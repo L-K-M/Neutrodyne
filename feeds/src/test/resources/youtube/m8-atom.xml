@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/">
+  <id>yt:channel:UCaaaaaaaaaaaaaaaaaaaaaA</id><title>Videos</title>
+  <author><name>Channel &amp; Team</name><uri>https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaA</uri></author>
+  <yt:channelId>aaaaaaaaaaaaaaaaaaaaaA</yt:channelId>
+  <entry>
+    <id>yt:video:aaaaaaaaaaa</id><yt:videoId>aaaaaaaaaaa</yt:videoId><yt:channelId>UCaaaaaaaaaaaaaaaaaaaaaA</yt:channelId>
+    <title>Published video</title><link rel="alternate" href="https://www.youtube.com/watch?v=aaaaaaaaaaa"/>
+    <published>2026-10-18T12:00:00Z</published><updated>2026-10-19T12:00:00Z</updated>
+    <media:group><media:description>Plain &lt;b&gt;description&lt;/b&gt;</media:description><media:thumbnail url="https://example.com/untrusted-thumbnail.jpg"/>
+      <media:community><media:statistics views="123"/></media:community></media:group>
+  </entry>
+  <entry>
+    <id>yt:video:bbbbbbbbbbb</id><yt:videoId>bbbbbbbbbbb</yt:videoId><title>Missing published</title>
+    <link rel="alternate" href="https://www.youtube.com/shorts/bbbbbbbbbbb"/><updated>2026-10-19T12:00:00Z</updated>
+  </entry>
+  <entry>
+    <id>yt:video:ccccccccccc</id><yt:videoId>ccccccccccc</yt:videoId><title>Malformed published</title>
+    <published>not-a-date</published><updated>2026-10-19T12:00:00Z</updated>
+  </entry>
+</feed>

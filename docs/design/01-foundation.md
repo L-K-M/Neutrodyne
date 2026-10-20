@@ -630,7 +630,7 @@ Kinds: **KMP** = `neutrodyne.kmp.*` with the targets `android` and `jvm("desktop
 | `:core:data` | `.kmp.library`, `.metro`, `kotlin.plugin.serialization` | common: repositories, ingestion, `FeedRefresher`, `FetchStateBatcher`, `FeedFetcher` on Ktor, update-check logic incl. `DesktopAssetSelector`; `androidMain`: `RefreshWorker`, `ImportFetchWorker`, `AutoSnapshotWorker`, `RestoreWorker`, `UpdateCheckWorker`, `UpdateNotifier`, `KeystoreCredentialStore`, `YouTubeAlertActionReceiver`; `desktopMain`: `DesktopJobRunner`, `DesktopRefreshLane`, `DesktopUpdateCheckLane`, `DesktopUpdateNotifier`, `DesktopSecretStore`, `DesktopMaintenanceLane` | `:core:{domain, model, common, database, datastore, network, artwork}`, `:feeds`, `:youtube:api`; *`:feeds:jvm`* | kotlinx-serialization-json, kotlinx-datetime, okio; `androidMain`: work-runtime, lifecycle-process; `desktopMain`: jna, jna-platform (DPAPI) | M1a (M0a stub binds `CredentialLookup.None`); M11a update check |
 | `:core:artwork` | `.kmp.library`, `.metro` | common: `ArtworkStore` on Okio, Coil components, `NeutrodyneImageLoaderFactory`; `androidMain`: `ArtworkProvider`, `ArtworkSyncWorker`; `desktopMain`: `DesktopArtworkLane` | `:core:{model, common, database, network}`, `:youtube:api`; *`:core:network:okhttp`* (Coil's OkHttp fetcher on the IMAGE client) | coil-core, okio; platform: coil-network-okhttp; `androidMain`: work-runtime; M10: material-color-utilities | M1a (Coil), M4 (store) |
 | `:core:designsystem` | `.kmp.compose` | common: `NeutrodyneTheme`, `BrandColors`, `Nd*` wrappers, `NdIcons`; `androidMain`: dynamic colour `actual`; `desktopMain`: scrollbar styles | `:core:model` | `cmp-material3`, `cmp-material3-navigationSuite`, graphics-shapes, coil-compose, kotlinx-collections-immutable; M10: material-color-utilities | M0a (M0b brand scheme) |
-| `:core:ui` | `.kmp.compose` (`publicResClass = true`) | common: the public `Res`, `UiText`, `UserMessage`, the shared navigation host (`NavigationState`, `NeutrodyneNavHost`, overlay scene strategies, `NeutrodyneRoot` layout, [Navigation](#appnavigator-and-per-tab-back-stacks)), `PlatformActions` interfaces, `DownloadRequestHandler`, the "Continue on this device" card; `androidMain`/`desktopMain`: `PlatformActions` implementations (08) | `:core:{designsystem, model, common, navigation}`, `:download:api` | coil-compose, kotlinx-collections-immutable, navigation3-ui-jb, `cmp-material3-adaptive-navigation3`, the JetBrains lifecycle artifacts, metrox-viewmodel-compose, reorderable (M4) | M0a |
+| `:core:ui` | `.kmp.compose` (`publicResClass = true`) | common: the public `Res`, `UiText`, `UserMessage`, the shared navigation host (`NavigationState`, `NeutrodyneNavHost`, overlay scene strategies, `NeutrodyneRoot` layout, [Navigation](#appnavigator-and-per-tab-back-stacks)), `PlatformActions` interfaces, `DownloadRequestHandler`, the "Continue on this device" card; `androidMain`/`desktopMain`: `PlatformActions` implementations (08) | `:core:{designsystem, model, common, navigation}`, `:download:api`, `:playback:api` | coil-compose, kotlinx-collections-immutable, navigation3-ui-jb, `cmp-material3-adaptive-navigation3`, the JetBrains lifecycle artifacts, metrox-viewmodel-compose, reorderable (M4) | M0a |
 | `:core:testing` | `.kmp.library`, `.metro` | common: `Fake<Name>` for every `:core:domain`, `:*:api` and `:sync:api` interface, `TestClock`, `MainDispatcherRule`, `Goldens`, 10's `InMemorySyncServer`; `androidMain`: Android-only helpers | `:core:{domain, model, common}`, `:*:api` (incl. `:sync:api`), `:sync:protocol` | `api`: kotlin-test, kotlinx-coroutines-test, turbine, coil-test; `desktopMain`/`androidMain`: junit4, truth | M0a |
 | `:feeds` | `.kmp.library`, `kotlin.plugin.serialization` | common only (one `actual` for NFC, 05): `ParsedFeed` models, `EpisodeKeys`, `UrlNormalizer`, `FeedDates`, `PodcastGuid`, `GroupNames`, OPML model and `OpmlWriter`, backup models, the `FeedParser`/`OpmlReader`/`ShowNotesSanitizer` interfaces, `ShowNotesDocument` ([03 Parser](03-feeds-and-discovery.md#parser)) | — | kotlinx-serialization-json, kotlinx-datetime | M1a (`GroupNames` M2) |
 | `:feeds:jvm` | `.jvm.island` | JVM 17: `XmlPullFeedParser`, `XmlPullOpmlReader`, `JsoupShowNotesSanitizer` | `:feeds` | jsoup; `compileOnly` + `testImplementation(kxml2)` | M1a |
@@ -661,9 +661,13 @@ Kinds: **KMP** = `neutrodyne.kmp.*` with the targets `android` and `jvm("desktop
 | `:feature:downloads` | feature | common | + `:download:api`, `:playback:api` (`playDownloads`), `:youtube:api` (`YouTubeHealth.retryNow`) | — | M6 |
 | `:feature:discover` | feature | common | + `:youtube:api` | — | M1a (add by URL), M7 |
 | `:feature:importexport` | feature | common | + `:playback:api` (pause before Replace), `:download:api` (re-download offer), `:youtube:api` (`YouTubeCapabilities`) | — | M3 |
-| `:feature:settings` | feature | common; Settings › Desktop shown only when `PlatformInfo.kind` is the desktop | + `:youtube:api` (`YouTubeEngine` rows in Settings › YouTube, M9a); the update check through `:core:domain` (`AppUpdateChecker`, `UpdateNotices`: Settings › Updates, Install & updates help, M11a) | aboutlibraries-core | M0a |
+| `:feature:settings` | feature | common; Settings › Desktop shown only when `PlatformInfo.kind` is the desktop | + `:playback:api` (`PlaybackMaintenance`, M4), `:youtube:api` (`YouTubeEngine` rows in Settings › YouTube, M9a); the update check through `:core:domain` (`AppUpdateChecker`, `UpdateNotices`: Settings › Updates, Install & updates help, M11a) | aboutlibraries-core | M0a |
 | `:feature:sync` | feature | common: Settings › Sync, link flows, devices, mass-change dialog, restore-while-linked prompts ([08 Sync screens](08-ui-ux.md#sync-screens)) | + `:sync:api` | — | MS2 |
 | `:benchmark` | `com.android.test`, `androidx.baselineprofile` (producer) | Android: out-of-process system tests (M6b), Macrobenchmarks against `benchmarkRelease` (M10), `BaselineProfileGenerator` (M11b) | `targetProjectPath = ":app"` | uiautomator (M6b), benchmark-macro-junit4 (M10) | M6b ([09 Out-of-process system tests](09-quality-and-release.md#out-of-process-system-tests), [09 Macrobenchmark and profiles](09-quality-and-release.md#macrobenchmark-and-profiles)) |
+
+**Implementation note (2026-10-18, M4).** Settings declares `:playback:api`
+directly for streaming-cache usage and clearing through `PlaybackMaintenance`.
+It does not access the cache implementation or database.
 
 **`api` vs `implementation`:** a module exposes a dependency as `api` only when its types appear in that module's public signatures (`:core:domain` → `:core:model`, `paging-common`; `:core:network` → `ktor-client-core`; `:core:network:okhttp` → `okhttp`; `:core:database` → `room3-runtime`, `room3-paging`); everything else is `implementation`. Implementation classes in implementation modules are `internal`; only graph contributions, Android framework components and the public API are `public` (Unverified whether Metro aggregates `internal` contributions across modules; S8 decides whether contributed implementations may stay `internal`).
 
@@ -699,7 +703,22 @@ Kinds: **KMP** = `neutrodyne.kmp.*` with the targets `android` and `jvm("desktop
 
 ## Dependency rules
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 10 places
+DownloadLifecycle, MissingLocalMediaReporter and EmbeddedChapterReader in
+core:domain. Downloads implements the lifecycle/missing-file ports; platform
+playback supplies the embedded reader. core:data orchestrates lifecycle calls
+before unsubscribe cascades, episode merges and restore Replace, awaiting durable
+journaling and stop acknowledgement. It does not acquire a download:impl edge or
+consume DownloadController directly. core:domain's existing download:api edge
+remains allowed; no implementation-to-implementation dependency is introduced.
+
 Serves N11, N8. Delivered in M0a (enforced from the first commit; the desktop and server rules apply from the stubs on). Source: [PLAN 5.1](../PLAN.md#51-module-graph) rules 1–8. Rules 1–9 expand PLAN rules 1–4 module by module; rules 10–13 (marked ⊕) make explicit the edges the PLAN graph implies; rules 14–18 expand PLAN rules 5–8. The numbers of rules 7, 8, 10 and 11 keep their pre-revision meaning because other documents cite them.
+
+**Implementation note (2026-10-18, M4).** Rule 7 also permits `:core:ui` to
+consume `:playback:api`. `PlaybackActions` shares result messages, retry and
+metered-consent handling across Feeds, Podcast, Episode and Up next, matching the
+existing `DownloadRequestHandler` API edge. Repository writes and credentials
+remain in the feature ViewModels; no implementation-module edge is added.
 
 | # | Rule |
 |---|---|
@@ -709,7 +728,7 @@ Serves N11, N8. Delivered in M0a (enforced from the first commit; the desktop an
 | 4 | `:core:data` → `:core:{domain, model, common, database, datastore, network, artwork}`, `:feeds`, `:youtube:api`; its `androidMain` and `desktopMain` also → `:feeds:jvm`. |
 | 5 | `:core:artwork` → `:core:{model, common, database, network}`, `:youtube:api`; its platform source sets also → `:core:network:okhttp` (Coil's OkHttp fetcher, [D10](../PLAN.md#3-key-decisions)). |
 | 6 | Shared implementations and the Android-only modules: `:playback:core` → `:playback:api`, `:core:{domain, model, common}`. `:playback:impl` → `:playback:{core, api}`, `:download:api`, `:youtube:api`, `:core:{domain, model, common, database, datastore, network, artwork}`, `:core:network:okhttp`. `:download:impl` → `:download:api`, `:youtube:api`, `:core:{domain, model, common, database, datastore, network, artwork}`. `:youtube:impl` → `:youtube:api`, `:core:{model, common, network}`. `:sync:impl` → `:sync:{api, protocol}`, `:core:{domain, model, common, database, datastore, network}`, `:feeds`. `:youtube:ytdlp` → `:youtube:{engine, api}`, `:core:{model, common, datastore}`, `:core:network:okhttp`. No implementation → `:core:data`, no implementation → another implementation, except `:core:artwork` (an infrastructure service any implementation may use) and `:playback:core` (the shared rule set of both platform players, [D84](../PLAN.md#3-key-decisions)). The update check has no module of its own ([D13](../PLAN.md#3-key-decisions)), so it adds no edge. YouTube Atom feeds are fetched and parsed by the generic refresh engine in `:core:data` ([03](03-feeds-and-discovery.md#refresh-scheduling)) using `:youtube:api` helpers; no YouTube module parses Atom. |
-| 7 | `:core:designsystem` → `:core:model` only. `:core:ui` → `:core:{designsystem, model, common, navigation}`, `:download:api` (the `:core:navigation` edge, added 2026-10-05, lets the shared navigation host and root layout live in `:core:ui` for both shells, [AppNavigator and per-tab back stacks](#appnavigator-and-per-tab-back-stacks)). `:core:navigation` → nothing project-internal. |
+| 7 | `:core:designsystem` → `:core:model` only. `:core:ui` → `:core:{designsystem, model, common, navigation}`, `:download:api`, `:playback:api` (the `:core:navigation` edge, added 2026-10-05, lets the shared navigation host and root layout live in `:core:ui` for both shells, [AppNavigator and per-tab back stacks](#appnavigator-and-per-tab-back-stacks)). `:core:navigation` → nothing project-internal. |
 | 8 | Common-only contracts and shared models: `:core:{model, common, domain}`, `:*:api`, `:feeds`, `:sync:protocol` have only `commonMain` code (the `actual`s of [Source sets and JVM islands](#source-sets-and-jvm-islands) excepted). `:feeds` and `:sync:protocol` depend on nothing project-internal ([D68](../PLAN.md#3-key-decisions)), so `:sync:server` can use them without the app's model. |
 | 9 | `:core:testing` → `:core:{domain, model, common, database, navigation}`, `:*:api` (incl. `:sync:api`), `:sync:protocol`, `:feeds` (`:core:database` and `:core:navigation` added 2026-10-05 for `TestDb` and `RecordingAppNavigator`, [09 Shared helpers](09-quality-and-release.md#shared-helpers); the `:core:database` edge also carries `TestSqliteDriverBindings` in `androidMain`, the Robolectric driver override of [Test overrides](#test-overrides), S4 2026-10-06). It is test-only: only test configurations depend on it, and no main configuration of any module may reach it (`restricted`). |
 | 10 ⊕ | `:playback:api`, `:download:api`, `:youtube:api`, `:sync:api` → `:core:{model, common}`. |
@@ -822,7 +841,7 @@ moduleGraphAssert {
         ":playback:desktop -> :playback:(core|api|engine)", ":playback:desktop -> :desktop:system",
         ":playback:desktop -> :(download|youtube):api", ":playback:desktop -> :core:(domain|model|common|artwork|database|datastore)",
         ":desktop:system -> :playback:(native|api)", ":desktop:system -> :core:(model|common)",
-        ":core:designsystem -> :core:model", ":core:ui -> :core:(designsystem|model|common|navigation)", ":core:ui -> :download:api",
+        ":core:designsystem -> :core:model", ":core:ui -> :core:(designsystem|model|common|navigation)", ":core:ui -> :download:api", ":core:ui -> :playback:api",
         ":core:testing -> :core:(domain|model|common|database|navigation)", ":core:testing -> :(playback|download|youtube|sync):api", ":core:testing -> :sync:protocol", ":core:testing -> :feeds",
         ":(playback|download|youtube|sync):api -> :core:(model|common)",
         ":core:(database|datastore) -> :core:(model|common)", ":core:network -> :core:(model|common|network:okhttp)",
@@ -1200,6 +1219,8 @@ Serves N11. Delivered in M0a (graph skeletons; [S8](#s8-metro-across-kmp-modules
 
 ### Components and scopes
 
+**Implementation note (2026-10-19, M5).** `ChapterRepository`, `QueueRepository`, `PlaySessionStore` and `PositionStore` bind once from `:core:data` for both shells. Framework-created components retain `Provider<T>` dependencies until `DatabaseOpener.awaitOpen()` on IO; constructors do not query. `EmbeddedChapterReader` and its local-file binding are deferred to M6/MD1, with no mandatory unused M5 binding.
+
 There is one application scope, `AppScope`, and one graph per process: `AndroidAppGraph` (`:app`, Android main process), `YtxGraph` (`:app`, Android `:ytx` process, `@DependencyGraph(YtxScope::class)`: it aggregates only `YtxScope` contributions — `:youtube:ytdlp`'s `ytx` subpackage, the `:youtube:engine` classes the Binder side needs, and the island's `CoreClients` (credential-free core, `YOUTUBE` client), which the island contributes to both scopes — so no database, DataStore or credential binding exists in `:ytx` at all), `DesktopAppGraph` (`:desktopApp`, [11 Desktop shell](11-desktop.md#desktop-shell)). The server uses plain constructor wiring ([D82](../PLAN.md#3-key-decisions)). Singletons are `@SingleIn(AppScope::class)`; unscoped bindings are created per injection. `AppScope` and `YtxScope` are `@Scope` annotation classes declared in `:core:common`'s `commonMain` (S8, 2026-10-06): every feature, island and both shells must see them, and the island cannot see `:app`. One class cannot be `@SingleIn` two scopes (`[Metro/IncompatiblyScopedBindings]`); an implementation both scopes need — the island's `CoreClients` — is unscoped and bound once per scope through contributed `@Provides @SingleIn(…)` binding containers (per-process singletons, S8 question 6; the providers construct `CoreClients` from its dependencies, because an explicit `@Provides` shadows the `@Inject` constructor and a `CoreClients` parameter would resolve to the provider itself — `[Metro/DependencyCycle]`, found by S12 2026-10-06).
 
 ```kotlin
@@ -1237,7 +1258,7 @@ interface DesktopAppGraph : ViewModelGraph {
 | `SQLiteDriver` | `:core:database` `SqliteDriverBindings` (`BundledSQLiteDriver()`) | both | `@SingleIn(AppScope)` |
 | `DatabaseOpener`, `NeutrodyneDatabase` (provided as `opener.requireDatabase()`), DAOs | `:core:database` (`AndroidDatabaseFactory`, `DesktopDatabaseFactory`; [02](02-data-model.md#error-handling-and-recovery)) | both | `@SingleIn(AppScope)`; DAO providers unscoped (Room caches them) |
 | `@SettingsDataStore(...) DataStore<Preferences>`, `SettingsStore`, `DeviceSettingsStore` | `:core:datastore` | both | `@SingleIn(AppScope)` |
-| `:core:domain` repository and use-case interfaces | `@ContributesBinding` on the implementing class (`:core:data` for most; `:playback:impl` and `:playback:desktop` for `QueueRepository`, `ChapterRepository`, 06) | both | `@SingleIn(AppScope)` |
+| `:core:domain` repository and use-case interfaces | `@ContributesBinding` on the implementing class (`:core:data`, including `QueueRepository` and `ChapterRepository`, 06) | both | `@SingleIn(AppScope)` |
 | `PlaybackController`, `PlaybackStateSource` | `:playback:impl` (`PlaybackControllerImpl`, `PlayerConnection`) / `:playback:desktop` (`DesktopPlaybackController`) | Android / desktop | `@SingleIn(AppScope)` (connection lifecycle: [06 UI boundary](06-playback.md#ui-boundary)) |
 | `DownloadController`, `LocalMediaIndex`, `DownloadProgressSource` | `:download:impl` | both | `@SingleIn(AppScope)` |
 | `ArtworkStore`, `NeutrodyneImageLoaderFactory` | `:core:artwork` | both | `@SingleIn(AppScope)` |
@@ -1268,6 +1289,16 @@ Rules:
 11. **Graph tests** ([Testing](#testing)): Metro reports missing and duplicate bindings at compile time; one runtime test per shell checks that every canonical `NavKey` has exactly one installer entry, every initializer order lies in a band and (desktop) every lane is bound.
 
 ### YouTube bindings
+
+
+Implementation note (2026-10-19, M9a): shared contracts leave
+both shells externally bound. Android activation follows only after
+all five capabilities work and the owner spike go; **spike pending**.
+Platform source sets of `:core:testing` depend on `:youtube:engine` solely
+for host-port fakes; commonMain keeps its existing API-only edges. This
+adds the corresponding module-graph allowance without exposing host types
+to feature common code.
+
 
 Every `:youtube:api` interface is bound in exactly one binding container per shell ([D2](../PLAN.md#3-key-decisions), [D77](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions)): `YouTubeBindingsModule` in `:app` and `DesktopYouTubeBindingsModule` in `:desktopApp`. There are no flavors: what a device can do with YouTube is a **runtime capability** read from `YouTubeCapabilitiesSource` (shape, reasons and every consumer: [04 Capability matrix](04-youtube.md#capability-matrix)). Until the engine milestone (M9a on Android, MD3 on the desktop) each container lives in its shell's `src/main/`; from then on it exists twice and the [engine switch](#emergency-build-without-the-engine) adds exactly one directory to the shell's Kotlin sources:
 
@@ -1445,7 +1476,9 @@ The navigation host is shared by both shells and lives in `:core:ui`'s `commonMa
 
 **Implementation note (2026-10-16, M2).** `AppNavigator.pop(key: NavKey)` removes an entry only when that exact key is the selected stack's top entry above its root. Otherwise it returns `false` without changing any stack, selected tab or transition marker. Sheet/dialog routes use this overload for completion and dismissal; the host's overlay scene callbacks capture their own entry key and use it too. This keeps a second signal from outgoing content from removing the screen underneath or switching tabs. Plain back navigation retains `pop()` and its existing root behavior. Actions that close an overlay before opening another route only open it when the scoped pop succeeds.
 
-**Root contract (2026-10-05).** `:core:ui` may not see `:sync:api`, `:core:domain`, `:playback:api` or `:feature:player` (rule 7), so `NeutrodyneRoot` takes only `:core:ui` and `:core:model` types; the shells map the domain flows into them:
+**Root contract (2026-10-05).** `NeutrodyneRoot` takes only `:core:ui` and `:core:model` types; the shells map the domain flows into them. `:core:ui` may not see `:sync:api`, `:core:domain` or `:feature:player` (rule 7).
+
+**Implementation note (2026-10-18, M4).** The module's new `:playback:api` edge serves shared result/consent handling. The root's parameters remain UI/model types and callbacks; it does not acquire playback services.
 
 ```kotlin
 // :core:ui commonMain
@@ -1849,7 +1882,21 @@ All interceptors and the DNS chain live in the island and run identically on And
 
 **`UserAgentInterceptor`** sets `User-Agent: Neutrodyne/<versionName> (<platform>; +<REPO_URL>)` (from `UserAgentProvider`) **only when the request has none** (OkHttp-only callers: Media3, Coil, `HttpByteSource`, `PyHttp`), where `<platform>` comes from `PlatformInfo` (`Android 17`; `Windows 11; x64`; `macOS 15.1; arm64`; `Linux; x64`), so the client-specific User-Agents that yt-dlp sets per request (passed through `PyHttp` unchanged) and any 04-mandated UA survive. Non-ASCII characters are replaced with `?` (OkHttp rejects non-ASCII header values). Some hosts reject generic UAs, so the UA is never empty or the OkHttp default.
 
+**Implementation note (2026-10-19, M7):** Directory callers reuse the API
+client and pass an internal origin marker to the existing network auth
+interceptor. It removes the marker before transmission, suppresses publisher
+Basic auth on directory calls, and strips PI's three auth headers on a different
+scheme/host/port. Request tags preserve this scope through OkHttp redirects;
+the marker preserves it through Ktor redirects. No new HTTP client is created.
+
 **`AuthInterceptor`** (Basic auth for private feeds and their same-origin enclosures, [03](03-feeds-and-discovery.md#feed-moves-auth-and-paging)):
+
+**Implementation note (2026-10-20, M9a).** `PublisherAuthPolicy.ANONYMOUS` suppresses
+stored and caller `Authorization` per request, before resolving the credential
+provider. Ktor callers use `publisherAuth`; raw drivers use the same internal
+hint. The interceptor strips the hint before wire IO and retains immutable
+policy through redirects/retries. Ordinary publisher and directory policies
+remain unchanged; clients, pools, DNS and guards are shared.
 
 ```kotlin
 // :core:common (commonMain): the lookup contract, implemented by 03's SecretStore implementations
@@ -2277,13 +2324,22 @@ Never shipped (each would be a licence regression, risk L2; [D3](../PLAN.md#3-ke
 
 Tasks (all configuration-cache safe):
 
+Implementation note (2026-10-19, M9a): Both hosts use the shared
+`verifyBundledYtDlp` gate.
+Missing/tampered inputs fail. The pinned v4 RSA/SHA-512 verifier uses JDK
+cryptography only; Android asset generation depends on it. Keys/signatures
+stay build-only. The Android lock and engine-only AboutLibraries entries
+inventory yt-dlp 2026.08.19, ejs 0.8.0, meriyah 6.1.4 and astring 1.9.0.
+
+
+
 | Task | Project | In `check` | Fails when |
 |---|---|---|---|
 | `checkPythonLicences` | `:youtube:ytdlp` | yes (from M0a, whatever S7 decides; the licence allow-list check is unconditional) | a component's licence is not on the allow-list (MPL-2.0 outside `kind = "data"` — the Android lock has no `pbs-patches` case; an `OR` expression without an allowed `elected`); the lockfile is not valid TOML, a `[[component]]` entry is not a table or lacks a required field (Tomlj's recoverable errors are rejected since 2026-10-06 — a duplicated key used to keep its first value and pass); only while `:youtube:ytdlp` applies Chaquopy (S7 go): the lockfile's `chaquopy`, `python` or `pip` differ from the build's Chaquopy plugin version, the exact resolved `com.chaquo.python:target` runtime version (`3.14.0-0`: the DSL's `3.14` selects `3.14.0`, so the lock must match the packaged runtime, not the selector — 2026-10-06) or pip requirements; the CPython component's `version`/`origin` differs from that runtime, or another component pins a different `com.chaquo.python:target` origin; the build declares any `install("-r", …)` requirement file or a `-r`/`--requirement`/`-e`/`--editable` `options(…)` flag — separate or with its argument attached (`-rFILE`, `-ePATH`, `--editable=PATH`); all bypass the lock's `pip` list and are rejected under the no-pip policy (2026-10-06; attached short-flag arguments were still accepted that day and are covered by negative fixtures); on a fallback host the lockfile's `python` entry is checked against the A2 package instead, and with the Kotlin port the CPython rows leave the lockfile; the vendored `bundled.json` version differs from the yt-dlp entry; the top-level packages inside the vendored `yt-dlp` are anything but `yt_dlp` and `yt_dlp_ejs`; a component has no AboutLibraries manual definition with its `aboutLibrariesId` (so the Licences screen and `THIRD_PARTY_NOTICES.md` cannot drift) |
 | `checkPythonLicences` | `:youtube:ytdlp-desktop` | yes (from M0a on an empty lock; content MD3) | the same licence rules over the desktop lock, with only the `kind = "pbs-patches"` MPL-2.0 named case (PO-48 proposed default): it fails on MPL-2.0 code outside that case, on a `pbs-patches` entry whose `pbsSource` tag differs from the lock's PBS release tag or has no SHA-256, whose MPL-2.0 notices entry is missing, or on PBS patches recorded as `kind = "data"` (the attached source asset is `check-runtime-sources.sh --release`'s check, not this task's); the trimmed image still contains a module the trim list removes (`_dbm`, `_gdbm`, `_tkinter`, `readline`, `ensurepip`, `pip`, `test`); a target's archive SHA-256 differs from the lock |
-| `verifyBundledYtDlp` | both engine hosts | yes (no-op until M9a vendors the file) | the SHA-256 of the vendored `yt-dlp` differs from its line in the committed `SHA2-256SUMS` or from `bundled.json`; `SHA2-256SUMS.sig` does not verify against `keys/yt-dlp-release-key.asc` whose fingerprint must equal the one pinned in build-logic (`AC0C BBE6 848D 6A87 3464 AF4E 57CF 6593 3B5A 7581`, [yt-dlp public key](https://github.com/yt-dlp/yt-dlp/blob/master/public.key); re-verified when M9b starts); `ORIGIN` in the zip's `yt_dlp/version.py` is not `yt-dlp/yt-dlp`. Verification uses build-logic's `OpenPgpSignatureCheck` (JDK `Signature`, no `gpg` binary) |
+| `verifyBundledYtDlp` | both engine hosts | yes (offline verification of the vendored release) | the SHA-256 of the vendored `yt-dlp` differs from its line in the committed `SHA2-256SUMS` or from `bundled.json`; `SHA2-256SUMS.sig` does not verify against `keys/yt-dlp-release-key.asc` whose fingerprint must equal the one pinned in build-logic (`AC0C BBE6 848D 6A87 3464 AF4E 57CF 6593 3B5A 7581`, [yt-dlp public key](https://github.com/yt-dlp/yt-dlp/blob/master/public.key); re-verified when M9b starts); `ORIGIN` in the zip's `yt_dlp/version.py` is not `yt-dlp/yt-dlp`. Verification uses build-logic's `OpenPgpSignatureCheck` (JDK `Signature`, no `gpg` binary) |
 | `checkNativeLicences` | `:playback:native` | yes (from MD0) | a component's licence is not on the native allow-list; an LGPL entry is not `lgpl-shared`/`dynamic` or lacks its source entry; the FFmpeg configure line of any target contains `--enable-gpl`, `--enable-version3` or `--enable-nonfree`; a vendored source's SHA-256 differs from the lock |
-| `shimTest`, `shimTestStdio` | `:youtube:ytdlp`, `:youtube:ytdlp-desktop` | no (need a host CPython of the target minor version; CI `unit` job) | the shim's pytest suite fails against the bundled yt-dlp with `ReplayRH` through the Chaquopy or the stdio adapter (04 owns the content) |
+| `shimTest`, `shimTestStdio` | `:youtube:ytdlp`, `:youtube:ytdlp-desktop` | no (need a host CPython of the target minor version; CI `unit` job) | the shim's Python test suite fails against the bundled yt-dlp with `ReplayRH` through the Chaquopy or the stdio adapter (04 owns the content) |
 
 `buildFfmpeg` additionally asserts that the built `avcodec_license()` reports "LGPL version 2.1 or later" and that the libraries keep their upstream names (risk L6). 09's scripts close the loop on the built artefacts: `check-apk.sh` fails on forbidden content (`mutagen`, `readline`, `libreadline`, `org/schabi/newpipe`, `org/mozilla/javascript`) and uses the Android lock as its input for what native libraries and top-level Python packages an APK may contain; `check-desktop-image.sh` fails on `_dbm`, `libreadline`, `_tkinter`, `AppRun`, `libfuse`, `proguard`, `mutagen`, `qjs`, Deno, Node or Bun, on an FFmpeg library that does not report LGPL, and on a missing `legal/` tree; `check-server-image.sh` checks the image's package list against its source bundle; `check-runtime-sources.sh` matches the runtime's `release` file (implementor, version) with `runtime.lock` and the attached tarball (09 owns the scripts, [11 Packaging and the runtime exception](11-desktop.md#packaging-and-the-runtime-exception) the rules).
 

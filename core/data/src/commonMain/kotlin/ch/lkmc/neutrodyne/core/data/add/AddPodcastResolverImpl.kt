@@ -7,8 +7,13 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.discovery.AppleDirectoryClient
+import ch.lkmc.neutrodyne.core.data.discovery.DirectoryMetadataCache
+import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexDirectoryClient
+import ch.lkmc.neutrodyne.core.data.fetch.ADD_YOUTUBE_REJECTED
 import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedRequest
+import ch.lkmc.neutrodyne.core.data.fetch.FeedRequestPurpose
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.fetch.FetchOutcome
 import ch.lkmc.neutrodyne.core.data.fetch.Sniff
@@ -21,35 +26,51 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.AlreadySubscribed
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
+import ch.lkmc.neutrodyne.core.model.DirectoryAccess
+import ch.lkmc.neutrodyne.core.model.DirectoryHit
+import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.PreviewEpisode
+import ch.lkmc.neutrodyne.core.model.ProviderId
+import ch.lkmc.neutrodyne.core.model.ProviderStatus
+import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
+import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
+import ch.lkmc.neutrodyne.feeds.discovery.HostAction
+import ch.lkmc.neutrodyne.feeds.discovery.HostRecognizer
+import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.identity.PrivateFeedUrls
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.feeds.model.ArtworkCandidate
+import ch.lkmc.neutrodyne.feeds.model.ArtworkSource
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
+import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.parse.EnclosureTypes
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseFailure
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import dev.zacsweers.metro.binding
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okio.FileSystem
 import okio.IOException
 import okio.buffer
 
-/**
- * `AddPodcastResolver` (03 Add podcast flow): normalises input, runs the M1a host checks
- * (YouTube → `YouTubeNotYetSupported`, Spotify → `SpotifyShow`), fetches and sniffs the URL,
- * parses a never-persisted preview, dedupes and caches it. HTML autodiscovery, directory
- * lookups and `Choose` are M7; the `AddInputNormalizer`/`HostRecognizer` split of `:feeds` lands
- * with them — for M1a both live here (deviation 2026-10-07).
- */
+/** Full Add discovery and direct-only Edit probes share fetch/parse/preview ownership (03, D24). */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class, binding<AddPodcastResolver>())
 @ContributesBinding(AppScope::class, binding<PreviewEntryResolver>())
@@ -63,54 +84,199 @@ internal class AddPodcastResolverImpl(
     private val cache: PreviewCache,
     private val db: NeutrodyneDatabase,
     private val clock: Clock,
+    private val apple: AppleDirectoryClient,
+    private val podcastIndex: PodcastIndexDirectoryClient,
+    private val autodiscovery: Autodiscovery,
+    private val metadata: DirectoryMetadataCache,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) : AddPodcastResolver,
     PreviewEntryResolver {
+    private val classifier = YouTubeUrlClassifier()
+
     /**
      * The shared bounded parse lane (03's threading table): capped at [PARSE_PARALLELISM]
      * concurrent parses — a per-call `limitedParallelism` view would cap each call separately.
      */
     private val parseDispatcher = io.limitedParallelism(PARSE_PARALLELISM)
 
-    override suspend fun resolve(input: String): AddResolution = resolveInner(input, null)
+    override suspend fun resolve(input: String): AddResolution = withContext(io) { resolveInner(input, null) }
+
+    override suspend fun lookupOnce(input: String): AddResolution =
+        withContext(io) { resolveInner(input, null, DirectoryAccess.ONE_TIME_LOOKUP) }
 
     override suspend fun resolve(
         input: String,
         credentials: BasicCredentials,
-    ): AddResolution = resolveInner(input, credentials)
+    ): AddResolution = withContext(io) { resolveInner(input, credentials) }
 
     /**
      * `PodcastPreviewKey(feedUrl)`: a directory hit's direct preview (03 Preview and dedupe) —
      * a live cached entry is reused, else the URL is fetched and parsed anew.
      */
-    override suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError> {
-        val entry = cache.findByUrl(feedUrl)
-        if (entry != null) return Outcome.Success(buildPreview(entry))
-        if (HostChecks.isYouTube(feedUrl)) return Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
-        return when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
-            is PreviewOutcome.Done -> Outcome.Success(buildPreview(cacheEntry(r.entry)))
-            is PreviewOutcome.Failed -> Outcome.Failure(r.error)
+    override suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError> =
+        withContext(io) {
+            val entry = cache.findByUrl(feedUrl)
+            if (entry != null) return@withContext Outcome.Success(buildPreview(entry))
+            if (HostChecks.isYouTube(
+                    feedUrl,
+                )
+            ) {
+                return@withContext Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
+            }
+            when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
+                is PreviewOutcome.Done -> Outcome.Success(buildPreview(cacheEntry(r.entry)))
+                is PreviewOutcome.Failed -> Outcome.Failure(r.error)
+                else -> Outcome.Failure(AddPodcastError.NotAFeed)
+            }
         }
-    }
 
     private suspend fun resolveInner(
         input: String,
         credentials: BasicCredentials?,
-    ): AddResolution =
-        when (val result = probe(input, credentials)) {
-            is Outcome.Success -> AddResolution.Feed(buildPreview(cacheEntry(result.value)))
-            is Outcome.Failure -> AddResolution.Failure(result.error)
+        access: DirectoryAccess = DirectoryAccess.ENABLED_ONLY,
+    ): AddResolution {
+        // Shared handles and IDs must be recognized before URL normalization or directory search.
+        val tokens = input.trim().take(MAX_INPUT_CHARS).split(Regex("\\s+"))
+        tokens.firstNotNullOfOrNull { classifier.classify(it) }?.let { return AddResolution.YouTube(it) }
+        if (tokens.any(classifier::isYouTubeHost)) return AddResolution.Failure(AddPodcastError.InvalidUrl)
+        val normalized =
+            when (val value = AddInputNormalizer.normalize(input)) {
+                is NormalizedInput.Url -> value
+                NormalizedInput.Invalid -> return AddResolution.Failure(AddPodcastError.InvalidUrl)
+                is NormalizedInput.NotAUrl -> return AddResolution.Failure(AddPodcastError.NotAUrl(value.query))
+            }
+        val creds = credentials ?: normalized.credentials?.let { BasicCredentials(it.username, it.password) }
+        val result =
+            resolveUrl(normalized.url, normalized.url, creds, normalized.schemeGuessed, access, DiscoveryMode.FULL)
+        return when (result) {
+            is PreviewOutcome.Channel -> {
+                AddResolution.YouTube(result.ref)
+            }
+
+            is PreviewOutcome.Done -> {
+                AddResolution.Feed(buildPreview(cacheEntry(result.entry)))
+            }
+
+            is PreviewOutcome.Failed -> {
+                AddResolution.Failure(result.error)
+            }
+
+            is PreviewOutcome.Consent -> {
+                AddResolution.LookupRequired(result.input, ProviderId.APPLE)
+            }
+
+            is PreviewOutcome.Choices -> {
+                AddResolution.Choose(result.candidates)
+            }
         }
+    }
+
+    private suspend fun resolveUrl(
+        url: String,
+        inputUrl: String,
+        credentials: BasicCredentials?,
+        schemeGuessed: Boolean,
+        access: DirectoryAccess,
+        mode: DiscoveryMode,
+    ): PreviewOutcome {
+        if (mode != DiscoveryMode.DIRECT) {
+            channelOutcome(url)?.let { return it }
+        }
+        if (HostChecks.isYouTube(url)) return PreviewOutcome.Failed(AddPodcastError.YouTubeNotYetSupported)
+        return when (val action = HostRecognizer.recognize(url)) {
+            is HostAction.AppleLookup -> {
+                when (val result = apple.lookup(persistentListOf(action.id), access)) {
+                    is Outcome.Success -> {
+                        result.value.firstOrNull()?.let { directoryPreview(it, inputUrl, credentials, url) }
+                            ?: PreviewOutcome.Failed(AddPodcastError.AppleOnlyShow)
+                    }
+
+                    is Outcome.Failure -> {
+                        if (result.error == ProviderStatus.Disabled) {
+                            PreviewOutcome.Consent(url)
+                        } else {
+                            directoryFailure(result.error)
+                        }
+                    }
+                }
+            }
+
+            is HostAction.PodcastIndexLookup -> {
+                when (val result = podcastIndex.lookup(action.id)) {
+                    is Outcome.Success -> {
+                        result.value?.let { directoryPreview(it, inputUrl, credentials, url) }
+                            ?: PreviewOutcome.Failed(AddPodcastError.NotAFeed)
+                    }
+
+                    is Outcome.Failure -> {
+                        if (result.error ==
+                            ProviderStatus.Disabled
+                        ) {
+                            fetchAndParse(url, inputUrl, credentials, schemeGuessed, mode)
+                        } else {
+                            directoryFailure(result.error)
+                        }
+                    }
+                }
+            }
+
+            HostAction.SpotifyShow -> {
+                PreviewOutcome.Failed(AddPodcastError.SpotifyShow)
+            }
+
+            else -> {
+                fetchAndParse(url, inputUrl, credentials, schemeGuessed, mode)
+            }
+        }
+    }
+
+    private fun directoryFailure(status: ProviderStatus): PreviewOutcome =
+        PreviewOutcome.Failed(
+            if (status ==
+                ProviderStatus.RateLimited
+            ) {
+                AddPodcastError.DirectoryBusy
+            } else {
+                AddPodcastError.Network(NetError.Other("directory"))
+            },
+        )
+
+    private suspend fun directoryPreview(
+        hit: DirectoryHit,
+        inputUrl: String,
+        credentials: BasicCredentials?,
+        credentialUrl: String,
+    ): PreviewOutcome {
+        // An ID lookup does not grant consent to transmit publisher credentials elsewhere.
+        val scoped = credentials.takeIf { UrlNormalizer.origin(hit.feedUrl) == UrlNormalizer.origin(credentialUrl) }
+        channelOutcome(hit.feedUrl)?.let { return it }
+        val result = fetchAndParse(hit.feedUrl, inputUrl, scoped, false, DiscoveryMode.VERIFY)
+        if (result !is PreviewOutcome.Done) return result
+        val entry = result.entry
+        val feed = entry.feed.withDirectoryMetadata(hit)
+        return PreviewOutcome.Done(
+            PreviewEntry(
+                entry.previewId,
+                entry.inputUrl,
+                feed,
+                entry.meta,
+                entry.hops,
+                entry.credentials,
+                entry.createdAt,
+            ),
+        )
+    }
 
     /** Edit URL always probes afresh; it neither reuses nor retains preview credentials. */
-    override suspend fun probe(input: String): Outcome<PreviewEntry, AddPodcastError> = probe(input, null)
+    override suspend fun probe(input: String): Outcome<PreviewEntry, AddPodcastError> =
+        withContext(io) { probe(input, null) }
 
     private suspend fun probe(
         input: String,
         credentials: BasicCredentials?,
     ): Outcome<PreviewEntry, AddPodcastError> {
         // YouTube pre-check on the raw text and each token (the M1–M2 host check, 03).
-        if (input.split(Regex("""\s+""")).any { HostChecks.isYouTube(it) }) {
+        if (input.take(MAX_INPUT_CHARS).split(Regex("""\s+""")).any { HostChecks.isYouTube(it) }) {
             return Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
         }
         val url =
@@ -138,6 +304,7 @@ internal class AddPodcastResolverImpl(
         return when (val r = fetchAndParse(url.url, url.url, creds, url.schemeGuessed)) {
             is PreviewOutcome.Done -> Outcome.Success(r.entry)
             is PreviewOutcome.Failed -> Outcome.Failure(r.error)
+            else -> Outcome.Failure(AddPodcastError.NotAFeed)
         }
     }
 
@@ -147,10 +314,23 @@ internal class AddPodcastResolverImpl(
         inputUrl: String,
         credentials: BasicCredentials?,
         schemeGuessed: Boolean,
+        mode: DiscoveryMode = DiscoveryMode.DIRECT,
     ): PreviewOutcome {
+        if (mode != DiscoveryMode.DIRECT) {
+            channelOutcome(url)?.let { return it }
+        }
+        if (HostChecks.isYouTube(url)) return PreviewOutcome.Failed(AddPodcastError.YouTubeNotYetSupported)
         var outcome =
             fetcher.fetch(
-                FeedRequest(url, etag = null, lastModified = null, conditional = false, credentials = credentials),
+                FeedRequest(
+                    url,
+                    purpose = FeedRequestPurpose.ADD,
+                    etag = null,
+                    lastModified = null,
+                    conditional = false,
+                    credentials = credentials,
+                    htmlReadLimit = Autodiscovery.MAX_HTML_BYTES,
+                ),
             )
 
         // A guessed scheme may retry cleartext only without credentials (03 step 5).
@@ -163,12 +343,25 @@ internal class AddPodcastResolverImpl(
                         null,
                         conditional = false,
                         credentials = credentials,
+                        purpose = FeedRequestPurpose.ADD,
+                        htmlReadLimit = Autodiscovery.MAX_HTML_BYTES,
                     ),
                 )
         }
         return when (outcome) {
             is FetchOutcome.Network -> {
-                PreviewOutcome.Failed(AddPodcastError.Network(outcome.error))
+                if (mode != DiscoveryMode.DIRECT && outcome.rejectedYouTubeUrl != null) {
+                    channelOutcome(outcome.rejectedYouTubeUrl)?.let { return it }
+                }
+                PreviewOutcome.Failed(
+                    if (outcome.error ==
+                        ADD_YOUTUBE_REJECTED
+                    ) {
+                        AddPodcastError.YouTubeNotYetSupported
+                    } else {
+                        AddPodcastError.Network(outcome.error)
+                    },
+                )
             }
 
             is FetchOutcome.Http -> {
@@ -202,7 +395,38 @@ internal class AddPodcastResolverImpl(
             }
 
             is FetchOutcome.Body -> {
-                bodyOutcome(outcome, inputUrl, credentials)
+                if (HostChecks.isYouTube(outcome.finalUrl) || outcome.hops.any { HostChecks.isYouTube(it.url) }) {
+                    tempFiles.delete(outcome.file)
+                    if (mode == DiscoveryMode.DIRECT) {
+                        PreviewOutcome.Failed(AddPodcastError.YouTubeNotYetSupported)
+                    } else {
+                        channelOutcome(outcome.finalUrl) ?: PreviewOutcome.Failed(AddPodcastError.InvalidUrl)
+                    }
+                } else if (outcome.sniff == Sniff.HTML && mode == DiscoveryMode.FULL) {
+                    discover(outcome, inputUrl, credentials)
+                } else {
+                    val parsed = bodyOutcome(outcome, inputUrl, credentials)
+                    if (mode != DiscoveryMode.DIRECT && parsed is PreviewOutcome.Failed &&
+                        parsed.error == AddPodcastError.NoMedia &&
+                        outcome.finalUrl
+                            .substringBefore('?')
+                            .trimEnd('/')
+                            .endsWith("/feed")
+                    ) {
+                        val fallback = outcome.finalUrl.substringBefore('?').trimEnd('/') + "/podcast"
+                        fetchAndParse(
+                            fallback,
+                            inputUrl,
+                            credentials.takeIf {
+                                UrlNormalizer.origin(fallback) ==
+                                    UrlNormalizer.origin(url)
+                            },
+                            false,
+                        )
+                    } else {
+                        parsed
+                    }
+                }
             }
         }
     }
@@ -220,7 +444,7 @@ internal class AddPodcastResolverImpl(
                 return PreviewOutcome.Failed(AddPodcastError.SubscriptionList(body.finalUrl))
             }
 
-            // HTML autodiscovery is M7; JSON and OTHER are never feeds.
+            // Full Add handles HTML before this direct-feed parse path.
             Sniff.HTML, Sniff.JSON, Sniff.OTHER -> {
                 tempFiles.delete(body.file)
                 return PreviewOutcome.Failed(AddPodcastError.NotAFeed)
@@ -242,7 +466,7 @@ internal class AddPodcastResolverImpl(
             } finally {
                 tempFiles.delete(body.file)
             }
-        val feed =
+        val parsedFeed =
             when (result) {
                 is ParseResult.Ok -> {
                     result.feed
@@ -258,6 +482,8 @@ internal class AddPodcastResolverImpl(
                     )
                 }
             }
+
+        val feed = parsedFeed.withDirectoryMetadata(metadata.forFeed(body.requestedUrl))
 
         // Items but nothing playable (03 Accepted items → NoMedia); an empty feed previews fine —
         // except an empty `podcast:medium*L` list feed, which is rejected up front.
@@ -302,13 +528,15 @@ internal class AddPodcastResolverImpl(
      * `SubscribeUseCase`'s re-fetch of an evicted preview (03 Subscribe step 1): [feedUrl] is the
      * previewId. Same fetch/parse/cache path as `preview`, returning the cache entry itself.
      */
-    override suspend fun resolveEntry(feedUrl: String): Outcome<PreviewEntry, AddPodcastError> {
-        cache.get(feedUrl)?.let { return Outcome.Success(it) }
-        return when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
-            is PreviewOutcome.Done -> Outcome.Success(cacheEntry(r.entry))
-            is PreviewOutcome.Failed -> Outcome.Failure(r.error)
+    override suspend fun resolveEntry(feedUrl: String): Outcome<PreviewEntry, AddPodcastError> =
+        withContext(io) {
+            cache.get(feedUrl)?.let { return@withContext Outcome.Success(it) }
+            when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
+                is PreviewOutcome.Done -> Outcome.Success(cacheEntry(r.entry))
+                is PreviewOutcome.Failed -> Outcome.Failure(r.error)
+                else -> Outcome.Failure(AddPodcastError.NotAFeed)
+            }
         }
-    }
 
     private suspend fun cacheEntry(entry: PreviewEntry): PreviewEntry =
         cache.put(entry.previewId, entry.inputUrl, entry.feed, entry.meta, entry.hops, entry.credentials)
@@ -373,7 +601,141 @@ internal class AddPodcastResolverImpl(
         return dao.byRealGuid(guid).firstOrNull()?.let { AlreadySubscribed(it.id, exact = false) }
     }
 
+    private suspend fun discover(
+        body: FetchOutcome.Body,
+        inputUrl: String,
+        credentials: BasicCredentials?,
+    ): PreviewOutcome {
+        val candidates =
+            try {
+                withContext(parseDispatcher) {
+                    fileSystem.source(body.file).use { autodiscovery.candidates(it, body.charset, body.finalUrl) }
+                }
+            } finally {
+                tempFiles.delete(body.file)
+            }
+        if (candidates.isEmpty()) return probes(body.finalUrl, inputUrl, credentials, body.requestedUrl)
+        val semaphore = Semaphore(Autodiscovery.VERIFICATION_CONCURRENCY)
+        val results =
+            coroutineScope {
+                candidates
+                    .distinctBy { UrlNormalizer.forIdentity(it.url) }
+                    .take(Autodiscovery.MAX_CANDIDATES)
+                    .map { candidate ->
+                        async {
+                            semaphore.withPermit {
+                                val scoped =
+                                    credentials.takeIf {
+                                        UrlNormalizer.origin(candidate.url) ==
+                                            UrlNormalizer.origin(body.requestedUrl)
+                                    }
+                                resolveUrl(
+                                    candidate.url,
+                                    inputUrl,
+                                    scoped,
+                                    false,
+                                    DirectoryAccess.ENABLED_ONLY,
+                                    DiscoveryMode.VERIFY,
+                                ) to
+                                    candidate.source.name
+                            }
+                        }
+                    }.awaitAll()
+            }
+        results.firstOrNull { (r, _) -> r is PreviewOutcome.Consent }?.let { return it.first }
+        val entries =
+            results
+                .mapNotNull { (result, source) ->
+                    val candidate =
+                        when (result) {
+                            is PreviewOutcome.Done -> {
+                                FeedCandidate(
+                                    result.entry.meta.permanentUrl ?: result.entry.meta.requestedUrl,
+                                    result.entry.feed.title,
+                                    result.entry.feed.items.size,
+                                    source,
+                                )
+                            }
+
+                            is PreviewOutcome.Channel -> {
+                                FeedCandidate(result.url, null, null, source)
+                            }
+
+                            else -> {
+                                return@mapNotNull null
+                            }
+                        }
+                    result to candidate
+                }.distinctBy { UrlNormalizer.forIdentity(it.second.url) }
+        return when (entries.size) {
+            0 -> PreviewOutcome.Failed(AddPodcastError.NotAFeed)
+            1 -> entries.single().first
+            else -> PreviewOutcome.Choices(entries.map { it.second })
+        }
+    }
+
+    private suspend fun probes(
+        pageUrl: String,
+        inputUrl: String,
+        credentials: BasicCredentials?,
+        credentialUrl: String,
+    ): PreviewOutcome {
+        val root = UrlNormalizer.origin(pageUrl) ?: return PreviewOutcome.Failed(AddPodcastError.NotAFeed)
+        return withTimeoutOrNull(Autodiscovery.PROBE_BUDGET_MS) {
+            for (path in PROBE_PATHS) {
+                val url = root + path
+                val scoped = credentials.takeIf { UrlNormalizer.origin(url) == UrlNormalizer.origin(credentialUrl) }
+                val body =
+                    fetcher.fetch(
+                        FeedRequest(
+                            url,
+                            null,
+                            null,
+                            false,
+                            purpose = FeedRequestPurpose.ADD,
+                            sniffOnlyBytes = Autodiscovery.PROBE_BYTES.toInt(),
+                            credentials = scoped,
+                        ),
+                    )
+                if (body is FetchOutcome.Network && body.error == ADD_YOUTUBE_REJECTED) {
+                    return@withTimeoutOrNull body.rejectedYouTubeUrl?.let(::channelOutcome)
+                        ?: PreviewOutcome.Failed(AddPodcastError.InvalidUrl)
+                }
+                if (body !is FetchOutcome.Body) continue
+                val feed = body.sniff in setOf(Sniff.RSS, Sniff.ATOM, Sniff.RDF)
+                val youtube = HostChecks.isYouTube(body.finalUrl)
+                tempFiles.delete(body.file)
+                if (youtube) {
+                    return@withTimeoutOrNull channelOutcome(body.finalUrl)
+                        ?: PreviewOutcome.Failed(AddPodcastError.InvalidUrl)
+                }
+                if (feed) return@withTimeoutOrNull fetchAndParse(url, inputUrl, scoped, false)
+            }
+            PreviewOutcome.Failed(AddPodcastError.NotAFeed)
+        } ?: PreviewOutcome.Failed(AddPodcastError.NotAFeed)
+    }
+
+    private fun channelOutcome(url: String): PreviewOutcome? {
+        classifier.classify(url)?.let { return PreviewOutcome.Channel(it, url) }
+        return if (classifier.isYouTubeHost(url)) PreviewOutcome.Failed(AddPodcastError.InvalidUrl) else null
+    }
+
+    private enum class DiscoveryMode { DIRECT, FULL, VERIFY }
+
     private sealed interface PreviewOutcome {
+        data class Channel(
+            val ref: YtRef,
+            val url: String,
+        ) : PreviewOutcome
+
+        data class Choices(
+            val candidates: List<FeedCandidate>,
+        ) : PreviewOutcome
+
+        data class Consent(
+            val input: String,
+        ) : PreviewOutcome
+
         data class Done(
             val entry: PreviewEntry,
         ) : PreviewOutcome
@@ -391,6 +753,8 @@ internal class AddPodcastResolverImpl(
             }
 
     private companion object {
+        const val MAX_INPUT_CHARS = 4096
+        val PROBE_PATHS = listOf("/feed/podcast", "/podcast.xml", "/feed", "/rss", "/rss.xml")
         const val HTTP_UNAUTHORIZED = 401
         const val HTTP_FORBIDDEN = 403
         const val HTTP_NOT_MODIFIED = 304
@@ -404,31 +768,24 @@ internal class AddPodcastResolverImpl(
 /** 03's accepted-item rule, shared by add previews and explicit moves. */
 internal fun ParsedEpisode.isAccepted(): Boolean = primaryEnclosure != null || externalMediaId != null
 
-/**
- * The M1a subset of 03's `HostRecognizer` host table: the YouTube host check that stands in for
- * `YouTubeUrlClassifier` until M3 and the Spotify explanation. Apple/pod.link/Podcast-Index
- * lookups are M7; everything else is fetched and sniffed.
- */
+/** Publisher metadata wins; directory art is the final subscribe fallback (03 Artwork). */
+private fun ParsedFeed.withDirectoryMetadata(hit: DirectoryHit?): ParsedFeed {
+    if (hit == null) return this
+    return copy(
+        title = title?.takeIf(String::isNotBlank) ?: hit.title,
+        author = author ?: hit.author,
+        artwork =
+            artwork.ifEmpty {
+                hit.artworkUrl?.let { listOf(ArtworkCandidate(it, ArtworkSource.DIRECTORY)) } ?: emptyList()
+            },
+    )
+}
+
+/** Compatibility guard shared with subscribe/edit; classification also covers bare handles/IDs. */
 internal object HostChecks {
-    fun isYouTube(url: String): Boolean {
-        val host = hostOf(url) ?: return false
-        return host == "youtube.com" || host.endsWith(".youtube.com") ||
-            host == "youtu.be" || host.endsWith(".youtu.be")
-    }
+    private val classifier = YouTubeUrlClassifier()
 
-    fun isSpotifyShow(url: String): Boolean =
-        hostOf(url) == "open.spotify.com" && url.substringAfter("://", "").substringAfter('/').startsWith("show/")
+    fun isYouTube(url: String): Boolean = classifier.classify(url) != null || classifier.isYouTubeHost(url)
 
-    /** The lowercase host of an http(s) URL or bare `host.tld/…` token, or null. */
-    private fun hostOf(url: String): String? {
-        val cleaned =
-            url
-                .removePrefix("feed:")
-                .substringAfter("://", url)
-                .substringBefore('/')
-                .substringAfterLast('@')
-                .substringBefore(':')
-                .substringBefore('?')
-        return cleaned.takeIf { it.isNotEmpty() }?.lowercase()
-    }
+    fun isSpotifyShow(url: String): Boolean = HostRecognizer.recognize(url) == HostAction.SpotifyShow
 }

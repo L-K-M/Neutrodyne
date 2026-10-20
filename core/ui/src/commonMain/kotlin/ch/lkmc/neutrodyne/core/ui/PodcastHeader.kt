@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,7 +28,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +48,7 @@ import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.art.ArtColors
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_add_group
@@ -55,6 +59,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_more
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_private
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_updated
+import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -80,16 +85,35 @@ public fun PodcastHeader(
         modifier = modifier.fillMaxWidth().padding(horizontal = HEADER_PADDING),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(HEADER_TOP_GAP))
-        CoverArt(
-            ref = detail.artwork,
-            monogram = rememberMonogram(detail.displayTitle),
-            title = detail.displayTitle,
-            tier = CoverTier.HERO,
-            shape = NeutrodyneShapes.PlayerArt,
-            avgArgb = null,
-            modifier = Modifier.size(HERO_SIZE),
-        )
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(top = HEADER_TOP_GAP),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            if (detail.sourceType == SourceType.YOUTUBE_CHANNEL && detail.bannerUrl != null) {
+                Box(Modifier.fillMaxWidth().aspectRatio(BANNER_ASPECT).align(Alignment.TopCenter)) {
+                    AsyncImage(
+                        model = detail.bannerUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Box(
+                        Modifier.matchParentSize().background(
+                            Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = BANNER_SCRIM))),
+                        ),
+                    )
+                }
+            }
+            CoverArt(
+                ref = detail.artwork,
+                monogram = rememberMonogram(detail.displayTitle),
+                title = detail.displayTitle,
+                tier = CoverTier.HERO,
+                shape = NeutrodyneShapes.PlayerArt,
+                avgArgb = null,
+                modifier = Modifier.size(HERO_SIZE),
+            )
+        }
         Spacer(Modifier.height(COVER_TITLE_GAP))
         Text(
             detail.displayTitle,
@@ -213,6 +237,15 @@ private fun Description(notes: ShowNotes) {
     }
 }
 
+/** The preview reuses description expansion while owning its surrounding header layout. */
+@Composable
+public fun PodcastDescription(
+    notes: ShowNotes,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) { Description(notes) }
+}
+
 /** "{n} episodes · Updated {relative} · Private". */
 @Composable
 private fun MetaLine(
@@ -298,3 +331,6 @@ private val CLOSE_ICON_SIZE = 18.dp
 private const val DOT_TONE_LIGHT = 40.0
 private const val DOT_TONE_DARK = 80.0
 private const val DESCRIPTION_LINES = 3
+
+private const val BANNER_ASPECT = 6f
+private const val BANNER_SCRIM = 0.4f

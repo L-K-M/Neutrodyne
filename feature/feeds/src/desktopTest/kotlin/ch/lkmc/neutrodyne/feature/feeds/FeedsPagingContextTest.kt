@@ -10,12 +10,15 @@ import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
+import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
@@ -71,7 +74,22 @@ class FeedsPagingContextTest : MainDispatcherTest() {
                     FakeEpisodeLiveStateSource(),
                     FakeGroupRepository(),
                     FakeSettingsRepository(),
+                    FakePlaybackController(),
+                    FakePlaybackStateSource(),
+                    testPlatformInfo,
                     defaultDispatcher,
+                    downloadController =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeDownloadController(),
+                    externalOpenService =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeExternalOpen(),
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
+                    youTubeHealth =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeHealth(),
                 )
 
             val store = ViewModelStore().apply { put("feeds", viewModel) }

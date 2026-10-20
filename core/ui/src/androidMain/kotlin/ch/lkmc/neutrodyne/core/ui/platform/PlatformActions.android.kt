@@ -75,6 +75,36 @@ internal class AndroidPlatformActions(
     private val createLauncher: ActivityResultLauncher<CreateDocumentRequest>,
     private val notificationLauncher: ActivityResultLauncher<String>,
 ) : PlatformActions {
+    override val settings: SystemSettingsOpener =
+        SystemSettingsOpener { target ->
+            val intent =
+                when (target) {
+                    SystemSettingsTarget.STORAGE -> {
+                        Intent(android.os.storage.StorageManager.ACTION_MANAGE_STORAGE)
+                    }
+
+                    SystemSettingsTarget.BACKGROUND_DATA -> {
+                        Intent(
+                            android.provider.Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    }
+
+                    SystemSettingsTarget.APP_DETAILS -> {
+                        Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    }
+                }
+            try {
+                context.startActivity(intent)
+                true
+            } catch (_: ActivityNotFoundException) {
+                false
+            }
+        }
+
     override val urls: ExternalUrlOpener =
         ExternalUrlOpener { url ->
             val intent =
@@ -144,6 +174,9 @@ internal class AndroidPlatformActions(
 
     // "Show in folder" is a desktop action (08 Modules).
     override val reveal: RevealInFolder? = null
+
+    override val appleLinks: AppleLinkSettings? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) AndroidAppleLinkSettings(context) else null
 
     override val notifications: NotificationPermissionRequester? =
         if (Build.VERSION.SDK_INT < NOTIFICATION_PERMISSION_SDK) {
@@ -240,3 +273,21 @@ internal class PendingResult<T> {
 /** Maps the launcher's `Uri` result onto the caller's `String` continuation. */
 private fun <T, R> Continuation<R>.contramap(map: (T) -> R): Continuation<T> =
     Continuation(context) { result -> resumeWith(result.map(map)) }
+
+/** No domain approval is assumed: this opens the user's own app-link preferences. */
+internal class AndroidAppleLinkSettings(
+    private val context: Context,
+) : AppleLinkSettings {
+    override fun openSettings(): OpenResult =
+        try {
+            context.startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null),
+                ),
+            )
+            OpenResult.OPENED
+        } catch (_: ActivityNotFoundException) {
+            OpenResult.NO_HANDLER
+        }
+}

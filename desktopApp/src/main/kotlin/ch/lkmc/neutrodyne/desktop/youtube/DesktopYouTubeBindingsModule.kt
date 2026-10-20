@@ -1,39 +1,61 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.youtube
 
-import ch.lkmc.neutrodyne.core.model.ExternalReason
-import ch.lkmc.neutrodyne.youtube.api.AudioPref
-import ch.lkmc.neutrodyne.youtube.api.ResolveResult
-import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
+import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
+import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
+import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelSearch
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEnricher
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedMetadataReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
+import ch.lkmc.neutrodyne.youtube.impl.DefaultYouTubeChannelResolver
+import ch.lkmc.neutrodyne.youtube.impl.DeferredYouTubeEngine
+import ch.lkmc.neutrodyne.youtube.impl.ExternalOnlyYouTubeStreamResolver
+import ch.lkmc.neutrodyne.youtube.impl.NoExtractorChannelLookup
+import ch.lkmc.neutrodyne.youtube.impl.NoOpYouTubeEnricher
+import ch.lkmc.neutrodyne.youtube.impl.StaticYouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.impl.UnsupportedYouTubeChannelSearch
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
-import kotlinx.coroutines.flow.MutableStateFlow
+import dev.zacsweers.metro.SingleIn
+import java.util.Locale
 
-/** The shell alone binds YouTube ports (01). External-only until M9 / MD3; no engine or IO. */
+/** Shell-owned bindings: all M8 builds remain external until M9a / MD3. */
 @BindingContainer
 object DesktopYouTubeBindingsModule {
-    private val external =
-        object : YouTubeCapabilitiesSource {
-            override val capabilities =
-                MutableStateFlow(
-                    YouTubeCapabilities(false, false, false, false, false, ExternalReason.NOT_YET_AVAILABLE),
-                )
-        }
-    private val unsupported =
-        object : YouTubeStreamResolver {
-            override suspend fun resolveAudio(
-                videoId: String,
-                pref: AudioPref,
-            ): ResolveResult = ResolveResult.Unsupported
-
-            override fun invalidate(videoId: String) = Unit
-
-            override fun invalidateAll() = Unit
-        }
+    private val external = StaticYouTubeCapabilitiesSource()
+    private val control = DeferredYouTubeEngine()
+    private val streams = ExternalOnlyYouTubeStreamResolver()
+    private val enrichment = NoOpYouTubeEnricher()
+    private val search = UnsupportedYouTubeChannelSearch()
+    private val lookup = NoExtractorChannelLookup()
 
     @Provides fun capabilities(): YouTubeCapabilitiesSource = external
 
-    @Provides fun streamResolver(): YouTubeStreamResolver = unsupported
+    @Provides fun audioLanguage(): DownloadAudioLanguage = DownloadAudioLanguage { Locale.getDefault().language }
+
+    @Provides fun engine(): YouTubeEngine = control
+
+    @Provides fun streamResolver(): YouTubeStreamResolver = streams
+
+    @Provides fun enricher(): YouTubeEnricher = enrichment
+
+    @Provides fun channelSearch(): YouTubeChannelSearch = search
+
+    @Provides fun channelLookup(): ExtractorChannelLookup = lookup
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun channelResolver(
+        clients: NeutrodyneHttpClients,
+        reader: YouTubeFeedMetadataReader,
+        extractor: ExtractorChannelLookup,
+    ): YouTubeChannelResolver =
+        DefaultYouTubeChannelResolver(clients, reader, extractor) {
+            Locale.getDefault().toLanguageTag()
+        }
 }

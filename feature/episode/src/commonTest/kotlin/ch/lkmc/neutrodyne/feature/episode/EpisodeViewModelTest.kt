@@ -2,24 +2,37 @@
 
 package ch.lkmc.neutrodyne.feature.episode
 
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
+import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
+import ch.lkmc.neutrodyne.core.testing.testNowPlaying
+import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -33,20 +46,163 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeViewModelTest : MainDispatcherTest() {
+    private val engine =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeEngine()
+    private val caps =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeCapabilitiesSource()
+    private val downloads =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController()
+    private val liveSource =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeEpisodeLiveStateSource()
     private val episodes = FakeEpisodeRepository()
+    private val chapters =
+        FakeChapterRepository()
+    private val podcasts = FakePodcastRepository()
     private val settings = FakeSettingsRepository()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+    private val playbackController = FakePlaybackController()
+    private val playbackStates = FakePlaybackStateSource()
 
-    private fun viewModel(episodeId: Long = 5) = EpisodeViewModel(episodeId, episodes, settings, network)
+    private fun viewModel(episodeId: Long = 5) =
+        EpisodeViewModel(
+            episodeId,
+            episodes,
+            chapters,
+            podcasts,
+            settings,
+            playbackController,
+            playbackStates,
+            testPlatformInfo,
+            network,
+            downloadController = downloads,
+            liveStateSource = liveSource,
+            externalOpenService =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeExternalOpen(),
+            capabilities = caps,
+            engine = engine,
+        )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
 
+    @Test fun screenPrewarmWaitsForIdentityAndRunsOncePerOpening() =
+        runTest {
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = true)
+            val model = viewModel()
+            model.onVisible()
+            runCurrent()
+            assertTrue(engine.prewarms.isEmpty())
+            episodes.episodes.value =
+                mapOf(
+                    5L to
+                        testEpisodeDetail(5).copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            externalMediaId = "abcdefghijk",
+                        ),
+                )
+            runCurrent()
+            model.onVisible()
+            episodes.episodes.value = episodes.episodes.value.mapValues { (_, row) -> row.copy(title = "Renamed") }
+            runCurrent()
+            assertEquals(listOf(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN), engine.prewarms)
+            model.onHidden()
+            model.onVisible()
+            runCurrent()
+            assertEquals(2, engine.prewarms.size)
+            model.onHidden()
+        }
+
+    @Test fun hiddenUnknownRssAndExternalScreensNeverPrewarm() =
+        runTest {
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = true)
+            val model = viewModel()
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            episodes.episodes.value = mapOf(5L to testEpisodeDetail(5))
+            runCurrent()
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = false)
+            episodes.episodes.value =
+                mapOf(
+                    5L to
+                        testEpisodeDetail(5).copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            externalMediaId = "abcdefghijk",
+                        ),
+                )
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            assertTrue(engine.prewarms.isEmpty())
+        }
+
+    @Test fun progressWindowTracksVisibilityAndClearsDuringTheSharingGrace() =
+        runTest {
+            val model = viewModel()
+            val subscription = backgroundScope.launch { model.uiState.collect {} }
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+
+            model.onVisible()
+            runCurrent()
+            assertEquals(setOf(5L), liveSource.lastVisibleIds.value)
+
+            subscription.cancel()
+            model.onHidden()
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+        }
+
+    @Test fun timestampSeeksCurrentAndStartsOtherEpisodeAtExactPosition() =
+        runTest {
+            val model = viewModel()
+            collect(model)
+            playbackStates.nowPlaying.value = testNowPlaying(5)
+            runCurrent()
+            model.onTimestamp(754_000)
+            playbackStates.nowPlaying.value = testNowPlaying(6)
+            model.onTimestamp(754_000)
+            runCurrent()
+            assertEquals(
+                listOf(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.SEEK, 754_000),
+                    FakePlaybackController.Call.Episode(5, 754_000),
+                ),
+                playbackController.calls,
+            )
+        }
+
     @Test
     fun initialStateBeforeSubscription() =
         runTest {
             assertEquals(EpisodeUiState(), viewModel().uiState.value)
+        }
+
+    @Test
+    fun currentPlaybackStateUpdatesTheDetailAffordance() =
+        runTest {
+            val model = viewModel()
+            collect(model)
+            playbackStates.nowPlaying.value = testNowPlaying(5)
+            advanceUntilIdle()
+            assertTrue(model.uiState.value.isNowPlaying)
+            assertTrue(model.uiState.value.isPlaying)
+            playbackStates.nowPlaying.value = testNowPlaying(5).copy(isPlaying = false, playWhenReady = false)
+            advanceUntilIdle()
+            assertTrue(model.uiState.value.isNowPlaying)
+            assertTrue(!model.uiState.value.isPlaying)
+            playbackStates.nowPlaying.value = testNowPlaying(6)
+            advanceUntilIdle()
+            assertTrue(!model.uiState.value.isNowPlaying)
         }
 
     @Test
@@ -222,5 +378,160 @@ class EpisodeViewModelTest : MainDispatcherTest() {
                 viewModel.uiState.value.messages
                     .isEmpty(),
             )
+        }
+
+    @Test
+    fun playToggleStartsTheEpisode() =
+        runTest {
+            playbackController.playResult = PlayResult.Started
+            val viewModel = viewModel()
+
+            viewModel.onAction(EpisodeAction.PlayToggle(5))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf<FakePlaybackController.Call>(FakePlaybackController.Call.Episode(5)),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun playToggleOnThePlayingItemPausesWithoutANewStart() =
+        runTest {
+            playbackStates.nowPlaying.value = testNowPlaying(5)
+            val viewModel = viewModel()
+
+            viewModel.onAction(EpisodeAction.PlayToggle(5))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun playNextAndPlayLastEnqueueTheEpisode() =
+        runTest {
+            val viewModel = viewModel()
+
+            viewModel.onAction(EpisodeAction.PlayNext(5))
+            viewModel.onAction(EpisodeAction.PlayLast(5))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Queue(FakePlaybackController.Placement.NEXT, listOf(5L)),
+                    FakePlaybackController.Call.Queue(FakePlaybackController.Placement.LAST, listOf(5L)),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun needsMeteredConsentOpensTheDialogAndOnceRetriesTheStart() =
+        runTest {
+            playbackController.playResult = PlayResult.NeedsMeteredConsent(5)
+            val viewModel = viewModel()
+            collect(viewModel)
+            advanceUntilIdle()
+
+            viewModel.onAction(EpisodeAction.PlayToggle(5))
+            advanceUntilIdle()
+            assertEquals(
+                5L,
+                viewModel.playback.meteredConsent.value
+                    ?.episodeId,
+            )
+
+            playbackController.calls.clear()
+            playbackController.playResult = PlayResult.Started
+            viewModel.playback.consentOnce()
+            advanceUntilIdle()
+
+            assertNull(viewModel.playback.meteredConsent.value)
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
+                    FakePlaybackController.Call.Episode(5),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun consentAlwaysPersistsAllowThenRetries() =
+        runTest {
+            settings.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.ASK)
+            playbackController.playResult = PlayResult.NeedsMeteredConsent(5)
+            val viewModel = viewModel()
+            collect(viewModel)
+            advanceUntilIdle()
+
+            viewModel.onAction(EpisodeAction.PlayToggle(5))
+            advanceUntilIdle()
+            playbackController.calls.clear()
+            playbackController.playResult = PlayResult.Started
+
+            viewModel.playback.consentAlways()
+            advanceUntilIdle()
+
+            assertEquals(
+                StreamOnMetered.ALLOW,
+                settings.get(PlaybackSettingKeys.STREAM_ON_METERED),
+            )
+            assertTrue("set(playback.stream_on_metered)" in settings.calls)
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
+                    FakePlaybackController.Call.Episode(5),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun authRequiredOffersEnterPasswordAndCredentialsSaveForTheEpisodesPodcast() =
+        runTest {
+            playbackController.playResult =
+                PlayResult.NotPlayable(5, UnplayableReason.AuthRequired)
+            episodes.episodes.value = mapOf(5L to testEpisodeDetail(5, podcastId = 7))
+            val viewModel = viewModel()
+            collect(viewModel)
+            advanceUntilIdle()
+
+            viewModel.onAction(EpisodeAction.PlayToggle(5))
+            advanceUntilIdle()
+
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            assertEquals(
+                PlaybackMessageAction.EnterPassword(5),
+                viewModel.playback.onMessageAction(message.id),
+            )
+
+            viewModel.onEnterPassword(5)
+            advanceUntilIdle()
+            assertEquals(7L, viewModel.pendingCredentials.value)
+
+            viewModel.onCredentials(BasicCredentials("user", "pw"))
+            advanceUntilIdle()
+            assertNull(viewModel.pendingCredentials.value)
+            assertEquals(listOf("setCredentials(7, user)"), podcasts.calls)
+        }
+
+    @Test fun downloadToggleReachesTheManualRequestHandler() =
+        runTest {
+            val vm = viewModel()
+            vm.onAction(EpisodeAction.DownloadToggle(5))
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadController.Action.REQUEST,
+                downloads.calls.single().action,
+            )
+            assertEquals(listOf(5L), downloads.calls.single().ids)
         }
 }

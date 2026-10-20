@@ -323,6 +323,35 @@ Call records may be typed values rather than strings. Session/queue reads are
 published explicitly by tests, avoiding a second implementation of the durable playback stores' SQL rules.
 Chapter, download-controller and sync fakes stay in their listed milestones.
 
+**Implementation note (2026-10-18, M4).** Playback framework instrumentation uses
+the app test APK with the real graph and test-only streaming assets. The CI and
+nightly workflows check the expected playback method names in each device's
+JUnit XML, including the 30-minute duration on API 34. Successful instrumented,
+API 37 and release-smoke runs upload reports as evidence; merely discovering or
+skipping the suite does not satisfy playback acceptance.
+
+**Implementation note (2026-10-19, M5).** The app-hosted playback evidence gate
+now requires sleep end-of-episode, chapter/timestamp seeks, both video decoder
+journeys, legacy browse/search and both hardware transport modes on each CI
+image and optimized release smoke image. Nightly also requires the one-minute
+screen-off listening timer and real ID3/Nero/QuickTime chapter extraction;
+API 34 retains its 30-minute continuity check. Missing, duplicate, failed or
+skipped required cases fail `scripts/ci/assert-playback-tests.py`. The same gate
+checks all nine nonempty synthetic media/chapter assets in the selected app
+test APK. Longer streams are assembled from the short fixture at runtime.
+
+The API 37 release route additionally runs `scripts/ci/playback-reboot.py`:
+three independent instrumentation processes seed/pause, inspect the offline
+System UI card and local blue artwork after a host reboot/unlock, then tap
+its play action with the controlled source restored. It enables audio
+hardening `throw` after reboot and archives phase results, screenshots,
+hierarchy, state, image fingerprint, tested SHA and logs under
+`app/build/reports/playback-reboot`. These host-only methods intentionally
+skip in ordinary suites and do not count toward their required cases. The
+host rejects any phase without exactly one non-skipped pass. No local
+emulator, release, reboot or DHU execution is claimed by this wiring; see
+[the M5 acceptance ledger](../PLAN.md#m5-playback-features-and-system-surfaces).
+
 Rule: an interface added to `:core:domain`, `:*:api` or `:sync:api` by any document gets its `Fake<Name>` in the same PR. Fakes are backed by `MutableStateFlow`, expose test-only mutators (`emit…`, `failNext: <ErrorType>?`) and a call log (`calls: List<String>`), and never sleep.
 
 **Not in `:core:testing`** (rule 9 forbids the dependencies, or the helper is one platform's):
@@ -495,13 +524,104 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
 
 ### Out-of-process system tests
 
+**Implementation note (2026-10-19, M6b).** W11 preserves W10's fallback and
+records current workflow selection: `system-tests` runs E10 only for full
+nightlies; `instrumented-full` runs benchmark smoke on API36 (also for the
+downloads scope); `api37-16k` runs connected smoke. These are wired jobs, not
+executed evidence in this local worktree. The current workflows have no
+`desktop-matrix` job, so Windows/macOS/ARM lane and move coverage remains open.
+The [ledger](../evidence/m6b-acceptance.md) names tasks, receipts and gaps.
+Assembly does not close E10 or published-release acceptance. The release mapping
+below is the design target; current code enables only `benchmarkRelease`.
+
+**Implementation note (2026-10-19, M6b).** W10's self-instrumenting
+`:benchmark` producer uses the recorded `benchmarkRelease` fallback; published
+`release` mapping remains Unverified. `scripts/ci/system-tests.sh` runs E10 on
+full-image `bench34`, smoke on ATD `api36` and connected API 37. It records
+SHA/device/variant metadata, removes old XML, and requires one named, non-skipped
+pass from that variant/device. Empty, failed, skipped and duplicate results fail.
+Nightly `system-tests`, `instrumented-full` and API 37 enforce this gate.
+
+E10's test-APK server supplies a strong-ETag WAV. Assertions cover PID death and
+restart, the real reconciler's `QUEUED(SYSTEM)` reset and cleared token, matching
+server-observed `Range`/`If-Range` from actual `.part` length, and the final hash.
+`-Pneutrodyne.systemTests=true` adds a DUMP-protected fixture initializer to
+`download:impl` and disables all app variants except `benchmarkRelease`. It
+accepts only loopback seed URLs and calls the real engine without an FGS so
+`am kill` can kill the cached process. A test-APK activity backgrounds it without
+SystemUI. Startup records the real reset before parking the row until resume.
+UIDT/WorkManager lifecycle coverage stays with their device suites. Normal
+builds exclude the hook; `check-apk.sh --published` rejects its classes.
+
+Smoke uses the real UI and normal scheduling: five destinations, subscribe,
+ten seconds of actual playing state, download and back. Both suites clear data;
+connected runs uninstall both APKs, while GMD owns its disposable installation.
+Reports and variant metadata are always uploaded. Host CI builds the test APK
+and opted-in driver, and checks dependency policy and graph boundaries; Licensee
+stays on shipped shells. No schema, domain-interface or licence exceptions.
+
+Device execution is Unverified. I2 integrates M6a's real episode DownloadToggle
+and feed/podcast request handlers with W9's controls; smoke exercises that UI
+entry point instead of bypassing it. M6a's E4/downloads selectors and bmgr job
+coexist with the system-tests job and benchmark smoke legs. W11 must not record
+host compilation or passing host tests as device acceptance.
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 9 permits
+W10 to use `benchmarkRelease` if AGP 9.4 does not offer the required `release`
+test variant. The fallback differs only by profileability. Record the actual
+variant and device evidence; benchmarkRelease coverage must never be described
+as release-APK coverage. W1 performs no system-test or variant verification.
+
+
 Instrumented tests run inside the app's process, so killing the process (`am kill`, `ProcessDeathResumeTest`) or reinstalling the app kills the test. Such tests live in `:benchmark` (`com.android.test` with the `androidx.baselineprofile` 1.5.0 producer plugin, self-instrumenting, `targetProjectPath = ":app"`), drive the app with UI Automator 2.4.0 and `UiAutomation.executeShellCommand`, and are created in **M6b** (system tests); Macrobenchmarks follow in M10 and the baseline-profile generator in M11b ([Macrobenchmark and profiles](#macrobenchmark-and-profiles)). A test module builds and tests the app variant with the same build-type name ([Macrobenchmark overview](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-overview)), so `:benchmark`'s variants map one to one: **`release`** — the system tests (E10 on `bench34`) and the release smoke journeys `ReleaseSmokeJourneyTest` (on `api36` and the API 37 16 KB image: start, five destinations, "Add by URL" with a feed from a MockWebServer inside the `:benchmark` process on `127.0.0.1`, which the app reaches over loopback, play 10 s, download one episode, back) against the published `release` build type; **`benchmarkRelease`** — Macrobenchmarks; **`nonMinifiedRelease`** — `BaselineProfileGenerator`. Compose nodes are found by resource ID through `Modifier.semantics { testTagsAsResourceId = true }` on `NeutrodyneRoot` and 08's test tags ([08 Performance journeys](08-ui-ux.md#performance-journeys)). Unverified: that `com.android.test` with the producer plugin under AGP 9.4 offers a `release` variant matching `:app`'s `release` (M6b check, with S19's throwaway module as the first evidence; fallback: the system tests and smoke journeys run against `benchmarkRelease`, which differs from `release` only in being profileable and in its own source set).
 
 ### Recorded responses
 
-- No PR job contacts YouTube, Apple, fyyd, Podcast Index, GitHub's release endpoints or a real sync server. Directory JSON (03), channel pages and oEmbed (04) and the engine's InnerTube traffic (04's `RecordingRH`, driven by `scripts/youtube/record-responses.sh`) are recorded on a developer machine, scrubbed per [04 Recorded responses](04-youtube.md#recorded-responses) (`ip=`, signatures, cookies, visitor data, `expire`), and committed under `youtube/engine/src/test/resources/recorded/`; both engine hosts replay the same files. The update check's GitHub responses (`latest/download` redirects, manifests with `desktop[]` and `server` entries) are hand-written fixtures served by MockWebServer. Sync traffic is never recorded: the tests use `InMemorySyncServer`, Ktor's test host or the built JAR.
+Implementation note (2026-10-19, M9a): The shared shim adds
+`:youtube:ytdlp:shimTest`, using stdlib unittest to avoid a new Python
+dependency. It prefers host CPython 3.14, otherwise records the available
+python3 version in `youtube/ytdlp/build/shim/python-runtime.txt`. The task
+depends on the offline upstream verifier and requires the committed pinned
+asset; no test bootstrap download is allowed. The host here runs CPython
+3.11.2, so CPython 3.14 and Android execution remain unverified.
+Test sockets are disabled and
+ReplayRH is the exclusive handler. Committed method fixtures and generated
+AC1 error vectors are explicitly synthetic. Manual capture never runs in CI;
+host/live urllib evidence is distinct from Android PyHttp and MD3 acceptance
+(adopted resolutions 1, 2 and 10). Host/device selection remains spike pending.
+
+
+Implementation note (2026-10-19, M8): I3 retains M6's download/system-test
+jobs and M7's discovery evidence assertions together. The download-only
+nightly selector does not assert discovery cases it did not select. The
+benchmark assemble task builds the existing `benchmarkRelease` fallback;
+it supplies no executed device or published-release evidence on this host.
+Physical-device, real-browser and platform acceptance remain unverified.
+
+Implementation note (2026-10-19, M8): Adopted plan resolution 8 keeps Layer A
+channel/oEmbed fixtures in `youtube/impl/src/test/resources/recorded/`, outside
+the future engine module. Desktop and Android host replay share the same
+resources and MockWebServer tests with the real app-client configuration;
+test-only routing sends production HTTPS URLs to loopback. Provenance labels
+reconstructed success shapes and the unsuccessful live consent capture.
+Byte-cap padding is generated in tests, not committed as large pages.
+Owner/device replay and successful live channel-head measurements remain
+separate acceptance evidence.
+
+- No PR job contacts YouTube, Apple, fyyd, Podcast Index, GitHub's release endpoints or a real sync server. Channel pages and oEmbed (04) and the engine's InnerTube traffic (04's `RecordingRH`, driven by `scripts/youtube/record-responses.sh`) are recorded on a developer machine, scrubbed per [04 Recorded responses](04-youtube.md#recorded-responses) (`ip=`, signatures, cookies, visitor data, `expire`), and committed under `youtube/engine/src/test/resources/recorded/`; both engine hosts replay the same files. The update check's GitHub responses (`latest/download` redirects, manifests with `desktop[]` and `server` entries) are hand-written fixtures served by MockWebServer. Sync traffic is never recorded: the tests use `InMemorySyncServer`, Ktor's test host or the built JAR.
 - Recording never runs in CI (GitHub runners use data-centre IPs that YouTube bot-challenges).
 - A replay test fails on any unrecorded request; that failure means "re-record", never "add a fallback".
+
+**Implementation note (2026-10-19, M7):** Directory JSON/HTML belongs in
+`feeds/src/test/resources/discovery/`, superseding YouTube placement above;
+keep origin/date/terms metadata and scrubbing, preserve the existing corpus.
+W8 shares parser/HTML assertions across desktop, Android host and device
+replay. See the [M7 evidence ledger](../evidence/m7-discovery.md) for executed
+counts, screenshot wiring, XML gates and the outstanding runtime/owner rows.
+W6 inventory/policy parity keeps `apple`, `fyyd`, `podcastindex`, `add-input` IDs
+and effective-provider states; enumerate Apple search/lookup/chart hosts,
+ID lookups/PI auth, pages/probes, publishers and artwork. Correct query/country-only
+and no-token-leaves claims; defer unrelated crash-report controls.
 
 ### Fixture policy
 
@@ -757,6 +877,17 @@ When `unit` exceeds 15 min at p50 over a week, the fix order is: raise `maxParal
 ---
 
 ## Static analysis
+
+Implementation note (2026-10-19, M9a): The bundled-engine suite adds genuine-release negative
+signature/hash/missing-input tests, bounded ZIP/recovery host tests and
+Android preparation tests using core:testing fakes, plus
+`:youtube:ytdlp:preparedShimTest` for the real extracted-engine/Python
+host-adapter boundary. The Android test publishes declared outputs; Gradle
+launches the Python probe, preserving the Kotlin process boundary. The Android inventory
+preserves exact meriyah ISC/astring MIT notices from authenticated ejs data;
+yt-dlp/ejs reuse the existing Unlicense text. Device/host compilation and
+activation evidence remain **spike pending**. No runtime updater is added.
+
 
 Serves N8, N10, N11, N12. Delivered in M0a (Lint, formatting, Python licence and APK content checks, with the engine stack from M9a), M0b (desktop image and runtime-source checks, the server's Licensee, the brand check), MD0 (native licences, C formatting), MS1 (server image scan). Honours [D3](../PLAN.md#3-key-decisions), [D60](../PLAN.md#3-key-decisions), [D89](../PLAN.md#3-key-decisions), [D95](../PLAN.md#3-key-decisions).
 
@@ -1551,6 +1682,11 @@ Removed 2026-10-05 (scope revision): the item about debuggable published builds 
 
 ### Network inventory
 
+**Implementation note (2026-10-19, M7):** W6 renders the stable-ID inventory
+and compares its IDs with the actual policy in `PrivacyInventoryParityTest`.
+Disclosure includes explicit ID lookups, PI authentication, bounded Add
+pages/probes/candidate requests and directory artwork, not only search text.
+
 IDs are stable; the in-app "What Neutrodyne connects to" list (Settings › Privacy, both apps) uses the same IDs and `PrivacyInventoryParityTest` (`:feature:settings`, `desktopTest`) fails when the IDs in `PRIVACY.md` and the in-app list differ. The Builds column says which artefacts make the connection: "all" (every APK and desktop build), "with engine" or "server".
 
 | ID | Destination | Purpose | When | Builds | Default |
@@ -1574,7 +1710,7 @@ IDs are stable; the in-app "What Neutrodyne connects to" list (Settings › Priv
 | `server-updates` | `github.com` (`<owner>/Neutrodyne/releases/latest/download/neutrodyne-update.json`), `release-assets.githubusercontent.com` | the sync server's notify-only update notice on its admin page ([10 Update notice](10-sync.md#update-notice)) | daily | server | on; `NEUTRODYNE_SERVER_UPDATE_CHECK=false` turns it off ([PO-45](../PLAN.md#48-further-product-owner-decisions)) |
 | — | Neutrodyne-operated servers, analytics, ads, Google Play services, `api.github.com`; from the server: feeds, enclosures, artwork, YouTube or any other host | — | never | — | — |
 
-What hosts receive: every request from an app carries the device's IP address and 01's User-Agent `Neutrodyne/<versionName> (<platform>; +<repo URL>)`, the platform being the OS release and on the desktop the architecture (no device or install identifiers, [01 Interceptors](01-foundation.md#interceptors)); feed requests carry stored `If-None-Match`/`If-Modified-Since`; private feeds and their same-origin enclosures carry Basic credentials (never across origins); directories receive only the query text and country ([03 Privacy](03-feeds-and-discovery.md#privacy)); YouTube receives the consent cookie `SOCS=CAE=` and, with the engine, what yt-dlp's InnerTube clients send (a client-specific User-Agent such as Safari for `visionos`, the video or channel ID, the app locale as `hl`/`gl`; cookies live only in the engine process's memory, [04 Networking bridge](04-youtube.md#networking-bridge)); GitHub (the update checks of both apps and of the server, and the engine's update checks and downloads) sees the IP address and the User-Agent, no identifier. The user's sync server receives the device token, the device's name, platform and app version, and the synced library state of R7.3 — subscriptions with their feed URLs (private ones included), groups, played state, positions, favourites, Up next, the now-playing episode and the synced settings; Basic-auth passwords only while "Share feed passwords" is on for the pushing device ([10 What syncs](10-sync.md#what-syncs)). Publishers' measurement redirects can count downloads by IP and user agent; the apps add nothing to help or hinder that. Outside the apps' control and disclosed: Android's own Auto Backup transfer, system DNS (Private DNS honoured), the OS's own certificate and update checks, and the user's mail app for crash reports.
+What hosts receive: every request from an app carries the device's IP address and 01's User-Agent `Neutrodyne/<versionName> (<platform>; +<repo URL>)`, the platform being the OS release and on the desktop the architecture (no device or install identifiers, [01 Interceptors](01-foundation.md#interceptors)); feed requests carry stored `If-None-Match`/`If-Modified-Since`; private feeds and their same-origin enclosures carry Basic credentials (never across origins); directories receive search text, applicable country/genre parameters or explicit IDs, and Podcast Index receives API-key/timestamp/SHA-1 authentication headers ([03 Privacy](03-feeds-and-discovery.md#privacy)); YouTube receives the consent cookie `SOCS=CAE=` and, with the engine, what yt-dlp's InnerTube clients send (a client-specific User-Agent such as Safari for `visionos`, the video or channel ID, the app locale as `hl`/`gl`; cookies live only in the engine process's memory, [04 Networking bridge](04-youtube.md#networking-bridge)); GitHub (the update checks of both apps and of the server, and the engine's update checks and downloads) sees the IP address and the User-Agent, no identifier. The user's sync server receives the device token, the device's name, platform and app version, and the synced library state of R7.3 — subscriptions with their feed URLs (private ones included), groups, played state, positions, favourites, Up next, the now-playing episode and the synced settings; Basic-auth passwords only while "Share feed passwords" is on for the pushing device ([10 What syncs](10-sync.md#what-syncs)). Publishers' measurement redirects can count downloads by IP and user agent; the apps add nothing to help or hinder that. Outside the apps' control and disclosed: Android's own Auto Backup transfer, system DNS (Private DNS honoured), the OS's own certificate and update checks, and the user's mail app for crash reports.
 
 ### Redaction surfaces
 
@@ -1964,7 +2100,7 @@ Settings › Privacy page content (09, both apps): crash-reports switch; "What N
 | [M3](../PLAN.md#m3-import-export-and-backup) | OPML/backup mutation providers; E5, E6, E9; nightly `bmgr` job on the release APK; `RecordingAppNavigator` in `:core:testing` |
 | [M4](../PLAN.md#m4-playback-core) | Media3 test-utils forcing verified; `:playback:core` tests in `commonTest`; `api34` device; 06's `PlaybackServiceTest` in nightly (incl. API 37 hardening); E3 |
 | [M5](../PLAN.md#m5-playback-features-and-system-surfaces) | manual device-matrix template in the release issue |
-| [M6](../PLAN.md#m6-downloads) | M6a: E4; `api33` device; the desktop download lanes' tests in `desktopTest`. M6b: `:benchmark` (`com.android.test` + baseline-profile producer) with its `release` variant for system tests and the release smoke journeys, `bench34`, `system-tests` job, E10, the `instrumented-full` release leg; `bmgr` assertion for `Podcasts/` |
+| [M6](../PLAN.md#m6-downloads) | M6a: E4; `api33` device; the desktop download lanes' tests in `desktopTest`; `bmgr` assertion for `Podcasts/`. M6b: `:benchmark` (`com.android.test` + baseline-profile producer) with its `release` variant for system tests and the release smoke journeys, `bench34`, `system-tests` job, E10, the `instrumented-full` release leg |
 | [M7](../PLAN.md#m7-discovery) | `PRIVACY.md` and the in-app inventory gain `apple`, `fyyd`, `podcastindex` and the autodiscovery probes of `add-input`; `PrivacyInventoryParityTest`; E1 deep-link case |
 | [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) | E8 (`ExternalYouTubeModeTest`) in `instrumented` and its desktop variant in `:desktopApp`'s JVM tests (every build is in external mode until M9a on Android and MD3 on the desktop); YouTube import-parser mutation providers; inventory `youtube-subscriptions` |
 | [M9](../PLAN.md#m9-youtube-playback-and-downloads-via-the-embedded-yt-dlp-engine) (M9a) | E7 through `:ytx` on the debug APK and the release APK (`ReplayRH` hook, `ytxReplay` argument, `ReleaseSmoke` filter); `shimTest` in `unit`; `check-apk.sh` content scan and ELF alignment check against the real engine stack; nightly `no-engine-build` (blocking), `youtube-canary` and `engine-nightly-canary`; `FakeYouTubeEngine`; PB18–PB21 from the spike on the release APK; inventory `youtube-streams` rewritten for the engine; YouTube engine lines in diagnostics and `CrashKey.YOUTUBE_HEALTH` |
@@ -2200,3 +2336,27 @@ Privacy, crash reporting, localisation and platform:
 - Android local network permission (`ACCESS_LOCAL_NETWORK`) (2026-10-05) — https://developer.android.com/privacy-and-security/local-network-permission
 - Android 17 behaviour changes and background audio — https://developer.android.com/about/versions/17/behavior-changes-17 · https://developer.android.com/about/versions/17/changes/bg-audio
 - Prior-art reliability lessons (position-loss bug class, database growth) — https://github.com/AntennaPod/AntennaPod/releases/tag/3.12.0 · https://github.com/AntennaPod/AntennaPod/issues/4426
+
+## M6a integration evidence
+
+**Implementation note (2026-10-19, M6a).** AC7's Podcasts exclusion belongs
+to M6a, as PLAN requires, rather than waiting for M6b. The implemented
+`bmgr-download-exclusion` nightly job uses release builds on rootable API29
+and API36, seeds completed internal and external downloads through the real
+controller, invokes the M3 snapshot receiver, and checks the LocalTransport
+archive for exactly the snapshot and portable settings (plus platform
+metadata/APK). It does not claim the M3 reinstall/restore journey.
+`DownloadJourneyTest.downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete`
+is E4 and release smoke. The API33 foreground-worker case and API34/36
+20-minute UIDT-with-playback case run in nightly full and the explicit
+`downloads` dispatch scope; CI API26/36, API37 and release selectors require
+E4. `scripts/ci/assert-playback-tests.py` shares the XML and fixture
+gate and rejects absent, skipped, failed, duplicate or too-short evidence.
+No device or packaged desktop execution is inferred from compilation or
+host green. The [M6a ledger](../../HANDOFF.md)
+records the AC-by-AC gaps, including MD1 for desktop audio and the missing
+desktop executor matrix. Benchmark/E10 and Task Manager inference stay M6b.
+The pre-existing W6 `:download:impl` device component remains an exception
+to the device-module list above: its smoke tests access internal builders.
+W10 adds all integrated journeys to `:app`; it does not widen production
+visibility merely to relocate those internal smoke tests.

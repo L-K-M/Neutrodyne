@@ -278,7 +278,20 @@ class BackupRouteTest {
                         emitAll(imports.observeSession(sessionId))
                     }
             }
-        restoreViewModel = RestoreViewModel(id, backups, delayed, FakePlaybackController(), appScope)
+        restoreViewModel =
+            RestoreViewModel(
+                id,
+                backups,
+                delayed,
+                FakePlaybackController(),
+                appScope,
+                ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeDownloadController(),
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakePlaybackMediaLookup(),
+                ),
+            )
         viewModels.put("restore", restoreViewModel)
         return ImportUiState(loaded = true, session = session)
     }

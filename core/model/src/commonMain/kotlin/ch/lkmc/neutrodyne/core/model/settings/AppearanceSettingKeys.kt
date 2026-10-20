@@ -74,8 +74,19 @@ public object AppearanceSettingKeys {
     /** Empty means All; otherwise Ungrouped or a group UUID (08 Library). */
     val LIBRARY_GROUP_FILTER = SettingKey.Text("ui.library_group_filter", "", SettingsFile.DEVICE)
 
+    /** Mini player › optional forward-skip control (08 Player sheet, M4). */
+    public val MINI_PLAYER_SKIP = SettingKey.Bool("appearance.mini_player_skip", true)
+
+    val YOUTUBE_ROW_ART =
+        SettingKey.Choice(
+            "appearance.youtube_row_art",
+            YouTubeRowArt.VIDEO_THUMBNAIL,
+            persistentListOf(YouTubeRowArt.VIDEO_THUMBNAIL, YouTubeRowArt.CHANNEL_AVATAR),
+        )
+
     public val ALL: List<SettingKey<*>> =
         listOf(
+            YOUTUBE_ROW_ART,
             THEME,
             DYNAMIC_COLOR,
             LIBRARY_TITLES,
@@ -86,5 +97,6 @@ public object AppearanceSettingKeys {
             FEEDS_SELECTED_SOURCE,
             LIBRARY_GROUP_FILTER,
             LIBRARY_SEGMENT,
+            MINI_PLAYER_SKIP,
         )
 }

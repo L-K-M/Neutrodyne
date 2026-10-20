@@ -77,6 +77,13 @@ public data class PlayerSlotState(
     val layout: PaneLayout,
     /** Pushes a key onto the selected tab's stack (podcast link, Go to episode, …). */
     val navigate: (NavKey) -> Unit,
+    /** Frozen bottom of NavDisplay while the suite is visible, in window pixels. */
+    val contentBottomPx: Float = 0f,
+    /** Route requests are tokens so repeated deep links are observable. */
+    val expandRequest: Int = 0,
+    val collapseRequest: Int = 0,
+    /** Hide the suite only after the player settles; keep anchors frozen until shown again. */
+    val onExpandedSettled: (Boolean) -> Unit = {},
 )
 
 /** Root-level key chords dispatched to the shell's playback actions (08 Keyboard and mouse). */

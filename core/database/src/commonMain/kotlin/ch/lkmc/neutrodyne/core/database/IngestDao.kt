@@ -30,7 +30,7 @@ abstract class IngestDao(
      */
     @Query(
         "SELECT id, identityKey, guid, enclosureUrl, enclosureType, title, pubDate, sortDate," +
-            " durationMs, contentHash, inFeed, firstSeenAt, chaptersUrl" +
+            " durationMs, contentHash, inFeed, firstSeenAt, chaptersUrl, isShort, externalMediaId" +
             " FROM episode WHERE podcastId = :podcastId",
     )
     abstract suspend fun existing(podcastId: Long): List<ExistingEpisodeKey>
@@ -327,6 +327,47 @@ abstract class IngestDao(
     /** The `YOUTUBE_CHANNEL` variant (04): omits the YouTube-page columns 04 writes. */
     @Update(entity = PodcastEntity::class)
     abstract suspend fun applyYouTubeFeedMetadata(row: YouTubeFeedMetadata)
+
+    suspend fun applyYouTubeFacts(
+        podcastId: Long,
+        videoId: String,
+        durationMs: Long?,
+        availability: Availability?,
+        isShort: Boolean,
+    ) = applyYouTubeFactsChanged(podcastId, videoId, durationMs?.takeIf { it > 0 }, availability, isShort)
+
+    /** Partial, value-diffed facts only. Call inside the writer's real Room transaction. */
+    @Query(
+        "UPDATE episode SET durationMs = COALESCE(:durationMs, durationMs)," +
+            " availability = COALESCE(:availability, availability), isShort = (isShort OR :isShort)" +
+            " WHERE podcastId = :podcastId AND externalMediaId = :videoId AND (" +
+            " (:durationMs IS NOT NULL AND (durationMs IS NULL OR durationMs <> :durationMs)) OR" +
+            " (:availability IS NOT NULL AND availability <> :availability) OR (:isShort = 1 AND isShort = 0))",
+    )
+    protected abstract suspend fun applyYouTubeFactsChanged(
+        podcastId: Long,
+        videoId: String,
+        durationMs: Long?,
+        availability: Availability?,
+        isShort: Boolean,
+    )
+
+    /** Caller checked absence/completeness under the same transaction; no Atom hash write. */
+    suspend fun fillYouTubeDescription(
+        episodeId: Long,
+        description: ByteArray,
+        snippet: String,
+    ) {
+        deleteDescription(episodeId)
+        insertDescription(EpisodeDescriptionEntity(episodeId, description))
+        fillYouTubeSnippet(episodeId, snippet)
+    }
+
+    @Query("UPDATE episode SET snippet = :snippet WHERE id = :episodeId AND (snippet IS NULL OR snippet = '')")
+    protected abstract suspend fun fillYouTubeSnippet(
+        episodeId: Long,
+        snippet: String,
+    )
 
     @Query("DELETE FROM episode_description WHERE episodeId = :episodeId")
     protected abstract suspend fun deleteDescription(episodeId: Long)

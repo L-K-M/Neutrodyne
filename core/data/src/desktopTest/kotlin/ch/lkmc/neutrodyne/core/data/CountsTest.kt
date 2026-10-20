@@ -20,7 +20,9 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakePlayContextResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -50,7 +52,8 @@ class CountsTest {
     private val db = TestDb.inMemory()
     private val settings = FakeSettingsRepository()
     private val clock = TestClock()
-    private val feeds = FeedRepositoryImpl(db, settings, clock)
+    private val feeds =
+        FeedRepositoryImpl(db, settings, clock, FakePlayContextResolver(), FakeYouTubeCapabilitiesSource())
     private val episodes = EpisodeRepositoryImpl(db, JsoupShowNotesSanitizer(), clock)
     private val now = clock.now()
     private val since = now - GroupCounts.WINDOW_DAYS * GroupCounts.DAY_MS
@@ -159,7 +162,14 @@ class CountsTest {
             val timedDb = TestDb.inMemory(queryContext = StandardTestDispatcher(testScheduler))
             try {
                 val movingClock = TestClock.from(testScheduler, now + FeedPrefs.HOUR_MS / 2)
-                val repo = FeedRepositoryImpl(timedDb, settings, movingClock)
+                val repo =
+                    FeedRepositoryImpl(
+                        timedDb,
+                        settings,
+                        movingClock,
+                        FakePlayContextResolver(),
+                        FakeYouTubeCapabilitiesSource(),
+                    )
                 val g = timedDb.groupDao().insert(groupEntity(name = "G", orderKey = "a", createdAt = now))
                 val p = timedDb.podcastDao().insertPodcast(podcastEntity())
                 timedDb.groupDao().insertMember(memberEntity(g, p, "a"))

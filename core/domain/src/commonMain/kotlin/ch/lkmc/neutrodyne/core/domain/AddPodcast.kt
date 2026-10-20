@@ -7,6 +7,8 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.ProviderId
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 
 /**
  * The add-podcast pipeline's front door (03 Add podcast flow): normalisation, host recognition,
@@ -22,11 +24,23 @@ interface AddPodcastResolver {
         credentials: BasicCredentials,
     ): AddResolution
 
+    /** Explicit one-call consent, without changing the Apple preference. */
+    suspend fun lookupOnce(input: String): AddResolution
+
     /** `PodcastPreviewKey(feedUrl)` (directory results): reuses a cached entry or fetches anew. */
     suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError>
 }
 
 sealed interface AddResolution {
+    data class YouTube(
+        val ref: YtRef,
+    ) : AddResolution
+
+    data class LookupRequired(
+        val input: String,
+        val provider: ProviderId,
+    ) : AddResolution
+
     data class Feed(
         val preview: FeedPreview,
     ) : AddResolution

@@ -57,9 +57,14 @@ android {
             buildConfigField("String", "ACRA_MAILTO", "\"\"") // ACRA off in debug builds (D62)
         }
     }
+    // Playback framework tests need the real Application graph, manifest and release resources.
+    sourceSets["androidTest"].kotlin.srcDir("../playback/impl/src/androidTest/appHost/kotlin")
+    sourceSets["androidTest"].assets.srcDir("../playback/impl/src/test/resources")
     // Corpus leg c (03 Testing): the shared fixture/golden tree reaches the device through the
     // test APK's assets under `feeds/`; the production APK's source sets stay untouched.
     sourceSets["androidTest"].assets.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
+    // The very same assertions run on desktop, Robolectric and the real Android runtime.
+    sourceSets["androidTest"].kotlin.srcDir("../feeds/src/replay/kotlin")
     // Exercise the device gate's decisions on the host without copying its implementation.
     sourceSets["androidTest"].kotlin.srcDir("src/restoreTest/kotlin")
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
@@ -70,6 +75,12 @@ android {
 tasks.withType<Test>().configureEach {
     // The selection test invokes this negative control through the pinned runner itself.
     exclude("ch/lkmc/neutrodyne/DeviceTestSelectionTest\$FailureFixture.class")
+}
+
+// Opt-in fixtures enter the single-variant KMP download library, so disable every
+// app variant except the disposable target. A release task with the flag must fail.
+if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
+    androidComponents.beforeVariants { it.enable = it.buildType == "benchmarkRelease" }
 }
 
 dependencies {
@@ -147,6 +158,13 @@ dependencies {
     debugImplementation(libs.cmp.material3)
     debugImplementation(libs.lifecycle.viewmodel.compose)
 
+    androidTestImplementation(libs.androidx.media3.common)
+    androidTestImplementation(libs.androidx.media3.session)
+    androidTestImplementation(libs.androidx.media3.exoplayer)
+    androidTestImplementation(libs.kotlinx.coroutines.guava)
+    androidTestImplementation(platform(libs.okhttp.bom))
+    androidTestImplementation(libs.okhttp.mockwebserver3)
+    androidTestImplementation(libs.androidx.test.uiautomator)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4.accessibility)
     androidTestImplementation(libs.androidx.test.espresso.core)
@@ -171,6 +189,7 @@ dependencies {
     testImplementation(libs.androidx.test.runner)
     // Startup recovery verifies the real periodic work against WorkManager's host backend.
     testImplementation(libs.androidx.work.testing)
+    testImplementation(libs.androidx.media3.session)
     testImplementation(project(":feeds:jvm"))
     testImplementation(libs.kotlinx.serialization.json)
 }

@@ -81,9 +81,13 @@ component's own upstream notice at the pinned version:
   from Mozilla.
 - **neutrodyne_ytx shim** — Unlicense — our own Python code (`youtube/engine/python/neutrodyne_ytx`).
 
-M9a adds yt-dlp (Unlicense, vendored zipimport release under `youtube/ytdlp/engine/`, checked by
-`verifyBundledYtDlp`), yt-dlp-ejs (Unlicense; meriyah ISC, astring MIT) and, if the JS provider
-ships, QuickJS inside quickjs-kt (MIT).
+- **yt-dlp 2026.08.19** and **yt-dlp-ejs 0.8.0**: Unlicense: unmodified official
+  zipimport release in `youtube/ytdlp/engine/yt-dlp`; signed checksums verified at build time.
+  The ejs data includes **meriyah 6.1.4**: ISC: Copyright (c) 2019 and later, KFlash and
+  others; and **astring 1.9.0**: MIT: Copyright (c) 2015, David Bonnet
+  <david@bonnet.cc>. Exact upstream notices from the bundled `lib.min.js` header are in
+  `app/config/engine/licenses/isc-meriyah.json` and `mit-astring.json`. No JS provider
+  or additional Python packages ship in M9a.
 
 ## Python components (desktop, `youtube/ytdlp-desktop/python-components.lock`)
 

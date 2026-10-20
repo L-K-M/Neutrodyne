@@ -33,12 +33,14 @@ import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.LocalYouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberDesktopPlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
@@ -54,6 +56,8 @@ import ch.lkmc.neutrodyne.desktop.resources.tray_show
 import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
+import ch.lkmc.neutrodyne.feature.player.PlayerRoute
+import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -92,6 +96,8 @@ internal fun ApplicationScope.NeutrodyneWindow(
     viewModelFactory: MetroViewModelFactory,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
+    rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -118,6 +124,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
+                rowArt = rowArt,
                 installers = installers,
                 menuActions = menuActions,
                 banners = banners,
@@ -126,6 +133,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 dataDir = dataDir,
                 viewModelFactory = viewModelFactory,
                 openHandler = openHandler,
+                failedDownloads = failedDownloads,
             )
         }
         if (openHandler == null) content() else DesktopDropTarget(openHandler, content)
@@ -282,6 +290,8 @@ internal fun NeutrodyneWindowContent(
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
     openHandler: DesktopOpenHandler? = null,
+    rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
@@ -308,13 +318,13 @@ internal fun NeutrodyneWindowContent(
     val slots =
         remember(menuActions, banners, openHandler) {
             RootSlots(
-                // No player before M4; the slot composes inside the root, where the
-                // navigator is readable — it hands the shell's menus the root's push
-                // (recorded in 11, 2026-10-06).
+                // Keep menu/input glue inside the root so it reads the root's navigator.
+                // The shared player follows these hooks on the same window store.
                 player = {
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
                     openHandler?.let { DesktopInputFeedback(it) }
+                    PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
                 },
                 userMessages = banners?.userMessages ?: emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },
@@ -324,11 +334,13 @@ internal fun NeutrodyneWindowContent(
         LocalPlatformActions provides platformActions,
         // 07 Storage rows: without a provider the local falls back to ANDROID wording.
         LocalPlatformKind provides PlatformKind.DESKTOP,
+        LocalYouTubeRowArt provides rowArt,
         LocalScrollbars provides DesktopScrollbars.style,
         // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
+            failedDownloads = failedDownloads,
             state = RootUiState.READY.copy(startup = startup),
             actions = actions,
             slots = slots,

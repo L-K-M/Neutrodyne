@@ -125,6 +125,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_groups_master
 import ch.lkmc.neutrodyne.core.ui.resources.import_groups_section
 import ch.lkmc.neutrodyne.core.ui.resources.import_header_in
 import ch.lkmc.neutrodyne.core.ui.resources.import_load_error
+import ch.lkmc.neutrodyne.core.ui.resources.import_newpipe_service
 import ch.lkmc.neutrodyne.core.ui.resources.import_no_media_hint
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_notify
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_treat_played
@@ -168,6 +169,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_warn_salvaged
 import ch.lkmc.neutrodyne.core.ui.resources.import_warn_truncated
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_count
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_later
+import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_resolution_failed
 import ch.lkmc.neutrodyne.core.ui.resources.selection_select_all
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -1007,6 +1009,12 @@ private fun statusLabel(
 @Composable
 private fun statusDescription(item: ImportItemView): String? =
     when (item.status) {
+        ImportItemStatus.INVALID_URL -> {
+            item.errorDetail?.takeIf { it.startsWith("newpipe_service:") }?.let {
+                stringResource(Res.string.import_newpipe_service, it.substringAfter(':'))
+            }
+        }
+
         ImportItemStatus.YOUTUBE_UNSUPPORTED_YET -> {
             stringResource(Res.string.import_youtube_later)
         }
@@ -1033,6 +1041,8 @@ private fun statusDescription(item: ImportItemView): String? =
                     IMPORT_DEFERRED_DETAIL
                 ) {
                     Res.string.import_deferred_hint
+                } else if (item.errorDetail == "YOUTUBE_RESOLUTION_FAILED") {
+                    Res.string.import_youtube_resolution_failed
                 } else {
                     Res.string.import_failure_retry_hint
                 },

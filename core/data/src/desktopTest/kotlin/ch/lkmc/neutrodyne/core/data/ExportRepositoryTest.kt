@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.feeds.youtube.NewPipeSubscriptions
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -60,6 +61,7 @@ class ExportRepositoryTest {
             storagePaths = storagePathsFor(root),
             fileSystem = fileSystem,
             io = io,
+            buildInfo = testBuildInfo(),
         )
     private val exportDir = root.resolve("cache").resolve("export")
 
@@ -143,23 +145,23 @@ class ExportRepositoryTest {
             assertEquals("neutrodyne-$prefix-2026-10-04.opml", prepared.fileName)
         }
 
-    @Test fun htmlUrlPrefersStoredLinkAndWritesLanguage() =
+    @Test fun rssHtmlUrlKeepsStoredLinkChannelsUseCanonicalPage() =
         runTest {
             podcast("https://a.example.com/rss", "Show") {
                 copy(link = "https://show.example.com", language = "de")
             }
-            // A channel with a stored link keeps it: `link` wins over the channel fallback.
+            // OPML channels always export canonical page URLs, even after a handle rename.
             podcast(
-                "https://www.youtube.com/feeds/videos.xml?channel_id=UC1",
+                "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
                 "YT",
                 SourceType.YOUTUBE_CHANNEL,
-            ) { copy(link = "https://studio.example.com", youtubeChannelId = "UC1") }
+            ) { copy(link = "https://studio.example.com", youtubeChannelId = "UCBJycsmduvYEL83R_U4JriQ") }
 
             val text = read(prepared())
             assertTrue("htmlUrl=\"https://show.example.com\"" in text)
             assertTrue("language=\"de\"" in text)
-            assertTrue("htmlUrl=\"https://studio.example.com\"" in text)
-            assertFalse("channel/UC1" in text)
+            assertFalse("studio.example.com" in text)
+            assertTrue("channel/UCBJycsmduvYEL83R_U4JriQ" in text)
         }
 
     // --- Options: YouTube, passwords, private-link count -------------------------------------------
@@ -170,16 +172,16 @@ class ExportRepositoryTest {
             member(
                 groupId,
                 podcast(
-                    "https://www.youtube.com/feeds/videos.xml?channel_id=UCxyz",
+                    "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
                     "Channel",
                     SourceType.YOUTUBE_CHANNEL,
-                ) { copy(youtubeChannelId = "UCxyz", youtubeVariants = 5) },
+                ) { copy(youtubeChannelId = "UCBJycsmduvYEL83R_U4JriQ", youtubeVariants = 5) },
             )
             val withYt = prepared()
             val text = read(withYt)
             assertTrue("nd:source=\"youtube\"" in text)
             assertTrue("nd:ytVariants=\"UULF,UULV\"" in text)
-            assertTrue("htmlUrl=\"https://www.youtube.com/channel/UCxyz\"" in text)
+            assertTrue("htmlUrl=\"https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ\"" in text)
 
             // With YouTube excluded the feed is dropped and its group becomes an empty folder.
             val without = prepared(ExportRequest(includeYouTube = false))
@@ -274,11 +276,41 @@ class ExportRepositoryTest {
             assertFalse(exportDir.exists())
         }
 
-    @Test fun newPipeJsonIsARejectedCallerBug() =
+    @Test
+    fun newPipeFullExportContainsOnlyCanonicalChannelsAndAppVersion() =
+        runTest {
+            podcast("https://rss.example/feed", "RSS")
+            podcast(
+                "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
+                "Publisher",
+                SourceType.YOUTUBE_CHANNEL,
+            ) {
+                copy(youtubeChannelId = "UCBJycsmduvYEL83R_U4JriQ", customTitle = "Custom")
+            }
+            val request =
+                ExportRequest(
+                    format = ExportFormat.NEWPIPE_JSON,
+                    includeYouTube = false,
+                    includePasswords = true,
+                )
+            val export = prepared(request)
+            assertEquals("application/json", export.mimeType)
+            assertEquals(1, export.feeds)
+            assertEquals(0, export.passwords)
+            assertTrue(export.fileName.startsWith("neutrodyne-youtube-"))
+            val text = read(export)
+            assertTrue("\"app_version_int\":${testBuildInfo().versionCode}" in text)
+            val parsed = NewPipeSubscriptions.parse(okio.Buffer().writeUtf8(text))
+            assertEquals("Custom", parsed.entries.single().title)
+            assertEquals("https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ", parsed.entries.single().url)
+        }
+
+    @Test
+    fun newPipeJsonRejectsGroupExport() =
         runTest {
             // NEWPIPE_JSON lands with M8; nothing in M3 can request it, so `require` fires.
             assertFailsWith<IllegalArgumentException> {
-                repo.prepare(ExportRequest(format = ExportFormat.NEWPIPE_JSON))
+                repo.prepare(ExportRequest(groupId = 1, format = ExportFormat.NEWPIPE_JSON))
             }
             assertFalse(exportDir.exists())
         }

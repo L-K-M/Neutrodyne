@@ -14,12 +14,20 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.AutoDownloadPlanner
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.CleanupPlanner
+import ch.lkmc.neutrodyne.core.domain.DownloadMover
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
+import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
@@ -29,7 +37,11 @@ import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
+import ch.lkmc.neutrodyne.download.api.DownloadController
+import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
+import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -70,18 +82,33 @@ interface DesktopAppGraph {
     val playbackStateSource: PlaybackStateSource
     val playbackMaintenance: PlaybackMaintenance
     val localMediaIndex: LocalMediaIndex
+    val localMediaChanges: LocalMediaChanges
+    val downloadController: Provider<DownloadController>
+    val autoDownloadPlanner: Provider<AutoDownloadPlanner>
+    val cleanupPlanner: Provider<CleanupPlanner>
+    val downloadMover: Provider<DownloadMover>
+    val downloadProgress: Provider<DownloadProgressSource>
+    val youtubeEngine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
 
     /** Resolve database-backed playback ports only after the database open gate. */
+    val queueRepository: Provider<QueueRepository>
+    val playContextResolver: Provider<PlayContextResolver>
     val playSessionStore: Provider<PlaySessionStore>
     val positionStore: Provider<PositionStore>
+    val playbackMediaLookup: Provider<PlaybackMediaLookup>
+    val chapterRepository: Provider<ChapterRepository>
 
     /** Every feature's navigation entries (01 Feature entry installers). */
     val entryInstallers: Set<EntryProviderInstaller>
 
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
+
+    /** Discovery bindings remain safe to resolve before the database startup gate. */
+    val searchRepository: SearchRepository
+    val autodiscovery: Autodiscovery
 
     val networkMonitor: NetworkMonitor
 

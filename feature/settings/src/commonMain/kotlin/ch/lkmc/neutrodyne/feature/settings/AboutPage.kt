@@ -6,12 +6,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -37,6 +43,9 @@ import ch.lkmc.neutrodyne.feature.settings.resources.about_version
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_abi
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_desktop
 import ch.lkmc.neutrodyne.feature.settings.resources.app_name
+import ch.lkmc.neutrodyne.feature.settings.resources.install_help_android
+import ch.lkmc.neutrodyne.feature.settings.resources.install_help_close
+import ch.lkmc.neutrodyne.feature.settings.resources.install_help_title
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
 import kotlinx.coroutines.launch
@@ -49,6 +58,7 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 internal fun AboutPage(buildInfo: BuildInfo) {
+    var showInstallHelp by rememberSaveable { mutableStateOf(false) }
     val navigator = LocalAppNavigator.current
     val urls = LocalPlatformActions.current.urls
     val snackbarHost = LocalSnackbarHost.current
@@ -74,6 +84,23 @@ internal fun AboutPage(buildInfo: BuildInfo) {
                 clipboard.setText(AnnotatedString(url))
             }
         }
+    }
+    if (showInstallHelp) {
+        AlertDialog(
+            onDismissRequest = { showInstallHelp = false },
+            title = { Text(stringResource(Res.string.install_help_title)) },
+            text = {
+                Text(
+                    stringResource(Res.string.install_help_android),
+                    Modifier.verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { showInstallHelp = false },
+                ) { Text(stringResource(Res.string.install_help_close)) }
+            },
+        )
     }
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
@@ -106,6 +133,14 @@ internal fun AboutPage(buildInfo: BuildInfo) {
                 summary = null,
                 onClick = { navigator.push(LicencesKey) },
             )
+            if (buildInfo.platform == BuildInfo.Platform.ANDROID) {
+                SettingsRow(
+                    icon = NdIcons.Article,
+                    title = stringResource(Res.string.install_help_title),
+                    summary = null,
+                    onClick = { showInstallHelp = true },
+                )
+            }
             SettingsRow(
                 icon = NdIcons.Explore,
                 title = stringResource(Res.string.about_source),

@@ -5,16 +5,24 @@ package ch.lkmc.neutrodyne.feature.groups
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.DeleteAfter
+import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.NetworkPolicy
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.SettingSource
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
+import ch.lkmc.neutrodyne.core.testing.testLibraryTile
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingEdit
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -33,6 +41,8 @@ class GroupSettingsViewModelTest : MainDispatcherTest() {
     private val groups = FakeGroupRepository()
     private val scopes = FakeScopeSettingsRepository()
     private val settings = FakeSettingsRepository()
+    private val podcasts = FakePodcastRepository()
+    private val capabilities = FakeYouTubeCapabilitiesSource()
     private var groupId = 0L
     private lateinit var ownSource: SettingSource.Group
 
@@ -41,7 +51,15 @@ class GroupSettingsViewModelTest : MainDispatcherTest() {
         val group = groups.groups.value.single()
         ownSource = SettingSource.Group(group.uuid, group.name)
         scopes.seedGroup(groupId, group.uuid, group.name)
-        val vm = GroupSettingsViewModel(groupId, groups, repository, settings)
+        val vm =
+            GroupSettingsViewModel(
+                groupId,
+                groups,
+                repository,
+                settings,
+                podcasts,
+                capabilities,
+            )
         backgroundScope.launch { vm.uiState.collect {} }
         advanceUntilIdle()
         return vm
@@ -60,8 +78,21 @@ class GroupSettingsViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             val scoped = vm.uiState.value.scoped!!
             assertEquals(SettingOverrides(120, true), scoped.own)
-            assertEquals(scoped.own, scoped.effective)
-            assertTrue(scoped.sources.values.all { it == ownSource })
+            assertEquals(
+                scoped.own.copy(
+                    playbackSpeed = 1f,
+                    skipSilence = false,
+                    autoDownload = false,
+                    autoDownloadKeepLatest = 3,
+                    autoDownloadNetwork = NetworkPolicy.UNMETERED,
+                    autoDownloadRequireCharging = false,
+                    includeVideoInAutoDownload = false,
+                    deleteAfterPlayed = DeleteAfter.AFTER_24H,
+                ),
+                scoped.effective,
+            )
+            assertEquals(ownSource, scoped.sources[SettingField.REFRESH_INTERVAL_MINUTES])
+            assertEquals(ownSource, scoped.sources[SettingField.NOTIFY_NEW_EPISODES])
             assertTrue(settings.calls.isEmpty(), "Group overrides must not write global settings")
         }
 
@@ -308,4 +339,65 @@ class GroupSettingsViewModelTest : MainDispatcherTest() {
 
         override fun openSettings() = Unit
     }
+
+    @Test fun automaticDownloadWritesClearDependentsWithoutTouchingOtherFields() =
+        runTest {
+            val vm = start()
+            vm.setRefreshIntervalMinutes(120)
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Enabled(true),
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Keep(7),
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Charging(true),
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Delete(DeleteAfter.NEVER),
+            )
+            advanceUntilIdle()
+            assertEquals(
+                7,
+                vm.uiState.value.scoped
+                    ?.own
+                    ?.autoDownloadKeepLatest,
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Enabled(false),
+            )
+            advanceUntilIdle()
+            val own =
+                vm.uiState.value.scoped!!
+                    .own
+            assertEquals(false, own.autoDownload)
+            assertNull(own.autoDownloadKeepLatest)
+            assertNull(own.autoDownloadRequireCharging)
+            assertEquals(120, own.refreshIntervalMinutes)
+            assertEquals(DeleteAfter.NEVER, own.deleteAfterPlayed)
+        }
+
+    @Test fun externalGroupLineTracksMembersAndCapabilityChanges() =
+        runTest {
+            val vm = start()
+            assertNull(vm.uiState.value.externalGroupReason)
+            podcasts.tilesByGroup.value =
+                mapOf(
+                    groupId to listOf(testLibraryTile(1).copy(sourceType = SourceType.YOUTUBE_CHANNEL)),
+                )
+            advanceUntilIdle()
+            assertEquals(ExternalReason.NOT_YET_AVAILABLE, vm.uiState.value.externalGroupReason)
+            capabilities.capabilities.value =
+                capabilities.capabilities.value.copy(
+                    downloads = true,
+                    externalReason = null,
+                )
+            advanceUntilIdle()
+            assertNull(vm.uiState.value.externalGroupReason)
+        }
 }

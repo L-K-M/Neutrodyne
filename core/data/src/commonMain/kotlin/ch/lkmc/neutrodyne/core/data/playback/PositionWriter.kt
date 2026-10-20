@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.playback
 import androidx.room3.withReadTransaction
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.map
 @Inject
 internal class PositionWriter(
     private val db: NeutrodyneDatabase,
+    private val clock: Clock,
 ) : PositionStore {
     override fun observe(episodeId: Long): Flow<StoredPosition?> =
         db.invalidationTracker
@@ -54,6 +56,20 @@ internal class PositionWriter(
 
         return db.withWriteTransaction {
             db.savePosition(episodeId, positionMs, durationMs, source, now, pinStartedAt, allowed)
+        }
+    }
+
+    override suspend fun setMeasuredDuration(
+        episodeId: Long,
+        durationMs: Long,
+    ) {
+        if (durationMs <= 0) return
+
+        db.withWriteTransaction {
+            if (db.episodeDao().byId(episodeId) == null) return@withWriteTransaction
+            val now = clock.now()
+            db.episodeStateDao().ensure(EpisodeStateEntity(episodeId, updatedAt = now))
+            db.episodeStateDao().setMeasuredDuration(episodeId, durationMs, now)
         }
     }
 

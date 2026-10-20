@@ -520,12 +520,20 @@ data class LaneStatus(val running: Boolean, val lastStartAt: Instant?, val lastE
 
 ### Lanes
 
+**Implementation note (2026-10-19, M6b).** Both download lanes and the move
+lane are bound by `DesktopDownloadBindings` and included in the shell's lane
+order test. The AUTO lane also runs due daily maintenance while offline, even
+when no download is queued; it persists `cleanup_last_at` only after success.
+Both transfer lanes and the mover await the shared once-per-process startup.
+These host assertions do not establish packaged Windows/macOS/ARM behavior;
+see the [M6b acceptance ledger](../evidence/m6b-acceptance.md).
+
 | Lane | Class (module) | Owner of the work | Due when | Pokes |
 |---|---|---|---|---|
 | `refresh` | `DesktopRefreshLane` (`:core:data`) | [03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh) | feeds with `nextRefreshAt ≤ now` | start, window focus, manual refresh, network regained, wake |
 | `import-backup` (2026-10-05) | `DesktopImportBackupLane` (`:core:data`) | [05 Restore algorithm](05-groups-opml-backup.md#restore-algorithm), [05 7. Fetch](05-groups-opml-backup.md#7-fetch) | import sessions in `COMMITTED` or `FETCHING`, a session with `restoreRequestedAt` set and not yet `COMMITTED` (one restore at a time), and once per 24 h the interim import-session cleanup until `maintenance` takes it over (M11b) | import confirm and fix-ups, restore request, network regained, wake |
 | `downloads-manual` | `DesktopDownloadLane` (`:download:impl`, lane `MANUAL`) | [07 Desktop runners](07-downloads.md#desktop-runners) | runnable `MANUAL` rows | download request, network regained, storage freed, wake |
-| `downloads-auto` | `DesktopDownloadLane` (lane `AUTO`) | [07 Desktop runners](07-downloads.md#desktop-runners) | runnable `AUTO` rows, planner output | refresh ingested new episodes, cleanup, wake |
+| `downloads-auto` | `DesktopDownloadLane` (lane `AUTO`) | [07 Desktop runners](07-downloads.md#desktop-runners) | runnable `AUTO` rows, planner output, daily maintenance due even offline | refresh ingested new episodes, cleanup, wake |
 | `downloads-move` | `DesktopMoveLane` (`:download:impl`) | [07 Moving between roots](07-downloads.md#moving-between-roots), [Change folder](#change-folder) | a pending folder move | "Change folder…" |
 | `artwork` | `DesktopArtworkLane` (`:core:artwork`) | [08 Artwork pipeline](08-ui-ux.md#artwork-pipeline) | missing or stale pinned artwork | new podcasts or episodes ingested |
 | `app-update-check` | `DesktopUpdateCheckLane` (`:core:data`) | [09 Update check](09-quality-and-release.md#update-check) | 24 h (jittered ± 1 h) after `updates.last_check_at` while `updates.check_enabled` is on | "Check now" |
@@ -985,6 +993,15 @@ Serves R8.8, R4.2, R4.3, R8.11, N6. Delivered in M6a (default folder, desktop la
 
 ### Download folders
 
+**Implementation note (2026-10-19, M6b).** W4 stores `desktop.downloads_dir`
+as device-local text, with empty text representing the default folder. The
+registry retains roots with outstanding journal deletions as well as live rows
+and the current root, so a deferred playing source remains reachable. Validation
+uses a unique `.neutrodyne-probe-*` file to avoid overwriting a user file with the
+fixed probe name. Root paths retain `toRealPath()`'s filesystem spelling, including
+decomposed Unicode: normalising an existing path to NFC can point at a different
+or absent directory on Linux. Media component naming still uses NFC.
+
 | Folder | Path | Setting |
 |---|---|---|
 | Default | `<data>/Downloads/` — `%LOCALAPPDATA%\Neutrodyne\Downloads\`, `~/Library/Application Support/ch.lkmc.neutrodyne/Downloads/`, `$XDG_DATA_HOME/neutrodyne/Downloads/` | `desktop.downloads_dir` = null |
@@ -1003,6 +1020,16 @@ Choosing a folder (`FilePicker` of `:core:ui`, 08):
 Validation before the folder is accepted: it exists or can be created; a probe file `.neutrodyne-probe` can be created, written and deleted; it is not inside the installation directory, `<cache>` or `<state>`; free space is shown in the confirmation. A folder that fails shows the reason and keeps the previous setting.
 
 ### Change folder
+
+**Implementation note (2026-10-19, M6b).** The integrated settings flow uses
+`registerFolderRoot` then `changeRoot` with `RootChangeMode.MOVE_EXISTING` or
+`NEW_DOWNLOADS_ONLY`; "Use default folder" uses the same confirmation. Rejection
+keeps the old root, and dismissing the dialog changes nothing. New requests use
+the selected root immediately. A same-store playing file stays on its old root
+with the move pending until the session changes; a cross-store copy can publish
+the target while source deletion is deferred. Host tests cover both paths and
+quit/restart intent, not native pickers or real removable volumes. The existing
+W4 registry/path note above remains applicable.
 
 "Change folder…" (Settings › Desktop, R8.8) asks "Move {n} downloads ({size}) to {folder}?" with **Move** (default) and **Leave them where they are**, and calls 07's `changeRoot(rootId, moveExisting)`. New downloads use the new folder at once; queued and paused rows follow it at their next prepare.
 

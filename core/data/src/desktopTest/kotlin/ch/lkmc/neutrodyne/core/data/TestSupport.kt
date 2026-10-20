@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImpl
@@ -9,6 +10,10 @@ import ch.lkmc.neutrodyne.core.data.add.PreviewCache
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntryResolver
 import ch.lkmc.neutrodyne.core.data.add.SubscribeUseCaseImpl
+import ch.lkmc.neutrodyne.core.data.discovery.AppleDirectoryClient
+import ch.lkmc.neutrodyne.core.data.discovery.DirectoryMetadataCache
+import ch.lkmc.neutrodyne.core.data.discovery.DirectorySettings
+import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexDirectoryClient
 import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
@@ -41,10 +46,15 @@ import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.model.ChartGenre
+import ch.lkmc.neutrodyne.core.model.DirectoryAccess
+import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
+import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
@@ -62,7 +72,10 @@ import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
 import dev.zacsweers.metro.Provider
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import okio.FileSystem
@@ -163,13 +176,13 @@ internal object TestOrderKeys : OrderKeys {
 // --- Database / engine builders --------------------------------------------------------------------
 
 internal fun newDb(
-    clock: TestClock = TestClock(),
+    clock: Clock = TestClock(),
     queryContext: CoroutineContext = Dispatchers.Default,
 ): NeutrodyneDatabase = TestDb.inMemory(clock = clock, queryContext = queryContext)
 
 internal fun newIngestor(
     db: NeutrodyneDatabase,
-    clock: TestClock,
+    clock: Clock,
     settings: SettingsRepository = FakeSettingsRepository(),
     sanitizer: ShowNotesSanitizer = JsoupShowNotesSanitizer(),
     defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -203,6 +216,9 @@ internal fun newRefresher(
     moves: FeedMoveCommitter = newFeedMoves(db, clock, coordinator),
     effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
     notifier: NewEpisodeNotifier = NewEpisodeNotifier(db, effectiveSettings, FakeNewEpisodePoster()),
+    youTubeMonitor: YouTubeFeedOutageMonitor =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeFeedOutageMonitor(),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -222,6 +238,7 @@ internal fun newRefresher(
         secrets,
         coordinator,
         notifier,
+        youTubeMonitor,
     )
 
 internal fun fetchMeta(
@@ -388,8 +405,8 @@ internal fun basicAuthHeader(
 internal class GatedSecretStore(
     private val delegate: SecretStore,
 ) : SecretStore by delegate {
-    val putCommitted = kotlinx.coroutines.CompletableDeferred<Unit>()
-    val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val putCommitted = CompletableDeferred<Unit>()
+    val release = CompletableDeferred<Unit>()
     private var gated = true
 
     override suspend fun put(
@@ -554,6 +571,9 @@ internal fun newResolver(
     credentials: CredentialLookup = CredentialLookup.None,
     io: CoroutineDispatcher = Dispatchers.IO,
     parser: FeedParser = XmlPullFeedParser.discovered(),
+    apple: AppleDirectoryClient = unusedApple,
+    podcastIndex: PodcastIndexDirectoryClient = unusedPodcastIndex,
+    metadata: DirectoryMetadataCache = newDirectoryMetadata(clock),
 ): ResolverBundle {
     val bundle = newFetcher(root, credentials, clock)
     val cache = PreviewCache(clock)
@@ -568,6 +588,12 @@ internal fun newResolver(
             db = db,
             clock = clock,
             io = io,
+            metadata = metadata,
+            apple = apple,
+            podcastIndex = podcastIndex,
+            autodiscovery =
+                ch.lkmc.neutrodyne.feeds.jvm.html
+                    .JsoupAutodiscovery(),
         )
     return ResolverBundle(resolver, cache, bundle.tempFiles, bundle)
 }
@@ -592,6 +618,9 @@ internal fun newSubscribe(
 ): SubscribeBundle =
     SubscribeBundle(
         SubscribeUseCaseImpl(
+            channelWriter =
+                ch.lkmc.neutrodyne.core.data.youtube
+                    .YouTubeSubscriptionWriterImpl(db, clock, orderKeys),
             db = db,
             cache = cache,
             resolver = resolver,
@@ -619,6 +648,8 @@ internal fun newUnsubscribe(
     secrets: SecretStore = FakeSecretStore(),
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     poster: NewEpisodePoster = FakeNewEpisodePoster(),
+    downloads: ch.lkmc.neutrodyne.core.domain.DownloadLifecycle =
+        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) },
     fetcher: Provider<FeedFetcher> = Provider { error("setCredentials is not wired in this fixture") },
     tempFiles: FeedTempFiles =
         FeedTempFiles(
@@ -639,21 +670,41 @@ internal fun newUnsubscribe(
             scheduler = scheduler,
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
-            merger = PodcastMerger(db, coordinator, clock),
+            merger =
+                PodcastMerger(
+                    db,
+                    coordinator,
+                    clock,
+                    downloads =
+                        Provider { downloads },
+                ),
             resolver = unusedPreviewResolver,
             secrets = secrets,
             coordinator = coordinator,
             fetcher = fetcher,
             tempFiles = tempFiles,
+            downloads = Provider { downloads },
+            youTubeHealth =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeHealth(),
         ),
         poster,
     )
 
 private fun newFeedMoves(
     db: NeutrodyneDatabase,
-    clock: TestClock,
+    clock: Clock,
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
-) = FeedMoveCommitter(db, PodcastMerger(db, coordinator, clock), clock)
+) = FeedMoveCommitter(
+    db,
+    PodcastMerger(
+        db,
+        coordinator,
+        clock,
+        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+    ),
+    clock,
+)
 
 /** `setCredentials`'s probe fetcher for fixtures that never set credentials. */
 internal val unusedProbeFetcher: Provider<FeedFetcher> =
@@ -681,3 +732,32 @@ internal val unusedPreviewResolver =
         override suspend fun resolveEntry(feedUrl: String): Outcome<PreviewEntry, AddPodcastError> =
             error("Unexpected preview resolution")
     }
+
+internal val unusedApple =
+    object : AppleDirectoryClient {
+        override suspend fun search(
+            query: String,
+            country: String,
+        ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = error("Unexpected search")
+
+        override suspend fun lookup(
+            ids: ImmutableList<String>,
+            access: DirectoryAccess,
+        ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = Outcome.Failure(ProviderStatus.Disabled)
+
+        override suspend fun charts(
+            genre: ChartGenre?,
+            country: String,
+        ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = error("Unexpected chart")
+    }
+internal val unusedPodcastIndex =
+    object : PodcastIndexDirectoryClient {
+        override suspend fun lookup(feedId: String): Outcome<DirectoryHit?, ProviderStatus> =
+            Outcome.Failure(ProviderStatus.Disabled)
+    }
+
+private fun newDirectoryMetadata(clock: TestClock): DirectoryMetadataCache {
+    val secrets = FakeSecretStore()
+    val settings = DirectorySettings(FakeSettingsRepository(), { secrets }, testBuildInfo(), fakePlatform())
+    return DirectoryMetadataCache(clock, settings)
+}

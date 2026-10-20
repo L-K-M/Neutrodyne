@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -257,6 +258,37 @@ class RestoreMatchingTest {
             assertEquals(sole, index.match(EpisodeMatchHints(identityKey = "k", guid = "sole")))
             // A GUID carried by two stored rows can never pick one — unmatched, so the line stubs.
             assertNull(index.match(EpisodeMatchHints(identityKey = "k", guid = "dup")))
+        }
+
+    @Test fun episodeIndexReadsMarkedAndLegacyDescriptionHeadsWithoutChangingKeys() =
+        runTest {
+            val podcast = insertPodcast()
+            val expected = mutableListOf<Pair<Long, String>>()
+            for (format in DescriptionFormat.entries) {
+                for (completeness in DescriptionCompleteness.entries) {
+                    val title = "head-$format-$completeness"
+                    val text = "0:00 <b>literal</b> &copy;"
+                    val id =
+                        db.episodeDao().insertStub(
+                            episodeEntity(podcastId = podcast, identityKey = "2h:$title", title = title),
+                        )
+                    db.ingestDao().replaceChildren(
+                        id,
+                        EpisodeDescriptionCodec.encode(text, format, completeness),
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                        emptyList(),
+                    )
+                    expected +=
+                        id to EpisodeKeys.keyFor(KeyInput(title = title, descriptionHead = text), EpisodeKeys.VERSION)
+                }
+            }
+            val index = episodes.index(podcast, setOf(1))
+            for ((id, key) in expected) {
+                assertEquals(id, index.match(EpisodeMatchHints(identityKey = key, kv = 1)))
+            }
         }
 
     @Test

@@ -1,0 +1,15 @@
+{
+  "cursor": null,
+  "hits": [
+    {
+      "channelId": "UCaaaaaaaaaaaaaaaaaaaaaA",
+      "title": "Synthetic channel",
+      "handle": "@synthetic",
+      "followerCount": null,
+      "avatar": "https://example.invalid/avatar",
+      "description": null,
+      "verified": false
+    }
+  ],
+  "hasMore": false
+}

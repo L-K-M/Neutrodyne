@@ -13,19 +13,26 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.RssAlternative
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
+import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name_empty
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name_taken
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name_too_long
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -73,9 +80,25 @@ public data class SubscribedPodcast(
  * [Preview] carries the card plus subscribe's own progress, error and race-time dedupe.
  */
 public sealed interface AddSheetStep {
+    public data class Channel(
+        val resolution: ChannelResolution.Resolved,
+        val variants: Int,
+        val alternative: RssAlternative? = null,
+        val subscribing: Boolean = false,
+        val subscribeError: UiText? = null,
+        val alreadySubscribedId: Long? = null,
+    ) : AddSheetStep
+
+    public data class ChannelFailure(
+        val result: ChannelResolution,
+    ) : AddSheetStep
+
     public data class Input(
         val error: UiText? = null,
         val auth: Boolean = false,
+        val searchQuery: String? = null,
+        /** W5 renders the explicit consent action; it must never silently retry. */
+        val lookupRequired: AddResolution.LookupRequired? = null,
     ) : AddSheetStep
 
     /** "Looking up…" — the progress line; `cancelResolve` returns to [Input]. */
@@ -109,6 +132,8 @@ public class AddPodcastViewModel(
     private val resolver: AddPodcastResolver,
     private val subscribeUseCase: SubscribeUseCase,
     private val groups: GroupRepository,
+    private val channelResolver: YouTubeChannelResolver,
+    private val channels: YouTubeChannelRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AddPodcastUiState())
     public val uiState: StateFlow<AddPodcastUiState> = mutableState.asStateFlow()
@@ -195,12 +220,18 @@ public class AddPodcastViewModel(
     public fun resolve(input: String) {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) return
-        if (trimmed == resolvedInput && mutableState.value.step !is AddSheetStep.Input) return
+        val step = mutableState.value.step
+        if (trimmed == resolvedInput && step !is AddSheetStep.Input && step !is AddSheetStep.ChannelFailure) return
         resolvedInput = trimmed
         runResolve { resolver.resolve(trimmed) }
     }
 
     /** The `AuthRequired` retry (03 Basic auth): the same input, now with credentials. */
+    public fun lookupOnce() {
+        val required = (mutableState.value.step as? AddSheetStep.Input)?.lookupRequired ?: return
+        runResolve { resolver.lookupOnce(required.input) }
+    }
+
     public fun resolveWithCredentials(credentials: BasicCredentials) {
         val input = resolvedInput ?: return
         runResolve { resolver.resolve(input, credentials) }
@@ -214,6 +245,7 @@ public class AddPodcastViewModel(
      */
     public fun onInputChanged(text: String) {
         if (text.trim() == resolvedInput) return
+        resolvedInput = null
         resolveJob?.cancel()
         nextGeneration { it.copy(step = AddSheetStep.Input()) }
     }
@@ -237,7 +269,8 @@ public class AddPodcastViewModel(
     /** "Looking up…" is cancellable (08) — back to the editable field. */
     public fun cancelResolve() {
         resolveJob?.cancel()
-        mutableState.update { it.copy(step = AddSheetStep.Input()) }
+        resolvedInput = null
+        nextGeneration { it.copy(step = AddSheetStep.Input()) }
     }
 
     /**
@@ -248,6 +281,10 @@ public class AddPodcastViewModel(
      * the sheet under it.
      */
     public fun subscribe(groupIds: Set<Long> = emptySet()) {
+        if (mutableState.value.step is AddSheetStep.Channel) {
+            subscribeChannel(groupIds)
+            return
+        }
         val step = mutableState.value.step as? AddSheetStep.Preview ?: return
         if (step.subscribing || step.alreadySubscribedId != null || mutableState.value.creatingGroup) return
         val generation =
@@ -292,6 +329,91 @@ public class AddPodcastViewModel(
         }
     }
 
+    public fun usePodcast() {
+        val step = mutableState.value.step as? AddSheetStep.Channel ?: return
+        val url = step.alternative?.feedUrl ?: return
+        resolve(url)
+    }
+
+    public fun subscribeOwner() {
+        val result =
+            (mutableState.value.step as? AddSheetStep.ChannelFailure)?.result
+                as? ChannelResolution.PlaylistUnsupported ?: return
+        result.ownerChannelId?.let { resolve(YouTubeFeedUrls.channelPage(it)) }
+    }
+
+    private suspend fun resolveChannel(
+        generation: Int,
+        ref: YtRef,
+    ) {
+        val result = channelResolver.resolve(ref)
+        kotlin.coroutines.coroutineContext.ensureActive()
+        if (mutableState.value.operationGeneration != generation) return
+        if (result !is ChannelResolution.Resolved) {
+            mutableState.update { state ->
+                if (state.operationGeneration != generation) {
+                    state
+                } else {
+                    state.copy(step = AddSheetStep.ChannelFailure(result))
+                }
+            }
+            return
+        }
+        val duplicate = channels.subscribedPodcastId(result.channelId)
+        val variants = (ref as? YtRef.Channel)?.variantsHint ?: YouTubeVariantBits.LONG_FORM
+        mutableState.update { state ->
+            if (state.operationGeneration != generation) {
+                state
+            } else {
+                state.copy(step = AddSheetStep.Channel(result, variants, alreadySubscribedId = duplicate))
+            }
+        }
+        // This optional request never holds the preview or Subscribe button in a loading state.
+        result.title?.let { title ->
+            val alternative = suspendRunCatching { channels.findRssAlternative(title) }.getOrNull()
+            mutableState.update { state ->
+                val step = state.step as? AddSheetStep.Channel
+                if (state.operationGeneration != generation || step == null) {
+                    state
+                } else {
+                    state.copy(step = step.copy(alternative = alternative))
+                }
+            }
+        }
+    }
+
+    private fun subscribeChannel(groupIds: Set<Long>) {
+        val step = mutableState.value.step as? AddSheetStep.Channel ?: return
+        if (step.subscribing || step.alreadySubscribedId != null || mutableState.value.creatingGroup) return
+        resolveJob?.cancel()
+        val generation = nextGeneration { it.copy(step = step.copy(subscribing = true, subscribeError = null)) }
+        viewModelScope.launch {
+            val outcome = subscribeUseCase.youTube(step.resolution, step.variants, groupIds)
+            mutableState.update { state ->
+                if (state.operationGeneration != generation) return@update state
+                val current = state.step as? AddSheetStep.Channel ?: return@update state
+                when (outcome) {
+                    is Outcome.Success -> {
+                        val title = step.resolution.title ?: step.resolution.channelId
+                        state.copy(done = SubscribedPodcast(outcome.value, title, generation))
+                    }
+
+                    is Outcome.Failure -> {
+                        val duplicate = (outcome.error as? SubscribeError.AlreadySubscribed)?.podcastId
+                        val message = if (duplicate == null) SubscribeErrorText.describe(outcome.error) else null
+                        val failed =
+                            current.copy(
+                                subscribing = false,
+                                alreadySubscribedId = duplicate,
+                                subscribeError = message,
+                            )
+                        state.copy(step = failed)
+                    }
+                }
+            }
+        }
+    }
+
     private fun runResolve(block: suspend () -> AddResolution) {
         resolveJob?.cancel()
         val generation = nextGeneration { it.copy(step = AddSheetStep.Resolving) }
@@ -300,7 +422,11 @@ public class AddPodcastViewModel(
                 val resolution = block()
                 // A result of a superseded resolve is dropped: a newer operation owns the step.
                 ensureActive()
-                apply(generation, resolution)
+                if (resolution is AddResolution.YouTube) {
+                    resolveChannel(generation, resolution.ref)
+                } else {
+                    apply(generation, resolution)
+                }
             }
     }
 
@@ -313,6 +439,14 @@ public class AddPodcastViewModel(
             state.copy(
                 step =
                     when (resolution) {
+                        is AddResolution.YouTube -> {
+                            error("Channel resolution is handled asynchronously")
+                        }
+
+                        is AddResolution.LookupRequired -> {
+                            AddSheetStep.Input(lookupRequired = resolution)
+                        }
+
                         is AddResolution.Feed -> {
                             AddSheetStep.Preview(resolution.preview)
                         }
@@ -325,6 +459,7 @@ public class AddPodcastViewModel(
                             AddSheetStep.Input(
                                 error = AddPodcastText.describe(resolution.error),
                                 auth = resolution.error is AddPodcastError.AuthRequired,
+                                searchQuery = (resolution.error as? AddPodcastError.NotAUrl)?.query,
                             )
                         }
                     },

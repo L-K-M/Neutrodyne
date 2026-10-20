@@ -19,13 +19,16 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PersonEntity
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFeedMetadata
+import ch.lkmc.neutrodyne.core.database.YouTubeFeedMetadata
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.OwnerType
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.identity.EpisodeContentHash
@@ -39,6 +42,7 @@ import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEntryRules
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -86,7 +90,7 @@ internal class FeedIngestor(
         ctx: IngestContext,
         intervalMinutes: Int?,
     ): IngestResult {
-        val prepared = withContext(defaultDispatcher) { prepare(parsed, ctx) }
+        val prepared = withContext(defaultDispatcher) { prepare(parsed, ctx, podcast.sourceType) }
 
         // Room re-checks cancellation as the transaction returns. A block that ran to its end has
         // committed by then, so its result goes back to the caller, which announces it (03 step 10).
@@ -124,7 +128,7 @@ internal class FeedIngestor(
         parsed: ParsedFeed,
         ctx: IngestContext,
         intervalMinutes: Int?,
-    ): IngestResult = ingestPrepared(podcast, parsed, ctx, prepare(parsed, ctx), intervalMinutes)
+    ): IngestResult = ingestPrepared(podcast, parsed, ctx, prepare(parsed, ctx, podcast.sourceType), intervalMinutes)
 
     /**
      * The diff's write phase. [prepared] carries everything the transaction needs so nothing
@@ -142,6 +146,10 @@ internal class FeedIngestor(
         val original =
             podcastDao.byId(podcast.id)
                 ?: return IngestResult.empty(prepared.warnings, vanished = true)
+
+        if (ctx.mode == IngestMode.OLDER_PAGE && original.sourceType == SourceType.YOUTUBE_CHANNEL) {
+            return ingestOlderYouTube(original, prepared)
+        }
 
         // Only a current page-1 request with accepted media can adopt its redirect target.
         val permanentUrl =
@@ -529,7 +537,7 @@ internal class FeedIngestor(
         val realGuid = parsed.podcastGuid?.let(PodcastGuid::parse)
         val artworkUrl = parsed.artwork.firstOrNull()?.url
         val artworkKey = artworkUrl?.let(ArtworkKeys::forUrl) ?: ArtworkKeys.monogram(stored.feedKey)
-        val artworkChanged = stored.artworkKey != artworkKey
+        val artworkChanged = stored.sourceType == SourceType.RSS && stored.artworkKey != artworkKey
         val (pagingNextUrl, pagingComplete) = pagingState(parsed, ctx.mode, stored)
         val pendingNewFeedUrl = pendingNewFeedUrl(parsed, stored, podcastDao.aliases(stored.id))
         val firstIngest = stored.initialFetch
@@ -548,7 +556,7 @@ internal class FeedIngestor(
                     (stored.podcastGuid ?: PodcastGuid.derive(stored.feedUrl)) to true
                 }
             }
-        ingestDao.applyFeedMetadata(
+        val metadata =
             PodcastFeedMetadata(
                 id = stored.id,
                 podcastGuid = guidValue,
@@ -600,8 +608,12 @@ internal class FeedIngestor(
                 usesPodping = parsed.usesPodping,
                 descriptionHtml = parsed.descriptionHtml,
                 categoriesJson = categoriesJson(parsed.categories),
-            ),
-        )
+            )
+        if (stored.sourceType == SourceType.YOUTUBE_CHANNEL) {
+            ingestDao.applyYouTubeFeedMetadata(metadata.youTube())
+        } else {
+            ingestDao.applyFeedMetadata(metadata)
+        }
         ingestDao.replacePodcastChildren(
             podcastId = stored.id,
             persons =
@@ -637,6 +649,41 @@ internal class FeedIngestor(
             firstIngest = firstIngest,
             artworkChanged = artworkChanged,
             warnings = prepared.warnings,
+        )
+    }
+
+    /** Tab snapshots cannot revise Atom identity/hash/fields or persist a host cursor. */
+    private suspend fun ingestOlderYouTube(
+        stored: PodcastEntity,
+        prepared: PreparedFeed,
+    ): IngestResult {
+        val dao = db.ingestDao()
+        val known = dao.existing(stored.id).mapNotNullTo(HashSet()) { it.externalMediaId }
+        val fresh = prepared.items.filter { item -> item.episode.externalMediaId?.let { known.add(it) } == true }
+        val ordered = fresh.sortedByDescending { it.episode.feedOrder }
+        val ids = dao.insertEpisodes(ordered.map { it.insertRow(stored.id, prepared.firstSeenAt, prepared.now) })
+        ordered.zip(ids).forEach { (item, id) ->
+            item.insertedId = id
+            dao.replaceChildren(
+                id,
+                item.descriptionBytes,
+                item.transcripts(id),
+                item.altEnclosures(id),
+                item.persons(id),
+                item.funding(id),
+                item.pscChapters(id),
+            )
+        }
+        return IngestResult(
+            fresh.mapNotNull { it.insertedId },
+            emptyList(),
+            0,
+            prepared.items.size,
+            0,
+            0,
+            false,
+            false,
+            prepared.warnings,
         )
     }
 
@@ -700,6 +747,7 @@ internal class FeedIngestor(
     private fun prepare(
         parsed: ParsedFeed,
         ctx: IngestContext,
+        sourceType: SourceType,
     ): PreparedFeed {
         val now = clock.now()
         val firstSeenAt = serverCorrectedNow(now, ctx.fetch.serverDateMs)
@@ -709,6 +757,10 @@ internal class FeedIngestor(
                 ?.url
                 ?.let(UrlNormalizer::forIdentity)
         val warnings = parsed.warnings.toMutableList()
+        val truncatedTextItems =
+            parsed.warnings
+                .filter { it.code == WarningCode.TEXT_TRUNCATED }
+                .mapTo(mutableSetOf()) { it.itemIndex }
         val usedKeys = mutableSetOf<String>()
         val items = mutableListOf<PreparedItem>()
         val seenIdenticals = HashMap<String, MutableSet<Long>>()
@@ -719,7 +771,19 @@ internal class FeedIngestor(
                 continue
             }
             val primaryKey = EpisodeKeys.primary(e)
-            val contentHash = EpisodeContentHash.of(e)
+            val hint = e.externalMediaId?.let { ctx.rowHints[it] }
+            val contentHash =
+                if (sourceType == SourceType.YOUTUBE_CHANNEL) {
+                    YouTubeEntryRules.contentHash(
+                        e.title,
+                        e.pubDate,
+                        e.rawPubDate,
+                        e.descriptionHtml,
+                        hint?.isShort == true,
+                    )
+                } else {
+                    EpisodeContentHash.of(e)
+                }
             // Identical repeats collapse before fallback keys are assigned (03 step 2); a
             // different item that repeats the primary gets a fallback in `chooseKey` below.
             if (!seenIdenticals.getOrPut(primaryKey) { mutableSetOf() }.add(contentHash)) continue
@@ -747,7 +811,8 @@ internal class FeedIngestor(
                     pubDayUtc = pubDayUtc,
                     titleDayKey =
                         if (titleNorm != null && pubDayUtc != null) "$titleNorm|$pubDayUtc" else null,
-                    contentHash = contentHash,
+                    baseContentHash = contentHash,
+                    sourceType = sourceType,
                     title = resolvedTitle(e),
                     imageUrl = imageUrl,
                     artworkKey = imageUrl?.let(ArtworkKeys::forUrl),
@@ -758,10 +823,17 @@ internal class FeedIngestor(
                             EpisodeDescriptionCodec.encode(
                                 it,
                                 if (e.descriptionIsHtml) DescriptionFormat.HTML else DescriptionFormat.PLAIN_TEXT,
+                                // Warnings are item-scoped, not field-scoped. Conservatively deny
+                                // completeness for any truncated text on this item or the feed.
+                                if (null in truncatedTextItems || e.feedOrder in truncatedTextItems) {
+                                    DescriptionCompleteness.TRUNCATED
+                                } else {
+                                    DescriptionCompleteness.COMPLETE
+                                },
                             )
                         },
                     snippet = e.descriptionHtml?.let { sanitizer.snippet(it, e.descriptionIsHtml) },
-                    hint = e.externalMediaId?.let { ctx.rowHints[it] },
+                    hint = hint,
                     pubDateValid =
                         e.pubDate?.takeIf {
                             it in PreparedItem.PUB_DATE_MIN_MS..(now + PreparedItem.PUB_DATE_MAX_OFFSET_MS)
@@ -866,3 +938,44 @@ internal class PreparedFeed(
     val now: Long,
     val firstSeenAt: Long,
 )
+
+/** Select the narrow DAO projection so Atom has no write access to page-owned metadata. */
+private fun PodcastFeedMetadata.youTube(): YouTubeFeedMetadata =
+    YouTubeFeedMetadata(
+        id = id,
+        podcastGuid = podcastGuid,
+        podcastGuidDerived = podcastGuidDerived,
+        title = title,
+        author = author,
+        language = language,
+        explicit = explicit,
+        showType = showType,
+        medium = medium,
+        locked = locked,
+        complete = complete,
+        status = status,
+        initialFetch = initialFetch,
+        latestEpisodeAt = latestEpisodeAt,
+        etag = etag,
+        lastModified = lastModified,
+        contentSha256 = contentSha256,
+        parserVersion = parserVersion,
+        lastParseOk = lastParseOk,
+        lastAttemptAt = lastAttemptAt,
+        lastSuccessAt = lastSuccessAt,
+        lastFullFetchAt = lastFullFetchAt,
+        nextRefreshAt = nextRefreshAt,
+        failureCount = failureCount,
+        lastErrorKind = lastErrorKind,
+        lastErrorDetail = lastErrorDetail,
+        gone = gone,
+        needsCredentials = needsCredentials,
+        ttlMinutes = ttlMinutes,
+        updateFrequencyRrule = updateFrequencyRrule,
+        pendingNewFeedUrl = pendingNewFeedUrl,
+        pagingNextUrl = pagingNextUrl,
+        pagingComplete = pagingComplete,
+        hubUrl = hubUrl,
+        usesPodping = usesPodping,
+        categoriesJson = categoriesJson,
+    )

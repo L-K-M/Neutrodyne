@@ -7,6 +7,8 @@ import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -16,6 +18,8 @@ import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import ch.lkmc.neutrodyne.playback.api.PlayResult
@@ -34,6 +38,63 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class FakePlaybackContractsTest {
+    @Test fun m5FakesRecordCommandsAndPreserveEmptyDefaultsAndSourceIsolation() =
+        runTest {
+            val controller = FakePlaybackController()
+            assertEquals(SleepTimerState.Off, controller.state.sleepTimer.value)
+            assertNull(controller.state.currentChapter.value)
+            controller.setSleepTimer(SleepTimerMode.Minutes(30))
+            controller.extendSleepTimer(10)
+            controller.nextChapter()
+            controller.previousChapter()
+            assertEquals(
+                listOf(
+                    FakePlaybackController.SleepSet(SleepTimerMode.Minutes(30)),
+                    FakePlaybackController.SleepExtend(10),
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CHAPTER_NEXT),
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CHAPTER_PREV),
+                ),
+                controller.calls,
+            )
+            assertEquals(SleepTimerState.Off, controller.state.sleepTimer.value)
+            controller.state.events.test {
+                controller.state.events.emit(PlaybackEvent.SleepTimerFired)
+                assertEquals(PlaybackEvent.SleepTimerFired, awaitItem())
+            }
+            val repo = FakeChapterRepository()
+            assertTrue(repo.observe(1).first().isEmpty())
+            val psc =
+                EpisodeChapter(
+                    0,
+                    null,
+                    "PSC",
+                    null,
+                    null,
+                    ChapterSource.PSC,
+                    false,
+                )
+            repo.replace(1, psc.source, listOf(psc))
+            repo.replace(1, psc.source, listOf(psc))
+            val id3 = psc.copy(source = ChapterSource.ID3)
+            repo.replace(1, id3.source, listOf(id3))
+            assertEquals(2, repo.writes.size)
+            assertEquals(listOf(psc), repo.observe(1).first())
+            repo.ensureLoaded(1)
+            assertEquals(listOf(1L), repo.loads)
+            repo.ensureCurrentLoaded(2)
+            assertEquals(listOf(2L), repo.currentLoads)
+            assertEquals(listOf(1L, 2L), repo.loads)
+            repo.failure = IllegalStateException("write failed")
+            assertFailsWith<IllegalStateException> { repo.replace(1, psc.source, emptyList()) }
+            assertEquals(listOf(psc), repo.observe(1).first())
+            val positions = FakePositionStore()
+            positions.setMeasuredDuration(1, 0)
+            positions.setMeasuredDuration(1, 2000)
+            positions.setMeasuredDuration(1, 3000)
+            assertEquals(2000L, positions.measuredDurations[1])
+            assertNull(positions.observe(1).first())
+        }
+
     @Test fun recordingControllerPreservesArgumentsOrderAndPauseCompatibility() =
         runTest {
             val f = FakePlaybackController()

@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.ImportSessionOperations
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -59,7 +60,16 @@ class ImportCredentialOrderTest {
         scheduler = scheduler,
         sanitizer = JsoupShowNotesSanitizer(),
         clock = clock,
-        merger = PodcastMerger(db, coordinator, clock),
+        merger =
+            PodcastMerger(
+                db,
+                coordinator,
+                clock,
+                downloads =
+                    Provider {
+                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                    },
+            ),
         resolver = unusedPreviewResolver,
         secrets = secrets,
         coordinator = coordinator,
@@ -70,6 +80,10 @@ class ImportCredentialOrderTest {
                     storagePathsFor(File("build/tmp/m1b-repo").resolve(UUID.randomUUID().toString())),
                     FileSystem.SYSTEM,
                 ),
+        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+        youTubeHealth =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeHealth(),
     )
 
     private fun newSecretsStore(

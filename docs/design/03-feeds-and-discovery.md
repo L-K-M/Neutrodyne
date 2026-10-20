@@ -977,6 +977,8 @@ forcing unrelated feeds or failing the rest of the appended chain.
 
 ### Engine run
 
+Implementation note (2026-10-19, M8): W4 runs the outage monitor's finalization before non-cancellable fetch-state cleanup, with caller cancellation and a maximum 20-second budget capped by the run deadline (adopted resolution 5). Only the monitor's in-memory accounting reset survives cancellation. Controls therefore cannot keep a stopped worker or desktop run waiting on network IO.
+
 The diagram shows the Android runner; on the desktop `DesktopRefreshLane` takes `RefreshWorker`'s place, passes no deadline and never enqueues a continuation ([Desktop refresh](#desktop-refresh)). Steps 1–10 are the same common code on both.
 
 ```mermaid
@@ -1012,6 +1014,14 @@ sequenceDiagram
 Expected cost: 300 feeds at 6 parallel and 1–2 s each ≈ 1–2 min on a fresh import; a steady-state run is mostly 304s.
 
 ### nextRefreshAt policy
+
+Implementation note (2026-10-19, M8): W3 applies the source scheduling hook
+to a successfully committed body as well as Unchanged. The schedule-only
+conditional write preserves a concurrent manual force mark. Under adopted
+resolution 3, only YouTube's bounded gap rule may lower ordinary success
+scheduling for the triggering success and next two successes; the 15-minute minimum, publisher deadline, failure backoff,
+Deferred deadline and Manual only remain authoritative. Source-specific
+metadata selection and YouTube-only hashes preserve the RSS ingest path.
 
 `I` = effective interval of the podcast (D45); `NEVER = 253_402_300_799_000` (9999-12-31) for "Manual only".
 
@@ -1333,6 +1343,13 @@ data class AlreadySubscribed(val podcastId: Long, val exact: Boolean)   // exact
 data class BasicCredentials(val username: String, val password: String)
 ```
 
+Implementation note (2026-10-19, M8): W6 recognizes shared bare handles and
+channel IDs before normalization, and channel URLs again after wrapper,
+directory lookup or HTML feed discovery. These inputs return the YouTube
+branch without an RSS fetch or directory name search; direct Edit-feed
+probes still reject source-type changes. Confirming a channel queues normal
+initial refresh and preserves the pending subscription on first-fetch failure.
+
 ### Input normalisation
 
 **YouTube pre-check (first).** `AddPodcastResolverImpl` (`:core:data`, which may depend on `:youtube:api`; `:feeds` may not, [D68](../PLAN.md#3-key-decisions)) trims the input (cap 4,096 chars) and calls `YouTubeUrlClassifier.classify` on the whole text and, if it contains whitespace, on each whitespace-separated token in order; the first non-null `YtRef` ends resolution with the YouTube branch of [Host recognition](#host-recognition). This is the only path for a bare `@handle` (R3.1: `@mkbhd`, `@some.name`) or a bare `UC…` ID, which the normaliser below would otherwise turn into `NotAUrl` or a scheme-less host. From M3 the classifier exists; in M1–M2 the pre-check is the host check of [Host recognition](#host-recognition), so a bare handle yields `NotAUrl` there.
@@ -1396,6 +1413,20 @@ flowchart TD
 3. **Probes** (only if steps 1–2 found nothing): `/feed/podcast`, `/podcast.xml`, `/feed`, `/rss`, `/rss.xml` relative to the site root, sequential `GET` with `sniffOnlyBytes = 65,536`, stop at the first RSS/Atom; at most 5 requests within 15 s.
 4. **Verification:** up to 5 candidates are fetched (2 in parallel) and parsed to obtain titles and episode counts; non-feeds are dropped. One survivor → preview it; several → `Choose`; none → `NotAFeed`.
 5. **WordPress blog feeds:** if a parsed feed has items but no accepted item and its path ends with `/feed`, probe `<path>/podcast` (the usual podcast feed) before returning `NoMedia`.
+
+**Implementation note (2026-10-19, M7):** W2/W3 implement the shared API-client
+lookups and the FEED-client Add pipeline. Candidate verification is direct-only
+(no recursive HTML), with a separate one-shot WordPress fallback. The five
+sequential root probes share a 15-second coroutine deadline, read at most 64 KiB
+per response (including error/redirect bodies), and refetch the first feed for a
+full preview. The existing 20-follow-up redirect limit also bounds Add fetches. Add/edit fetches opt into a
+2 MiB HTML transport prefix after sniffing; normal refresh retains 32 MiB.
+`LookupRequired`/`lookupOnce` carry explicit Apple consent; the button is W5.
+Directory metadata supplies missing preview title/author and last-resort artwork
+(`ArtworkSource.DIRECTORY`) without preview database writes. A shared 150-hit,
+30-minute metadata cache carries search/chart covers into direct previews and
+Subscribe refetches; its configuration generation prevents stale provider replay. All URL handoffs,
+including redirect targets, reject YouTube before a request in M7.
 
 ### Preview and dedupe
 
@@ -1498,6 +1529,48 @@ data class CategoryCount(val category: String, val podcastIds: List<Long>)
 
 ## Search and discovery
 
+**Implementation note (2026-10-19, M7):** These W1 contracts supersede the
+conflicting examples/prose below. Domain/extraction interfaces have
+`:core:testing` fakes; `assertSearchContract` also serves W2's recorded real tests.
+
+- Search is cold: initial Pending/Disabled, per-answer partials, one final with
+  no Pending. Blank/all-disabled emits one empty final without I/O. Cancellation
+  propagates; settings/key changes cancel stale runs/invalidate caches; retry
+  recollects. Immutable models retain ranks and Apple/PI/fyyd order. Provider
+  state separates stored switch, key source/status and effective recipients;
+  `ProviderFailure.CREDENTIALS` identifies rejected keys without raw error text.
+  Provider `configurationVersion` changes on country/switch/key replacement,
+  independently of status, so W5 restarts the current query even for USER→USER keys.
+- Internal `:core:data` Apple search/lookup/charts share limiter/caches; lookup
+  takes at most 100 decimal IDs in requested order. Retain the bucket plus
+  **20 dispatches per rolling 60 seconds**, immediate RateLimited/no queue,
+  shared 403/429 cooldown, free cache hits. PI ID lookup is key/switch-gated.
+- No disabled provider receives automatic requests. Explicit Apple-link Add
+  offers **Look up once with Apple**: W3 adds `AddResolution.LookupRequired(input, provider)`
+  and resolver `lookupOnce(input: String): AddResolution`; W5 grants `DirectoryAccess.ONE_TIME_LOOKUP`
+  only for that lookup, no saved consent/toggle change. Explicit BYOK verifies
+  before replacement, preserves old keys on cancellation; user overrides build,
+  clear falls back. No keys in public state/logs.
+- Country/three switches are PORTABLE via explicit backups, never synced,
+  superseding “per device”. Dismissal is DEVICE; key material SecretStore-only.
+  Country is empty (system region then US) or two uppercase ASCII letters;
+  shared registry validation governs writes/restores, invalid restores skip.
+- Feed-owned `DirectoryRecord`, `HostAction`, `DiscoveredFeed`/`Autodiscovery`
+  freeze parser/add boundaries; W2 maps DTOs in `:core:data`. fyyd pages use
+  HTML discovery, no detail API. Keep YouTube checks at every URL handoff.
+  W3 caps HTML transport after sniffing at 2 MiB, parses the prefix; retain
+  32 MiB feeds, five sequential 64 KiB probes/15 seconds, verification five/
+  concurrency two. Edit feed address stays direct-only; no pre-Subscribe rows.
+- Never automatically search URL-like/private input or look up feed URLs.
+  Disclose ID lookups and PI auth, publishers and artwork alongside query/country.
+  Recommendations are Discover rows plus matching-category navigation, no Feeds
+  pager material. Hide failed Discover rows; explicit chart directories retry.
+  Genre loads are independent/coalesced with bounded six-hour country/genre caches.
+- W4 retains category-count/create-with-members contracts: distinct IDs per
+  normalized top-level category, exclude existing group names, threshold two,
+  count/name sort, five maximum, DEVICE dismissal. No schema change or provider
+  implementation/binding/live evidence in W1.
+
 Serves onboarding for R1/R2/R5, R8.1 and N3. Delivered in M7 (both apps; the providers, parsers and aggregation are common code on Ktor's API client, so PLAN M7 AC10 runs the same recorded responses in `desktopTest`). Honours [D26](../PLAN.md#3-key-decisions) (amended 2026-10-05), [PO-3](../PLAN.md#po-3-podcast-index-api-key-handling) default B (option A: a key in the published builds built by `release.yml` — the APKs and the desktop images — once Podcast Index grants written permission); mitigates risk L3. Podcast directories only: YouTube channel search is 04's ([04 Channel search](04-youtube.md#channel-search)) and never part of `SearchRepository`.
 
 ```kotlin
@@ -1531,6 +1604,19 @@ internal interface PodcastSearchProvider {
 ```
 
 The ViewModel debounces: search fires 600 ms after typing stops with ≥ 3 characters, or immediately on the IME search action (Enter on the desktop). All providers use the Ktor client of kind API (8 s call timeout, [01](01-foundation.md#one-client-family)) and parse with kotlinx.serialization in `:feeds`' common directory parsers; no cookies are stored.
+
+**Implementation note (2026-10-19, M7):** Directory responses are capped at
+2 MiB before JSON parsing. Search rejects URL-like/private input at the repository
+boundary, including mixed text containing a URL. Success-only bounded caches are
+partitioned by configuration generation; changes cancel search and suppress stale
+results. The subscription annotation uses existing feed-key/alias indexes in one
+query, with no schema change. Provider recording provenance and live-verification
+limits are in [the shared fixture metadata](../../feeds/src/test/resources/discovery/README.md).
+Apple search/lookup, US/DE/CH overall charts, US technology charts, all 19 genre
+IDs and fyyd v0.2 were live-checked; other country/per-genre availability, fyyd
+terms and authenticated PI remain unverified. PI
+fixtures are explicitly spec-derived. Provider permission risks L3/PO-3 remain
+open; builds remain keyless by default, with no release-secret injection.
 
 ### Apple iTunes Search
 
@@ -1584,11 +1670,36 @@ The ViewModel debounces: search fires 600 ms after typing stops with ≥ 3 chara
 
 ### Privacy
 
-Only the query text and the country go to directories; subscriptions and feed URLs never do (the user's own sync server, when linked, is not a directory and receives no search query). Discover shows "Searches are sent to Apple and fyyd" (plus "and Podcast Index" when enabled, also when the key is a release-build key) under the search field (M7 acceptance 6). Typed podcast searches never reach YouTube: 04's channel search sends a query to YouTube only on its explicit action and only with the engine (N3); `PRIVACY.md` lists the hosts ([09 Privacy](09-quality-and-release.md#privacy)). gpodder.net is not used (toplist a decade stale, tested).
+**Implementation note (2026-10-19, M7):** W6 exposes the persisted provider
+switches and country, verified user-key entry/removal through `SearchRepository`
+and SecretStore, and the shared privacy inventory. Key drafts are transient,
+never saved or logged. The existing SecretStore contract stores the API key
+identifier of a user pair in `credential.username` (unencrypted metadata) and protects the API
+secret with Android Keystore or the Windows DPAPI secrets file. macOS/Linux use
+the existing 0600 file exception (PO-44), not encryption. W6 disclosures explicitly
+qualify the earlier blanket encryption wording; no storage/schema change is
+needed to use the frozen key-as-username contract.
+
+Apple receives query text and country for searches, country/genre for charts,
+and podcast IDs for explicit link and chart lookups. fyyd receives query text
+and count parameters, without country. Podcast Index receives query text or an
+explicit feed ID plus API-key, timestamp and SHA-1 authentication headers;
+verification uses the fixed query “podcast”. The API secret itself is not sent.
+All receive IP/User-Agent. Subscriptions and feed URLs never go to directories
+(the user's own sync server, when linked, is not a directory and receives no
+search query). Publisher pages, bounded probes/candidates and directory
+artwork requests are disclosed separately in Settings › Privacy and
+[PRIVACY.md](../../PRIVACY.md). Discover shows "Searches are sent to Apple and fyyd" (plus "and Podcast Index" when enabled, also when the key is a release-build key) under the search field (M7 acceptance 6). Typed podcast searches never reach YouTube: 04's channel search sends a query to YouTube only on its explicit action and only with the engine (N3); `PRIVACY.md` lists the hosts ([09 Privacy](09-quality-and-release.md#privacy)). gpodder.net is not used (toplist a decade stale, tested).
 
 ---
 
 ## Deep links and share targets
+
+**Implementation note (2026-10-19, M7):** The Apple HTTPS filter declares
+`android:autoVerify="false"` explicitly. Release lint requires an explicit
+choice for a browsable HTTPS filter; false preserves the adopted rule of no
+automatic domain verification. Browser delivery on API 31+ still requires
+user approval, and Share remains the documented path.
 
 Serves R3.1 (links), R8.3, onboarding. Delivered in M7 (Android filters; M1 handles the same schemes only when typed into the add sheet), MD2 (desktop URL schemes, 11). Routing: [01 Intent routing](01-foundation.md#intent-routing) maps every match to `AddPodcastKey(input)` on both platforms; nothing subscribes without the user tapping Subscribe. The XML below is Android's; the desktop's inputs follow it.
 
@@ -1607,7 +1718,7 @@ Serves R3.1 (links), R8.3, onboarding. Delivered in M7 (Android filters; M1 hand
   <category android:name="android.intent.category.BROWSABLE" />
   <data android:scheme="neutrodyne" android:host="subscribe" />
 </intent-filter>
-<intent-filter>   <!-- Apple Podcasts web links; not App Links (no autoVerify): active on API 31+ only after the user adds the domain -->
+<intent-filter android:autoVerify="false">   <!-- Apple web links: user approval required on API 31+ -->
   <action android:name="android.intent.action.VIEW" />
   <category android:name="android.intent.category.DEFAULT" />
   <category android:name="android.intent.category.BROWSABLE" />

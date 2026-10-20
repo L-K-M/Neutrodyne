@@ -2,12 +2,17 @@
 
 package ch.lkmc.neutrodyne.core.datastore
 
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.mutablePreferencesOf
+import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogLevel
 import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import kotlinx.collections.immutable.persistentListOf
@@ -213,6 +218,21 @@ class SettingStoresTest {
 
             assertEquals(LibrarySegment.PODCASTS, device.get(deviceChoice))
         }
+
+    @Test fun invalidPlaybackValuesFromAForeignFileReadAsDefaults() {
+        val preferences =
+            mutablePreferencesOf(
+                floatPreferencesKey(PlaybackSettingKeys.SPEED.name) to 1.51f,
+                stringPreferencesKey(PlaybackSettingKeys.SPEED_PRESETS.name) to "1.0,9.9",
+                intPreferencesKey(PlaybackSettingKeys.STREAM_CACHE_MB.name) to 333,
+            )
+        assertEquals(1f, SettingPreferences.read(preferences, PlaybackSettingKeys.SPEED))
+        assertEquals(
+            PlaybackSettingKeys.SPEED_PRESETS.default,
+            SettingPreferences.read(preferences, PlaybackSettingKeys.SPEED_PRESETS),
+        )
+        assertEquals(500, SettingPreferences.read(preferences, PlaybackSettingKeys.STREAM_CACHE_MB))
+    }
 
     @Test
     fun corruptFileResetsToDefaultsAndLogsWarn() =

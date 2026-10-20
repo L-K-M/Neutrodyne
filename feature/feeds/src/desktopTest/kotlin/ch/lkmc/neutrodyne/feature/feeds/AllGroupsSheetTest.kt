@@ -67,11 +67,14 @@ import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
+import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
@@ -376,7 +379,22 @@ private class AllGroupsSheetFixture {
                     FakeEpisodeLiveStateSource(),
                     groups,
                     settings,
+                    FakePlaybackController(),
+                    FakePlaybackStateSource(),
+                    testPlatformInfo,
                     dispatcher,
+                    downloadController =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeDownloadController(),
+                    externalOpenService =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeExternalOpen(),
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
+                    youTubeHealth =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeHealth(),
                 ).also {
                     feedModel = it
                     store.put("feeds", it)
@@ -412,6 +430,7 @@ private class AllGroupsSheetFixture {
                         pagingFor = pagerModel::pagingFor,
                         prefsFor = pagerModel::prefsFor,
                         onRefresh = pagerModel::onRefresh,
+                        onPlay = pagerModel::playFeed,
                         onFiltersChange = pagerModel::onFilters,
                         onAction = {},
                         onMarkAllPlayedClick = {},

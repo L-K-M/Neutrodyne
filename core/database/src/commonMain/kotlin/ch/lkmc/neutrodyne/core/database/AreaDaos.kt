@@ -8,6 +8,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.MEASURED_DURATION_TOLERANCE_MS
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import kotlinx.coroutines.flow.Flow
@@ -349,7 +350,21 @@ data class GroupMosaicRow(
 
 /** `episode_state` (M4: the user-state write chains of 02 User-state writes). */
 @Dao
-interface EpisodeStateDao {
+interface EpisodeStateDao : DownloadStateQueries {
+    @Query(
+        "UPDATE episode_state SET downloadDismissedAt = NULL WHERE episodeId IN (:ids) AND downloadDismissedAt IS NOT NULL",
+    )
+    override suspend fun clearDismissed(ids: List<Long>)
+
+    @Query(
+        "UPDATE episode_state SET downloadDismissedAt = :at, updatedAt = :at" +
+            " WHERE episodeId IN (:ids) AND downloadDismissedAt IS NOT :at",
+    )
+    override suspend fun setDismissed(
+        ids: List<Long>,
+        at: Long,
+    )
+
     /** Lazy-row primitive (02 DAO rule 2): `INSERT OR IGNORE` then targeted UPDATEs by writers. */
     @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
     suspend fun ensure(row: EpisodeStateEntity): Long
@@ -410,6 +425,18 @@ interface EpisodeStateDao {
             " FROM episode_state WHERE episodeId IN (:ids)",
     )
     fun observeFor(ids: List<Long>): Flow<List<EpisodeStateLiveRow>>
+
+    /** Enrichment only; the difference guard prevents metadata invalidation loops. */
+    @Query(
+        "UPDATE episode_state SET measuredDurationMs = :durationMs, updatedAt = :now" +
+            " WHERE episodeId = :id AND :durationMs > 0 AND (measuredDurationMs IS NULL" +
+            " OR ABS(measuredDurationMs - :durationMs) > $MEASURED_DURATION_TOLERANCE_MS)",
+    )
+    suspend fun setMeasuredDuration(
+        id: Long,
+        durationMs: Long,
+        now: Long,
+    )
 
     /** Written once at the first positive position, never at tick cadence. */
     @Query(
@@ -535,33 +562,6 @@ interface QueueDao {
     fun observeUpNext(): Flow<List<UpNextRow>>
 }
 
-/** `download` (M6: the claim/state machine of 07). */
-@Dao
-interface DownloadDao {
-    @Insert
-    suspend fun insert(row: DownloadEntity)
-
-    @Query("SELECT * FROM download WHERE episodeId = :episodeId")
-    suspend fun byEpisode(episodeId: Long): DownloadEntity?
-
-    /** 07's file-deletion set of an unsubscribe/merge (03 PodcastRepository). */
-    @Query(
-        "SELECT d.episodeId FROM download d JOIN episode e ON e.id = d.episodeId" +
-            " WHERE e.podcastId IN (:podcastIds)",
-    )
-    suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long>
-
-    /**
-     * 02 Live row state: the `download` transition columns `RowLive` merges; callers chunk at
-     * 200 ids. `downloadedBytes` is persisted only on transitions (D17), never progress cadence.
-     */
-    @Query(
-        "SELECT episodeId, state, waitReason, downloadedBytes, totalBytes, estimatedBytes," +
-            " nextAttemptAt, lastError FROM download WHERE episodeId IN (:ids)",
-    )
-    fun observeLiveFor(ids: List<Long>): Flow<List<DownloadLiveRow>>
-}
-
 /** `artwork` (M4: references and garbage collection; `@Upsert`-able single-writer table). */
 @Dao
 interface ArtworkDao {
@@ -578,6 +578,54 @@ interface ArtworkDao {
     /** The index load of 08's `ArtworkStore` (key → localPath for every pinned file). */
     @Query("SELECT `key`, localPath FROM artwork WHERE localPath IS NOT NULL")
     suspend fun pinnedRows(): List<ArtworkPinRow>
+
+    /** Sources, rather than pin hints, determine what survives unsubscribe/restore. */
+    @Query(
+        "SELECT p.artworkKey AS `key`, 'PODCAST' AS kind, p.artworkUrl AS sourceUrl," +
+            " COALESCE(p.customTitle, p.title) AS title, p.feedKey, p.latestEpisodeAt," +
+            " EXISTS(SELECT 1 FROM play_session s JOIN episode e ON e.id = s.currentEpisodeId" +
+            " WHERE e.podcastId = p.id) AS nowPlaying FROM podcast p" +
+            " UNION ALL SELECT e.artworkKey, 'DOWNLOAD', e.imageUrl," +
+            " COALESCE(p.customTitle, p.title), p.feedKey, p.latestEpisodeAt, 0" +
+            " FROM download d JOIN episode e ON e.id = d.episodeId" +
+            " JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE d.state = 'COMPLETED' AND e.artworkKey IS NOT NULL" +
+            " UNION ALL SELECT 'g-' || g.uuid, 'GROUP', NULL, g.name, NULL, NULL, 0 FROM podcast_group g",
+    )
+    suspend fun syncCandidates(): List<ArtworkCandidate>
+
+    @Query(
+        "SELECT COALESCE(p.customTitle, p.title) AS title, p.feedKey FROM podcast p WHERE p.artworkKey = :key" +
+            " UNION ALL SELECT COALESCE(p.customTitle, p.title), p.feedKey" +
+            " FROM download d JOIN episode e ON e.id = d.episodeId JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.artworkKey = :key LIMIT 1",
+    )
+    suspend fun fallbackFor(key: String): ArtworkFallback?
+
+    @Query("SELECT * FROM artwork WHERE `key` = :key")
+    fun observe(key: String): Flow<ArtworkEntity?>
+
+    /** The partial upsert leaves reference counts to the recount, including on insert. */
+    @androidx.room3.Transaction
+    @Upsert(entity = ArtworkEntity::class)
+    suspend fun applyBatch(rows: List<ArtworkSyncResult>)
+
+    @Query(
+        "SELECT * FROM artwork WHERE `key` NOT IN (SELECT artworkKey FROM podcast" +
+            " UNION SELECT e.artworkKey FROM download d JOIN episode e ON e.id = d.episodeId" +
+            " WHERE d.state = 'COMPLETED' AND e.artworkKey IS NOT NULL" +
+            " UNION SELECT 'g-' || uuid FROM podcast_group)",
+    )
+    suspend fun garbage(): List<ArtworkEntity>
+
+    @Query("DELETE FROM artwork WHERE `key` = :key")
+    suspend fun delete(key: String)
+
+    @Query(
+        "UPDATE artwork SET pinCount = " + ARTWORK_REFERENCE_COUNT +
+            " WHERE pinCount <> " + ARTWORK_REFERENCE_COUNT,
+    )
+    suspend fun recountPins()
 }
 
 /** `key` → `localPath` projection for [ArtworkDao.pinnedRows]. */
@@ -589,3 +637,40 @@ data class ArtworkPinRow(
 /** `MaintenanceDao` (M11b: the `db-maintenance` lane's sweeps and `PRAGMA`s). */
 @Dao
 interface MaintenanceDao
+
+// A correlated count avoids a separately maintained pin ledger and guards no-op writes.
+private const val ARTWORK_REFERENCE_COUNT =
+    "(SELECT COUNT(*) FROM podcast p WHERE p.artworkKey = artwork.`key`)" +
+        " + (SELECT COUNT(*) FROM download d JOIN episode e ON e.id = d.episodeId" +
+        " WHERE d.state = 'COMPLETED' AND e.artworkKey = artwork.`key`)" +
+        " + (CASE WHEN artwork.`key` IN (SELECT 'g-' || uuid FROM podcast_group) THEN 1 ELSE 0 END)"
+
+/** Referenced sources; the runner skips group raster production until M10. */
+data class ArtworkCandidate(
+    val key: String,
+    val kind: String,
+    val sourceUrl: String?,
+    val title: String,
+    val feedKey: String?,
+    val latestEpisodeAt: Long?,
+    val nowPlaying: Boolean,
+)
+
+data class ArtworkFallback(
+    val title: String,
+    val feedKey: String,
+)
+
+/** Byte metadata only; [ArtworkDao.applyBatch] never overwrites pinCount. */
+data class ArtworkSyncResult(
+    val key: String,
+    val url: String?,
+    val localPath: String?,
+    val width: Int?,
+    val height: Int?,
+    val seedArgb: Int?,
+    val avgArgb: Int?,
+    val version: Int,
+    val fetchedAt: Long?,
+    val lastError: String?,
+)

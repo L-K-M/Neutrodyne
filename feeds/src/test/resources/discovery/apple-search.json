@@ -1,0 +1,34 @@
+{
+  "results": [
+    {
+      "collectionId": 121493675,
+      "artistName": "NPR",
+      "collectionName": "NPR News Now",
+      "feedUrl": "https://feeds.npr.org/500005/podcast.xml",
+      "releaseDate": "2026-10-19T03:10:00Z",
+      "collectionExplicitness": "notExplicit",
+      "trackCount": 4,
+      "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/27/a0/ab/27a0abb7-817f-d80c-4fed-6fd04d424333/mza_16804553558295235422.jpg/600x600bb.jpg",
+      "genres": [
+        "Daily News",
+        "Podcasts",
+        "News"
+      ]
+    },
+    {
+      "collectionId": 1473872585,
+      "artistName": "Apple News",
+      "collectionName": "Apple News Today",
+      "releaseDate": "2026-10-17T11:00:00Z",
+      "collectionExplicitness": "notExplicit",
+      "trackCount": 1675,
+      "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/f2/04/2a/f2042a31-a0c9-9eaa-9823-463b64a12da7/mza_11550077189211837325.jpg/600x600bb.jpg",
+      "genres": [
+        "Daily News",
+        "Podcasts",
+        "News"
+      ]
+    }
+  ],
+  "resultCount": 2
+}

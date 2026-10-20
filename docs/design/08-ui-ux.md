@@ -675,7 +675,7 @@ and context-menu moves share the drop path. Delete reuses D4's ten-second
 Undo handler without popping the list. Another Delete is disabled until the
 pending Undo snackbar finishes, preserving each deletion's Undo window.
 D8b wires Group settings in the row overflow and context menu.
-The suggested-groups card awaits D11, as in the milestone split.
+The M7 suggested-groups card uses the subscribed feeds’ top-level categories.
 B1's permutation-only API cannot distinguish which row was dragged in an
 adjacent swap: its deterministic longest-increasing-subsequence tie-break
 may update the neighbour's key instead. D5 preserves that contract and the
@@ -714,6 +714,19 @@ Title "Add 3 podcasts to groups" ("Groups for {title}" for one podcast). Tri-sta
 
 `UpNextKey`, `:feature:queue`, M4.
 
+**Implementation note (2026-10-18, M4).** Queue removal and clear capture an ordered
+`QueueRemoval` in the same transaction. Undo uses `QueueRepository.undoRemoval` to
+restore only missing, unplayed, non-current entries around surviving neighbours;
+it keeps existing entries in their current relative order, including episodes
+requeued or moved since removal. Restored entries keep their own original order
+when surviving anchors have moved past one another. This replaces the separate re-add/move recipe
+below, which could overwrite concurrent moves. Unavailable stored entries remain
+editable and greyed. `UpNextList` is shared with the player; its drag preview
+commits one move on release and cancels on Escape or changed membership.
+Feeds, Podcast and Episode playback/queue actions now use `PlaybackController`,
+superseding the pre-M4 inert-action notes in the implementation deviations below.
+In progress is enabled; Downloaded remains gated until M6.
+
 ```
 +--------------------------------------------------+
 | Up next                          (clear)(:)(gear)|
@@ -734,6 +747,45 @@ Title "Add 3 podcasts to groups" ("Groups for {title}" for one podcast). Tri-sta
 - `AddResult.Rejected` texts: `ALREADY_PLAYING` "This episode is already playing", `YOUTUBE_EXTERNAL` "YouTube episodes open in YouTube", `UNAVAILABLE` "This episode isn't available".
 
 ### Downloads
+
+**Implementation note (2026-10-19, M6a).** The manual Downloads screen exposes
+new-download storage selection, manual mobile-data policy and the current wait
+reasons. The empty state links to "Download settings". Automatic admission,
+cleanup/caps, root moves, Download all and desktop folder registration remain
+M6b controls and are hidden. Existing completed files retain their recorded
+roots when you select a location for new downloads. Desktop Share file is
+hidden. The background-restriction notice refers to downloads generally while
+automatic downloads are unavailable. Queued episode buttons open the current
+wait reason's actions and Cancel; completed buttons open a delete confirmation.
+Progress is an overlay for visible IDs and never invalidates paging membership.
+
+**Implementation note (2026-10-19, M6b).** W9 is integrated with M6a's
+real Downloads screen, preserving selection, playback, visible live progress,
+manual consent and deletion confirmation. Its duplicate overview is replaced
+by shared ordered notices and the orphan-confirmation dialog on that screen.
+Settings combines M6a's manual mobile-data/root controls with W9's automatic
+policy, cleanup and cap controls. Android root rows and desktop folder changes
+use the same move-or-leave confirmation and W4's implemented controller.
+Desktop completed rows reveal their indexed file URI through RevealInFolder;
+Share file remains Android-only. Episode DownloadToggle uses M6a's real request
+handler, including the entry point used by the benchmark smoke journey.
+Bulk requests also hand notification consent to that contextual handler,
+including its blocked-permission guidance. Storage actions resolve the selected
+root instead of assuming the desktop default folder.
+`DownloadsOverview` has no move counters, so MOVE_IN_PROGRESS reads
+"Moving downloads…" without invented counts. Scoped choosers retain M2's
+"Inherit" label because ScopedSettingsView has no underlying overridden value.
+Group dependents require explicit opt-in, and external-mode cleanup remains
+editable. No YouTube transfer behavior is added. These controls supersede the
+M6a-only hiding described in the preceding historical note.
+
+W11's [acceptance ledger](../evidence/m6b-acceptance.md) records the exact
+settings, bulk-confirmation and string tests. Notice order is Data Saver,
+background restriction, notifications off, cap, low storage, unavailable root,
+YouTube paused, move, then orphan files; show at most two, with Android-only
+notices filtered on desktop. Native folder selection, settings navigation,
+accessibility and permission behavior still require device/packaged-app runs.
+
 
 `DownloadsKey`, `:feature:downloads`, M6 (empty state from M0). Data: 07's `DownloadController.observeAll(): Flow<DownloadsOverview>` (in progress, completed and failed `DownloadEntry` lists, `StorageUsage`, `notices`) with live bytes from `DownloadProgressSource` for the visible in-progress rows ([07 Engine architecture](07-downloads.md#engine-architecture), [07 Notices](07-downloads.md#notices)); texts are [`DownloadStatusText`](#download-status-text).
 
@@ -760,6 +812,23 @@ Title "Add 3 podcasts to groups" ("Groups for {title}" for one podcast). Tri-sta
 - Empty: "Downloaded episodes play offline" + storage summary + "Auto-download settings" (`SettingsKey(DOWNLOADS)`).
 
 ### Discover
+
+**Implementation note (2026-10-19, M7):** W5 owns Discover/directory state and
+`:feature:podcast` preview via domain services. Save input/query/group IDs,
+re-fetch memory-only results/previews after death. Search statuses distinguish
+pending/partial/empty/all-disabled/offline/failed/rate-limited; disabled offers
+Settings, retry recollects. Retain debounce/IME/stale cancellation. Preview
+reuses Add/Subscribe groups, with no play/download or pre-confirmation DB rows.
+Recommendations are Discover rows plus matching-category navigation only;
+hide failed rows, explicit chart directories offer unavailable/retry.
+`DirectoryKey` serializer/fields stay unchanged: nonblank query = search (ignore
+genre); empty/null = overall chart; empty/numeric `ChartGenre.id` = genre chart;
+reject unknown IDs without I/O, no cross-provider genre filtering. W5 renders
+W3's Apple-off one-time action. W6 settings/privacy use effective provider/key
+source/status, never save passwords, and add nullable `PlatformActions.appleLinks`
+with `openSettings(): OpenResult` (Android 31+); W7 implements it and adapts
+VIEW/SEND text/plain through existing `IntentRouter` (4 KiB UTF-8, external
+internal-routes rejected), only navigating to Add cold/warm.
 
 `DiscoverKey`, `:feature:discover`, M1 (add by URL and import entry points), M7 (search, charts), M9a (YouTube channel search with the engine).
 
@@ -1476,6 +1545,17 @@ enum class CoverAspect { SQUARE, WIDE_16_9 }
 
 `PodcastHeader` (`:core:ui`) is the first item of the podcast screen's `LazyColumn` and scrolls away; a pinned transparent `NdTopAppBar` overlays it and fades its container and title in as `firstVisibleItemScrollOffset` passes the cover's bottom (simpler and more robust than nested-scroll large app bars with a 300 dp header). Background: vertical gradient from the artwork scheme's `primaryContainer` (top) to `surface` at 70 % of the header height. Cover 160 dp, 24 dp corners, `dropShadow` in the seed colour at 30 % (M10). YouTube: the banner (`podcast.bannerUrl`, never pinned, 04) fills the top 6:1 strip behind the avatar with a 40 % bottom scrim; without a banner (offline, missing): the avatar blurred (`Modifier.blur(24.dp)`, API 31+) or the artwork gradient below 31. Group chips are `NdInputChip`s with the group dot; the trailing "x" removes the membership (snackbar with Undo) and "+ Group" opens `AddToGroupsKey(listOf(id))`.
 
+Implementation note (2026-10-19, M8): W6 renders the channel banner as an
+unpinned 6:1 image with a bottom scrim and requests coalesced metadata on
+podcast detail open. The existing avatar/monogram remains the fallback when
+no banner exists; the blurred avatar and artwork gradient remain M10 polish.
+The Add sheet supplies channel metadata, variant guidance, groups, exact
+Open, playlist-owner and optional Use podcast actions. Channel settings expose
+Shorts and past-live switches with the future-poll explanation. Pending/error
+banners continue to use the existing feed-state presentation; an active
+channel without visible episodes offers the channel-specific empty message
+and Podcast settings.
+
 ### Show notes renderer
 
 `@Composable fun LazyListScope.showNotes(notes: ShowNotes, ...)` (`:core:ui`) emits one lazy item per block of 03's `:core:model` mirror (`ShowNotes`, `ShowNoteBlock`, `ShowNoteSpan`, [03 Sanitiser and block model](03-feeds-and-discovery.md#sanitiser-and-block-model)), so a 2,000-block note never composes at once.
@@ -1564,6 +1644,12 @@ All in `:core:ui`, returning `UiText` (01) so ViewModels stay resource-free; eac
 
 #### Download status text
 
+**Implementation note (2026-10-19, M6a).** Desktop `SYSTEM` waits use
+"Interrupted, resumes automatically", following 07's quit/crash recovery
+semantics. The earlier statement below that `SYSTEM` never occurs on desktop
+does not apply to M6a recovery rows.
+
+
 07 owns the meaning of each state ([07 Wait reasons](07-downloads.md#wait-reasons), [07 Errors](07-downloads.md#errors)); this is the final wording, including 07's refinements (marked ‡). Context needed beyond the enum value: `lastError` (for `STORAGE` and `MISSING`), `nextAttemptAt` (both in `RowLive` and `DownloadStatus`), the row's `sourceType`, `YouTubeHealth.state` (YouTube gate) and `YouTubeCapabilities.externalReason` (YouTube rows in external mode). All texts, the YouTube ones included, are ordinary string resources, identical in every APK and desktop build ([Capability differences in UI](#capability-differences-in-ui)); on the desktop `STORAGE` with `lastError = STORAGE_UNAVAILABLE` reads ‡ "Waiting for the download folder", and `UNMETERED_NETWORK`, `CHARGING`, `SYSTEM` and `NEEDS_FOREGROUND` do not occur ([07 Desktop runners](07-downloads.md#desktop-runners)).
 
 | `WaitReason` | Text |
@@ -1616,7 +1702,22 @@ Other states: `DOWNLOADING` "{p} %" in rows and "{12.3 MB} of {48.0 MB} · {1.2 
 
 ## Player sheet
 
+**Implementation note (2026-10-19, M5).** Reuse M4 UI seams for sleep, chapters and timestamp seeking. Tint, side panels and other M10/MD1 layout/theming stay deferred. `playback.sleep_last_minutes` stores only the last choice (default 30, range 1–240, synced), never active timer state. Hardware buttons default to EPISODE (not synced); smart resume defaults true (synced).
+
 Serves R4.7, R4.8, R5.2, R5.5, R5.7, R8.5, N4. Delivered in M4 (sheet, mini and full player, speed sheet), M5 (sleep sheet, chapters tab, timestamp seeks), M9a (YouTube issue banners), M10 (artwork tint, side panel, tabletop, landscape), MD1 (the same player on the desktop, usually as the side panel), MS3 (the "Continue on this device" card and the "Marked played on" line, [Sync screens](#sync-screens)). Honours [D56](../PLAN.md#3-key-decisions), [D43](../PLAN.md#3-key-decisions), [D84](../PLAN.md#3-key-decisions). Behaviour behind every button is 06's common Player API ([06 UI boundary](06-playback.md#ui-boundary), [06 Shared playback core](06-playback.md#shared-playback-core)), served by Media3 on Android and by 11's `DesktopPlaybackController` on the desktop; `:feature:player` is common code with no Media3 type in v1.0 (06 [No Media3 in features](06-playback.md#no-media3-in-features-v10)).
+
+**Implementation note (2026-10-18, M4).** The M4 player renders the mini/full
+sheet at every width, without reserving a side-panel column or changing the
+saved panel preference. The panel geometry remains available for MD1; artwork
+tint, tabletop and landscape adaptation remain M10/MD1, and sleep/chapters
+remain M5. Both shells fill the full player content slot with the shared Up next
+list through the queue route and its `UpNextViewModel`. M4 uses the existing
+Material 3 slider because the documented `NdSlider`
+wrapper is not present in the codebase. The play button interpolates Compose
+rounded corners between a square and a circle, without adding graphics-shapes.
+Desktop composes the same sheet against
+the unavailable controller; this does not establish audible desktop playback
+or MD1 resize coverage.
 
 ### Structure and states
 
@@ -1721,6 +1822,16 @@ Compact portrait layout; other layouts in [Side panel, medium widths and tableto
 - Colours: the whole sheet is wrapped in `ArtworkTheme(colors?.seedArgb)` (M10; app scheme before).
 
 ### Tabs panel
+
+**Implementation note (2026-10-19, M5).** The M5 player uses the existing M4 bounded
+player content slot for the tabs, retaining the mini/full geometry. Selecting
+a tab opens its content; Back closes that content before collapsing the
+player. The separate draggable panel geometry remains part of M10 polish.
+Notes stays discoverable with an empty-state message: its repository is
+observed only while that tab is visible, so hiding it based on a background
+notes subscription would violate the observation rule above. Empty Chapters
+is hidden. Sleep state comes exclusively from the service; only validated
+minute choices are persisted, and failed writes produce the existing snackbar.
 
 A nested panel at the bottom of the full player with its own `AnchoredDraggableState` (Peek 56 dp ↔ Open = just below the top bar). Tabs: **Up next** (`UpNextList` with reorder, swipe-remove and the "Then: …" context header, same behaviour as the [Up next screen](#up-next)), **Chapters** (`ChapterList`: image 40 dp, title, start time, current chapter highlighted; tap seeks; hidden chapters excluded by 06), **Notes** ([show notes renderer](#show-notes-renderer) of the current episode). Tabs without content are hidden (no chapters → no Chapters tab). Back while Open → Peek. On the side panel the tabs are a regular `PrimaryTabRow` below the controls.
 
@@ -2215,6 +2326,17 @@ Serves R5.2, R5.3, R5.4, R5.8, N6, N5. Delivered in M1 (Coil loader, `ArtworkRef
 
 ### Overview
 
+**Implementation note (2026-10-18, M4):** M4 delivers the common runner and
+Android codec, worker, provider and monogram rasters. The desktop continues
+to use Coil for in-app covers and fake-tests the common rules; its real Skia
+codec, artwork lane and OS-session rasters remain MD1. Group raster
+production and colour extraction remain M10. At the M4 contracts stage, the M3 base had no
+subscription/import/restore `pin` callers. To keep M4 artwork ownership in
+`:core:artwork`, the Android order-300 initializer observes committed changes
+to podcast, episode, download and group source tables and debounces requests
+through the same scheduler. Explicit `pin`/`unpin` remain supported hints;
+artwork-table writes themselves do not trigger this observer.
+
 ```mermaid
 flowchart LR
   subgraph SRC["Sources"]
@@ -2280,6 +2402,13 @@ interface ArtworkStore {
 
 ### ArtworkSyncWorker
 
+**Implementation note (2026-10-18, M4):** A failed refresh stays eligible after
+its backoff even while the old pinned file remains usable. On failure,
+`fetchedAt` dates the failed attempt, so monthly freshness alone must not
+suppress the retry. The common runner owns the eight-minute soft deadline
+and immediate continuation; the Android host awaits database opening before
+calling it, without a second overlapping timer that could enqueue twice.
+
 The loop is common code, `ArtworkSyncRunner.runOnce(deadline: Duration?)` in `:core:artwork`, hosted per platform. **Android:** unique work `artwork-sync` (one-time, `NetworkType.CONNECTED` + storage not low, `APPEND_OR_REPLACE`, tag `artwork`; `ArtworkSyncWorker` in `androidMain`, created by 01's `MetroWorkerFactory`) runs it with an 8-min deadline. **Desktop:** `DesktopArtworkLane` (lane `artwork` of 11's `DesktopJobRunner`, `desktopMain`) runs it with no deadline whenever the scheduler flagged work, the network is connected and the tick reaches the lane; a lane run yields after each batch so other lanes are not starved ([11 Lanes](11-desktop.md#lanes)). `ArtworkSyncScheduler.request()` (common) debounces calls for 2 s on `@ApplicationScope` and enqueues one request (Android) or sets the lane's flag (desktop), so 300 `pin` calls during an import produce one or two runs; `enqueueNow()` skips the debounce (used for the worker's own continuation, which must not be lost if the process dies within the debounce window).
 
 ```
@@ -2288,7 +2417,7 @@ runOnce(deadline):                             // Android: elapsedRealtime + 8 m
                                                // (artworkUrl, imageUrl, display title, feedKey) and its artwork row
   wanted = candidates.map { it to descriptorFor(it) }
            .filter { (c, d) -> c.row == null || c.row.localPath == null || c.row.url != d
-                               || c.row.fetchedAt < now - 30 d }          // monthly refresh of fetched art
+                               || c.row.fetchedAt < now - 30 d || c.row.lastError != null }          // monthly refresh of fetched art
            .filterNot { backoffActive(it.row?.lastError, it.row?.fetchedAt) }
            .sortedWith(nowPlaying podcast first, SUBSCRIPTION by latestEpisodeAt desc, DOWNLOAD, MONOGRAM, MOSAIC)
   for batch in wanted.chunked(8):
@@ -2335,6 +2464,17 @@ data class ArtworkColors(val key: String, val version: Int, val seedArgb: Int?, 
 - `MosaicRenderer.render(members, groupColor, 512)` (M10, Android only: its consumers are Android surfaces): 2 × 2 cells of 254 px with 4 px gaps; each cell is the member's pinned file (decoded with `inSampleSize`), else the member's monogram raster, else the group container tone; JPEG under `g-{uuid}`. Consumers: Auto's `groups` node (06) and v1.x widgets; the in-app [`GroupMosaic`](#groupmosaic-and-group-tab-label) composes four `CoverArt`s instead.
 
 ### ArtworkProvider
+
+**Implementation note (2026-10-18, M4):** Provider fallback publication and
+runner batch commits share the store's file lock. The provider records its
+fallback row on IO before returning the open file descriptor, instead of
+launching an asynchronous row write that could overwrite a later fetch.
+It re-reads the current row under that lock and preserves retry metadata.
+The runner opens four producers outside the lock, then re-reads rows when
+committing each batch of eight. Garbage collection holds the same lock and
+a writer transaction while rechecking references. The neutral placeholder
+is drawn from fixed Canvas geometry and cached as a PNG, without an Android
+resource or database dependency.
 
 **Android only** (`:core:artwork` `androidMain`; the desktop has no content URIs and its OS sessions read the pinned files directly, falling back to no artwork when a file is missing, [11 OS-integration failure modes](11-desktop.md#os-integration-failure-modes)). `ch.lkmc.neutrodyne.core.artwork.ArtworkProvider`, authority `${applicationId}.artwork`, exported, read-only (manifest: [01 Application element and components](01-foundation.md#application-element-and-components)). Contract for 06 and v1.x widgets:
 
@@ -2410,6 +2550,18 @@ object Covers {
 Coil 3's computed memory key omits the size unless transformations are set, so without explicit keys a hero request reuses (or misses) the thumb bitmap unpredictably; explicit keys let both tiers live in memory and the hero land on the thumb instantly, so shared-element transitions show no placeholder frame (M10 acceptance 5; [Coil MemoryCacheService](https://github.com/coil-kt/coil/blob/main/coil-core/src/commonMain/kotlin/coil3/memory/MemoryCacheService.kt)). THUMB is used by rows, tiles, mosaics and the mini player; HERO by the podcast header, episode detail and the full player. Hardware bitmaps stay enabled in Compose on Android (Unverified: that Compose shared elements need no `allowHardware(false)`, which Coil documents only for View transitions; M10 spike); the desktop decodes into Skia bitmaps and has no hardware-bitmap option.
 
 ### YouTube thumbnails
+
+Implementation note (2026-10-19, M8): W7 registers the interceptor in the
+singleton loader on both platforms. Candidate URLs have separate disk keys;
+explicit request-tier memory keys are retained so hero placeholders can find
+row art. Pinned references retain their original data and keys. `LetterboxCrop169` shares its rectangle calculation in common
+code, with Android Bitmap and desktop Skia crop implementations. It precedes
+any caller transformations, including square crops. The Appearance chooser
+is shown only while the unfiltered library contains a YouTube channel;
+its saved choice is collected once by each shell and applied to shared
+feed, queue and podcast rows; RSS artwork/date layouts stay unchanged.
+The default remains
+`VIDEO_THUMBNAIL`; system artwork continues to use the channel avatar.
 
 `YouTubeThumbnailInterceptor` (M8) implements 04's contract ([04 Artwork and thumbnails](04-youtube.md#artwork-and-thumbnails)):
 
@@ -2642,6 +2794,13 @@ Illustrations are single-colour Material Symbols at 96 dp in `primary` (the bran
 
 ### Suggested groups card
 
+**Implementation note (2026-10-19, M7):** W4 uses one screen-owned
+`SuggestedGroups` workflow from both ViewModels. It snapshots selected categories,
+creates with atomic memberships through `GroupRepository`, counts committed
+writes only, keeps failed selections available, and persists only DEVICE
+dismissal on “Not now”. Suggestions react to category and group changes;
+invalid group names are omitted.
+
 Shown at the top of Feeds and Manage groups when `PodcastRepository.observeCategoryCounts()` (03, M7) returns suggestions and `discover.suggested_groups_dismissed` is false: "Group podcasts into feeds" + chips "Technology (5)", "News (3)", "Fiction (2)" (each toggles) + "Create groups" → `GroupRepository.create(draft, memberIds)` for each selected suggestion (colours per 05) → snackbar "Created 3 groups" with "Open" (selects the first in Feeds); "Not now" sets the dismiss flag. Before M7 the card shows only "Create your first group" → `GroupEditKey(null)`.
 
 ### Banners and the startup gate
@@ -2664,6 +2823,14 @@ Shown at the top of Feeds and Manage groups when `PodcastRepository.observeCateg
 
 ### Permission prompts
 
+**Implementation note (2026-10-19, M6a).** Download consent and notification
+permission use the shared contextual dialog handler. After a notification
+denial, the contextual prompt shows "Notifications are blocked" and an explicit
+"Open settings" action. It never opens system settings automatically or retries
+the system dialog after a denial. This prompt replaces the inline blocked row
+for the M6a download entry points.
+
+
 **Android.** `POST_NOTIFICATIONS` (API 33+) is never requested at launch ([01 P22](01-foundation.md#platform-compliance)). `PlatformActions.notifications` (`NotificationPermissionRequester`, [Modules](#modules)) wraps `rememberLauncherForActivityResult(RequestPermission())` and is invoked only:
 
 1. when the user switches a new-episode notification setting on (global, group, podcast, or the import preview's "Notify me about new episodes"; 03's permission rule),
@@ -2680,6 +2847,35 @@ Denied → no repeated system dialog; the relevant screen shows an inline row "N
 ---
 
 ## Capability differences in UI
+
+Implementation note (2026-10-19, M8): W8 observes capability changes in
+Feeds, Podcast, episode detail and YouTube Settings. Injected capability,
+health and successful-open ports are required dependencies: Metro's constructor
+defaults would otherwise bypass the real bindings. Test fixtures pass explicit
+fakes. The window's player resolves its successful-open service lazily, keeping
+pre-gate construction free of database access. External channels have no
+queue or download menu, selection or accessibility actions; RSS in mixed feeds
+keeps its native actions. Restored Up next channel rows remain grey. Successful
+browser handoff offers the optional played transition and a five-second Undo;
+failed opens retain the existing Copy link feedback. Feeds and Library each
+render one shared outage banner with Retry now. The podcast health mapper
+suppresses channel failure badges while the global outage level is active,
+retaining single-channel diagnostics once it recovers (adopted resolution 5).
+No system notification is emitted for a feed outage. The desktop's pre-MD1
+playback stub uses read-only domain queries after the database gate to report
+external row refusal and all-external contexts truthfully; RSS playback still
+reports ServiceUnavailable, with native audio left to MD1.
+
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 5 applies the
+global delete-after-played policy to completed YouTube files even while the
+channel is NotSupported; cleanup is still the user's chosen policy. External-mode
+copy must not imply that unavailable playback protects a file from cleanup.
+Adopted resolution 6 retains the M6a RevealInFolder mechanism; W9 owns the new
+Downloads-screen surface and settings row, without a second reveal mechanism.
+Adopted resolution 7 adds only the visible group/podcast "Download all unplayed…"
+action and confirmation, creating MANUAL rows; the restore offer remains M6a.
+
 
 Serves R3.7, R3.5, R3.6, R3.9 (display), R8.6, N8. Delivered in M8 (every APK and desktop build in external mode, reason `NOT_YET_AVAILABLE`), M9a (the engine on the 64-bit APKs; reason texts for `NOT_IN_THIS_APK`, `DISABLED_BY_USER`, `ENGINE_FAILED`; engine rows), M9b (engine-update rows) and MD3 (the engine on every desktop build). Honours [D2](../PLAN.md#3-key-decisions), [D51](../PLAN.md#3-key-decisions), [D77](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions), [PO-2](../PLAN.md#po-2-distribution-channels). There is one Android product (build types only, [D2](../PLAN.md#3-key-decisions)) and one desktop configuration per target, and the UI never reads the ABI, the platform, `BuildConfig` or the no-engine build switch to decide what YouTube can do (only `ExternalReasonText` picks a desktop wording through `PlatformInfo`, below): every difference is driven by 04's `YouTubeCapabilitiesSource.capabilities` (`StateFlow<YouTubeCapabilities>` from `:youtube:api`, observed by ViewModels and never snapshotted), so every APK before M9a, every desktop build before MD3, the `armeabi-v7a` APK, the emergency builds without the engine and an app whose engine is off or failed all render the same **external mode** ([04 Capability matrix](04-youtube.md#capability-matrix), [04 Capability consumers](04-youtube.md#capability-consumers)). Capabilities can flip while a screen is visible (the switch, a third failed start, "Try again"): rows, Discover and Settings re-render at once; the queue and downloads follow 06 and 07.
 
@@ -2720,6 +2916,13 @@ The YouTube logo is never used (trademark); YouTube items carry the `smart_displ
 Serves R2.7 (settings screens), R3.9 (display), R5.5, R6.2–R6.3 and R6.6 (Settings › Updates), R7.2–R7.3 (Settings › Sync), R8.3 and R8.8 (Settings › Desktop), N10. Delivered in M0 (home, Appearance basics, About, Licences; M0b Settings › Desktop) and by each owning milestone (YouTube engine rows M9a/M9b, desktop MD3; Sync MS2; Updates M11a). Every portable key also declares whether it syncs (`SettingKey.synced`, [D93](../PLAN.md#3-key-decisions), [10 What syncs](10-sync.md#what-syncs)). Keys follow 01's registry ([01 DataStore files and typed setting keys](01-foundation.md#datastore-files-and-typed-setting-keys)); enums used as key types (`ThemeMode`, `LibraryDensity`, `LibrarySort`, `SwipeAction`, `PlayerTimeDisplay`, `YouTubeRowArt`, `LibrarySegment`) live in `:core:model` (`ch.lkmc.neutrodyne.core.model.settings`).
 
 ### Settings screen structure
+
+**Implementation note (2026-10-19, M7):** W6 installs the Discover/Privacy
+destinations, provider and country writes, transient masked BYOK editor and
+rendered stable-ID inventory. `PlatformActions.appleLinks` is nullable; W7
+supplies Android 31+ Open by default implementation, while other platforms hide
+the action. The key identifier is local unencrypted credential metadata; the
+API secret uses the existing platform protection described in 03.
 
 `SettingsHomeKey` lists the pages; each page is `SettingsKey(page)`. Rows are `NdSwitchRow`/choice rows with the current value as subtitle; owning documents define semantics and defaults.
 
@@ -2857,7 +3060,7 @@ Shared screens are written once against `:core:testing` fakes and run as `runCom
 | `SpeedSheetTest` | scope options per context; `setSpeed` on release with the chosen scope; group option disabled outside a group context; attribution text | M4 |
 | `UpNextScreenTest` | drag-and-drop calls `move` once on drop; Move up/down actions call `move`; swipe remove with undo (M4 acceptance 14); "Stop after Up next"; empty-state chips | M4 |
 | `ShowNotesTest` | every block type; timestamp beyond duration is plain; tap timestamp → `seekTo` for the current episode, `playEpisodeAt` otherwise; images per `feeds.show_notes_images` and metered state | M1, M5 |
-| `ArtworkSyncRunnerTest` (MockWebServer, real Coil loader; Robolectric with `AndroidArtworkCodec` and the desktop JVM with `SkiaArtworkCodec`) | 3000 px JPEG → ≤ 1024 px JPEG q88; PNG with alpha kept; version + 1 per byte change, unchanged bytes keep the version; 404 → `lastError` + backoff; 100 px image → not pinned; monogram descriptor change re-renders; 8 rows per transaction; deadline → continuation; GC removes unreferenced keys | M4 |
+| `ArtworkSyncRunnerTest` (MockWebServer, real Coil loader; M4 Robolectric with `AndroidArtworkCodec`; MD1 desktop JVM with `SkiaArtworkCodec`) | 3000 px JPEG → ≤ 1024 px JPEG q88; PNG with alpha kept; version + 1 per byte change, unchanged bytes keep the version; 404 → `lastError` + backoff; 100 px image → not pinned; monogram descriptor change re-renders; 8 rows per transaction; deadline → continuation; GC removes unreferenced keys | M4 (Android), MD1 (Skia) |
 | `ColorExtractionTest` | colourful → seed; monochrome → null (M10 acceptance 4); near-white in dark mode → container tone ≤ 40 after `ArtworkSchemeCache`; transparent logo → average of opaque pixels | M10 |
 | `ArtworkProviderTest` (Android) | `r` ok, `w` → `SecurityException`; invalid key → `FileNotFoundException`; missing file → monogram served (an `m-` key as `{key}.png`, a failed `u-` key as `{key}.fallback.png` under the requested key, which a garbage pass keeps); MockWebServer records zero requests | M4 |
 | `YouTubeThumbnailInterceptorTest` (MockWebServer) | maxres 404 → hq720 → mq; width ≤ 320 → mq only; pinned ref → no rewrite; all variants failing → hqdefault cropped to 480 × 270 | M8 |

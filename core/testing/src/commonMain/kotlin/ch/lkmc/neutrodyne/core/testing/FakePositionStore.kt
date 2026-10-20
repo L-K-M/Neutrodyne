@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
+import ch.lkmc.neutrodyne.core.model.MEASURED_DURATION_TOLERANCE_MS
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +19,9 @@ class FakePositionStore : PositionStore {
     val calls = mutableListOf<Call>()
     var failure: Throwable? = null
 
-    enum class Operation { SAVE, RESET, PLAYED, REPLAY }
+    val measuredDurations = mutableMapOf<Long, Long>()
+
+    enum class Operation { SAVE, RESET, PLAYED, REPLAY, MEASURED_DURATION }
 
     data class Call(
         val operation: Operation,
@@ -58,6 +61,21 @@ class FakePositionStore : PositionStore {
         positions.value = positions.value + (episodeId to StoredPosition(episodeId, positionMs, now, playedAt))
         playedWithoutPosition.remove(episodeId)
         return true
+    }
+
+    override suspend fun setMeasuredDuration(
+        episodeId: Long,
+        durationMs: Long,
+    ) {
+        if (durationMs <= 0) return
+        record(Call(Operation.MEASURED_DURATION, episodeId, 0, durationMs = durationMs))
+        val old = measuredDurations[episodeId]
+        if (old == null ||
+            kotlin.math.abs(old - durationMs) > MEASURED_DURATION_TOLERANCE_MS
+        ) {
+            measuredDurations[episodeId] =
+                durationMs
+        }
     }
 
     override suspend fun reset(

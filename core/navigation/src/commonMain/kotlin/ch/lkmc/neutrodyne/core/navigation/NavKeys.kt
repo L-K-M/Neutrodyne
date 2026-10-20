@@ -101,7 +101,11 @@ public data class AddToGroupsKey(
 @Serializable
 public data object AllGroupsKey : NavKey
 
-/** Directory search results for a query, optionally restricted to a genre. */
+/**
+ * Nonblank query = text search (genre ignored). Empty query + null genre = overall chart;
+ * empty query + recognized numeric Apple genre ID = genre chart. Unknown IDs show an invalid
+ * destination without fetching. Keep these fields unchanged for saved-key compatibility.
+ */
 @Serializable
 public data class DirectoryKey(
     val query: String,

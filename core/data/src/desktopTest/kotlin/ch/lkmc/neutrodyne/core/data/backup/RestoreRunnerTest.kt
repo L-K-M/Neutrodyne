@@ -33,8 +33,11 @@ import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
@@ -61,6 +64,7 @@ import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -147,6 +151,10 @@ class RestoreRunnerTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
     private val episodeMerger =
         RestoreEpisodeMerger(
@@ -405,6 +413,51 @@ class RestoreRunnerTest {
                 listOf("set(appearance.library_titles)"),
                 settings.calls.filter { it.startsWith("set(") },
             )
+        }
+
+    /**
+     * W4/05 Rules 4: `playback.*` values outside the shared validator's declared ranges or
+     * formats are `OutOfRange`, so the merge skips them; valid values land and round-trip.
+     */
+    @Test
+    fun playbackSettingsApplyAndOutOfRangeValuesSkip() =
+        runTest {
+            fun v(
+                key: String,
+                type: String,
+                value: JsonPrimitive,
+            ) = SettingValueV1(key, type, value)
+            val staged =
+                SettingsV1(
+                    listOf(
+                        v("playback.speed", "Float32", JsonPrimitive(1.5)),
+                        v("playback.speed", "Float32", JsonPrimitive(9.0)),
+                        v("playback.speed", "Float32", JsonPrimitive(1.51)),
+                        v("playback.speed_presets", "Text", JsonPrimitive("0.75,1.25,2.5")),
+                        v("playback.speed_presets", "Text", JsonPrimitive("1.0,9.9")),
+                        v("playback.skip_back_ms", "Int64", JsonPrimitive(7_000)),
+                        v("playback.skip_forward_ms", "Int64", JsonPrimitive(45_000)),
+                        v("playback.stream_on_metered", "Choice", JsonPrimitive("SOMETIMES")),
+                        v("playback.stream_on_metered", "Choice", JsonPrimitive("ASK")),
+                        v("playback.stream_cache_mb", "Int32", JsonPrimitive(333)),
+                        v("playback.skip_silence", "Bool", JsonPrimitive(true)),
+                    ),
+                )
+            val entries = archivePayloads(settings = staged)
+            val sessionId =
+                session(archiveOf(entries, manifestBytes(entries)), categories = setOf(RestoreCategory.SETTINGS))
+
+            val completed = assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+
+            assertEquals(5, completed.settingsApplied)
+            assertEquals(6, completed.settingsSkipped)
+            assertEquals(1.5f, settings.get(PlaybackSettingKeys.SPEED))
+            assertEquals(true, settings.get(PlaybackSettingKeys.SKIP_SILENCE))
+            assertEquals("0.75,1.25,2.5", settings.get(PlaybackSettingKeys.SPEED_PRESETS))
+            assertEquals(10_000L, settings.get(PlaybackSettingKeys.SKIP_BACK_MS)) // 7_000 rejected
+            assertEquals(45_000L, settings.get(PlaybackSettingKeys.SKIP_FORWARD_MS))
+            assertEquals(StreamOnMetered.ASK, settings.get(PlaybackSettingKeys.STREAM_ON_METERED))
+            assertEquals(500, settings.get(PlaybackSettingKeys.STREAM_CACHE_MB)) // 333 rejected
         }
 
     @Test

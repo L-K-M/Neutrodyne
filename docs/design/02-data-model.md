@@ -663,14 +663,50 @@ Show notes, kept out of the hot `episode` table. Read only by episode detail, ch
 data class EpisodeDescriptionEntity(@PrimaryKey val episodeId: Long, val html: ByteArray)
 
 object EpisodeDescriptionCodec {             // the only way to read or write `html`
-    fun encode(text: String, format: DescriptionFormat): ByteArray   // header byte + UTF-8 (< 512 B) or raw DEFLATE (nowrap, level 6)
-    fun decode(bytes: ByteArray): DecodedDescription     // the text plus its stored format
+    fun encode(text: String, format: DescriptionFormat, completeness: DescriptionCompleteness = UNKNOWN): ByteArray
+    fun decode(bytes: ByteArray): DecodedDescription     // immutable text, stored format and completeness
 }
 ```
 
 `decode` never throws only on the unknown-header UTF-8 fallback (corrupt or pre-codec blobs decode as themselves, as HTML). The codec-owned `0x00`–`0x03` forms fail with `IllegalStateException` on a corrupt or truncated deflate body or on decoded output past the producer bound — every supported producer is capped at 03's `ParseLimits.maxTextChars` (512 Ki chars per element), so legitimate decoded output is at most 2 MiB of UTF-8; anything past it is a corruption signal, not show notes. `encode` enforces the same bound on its input (`IllegalArgumentException`), so a custom `ParseLimits` raised past the codec bound fails before persistence instead of writing an unreadable blob — a successful encode always round-trips.
 
 **Format headers (2026-10-12, M1a):** the header now also carries the description format, with no schema change. `encode(text, format)` writes `[0x00]` raw / `[0x01]` DEFLATE for `DescriptionFormat.HTML` and `[0x02]`/`[0x03]` for `DescriptionFormat.PLAIN_TEXT` under the same 512-byte threshold; `decode` returns a `DecodedDescription(text, format)`. Legacy and unknown-header payloads still decode as HTML, matching what every pre-format blob meant. `FeedIngestor` passes the parser's `descriptionIsHtml`; `observeShowNotes` feeds the decoded format to the sanitiser's `isHtml`, so Atom `type="text"` (and YouTube / `media:description`) literals such as `<b>` and `&copy;` no longer render as markup.
+
+**Completeness expansion (2026-10-19, local M9a I3):** `DecodedDescription`
+also returns the existing typed `DescriptionCompleteness`, now shared from
+`:core:model` (the domain name remains a Kotlin type alias). Legacy, raw and
+unmarked compressed blobs are `UNKNOWN`. Two-argument encoding keeps exactly
+the old bytes and 512-byte threshold. A producer marking `COMPLETE` or
+`TRUNCATED` forces the existing `0x01`/`0x03` raw-DEFLATE form, even for short
+or empty text. Immediately after the DEFLATE end, the codec appends UTF-8
+`\u0000Neutrodyne.description\u0000` followed by ASCII `C` or `T` (25 bytes
+total). This is an optional trailer within the existing compressed
+representation, with no new header or format version. The frozen old reader
+stops at the DEFLATE end and ignores trailing bytes; old and new readers render
+identical text and format. The new reader accepts provenance only when the
+inflater's entire remaining input is exactly that trailer. Missing, partial,
+extra or unrecognised trailers are `UNKNOWN`; corrupt/truncated DEFLATE and
+oversized output retain the existing controlled errors. In-band publisher text
+cannot mark provenance. The 2 MiB bound applies to decoded UTF-8, excluding the
+trailer, and still applies before persistence.
+
+`FeedIngestor` supplies `COMPLETE` only without a parser `TEXT_TRUNCATED`
+warning for the item's `feedOrder` or the feed. Warnings are item-scoped rather
+than field-scoped, so any such item warning conservatively marks its notes
+`TRUNCATED`. An item-count cap does not truncate an already parsed item's
+text. The YouTube variant adapter retains truncation provenance for the selected
+producer entry and remaps it after union/reordering, even when another variant
+has identical retained text. Facts supply `COMPLETE` only after an explicit
+Boolean `descriptionTruncated` in the frozen wire reply and the 32 KiB check;
+the DTO default, missing or string-valued flags are not evidence. Unknown or truncated text never authorizes complete chapter
+extraction. Existing unknown blobs, including blank ones, remain intact; no
+unchanged-row promotion, backfill or opportunistic migration is performed.
+Rollback to the old reader preserves display and backup matching, while losing
+completeness authorization. Old-writer data remains readable as `UNKNOWN`.
+Backup V1 records and SQL/schema/entities/indices/exports do not change;
+backups carry identity/hints/state, not description blobs. Restore matching
+still decodes the same description head and never derives completeness from
+hints or snippets.
 
 The column holds raw HTML from the feed (or plain text for YouTube and Atom); sanitising happens at display time ([D27](../PLAN.md#3-key-decisions), [03 Show notes](03-feeds-and-discovery.md#show-notes)). Compression shrinks the largest table to roughly a third (see [Expected size](#expected-size)). Encoding runs in the ingest's prepare step — off the write transaction for a refresh ingest, inside it for subscribe's single-transaction path, where an encode rejection aborts the whole subscribe: no podcast, alias, membership or episode row survives it (03 Subscribe transaction; covered by `SubscribeFlowTest`'s over-bound rollback and exact-bound commit cases).
 
@@ -724,6 +760,8 @@ data class FundingEntity(
 ```
 
 ### chapter
+
+**Implementation note (2026-10-19, M5).** `ChapterSource.winning` selects the first normalized source with visible rows. `normalize` drops negative starts, stable-sorts and keeps first duplicate starts including hidden rows. Missing/invalid ends use the next start; valid ends cap there, shorter ends leave gaps and the final unknown end stays null. Hidden boundaries remain. Repository source writes are atomic and identical lists are no-ops; failed JSON preserves cached sources. No schema change.
 
 One table for every chapter source; the playback rule "first non-empty source wins" is 06's ([06 Chapters](06-playback.md#chapters)).
 
@@ -1452,6 +1490,8 @@ member's display title, which the reference projection did not carry.
 
 ### Play context
 
+**Implementation note (2026-10-19, M5).** Auto browse shares membership, visibility, filters and order with play context, but includes eligible queued episodes and omits the tail anchor and queue exclusion. `contextTail` is not the browse query.
+
 Rules (which items, start item, exclusions): [05 Playing a group](05-groups-opml-backup.md#playing-a-group); consumption: [06 Queue and play context](06-playback.md#queue-and-play-context). Delivered in M4. `FeedQueryBuilder.contextTail(scope, filters, order, anchor, k, youtubePlayable)` reuses the feed-page source predicates; `ContextType` maps to `GROUP → Group`, `PODCAST → Podcast`, `ALL → All`, `UNGROUPED → Ungrouped`, `DOWNLOADS` → no source predicate plus `d.state = 'COMPLETED'` (all podcasts, ignoring `includeInAll`), `EXTERNAL` → no tail. The filters come from `contextFilterFlags`, `contextMediaFilter` and `contextMinSortDate`.
 
 ```sql
@@ -1494,20 +1534,16 @@ SELECT e.id, e.podcastId, e.title, e.enclosureUrl, e.enclosureType, e.enclosureL
        COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, s.playedAt, d.state AS downloadState,
        COALESCE(p.customTitle, p.title) AS podcastTitle, p.author, p.sourceType, p.credentialId,
        COALESCE(e.artworkKey, p.artworkKey) AS artworkKey, COALESCE(a.version, 0) AS artworkVersion,
-       p.artworkKey AS podcastArtworkKey, COALESCE(pa.version, 0) AS podcastArtworkVersion,
-       alt.type AS audioAlternateType, alt.length AS audioAlternateLength, alt.sourcesJson AS audioAlternateSourcesJson
+       p.artworkKey AS podcastArtworkKey, COALESCE(pa.version, 0) AS podcastArtworkVersion
 FROM episode e JOIN podcast p ON p.id = e.podcastId
 LEFT JOIN episode_state s ON s.episodeId = e.id
 LEFT JOIN download d ON d.episodeId = e.id
 LEFT JOIN artwork a ON a.key = COALESCE(e.artworkKey, p.artworkKey)
 LEFT JOIN artwork pa ON pa.key = p.artworkKey
-LEFT JOIN episode_alt_enclosure alt ON alt.episodeId = e.id AND alt.ordinal =
-     (SELECT x.ordinal FROM episode_alt_enclosure x WHERE x.episodeId = e.id AND x.type LIKE 'audio/%'
-      ORDER BY x.isDefault DESC, x.ordinal LIMIT 1)
 WHERE e.id IN (:ids)
 ```
 
-The mapper picks the first `http(s)` URI from `audioAlternateSourcesJson` (JSON is never read in SQL); no such URI → no alternate.
+**Implementation note (2026-10-19, M5).** `MediaLookupRow.audioAlternates` adds a batched Room relation in the same transaction, observing alternate changes without position ticks. This replaces the single-row join: rank audio rows by `isDefault DESC, ordinal`, then take the first row with a usable HTTP(S) source in list order. Skip malformed/empty/unusable rows. JSON stays in the mapper. `PlaybackMediaInfo` exposes chapter URL/type and `audioAlternate: AudioAlternate?` (URL/type/length); null means original enclosure. Preserve `isVideo`. M6 shares this ranking.
 
 **Implementation note (2026-10-18, M4).** `PlaybackMediaInfo` carries a
 `podcastArtwork` reference as well as the episode-preferred `artwork`. Its
@@ -1734,6 +1770,17 @@ WHERE episodeId = :id AND state = 'QUEUED';
 
 ### Auto-download candidates
 
+**Implementation note (2026-10-19, M6b).** W1 freezes the read signatures
+on `DownloadQueries`/`DownloadDao`: `autoCandidates`, `cleanupCandidates`,
+`unplayedAutoCompleted`, `rowsOnOtherRoots` and `observePlayedCompletedIds`,
+plus the dedicated Task Manager reset transaction. The played cleanup
+projection carries episode ID, podcast ID and played time; deletion reads the
+current row under the claim mutex. The rolling projection carries episode ID,
+podcast ID and the protected flag. Move batches return full `DownloadEntity`
+snapshots rather than a second partial row type. The owning algorithms still
+recheck state before mutation. These query additions and the settings-scope
+projection change no entity, index, schema JSON or database version.
+
 `DownloadDao.autoCandidates(...)` per podcast (M6). 07's `AutoDownloadPlanner` resolves the effective policy with `EffectiveSettingsResolver` (05) in Kotlin, then:
 
 ```sql
@@ -1757,6 +1804,14 @@ Rows already downloaded or queued count towards `keepLatest`; the planner insert
 
 ### Download all candidates
 
+Implementation note (2026-10-19, M6b): W8 also gates non-RSS sources by
+`youtubeDownloads`. The enclosure alternative alone would admit a legacy
+YouTube row carrying an enclosure in external mode, contradicting
+[05 Group actions](05-groups-opml-backup.md#group-actions). The source guard
+below keeps both channel and playlist episodes excluded until downloads are
+supported. Playback and bulk download queries share source and view predicates;
+bulk selection adds its download eligibility rules and uses no anchor.
+
 `FeedDao.downloadAllCandidates(query)` and `FeedDao.downloadAllCount(query)` (M6) back 05's `downloadAllEstimate(source)` ([05 Group feeds](05-groups-opml-backup.md#group-feeds)). `FeedQueryBuilder.downloadAll(spec, youtubeDownloads)` (`youtubeDownloads` = `YouTubeCapabilities.downloads`) reuses the play-context source predicate and carried filters of [Play context](#play-context) without an anchor:
 
 ```sql
@@ -1768,6 +1823,7 @@ WHERE <source predicate> AND <filters> AND <VISIBLE> AND e.availability = 'AVAIL
   AND e.sortDate >= :minSortDate
   AND s.playedAt IS NULL AND s.downloadDismissedAt IS NULL          -- tombstones are deliberate user deletions
   AND (d.episodeId IS NULL OR d.state IN ('FAILED', 'MISSING'))     -- no row in QUEUED … COMPLETED
+  AND (:youtubeDownloads = 1 OR p.sourceType = 'RSS')
   AND (e.enclosureUrl IS NOT NULL OR (e.externalMediaId IS NOT NULL AND :youtubeDownloads = 1))
 ORDER BY e.sortDate DESC, e.id DESC
 LIMIT 200
@@ -2063,11 +2119,11 @@ sequenceDiagram
 **Implementation note (2026-10-16, M2):** B5 uses the existing `PositionDao.upsert` and ignored `EpisodeStateDao.ensure` with pre-seeded `startedAt` for the 100 position-only writes; the guarded position-save sequence belongs to M4 and is not implemented yet. A separate test creates the state row with `startedAt` in the first position transaction and permits exactly one invalidation, then none on subsequent saves. Session updates and queue reorders use test-only SQL because their M4 DAO writers are also absent. Both desktop and bundled-driver device legs drain Room tracking between writes and reload a fresh source after every invalidation, so notifications cannot coalesce into a false pass. The timing legs use the full 300/50,000/20 seed and file-backed WAL databases; GMD emits the samples and medians to stdout and the instrumentation stream collected with the existing `androidTest-results` reports. Timings are recorded only, with reference-device acceptance still manual.
 
 **Implementation note (2026-10-18, M4).** The shared desktop/device hygiene
-probe now uses the guarded position-save DAO sequence (`insertIfAbsent` +
-`updateGuarded` + `markStarted`), the production `PlaySessionDao` write path
-and the queue order-key update, one transaction per step. The data-layer
-store-level hygiene test lands with its queue/media store slice. No schema
-or index change is required by these queries.
+probe now uses the guarded position-save DAO sequence, `markStarted`, and
+the production session and queue writers. The data-layer hygiene tests also
+exercise the actual playback stores and verify that steady position saves
+leave feed pages and low-churn queue/media observers alone. No schema or
+index change is required by these queries.
 
 ---
 

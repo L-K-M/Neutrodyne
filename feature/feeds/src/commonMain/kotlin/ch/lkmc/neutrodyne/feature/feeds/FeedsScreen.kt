@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,9 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,6 +51,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.ui.EmptyState
@@ -59,10 +64,12 @@ import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.forSource
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
+import ch.lkmc.neutrodyne.core.ui.resources.download_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_caught_up
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_empty_body
@@ -73,6 +80,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_onboarding_title
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_search
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
+import ch.lkmc.neutrodyne.core.ui.resources.play
 import org.jetbrains.compose.resources.stringResource
 
 private const val SKELETON_ROWS = 6
@@ -93,6 +101,8 @@ internal fun FeedPage(
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    onDownloadAll: (() -> Unit)? = null,
+    onPlay: () -> Unit = {},
     onImport: () -> Unit = {},
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
@@ -121,9 +131,11 @@ internal fun FeedPage(
                     live = live,
                     onVisibleIds = onVisibleIds,
                     onRefresh = onRefresh,
+                    onPlay = onPlay,
                     onFiltersChange = onFiltersChange,
                     onAction = onAction,
                     onMarkAllPlayedClick = onMarkAllPlayedClick,
+                    onDownloadAll = onDownloadAll,
                     visitBaseline = visitBaseline,
                 )
             }
@@ -140,9 +152,11 @@ private fun FeedList(
     state: FeedsUiState,
     items: LazyPagingItems<FeedItem>,
     onRefresh: () -> Unit,
+    onPlay: () -> Unit,
     onFiltersChange: (FeedFilters) -> Unit,
     onAction: (EpisodeAction) -> Unit,
     onMarkAllPlayedClick: () -> Unit,
+    onDownloadAll: (() -> Unit)?,
     visitBaseline: Long?,
     selection: EpisodeSelectionController?,
 ) {
@@ -160,7 +174,7 @@ private fun FeedList(
 
     if (refreshState is LoadState.Loading && items.itemCount == 0) {
         Column(Modifier.fillMaxSize()) {
-            FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
+            FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick, onDownloadAll)
             repeat(SKELETON_ROWS) { SkeletonRow() }
         }
         return
@@ -221,7 +235,7 @@ private fun FeedList(
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().testTag("feed-list")) {
             offlineBannerItem(state.offline)
             item(key = "header", contentType = "header") {
-                FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
+                FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick, onDownloadAll)
             }
             items(
                 count = items.itemCount,
@@ -270,7 +284,7 @@ private fun FeedList(
                             live = rowLive,
                             style = EpisodeRowStyle.FEED,
                             caps =
-                                RowCaps.FULL.copy(
+                                state.rowCaps.forSource(item.row.sourceType).copy(
                                     offline = state.offline,
                                     swipe = state.swipe.takeIf { selectedIds.isEmpty() },
                                 ),
@@ -340,19 +354,26 @@ private fun LoadErrorBanner(items: LazyPagingItems<*>) {
 }
 
 /**
- * The scrolling header item (08 Header, chips and actions): the filter chips and the page
- * overflow — Refresh and "Mark all as played…" (the All page's M1a overflow; "Hide older
- * than…" is M2's). The header's Play button is omitted until M4 (deviation in 08).
+ * The scrolling header item (08 Header, chips and actions): the Play button, the filter
+ * chips and the page overflow — Refresh and "Mark all as played…" (the All page's M1a
+ * overflow; "Hide older than…" is M2's).
  */
 @Composable
 private fun FeedHeader(
     filters: FeedFilters,
+    onPlay: () -> Unit,
     onFiltersChange: (FeedFilters) -> Unit,
     onRefresh: () -> Unit,
     onMarkAllPlayedClick: () -> Unit,
+    onDownloadAll: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        FilledTonalButton(onClick = onPlay, modifier = Modifier.padding(start = HEADER_PAD)) {
+            Icon(NdIcons.PlayArrow, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+            Text(stringResource(Res.string.play))
+        }
         FeedFilterChips(
             availableFilters = AVAILABLE_FEED_FILTER_CAPABILITIES,
             filters = filters,
@@ -366,6 +387,13 @@ private fun FeedHeader(
                 contentDescription = stringResource(Res.string.action_more),
             )
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                onDownloadAll?.let { download ->
+                    DropdownMenuItem(text = { Text(stringResource(Res.string.download_all)) }, onClick = {
+                        menuOpen =
+                            false
+                        ; download()
+                    })
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(Res.string.feeds_refresh)) },
                     onClick = {
@@ -418,6 +446,7 @@ private fun Modifier.skeletonBlock(): Modifier = background(MaterialTheme.colorS
 
 private val ROW_HEIGHT = 72.dp
 private val DAY_PADDING = 16.dp
+private val HEADER_PAD = 16.dp
 private val DAY_TOP = 16.dp
 private val DAY_BOTTOM = 4.dp
 private val FOOTER_PAD = 16.dp

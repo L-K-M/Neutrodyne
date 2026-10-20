@@ -7,6 +7,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
+import androidx.room3.Transaction
 import ch.lkmc.neutrodyne.core.model.Availability
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -17,7 +18,7 @@ private const val NOTIFICATION_BIND_CHUNK = 500
 /**
  * The [MediaLookupRow] SELECT list and joins (02 Media lookup, M4): `episode`, `podcast` and the
  * low-churn LEFT joins (`episode_state`, `download`, both artwork lookups), never
- * `episode_position`. The alternate-enclosure columns of the reference SQL ship with M5.
+ * `episode_position`. M5 adds the batched alternate relation to the projection.
  */
 private const val MEDIA_INFO_SELECT =
     "SELECT e.id, e.podcastId, e.title, e.sortDate, e.enclosureUrl, e.enclosureType, e.enclosureLength," +
@@ -42,7 +43,26 @@ private const val MEDIA_INFO_SELECT =
  * besides refresh, restore stubs and retention — 02).
  */
 @Dao
-interface EpisodeDao {
+interface EpisodeDao : DownloadSourceQueries {
+    override suspend fun downloadSources(ids: List<Long>): List<DownloadSourceRow> =
+        ids.distinct().chunked(DOWNLOAD_BIND_CHUNK).flatMap { downloadSourcesChunk(it) }.map { row ->
+            val ranked =
+                row.audioAlternates
+                    .filter { it.type.startsWith("audio/", ignoreCase = true) }
+                    .sortedWith(compareByDescending<EpisodeAltEnclosureEntity> { it.isDefault }.thenBy { it.ordinal })
+            row.copy(audioAlternates = ranked)
+        }
+
+    @Transaction
+    @Query(
+        "SELECT e.id AS episodeId, e.podcastId, e.title, e.sortDate, e.isVideo, e.availability," +
+            " COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, p.sourceType, p.youtubeChannelId," +
+            " COALESCE(p.customTitle, p.title) AS podcastTitle, e.enclosureUrl, e.enclosureType," +
+            " e.enclosureLength, e.externalMediaId FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " LEFT JOIN episode_state s ON s.episodeId = e.id WHERE e.id IN (:ids)",
+    )
+    suspend fun downloadSourcesChunk(ids: List<Long>): List<DownloadSourceRow>
+
     /**
      * Restore's stub insertion (05 `Stubs and matching`, 02's `INSERT OR IGNORE`): `inFeed = 0`
      * rows a later refresh matches by `identityKey`. OR IGNORE because a `(podcastId,
@@ -97,6 +117,41 @@ interface EpisodeDao {
     )
     suspend fun notificationRowsChunk(episodeIds: Collection<Long>): List<NewEpisodeRow>
 
+    /** Filter announcements after ingest; hidden Shorts and unavailable rows are never announced. */
+    @Query(
+        "SELECT e.id FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.podcastId = :podcastId AND e.id IN (:ids)" +
+            " AND e.isNew = 1 AND e.availability = 'AVAILABLE' AND " + FeedQueryBuilder.VISIBLE,
+    )
+    suspend fun youTubeAnnounceable(
+        podcastId: Long,
+        ids: List<Long>,
+    ): List<Long>
+
+    @Query("SELECT * FROM episode WHERE podcastId = :podcastId AND externalMediaId = :videoId LIMIT 1")
+    suspend fun youTubeByVideoId(
+        podcastId: Long,
+        videoId: String,
+    ): EpisodeEntity?
+
+    @Query("SELECT html FROM episode_description WHERE episodeId = :episodeId")
+    suspend fun description(episodeId: Long): ByteArray?
+
+    /** Refresh never scans an unbounded history or individually fetches every unknown video. */
+    @Query(
+        "SELECT e.id, e.externalMediaId, e.availability, e.isShort FROM episode e" +
+            " JOIN podcast p ON p.id = e.podcastId WHERE e.podcastId = :podcastId" +
+            " AND p.sourceType = 'YOUTUBE_CHANNEL' AND e.externalMediaId IS NOT NULL AND (" +
+            " (e.availability = 'AVAILABLE' AND (e.durationMs IS NULL OR e.durationMs <= 0)" +
+            " AND e.firstSeenAt > :now - 604800000 AND " + FeedQueryBuilder.VISIBLE + ") OR" +
+            " (e.availability IN ('LIVE', 'UPCOMING') AND e.firstSeenAt > :now - 2592000000))" +
+            " ORDER BY e.sortDate DESC, e.id DESC LIMIT 90",
+    )
+    suspend fun youTubeCandidates(
+        podcastId: Long,
+        now: Long,
+    ): List<YouTubeCandidate>
+
     // --- Episode detail and show notes (03, added 2026-10-07) -------------------------------------
 
     /** `EpisodeRepository.observeEpisode` (03): the episode detail screen's joined row. */
@@ -141,6 +196,19 @@ interface EpisodeDao {
     @RawQuery(observedEntities = [EpisodeEntity::class, PodcastEntity::class, EpisodeStateEntity::class])
     suspend fun unplayedIds(query: RoomRawQuery): List<Long>
 
+    /** Caller escapes LIKE wildcards; values are bound, never interpolated into SQL. */
+    @Query(
+        "SELECT e.id FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.title LIKE :pattern ESCAPE '\\' AND " + FeedQueryBuilder.VISIBLE +
+            " AND e.availability = 'AVAILABLE' AND (:youtubePlayable = 1 OR p.sourceType = 'RSS')" +
+            " ORDER BY e.sortDate DESC, e.id DESC LIMIT :limit",
+    )
+    suspend fun searchTitles(
+        pattern: String,
+        limit: Int,
+        youtubePlayable: Boolean,
+    ): List<Long>
+
     // --- Playback media lookup (02 Media lookup, M4) -------------------------------------------------
 
     /**
@@ -151,12 +219,13 @@ interface EpisodeDao {
     suspend fun mediaInfo(ids: List<Long>): List<MediaLookupRow> =
         ids.distinct().chunked(NOTIFICATION_BIND_CHUNK).flatMap { mediaInfoChunk(it) }
 
+    @Transaction
     @Query("$MEDIA_INFO_SELECT WHERE e.id IN (:ids)")
     suspend fun mediaInfoChunk(ids: List<Long>): List<MediaLookupRow>
 
     /**
      * The observed variant (06's projector): Room tracks exactly the queried low-churn tables:
-     * `episode`, `podcast`, `episode_state`, `download`, `artwork`, so position ticks never
+     * `episode`, `podcast`, `episode_state`, `download`, `artwork`, `episode_alt_enclosure`, so position ticks never
      * re-emit. Batch reads chunk like [mediaInfo]; an empty set emits one empty list.
      */
     fun observeMediaInfo(ids: List<Long>): Flow<List<MediaLookupRow>> =
@@ -172,6 +241,7 @@ interface EpisodeDao {
                 }
             }
 
+    @Transaction
     @Query("$MEDIA_INFO_SELECT WHERE e.id IN (:ids)")
     fun observeMediaInfoChunk(ids: List<Long>): Flow<List<MediaLookupRow>>
 
@@ -202,4 +272,12 @@ data class NewEpisodeRow(
     val groupName: String?,
     val groupOrderKey: String?,
     val groupNotify: Boolean?,
+)
+
+/** Narrow refresh selection; identity, Atom hash and user state are intentionally absent. */
+data class YouTubeCandidate(
+    val id: Long,
+    val externalMediaId: String,
+    val availability: Availability,
+    val isShort: Boolean,
 )

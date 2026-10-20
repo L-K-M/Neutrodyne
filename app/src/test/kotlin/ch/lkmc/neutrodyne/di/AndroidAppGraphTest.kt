@@ -2,19 +2,29 @@
 package ch.lkmc.neutrodyne.di
 
 import android.app.Application
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.SnapshotNowReceiver
+import ch.lkmc.neutrodyne.core.artwork.ArtworkProviderGraph
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
+import ch.lkmc.neutrodyne.core.database.DescriptionFormat
+import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
+import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
@@ -23,12 +33,19 @@ import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
+import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.feature.player.PlayerViewModel
 import ch.lkmc.neutrodyne.notifications.AndroidGroupChannelSync
 import ch.lkmc.neutrodyne.notifications.AndroidImportReportPoster
 import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
@@ -37,6 +54,8 @@ import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,13 +76,137 @@ class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
 
     @Test
+    fun downloadComponentsInjectBeforeDatabaseOpen() {
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .ManualDownloadJobService(),
+        )
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .DownloadActionReceiver(),
+        )
+        assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
+        assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+        assertThat(graph.initializers.map { it.order }).containsAtLeast(10, 130, 210, 310)
+    }
+
+    @Test
+    fun discoveryEntriesResolveWithTheirIntendedScenes() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(provider(DiscoverKey).metadata[NdSceneMetadata.KEY_PANE])
+            .isEqualTo(NdSceneMetadata.PANE_LIST)
+        for (key in listOf(
+            DirectoryKey("news", null),
+            DirectoryKey("", null),
+            DirectoryKey("", "1318"),
+            PodcastPreviewKey("https://example.test/feed"),
+        )) {
+            assertThat(provider(key).metadata[NdSceneMetadata.KEY_PANE]).isEqualTo(NdSceneMetadata.PANE_DETAIL)
+        }
+        assertThat(provider(AddPodcastKey(null)).metadata[NdSceneMetadata.KEY_OVERLAY])
+            .isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        for (page in listOf(SettingsPage.DISCOVER, SettingsPage.PRIVACY)) {
+            assertThat(provider(SettingsKey(page)).contentKey).isNotNull()
+        }
+        assertThat(graph.searchRepository::class.simpleName).isEqualTo("SearchRepositoryImpl")
+        assertThat(graph.searchRepository).isSameInstanceAs(graph.searchRepository)
+        assertThat(graph.autodiscovery::class.simpleName).isEqualTo("JsoupAutodiscovery")
+        assertThat(graph.metroViewModelFactory).isNotNull()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
+    fun currentChaptersUseTheRealCompleteSnapshotLoaderInTheOrdinaryGraph() =
+        runBlocking<Unit> {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            try {
+                val channel =
+                    db.podcastDao().insertPodcast(
+                        podcastEntity().copy(
+                            sourceType = SourceType.YOUTUBE_CHANNEL,
+                            youtubeChannelId = "UC" + "0".repeat(21) + "A",
+                        ),
+                    )
+                val id =
+                    db.episodeDao().insertStub(
+                        episodeEntity(podcastId = channel).copy(externalMediaId = "aaaaaaaaaaA", durationMs = 30_000),
+                    )
+                db.ingestDao().fillYouTubeDescription(
+                    id,
+                    EpisodeDescriptionCodec.encode(
+                        "0:00 Intro\n0:10 Next\n0:20 End",
+                        DescriptionFormat.PLAIN_TEXT,
+                        DescriptionCompleteness.COMPLETE,
+                    ),
+                    "notes",
+                )
+                graph.chapterRepository().ensureCurrentLoaded(id)
+                val rows = graph.chapterRepository().observe(id).first()
+                assertThat(rows.map { it.startMs }).containsExactly(0L, 10_000L, 20_000L).inOrder()
+                assertThat(rows.map { it.source }.toSet()).containsExactly(ChapterSource.YOUTUBE_DESC)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun durablePlaybackPortsResolveToSingleProductionBindings() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                val bindings =
+                    listOf(
+                        graph.queueRepository() to "QueueRepositoryImpl",
+                        graph.playContextResolver() to "PlayContextResolverImpl",
+                        graph.playSessionStore() to "SessionWriter",
+                        graph.positionStore() to "PositionWriter",
+                        graph.playbackMediaLookup() to "PlaybackMediaLookupImpl",
+                        graph.chapterRepository() to "ChapterRepositoryImpl",
+                    )
+                for ((binding, expectedName) in bindings) {
+                    assertThat(binding::class.simpleName).isEqualTo(expectedName)
+                }
+                assertThat(graph.queueRepository()).isSameInstanceAs(graph.queueRepository())
+                assertThat(graph.playContextResolver()).isSameInstanceAs(graph.playContextResolver())
+                assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
+                assertThat(graph.positionStore()).isSameInstanceAs(graph.positionStore())
+                assertThat(graph.playbackMediaLookup()).isSameInstanceAs(graph.playbackMediaLookup())
+                assertThat(graph.chapterRepository()).isSameInstanceAs(graph.chapterRepository())
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
+
+    @Test
+    fun playerSpeedEntryAndWindowViewModelResolveWithoutOpeningDatabase() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(
+            provider(SleepTimerKey).metadata[NdSceneMetadata.KEY_OVERLAY],
+        ).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        assertThat(provider(SpeedKey).metadata[NdSceneMetadata.KEY_OVERLAY]).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        val player = graph.metroViewModelFactory.create(PlayerViewModel::class, CreationExtras.Empty)
+        assertThat(player.uiState.value.now).isNull()
+        player.viewModelScope.cancel()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
     fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
         runBlocking {
             assertThat(graph.playbackController).isSameInstanceAs(graph.playbackController)
-            assertThat(graph.playbackStateSource).isSameInstanceAs(graph.playbackController)
-            assertThat(graph.playbackMaintenance).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource).isSameInstanceAs(graph.playbackStateSource)
+            assertThat(graph.playbackMaintenance).isSameInstanceAs(graph.playbackMaintenance)
+            assertThat(graph.playbackController::class.simpleName).isEqualTo("PlaybackControllerImpl")
+            assertThat(graph.playbackStateSource::class.simpleName).isEqualTo("PlaybackStateHub")
+            assertThat(graph.playbackMaintenance::class.simpleName).isEqualTo("StreamingCache")
             assertThat(graph.playbackStateSource.nowPlaying.value).isNull()
             assertThat(graph.playbackStateSource.effectivePlayback.value).isNull()
+            assertThat(
+                graph.playbackStateSource.sleepTimer.value,
+            ).isEqualTo(SleepTimerState.Off)
+            assertThat(graph.playbackStateSource.currentChapter.value).isNull()
             assertThat(graph.playbackController.playEpisode(1)).isEqualTo(PlayResult.ServiceUnavailable)
             assertThat(graph.playbackController.playEpisodeAt(1, 20)).isEqualTo(PlayResult.ServiceUnavailable)
             assertThat(
@@ -71,10 +214,16 @@ class AndroidAppGraphTest {
             ).isEqualTo(PlayResult.ServiceUnavailable)
             assertThat(graph.playbackController.play()).isEqualTo(PlayResult.ServiceUnavailable)
             graph.playbackController.pause()
-            graph.playbackController.dismiss()
-            assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)
-            graph.playbackMaintenance.clearStreamingCache()
+            // Dismiss is a durable command; it is deliberately not invoked by a graph-construction test.
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+            assertThat(graph.youtubeEngine).isSameInstanceAs(graph.youtubeEngine)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+            graph.youtubeEngine.retryStart()
+            assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
+                ch.lkmc.neutrodyne.youtube.api.EngineAvailability.NOT_YET_AVAILABLE,
+            )
+            assertThat(graph.youtubeEngine.status.value.version).isNull()
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
             assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
             assertThat(
@@ -84,8 +233,33 @@ class AndroidAppGraphTest {
             graph.youtubeStreamResolver.invalidate("id")
             graph.youtubeStreamResolver.invalidateAll()
             assertThat(graph.initializers).isNotEmpty()
+            // Taking providers must not resolve their database-backed dependencies.
+            assertThat(graph.queueRepository).isNotNull()
+            assertThat(graph.playContextResolver).isNotNull()
+            assertThat(graph.playSessionStore).isNotNull()
+            assertThat(graph.positionStore).isNotNull()
+            assertThat(graph.playbackMediaLookup).isNotNull()
+            assertThat(graph.chapterRepository).isNotNull()
             assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
         }
+
+    @Test
+    fun serviceInjectionDefersDatabaseConsumersWhileOpenIsPending() {
+        val service =
+            ch.lkmc.neutrodyne.playback.impl
+                .NeutrodynePlaybackService()
+        (graph as ch.lkmc.neutrodyne.playback.impl.PlaybackServiceInjector).inject(service)
+        assertThat(service.access).isNotNull()
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+    }
+
+    @Test
+    fun artworkProviderContributionDefersDatabaseAccess() {
+        val artwork = graph as ArtworkProviderGraph
+        assertThat(artwork.artworkProviderAccess()).isNotNull()
+        assertThat(graph.workerFactory).isNotNull()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
 
     @Test
     fun everyM0aKeyHasAnEntry() {
@@ -280,6 +454,16 @@ class AndroidAppGraphTest {
                 "AutoBackupInitializer" to 200..299,
                 // 05 Destinations: expired private exports are swept in the cleanup band.
                 "ExportFilesCleaner" to 300..399,
+                "ArtworkInitializer" to 300..300,
+                "PlaybackPrefsInitializer" to 300..300,
+                "PlayerConnectionInitializer" to 300..300,
+                "PlaybackChannels" to 10..10,
+                "DownloadChannelsInitializer" to 10..10,
+                "DownloadIndexInitializer" to 130..130,
+                "DeferredDeletesInitializer" to 310..310,
+                "DownloadCleanupInitializer" to 200..200,
+                "DownloadReconcileInitializer" to 210..210,
+                "DownloadObserversInitializer" to 310..310,
             )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */
@@ -288,8 +472,13 @@ class AndroidAppGraphTest {
                 FeedsKey,
                 LibraryKey,
                 UpNextKey,
+                SpeedKey,
+                SleepTimerKey,
                 DownloadsKey,
                 DiscoverKey,
+                DirectoryKey("news", null),
+                DirectoryKey("", "1318"),
+                PodcastPreviewKey("https://example.test/feed"),
                 SettingsHomeKey,
                 SettingsKey(SettingsPage.ABOUT),
                 LicencesKey,

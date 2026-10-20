@@ -51,7 +51,7 @@ class FeedFilterChipsTest {
         }
 
     @Test
-    fun milestoneGatedChipsAreAbsentEvenForStoredFlags() =
+    fun progressAndDownloadsAreAvailableWithTheirProducers() =
         runComposeUiTest {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
@@ -63,9 +63,9 @@ class FeedFilterChipsTest {
                         AVAILABLE_FEED_FILTER_CAPABILITIES,
                     )
                 }
-                onNodeWithText("Downloaded").assertDoesNotExist()
-                onNodeWithText("In progress").assertDoesNotExist()
-                onNodeWithText("Clear filters").assertDoesNotExist()
+                onNodeWithText("Downloaded").assertIsSelected()
+                onNodeWithText("In progress").assertIsSelected()
+                onNodeWithText("Clear filters").assertExists()
             } finally {
                 Locale.setDefault(previous)
             }

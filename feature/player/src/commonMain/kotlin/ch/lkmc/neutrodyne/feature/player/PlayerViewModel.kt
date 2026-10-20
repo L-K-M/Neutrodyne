@@ -1,0 +1,560 @@
+// SPDX-License-Identifier: Unlicense
+
+package ch.lkmc.neutrodyne.feature.player
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
+import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
+import ch.lkmc.neutrodyne.core.model.EffectivePlayback
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
+import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
+import ch.lkmc.neutrodyne.core.ui.AvailabilityText
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
+import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.UserMessage
+import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
+import ch.lkmc.neutrodyne.feature.player.resources.Res
+import ch.lkmc.neutrodyne.feature.player.resources.player_audio_gone
+import ch.lkmc.neutrodyne.feature.player.resources.player_auth_required
+import ch.lkmc.neutrodyne.feature.player.resources.player_external
+import ch.lkmc.neutrodyne.feature.player.resources.player_format_unsupported
+import ch.lkmc.neutrodyne.feature.player.resources.player_http
+import ch.lkmc.neutrodyne.feature.player.resources.player_invalid_presets
+import ch.lkmc.neutrodyne.feature.player.resources.player_marked_played
+import ch.lkmc.neutrodyne.feature.player.resources.player_metered_blocked
+import ch.lkmc.neutrodyne.feature.player.resources.player_no_group
+import ch.lkmc.neutrodyne.feature.player.resources.player_no_media
+import ch.lkmc.neutrodyne.feature.player.resources.player_not_playable
+import ch.lkmc.neutrodyne.feature.player.resources.player_nothing_to_play
+import ch.lkmc.neutrodyne.feature.player.resources.player_offline
+import ch.lkmc.neutrodyne.feature.player.resources.player_retry
+import ch.lkmc.neutrodyne.feature.player.resources.player_settings
+import ch.lkmc.neutrodyne.feature.player.resources.player_skipped
+import ch.lkmc.neutrodyne.feature.player.resources.player_unavailable
+import ch.lkmc.neutrodyne.feature.player.resources.player_write_failed
+import ch.lkmc.neutrodyne.feature.player.resources.player_youtube_unavailable
+import ch.lkmc.neutrodyne.playback.api.NowPlaying
+import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
+import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
+import ch.lkmc.neutrodyne.playback.api.UnplayableReason
+import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
+import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+public enum class PlayerMessageAction { RETRY, PLAYBACK_SETTINGS, WATCH_ON_YOUTUBE }
+
+public data class PlayerUiState(
+    val now: NowPlaying? = null,
+    val effective: EffectivePlayback? = null,
+    val skipBackMs: Long = PlaybackSettingKeys.SKIP_BACK_MS.default,
+    val skipForwardMs: Long = PlaybackSettingKeys.SKIP_FORWARD_MS.default,
+    val presets: String = PlaybackSettingKeys.DEFAULT_SPEED_PRESETS,
+    val consent: PlayResult.NeedsMeteredConsent? = null,
+    val messages: ImmutableList<UserMessage> = persistentListOf(),
+    val miniSkip: Boolean = true,
+    val sleepTimer: SleepTimerState = SleepTimerState.Off,
+    val lastSleepMinutes: Int = PlaybackSettingKeys.SLEEP_LAST_MINUTES.default,
+    val chapters: List<EpisodeChapter> = emptyList(),
+    val currentChapter: CurrentChapter? = null,
+)
+
+public data class PlayerNotesState(
+    val episodeId: Long? = null,
+    val notes: ShowNotes? = null,
+    val imageMode: ShowNotesImageMode = ShowNotesImageMode.TAP_TO_LOAD,
+    val offline: Boolean = false,
+)
+
+/** Window-scoped UI policy. Audio, scope resolution and storage stay behind their ports. */
+@ViewModelKey(PlayerViewModel::class)
+@ContributesIntoMap(AppScope::class)
+@Inject
+public class PlayerViewModel(
+    private val controller: PlaybackController,
+    private val source: PlaybackStateSource,
+    private val settings: SettingsRepository,
+    private val clock: Clock,
+    private val chapters: Provider<ChapterRepository>,
+    private val episodes: Provider<EpisodeRepository>,
+    private val network: NetworkMonitor,
+    externalOpenService: Provider<YouTubeExternalOpen>,
+) : ViewModel() {
+    private val messages = UserMessages()
+    public val externalOpen =
+        ExternalOpenHandler(
+            viewModelScope,
+            messages,
+            mark = { externalOpenService().onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+            undo = { externalOpenService().undo(it) },
+            onFailure = { writeFailed() },
+        )
+    private val messageActions = mutableMapOf<Long, PlayerMessageAction>()
+    private val watchEpisodes = mutableMapOf<Long, Long>()
+    private val locallyPendingConsent = MutableStateFlow<PlayResult.NeedsMeteredConsent?>(null)
+    private val ignoredConsent = MutableStateFlow<PlayResult.NeedsMeteredConsent?>(null)
+    private val scopeWrite = MutableStateFlow<ScopeWriteResult?>(null)
+    public val scopeWriteResult: StateFlow<ScopeWriteResult?> = scopeWrite.asStateFlow()
+
+    private val notesVisible = MutableStateFlow(false)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val chapterRows =
+        source.nowPlaying
+            .map { it?.episodeId }
+            .distinctUntilChanged()
+            .flatMapLatest { id ->
+                if (id == null) {
+                    flowOf(null to emptyList())
+                } else {
+                    chapters().observe(id).map { id to it }.onStart { emit(id to emptyList()) }
+                }
+            }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    public val notes: StateFlow<PlayerNotesState> =
+        combine(
+            source.nowPlaying.map { it?.episodeId }.distinctUntilChanged(),
+            notesVisible,
+        ) { id, visible -> id?.takeIf { visible } }
+            .distinctUntilChanged()
+            .flatMapLatest { id ->
+                if (id == null) {
+                    flowOf(PlayerNotesState())
+                } else {
+                    combine(
+                        episodes().observeShowNotes(id),
+                        settings.observe(FeedsSettingKeys.SHOW_NOTES_IMAGES),
+                        network.status,
+                    ) { notes, images, net ->
+                        val imageMode =
+                            when (images) {
+                                ShowNotesImages.ALWAYS -> {
+                                    ShowNotesImageMode.SHOWN
+                                }
+
+                                ShowNotesImages.TAP_TO_LOAD -> {
+                                    ShowNotesImageMode.TAP_TO_LOAD
+                                }
+
+                                ShowNotesImages.WIFI_ONLY -> {
+                                    if (net.isMetered) ShowNotesImageMode.BLOCKED else ShowNotesImageMode.SHOWN
+                                }
+                            }
+                        PlayerNotesState(id, notes, imageMode, !net.isConnected)
+                    }
+                }
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), PlayerNotesState())
+
+    public fun showNotes(visible: Boolean) {
+        notesVisible.value = visible
+    }
+
+    public val uiState: StateFlow<PlayerUiState> =
+        combine(
+            source.nowPlaying,
+            source.effectivePlayback,
+            settings.observe(PlaybackSettingKeys.SKIP_BACK_MS),
+            settings.observe(PlaybackSettingKeys.SKIP_FORWARD_MS),
+            settings.observe(PlaybackSettingKeys.SPEED_PRESETS),
+            ::PlayerUiState,
+        ).combine(
+            combine(source.pendingMeteredConsent, locallyPendingConsent, ignoredConsent) { retained, local, ignored ->
+                (retained ?: local)?.takeUnless { it == ignored }
+            },
+        ) { state, consent -> state.copy(consent = consent) }
+            .combine(
+                settings.observe(AppearanceSettingKeys.MINI_PLAYER_SKIP),
+            ) { state, show -> state.copy(miniSkip = show) }
+            .combine(source.sleepTimer) { state, timer -> state.copy(sleepTimer = timer) }
+            .combine(settings.observe(PlaybackSettingKeys.SLEEP_LAST_MINUTES)) { state, minutes ->
+                val valid =
+                    minutes.takeIf(SleepTimerMode::isValidMinutes)
+                        ?: PlaybackSettingKeys.SLEEP_LAST_MINUTES.default
+                state.copy(lastSleepMinutes = valid)
+            }.combine(chapterRows) { state, rows ->
+                state.copy(chapters = rows.second.takeIf { rows.first == state.now?.episodeId }.orEmpty())
+            }.combine(source.currentChapter) { state, current ->
+                state.copy(currentChapter = current?.takeIf { it.episodeId == state.now?.episodeId })
+            }.combine(messages.flow) { state, messages -> state.copy(messages = messages) }
+            .stateIn(viewModelScope, SHARING, PlayerUiState(now = source.nowPlaying.value))
+
+    /** Only 1 Hz samples enter a flow. Frame interpolation belongs to the visible scrubber. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    public val position: StateFlow<PositionSnapshot?> =
+        source.nowPlaying
+            .flatMapLatest { now ->
+                if (now == null) {
+                    flowOf(null)
+                } else {
+                    source.positionTicks.filter { it.episodeId == now.episodeId }.onStart { emit(now.position) }
+                }
+            }.stateIn(viewModelScope, SHARING, source.nowPlaying.value?.position)
+
+    init {
+        viewModelScope.launch {
+            source.events.collect { event ->
+                when (event) {
+                    is PlaybackEvent.StartRefused -> {
+                        report(event.result)
+                    }
+
+                    is PlaybackEvent.Skipped -> {
+                        messages.post(
+                            UiText.Res(Res.string.player_skipped, listOf(event.title, unplayableText(event.reason))),
+                        )
+                    }
+
+                    is PlaybackEvent.MarkedPlayed, PlaybackEvent.SleepTimerFired -> {
+                        Unit
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            source.pendingMeteredConsent.collect { pending ->
+                if (pending == null) {
+                    ignoredConsent.value = null
+                } else {
+                    locallyPendingConsent.value = null
+                }
+            }
+        }
+    }
+
+    public fun positionAt(snapshot: PositionSnapshot): Long = snapshot.positionAt(clock.elapsedRealtime())
+
+    public fun togglePlayPause() {
+        if (source.nowPlaying.value?.let { it.isPlaying || it.playWhenReady } == true) {
+            controller.pause()
+            return
+        }
+        viewModelScope.launch {
+            ignoredConsent.value = null
+            report(suspendRunCatching { controller.play() }.getOrDefault(PlayResult.ServiceUnavailable))
+        }
+    }
+
+    public fun skipBack() = controller.skipBack()
+
+    public fun skipForward() = controller.skipForward()
+
+    public fun previous() {
+        if (uiState.value.chapters.isNotEmpty()) controller.previousChapter() else controller.skipToPrevious()
+    }
+
+    public fun next() {
+        if (uiState.value.chapters.isNotEmpty()) controller.nextChapter() else nextEpisode()
+    }
+
+    public fun nextEpisode() {
+        if (source.nowPlaying.value?.hasNext == true) controller.skipToNext()
+    }
+
+    public fun setSleepTimer(mode: SleepTimerMode) {
+        if (source.nowPlaying.value == null) return
+        if (mode is SleepTimerMode.Minutes && !SleepTimerMode.isValidMinutes(mode.minutes)) return
+        controller.setSleepTimer(mode)
+        if (mode !is SleepTimerMode.Minutes) return
+        viewModelScope.launch {
+            if (suspendRunCatching { settings.set(PlaybackSettingKeys.SLEEP_LAST_MINUTES, mode.minutes) }
+                    .getOrNull() !is Outcome.Success
+            ) {
+                writeFailed()
+            }
+        }
+    }
+
+    public fun extendSleepTimer(minutes: Int) {
+        if (SleepTimerMode.isValidMinutes(minutes)) controller.extendSleepTimer(minutes)
+    }
+
+    public fun seekTo(
+        positionMs: Long,
+        episodeId: Long? = source.nowPlaying.value?.episodeId,
+    ) {
+        val snapshot = position.value ?: return
+        if (episodeId != source.nowPlaying.value?.episodeId || snapshot.episodeId != episodeId) return
+        controller.seekTo(positionMs.coerceIn(0L, snapshot.durationMs?.coerceAtLeast(0L) ?: Long.MAX_VALUE))
+    }
+
+    /** A resume during a drag must not turn a paused-only gesture into Stop. */
+    public fun dismissPaused() {
+        val now = source.nowPlaying.value ?: return
+        if (now.isPlaying || now.playWhenReady) return
+        viewModelScope.launch {
+            val current = source.nowPlaying.value ?: return@launch
+            if (current.episodeId != now.episodeId || current.isPlaying || current.playWhenReady) return@launch
+            suspendRunCatching { controller.dismiss() }.onFailure { writeFailed() }
+        }
+    }
+
+    public fun stopAndClose() {
+        controller.pause()
+        dismiss()
+    }
+
+    private fun dismiss() {
+        viewModelScope.launch {
+            suspendRunCatching { controller.dismiss() }.onFailure { writeFailed() }
+        }
+    }
+
+    public fun acknowledgeScopeWrite() {
+        scopeWrite.value = null
+    }
+
+    public fun setSpeed(
+        speed: Float,
+        scope: SettingScope,
+    ) {
+        if (!speed.isFinite()) return
+        writeScope { controller.setSpeed(PlaybackSettingKeys.normalizeSpeed(speed), scope) }
+    }
+
+    public fun setSkipSilence(
+        enabled: Boolean,
+        scope: SettingScope,
+    ) {
+        writeScope { controller.setSkipSilence(enabled, scope) }
+    }
+
+    private fun writeScope(write: suspend () -> ScopeWriteResult) {
+        scopeWrite.value = null
+        viewModelScope.launch {
+            val result = suspendRunCatching { write() }.getOrDefault(ScopeWriteResult.FAILED)
+            scopeWrite.value = result
+            when (result) {
+                ScopeWriteResult.NO_CONTEXT_GROUP -> messages.post(UiText.Res(Res.string.player_no_group))
+                ScopeWriteResult.FAILED -> writeFailed()
+                else -> Unit
+            }
+        }
+    }
+
+    public fun setPresets(text: String) {
+        if (PlaybackSettingKeys.parseSpeedPresets(text) == null) {
+            messages.post(UiText.Res(Res.string.player_invalid_presets))
+            return
+        }
+        viewModelScope.launch {
+            if (suspendRunCatching {
+                    settings.set(
+                        PlaybackSettingKeys.SPEED_PRESETS,
+                        text,
+                    )
+                }.getOrNull() !is Outcome.Success
+            ) {
+                writeFailed()
+            }
+        }
+    }
+
+    public fun continueOnMobileData() {
+        ignoredConsent.value = null
+        locallyPendingConsent.value = null
+        controller.grantMeteredStreaming()
+        viewModelScope.launch {
+            report(suspendRunCatching { controller.play() }.getOrDefault(PlayResult.ServiceUnavailable))
+        }
+    }
+
+    public fun declineMobileData() {
+        ignoredConsent.value = uiState.value.consent
+        locallyPendingConsent.value = null
+    }
+
+    public fun onMessageShown(id: Long) {
+        externalOpen.shown(id)
+        messages.shown(id)
+        messageActions.remove(id)
+        watchEpisodes.remove(id)
+    }
+
+    public fun onMessageAction(id: Long): PlayerMessageAction? = messageActions[id]
+
+    public fun watchEpisode(messageId: Long): Long? = watchEpisodes[messageId]
+
+    public suspend fun watchLink(episodeId: Long): String? =
+        episodes().observeEpisode(episodeId).first()?.externalMediaId?.let {
+            ch.lkmc.neutrodyne.core.ui.YouTubeLinks
+                .watch(it)
+        }
+
+    private fun report(result: PlayResult) {
+        if (result is PlayResult.NeedsMeteredConsent) {
+            if (source.pendingMeteredConsent.value == null) locallyPendingConsent.value = result
+            return
+        }
+        val text =
+            when (result) {
+                PlayResult.Started -> {
+                    locallyPendingConsent.value = null
+                    return
+                }
+
+                is PlayResult.NeedsMeteredConsent -> {
+                    return
+                }
+
+                is PlayResult.NothingToPlay -> {
+                    UiText.Res(
+                        if (result.externalOnly) Res.string.player_external else Res.string.player_nothing_to_play,
+                    )
+                }
+
+                PlayResult.MeteredBlocked -> {
+                    UiText.Res(Res.string.player_metered_blocked)
+                }
+
+                PlayResult.Offline -> {
+                    UiText.Res(Res.string.player_offline)
+                }
+
+                is PlayResult.NotPlayable -> {
+                    unplayableText(result.reason)
+                }
+
+                PlayResult.ServiceUnavailable -> {
+                    UiText.Res(Res.string.player_unavailable)
+                }
+            }
+        val action =
+            when (result) {
+                PlayResult.ServiceUnavailable -> {
+                    PlayerMessageAction.RETRY
+                }
+
+                PlayResult.MeteredBlocked -> {
+                    PlayerMessageAction.PLAYBACK_SETTINGS
+                }
+
+                is PlayResult.NotPlayable -> {
+                    if (result.reason is UnplayableReason.YouTubeExternal) {
+                        PlayerMessageAction.WATCH_ON_YOUTUBE
+                    } else {
+                        null
+                    }
+                }
+
+                else -> {
+                    null
+                }
+            }
+        val label =
+            when (action) {
+                PlayerMessageAction.RETRY -> {
+                    UiText.Res(Res.string.player_retry)
+                }
+
+                PlayerMessageAction.PLAYBACK_SETTINGS -> {
+                    UiText.Res(Res.string.player_settings)
+                }
+
+                PlayerMessageAction.WATCH_ON_YOUTUBE -> {
+                    UiText.Res(
+                        ch.lkmc.neutrodyne.core.ui.resources.Res.string.action_watch_on_youtube,
+                    )
+                }
+
+                null -> {
+                    null
+                }
+            }
+        val message = messages.post(text, label)
+        if (action != null) messageActions[message.id] = action
+        if (action == PlayerMessageAction.WATCH_ON_YOUTUBE && result is PlayResult.NotPlayable) {
+            watchEpisodes[message.id] = result.episodeId
+        }
+    }
+
+    private fun unplayableText(reason: UnplayableReason): UiText =
+        when (reason) {
+            is UnplayableReason.Http -> {
+                if (reason.status == HTTP_NOT_FOUND || reason.status == HTTP_GONE) {
+                    UiText.Res(Res.string.player_audio_gone)
+                } else {
+                    UiText.Res(Res.string.player_http, listOf(reason.status))
+                }
+            }
+
+            UnplayableReason.AuthRequired -> {
+                UiText.Res(Res.string.player_auth_required)
+            }
+
+            UnplayableReason.UnsupportedFormat -> {
+                UiText.Res(Res.string.player_format_unsupported)
+            }
+
+            UnplayableReason.NoMedia -> {
+                UiText.Res(Res.string.player_no_media)
+            }
+
+            is UnplayableReason.YouTube -> {
+                if (reason.availability == Availability.AVAILABLE) {
+                    UiText.Res(Res.string.player_not_playable)
+                } else {
+                    AvailabilityText.describe(reason.availability)
+                }
+            }
+
+            UnplayableReason.YouTubeExtraction -> {
+                UiText.Res(Res.string.player_youtube_unavailable)
+            }
+
+            is UnplayableReason.YouTubeExternal -> {
+                UiText.Res(Res.string.player_external)
+            }
+        }
+
+    private fun writeFailed() {
+        messages.post(UiText.Res(Res.string.player_write_failed))
+    }
+
+    private companion object {
+        const val HTTP_NOT_FOUND = 404
+        const val HTTP_GONE = 410
+        val SHARING = SharingStarted.WhileSubscribed(5_000)
+    }
+}

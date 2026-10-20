@@ -56,6 +56,9 @@ interface PlaySessionStore {
 
 enum class ContextRetention { REPLACE, KEEP }
 
+/** External browse taps must still belong to their parent at the transaction boundary. */
+enum class StartMembership { ANY, CONTEXT }
+
 /** KEEP ignores context/anchor fields; REPLACE with null context means EXTERNAL, no tail. */
 data class SessionStart(
     val currentEpisodeId: Long,
@@ -65,6 +68,9 @@ data class SessionStart(
     val anchorSortDate: Long?,
     /** Interrupted current, captured after start gates; save/mark before promoting arrival. */
     val departure: Departure? = null,
+    /** Explicit multi-item external start: prepend these IDs atomically with current/context. */
+    val queueHead: List<Long> = emptyList(),
+    val membership: StartMembership = StartMembership.ANY,
 )
 
 /** Core-decided save/played flags; pinStartedAt is wall-clock start time, never a tick timestamp. */
@@ -85,6 +91,14 @@ data class Departure(
  */
 interface PositionStore {
     fun observe(episodeId: Long): Flow<StoredPosition?>
+
+    /** Positive measured duration only; <=0 is unknown and ignored. Ensures state, preserves all
+     * user marks/positions/feed duration, and writes only if absent or differing by >1 second.
+     * Missing episodes are ignored; callers reject stale current occurrences before dispatch. */
+    suspend fun setMeasuredDuration(
+        episodeId: Long,
+        durationMs: Long,
+    )
 
     /** allowed is a fast thread-safe predicate read INSIDE the transaction. False writes nothing. */
     suspend fun save(

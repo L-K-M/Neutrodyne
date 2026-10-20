@@ -166,6 +166,9 @@ data class ExistingEpisodeKey(
     val firstSeenAt: Long,
     /** Added 2026-10-07: step 6's JSON-chapters invalidation compares the stored value. */
     val chaptersUrl: String?,
+    /** YouTube's sticky Shorts update and raw-window/gap identity; no entity/schema change. */
+    val isShort: Boolean = false,
+    val externalMediaId: String? = null,
 )
 
 /**

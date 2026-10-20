@@ -69,6 +69,13 @@ public class EpisodeSelectionController(
         selected.value = emptySet()
     }
 
+    /** Complete only the submitted batch, preserving selection added during an asynchronous edit. */
+    public fun deselect(ids: Collection<Long>) {
+        val remaining = selected.value - ids.toSet()
+        if (remaining.isEmpty()) anchor = null
+        selected.value = remaining
+    }
+
     internal fun restore(snapshot: List<Long?>) {
         anchor = snapshot.firstOrNull()
         selected.value = snapshot.drop(1).filterNotNull().toSet()
@@ -81,9 +88,7 @@ public class EpisodeSelectionController(
         scope.launch {
             suspendRunCatching { setPlayed(ids, action == EpisodeSelectionAction.MARK_PLAYED) }
                 .onSuccess {
-                    val remaining = selected.value - ids.toSet()
-                    if (remaining.isEmpty()) anchor = null
-                    selected.value = remaining
+                    deselect(ids)
                 }.onFailure(onFailure)
             writing.value = false
         }

@@ -9,24 +9,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
-import ch.lkmc.neutrodyne.core.model.DownloadState
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
+import ch.lkmc.neutrodyne.core.ui.DownloadAllDialogs
+import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
+import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
+import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.net_other
-import ch.lkmc.neutrodyne.core.ui.resources.offline_banner
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
@@ -46,8 +53,14 @@ internal fun PodcastRoute(key: PodcastKey) {
         assistedMetroViewModel<PodcastViewModel, PodcastViewModel.Factory> {
             create(key.podcastId)
         }
+    LifecycleStartEffect(viewModel) {
+        viewModel.onVisible()
+        onStopOrDispose { viewModel.onHidden() }
+    }
+    DownloadDialogs(viewModel.downloads)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
+    val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()
     val items = viewModel.feed.collectAsLazyPagingItems()
     val live = viewModel.live.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
@@ -56,6 +69,7 @@ internal fun PodcastRoute(key: PodcastKey) {
     val scope = rememberCoroutineScope()
     val noHandler = rememberNoHandlerFallback()
     var pending by remember { mutableStateOf<PendingUnsubscribe?>(null) }
+    var passwordPrompt by remember { mutableStateOf(false) }
 
     // 08 Podcast detail states: `observePodcast` emitting null means the podcast was removed
     // elsewhere — pop with the snackbar.
@@ -66,10 +80,13 @@ internal fun PodcastRoute(key: PodcastKey) {
         }
     }
 
+    DownloadAllDialogs(viewModel.downloadAll)
     BindEpisodeSelection(viewModel.episodeSelection)
 
     PodcastScreen(
         selection = viewModel.episodeSelection,
+        onPlaySelectionNext = viewModel::playSelectionNext,
+        onPlaySelectionLast = viewModel::playSelectionLast,
         state = state,
         items = items,
         live = live,
@@ -83,7 +100,12 @@ internal fun PodcastRoute(key: PodcastKey) {
             if (action is EpisodeAction.Open || action is EpisodeAction.OpenPodcast) viewModel.episodeSelection.clear()
             when (dispatchEpisodeRoute(action, navigator, urls)) {
                 EpisodeRouteResult.HANDLED -> {
-                    Unit
+                    if (action is EpisodeAction.WatchOnYouTube) {
+                        viewModel.externalOpen.opened(
+                            action.episodeId,
+                            action.mode,
+                        )
+                    }
                 }
 
                 // Only `WatchOnYouTube` can fail today: offer its watch URL for copying.
@@ -94,18 +116,7 @@ internal fun PodcastRoute(key: PodcastKey) {
                 }
 
                 EpisodeRouteResult.UNHANDLED -> {
-                    // The offline row's cloud_off affordance still dispatches PlayToggle so the
-                    // screen answers with the offline snackbar, not a dead button (08's row
-                    // table); downloaded rows fall through to the ViewModel like any tap.
-                    val downloaded =
-                        items.itemSnapshotList.items
-                            .firstOrNull { it.id == action.episodeId }
-                            ?.downloadState == DownloadState.COMPLETED
-                    if (action is EpisodeAction.PlayToggle && state.offline && !downloaded) {
-                        scope.launch { snackbar.showSnackbar(getString(Res.string.offline_banner)) }
-                    } else {
-                        viewModel.onRowAction(action)
-                    }
+                    viewModel.onRowAction(action)
                 }
             }
         },
@@ -121,6 +132,7 @@ internal fun PodcastRoute(key: PodcastKey) {
                 )
             }
         },
+        onDownloadAll = { viewModel.downloadAll.open(FeedSource.Podcast(key.podcastId)) },
         onMarkAllPlayedClick = viewModel::markAllPlayed,
         onUnsubscribeRequest = {
             scope.launch {
@@ -152,9 +164,70 @@ internal fun PodcastRoute(key: PodcastKey) {
         )
     }
 
+    if (consent != null) {
+        MeteredConsentDialog(
+            onOnce = viewModel.playback::consentOnce,
+            onAlways = viewModel.playback::consentAlways,
+            onDismiss = viewModel.playback::consentDismiss,
+        )
+    }
+
+    // The playback snackbar's Enter action and the banner share this dialog: the screen's
+    // podcast owns the credentials either way.
+    if (passwordPrompt) {
+        CredentialsDialog(
+            onSubmit = { credentials ->
+                passwordPrompt = false
+                scope.launch {
+                    viewModel.setCredentials(credentials)?.whenOutcome(
+                        onSuccess = {},
+                        onFailure = { error ->
+                            snackbar.showSnackbar(addPodcastErrorText(error).resolve())
+                        },
+                    )
+                }
+            },
+            onDismiss = { passwordPrompt = false },
+        )
+    }
+
     ShowUserMessages(
         state.messages,
         viewModel::onMessageShown,
-        onMessageAction = viewModel::onMessageAction,
+        // Membership Undo stays in the ViewModel; playback actions resolve through the helper.
+        onMessageAction = { id ->
+            viewModel.externalOpen.onAction(id)
+            viewModel.onMessageAction(id)
+            when (val action = viewModel.playback.onMessageAction(id)) {
+                is PlaybackMessageAction.RetryStart -> {
+                    Unit
+                }
+
+                PlaybackMessageAction.OpenPlaybackSettings -> {
+                    navigator.pushDetail(SettingsKey(SettingsPage.PLAYBACK))
+                }
+
+                is PlaybackMessageAction.EnterPassword -> {
+                    passwordPrompt = true
+                }
+
+                is PlaybackMessageAction.WatchOnYouTube -> {
+                    scope.launch {
+                        val url = viewModel.youtubeWatchUrl(action.episodeId)
+                        if (url != null) {
+                            if (urls.open(url) == OpenResult.NO_HANDLER) {
+                                noHandler(url)
+                            } else {
+                                viewModel.externalOpen.opened(action.episodeId)
+                            }
+                        }
+                    }
+                }
+
+                null -> {
+                    Unit
+                }
+            }
+        },
     )
 }

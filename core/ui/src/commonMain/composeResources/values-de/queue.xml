@@ -1,0 +1,14 @@
+<resources>
+    <string name="queue_now_playing">Aktuelle Wiedergabe</string>
+    <string name="queue_count">Als Nächstes · %1$d</string>
+    <string name="queue_clear">Als Nächstes leeren</string>
+    <string name="queue_removed">Aus Als Nächstes entfernt</string>
+    <string name="queue_cleared">Als Nächstes geleert</string>
+    <string name="queue_remove">Aus Als Nächstes entfernen</string>
+    <string name="queue_move_up">Nach oben</string>
+    <string name="queue_move_down">Nach unten</string>
+    <string name="queue_move_top">An den Anfang</string>
+    <string name="queue_then">Danach: %1$s, %2$s</string>
+    <string name="queue_stop_after">Nach Als Nächstes anhalten</string>
+    <string name="queue_play_group">%1$s abspielen</string>
+</resources>

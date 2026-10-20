@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.window.application
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
@@ -263,8 +265,18 @@ internal object DesktopShell {
         // 11 Notifications' fallback: banner taps route through the root's navigator.
         graph.bannerNotifier.routeDispatch = menuActions::applyRoute
         application {
+            val rowArt =
+                graph.settingsRepository
+                    .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
+                    .collectAsState(initial = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
             NeutrodyneWindow(
+                rowArt = rowArt.value,
                 installers = graph.entryInstallers,
+                failedDownloads =
+                    kotlinx.coroutines.flow.flow {
+                        graph.databaseOpener.awaitOpen()
+                        graph.downloadController().observeFailedCount().collect { emit(it) }
+                    },
                 openHandler = openHandler,
                 menuActions = menuActions,
                 banners = graph.bannerNotifier,

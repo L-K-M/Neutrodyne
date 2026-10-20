@@ -10,4 +10,7 @@ package ch.lkmc.neutrodyne.core.common
 expect object Nfc {
     /** Returns [text] in NFC — canonical composed form. */
     fun normalize(text: String): String
+
+    /** Compatibility normalization for directory name/artist matching (04). */
+    fun compatibility(text: String): String
 }

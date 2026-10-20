@@ -156,11 +156,18 @@ class YouTubeFormatChangedException(val videoId: String, val oldFormatId: String
 ```kotlin
 // :youtube:api — enrichment, health
 interface YouTubeEnricher {
+    suspend fun facts(videoId: String): VideoFactsResult
     suspend fun enrich(channelId: String, videoIds: Set<String>, variants: Int): EnrichResult
     suspend fun uploadsPage(channelId: String, variant: Int, cursor: UploadsCursor?): UploadsPageResult
 }
 data class VideoFacts(val videoId: String, val title: String?, val publishedAtMs: Long?, val publishedApprox: Boolean,
-                      val durationMs: Long?, val availability: Availability?, val isShort: Boolean?, val description: String?)
+                      val durationMs: Long?, val availability: Availability?, val isShort: Boolean?, val description: String?,
+                      val descriptionTruncated: Boolean = false)
+sealed interface VideoFactsResult {
+    data class Ok(val facts: VideoFacts) : VideoFactsResult
+    data object Unsupported : VideoFactsResult
+    data class Failed(val kind: TransientKind, val cause: Throwable?) : VideoFactsResult
+}
 sealed interface EnrichResult {
     data class Ok(val facts: List<VideoFacts>) : EnrichResult
     data object Unsupported : EnrichResult
@@ -224,7 +231,7 @@ interface YouTubeAvailabilityRecorder { suspend fun record(episodeId: Long, avai
 | Timeouts | `resolveAudio` 20 s (25 s when the engine host is not running yet, so the first call can pay the cold start); channel resolution 20 s overall; `enrich` 20 s per channel; `search` 10 s (15 s cold); `uploadsPage` 20 s (`withTimeout` → `Transient(TIMEOUT)`); resolves that may take the JS path in background contexts (07 transfers, "Check again") 45 s ([JS challenge provider](#js-challenge-provider)). Identical on both hosts |
 | Single flight | Concurrent `resolveAudio` calls with the same cache key share one `Deferred` (pre-resolve and playback race), started on `@ApplicationScope` with a waiter count; it is cancelled (and its host call with it) when the last waiter is cancelled, so one caller's cancellation never fails another |
 | Concurrency caps | Enrichment: `Semaphore(2)` across channels. Downloads: 07's YouTube slot 1. Channel resolution during import: 2 concurrently (the same 2-per-host limit 03 applies to `www.youtube.com`, [D25](../PLAN.md#3-key-decisions)). Playback resolves: no cap beyond single flight. Search: latest wins (previous job cancelled). Engine host: `YtDlpClient` admits at most `HostStatus.workers` calls at once (Android 2, desktop 4) and queues the rest by priority (`resolve`, then `lookup` and `search_*`, then `facts` and `tab_*`), FIFO within a priority, so both hosts schedule alike |
-| `ResolvedUrlCache` (`:youtube:engine`) | `ConcurrentHashMap`, read from Media3's loader thread (Android) and the desktop engine's loader thread ([11 Sources and SpanCache](11-desktop.md#sources-and-spancache)) |
+| `ResolvedUrlCache` (`:youtube:engine`) | Synchronized 64-entry access-order LRU, read from Media3's loader thread (Android) and the desktop engine's loader thread ([11 Sources and SpanCache](11-desktop.md#sources-and-spancache)) |
 | `YouTubeHealth` | `MutableStateFlow`; loaded from `device_settings` by an `AppInitializer` (01's initializer set, both shells; `awaitLoaded()` suspends until then); persistence launched on `@ApplicationScope`, conflated |
 | `YtDlpEngine` (`:youtube:engine`) | Capabilities and `EngineStatus` in `MutableStateFlow`s, loaded by the order-150 `AppInitializer` from `EngineSettings` and the engine store's `active.json` (Android `noBackupFilesDir/ytdlp/`, desktop `<data>/ytdlp/`; [01 Application start-up](01-foundation.md#application-start-up)); loading never starts the engine host |
 
@@ -305,6 +312,14 @@ There are no build flavors. What YouTube can do is a **runtime capability** of t
 
 ### Capability computation
 
+
+Implementation note (2026-10-19, M9a): Adopted resolution 9 adds preflight
+before native loading: present-but-unusable x86_64 API26–27 maps to
+`ENGINE_FAILED` with `X86_64_API_26_27`, while no engine/32-bit maps to
+`NOT_IN_THIS_APK`. Retry rechecks eligibility without a doomed Python start.
+The Android host must implement this port; hardware validation remains spike pending.
+
+
 `YtDlpEngine` (the default builds' `YouTubeCapabilitiesSource`, from M9a on Android and MD3 on the desktop) evaluates these rows in order; the first match wins. The external-only bindings publish a fixed reason.
 
 | Condition | `externalReason` | `EngineStatus.availability` |
@@ -327,6 +342,8 @@ Capabilities are all-or-nothing in v1 (`externalReason == null` ⇔ all five `tr
 
 ### DI bindings
 
+Implementation note (2026-10-19, M8): Both shells bind named external implementations in M8: all five capabilities false, `NOT_YET_AVAILABLE`, regardless of packaged self-test scaffolding (adopted resolution 1).
+
 Bound only in the shells' YouTube binding containers — `:app`'s `YouTubeBindingsModule` and `:desktopApp`'s `DesktopYouTubeBindingsModule` ([01 YouTube bindings](01-foundation.md#youtube-bindings)); `YouTubeChannelResolver` (→ `DefaultYouTubeChannelResolver`, `:youtube:impl`), `YouTubeHealth` (→ `DefaultYouTubeHealth`, `:core:data`), `YouTubeChannelRepository` and `YouTubeAvailabilityRecorder` (`:core:data`) are capability-independent bindings contributed by their modules (Metro), the same on both platforms. The host ports of [Shared engine module](#shared-engine-module) are contributed by the host modules, never by the shells' containers.
 
 | Interface | Engine-backed (default builds: APKs from M9a, desktop builds from MD3; serves every build and state) | External-only (before M9a / MD3; emergency builds) |
@@ -342,6 +359,14 @@ The engine-backed implementations also serve the `armeabi-v7a` APK and the off o
 
 ### Capability consumers
 
+Implementation note (2026-10-19, M8): I3 integrates the landed M6a/M6b
+code without changing adopted resolution 1. Requests and AUTO insertion
+remain RSS-only, Download all uses the false downloads capability, restore
+re-download selects RSS only, and runtime claims disable YouTube candidates.
+The low-level DAO claim trusts its caller's candidate/source admission;
+W8 must assess direct-claim and malformed/restored-row coverage. Its external
+action hiding and integrated safety tests are not implemented by this merge.
+
 | Flag | Consumers |
 |---|---|
 | `inAppPlayback` | 06 `EpisodeResolver` YouTube branch, `QueueProjector`, Auto browse tree; 11 `DesktopEpisodeSourceResolver` and `DesktopQueueProjector`; 05/02 context tail (`youtubePlayable`); `QueueRepository` rejects YouTube adds when false; 08 row primary action |
@@ -353,6 +378,16 @@ The engine-backed implementations also serve the `armeabi-v7a` APK and the off o
 | `YouTubeEngine.prewarm(reason)` (not a flag) | 06 `QueueProjector` and 11 `DesktopQueueProjector` when a YouTube item enters the projection window (`PROJECTION`); 08 YouTube podcast and episode screens on open (`SCREEN`); 07 claim of a YouTube row (`DOWNLOAD`); 08 Discover's "Search YouTube channels" on open (`SEARCH`) |
 
 ### UI per capability (hand-off to [08 Capability differences in UI](08-ui-ux.md#capability-differences-in-ui))
+
+Implementation note (2026-10-19, M8): W8 observes runtime capabilities on
+rows, detail, queue and Settings. Every M8 build remains external with
+NOT_YET_AVAILABLE (adopted resolution 1); Settings offers suggest-RSS and
+mark-played-on-open only. A successful OS handoff invokes YouTubeExternalOpen;
+no handler or cancellation never invokes it. Played transitions use the shared
+transaction and update counts. Its matching undo operation clears only the
+played mark, preserving position and Up next; the shared UI offers it for five
+seconds. Playable overflow never marks played.
+
 
 | Element | With the engine | External mode |
 |---|---|---|
@@ -458,6 +493,27 @@ flowchart TD
 
 The page is about 2.5 MB; reading it fully for every subscribe is wasteful, hence head-first. Unverified: the byte size of `<head>`; M8 measures it on the recorded fixture. If the median head exceeds 512 KiB, imports fetch avatars only for the first 20 channels per refresh run on metered networks (rest on unmetered); the decision is recorded here.
 
+Implementation note (2026-10-19, M8): W2 implements the head and total byte
+limits in common code, counting UTF-8 bytes before decoding. FULL alone scans
+for banners. FEED redirects are explicit, bounded to five hops and restricted
+to HTTPS YouTube page hosts; consent redirects produce CONSENT_WALL. The
+20 s deadline spans every lookup and request; known identity survives a
+metadata timeout, while caller cancellation still propagates. Both shells
+now supply the resolver constructor with the current app locale, keeping
+capabilities false.
+The feed-owned metadata-reader port is implemented in core data using the
+existing Atom parser, outside the YouTube modules.
+
+Implementation note (2026-10-19, M8): Adopted plan resolution 8 places Layer A
+replay fixtures under `youtube/impl/src/test/resources/recorded/`, shared by
+desktop and Android host tests. Successful response shapes are reconstructed
+from this document's recorded research and explicitly labelled in
+`PROVENANCE.md`. Live requests for two channels on this worker both reached
+the consent host despite the cookie. Each consent head was 19,890 bytes;
+neither measures a channel head. A valid median and the resulting metered
+avatar policy remain unverified pending an owner capture. Scrubbed fixture
+sizes are not evidence for changing that policy.
+
 ### oEmbed, user feed and watch page
 
 - **oEmbed** (`OEmbedClient`, 01's API client): `GET https://www.youtube.com/oembed?url={urlencoded https://www.youtube.com/watch?v={id}}&format=json` → `author_url` (a handle URL, sometimes `/channel/` or `/user/`) and `author_name`; the URL is classified and resolved again (one hop, no loops).
@@ -514,15 +570,56 @@ sequenceDiagram
 | `Failed(CONSENT_WALL or PAGE_UNREADABLE)` | "Couldn't read this YouTube page. Paste the channel's /channel/UC… link or a link to one of its videos." | Edit |
 | Typed name in external mode | "To add a YouTube channel, share it from the YouTube app or paste its link." | — |
 
+Implementation note (2026-10-19, M8): W6 implements the same metadata-only
+Add branch on Android and desktop. Canonical identity, pending initial state,
+sync ID and memberships commit together through `YouTubeSubscriptionWriter`;
+normal SUBSCRIBE refresh runs after commit, with no preview Atom ingest.
+`subscribedPodcastId(channelId)` extends the frozen repository contract for
+an exact duplicate's Open action before confirmation. Metadata-only titles
+fall back to the channel ID. Page descriptions are escaped before storage
+because the existing description column is rendered as HTML. All capability
+bindings remain external (`NOT_YET_AVAILABLE`), implementing adopted plan
+resolution 1 for these screens.
+
+Implementation note (2026-10-19, M8): W6 implements adopted plan resolution 6:
+Include past live streams affects future polls, and disabling it keeps
+previously fetched recordings visible. The settings explanation also states
+that external mode cannot reliably distinguish live streams or premieres.
+Shorts changes instead invalidate existing feed pages immediately through
+the targeted variants write. No per-row live provenance or schema change is
+introduced.
+
 ### Prefer the show's RSS feed
 
 [PO-9](../PLAN.md#48-further-product-owner-decisions) default. When the preview opens and `youtube.suggest_rss` is on, `YouTubeChannelRepository.findRssAlternative(title)` queries 03's `SearchRepository` (enabled podcast directories only; never YouTube search) with an 8 s timeout. A hit matches when `norm(channelTitle)` equals `norm(collectionName)` or `norm(artistName)`, where `norm` = NFKC, lowercase, remove everything except letters and digits. The first match is shown as a card "This show also has a podcast feed — Subscribe to the podcast instead"; the preview is never blocked. The query only goes to directories the user already has enabled ([03 Search and discovery](03-feeds-and-discovery.md#search-and-discovery) privacy text applies).
+
+Implementation note (2026-10-19, M8): W6 uses the enabled M7 search service,
+with an eight-second deadline, NFKC name/artist comparison and no persistence.
+The optional suggestion runs after the channel preview becomes subscribable;
+Use podcast re-enters the same Add resolver and discards the old channel state.
+Editing or cancelling invalidates the resolution generation, including late
+metadata and directory answers.
 
 ### Channel search
 
 With the engine only, M9a. Discover offers an explicit "Search YouTube channels" action (opening it calls `prewarm(SEARCH)`); YouTube is queried only on that action, never on every keystroke of the podcast search (N3: typed podcast searches never reach YouTube). `YtDlpChannelSearch` calls `search_open`: the shim runs `extract_info('https://www.youtube.com/results?search_query={q}&sp=EgIQAg%253D%253D', process=False)` — YouTube's search URL with the channel filter, the URL yt-dlp's own tests use — and returns the first 20 channel entries (`channel_id`, `title`, `uploader_id`, `channel_follower_count`, a thumbnail, `description`, `channel_is_verified`) with a `SearchCursor` token; `search_next` pulls the next page from the generator held in the engine host, up to 3 pages on scroll. `CURSOR_EXPIRED` ends paging (`next = null`): the visible hits stay, and a new search starts over. A hit opens `AddPodcastKey("https://www.youtube.com/channel/{id}")`, i.e. the normal subscribe flow. External mode → `Unsupported`; breaker open, rate limited, `ENGINE_UNAVAILABLE` or a timeout → `Failed`, shown as "YouTube search is temporarily unavailable".
 
 ### Channel metadata refresh
+
+Implementation note (2026-10-19, M8): W3 and W6 share one app-scoped
+`DefaultYouTubeChannelMetadata` binding for adapter after-ingest and channel
+detail. It owns the 100-new/30-stale sliding budget, two lookup permits,
+jitter, coalescing and the 20-second bound. Detail upgrades an in-flight
+AVATAR request to FULL; concurrent detail opens share its banner result.
+Both callers refresh at the 30-day boundary. A fresh AVATAR-only preview
+with no banner does not force another page request. Failed metadata leaves
+the timestamp unchanged; NotFound stamps it without affecting feed health.
+The transaction preserves missing page values, escapes plain descriptions
+for HTML storage and explicitly re-pins changed avatar keys through W7's
+900 px helper. Banners stay unpinned. Atom uses `applyYouTubeFeedMetadata`
+and cannot erase page artwork, banner, description or link. Both shells
+provide one W2 resolver with the current app locale and keep external
+capabilities (`NOT_YET_AVAILABLE`, adopted resolution 1).
 
 - Atom `author/name` updates the title on every refresh (via 03's metadata update).
 - Avatar and description: in `afterIngest` (after a successful fetch, ingested or unchanged; after the enrichment step), `YouTubeSourceAdapter` re-resolves `Channel(id)` with `AVATAR` depth when `channelMetadataAt` is null or older than 30 days, under `withTimeoutOrNull(20 s)`. Budget (in-memory sliding window of 10 min, which covers one 8-min run): at most 100 never-fetched (`channelMetadataAt IS NULL`, typically fresh imports) plus 30 stale channels, 2 concurrently with 0.5–1.5 s jitter. With the engine, a denied extraction gate makes the lookup fall back to HTML ([Engine channel lookup](#engine-channel-lookup)). Channels over budget keep their monogram until a later run. New avatar URL → new `artworkKey`. 03's pin on an `artworkUrl` change runs before `afterIngest` and never sees this write, so whenever `applyYouTubeChannelMetadata` changes `artworkKey` (first avatar after a monogram, or a new avatar URL; the caller compares the stored key), the caller (`YouTubeSourceAdapter.afterIngest` here, `YouTubeChannelRepository.ensureChannelArt` below) calls `ArtworkStore.pin(ArtworkRef(newKey, avatarUrl, 0), PinReason.SUBSCRIPTION, podcastId)`, which schedules `artwork-sync` ([08 ArtworkStore](08-ui-ux.md#artworkstore)).
@@ -579,6 +676,15 @@ The prefixes are undocumented; if YouTube drops them, the `channel_id` fallback 
 
 ### Fetch policy
 
+Implementation note (2026-10-19, M8): W3 applies adopted resolution 2 to
+all seven masks: primary 404/410 always tries canonical first, including
+Shorts/live-only selections; failed fallback keeps its real diagnostic.
+Selected variants run sequentially under the refresher's
+host permit, with unconditional Atom requests and a 2 MiB cap. Secondary
+404/410 is empty; other secondary failures disable absence marking.
+403/429 abort the merge and defer without a failure count. An admitted
+health probe always reports, including cancellation as inconclusive.
+
 | Rule | Value |
 |---|---|
 | Requests per refresh | One per set bit, **sequentially** in bit order inside the feed's 03 permit (so at most 2 concurrent requests to `www.youtube.com`, [D25](../PLAN.md#3-key-decisions)); plus one `channel_id` fallback when the primary (lowest set bit) returns 404 |
@@ -627,6 +733,17 @@ Episode columns (subset; full entity in [02 episode](02-data-model.md#episode)):
 
 ### Merge algorithm
 
+Implementation note (2026-10-19, M8): W3 implements adopted resolution 4
+with transient `AtomDates` parser provenance. RSS values and RSS hashes
+stay unchanged, so this additive provenance does not bump the parser
+version or rewrite its goldens. YouTube takes only published/raw-published;
+malformed or missing published never uses updated. The digest includes
+NFC-normalized, trimmed, whitespace-collapsed authorName. Digest fields
+are length-framed before hashing to avoid delimiter collisions in publisher
+text; a malformed published value contributes its raw text. Item hashes
+include Shorts after OR with stored Shorts, and variant-only reclassification
+therefore writes even when the text stays equal. No schema change is needed.
+
 `YouTubeEntryRules.merge(results, enabledBits): MergedChannel` (pure), called by `YouTubeSourceAdapter` with one `VariantResult` per polled URL (`Ok(bit, entries, authorName)`, `Empty(bit)`, `Failed(bit, httpCode, cause)`; the `channel_id` fallback reports under the primary's bit with `fallback = true`):
 
 1. If the primary variant failed and its `channel_id` fallback failed too → channel failure; no ingest (see [Errors and global outage](#errors-and-global-outage)). A failed **secondary** variant (`UUSH`, `UULV`) does not fail the channel: the others are ingested and step 7 marks no absences.
@@ -648,9 +765,29 @@ YouTube feeds show only the newest 15 entries per variant, so "absent from this 
 
 ### Gap detection
 
+Implementation note (2026-10-19, M8): W3 implements adopted resolution 3
+for the triggering success and the next two successful refreshes. Failure,
+deferred and manual-only deadlines are preserved; publisher max-age is a
+lower bound even during pull-in. The normal success hook now also runs
+after a body ingest commits, before the post-ingest announcement. Manual
+requests still bypass due-time selection. Gap counters are in-memory only.
+
 On a non-initial refresh, if every entry of a 15-entry variant is unknown, items may have been missed between refreshes (high-volume channels, or the device was offline). Then: with the engine, the enrichment step also requests `uploadsPage(channelId, bit, null)` (one page, ~30 items) and ingests unknown IDs through 03's `FeedIngestor` in `OLDER_PAGE` mode (never `isNew`, never flips absence; [D66](../PLAN.md#3-key-decisions)); in both capability modes `nextRefreshAt` is pulled in to `now + max(15 min, interval / 2)` for the next three refreshes of that channel (in memory, best effort). The 15 newest unknown items of the triggering refresh stay `isNew = 1` subject to 03's dump guard.
 
 ### Errors and global outage
+
+Implementation note (2026-10-19, M8): W4 implements adopted resolution 5
+with serialized device health writes and probe admission. Only global outage
+state suppresses channel badges; ordinary failures retain their diagnostics
+and never set `gone` or unsubscribe. Control checks use the existing FEED
+transport under the adapter's current host permit, or after refresh fan-out,
+and are bounded to 20 seconds with caller cancellation. The privacy
+inventory and PRIVACY.md disclose canonical-feed requests to YouTube
+`UCBR8-60-B28hp2BmDPdntcQ` and Google `UCK8sQmJBp8GCxrOtXWBpyEA`. The
+refresher counts the whole library at finalization, including rows outside
+the requested scope; cancellation during that read still resets accounting
+without control requests. Failed probes read the current library count
+again. Engine health remains M9 work in external mode.
 
 Since December 2025 the feed endpoint has repeatedly answered 404 for every feed for hours. A YouTube-wide outage must never mark channels dead or unsubscribe them (R3.3).
 
@@ -678,10 +815,67 @@ UI: one in-app banner on Feeds and Library while `feedOutageLevel > 0`, "YouTube
 
 ### Enrichment step
 
+Implementation note (2026-10-19, M8): Under adopted resolutions 1 and 6,
+W3's post-ingest path performs channel metadata and announcement filtering
+only. All M8 builds remain external (`NOT_YET_AVAILABLE`); it never calls
+an enricher, extractor or back-catalogue engine. Canonical fallback cannot
+reliably identify live, premiere or members-only uploads, and disabling LIVE
+only changes future polls. No guessed availability or new row flag is added.
+
+Implementation note (2026-10-19, local M9a W9): the portable enricher reuses
+W5's admitted composite operation for tab calls and completes one W6 reservation
+in `finally`, including `Inconclusive` on cancellation. Missing live/premiere
+checks are separate bounded facts operations after the tab operation, sharing the
+channel deadline and the app-wide check budget. No caller reserves another trial
+or repeats extraction health reports. Storage failures occur after extraction
+completion and cannot become breaker parse failures.
+
+The data coordinator owns candidate selection, the 20-second channel deadline,
+concurrency and sliding budgets. Refresh cancellation reaches extraction; only
+the committed event and its final `isNew`/`VISIBLE`/`AVAILABLE` filter are shielded.
+An `Unchanged` response can emit a promotion. INITIAL rows retain `isNew = 0`;
+IMPORT and RESTORE suppress YouTube announcements. The partial writer updates
+only changed duration, availability and sticky Shorts, plus absent descriptions
+and snippets. It cannot revise Atom identity, hash, dates or user state.
+
+`YouTubeDescriptionLoader.load` is the data-layer seam for W7's current
+chapter request: waiters requesting absent notes share one 45-second facts call
+and the last waiter cancels it. Only complete plain text (up to the frozen
+32 KiB UTF-8 bound) reaches the existing codec/blob/snippet. The loader returns
+that immutable complete text; W7 must parse this snapshot, rather than re-read
+a blob that a later Atom ingest could replace. Truncated facts remain absent.
+There is no eager per-video description refresh or schema addition. W7 owns
+requesting these notes from its cancellable current-item scope and parsing/
+persisting description chapters.
+
+The parent-authorized I3 expansion carries producer completeness through the
+existing description codec and read boundary (see [02 episode_description](02-data-model.md#episode_description)).
+Legacy/unmarked notes are `UNKNOWN`; actual parser `TEXT_TRUNCATED` warnings
+remain `TRUNCATED`, including a default-cap prefix trimmed to a plausible short
+chapter list. Variant union preserves the selected entry's actual parser
+warning across reordering; identical text from another variant is not provenance.
+Missing or untyped wire truncation flags fail through the existing extraction
+error path, rather than letting the DTO default authorize chapters.
+Unknown and truncated stored notes remain byte-identical and return no chapter snapshot.
+Known complete stored Atom/facts notes are reused before requesting facts;
+there is no per-video refresh storm or inference from length, contents or
+nonempty blobs. The loader rechecks episode ownership and deadline and returns
+the immutable complete snapshot it acquired. A later blob replacement during
+an async call cannot change that snapshot. W7 must parse only the returned
+snapshot in its cancellable current-item service. The portable W7a consumer
+is described in [Chapters from the description](#chapters-from-the-description);
+the I3 loader/codec contract and production bindings remain unchanged.
+
+These services remain behind ordinary external `NOT_YET_AVAILABLE` bindings.
+W4 transport, W7b playback sources/recovery, W8 transfers, W10 lookup/search,
+W11 activation and the reference-device spike remain separate owner work.
+Portable controlled-transport/database evidence is not live or Android-host
+acceptance. No startup Python work, runtime update or JS provider is enabled.
+
 With the engine, M9a. Runs in `YouTubeSourceAdapter.afterIngest`, i.e. inside the same refresh run (`RefreshWorker` on Android, the `refresh` lane on the desktop, [03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh)), after the channel's ingest transaction (or after `Unchanged`, so pending premieres of quiet channels are still re-checked).
 
 1. Skip when `capabilities.enrichment` is false or `extractionGate` denies. The whole step runs under `withTimeoutOrNull(20 s)`; 03's refresh deadline (8 min on Android; none on the desktop, where the 20 s bound alone applies) cancels it like any in-flight feed. Unfinished candidates are picked up next run.
-2. Candidates (`EpisodeDao.youtubeEnrichmentCandidates(podcastId, now)`): episodes of the channel with (`durationMs IS NULL AND availability = 'AVAILABLE' AND firstSeenAt > now − 7 d`) or (`availability IN ('UPCOMING','LIVE') AND firstSeenAt > now − 30 d`). None → skip.
+2. Candidates (`EpisodeDao.youTubeCandidates(podcastId, now)`): episodes of the channel with (`(durationMs IS NULL OR durationMs <= 0) AND availability = 'AVAILABLE' AND firstSeenAt > now − 7 d`) or (`availability IN ('UPCOMING','LIVE') AND firstSeenAt > now − 30 d`). None → skip.
 3. `enrich(channelId, ids, variantsOfCandidates)`: `YtDlpEnricher` calls the engine's `tab_open` once per needed bit — `LONG_FORM` → `https://www.youtube.com/channel/{UC}/videos`, `SHORTS` → `/shorts`, `LIVE` → `/streams` — which returns the first page (~30 flat entries; one InnerTube browse request per tab) and drops the cursor. `UPCOMING`/`LIVE` candidates not on the first page are checked one by one with `facts` (at most 5 per channel and 20 per 10-min window); other IDs missing from the page get no facts.
 4. Fact mapping per item (flat tab entry or `facts` result): `duration` > 0 → `durationMs`; `availability` `subscriber_only` or `premium_only` → `MEMBERS_ONLY`; `live_status` `is_upcoming` → `UPCOMING`, `is_live` or `post_live` → `LIVE` (overrides `AVAILABLE`), `was_live` or `not_live` → `AVAILABLE` (a processed recording is an ordinary video); missing fields → unchanged; an entry of the `/shorts` tab → `isShort = true` (sticky). A per-video check that ends in an error code maps through [Exception classification](#exception-classification) (per-video reasons are recorded, `Transient` results change nothing).
 5. Rate: 2 channels concurrently, 0.5–1.5 s jitter between channels, a 6–12 s pause after every 50 channels (NewPipe's feed-update precedent), at most 100 channels per 10-min window.
@@ -723,6 +917,7 @@ With the engine, M9a; `YouTubeChannelRepository.loadOlder(podcastId)` from the p
 - Pages the tab of the channel's lowest set variant bit (`videos` for `LONG_FORM`, else `shorts`, else `streams`) through `YouTubeEnricher.uploadsPage`: `tab_open` for the first page, `tab_next(cursor)` afterwards. The `UploadsCursor` is the token of a lazy yt-dlp entry generator held in the engine host; `YouTubeChannelRepositoryImpl` keeps one per podcast in a `@Singleton` (survives screen recreation, not the death of either process). `CURSOR_EXPIRED` (`:ytx` restarted, cursor evicted or idle for 10 min) and main-process death both restart paging at page 1; pages whose IDs are all stored are skipped forward within the same call (they count against the page cap below).
 - Each call fetches one page (~30) and ingests it through 03's `FeedIngestor` in `OLDER_PAGE` mode (identity keys, `sortDate`, `feedOrder` as for Atom entries; `isNew = 0`, `inFeed = 1`, never flips absence, never updates existing rows' feed fields), then writes the page's facts with `applyYouTubeFacts`. Back-catalogue rows never emit `NewEpisodes` and are never auto-downloaded ([D66](../PLAN.md#3-key-decisions), [D67](../PLAN.md#3-key-decisions)).
 - Tab entries carry only relative dates ("3 years ago"), so yt-dlp's `timestamp` for them (the shim's fixed options always include `extractor_args` `youtubetab.approximate_date`) is an estimate: `pubDate` is truncated to the UTC day with `rawPubDate = "approx"`. A missing date uses the previous item's date (keeps order).
+- W9 keeps cursor, page count and approximate-date state only in memory. Loads coalesce per podcast; the last waiter cancels extraction. Variant changes invalidate/cancel old work and preserve the process page count. A restart returns the first page; duplicate-only pages advance within the same cap. Every write rechecks channel identity and variants in its transaction. Only newly inserted rows receive older-page facts; matched Atom rows and podcast metadata stay unchanged.
 - At most 20 pages per podcast per process; `hasMore = false` when the generator ends. Gate denied → `Failed(BREAKER_OPEN or RATE_LIMITED)`; engine host gone → `Failed(ENGINE_UNAVAILABLE)`; external mode → `Unsupported`; 08 shows the failure text.
 
 ---
@@ -730,6 +925,13 @@ With the engine, M9a; `YouTubeChannelRepository.loadOlder(podcastId)` from the p
 ## Artwork and thumbnails
 
 Serves R3.2, R5.2, R5.3, R5.8. Delivered in M8. 08 owns rendering, `ArtworkStore`, Coil and the interceptor code; this section defines the sources.
+
+Implementation note (2026-10-19, M8): W7 supplies the common URL rules and
+thumbnail interceptor. Avatar normalization defaults to 900 px; video URLs
+default to `mqdefault`. Banner selection returns only a URL and does not
+fetch or pin it; W3/W6 own metadata persistence and lazy detail loading.
+All M8 artwork works in external mode without engine lookup (adopted
+resolution 1).
 
 ```kotlin
 object YouTubeThumbnails {
@@ -774,7 +976,7 @@ Serves R3.2, R3.7, R3.8. Delivered in M8 (Shorts, `VISIBLE`), M9a (enrichment an
 
 Enrichment re-checks `UPCOMING` and `LIVE` items for 30 days; a premiere or finished live stream becomes `AVAILABLE` (processed post-live recordings are ordinary videos) and is then announced ([Enrichment step](#enrichment-step)). Resolve-time reasons are persisted with `YouTubeAvailabilityRecorder.record(episodeId, reason)` (implemented in `:core:data` with `EpisodeDao.setAvailability`, which writes only `availability`), called by 06 and 07; this is a write to `episode` outside the refresh pipeline (exception to [D15](../PLAN.md#3-key-decisions), see [Open questions](#open-questions)).
 
-**Check again** (with the engine; overflow of a greyed row with `REGION_BLOCKED`, `PRIVATE` or `UNAVAILABLE`, which can change): `YouTubeChannelRepository.recheckAvailability(episodeId)` calls `invalidate(videoId)`, then `resolveAudio`, and records `AVAILABLE` on `Ok` or the new reason on `Unavailable`; `Transient` records nothing and returns null (snackbar "Couldn't check — try again later"). This is also the recovery path for items wrongly marked during an engine breakage.
+**Check again** (with the engine; overflow of a greyed row with `REGION_BLOCKED`, `PRIVATE` or `UNAVAILABLE`, which can change): `YouTubeChannelRepository.recheckAvailability(episodeId)` uses the bounded 45-second `facts` path without requiring an audio format, and records its known availability through the shared `YouTubeAvailabilityRecorder`; missing availability, unsupported extraction and transient failures write nothing and return null (snackbar "Couldn't check — try again later"). This is also the recovery path for items wrongly marked during an engine breakage.
 
 ### Participation matrix
 
@@ -821,9 +1023,35 @@ flowchart LR
 
 ### Shared engine module
 
-Serves R3.5, R3.6, R3.8, R3.9, R8.6, N11. Delivered in M9a (the JVM island `:youtube:engine` with the host-independent classes, written against the contract below, and `BinderYtxTransport` in `:youtube:ytdlp`), M9b (update orchestration and verifiers, in the island), MD3 (the stdio host on the same island, [11 Desktop YouTube engine host](11-desktop.md#desktop-youtube-engine-host)). Honours [D72](../PLAN.md#3-key-decisions), [D76](../PLAN.md#3-key-decisions), [D81](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions).
+Implementation note (2026-10-19, M9a): the shared Python package implements adopted resolutions
+1, 2, 3, 5, 10 and 11. `Bridge.call` returns
+wire-v1 JSON or a sanitized `ShimError.code`; host adapters pass an absolute
+Python-monotonic deadline, derived once from the remaining app budget.
+Worker-local extractors use fixed options; retained lazy cursors serialize
+against their creator's extractor even when resumed on another host thread.
+A full page reports `hasMore` without prefetching an extra item; an exact
+multiple can therefore end with an empty final page. Facts include at most
+32 KiB of UTF-8 description and an explicit truncation flag, independent of
+audio formats. No compilation, store, JS provider or production activation
+is performed here. Host selection and device acceptance remain **spike pending**.
 
-One engine, two hosts. Everything that decides what YouTube does — the methods and their results, error mapping, format selection, caches, capabilities, the engine store, the update policy and the trust chain — is host-independent JVM code; a host only runs CPython with the shared shim and carries JSON between the app and the interpreter. Until MD3 the package `…youtube.engine` inside `:youtube:ytdlp` imports nothing from `android.*`, Chaquopy or the AIDL classes (a package rule of 01's `checkBannedApis`), so MD3's move is mechanical.
+
+
+Implementation note (2026-10-19, M9a): Adopted resolutions 1, 2 and 11
+place shared contracts in `:youtube:engine` now; host selection/activation
+remain **spike pending**. M9a exposes bundled status/prewarm/retry only.
+Transport uses `YtxMethod` and absolute app-monotonic `YtxDeadline`; adapters
+translate remaining budgets without extension and count encoding overhead
+against caps. Wire seconds map to API milliseconds; lmt stays microseconds.
+The store owns explicit preparation/compile identity (app/engine/Python minor);
+playback never compiles inline. A broken bridge fails selftest; urllib
+fallback requires a recorded host choice. Adopted resolution 5 adds bounded
+plain description/truncation and format-independent 45 s `facts` to the API.
+Before-first-bind test arming belongs to the future Android host. Replay
+provenance and device evidence remain separate acceptance obligations.
+
+
+One engine, two hosts. Everything that decides what YouTube does — the methods and their results, error mapping, format selection, caches, capabilities, the engine store, the update policy and the trust chain — is host-independent JVM code; a host only runs CPython with the shared shim and carries JSON between the app and the interpreter. Shared Kotlin code lives in `:youtube:engine` from M9a and imports nothing from `android.*`, Chaquopy or AIDL. MD3 adds the desktop host without moving shared code (adopted resolution 1).
 
 | Concern | Shared (`:youtube:engine`, shim) | Android host (`:youtube:ytdlp`) | Desktop host (`:youtube:ytdlp-desktop`, [11](11-desktop.md#desktop-youtube-engine-host)) |
 |---|---|---|---|
@@ -899,7 +1127,7 @@ Rules every transport meets (the tests of both hosts check them: `BinderYtxTrans
 | `host_chaquopy.py`, `okhttp_rh.py` | registers `NeutrodyneOkHttpRH` as the only handler, binds the solve function to `QuickJsEngine` through Java interop; entry point for `YtxPython` | Android |
 | `host_stdio.py`, `bootstrap.py` | the line loop, the worker pool, `hello`, `cancel` and `jsc` lines, urllib with `source_address` as the only handler, the orphan guard ([11 Stdio protocol](11-desktop.md#stdio-protocol)) | desktop |
 
-Chaquopy packages `youtube/engine/python/` as `:youtube:ytdlp`'s Python source directory and compiles it with the build-host Python ([01 S7 Chaquopy under AGP 9.4.1](01-foundation.md#s7-chaquopy-under-agp-941)); the desktop build copies it into the image's resources and compiles it with each target's bundled interpreter on that target's runner ([11 Trim list and checks](11-desktop.md#trim-list-and-checks)). Its pytest suite lives in `youtube/engine/python/tests/` and runs once per adapter: `:youtube:ytdlp:shimTest` (the Chaquopy adapter with a test stub of Chaquopy's `java` module standing in for `PyHttp`) and `:youtube:ytdlp-desktop:shimTestStdio` (the stdio adapter driving a real child on the host CPython), both against the bundled yt-dlp with `ReplayRH` ([Testing](#testing)).
+Chaquopy packages `youtube/engine/python/` as `:youtube:ytdlp`'s Python source directory and compiles it with the build-host Python ([01 S7 Chaquopy under AGP 9.4.1](01-foundation.md#s7-chaquopy-under-agp-941)); the desktop build copies it into the image's resources and compiles it with each target's bundled interpreter on that target's runner ([11 Trim list and checks](11-desktop.md#trim-list-and-checks)). Its Python test suite lives in `youtube/engine/python/tests/` and runs once per adapter: `:youtube:ytdlp:shimTest` (the Chaquopy adapter with a test stub of Chaquopy's `java` module standing in for `PyHttp`) and `:youtube:ytdlp-desktop:shimTestStdio` (the stdio adapter driving a real child on the host CPython), both against the bundled yt-dlp with `ReplayRH` ([Testing](#testing)).
 
 **Methods.** Payloads and results are JSON strings, decoded in Kotlin with kotlinx.serialization DTOs; no Python object crosses a host boundary. Every payload carries `ctx = {hl, gl, ua, ipFamily}` from the app: `hl`/`gl` from the app locale, `ua` = 01's User-Agent (used only where yt-dlp sets none), `ipFamily` = `V4`, `V6` or null ([IP-family matching](#ip-family-matching)). Methods of `bridge.py`, identical on both hosts:
 
@@ -909,7 +1137,7 @@ Chaquopy packages `youtube/engine/python/` as `:youtube:ytdlp`'s Python source d
 | `version` | — | `{ytDlp, ejs, shimApi, python, jsc, host}` | `yt_dlp.version` |
 | `selftest` | — | `{ok, missing[]}` | API probe without network ([Update flow](#update-flow)) |
 | `resolve` | `{videoId}` | `{videoId, duration, liveStatus, availability, ageLimit, releaseTs, formats[{formatId, url, ext, acodec, abr, tbr, filesize, language, languagePreference, formatNote, protocol, availableAt}]}`, audio-only formats (`vcodec == 'none'`) | `extract_info(watch URL, download=False, process=False)` |
-| `facts` | `{videoId}` | `{videoId, title, duration, liveStatus, availability, releaseTs}` | the same call; no formats returned |
+| `facts` | `{videoId}` | `{videoId, title, duration, liveStatus, availability, releaseTs, description, descriptionTruncated}` | the same call; no formats returned; description bounded to 32 KiB UTF-8 |
 | `lookup` | `{url}`: `/@handle`, `/c/…`, `/user/…`, `/{name}` or `/channel/UC…` | `{channelId, title, handle, description, followerCount, avatars[{url, w, h}], banners[{url, w, h}]}` | the channel URL with `process=False`; playlist-level fields only, `entries` never iterated |
 | `tab_open` | `{channelId, tab, pageSize: 30}`, `tab` ∈ `videos`, `shorts`, `streams` | `{cursor, items[{id, title, duration, liveStatus, availability, timestamp}], hasMore}` | `https://www.youtube.com/channel/{UC}/{tab}` with `process=False`; flat entries pulled lazily from yt-dlp's generator |
 | `tab_next` | `{cursor}` | as `tab_open` | next page of the same generator |
@@ -938,6 +1166,45 @@ The vendored yt-dlp file (first bullet) is shared by both hosts; everything afte
 | `cacheDir/yt-dlp/` | yt-dlp's `cachedir`: player JS and solver data only, never stream URLs ([D50](../PLAN.md#3-key-decisions)) |
 
 `EngineStore` extracts a version (zip-slip and size checks as in [Update flow](#update-flow)) before `:ytx` is first bound to it, on `@Dispatcher(IO)`. `YtxPython` compiles an uncompiled `lib/` on its first import (`compileall`, legacy layout; 1.4 s for the whole zip on a host CPU, device time measured by the spike), writes the marker and makes the files read-only; later imports read `.pyc` (host 0.13–0.16 s, against 0.5–0.6 s from the zip). So that this one-time cost — on top of Chaquopy's own first-start extraction — never lands on a playback resolve, the order-210 initializer enqueues the one-time work `engine-prepare` (`KEEP`, 30 s initial delay, no network) whenever the bundled version has no compile marker for this app version, i.e. after every install or app update: it extracts the bundled version and binds `:ytx` once to compile and import it while nothing waits on it, then lets the idle stop end `:ytx`. `YtxPython` runs `Python.start`, compilation and imports on a worker thread, never on `:ytx`'s main thread (`onCreate`/`onBind` return at once, so no service-start ANR), and `ping` answers `ready` only afterwards. A marker for another Python minor (an app update that changed CPython) makes `EngineStore` re-extract from the kept zip.
+
+Implementation note (2026-10-19, M9a): the bundled store implements adopted resolutions
+1, 2 and 11 in `:youtube:engine`; host selection/activation remain **spike
+pending**. The documented 2026.08.19 pin is unchanged: 3,072,469 bytes,
+SHA-256 `1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6`,
+1,053 files / 10,161,243 expanded bytes; ejs 0.8.0, meriyah 6.1.4, astring
+1.9.0. Signature/fingerprint/hash were verified in a fresh temporary directory
+before copying, without executing upstream code. Only ZIP/metadata enter APK
+assets; the key and verifier remain build-only.
+
+M9a `active.json` holds current/bundled/full compile identity only, written
+by the main process through synced temp plus atomic rename. Extraction limits
+are 10 MiB compressed, 40 MiB expanded, 8 MiB/entry, 4,096 entries, 512-byte
+paths and 200:1 expansion. It checks sizes/CRC and rejects traversal,
+duplicates/collisions, symlinks/special files, encryption/native/precompiled
+code and roots outside the documented allow-list. Extracted sources are
+read-only, with writable directories until the host worker compiles legacy `.pyc`.
+
+Order 150 reads status only; order 210 schedules unique KEEP `engine-prepare`
+after 30 s with no network requirement. These hooks and the worker remain unbound until activation approval;
+shells remain external. Preparation publishes `hostLibDir` while
+status stays PREPARING. The worker pings the transport for worker-owned
+compile/import; the host calls `EngineCompileMarkers.write` after success and source
+removal, sealing files and writing the full-identity `.compiled-<minor>`.
+Delayed work rechecks settings and platform preflight before binding.
+Worker success requires reloaded compiled status. Torn active/marker, missing
+required bytecode, app/Python changes or interrupted compile re-extract from
+the APK on explicit preparation. Playback never prepares inline; broken
+bridge configuration must fail closed.
+
+Preparation supplies the existing `YtxControlRequest` with caller-provided
+`ctx`; the worker has no locale or network provider. The shared bridge
+continues rejecting context-free calls. The S7 `YtxPython` scaffold still
+uses the runtime-only `selftest()` diagnostics without loading an engine;
+wire `selftest` invokes the full API/handler probe after host configuration.
+The Android host test publishes a real prepared store and worker payload
+as declared Gradle outputs. `:youtube:ytdlp:preparedShimTest` consumes them
+through the Python host adapter and all eight recorded method scenarios;
+Kotlin never launches a process and no Binder execution is claimed.
 
 - **Sizes** (estimates from Chaquopy's 3.14.0 runtime artifacts, [runtime artifacts](https://repo1.maven.org/maven2/com/chaquo/python/target/), and the release asset):
 
@@ -1003,6 +1270,17 @@ oneway interface IYtxCallback {
 
 ### Networking bridge
 
+Implementation note (2026-10-19, M9a): the Python/Java adapter contract is
+`PyHttp.execute(callId, method, url, headersJson, body, timeoutMs, ipFamily)`.
+The final argument explicitly carries the per-call family to the Android socket
+owner. The response exposes `status`, final `url`, decoded `body` and
+`headersJson` as a JSON array of header pairs, preserving repeated
+Set-Cookie fields. PyHttp owns redirect/gzip decoding and socket cancellation;
+Python applies the yt-dlp cookie jar and removes decoded gzip headers.
+Configuration/probe failure leaves no urllib fallback (adopted resolution 11).
+The host CPython java stub verifies this contract; Android execution remains unverified.
+
+
 **Android host** ([D74](../PLAN.md#3-key-decisions)); the desktop host uses the Fallback row below — yt-dlp's urllib handler with `source_address` and the bundled CA file — as its primary rule ([11 Networking and TLS](11-desktop.md#networking-and-tls)). On Android every HTTP request yt-dlp makes goes through `NeutrodyneOkHttpRH`, a yt-dlp `RequestHandler` registered with `register_rh` (`yt_dlp.networking.common`): `RH_KEY = "NeutrodyneOkHttp"`, schemes `http` and `https`, no proxy schemes, and a `register_preference` of 1000, so it is always tried first (and, per Exclusivity below, is the only handler left). Its `_send` calls `PyHttp.execute(callId, method, url, headersJson, body, timeoutMs)` through Chaquopy's Java interop (`from java import jclass`) and wraps the answer in a yt-dlp `Response`; non-2xx statuses raise `HTTPError` and I/O failures `TransportError`, as yt-dlp's own handlers do.
 
 **Exclusivity.** The preference alone does not guarantee that every request uses the bridge: yt-dlp's `RequestDirector` silently tries the next registered handler when one raises `UnsupportedRequest` in `validate`, or any exception that is not a `RequestError` in `send` (it logs "Unexpected error" and continues; 2026.08.19 `networking/common.py`), and the built-in urllib handler is always registered. Such a fallback would bypass IP-family pinning (so googlevideo answers 403), cancellation, the User-Agent policy and Android's TLS stack. The shim therefore (1) pops all four extensions yt-dlp defines in `NeutrodyneOkHttpRH._check_extensions` — `cookiejar` and `timeout` are honoured, `legacy_ssl` and `keep_header_casing` ignored — because any extension left over raises `UnsupportedRequest`; (2) wraps every exception from the Java bridge in `TransportError` (statuses in `HTTPError`); (3) sets the `YoutubeDL` option `proxy = ''` (yt-dlp's "no proxy"), so no environment proxy reaches a handler with no proxy schemes; (4) removes every other entry from `yt_dlp.networking.common._REQUEST_HANDLERS` before building `YoutubeDL` unless the urllib fallback below is deliberately active — internal API, so the self-test probes it and risk M8r covers it; (5) `shimTest` fails when any request reaches a handler other than `NeutrodyneOkHttpRH` or `ReplayRH`.
@@ -1017,7 +1295,7 @@ oneway interface IYtxCallback {
 | IP family | `ctx.ipFamily` picks one of three clients that differ only in their `Dns`: system order (null), A records only (`V4`) or AAAA records only (`V6`), each falling back to all records when the host has none of that family. Every request of the call uses it, so the InnerTube requests — and therefore the `ip=` of the googlevideo URLs they return — have a known family. The main process sends its current `googlevideo.com` hint and updates the hint from each result's `ip=` ([IP-family matching](#ip-family-matching)) |
 | Hosts | `www.youtube.com` (watch page, `/youtubei/…`) from `:ytx` (desktop: from the child); `*.googlevideo.com` media requests come from the app process (06, 07; desktop 11's loader and download lanes). Listed as `youtube-streams` in 09's network inventory for both apps; Unverified: the complete host list (captured in M9a, re-checked in MD3) |
 | TLS | OkHttp on Android's TLS stack; CPython's bundled OpenSSL (3.0.18 in Chaquopy's 3.14.0 runtime, behind upstream patch releases) carries no traffic, because the bridge is the only registered handler (Exclusivity above). On the desktop the python-build-standalone OpenSSL does carry the engine's traffic, verified against the bundled certifi CA file, and is updated with each pinned PBS release (11) |
-| Fallback | A2 host, or a bridge the self-test finds broken: yt-dlp's built-in urllib handler with `source_address` `0.0.0.0` (V4) or `::` (V6), i.e. its `--force-ipv4`/`--force-ipv6` behaviour; no OkHttp interceptors, and a running request is cancelled only by killing the process (the shim's cancel flag still stops the next request). This is the desktop host's normal rule (urllib as the only handler, `proxy = ''`, `SSL_CERT_FILE` = the bundled certifi file; `shimTestStdio` fails when a request reaches another handler) |
+| Fallback | A2 host after a recorded host decision: yt-dlp's built-in urllib handler with `source_address` `0.0.0.0` (V4) or `::` (V6), i.e. its `--force-ipv4`/`--force-ipv6` behaviour; no OkHttp interceptors, and a running request is cancelled only by killing the process (the shim's cancel flag still stops the next request). A broken Android bridge fails selftest instead of falling back. This is the desktop host's normal rule (urllib as the only handler, `proxy = ''`, `SSL_CERT_FILE` = the bundled certifi file; `shimTestStdio` fails when a request reaches another handler) |
 
 ### JS challenge provider
 
@@ -1070,6 +1348,22 @@ State of the engine (yt-dlp 2026.08.19 source, read 2026-10-05): without a JS ru
 
 ### Engine call and transport
 
+Implementation note (2026-10-19, W5): admission and DTO bounds belong to
+`YtDlpClient`; `YtDlpStreamResolver` alone owns resolve single flight. A caller
+waits with its own monotonic budget; joining never extends the flight deadline.
+A background waiter may retry a shorter expired flight within its remaining
+budget. Last-waiter cancellation propagates through transport cancellation,
+which alone owns host call IDs. Neither class starts or compiles Python itself.
+The strict W3 wire schema omits video formats before Kotlin mapping. Kotlin
+requires progressive HTTP audio, matching URL/format itags and bounded metadata;
+unknown or malformed output fails with a redacted extraction error. Portable
+coverage uses synthetic W3 replay, not residential or reference-device proof.
+For a multi-track itag with absent track identity, a bare `~` suffix is
+reserved; accepted typed track IDs are nonempty. It cannot alias a track
+literally named `untyped`. Cache hits restore their own IP-family hint. The
+client deadline checkpoint also covers local mapping before health/cache
+completion; local work does not extend the absolute flight deadline.
+
 - `YtDlpClient.call(method, payload, deadline)` admits the call under the host's worker limit and calls `YtxTransport.call`, which starts the host if needed (a cold start; [Process and lifecycle](#process-and-lifecycle), [11 Process model](11-desktop.md#process-model)) and suspends until the host answers; cancellation, the 5 s kill grace and host death behave as in the [host contract](#shared-engine-module). Results are decoded into DTOs; an undecodable result is `EXTRACTION`.
 - The shim's yt-dlp options ([yt-dlp embedding](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)): `quiet`, the redacting logger, `skip_download`, `noplaylist`, `ignore_no_formats_error` (upcoming and live videos then return their metadata instead of raising; yt-dlp then reports every per-video "no formats" reason as a logger warning instead of an exception, which the shim's logger captures per call for `errors.py`, [Exception classification](#exception-classification)), `socket_timeout` 15 s, `cachedir` = `EngineStorePaths.ytDlpCacheDir` (Android `cacheDir/yt-dlp`, desktop `<cache>/engine-cache/yt-dlp`), `js_runtimes = {}` (always: an in-process plugin provider needs no `js_runtimes` entry, and any entry would re-enable yt-dlp's subprocess probing for `deno` or `node`), `remote_components = set()`, `extractor_args` `youtube.skip = [hls, dash, translated_subs]`, `youtube.player_client = ['default', '-web']` (upstream's defaults, never a pinned client, [JS challenge provider](#js-challenge-provider)), `youtube.lang = [hl]` and `youtubetab.approximate_date` (always on; harmless for video calls). Each Python worker thread (2 in `:ytx`, 4 in the desktop child) owns its own `YoutubeDL` per `hl` value (normally one each; a locale change creates another), built once with these fixed options and never changed per call: yt-dlp does not document concurrent `extract_info` calls on one instance, and its cached extractor instances keep mutable state (player and code caches). `extract_flat` and `lazy_playlist` are not set: they act only in yt-dlp's processing stage, which `process=False` skips; the YouTube tab and search extractors already yield flat `url` entries from a lazy generator. `shimTest`, `shimTestStdio` and the engine canary build `YoutubeDL` through the same `bridge.py` function, so they test exactly these options on both adapters. Extraction runs with `extract_info(…, download=False, process=False)`: yt-dlp's format sorting and selection are bypassed, [Format selection](#format-selection) decides.
 - Consent and cookies: yt-dlp handles YouTube's consent cookie itself; the jar lives only in the host's memory (`:ytx` or the desktop child; [Networking bridge](#networking-bridge)). No PO-token provider and no captcha solver are registered.
@@ -1081,13 +1375,13 @@ State of the engine (yt-dlp 2026.08.19 source, read 2026-10-05): without a JS ru
 1. `videoId` fails `YouTubeIds.VIDEO` → `Unavailable(UNAVAILABLE)`.
 2. `capabilities.inAppPlayback` false → `Unsupported` without starting the engine host.
 3. `ResolvedUrlCache.get(videoId, pref)` hit (pinned or unpinned, rules in [ResolvedUrlCache](#resolvedurlcache)) → `Ok`.
-4. `health.awaitLoaded()`; `health.extractionGate(now)`: `Deny(until, kind)` → `Transient(kind)` (`BREAKER_OPEN` or `RATE_LIMITED`) without an engine call; `AllowTrial` → this call is the half-open trial.
+4. Only the owning single flight reserves extraction health, after client admission and `health.awaitLoaded()`. `reserveExtraction` atomically admits one operation or returns `Transient(BREAKER_OPEN/RATE_LIMITED)` without a wire call. Planner/claimer gate views do not reserve. Cache hits own no reservation.
 5. Single flight on the key; `YtDlpClient.call("resolve", {videoId, ctx}, deadline)` with 20 s (25 s when the host is not `READY`; 45 s for 07's transfers and "Check again").
 6. Error codes → `YtDlpErrorMapper` ([table](#exception-classification)); `UPCOMING`, `LIVE` and the other per-video codes become `Unavailable(reason)`.
 7. `YtDlpAudioMapper` maps the result's formats (audio-only, `protocol` `https`, `url` present) to `AudioCandidate`s; `AudioStreamSelector.select(candidates, pref)`.
 8. No candidate: the shim has already classified an empty format list from structured fields and the call's captured warnings (`KIDS_ONLY`, `PRIVATE`, `AGE_RESTRICTED`, `MEMBERS_ONLY`, `REGION_BLOCKED`, `UNAVAILABLE`, `RATE_LIMITED`; [Exception classification](#exception-classification)); only formats that are all unusable (SABR-only) or an empty list with no recognised reason → `Transient(EXTRACTION)`.
 9. Build `ResolvedAudio` from the chosen format and its URL query: `expire` (epoch s) → `expiresAtMs` (missing → `now + 5 h`), `clen` → `contentLength` (else yt-dlp's `filesize`), `lmt` → `lastModifiedMicros`, `ip` → `ipFamily` (`:` in the value → `V6`), `formatId` ([Scope](#modules-and-public-api)); `durationMs = duration × 1000`; `availableAtMs = availableAt × 1000` when yt-dlp reports a preroll wait.
-10. `health.reportExtraction(Success)` and `EngineRollbackMonitor` notified; cache; set the googlevideo IP-family hint ([below](#ip-family-matching)); return `Ok`. Cancellation of a trial call reports `Inconclusive`.
+10. Complete the owning reservation exactly once in `finally`: `Success` for usable audio, `ParseFailure` for extraction failure, otherwise `Inconclusive`, including cancellation. Cache and set the googlevideo IP-family hint ([below](#ip-family-matching)) only if the flight has not been invalidated; return `Ok`. Runtime rollback remains M9b.
 
 `availableAtMs`: yt-dlp derives it from preroll ad placements in the player response; a googlevideo URL may answer 403 before that time. 06 waits up to 30 s for it before opening the `DataSpec` (longer → `Transient(NETWORK)`), 07 sets `nextAttemptAt` to it, and neither reports a 403 before it to the breaker. Unverified: whether `visionos` responses carry preroll placements at all (M9a fixtures).
 
@@ -1113,8 +1407,8 @@ Media3 plays AAC in MP4 on all API levels and Opus in WebM through the platform 
 
 - Key `"$videoId|$quality|$preferDrc|$preferredLanguage"`; `pinnedItag` is **not** part of the key, because 06's `EpisodeResolver` (on the desktop 11's `DesktopEpisodeSourceResolver`) and 07's YouTube transfers resolve unpinned first and pinned on every later connection or chunk. Lookup: a valid entry is a hit when `pref.pinnedItag == null || entry.itag == pref.pinnedItag`; only an itag mismatch resolves anew, and its result replaces the entry. So a pinned call after an unpinned one for the same video and preferences costs no engine call, which keeps the [Costs](#costs) below. LRU of 64 entries; memory only ([D50](../PLAN.md#3-key-decisions)): never written to the database, a backup, logs, crash reports or the restored queue.
 - An entry is valid until `min(expiresAtMs − 10 min, resolvedAtMs + 5 h)`.
-- `invalidate(videoId)` removes every key of that video. If a removed entry was resolved less than 2 min earlier, the resolver reports `ExtractionOutcome.ForbiddenFreshUrl(videoId)` (06 and 07 call `invalidate` only after a 403/410, so a fresh URL being refused signals a PO-token requirement or an IP mismatch; [Circuit breaker](#circuit-breaker)).
-- `invalidateAll()` runs on a change of the default network (`NetworkMonitor`, because the client IP changes) and when the breaker opens; neither reports anything.
+- `invalidate(videoId)` removes every key of that video and prevents older flights from refilling the cache. Frozen W1 ownership applies: media callers (06/07) alone report `ForbiddenFreshUrl` for a refused URL less than 2 min old, after its preroll time; W5 invalidation never repeats their report. The cache exposes freshness to internal consumers, without persisting URLs. [Circuit breaker](#circuit-breaker) clusters those reports in W6.
+- `invalidateAll()` runs when the breaker opens; it reports nothing. Default-network identity changes clear both the URL cache and the googlevideo family hint, including Wi-Fi to Wi-Fi with identical connectivity flags. Old flights cannot restore either. The Android identity callback and DNS adapter remain unbound until W11 activation; reachability-only `NetworkMonitor.status` is insufficient.
 
 ### Exception classification
 
@@ -1181,7 +1475,7 @@ Serves R3.5, R3.8, R8.6. Delivered in M9a on Android (06's YouTube branch return
 | Format pinning | The first `Ok` pins `(formatId, contentLength, lastModifiedMicros)` for this episode's playback (in memory, cleared on item transition). A later `Ok` that differs in any of the three throws `YouTubeFormatChangedException(videoId, old, new formatId)` (same `formatId` with a new `clen`/`lmt` means the video was re-encoded) |
 | Cross-session cache check | On the first `Ok` of a pin, if `ContentMetadata.getContentLength(cache.getContentMetadata(key))` is known and differs from `contentLength`, 06 removes the resource for `key` before opening (old bytes of a re-encoded or different variant must never be mixed in) |
 | Expiry | Handled by the cache TTL: any new connection after `expire − 10 min` gets a fresh URL; bytes of one pinned format are identical across URLs, so continuing mid-file is safe |
-| 403 / 410 from googlevideo | The wrapping data source calls `resolver.invalidate(videoId)` and rethrows; `DefaultLoadErrorHandlingPolicy` retries (backoff `min((n−1)·1 s, 5 s)`) and the retry re-enters `resolveDataSpec`, which resolves a fresh URL at the same byte offset. At most 2 invalidations per item per 60 s; a third 403 within that window is rethrown without invalidating and surfaces through Media3's retry limit as a playback error (`YOUTUBE` stream, "YouTube playback failed — try again later"). A refused fresh URL is reported to the breaker by `invalidate` ([ResolvedUrlCache](#resolvedurlcache)) |
+| 403 / 410 from googlevideo | The wrapping data source calls `resolver.invalidate(videoId)` and rethrows; `DefaultLoadErrorHandlingPolicy` retries (backoff `min((n−1)·1 s, 5 s)`) and the retry re-enters `resolveDataSpec`, which resolves a fresh URL at the same byte offset. At most 2 invalidations per item per 60 s; a third 403 within that window is rethrown without invalidating and surfaces through Media3's retry limit as a playback error (`YOUTUBE` stream, "YouTube playback failed — try again later"). The media caller alone reports a refused fresh URL after preroll; invalidation does not report it ([ResolvedUrlCache](#resolvedurlcache)) |
 | Pre-warm | When a YouTube item without a local file enters the projection window, `QueueProjector` calls `YouTubeEngine.prewarm(PROJECTION)`, so the engine host is running before the first resolve ([Process and lifecycle](#process-and-lifecycle)) |
 | Pre-resolve | 60 s before the current item ends, if the next projected item is YouTube without a local file, 06 calls `resolveAudio` on `@ApplicationScope` and ignores the result (hides 0.5–3 s of extraction latency) |
 | Preroll wait | `ResolvedAudio.availableAtMs > now`: 06 waits up to 30 s before opening the `DataSpec`, else treats the result as `Transient(NETWORK)`; a 403 before that time is not reported to the breaker ([Resolve algorithm](#resolve-algorithm)) |
@@ -1208,9 +1502,68 @@ Serves R3.5, R3.8, R8.6. Delivered in M9a on Android (06's YouTube branch return
 
 The queue continues with the next playable item in every skip case (R3.8). Unavailable reasons recorded during playback remove the item from the projection window at the next diff (06's window skips `availability != AVAILABLE`).
 
+**Implementation note (2026-10-20, W7b B1).** The Android consumer now uses the
+existing stream resolver for initial pins and every actual HTTP upstream open,
+including cache holes and retries. An in-memory `DataSpec.customData` lease keeps
+same-video episode occurrences distinct; the original custom data reaches the
+MEDIA client. Pins retain the full representation and audio preference snapshot.
+YouTube resources use the existing cache owner with reference-counted pins;
+known incompatible lengths and stale redirect metadata are cleared before reuse.
+Cache setup errors retain the existing RSS policy: CacheDataSource observes the
+failure and bypasses cache on its retry, including after a stale-resource reset.
+The 35 s resolver watchdog excludes the interruptible preroll wait. Media callers
+own bounded 403/410 invalidation and fresh-403/429 reports; resolver reservations
+and URL-cache policy remain W5/W6-owned. Typed recovery precedes RSS HTTP/IO
+classification; format recovery preserves time and does not become a user seek.
+Health is obtained lazily so service injection does not open the database on main.
+Controlled portable tests do not establish host, device or audible acceptance.
+Ordinary bindings still return external `NOT_YET_AVAILABLE` and `Unsupported`.
+
+**Implementation note (2026-10-20, W7b B2).** Projection/screens require
+`YouTubeEngine` directly. Both shells bind `DeferredYouTubeEngine`: transient
+`NOT_YET_AVAILABLE`, unknown version, inert prewarm/retry. This status is not
+persisted; prior enum entries and fake defaults are unchanged. W11 must alias
+the real singleton used by extraction with its complete activation set.
+
+Installed-window commits request `PROJECTION` for new remote YouTube occurrences
+and renewed next eligibility. Known episode/channel visibility requests `SCREEN`
+once per opening; hidden, RSS and external screens do no work. No facts/chapters
+are fetched. The five-second playing tick drives service-owned `PreResolver`
+with known remaining media time in [0,60s], immutable occurrence identity and
+playback's preferences/PLAYBACK stream owner. It takes no pin or health token.
+Host/device/latency/audible acceptance remains pending.
+
 ### Chapters from the description
 
 `YouTubeChapters.parse(description: String, durationMs: Long?): List<ChapterSpec>` (pure); 06 stores the result with `ChapterSource.YOUTUBE_DESC` when the item becomes current and no higher-priority chapters exist ([06 Chapters](06-playback.md#chapters)). Rules: a line whose first token is a timestamp (`m:ss`, `mm:ss`, `h:mm:ss`, token grammar as 03's timestamp linkifier) followed by an optional separator (`-`, `–`, `—`, `|`, `:`) and a title; at least 3 such lines; the first is `0:00`; strictly ascending; each chapter ≥ 10 s; the last start before `durationMs` when known. Otherwise no chapters (timestamps still become seek links via 03). Unverified: these mirror YouTube's own chapter rules as commonly documented, not re-checked.
+
+**Implementation note (2026-10-20, W7a).** `ChapterSpec` contains only `startMs`
+and the nonempty title. The common parser uses 03's ASCII clock field widths,
+range checks and time-of-day exclusions, with 04's optional line separator.
+A numeric timestamp-like first token with malformed fields, overflow-width
+digits, a missing title, a duplicate or a short interval rejects the whole list.
+Unrelated prose is ignored. Parsing is linear in input size; more than 2 MiB
+UTF-8 or 1,000 chapters rejects the whole input rather than returning a prefix.
+A known duration must leave at least ten seconds after the final start;
+unknown duration leaves the final end open. Next-start bounds use the existing
+chapter normalization in 06.
+
+`ChapterRepository.ensureCurrentLoaded` first attempts the existing JSON path,
+then requests only the frozen loader's immutable proven-complete snapshot for
+an eligible current YouTube item without winning higher-priority chapters. Complete Atom notes
+work offline without facts. Unknown/truncated stored notes remain intact and
+authorize no chapters. No mutable description blob is reread after facts.
+The real write transaction rechecks episode/video/podcast ownership, YouTube
+source, winning priority, current duration and cancellation before replacing
+only `YOUTUBE_DESC`. Each current occurrence reparses its returned complete
+snapshot: changed notes replace that source, and an invalid complete list clears
+it. If the loader returns no snapshot, cached rows are preserved; unknown or
+truncated text cannot replace them. Identical normalized results do not write. The Android service
+calls this entry in its cancellable current-occurrence scope; browsing and
+completed downloads retain JSON-only `ensureLoaded` plus M6 local inspection.
+Both ordinary graphs supply the existing loader and still use external
+`NOT_YET_AVAILABLE`/`Unsupported` bindings. Portable B1/B2 are described above;
+W4 host, W11 activation and live/device/audible acceptance remain pending.
 
 ### Watch on YouTube
 
@@ -1310,7 +1663,31 @@ Export (05 writes the XML, [D31](../PLAN.md#3-key-decisions)): each channel as `
 
 `ImportFormat.URL_LIST` (02's constant, 05's pipeline; stored as TEXT, no migration): UTF-8 text ≤ 1 MB, ≤ 5,000 lines; lines trimmed; empty and `#` lines skipped; each line is an http(s) URL (RSS or YouTube), a `UC…` ID or an `@handle`. Sniffed when ≥ 80 % of the remaining lines are such tokens. Covers LibreTube's "list of URLs/IDs" export and hand-made lists.
 
+Implementation note (2026-10-19, M8): W5 implements the four pure format parsers,
+OPML canonical channel export and full-library NewPipe export in external mode.
+JSON row caps apply during decoding, and ignored JSON structures have a 64-level
+nesting bound. W5 and W6 use one app-scoped `YouTubeSubscriptionWriter`
+implementation for Add, static imports and durable resolved imports. It commits
+canonical identity, sync ID, pending initial state, variants and memberships
+together. Import preserves existing settings and unions groups; Add rejects an
+existing identity. New rows retain the initial GUID coverage timestamp and mark
+external paging complete. Invalid masks return a typed failure, and invalid group
+memberships roll back the subscription. Page descriptions are escaped as HTML.
+Static channels commit without a resolver request. Unresolved items retain validated
+inputs and masks by ordinal, use two ID_ONLY lookups with 0.5–1.5 s jitter, and
+recheck cancellation and input ownership before canonical insertion and group union.
+
+Implementation note (2026-10-19, M8): Import format examples live under
+`feeds/src/test/resources/import/` and shared parser tests replay on the desktop
+and Android host targets (adopted resolution 8). They are small synthetic examples
+with provenance, not current owner exports. NewPipe interoperability is an M8 manual
+check despite its placement in the M9 checklist below. A current localized Takeout
+ZIP, grouped LibreTube owner export and application interoperability remain owner
+acceptance evidence; deterministic tests do not claim those checks.
+
 ### Pipeline rules for YouTube items (05 implements)
+
+Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` retain htmlUrl-selected inputs and validated nd-over-hint-over-LONG_FORM masks in optionsJson. Old maps default empty. W5 lazily upgrades unfinished sessions on retry/re-preview, preserves historical reports and unions duplicate memberships through the same canonical-key writer as Add, without storing handle aliases (adopted resolution 7).
 
 1. Before M8: YouTube items get `YOUTUBE_UNSUPPORTED_YET` and are not selectable.
 2. Statically known channels: commit inserts `PENDING_FIRST_FETCH` podcasts with the canonical feed URL, `youtubeChannelId`, `youtubeVariants`, title from the file, `initialFetch = 1`, `channelMetadataAt = null`. Dedupe by `feedKey`; duplicates within one file merge with the union of group names.
@@ -1343,6 +1720,56 @@ Serves R3.3, R3.8, N2. Delivered in M8 (feed outage), M9a (breaker, rate limit, 
 
 ### Circuit breaker
 
+
+Implementation note (2026-10-19, M9a): Adopted resolution 4 makes gate
+views non-reserving. Lifecycle health owns atomic `YouTubeExtractionHealth` reservations:
+one per admitted operation, completed once including cancellation, visible
+before persistence. Resolver, enrichment and search own extraction reports; composite enrichment
+shares one reservation. Playback/download loaders alone report media 429/fresh-URL 403. Cache
+hits/claims reserve nothing; breaker opening invalidates URLs before gates.
+W6 implements this portable state and lifecycle against the frozen ports;
+M8 feed-health behavior stays independent. The health constructor receives the
+app version and a synchronous cache `invalidateAll` callback. Admission is
+blocked during that callback. Snapshot revisions discard stale queued writes;
+the app-version key commits each multi-key snapshot last, with zero marking
+an interrupted write. Reservations and failure history stay in memory.
+Lifecycle waits for health loading before reporting the bundled version.
+Portable W5/W6 integration exercises the real client, mapper, resolver cache,
+lifecycle and persistent health together in `core:data` desktop tests. Opening
+first blocks admission, synchronously calls resolver `invalidateAll` to fence
+cached and in-flight representations, then releases the invalidation fence.
+Health loading consumes the operation deadline; recheck it before reserving.
+W4 still supplies the settings/preflight/host adapters, and W11 supplies the
+singleton aliases, application bindings and notices. Ordinary shells remain
+external `NOT_YET_AVAILABLE`. Host selection and the device spike remain
+**PENDING**; this is no production activation or M9a acceptance.
+
+Before production, W4/W11 must establish a lossless observation boundary for
+every actual start attempt: the lifecycle observer must receive its start
+(`STARTING`/`COMPILING`) and its outcome (`READY`, failed start as
+`STOPPED` with `lastExit = START_FAILED`, or `UNUSABLE`) before another attempt
+can overwrite them. Each attempt has exactly one start outcome. The frozen conflating `HostStatus` StateFlow has no outcome
+sequence; snapshots cannot reconstruct arbitrarily lost transitions. W4/W11
+must prove ordered delivery/acknowledgement or agree an outcome contract before
+activation; this portable integration adds neither a port nor policy counters.
+Shutdown must fence callbacks from the old host, expose a restartable state
+before retry prewarm, or queue that prewarm through teardown. Direct call starts
+must await real settings and platform preflight, as well as prepared artifacts.
+W4 must persist start failures with full app/engine/Python identity while
+atomically preserving enabled state; extraction snapshot markers are separate.
+W11 must alias both health interfaces to one singleton, provide the positive app
+version and a synchronous nonblocking resolver invalidation callback, and own
+context and default-network callback registration/removal for that resolver's
+lifetime. The callback clears all URL representations and fences stale puts
+before later admission; network changes also clear the IP-family hint. These
+are outstanding real-host/graph contracts, not proven by scripted transport
+transitions. Portable W9 facts/composites and paging now exercise the same real
+health/client/mapper boundaries, including expired health loading before any
+reservation, once-only completion, half-open cancellation/rate persistence,
+committed promotion under cancellation and page transaction rollback. W5/W6
+and W9 remain separate measured publication slices.
+
+
 ```mermaid
 stateDiagram-v2
   [*] --> Closed
@@ -1359,7 +1786,7 @@ stateDiagram-v2
 | Counted | `ExtractionOutcome.ParseFailure` from resolve, enrichment, search, back catalogue and `YtDlpChannelLookup` (including the "content not available" cluster rule of [Exception classification](#exception-classification)); at most one per `videoId` per 10 min (Media3 retries must not trip it alone). `ForbiddenFreshUrl` outcomes count like parse failures once 3 distinct videos produced one within 1 h (a new PO-token requirement looks like this; one or two are treated as per-video glitches; a 403 before `availableAtMs` never counts). Never counted: `Unavailable`, `Inconclusive` (network, timeout, rate limit, cancellation, `ENGINE_UNAVAILABLE`) |
 | Open duration | 6 h; 12 h when the previous opening was less than 24 h earlier (PLAN glossary "Circuit breaker": 6–12 h) |
 | While open | `extractionGate` returns `Deny(breakerOpenUntil, BREAKER_OPEN)` to resolve, enrichment, search, back catalogue and `YtDlpChannelLookup` (which then returns `null`, so the HTML fallback keeps subscribing working); `ResolvedUrlCache.invalidateAll()` on opening |
-| Half-open | Entered lazily: the first `extractionGate` call with `now ≥ breakerOpenUntil`, or `retryNow()`. Exactly one caller gets `AllowTrial` (any purpose); every other call gets `Deny(now + 60 s, BREAKER_OPEN)` until the trial reports. `Success` → CLOSED (failure history cleared); `ParseFailure`/counted `ForbiddenFreshUrl` → OPEN again (12 h rule); `Inconclusive` → the trial slot is released and the next call becomes the trial |
+| Half-open | Entered lazily: the first `extractionGate` call with `now ≥ breakerOpenUntil`, or `retryNow()`. Gate views return `AllowTrial` without reserving. Exactly one admitted operation reserves the trial (any purpose); other reservations get `Deny(now + 60 s, BREAKER_OPEN)` until it completes. `Success` → CLOSED (failure history cleared); `ParseFailure`/counted `ForbiddenFreshUrl` → OPEN again (12 h rule); `Inconclusive` → the trial slot is released and the next call becomes the trial |
 | Opening | From M9b also asks for a fix: `YtDlpEngine` observes `YouTubeHealth.state` and, on each transition to `OPEN`, calls `EngineUpdateScheduler.requestNow(BREAKER)` (Android `engine-update-now`; desktop a poke of the `engine-update` lane, from MD3) when the policy is not `OFF` and the last check is more than 3 h old ([Update flow](#update-flow)) |
 | Persisted (`device_settings`) | `youtube.breaker_open_until`, `youtube.breaker_last_opened_at`, `youtube.breaker_version_code`, `youtube.breaker_engine_version`; failure timestamps are memory-only |
 | Reset | A different `versionCode` at start, or a different active engine version (reported by `YtDlpEngine` through `reportEngineVersion` at load and after every activation, rollback or reset), closes the breaker: the fix is an engine update or, failing that, an app update |
@@ -1546,6 +1973,12 @@ Serves N11, R3.9, R8.6; mitigates risks M1r, M8r. Delivered in M9a (recorded res
 
 ### Engine canary
 
+Implementation note (2026-10-19, M9a): Adopted resolution 10 keeps live
+host traffic in an explicitly named test/live adapter, not a shipped desktop
+host or Android PyHttp claim. Informational canaries provide separate evidence;
+strict recorded replay gates PRs. No canary approves or ships engine updates.
+
+
 The workflow, its schedule, environment and Pages deployment are 09's ([09 engine-canary.yml](09-quality-and-release.md#engine-canaryyml)); what it tests is defined here. Every 6 h and on `workflow_dispatch(tag)`:
 
 1. **Detect.** The latest yt-dlp stable tag from the `Location` header of `https://github.com/yt-dlp/yt-dlp/releases/latest` (or the dispatched `tag`); nothing to do when it equals the approved version.
@@ -1582,6 +2015,19 @@ Three paths, in order of preference. Path 1 needs nobody to install anything. Th
 
 ### Recorded responses
 
+Implementation note (2026-10-19, M9a): Adopted resolution 10 uses explicit
+host/live urllib only in the manual recording tool; it refuses CI and writes
+a new staging directory for review. JSON/bootstrap objects are minimized,
+prose replaced and cookies/visitor data/signatures/IP/expiry scrubbed before
+writing. Unsupported pages fail capture; inspect staging before promotion.
+Committed shim scenarios are labelled synthetic, never successful live captures.
+The strict corpus and generated synthetic AC1 error vectors exercise the
+real official 2026.08.19 extractor. Generated vectors are parser coverage,
+not evidence of request stability or current server behavior. A replay miss
+poisons the whole call even if an extractor swallows its transport exception.
+Successful residential captures and Android host inventory remain pending.
+
+
 `scripts/youtube/record-responses.sh` (a developer machine on a residential connection, never CI) runs the shim on a host CPython of the target minor version with `RecordingRH`, a yt-dlp `RequestHandler` registered above every other handler's preference in tests that performs real requests and writes the request/response pairs of each [Testing](#testing) scenario to `youtube/engine/src/test/resources/recorded/{scenario}/` (moved 2026-10-05 from `youtube/ytdlp/src/test/resources/recorded/`; one set for both hosts), together with the shim's JSON result (`result.json`, the input of `FakeYtxTransport`). Scrubbing before commit: `ip=` values → `0.0.0.0`, `sig`/`lsig` → `X`, visitor data and cookies removed, `expire` rewritten to a fixed far-future value. `ReplayRH` replays them in `shimTest` and `shimTestStdio`, in the canary, (through `:ytx`) in the smoke test on the release and debug APKs, and (through the child) in the packaged desktop app's smoke test on every target. **Strict mode** (PR CI, the smoke tests, the canary's report) fails on any unrecorded request — the signal to re-record; **contract mode** (the canary's gate) matches by endpoint and InnerTube client and answers unrecorded ones with 404 ([Engine canary](#engine-canary)).
 
 ### Fallback engines
@@ -1599,6 +2045,20 @@ Rejected: NewPipe Extractor (GPL-3.0-or-later; the previous design), youtubedl-a
 ---
 
 ## Settings
+
+
+Implementation note (2026-10-19, M9a): The registry includes engine-enabled,
+audio-quality, volume-levelling, auto-download off/keep2 portable keys and
+breaker/rate/start-failure device keys. All are unsynced; portable registry
+membership is the backup whitelist. Zero deadlines encode absence. Quality
+uses model-owned `YouTubeAudioQuality` with API `AudioQuality` alias to
+preserve dependency direction. Update-policy/check/outcome keys await M9b.
+
+
+Implementation note (2026-10-19, M8): W1 registers M8 keys only: portable
+preferences, device-only health, no youtube-key sync. Zero stored deadline
+means null in health APIs; the external-mode live limitation and switches
+follow the Add and ingestion notes above (adopted resolution 6).
 
 | Key | Type | Default | File | UI location | Milestone |
 |---|---|---|---|---|---|
@@ -1624,7 +2084,7 @@ Changing variants calls `YouTubeChannelRepository.setVariants`, which refreshes 
 
 ## Testing
 
-Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs that YouTube bot-challenges). Strategy and infrastructure: [09 Test strategy](09-quality-and-release.md#test-strategy). Common code is tested in `commonTest` on the desktop JVM; the host-independent engine classes are tested on the JVM in `:youtube:ytdlp`'s unit tests from M9a and move with them to `:youtube:engine` in MD3 — the table names their final module. The desktop host's own tests are 11's (last row).
+Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs that YouTube bot-challenges). Strategy and infrastructure: [09 Test strategy](09-quality-and-release.md#test-strategy). Common code is tested in `commonTest` on the desktop JVM; the host-independent engine classes are tested on the JVM in `:youtube:engine` from M9a (adopted resolution 1). The desktop host's own tests are 11's (last row).
 
 | Test class | Module, runner | Cases | Milestone |
 |---|---|---|---|
@@ -1634,7 +2094,7 @@ Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs t
 | `OEmbedClientTest`, `DefaultYouTubeChannelResolverTest` | `:youtube:impl`, `desktopTest` | oEmbed → handle → page; 401 → watch-page fallback; `?user=` feed path; playlist owner; engine lookup returns null → HTML (fake `ExtractorChannelLookup`); `NotFound` from the lookup is final | M8, M9a |
 | `YouTubeSourceAdapterTest` | `:core:data`, `desktopTest` with `TestDb` on the bundled driver, real `FeedIngestor`, MockWebServer | Atom fixtures: `yt:video:` GUIDs; `UULF` + `UUSH` merge, variants fetched sequentially; `<updated>`-only change → `Unchanged`, no transaction; title edit keeps enriched `durationMs`/`availability`/`isShort`; window-aware `inFeed` (item older than floor kept, item inside floor removed, failed secondary variant marks nothing); scrolled-out videos and back-catalogue rows survive 10 refreshes (PLAN M8 AC); the INITIAL first ingest after subscribe sets no `isNew`; `afterIngest` returns new IDs minus upcoming/hidden ones and adds promoted `UPCOMING → AVAILABLE` rows once; a deadline cancellation during enrichment still emits `NewEpisodes`; `Unchanged` still enriches pending premieres; external mode skips enrichment; avatar budget 100 new + 30 stale per window; gap detection pulls `nextRefreshAt` in | M8, M9a |
 | `YouTubeOutageMonitorTest`, `DefaultYouTubeHealthTest` (`TestClock`) | `:core:data`, `commonTest` | Every feed 404 → outage after 3 of the first 4, remaining channels `Deferred` (no `failureCount` change, no network), never `gone`, one banner state; end-of-run rule (> 50 % of ≥ 3); `onRunFinished()` uses the monitor's own counters and `PodcastDao.youtubeChannelIds()`, then resets them; small library (every feed MockWebServer-routed): 1 subscribed channel attempted and failed with both control feeds failing declares, 2 of 2 failed with both controls failing declares, 1 failed of 2 attempted never declares, 1 of 2 subscribed attempted and failed (partial refresh) never declares, 1 failed of 10 subscribed (partial refresh) never declares; 1 of 1 failed while a control feed answers → no outage, the channel's `failureCount` rises and `PossiblyDead` appears after 7 days; in a 1–2-channel library a probe that fails while a control answers ends the outage (level 0); a check result is reused for 1 h; backoff 1/2/4/6 h; probe: one fetch while concurrent callers wait, success clears, failure raises the level; `retryNow` makes the next fetch the probe; Atom 429/403 → `feedRateLimitedUntil` with `Retry-After` and doubling; offline counts as neither; breaker opens at 5 in 1 h, 6 h then 12 h, lazy half-open with a single trial, `Inconclusive` (incl. `ENGINE_UNAVAILABLE`) releases the slot, reset on an app **or** engine version change, dedupe per video, `ForbiddenFreshUrl` counts only from 3 distinct videos per hour; an opening calls `EngineUpdateScheduler.requestNow` at most every 3 h and never with policy `OFF` | M8, M9a |
-| `AudioStreamSelectorTest`, `ResolvedUrlCacheTest` | `:youtube:api` `commonTest` (selector), `:youtube:engine` JVM (cache) | Original track preferred over dubbed; no original → dubbed and descriptive dropped, language fallback, then untyped; DRC dropped unless preferred; same itag in DRC and non-DRC → distinct `formatId`s (`140` vs `140-drc`), multi-track itag → `~{trackId}` suffix, single-track non-DRC → plain itag; pinned itag; ranks per `AudioQuality`; SABR-only → none; TTL = min(expire − 10 min, 5 h); key includes language and excludes `pinnedItag`: a pinned call after an unpinned call for the same video and preferences is a hit (no second resolve), a pinned call with a different itag re-resolves and replaces the entry; invalidate by video; `invalidate` of an entry < 2 min old reports `ForbiddenFreshUrl`, `invalidateAll` reports nothing; LRU size; `toString` hides URLs | M9a |
+| `AudioStreamSelectorTest`, `ResolvedUrlCacheTest` | `:youtube:api` `commonTest` (selector), `:youtube:engine` JVM (cache) | Original track preferred over dubbed; no original → dubbed and descriptive dropped, language fallback, then untyped; DRC dropped unless preferred; same itag in DRC and non-DRC → distinct `formatId`s (`140` vs `140-drc`), multi-track itag → `~{trackId}` suffix, single-track non-DRC → plain itag; pinned itag; ranks per `AudioQuality`; SABR-only → none; TTL = min(expire − 10 min, 5 h); key includes language and excludes `pinnedItag`: a pinned call after an unpinned call for the same video and preferences is a hit (no second resolve), a pinned call with a different itag re-resolves and replaces the entry; invalidate by video; `invalidate` removes fresh entries without duplicating media-owned `ForbiddenFreshUrl`; `invalidateAll` reports nothing; LRU size; `toString` hides URLs | M9a |
 | `YtDlpStreamResolverTest`, `YtDlpErrorMapperTest`, `YtDlpEnricherTest`, `YtDlpChannelSearchTest`, `YtDlpChannelLookupTest` | `:youtube:engine`, JVM with `FakeYtxTransport` replaying recorded shim JSON through the real `YtDlpClient` | Recorded scenarios: normal video (140 chosen), dubbed video, DRC variants, age-restricted, members-only, made-for-kids (`KIDS_ONLY`), upcoming premiere (`UPCOMING`), live, post-live (`LIVE`), region-blocked, private, removed, terminated channel, bot check and "try again later" session rate limit (`RATE_LIMITED`, **not** a breaker failure), SABR-only (`EXTRACTION`); with `ignore_no_formats_error` the private, removed, age-gated, region-blocked and rate-limited fixtures arrive as empty format lists plus warnings and never yield `EXTRACTION`; `UNAVAILABLE` on a third video within 10 min → `Transient(EXTRACTION)`; unknown code → `EXTRACTION`; `availableAt` → `availableAtMs`; `xtags` and `format_id` → `formatId`, `isDrc`, track type; expiry → re-resolve; single flight; gate deny without an engine call; external mode → `Unsupported` without starting the host; `IpFamilyHints` set from `ip=` and cleared on a network change; enrichment facts for the videos, shorts and streams tabs and per-video `facts` of off-page premieres; back-catalogue paging with `CURSOR_EXPIRED` restart; search pages 1 and 2; handle lookup avatar/banner split | M9a |
 | `YtDlpClientTest`, `YtDlpEngineCapabilitiesTest` | `:youtube:engine`, JVM with `FakeYtxTransport` and `TestClock` | Priority queueing and admission ≤ `HostStatus.workers` (2 and 4); single flight; cold-start deadline 25 s; `TIMEOUT` and `ENGINE_UNAVAILABLE` from the transport map to `Transient`; capability rows in order (`NOT_IN_THIS_APK` for a 32-bit `BuildInfo`, `DISABLED_BY_USER`, third failed start → `ENGINE_FAILED`, `HostState.UNUSABLE` → `ENGINE_FAILED` at once, cleared by `retryStart`, a new app version or engine activation); capability flips emitted; turning the engine off calls `shutdown()` | M9a |
 | `BinderYtxTransportTest` | `:youtube:ytdlp`, Robolectric with a fake `IYtxEngine` and `TestClock` | The [host contract](#shared-engine-module) on Android: deadline + 5 s → kill and `TIMEOUT`, other calls `ENGINE_UNAVAILABLE`; coroutine cancel → `cancel(callId)`; `binderDied` → `ENGINE_UNAVAILABLE` and `lastExit = CRASH`; no `ping` within 15 s → `START_FAILED`, `compiling` suspends that limit; idle stop and kill after 3 min, pre-warm restarts the timer, one pre-warm in flight; `HostStatus` from `status()` | M9a |
@@ -1650,6 +2110,12 @@ Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs t
 | `YouTubeReleaseSmokeTest` (E7) | `:app`, the R8-minified release APK and the debug APK, GMD API 36 and API 37 16 KB | On the release APK, R8 keeps the classes Chaquopy calls (`PyHttp`, `QuickJsEngine`) and `YtxTestHooks` (keep rules in `youtube/ytdlp/consumer-rules.pro`, S7 and S19, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)); on both, one resolve and one chunked download through `:ytx` with `ReplayRH` (the test reads the instrumentation argument `ytxReplay`, copies `ReplayRH` and a scenario into `noBackupFilesDir/ytx-test/` and sets `YtxTestHooks.replayDir` before the first bind, 09) and a MockWebServer googlevideo stand-in (PLAN M9 AC9). Emulators run CheckJNI for every app ([JNI tips](https://developer.android.com/training/articles/perf-jni)), so a JNI misuse in Chaquopy's bridge or `PyHttp` aborts `:ytx` in this test on the GMD images; the release APK is the gating run, and the device checks of PLAN M9 AC3 use it too | M9a |
 | APK content scan (`check-apk.sh --published` on the release APKs, 09) | CI | No `mutagen`, `readline`, `libreadline`, `org/schabi/newpipe`, `org/mozilla/javascript` in any APK; no Python native libraries in the `armeabi-v7a` APK; no `ch/lkmc/neutrodyne/youtube/ytdlp` classes in the `-Pneutrodyne.youtubeEngine=false` build; 16 KB alignment including the `.so` files inside Chaquopy's asset zips | M9a |
 | Desktop host tests (11 owns them) | `:youtube:ytdlp-desktop` `desktopTest`, the nightly `desktop-matrix`, `release.yml`'s `desktop` jobs | `StdioYtxTransportTest` (MD3 AC1: the recorded-response vectors of M9 AC1 through the stdio host), the packaged app's YouTube smoke test with `ReplayRH` on every target (MD3 AC2), `YtxProcessTest` (MD3 AC3), `EngineUpdaterTest` with the desktop store (MD3 AC4), `check-desktop-image.sh` and `codesign --verify --deep --strict` (MD3 AC5), PB29 (MD3 AC6) ([11 Testing](11-desktop.md#testing)) | MD3 |
+
+Implementation note (2026-10-19, M8): W3 implements the Atom portion of
+adopted resolution 8 with a synthetic, provenance-documented
+`feeds/src/test/resources/youtube/m8-atom.xml`, shared with Android host
+replay. Tests generate bounded 15-entry windows and status changes; no live
+YouTube calls are used as acceptance proof.
 
 Fixtures: `feeds/src/test/resources/corpus/youtube/` (`uulf_mkbhd.xml`, `channel_id_mkbhd.xml` with 3 Shorts, `uush_mkbhd.xml`, `uulv_nasa.xml`, `user_marquesbrownlee.xml`, `playlist_pl_oldest_first.xml`, `empty_channel.xml`); `youtube/impl/src/test/resources/youtube/` (`handle_mkbhd.html.gz`, `channel_canonical_only.html`, `consent_redirect.txt`, `oembed_3iRUwVzRDZQ.json`); `youtube/engine/src/test/resources/recorded/{scenario}/` (request/response pairs and `result.json`, both hosts, [Recorded responses](#recorded-responses)); `youtube/engine/src/test/resources/engine/` (test manifest keys, a signed test manifest, the real 2026.08.19 `SHA2-256SUMS` and `.sig`); `feeds/src/test/resources/import/{newpipe,libretube,takeout,urllist}/`.
 

@@ -10,5 +10,11 @@ kotlin {
             implementation(project(":download:api"))
             implementation(project(":youtube:api"))
         }
+        commonTest.dependencies { implementation(project(":core:testing")) }
+        desktopTest.dependencies {
+            implementation(libs.cmp.ui.test)
+            implementation(libs.kotlinx.coroutines.swing)
+            implementation(compose.desktop.currentOs)
+        }
     }
 }

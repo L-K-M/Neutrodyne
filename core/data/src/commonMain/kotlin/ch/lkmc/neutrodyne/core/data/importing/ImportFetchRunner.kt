@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.data.playback.markEpisodesPlayed
 import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
@@ -26,16 +27,28 @@ import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
+import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.random.Random
 
 /**
  * 05 §7's fetch lane (`:core:data` commonMain): drives a session's `QUEUED` items through the
@@ -66,7 +79,12 @@ internal class ImportFetchRunner(
     private val snapshots: SnapshotScheduler,
     private val reports: ImportReportPoster,
     private val clock: Clock,
+    private val resolver: YouTubeChannelResolver,
+    private val committer: ImportCommitter,
+    private val random: Random,
 ) {
+    private val resolutionPermits = Semaphore(RESOLUTION_CONCURRENCY)
+
     /**
      * One host invocation for [sessionId] (05 §7). [attempt] is the platform counter —
      * Android's `runAttemptCount`, the desktop lane's `ImportOptions.laneAttempts`.
@@ -127,6 +145,8 @@ internal class ImportFetchRunner(
         seenLock: Mutex,
     ): ImportFetchResult {
         while (true) {
+            if (nearDeadline(deadlineElapsedMs)) return ImportFetchResult.RETRY
+            resolvePending(sessionId, deadlineElapsedMs)
             val pending = derive(sessionId) ?: return ImportFetchResult.COMPLETED
             if (pending.isEmpty()) {
                 when (finish(sessionId)) {
@@ -150,6 +170,7 @@ internal class ImportFetchRunner(
             ) {
                 return ImportFetchResult.RETRY
             }
+            if (pending.any { it.podcastId == null }) return ImportFetchResult.RETRY
             val report =
                 suspendRunCatching {
                     refresher.run(
@@ -180,6 +201,85 @@ internal class ImportFetchRunner(
             if (offline || report.stoppedByDeadline) return ImportFetchResult.RETRY
         }
     }
+
+    /** At most two live lookups across sessions; each holds its permit through the jitter. */
+    private suspend fun resolvePending(
+        sessionId: Long,
+        deadlineElapsedMs: Long,
+    ) = coroutineScope {
+        val dao = db.importDao()
+        val session = dao.sessionById(sessionId) ?: return@coroutineScope
+        if (session.state !in RUNNABLE_STATES) return@coroutineScope
+        val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
+        val pending =
+            dao
+                .itemsByStatus(sessionId, QUEUED_ONLY)
+                // A canonical URL with a missing podcast means unsubscribe, not unresolved input.
+                .filter {
+                    it.kind == ImportItemKind.YOUTUBE && it.podcastId == null && it.normalizedUrl == null
+                }
+        // Batches avoid one suspended coroutine per row in a 10k-channel export.
+        for (batch in pending.chunked(RESOLUTION_CONCURRENCY)) {
+            if (nearDeadline(deadlineElapsedMs)) break
+            batch
+                .map { item ->
+                    async {
+                        resolutionPermits.withPermit {
+                            if (nearDeadline(deadlineElapsedMs)) return@withPermit
+                            if (dao.sessionById(sessionId)?.state !in RUNNABLE_STATES) return@withPermit
+                            delay(random.nextLong(MIN_JITTER_MS, MAX_JITTER_MS + 1))
+                            if (nearDeadline(deadlineElapsedMs)) return@withPermit
+                            if (dao.sessionById(sessionId)?.state !in RUNNABLE_STATES) return@withPermit
+                            val input = options.itemYouTubeInputs[item.ordinal] ?: item.originalUrl
+                            val ref = YouTubeUrlClassifier().classify(input)
+                            val result =
+                                if (ref == null || ref is YtRef.Playlist || ref is YtRef.Query) {
+                                    ChannelResolution.NotFound
+                                } else {
+                                    suspendRunCatching {
+                                        withTimeoutOrNull(RESOLUTION_TIMEOUT_MS) {
+                                            resolver.resolve(ref, MetadataDepth.ID_ONLY)
+                                        }
+                                    }.getOrNull()
+                                }
+                            if (result is ChannelResolution.Resolved) {
+                                committer.commitResolved(
+                                    sessionId,
+                                    item.ordinal,
+                                    input,
+                                    result,
+                                    options.attemptMarkerAt,
+                                )
+                            } else {
+                                db.withWriteTransaction {
+                                    val latest = dao.sessionById(sessionId) ?: return@withWriteTransaction
+                                    val rows = dao.itemsByOrdinals(sessionId, listOf(item.ordinal))
+                                    val current = rows.singleOrNull() ?: return@withWriteTransaction
+                                    val nowOptions =
+                                        latest.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
+                                    val currentInput = nowOptions.itemYouTubeInputs[item.ordinal] ?: current.originalUrl
+                                    if (latest.state in RUNNABLE_STATES && current.status == ImportItemStatus.QUEUED &&
+                                        current.podcastId == null && currentInput == input &&
+                                        nowOptions.attemptMarkerAt == options.attemptMarkerAt
+                                    ) {
+                                        dao.setItemStatus(
+                                            sessionId,
+                                            item.ordinal,
+                                            ImportItemStatus.FETCH_FAILED,
+                                            DETAIL_RESOLUTION_FAILED,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }.awaitAll()
+        }
+    }
+
+    private fun nearDeadline(deadlineElapsedMs: Long): Boolean =
+        deadlineElapsedMs != RefreshRequest.NO_DEADLINE &&
+            deadlineElapsedMs - clock.elapsedRealtime() < HOST_DEADLINE_MARGIN_MS
 
     /**
      * 05 §7's derive step over one write transaction: each `QUEUED` item whose podcast row
@@ -229,17 +329,12 @@ internal class ImportFetchRunner(
             dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.MERGED, null)
             return ItemVerdict.FINALISED
         }
+        if (podcast == null && item.kind == ImportItemKind.YOUTUBE && item.normalizedUrl == null) {
+            return ItemVerdict.PENDING
+        }
         if (podcast == null) {
-            // No feed is linked: an unresolved YouTube ref stays explicitly
-            // unsupported until M8 — it is never claimed fetched. Anything else simply
-            // never reached a fetch.
-            val unsupported = item.kind == ImportItemKind.YOUTUBE
-            dao.setItemStatus(
-                sessionId,
-                item.ordinal,
-                if (unsupported) ImportItemStatus.YOUTUBE_UNSUPPORTED_YET else ImportItemStatus.FETCH_FAILED,
-                if (unsupported) null else DETAIL_NOT_ATTEMPTED,
-            )
+            // A committed podcast removed during the run cannot be reported subscribed.
+            dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.FETCH_FAILED, DETAIL_NOT_ATTEMPTED)
             return ItemVerdict.FINALISED
         }
         val attemptedAt = podcast.lastAttemptAt
@@ -466,12 +561,7 @@ internal class ImportFetchRunner(
         val ids = db.episodeDao().playedExceptNewestIds(podcastId)
         if (ids.isEmpty()) return
         val now = clock.now()
-        for (chunk in ids.chunked(BIND_CHUNK)) {
-            db.episodeStateDao().ensureAll(chunk, now)
-            db.episodeStateDao().markPlayed(chunk, now)
-            db.positionDao().reset(chunk, now)
-            db.queueDao().removeEpisodes(chunk)
-        }
+        db.markEpisodesPlayed(ids, now)
     }
 
     /** Attempt exhaustion (05 §7): every still-`QUEUED` item ends `FETCH_FAILED("NOT_ATTEMPTED")`. */
@@ -532,6 +622,12 @@ internal class ImportFetchRunner(
 
     private companion object {
         const val TAG = "ImportFetchRunner"
+        const val DETAIL_RESOLUTION_FAILED = "YOUTUBE_RESOLUTION_FAILED"
+        const val RESOLUTION_CONCURRENCY = 2
+        const val MIN_JITTER_MS = 500L
+        const val MAX_JITTER_MS = 1_500L
+        const val RESOLUTION_TIMEOUT_MS = 20_000L
+        val RUNNABLE_STATES = setOf(ImportState.COMMITTED, ImportState.FETCHING)
 
         /** 05 §7: after this many host attempts the remaining QUEUED items give up. */
         const val MAX_LANE_ATTEMPTS = 20
@@ -541,9 +637,6 @@ internal class ImportFetchRunner(
 
         /** `errorDetail` of items the lane never fetched (exhaustion, a lost podcast row). */
         const val DETAIL_NOT_ATTEMPTED = "NOT_ATTEMPTED"
-
-        /** 02 Transactions and threading: `IN (:ids)` lists are chunked at 500 bound variables. */
-        const val BIND_CHUNK = 500
 
         val QUEUED_ONLY = listOf(ImportItemStatus.QUEUED)
     }

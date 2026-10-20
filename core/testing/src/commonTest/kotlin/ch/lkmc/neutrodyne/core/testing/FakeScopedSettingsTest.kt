@@ -15,6 +15,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class FakeScopedSettingsTest {
+    private val defaults =
+        SettingOverrides(
+            240,
+            false,
+            1f,
+            false,
+            autoDownload = false,
+            autoDownloadKeepLatest = 3,
+            autoDownloadNetwork = ch.lkmc.neutrodyne.core.model.NetworkPolicy.UNMETERED,
+            autoDownloadRequireCharging = false,
+            includeVideoInAutoDownload = false,
+            deleteAfterPlayed = ch.lkmc.neutrodyne.core.model.DeleteAfter.AFTER_24H,
+        )
+
     @Test fun fakeResolverSelectsIdsAndObservesUpdates() =
         runTest {
             val fake = FakeEffectiveSettingsResolver()
@@ -34,7 +48,10 @@ class FakeScopedSettingsTest {
             fake.seedPodcast(1)
             fake.seedGroup(2, "uuid", "news")
             fake.updatePodcast(1) { SettingOverrides(0, true) }
-            assertEquals(SettingOverrides(null, true), fake.observePodcast(1).first()?.effective)
+            assertEquals(
+                defaults.copy(refreshIntervalMinutes = null, notifyNewEpisodes = true),
+                fake.observePodcast(1).first()?.effective,
+            )
             fake.updateGroup(2) { SettingOverrides(60, false) }
             val before = fake.observeGroup(2).first()
             assertEquals(
@@ -45,7 +62,7 @@ class FakeScopedSettingsTest {
             )
             assertEquals(before, fake.observeGroup(2).first())
             fake.updatePodcast(1) { SettingOverrides() }
-            assertEquals(SettingOverrides(240, false), fake.observePodcast(1).first()?.effective)
+            assertEquals(defaults, fake.observePodcast(1).first()?.effective)
             fake.removePodcast(1)
             fake.removeGroup(2)
             assertNull(fake.observePodcast(1).first())

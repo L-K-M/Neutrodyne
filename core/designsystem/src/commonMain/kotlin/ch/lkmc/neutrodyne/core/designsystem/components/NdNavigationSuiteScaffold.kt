@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -41,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.unit.dp
@@ -56,6 +59,8 @@ public data class NdNavItem(
     /** A dot badge (e.g. the downloads-failed count arrives as a labelled badge later). */
     val badge: Boolean = false,
     val testTag: String? = null,
+    val badgeCount: Int = 0,
+    val badgeDescription: String? = null,
 )
 
 /**
@@ -83,13 +88,16 @@ public fun NdNavigationSuiteScaffold(
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         NavigationSuiteScaffoldLayout(
             navigationSuite = {
-                when (suiteType) {
-                    NavigationSuiteType.WideNavigationRailCollapsed,
-                    NavigationSuiteType.WideNavigationRailExpanded,
-                    NavigationSuiteType.NavigationRail,
-                    -> NdRail(items, selected, onSelect, footer, suiteType)
+                // The layout moves hidden chrome offscreen but retains its focus/semantics nodes.
+                if (state.currentValue != NavigationSuiteScaffoldValue.Hidden || state.isAnimating) {
+                    when (suiteType) {
+                        NavigationSuiteType.WideNavigationRailCollapsed,
+                        NavigationSuiteType.WideNavigationRailExpanded,
+                        NavigationSuiteType.NavigationRail,
+                        -> NdRail(items, selected, onSelect, footer, suiteType)
 
-                    else -> NdBar(items, selected, onSelect, suiteType)
+                        else -> NdBar(items, selected, onSelect, suiteType)
+                    }
                 }
             },
             navigationSuiteType = suiteType,
@@ -137,10 +145,7 @@ private fun NdRail(
                     selected = index == selected,
                     onClick = { onSelect(index) },
                     icon = {
-                        Icon(
-                            if (index == selected) item.iconSelected else item.icon,
-                            contentDescription = null,
-                        )
+                        NavigationIcon(item, index == selected)
                     },
                     label = { Text(item.label) },
                     railExpanded = railExpanded,
@@ -176,10 +181,7 @@ private fun NdBar(
                     selected = index == selected,
                     onClick = { onSelect(index) },
                     icon = {
-                        Icon(
-                            if (index == selected) item.iconSelected else item.icon,
-                            contentDescription = null,
-                        )
+                        NavigationIcon(item, index == selected)
                     },
                     label = { Text(item.label) },
                     modifier = itemModifier(item),
@@ -193,10 +195,7 @@ private fun NdBar(
                     selected = index == selected,
                     onClick = { onSelect(index) },
                     icon = {
-                        Icon(
-                            if (index == selected) item.iconSelected else item.icon,
-                            contentDescription = null,
-                        )
+                        NavigationIcon(item, index == selected)
                     },
                     label = { Text(item.label) },
                     modifier = itemModifier(item),
@@ -248,3 +247,17 @@ private val GEAR_BOTTOM_PADDING = 16.dp
 
 /** The gear must be traversed after the last destination (08 Destinations). */
 private const val TRAVERSAL_AFTER_LAST: Float = 5f
+
+@Composable
+private fun NavigationIcon(
+    item: NdNavItem,
+    selected: Boolean,
+) {
+    BadgedBox(badge = {
+        if (item.badge || item.badgeCount > 0) {
+            Badge(Modifier.semantics { item.badgeDescription?.let { contentDescription = it } }) {
+                if (item.badgeCount > 0) Text(item.badgeCount.toString())
+            }
+        }
+    }) { Icon(if (selected) item.iconSelected else item.icon, contentDescription = null) }
+}

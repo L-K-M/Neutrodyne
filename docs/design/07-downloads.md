@@ -10,7 +10,7 @@ Contents: [Scope](#scope) · [Engine architecture](#engine-architecture) · [Sta
 
 Serves R4.2–R4.6, R3.6, R3.7, R7.3 (download side), R8.7, R8.8, N1, N2, N6. Delivered in [M6](../PLAN.md#m6-downloads) (engine, runners, RSS transfers, storage, auto-download, cleanup, reconciliation — on Android and the desktop, M6a and M6b), [M9](../PLAN.md#m9-youtube-playback-and-downloads-via-the-embedded-yt-dlp-engine) (M9a: YouTube transfers on the APKs with the YouTube engine, and the engine-absent rules) and [MD3](../PLAN.md#md3-desktop-youtube-engine) (the same YouTube transfers on every desktop build), with API stubs in M0a, the YouTube rejection rule in M8, the desktop alerts and busy signal in MD2 and the sync interplay in MS2 ([Delivery by milestone](#delivery-by-milestone)).
 
-Neutrodyne downloads episodes with its **own small engine** that writes real, user-copyable audio files ([D46](../PLAN.md#3-key-decisions)). The engine, its state machine, the claim rules, the **transfer core** (Ktor streaming into Okio `.part` files over the island's OkHttp DOWNLOAD client), YouTube transfers, the auto-download planner, cleanup, reconciliation and the move algorithm are **common code** in `:download:impl`'s `commonMain` and behave identically on Android and the desktop ([D81](../PLAN.md#3-key-decisions)); only the runners, storage roots, notifications and a few file-system details are per platform. The `download` row in Room is the only record of download state; there is no Media3 `DownloadManager`, no system `DownloadManager` and no `WorkInfo`-based progress. Two **lanes** partition the queue: `MANUAL` (the user asked) and `AUTO` (a policy asked). On **Android** the runner that drains a lane depends on the lane and the API level ([D47](../PLAN.md#3-key-decisions)): a user-initiated data transfer (UIDT) job on API 34+ for `MANUAL`, WorkManager expedited work (promoted to a `dataSync` foreground service only when started while the app is visible) on API 26–33 for `MANUAL`, and a regular WorkManager worker with an 8-minute soft deadline for `AUTO` everywhere. On the **desktop** both lanes drain in-process in 11's `DesktopJobRunner` while the app runs, with the same claim rules and slots and without quotas, soft deadlines or wake work ([Desktop runners](#desktop-runners), [D85](../PLAN.md#3-key-decisions)). Files live in app-specific storage on Android and in `<data>/Downloads` or a folder the user chose on the desktop ([D48](../PLAN.md#3-key-decisions)), in one layout for RSS and YouTube ([D49](../PLAN.md#3-key-decisions)). Live byte counts never touch the database between state transitions ([D17](../PLAN.md#3-key-decisions)), and resolved stream or CDN URLs never touch it at all ([D50](../PLAN.md#3-key-decisions)). Downloads are device-local: sync never carries audio files, `download` rows or `downloads.*` settings, although synced played state, favourites, Up next and unsubscribes drive cleanup and planning here ([D93](../PLAN.md#3-key-decisions), [Sync interplay](#sync-interplay)).
+Neutrodyne downloads episodes with its **own small engine** that writes real, user-copyable audio files ([D46](../PLAN.md#3-key-decisions)). The engine, its state machine, the claim rules, the **transfer core** (Ktor streaming into Okio `.part` files over the island's OkHttp DOWNLOAD client), YouTube transfers, the auto-download planner, cleanup, reconciliation and the move algorithm are **common code** in `:download:impl`'s `commonMain` and behave identically on Android and the desktop ([D81](../PLAN.md#3-key-decisions)); only the runners, storage roots, notifications and a few file-system details are per platform. The `download` row in Room is the only record of download state; there is no Media3 `DownloadManager`, no system `DownloadManager` and no `WorkInfo`-based progress. Two **lanes** partition the queue: `MANUAL` (the user asked) and `AUTO` (a policy asked). On **Android** the runner that drains a lane depends on the lane and the API level ([D47](../PLAN.md#3-key-decisions)): a user-initiated data transfer (UIDT) job on API 34+ for `MANUAL`, WorkManager expedited work (promoted to a `dataSync` foreground service only when started while the app is visible) on API 26–33 for `MANUAL`, and a regular WorkManager worker with an 8-minute soft deadline for `AUTO` everywhere. On the **desktop** both lanes drain in-process in 11's `DesktopJobRunner` while the app runs, with the same claim rules and slots and without quotas, soft deadlines or wake work ([Desktop runners](#desktop-runners), [D85](../PLAN.md#3-key-decisions)). Files live in app-specific storage on Android and in `<data>/Downloads` or a folder the user chose on the desktop ([D48](../PLAN.md#3-key-decisions)), in one layout for RSS and YouTube ([D49](../PLAN.md#3-key-decisions)). Live byte ticks never touch the database; a changed representation has a token-owned proof checkpoint before replacement bytes ([D17](../PLAN.md#3-key-decisions)), and resolved stream or CDN URLs never touch it at all ([D50](../PLAN.md#3-key-decisions)). Downloads are device-local: sync never carries audio files, `download` rows or `downloads.*` settings, although synced played state, favourites, Up next and unsubscribes drive cleanup and planning here ([D93](../PLAN.md#3-key-decisions), [Sync interplay](#sync-interplay)).
 
 ### Responsibilities and boundaries
 
@@ -30,6 +30,24 @@ Neutrodyne downloads episodes with its **own small engine** that writes real, us
 
 ### Modules and public API
 
+**Implementation note (2026-10-19, M6a).** Kotlin declarations are the frozen
+boundary: download:api plus download:impl's TransferContracts, StorageContracts
+and RunnerContracts. DeleteReason replaces byUser; RootChangeMode replaces
+moveExisting. Moves return Unsupported; folder registration rejects UNSUPPORTED
+until M6b. Orphan deletion returns Deleted(bytes) or Unavailable. AUTO admission
+rejects IDs as UNAVAILABLE in M6a. LocalMediaChanges publishes changed IDs after
+index updates; LocalMediaIndexStore freezes the internal replace/put/remove writer.
+DownloadQueries, DownloadSourceQueries, DownloadStateQueries and
+DownloadSessionQueries freeze SQL-facing contracts without changing Room/schema.
+Engine owns claimMutex through paging/claim/slot reservation; pause/cancel/delete
+share it. Engine alone commits transfer states, including ProgressSink.started
+before accepted bytes; token ownership lasts through child cleanup/final commits.
+Scheduler owns lane exit mutex/rechecks; reconcile and deletion each serialize.
+File ports use byte arrays with Okio behind the implementation boundary.
+ChapterRepository.ensureLocalLoaded(id, fileUri) returns EmbeddedChapterResult;
+it and PlaybackController.playDownloads explicitly report unavailable until W8.
+
+
 | Module | Package | Contents |
 |---|---|---|
 | `:download:api` (`neutrodyne.kmp.library`, `commonMain` only, Unlicense) | `ch.lkmc.neutrodyne.download.api` | `DownloadController`, `LocalMediaIndex`, `DownloadProgressSource` and the data types below; depends on `:core:{model, common}` only ([01 Dependency rules](01-foundation.md#dependency-rules)) |
@@ -48,7 +66,7 @@ interface DownloadController {
     suspend fun cancel(episodeIds: Collection<Long>)                    // user: drops row and .part, writes tombstone
     suspend fun retry(episodeIds: Collection<Long>)
     suspend fun promote(episodeId: Long): RequestResult                 // "Download now": AUTO → MANUAL, priority 200
-    suspend fun delete(episodeIds: Collection<Long>, byUser: Boolean)   // any state; tombstone only when byUser
+    suspend fun delete(episodeIds: Collection<Long>, reason: DeleteReason)   // any state; tombstone only for USER
     suspend fun setAllowMetered(episodeIds: Collection<Long>, allowed: Boolean)  // + "Use mobile data"
     suspend fun pauseAll()                                              // +
     suspend fun resumeAll()                                             // +
@@ -60,8 +78,8 @@ interface DownloadController {
     fun observeBusy(): Flow<Boolean>                                    // + (2026-10-05) desktop close behaviour (11); see Desktop runners
     suspend fun storageRoots(): List<StorageRootInfo>                   // +
     suspend fun registerFolderRoot(absolutePath: String): FolderRootResult   // + (2026-10-05) desktop "Change folder…"; Android: Rejected(UNSUPPORTED)
-    suspend fun changeRoot(rootId: String, moveExisting: Boolean)       // + settings; Android enqueues download-move, desktop pokes downloads-move
-    suspend fun deleteOrphanFiles(): Long                               // + bytes freed
+    suspend fun changeRoot(rootId: String, mode: RootChangeMode): RootChangeResult       // + settings; moves are M6b only
+    suspend fun deleteOrphanFiles(): OrphanDeleteResult                               // + bytes freed or explicitly unavailable
     suspend fun shareableFile(episodeId: Long): ShareableFile?          // + "Share file" (Android); null unless COMPLETED on a shareable root; always null on the desktop
 }
 fun interface LocalMediaIndex { fun localUriOrNull(episodeId: Long): String? }   // canonical, synchronous
@@ -105,9 +123,19 @@ enum class DownloadNotice { DATA_SAVER, BACKGROUND_RESTRICTED, NOTIFICATIONS_OFF
                             ROOT_UNAVAILABLE, YOUTUBE_PAUSED, MOVE_IN_PROGRESS, ORPHAN_FILES }
 ```
 
-Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`, `:feature:feeds`, and Settings › Desktop for `registerFolderRoot`/`changeRoot` on the desktop) call `DownloadController` with `trigger = MANUAL` only; `AUTO` is used by `AutoDownloadPlanner` inside `:download:impl`. 03's unsubscribe and merge (including unsubscribes pulled by sync), 06's error recovery and 11's desktop playback resolver take `DownloadController` and `LocalMediaIndex` as optional bindings (a nullable constructor parameter defaulting to `null` before M6; Metro's exact form is S8's, [06 Open questions](06-playback.md#open-questions) 23). `DownloadController`, `LocalMediaIndex` and `DownloadProgressSource` are `@SingleIn(AppScope::class)` bindings contributed by `:download:impl` to both app graphs ([01 Dependency injection](01-foundation.md#dependency-injection)); 11's close behaviour reads `observeBusy()` and 08's Downloads tab badge reads `observeFailedCount()` (a `COUNT(*)` over `download` rows in `FAILED`, so the badge does not load the full lists).
+Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`, `:feature:feeds`, and Settings › Desktop for `registerFolderRoot`/`changeRoot` on the desktop) call `DownloadController` with `trigger = MANUAL` only; `AUTO` is used by `AutoDownloadPlanner` inside `:download:impl`. 03's unsubscribe and merge (including unsubscribes pulled by sync) use core:domain lifecycle ports; 06's error recovery and 11's desktop playback resolver take `DownloadController` and `LocalMediaIndex` as optional bindings (a nullable constructor parameter defaulting to `null` before M6; Metro's exact form is S8's, [06 Open questions](06-playback.md#open-questions) 23). `DownloadController`, `LocalMediaIndex` and `DownloadProgressSource` are `@SingleIn(AppScope::class)` bindings contributed by `:download:impl` to both app graphs ([01 Dependency injection](01-foundation.md#dependency-injection)); 11's close behaviour reads `observeBusy()` and 08's Downloads tab badge reads `observeFailedCount()` (a `COUNT(*)` over `download` rows in `FAILED`, so the badge does not load the full lists).
 
 ### Threading and coroutines
+
+**Implementation note (2026-10-19, M6b).** W1 exposes the orchestration ports
+in `ch.lkmc.neutrodyne.core.domain` so `core:testing` can supply fakes without
+an implementation-module dependency. The concrete owners remain in
+`download:impl`. Planner, cleanup and mover each own a separate single-flight
+mutex. Queue mutations coordinate with the shared claim mutex; file/network IO
+stays outside DB transactions. `DownloadMover.run(target, deadline)` takes a
+nullable monotonic elapsed-ms deadline, null on desktop, and returns
+COMPLETE, PENDING, DEADLINE or STORAGE_FULL. Scheduler lane/wake signatures stay
+unchanged; W5 extends their Android implementation to AUTO.
 
 | Component | Runs on | Rules |
 |---|---|---|
@@ -115,7 +143,7 @@ Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`,
 | `DownloadEngine.drain(...)` | the runner's coroutine (Android: UIDT service scope or `CoroutineWorker.doWork`; desktop: the lane's `run` on 11's `DesktopJobRunner`, `Dispatchers.IO`) | transfers are **children** of the runner, so stopping a runner cancels exactly its transfers; shared state (slots, active registry, progress) is thread-safe |
 | One transfer | `@Dispatcher(IO)` | Ktor `prepareGet(…).execute { }` on the DOWNLOAD client: cancelling the coroutine cancels the underlying OkHttp call (Ktor's OkHttp engine; S12 checks it, [01 One client family](01-foundation.md#one-client-family)); `bodyAsChannel()` reads suspend, so no `runInterruptible` is needed; 256 KiB buffer into an Okio sink |
 | State writes on stop | `withContext(NonCancellable)` in `finally` | at most one write transaction; never network or file I/O inside it |
-| `LocalMediaIndexImpl` | any thread, including Media3's loader thread and the main thread (Android) and 11's `nd-prepare` and `nd-engine` threads and the Swing EDT (desktop) | an immutable map in a `MutableStateFlow` (copy-on-write; writes are rare — one per completion, deletion or move — and reads are lock-free in `commonMain`); on the UI thread it never blocks; elsewhere it waits ≤ 2 s for the initial load |
+| `LocalMediaIndexImpl` | any thread, including Media3's loader thread and the main thread (Android) and 11's `nd-prepare` and `nd-engine` threads and the Swing EDT (desktop) | an immutable map in a `MutableStateFlow` (copy-on-write; writes are rare — one per completion, deletion or move — and reads are lock-free in `commonMain`); on the UI thread it never blocks; all threads return the current memory snapshot immediately |
 | `DownloadProgressHub` | ticker on `@Dispatcher(Default)` | publishes a snapshot every 250 ms while any transfer is active, idle otherwise |
 | `AutoDownloadPlanner`, `CleanupPlanner`, `DownloadReconciler`, `DownloadMover` | `@ApplicationScope`, the calling worker or the calling desktop lane | each guarded by its own `Mutex` (single flight) |
 | `ManualDownloadJobService` callbacks (Android) | main thread | return within milliseconds (Android 14 ANR rule); work runs in a service scope (`SupervisorJob() + Default`) |
@@ -269,6 +297,12 @@ private suspend fun claimOne(lanes: List<DownloadLane>, token: String, c: Condit
 
 `claimNext` is 02's transaction (candidates ordered `priority DESC, requestedAt ASC, episodeId ASC`, then `claim` sets `RESOLVING`, `waitReason = NONE`, `runnerToken`; [02 Downloads](02-data-model.md#downloads)). Paging matters for throughput: after "Download all" of 200 episodes from one host, the first 20 candidates all wait for that host's 2 slots, and a row from another host further down must still get the third slot. `Conditions` comes from `NetworkMonitor.status` (`connected = isConnected`, `unmetered = isConnected && !isMetered`; on the desktop `isMetered` is always false, [01 NetworkMonitor](01-foundation.md#networkmonitor)), `ChargingMonitor.isCharging` (Android; the desktop sets `charging = true`, so charging rules never hold a row there), and `youtubeAllowed = capabilities.value.downloads && YouTubeGateView.blockedUntil(health.state.value, now) == null`, where `capabilities` is 04's `YouTubeCapabilitiesSource.capabilities`, read at every claim and never cached (it flips at run time, [04 Capability computation](04-youtube.md#capability-computation)). `YouTubeGateView` is a pure read of 04's `YouTubeHealthState` (breaker `OPEN` with `breakerOpenUntil > now`, or `rateLimitedUntil > now`). The engine never calls `YouTubeHealth.extractionGate` for claims: that call hands out the breaker's single half-open trial ([04 Circuit breaker](04-youtube.md#circuit-breaker)), which must go to the resolver's own call. Slots are released in the transfer's `finally`. `pause`, `cancel` and `delete` of queued rows also take `claimMutex`, so a row is never paused in the database while a runner is claiming it.
 
+**Implementation note (2026-10-19, M6a).** Candidate selection also excludes IDs still
+registered in `ActiveTransfers`, even after a final requeue clears the database
+token. Registration lasts through post-commit cleanup and slot release. A runner
+stop received during a suspended claim is applied to the registered child before
+it starts transfer work.
+
 ### Drain loop
 
 `suspend fun drain(req: DrainRequest): DrainOutcome` where `DrainRequest(lanes, runnerToken, softDeadlineElapsed: Long?, waitHorizonMs, reporter, exit: DrainExit)`; `DrainExit` is the platform scheduler's hook for steps 2 and 3.3 (Android: `LaneRegistry` and the exit protocol; desktop: a plain return, [Desktop runners](#desktop-runners)):
@@ -281,6 +315,13 @@ private suspend fun claimOne(lanes: List<DownloadLane>, token: String, c: Condit
    3. If nothing is active and nothing was claimed: call `exit` (on Android the [exit protocol](#lane-registry-and-the-exit-protocol)); return `Empty`, `Waiting(earliest)` or `Blocked(reason)`.
    4. Otherwise suspend until one of: a transfer ended; `wake(lane)` was signalled (new request, resume, freed slot, network or charging change, freed storage); the soft deadline; the earliest due `nextAttemptAt` of the lane within the **wait horizon** `waitHorizonMs` — 5 min for the UIDT job, 60 s for Android lane workers and for the desktop lanes. The UIDT job is quota-exempt, so it can wait out the first backoffs (about 1, 2 and 4 min) of a user's download instead of handing it to a quota-bound worker. Its notification then shows "Retrying in {t}". Lane workers must not burn quota waiting; the desktop has no quota but 11's runner ticks every 60 s anyway, so a longer horizon would only hold the lane open.
 4. `finally`: unregister the token.
+
+**Implementation note (2026-10-19, M6a).** The wait horizon limits an otherwise
+idle drain. While it still owns transfers, the drain arms the earliest future
+retry even when older due candidates are blocked by host slots, and even beyond
+the idle horizon. Otherwise two long transfers from one host could leave the
+third slot unused when another host's backoff expires. A wake or the soft
+deadline still interrupts this timer.
 
 The engine also collects `NetworkMonitor.status` and (Android) `ChargingMonitor` while any transfer is active; on the desktop only the disconnect rule can fire:
 - on "metered", transfers whose row has `allowMetered = false` get `StopIntent.Requeue(UNMETERED_NETWORK)`;
@@ -311,16 +352,28 @@ suspend fun runTransfer(row: DownloadEntity, source: TransferSource) {
 
 ### Persisted transitions
 
-The `download` table is low-churn: paged feeds join it ([D16](../PLAN.md#3-key-decisions)). The engine writes only these transitions; byte progress lives in `DownloadProgressHub`, and the `.part` length is the authoritative resume offset.
+The `download` table is low-churn: paged feeds join it ([D16](../PLAN.md#3-key-decisions)). The engine writes these transitions and the rare representation checkpoint below; byte progress lives in `DownloadProgressHub`, and the `.part` length is the authoritative resume offset.
 
 | Transition | Columns written (besides `state`) |
 |---|---|
 | insert `QUEUED` | everything known at request time ([Requests](#requests)) |
 | `QUEUED → RESOLVING` (claim) | `waitReason = NONE`, `runnerToken` |
 | `RESOLVING → DOWNLOADING` (first accepted response or chunk) | `totalBytes`; RSS: `etag` (only when the response `ETag` is strong) and `lastModified` (only when the response carried no `ETag` at all and its `Date` is at least 60 s after `Last-Modified`, [RSS prepare](#rss-prepare) step 5); YouTube: `lastModified` = `lmt`; `mimeType`, `resolvedItag`, `sourceRef` (if refreshed), `rootId`/`tempPath` (if reassigned), `downloadedBytes = offset` |
+| `DOWNLOADING → DOWNLOADING` (changed accepted representation or part placement) | same proof fields as first acceptance, including the accepted offset; awaited before replacement bytes, never per buffer/chunk/progress tick |
 | `→ COMPLETED` | `relativePath`, `finalUri`, `totalBytes`, `downloadedBytes`, `completedAt`, `tempPath = NULL`, `runnerToken = NULL`, `lastError = NULL`, `attempt = 0` |
 | `→ QUEUED(waitReason)`, `→ PAUSED`, `→ FAILED` | `waitReason`, `nextAttemptAt`, `attempt`, `integrityFailures`, `lastError`, `lastHttpStatus`, `lastStopReason`, `downloadedBytes = .part length`, `runnerToken = NULL` |
 | `COMPLETED ↔ MISSING` | `lastError` (`STORAGE_UNAVAILABLE` or `NULL`) |
+
+**Correctness amendment (2026-10-20, D17).** First acceptance and changed total,
+MIME, ETag, Last-Modified, itag or root/part placement are committed under the
+current state and runner token before accepted bytes. The attempt remembers the
+last successfully committed proof independently of restart-cleared memory;
+unchanged proof, including a retry after `Restart`, adds no write. Ordinary RSS
+success still writes claim/start/complete exactly three times. Previously an
+inline 200 replacement changed only memory after first start: a crash could leave
+B bytes with durable A proof and later splice an A suffix. The real Room/HTTP/Okio
+logical crash-snapshot regression now checks exact recovered bytes and proof
+ordering. It does not establish OS-kill or power-loss durability.
 
 Not persisted in v1 (in-memory sub-states visible through `LiveProgress.state`): `VERIFYING` (a same-volume rename takes milliseconds; a crash there is recovered by the [completed-file adoption](#transfer-lifecycle-recovery) rule) and the YouTube `DOWNLOADING → RESOLVING → DOWNLOADING` re-resolve loop. `VERIFYING` becomes persisted when verification includes a copy (SAF roots, v1.x). Waiting rows' `waitReason`/`nextAttemptAt` updates are written only when the value changes.
 
@@ -342,7 +395,11 @@ At `RESOLVING`, before any network request, the engine checks for a process deat
 
 #### Estimates
 
-`estimatedBytes` = `enclosureLength` when ≥ 100 KB (smaller values are bogus placeholders, never used for integrity); else `durationMs × 16 000` (128 kbit/s) when a duration is known; else `null`. The free-space check then falls back to 150 MB ([Free space](#free-space-and-allocation)). 05's "Download all" confirmation uses the same rule.
+**Implementation note (2026-10-19, M6b).** W2 shares the manual and automatic
+estimate helper: 128 kbit/s is `durationMs × 16` bytes (16,000 bytes per second).
+Duration hints are clamped before multiplication to avoid overflow.
+
+`estimatedBytes` = `enclosureLength` when ≥ 100 KB (smaller values are bogus placeholders, never used for integrity); else `durationMs × 16` (128 kbit/s) when a positive duration is known; else `null`. The free-space check then falls back to 150 MB ([Free space](#free-space-and-allocation)). 05's "Download all" confirmation uses the same rule.
 
 ### Other controller operations
 
@@ -363,6 +420,23 @@ At `RESOLVING`, before any network request, the engine checks for a process deat
 Android only (on the desktop both lanes are equally privileged, so an in-flight `AUTO` row simply continues with `lane = MANUAL` set for its next attempt). When a `request(…, MANUAL, …)` or `promote` turns an `AUTO` row that is in flight in an `AUTO` lane worker into a `MANUAL` row, and the same call scheduled the UIDT job (API 34+, visible), the transfer is stopped with `StopIntent.Requeue(NONE, STOP_HANDOVER)`. No attempt is counted, and the `.part` is kept. The UIDT job claims the row within seconds and resumes from the `.part` outside the job quota. Without a UIDT job (API ≤ 33, or scheduling failed), the transfer simply continues in its current runner.
 
 ### Deleting a download
+
+**Implementation note (2026-10-19, M6a).** Core data calls the domain
+`DownloadLifecycle` before unsubscribe cascades, duplicate-episode merges and
+restore Replace. Cleanup stops transfers, removes index hints, journals paths
+and unpins download artwork before a Room writer is acquired. Matched losers are
+removed when a winner already has a download. Otherwise the
+row and its recorded paths move to the winning episode ID, as required by design
+02; `DownloadLifecycle.afterEpisodeMerges` republishes surviving index owners and
+drains the journal after commit or rollback. Re-parented unmatched episodes keep
+their IDs and files. Incomplete moved transfers pause with their partial bytes
+preserved; manual resume uses the winning ID. Writer rechecks abort
+unsubscribe/merge if a concurrent request or ingest invalidates that preparation;
+the caller can retry. Failed database cascades cannot roll back prior file cleanup.
+Current duplicate merges and Replace also pause and flush through the existing
+`PlaybackBeforeUnsubscribe` port. No lifecycle cleanup writes a dismissal tombstone.
+Current-file deletion remains journaled until the durable current episode changes.
+
 
 `delete(ids, byUser)` for each row, in this order:
 
@@ -525,6 +599,26 @@ Other states: `RESOLVING` and `VERIFYING` show an indeterminate ring; `DOWNLOADI
 
 ### Pause, cancel and Task Manager stops
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 2 keeps the
+three-condition inference rule: USER_REQUESTED, exit newer than the stale UIDT
+token, and no pending manual job. If an OEM Recents swipe also removes that job,
+AC11's Recents distinction is a named device gap, not presumed verified.
+Adopted resolution 3 freezes a dedicated
+`resetTaskManagerStoppedRunners(liveTokens, stopReason)` DAO transaction before
+generic orphan reset. Only stale active MANUAL `uidt:` owners and the unclaimed
+MANUAL queue pause; other stale rows retain generic SYSTEM recovery. No schema
+change is needed. W6 binds the Android historical-exit probe and invokes this
+transaction in `beforeRunnerReset(liveTokens)` under the shared claim mutex,
+before the generic reset. The UIDT service appends an invocation UUID to the
+shown token format (`uidt:{startedAtMs}:{UUID}`); inference reads the timestamp
+before that optional suffix and also accepts the timestamp-only form.
+
+
+**Implementation note (2026-10-19, M6a).** Adopted resolution 7: M6a handles actual
+callback stop reasons and stale-runner recovery only. ApplicationExitInfo historical
+Task Manager inference is M6b AC11. Stop may bypass onStopJob; callback tests do
+not prove AC11 or distinguish every process death.
+
 - **User pause** is persistent: `PAUSED` rows are never claimed, never auto-resumed after a reboot or an app update, and are not removed by the planner (the user touched them).
 - **Runner stops** (job stopped, quota, soft deadline, desktop quit, process death) are not user intent: rows return to `QUEUED(SYSTEM)` and resume automatically.
 - **Task Manager stop** (Android API 34+ "Stop" on the UIDT entry; the desktop has no equivalent — quitting the app is not a pause): the platform kills the process at once, does not call `onStopJob`, and never reschedules the job. If a stop through a system affordance does reach `onStopJob`, its return value is treated as `false` ([UIDT](https://developer.android.com/develop/background-work/background-tasks/uidt), [JobService.onStopJob](https://developer.android.com/reference/android/app/job/JobService)).
@@ -540,9 +634,46 @@ Other states: `RESOLVING` and `VERIFYING` show an indeterminate ring; `DOWNLOADI
 
 ## Runners and scheduling
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 4: manual wake work is M6a;
+AUTO wake is M6b. Startup/initializer310 schedules manual work and deferred deletes
+only. Planner, played cleanup, daily AUTO pass and periodic cleanup remain M6b.
+
 Serves R4.2, R8.7, N2. Delivered in M6. Honours [D47](../PLAN.md#3-key-decisions), [D85](../PLAN.md#3-key-decisions). Mitigates risks [T3](../PLAN.md#8-risks-and-mitigations) and [T10](../PLAN.md#8-risks-and-mitigations).
 
 Everything from [Runner matrix](#runner-matrix) to [Platform constraints](#platform-constraints) is Android (`androidMain`, `AndroidDownloadScheduler`), unchanged by the scope revision; the desktop lanes are in [Desktop runners](#desktop-runners). Both drive the same common `DownloadEngine`.
+
+Implementation note (2026-10-19, M6a): W6 implements only the MANUAL Android
+hosts. Its `AndroidDownloadRuntime` composition provider fails explicitly until
+W4/W5 supply the common runner, stop/wake hooks, reconciler and controller;
+tests use the frozen runner contracts with fakes. The Android index binding
+is replaced with W5 during integration, and the desktop binding stays with W7.
+The pinned SDK/WorkManager API gate compiles the service notification and byte
+methods and exercises persisted UIDT network/backoff builders on host API34/36.
+These host results do not prove real UIDT execution. The AC3/AC10 device smoke
+sources compile; the 20-minute, reboot, playback and permission journeys still
+require device execution with the integrated engine.
+
+The scheduler uses a queued-row snapshot to correlate due time and metered
+permission. The frozen aggregate cannot distinguish an allowed-metered row in
+backoff from a due Wi-Fi-only row; broadening a UIDT network request from that
+aggregate would be incorrect. No schema or entity change is needed. Full
+queue-read cost remains a profiling consideration for large libraries.
+
+`DrainRequest.claimsAllowed()` is an additive default claim gate: the common
+engine checks it before every claim so a worker yields new rows to a live UIDT
+job without cancelling its active transfers. `DrainRequest.cancellationIntent()`
+lets cancellation cleanup read WorkManager's stop reason before its transition;
+`CoroutineWorker.onStopped` is final in the pinned library, and the host catch
+runs after engine cleanup. `StopIntent.RunnerStopped.mode`
+defaults to REQUEUE; PAUSE preserves the real callback stop reason while pausing
+the stopped job's rows. These are W4 integration obligations.
+
+`DrainReporter.transferred(bytes)` is an additive default callback for network
+bytes received by this invocation. W4 must emit deltas excluding the resumed
+file prefix; UIDT reports those independently of aggregate file progress. The
+assigned JobParameters network versus the existing DOWNLOAD client's process
+default remains unverified on devices with Wi-Fi/mobile/VPN/Data Saver. W6
+retains the documented client path and does not bind the process or add a client.
 
 ### Runner matrix
 
@@ -715,6 +846,14 @@ class ManualDownloadJobService : JobService() {          // ch.lkmc.neutrodyne.d
 
 ### Wake work
 
+Implementation note (2026-10-19, M6a): below API28, WorkManager's CONNECTED
+fallback cannot require VALIDATED. While connected but unvalidated, the manual
+wake therefore waits at least one minute to prevent a captive-portal wake loop.
+API28+ retains the validated NetworkRequest constraint. Empty queues also clear
+the foreground-wait notification, including when cancellation emptied the queue
+before the next foreground event.
+
+
 `download-wake-{lane}` (`DownloadWakeWorker`, one-time, policy `REPLACE`, tag `download`) re-arms a lane when rows wait for a time or a condition. Its `doWork()` only calls `withContext(NonCancellable) { ensureScheduled(lane) }`. `ensureScheduled` usually re-arms the wake work with `REPLACE`, which cancels the running wake worker itself; `NonCancellable` lets the call finish. From the background, `MANUAL` on API 34+ falls back to `download-lane-MANUAL`, because UIDT is never scheduled while invisible.
 
 `armWake(lane, needs)` over the waiting rows W (those not runnable now):
@@ -725,6 +864,12 @@ class ManualDownloadJobService : JobService() {          // ch.lkmc.neutrodyne.d
 4. W empty → cancel the wake work.
 
 Because the delay only considers rows whose needs the request already guarantees, a wake always finds at least one runnable row or rows whose `nextAttemptAt` moved (gates, storage re-check), so wakes never spin. Rows with stricter needs than the request (e.g. Wi-Fi-only rows when another row allows mobile data) are picked up by any later runner, by the in-process `NetworkMonitor` trigger, or by the next wake; the worst case while the process is dead is the covered rows' backoff (≤ 6 h).
+
+**Implementation note (2026-10-19, M6b).** The aggregate wake constraints
+can cover no row when network and charging needs are disjoint (one row needs
+Wi-Fi without charging, another allows mobile but needs charging). Android then
+uses the earliest row's complete constraints and retry time, including the
+pre-28 portal delay. This preserves the guarantee that a wake covers a row.
 
 ### Work requests
 
@@ -763,6 +908,13 @@ Each runner stop writes `lastStopReason` on the affected rows (platform `STOP_RE
 
 ### Platform constraints
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 9: W6 must verify assigned job network
+versus process default under Wi-Fi/mobile/VPN/Data Saver before fixing transport
+policy. If binding is needed, extend the network island with a scoped DOWNLOAD
+socket/DNS transport seam and record the D10/D47 amendment in its owning docs.
+Never bind the whole process or construct a client inside downloads. W1 makes no
+claim that this platform experiment has passed.
+
 | Rule | Consequence here | Source |
 |---|---|---|
 | UIDT (API 34): `RUN_USER_INITIATED_JOBS`; schedulable only while visible or allowed to start activities; must specify a network; `setNotification` within 10 s; not subject to quotas; "should not be used for automatic features"; a Task Manager stop prevents rescheduling; no Jetpack wrapper | `MANUAL` only; own `JobService`; fallbacks above | [UIDT](https://developer.android.com/develop/background-work/background-tasks/uidt), [setUserInitiated](https://developer.android.com/reference/android/app/job/JobInfo.Builder#setUserInitiated(boolean)), [JobService](https://developer.android.com/reference/android/app/job/JobService) |
@@ -777,6 +929,25 @@ Each runner stop writes `lastStopReason` on the affected rows (platform `STOP_RE
 | Google's transfer guidance: WorkManager for background or automatic transfers, UIDT for user-initiated transfers needing progress | matches D47 | [Data transfer options](https://developer.android.com/develop/background-work/background-tasks/data-transfer-options), [dataSync migration](https://developer.android.com/about/versions/15/changes/datasync-migration) |
 
 ### Desktop runners
+
+**Implementation note (2026-10-19, M6a).** W7 binds the manual lane to the
+existing `JobLanePoker` runner and default root. The first lane invocation awaits
+reconciliation before draining; the runner retains concurrent pokes and owns the
+minute retry tick. Lane activity refreshes the controller's busy calculation at
+run end, including when a retry becomes due without a database write. Runner
+cancellation supplies `STOP_APP_QUIT` before child cleanup, keeps parts and
+validators, and retains live tokens through final commits. Callback pause modes
+are honored directly; historical Task Manager inference remains M6b. Manual
+failure and storage-full alerts use the existing in-app banner notifier. MD1 is
+still an open prerequisite for audible desktop offline playback; MD2 owns native
+alerts and tray behavior. No desktop audio implementation is included here.
+Active episode ownership protects journal and orphan deletion during final rename
+and root reassignment. Smoke shutdown stops and joins graph jobs before closing
+Room and removing temporary files, then disarms its watchdog.
+
+**Implementation note (2026-10-19, M6a).** Adopted resolution 2: transfer/restart mechanics can ship
+independently, but AC14's audible offline playback requires MD1. M6a acceptance
+remains open until that proof exists. MD2 owns tray/native alerts, not M6a.
 
 Serves R4.2, R8.7, R8.8, N2 (desktop). Delivered in M6a (`downloads-manual`, the start-up pass, the default root), M6b (`downloads-auto`, the daily pass, `downloads-move`), MD2 (the busy signal behind 11's close behaviour, desktop alerts, wake catch-up through 11's hardened runner), MD3 (YouTube rows). Honours [D47](../PLAN.md#3-key-decisions) (desktop note), [D48](../PLAN.md#3-key-decisions), [D85](../PLAN.md#3-key-decisions); runner contract, tick, pokes, wake detection and quit: [11 Background work](11-desktop.md#background-work).
 
@@ -860,6 +1031,19 @@ sequenceDiagram
 
 ## Transfer core
 
+**Implementation note (2026-10-19, M6a).** W3 keeps the transfer and file classes
+unbound. `Prepared.Adopted` reports verified crash recovery to the engine, which
+still owns the guarded completion commit. `TransferPlan.integrity` carries the
+selected alternate's SRI; `originalUrl` and `Transient.retryUrl` let the engine
+retry a CDN rendition in memory and fall back to the original source. Fresh
+prepare always selects the current source again. Long HTTP pacing waits carry
+`countsAsAttempt` and `httpStatus`; storage and network gates retain the defaults.
+`StorageRoots.maximumFileBytes` distinguishes a known FAT file limit from free
+space. Shared JVM hash/date mechanics live in `jvmMain`, consumed by both targets;
+commonMain retains only their platform seams and reuses core:common's NFC helper.
+Part handles open on first IO so prepare can reassign an unavailable old root;
+closing a handle always releases it even during coroutine cancellation.
+
 Serves R4.2, N1, N3, N9. Delivered in M6 (both platforms). Honours [D46](../PLAN.md#3-key-decisions), [D50](../PLAN.md#3-key-decisions), [D10](../PLAN.md#3-key-decisions), [D81](../PLAN.md#3-key-decisions). Mitigates risk [T7](../PLAN.md#8-risks-and-mitigations) (dynamic ad insertion).
 
 The transfer core is `commonMain` code and the same on both platforms: HTTP through the Ktor `HttpClient` that 01's `NeutrodyneHttpClients.client(DOWNLOAD)` returns (the OkHttp engine with the island's DOWNLOAD client as `preconfigured`, so the shared pool, DNS chain and interceptors apply, [01 One client family](01-foundation.md#one-client-family)), files through Okio. Only free-space probing, the classification of storage errors, SRI digests and `file:` URIs are platform seams ([Storage layout](#storage-layout)).
@@ -899,7 +1083,7 @@ sealed interface TransferResult {
    - a `.part` on an available old root → copy it to `<current>/.partial/{id}.part` (256 KiB buffer, `sync()`, length check), delete the source, reassign;
    - a `.part` on an unavailable old root → start over on the current root. The old `.part` is swept later as unreferenced.
 
-   The new `rootId`/`tempPath` are persisted with the `DOWNLOADING` transition. This is how in-progress downloads follow a root change; `download-move` moves only completed files ([Moving between roots](#moving-between-roots)).
+   The new `rootId`/`tempPath` are persisted with the first `DOWNLOADING` transition or changed-proof checkpoint before bytes. This is how in-progress downloads follow a root change; `download-move` moves only completed files ([Moving between roots](#moving-between-roots)).
 4. Free space ([Free space and allocation](#free-space-and-allocation)), counting a `.part` to be copied; short → `Wait(STORAGE, STORAGE_FULL, now + 30 min)` (not an attempt).
 5. Reliable validator: a strong stored `etag` (never `W/…`; [Persisted transitions](#persisted-transitions) stores no other) or a stored `lastModified` that qualified at store time — the response carried no `ETag` at all, because RFC 9110 §13.1.5 forbids an HTTP-date in `If-Range` when the client has any entity tag for the representation (so a weak-ETag-only response is validator-less), and its `Date` was at least 60 s after `Last-Modified`, a conservative reading of RFC 9110 §8.8.2.2, which asks for a `Date` at least one second later plus the same clock or "enough difference" (60 s is RFC 2616 §13.3.3's figure) ([RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.5)). `offset = part.length()`; when `offset > 0` with no reliable validator → truncate `.part` to 0, drop stored validators, `offset = 0`, `ifRange = null` (safe restart within the same attempt, never a splice). Otherwise `ifRange` = the reliable validator (strong `etag` preferred) and `expectedTotal = totalBytes`. `Range` is never sent without a reliable `If-Range`.
 
@@ -932,6 +1116,11 @@ Client: `NeutrodyneHttpClients.client(HttpClientKind.DOWNLOAD)` (connect 15 s, r
 `Retry-After` (delta seconds or HTTP date): ≤ 30 s → wait in the runner and retry (counts as one in-runner retry); longer → `Wait(BACKOFF)` with `nextAttemptAt = now + min(Retry-After, 6 h)`, counted as an attempt.
 
 ### Sniffing
+
+**Implementation note (2026-10-19, M6a).** Adopted resolution 3: HTML on validated Android networks and
+on desktop is FAILED(NOT_MEDIA). Only an unvalidated Android network produces a
+NETWORK wait without a file. Test that branch with injected conditions even if
+validated job constraints prevent it in production; PLAN AC12 is qualified.
 
 Before writing the first byte at offset 0, the engine reads up to 512 bytes from the body channel into memory (nothing is written while deciding, which satisfies "≤ 64 KB written" of the M6 acceptance criteria; the bytes are then written first if accepted) and `MediaSniffer.classify(bytes, contentType)` returns a `MediaKind`:
 
@@ -1055,6 +1244,30 @@ Row shape: `sourceKind = YOUTUBE`, `sourceRef = videoId`, `formatPref = AudioQua
 
 ### Engine absent or disabled
 
+
+Implementation note (2026-10-19, M9a): Adopted resolutions 6, 7 and 8
+preserve M6 prepare/result/runner ownership. The download implementation owns transfers and wait/wake.
+`TransferPlan.youtube` is a memory-only preference/representation snapshot.
+Resume requires non-null equal itag/clen/lmt proof in existing fields, lmt
+as decimal microseconds; full formatId also matches within an attempt.
+Real tuple collisions alone trigger the D22 contingency. Unknown total
+requires a bounded first range and consistent finite Content-Range; partial
+chunks resume at verified length or truncate. Engine-off keeps parts/PAUSED
+and never spins lanes; re-enable wakes both lanes. No-engine fails unfinished
+rows only. Claims never reserve; gate waits recheck within 30 minutes.
+
+Implementation note (2026-10-19, M8): W8 gates channel scoped auto-download
+presentation with the live downloads capability and refuses hidden policy
+edits. Cleanup of existing files remains available. M8 has only an RSS transfer
+source: both candidates and direct claims join the parent podcast and refuse
+channels even when a restored download is tagged RSS. A non-null channel ID
+also prevents an RSS-tagged parent from bypassing the controller or claim
+boundary. Runnable summaries use the same parent-source guard, preventing
+restored rows from repeatedly rearming a runner that cannot claim them.
+This changes queries and projections only, without a schema change;
+M9a / MD3 must extend this guard with their engine-backed transfer source.
+
+
 YouTube rows are created only while `capabilities.value.downloads` is true: otherwise `request` rejects YouTube IDs (`YOUTUBE_NOT_SUPPORTED`) and the planner gets no YouTube candidates, so before M9a no YouTube row exists on any APK and before MD3 none on the desktop (`NOT_YET_AVAILABLE`). Rows created with the engine meet external mode when the user turns the engine off, it fails three starts, or a build without the engine is installed over one with it. Sync carries no download rows, so a YouTube row never arrives on a device in external mode from elsewhere ([Sync interplay](#sync-interplay)). `YouTubeEngineRules` applies 04's rules ([04 Engine absent or disabled](04-youtube.md#engine-absent-or-disabled)) by `ExternalReason`:
 
 | `externalReason` | Queued, running and paused rows | `.part` | Completed files |
@@ -1085,6 +1298,12 @@ interface StorageRoots {
 ```
 
 ### Roots
+
+**Implementation note (2026-10-19, M6a).** Adopted resolution 6: Android selection means "Use this location
+for new downloads". Completed files stay on recorded roots; in-flight parts follow
+the safe reassignment rule in RSS prepare. Moves, desktop folder registration and
+the desktop_roots key wait for M6b; desktop uses dir:default. Empty Downloads UI
+links to available manual settings, not unavailable automatic controls.
 
 **Android** (`AndroidStorageRoots`):
 
@@ -1134,6 +1353,12 @@ Folder: `component(customTitle ?: title, "[p$podcastId]")`; before creating it, 
 
 ### Free space and allocation
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 8 supersedes the allocation
+sketch below: probe on IO, reserve via UUID only when required bytes are within
+getAllocatableBytes, then recheck. Otherwise wait STORAGE and offer Manage storage.
+Never use file-descriptor preallocation, which changes resume length. M6a has no
+CleanupPlanner fallback on either platform.
+
 Before `DOWNLOADING` (and before each YouTube chunk sequence): `required = (totalBytes ?: estimatedBytes ?: 150 MB) + 200 MB − part.length()`, on both platforms. **Android:** `available = StorageManager.getAllocatableBytes(getUuidForPath(rootDir))` (API 26); if `available < required`, call `allocateBytes(uuid, required)` (lets the system clear other apps' caches); if still short, run `CleanupPlanner` for that root synchronously when a cleanup would free space, then re-check; else `Wait(STORAGE, STORAGE_FULL)` with `nextAttemptAt = now + 30 min`. Removable public volumes where `getUuidForPath` or `getAllocatableBytes` throws fall back to `StatFs(rootDir).availableBytes` without allocation (Unverified which volumes throw). Sources: [App-specific storage](https://developer.android.com/training/data-storage/app-specific), [StorageManager](https://developer.android.com/reference/android/os/storage/StorageManager). **Desktop:** `available = FileStore.getUsableSpace()` of the root's file store, with no allocation call; the same cleanup fallback and `STORAGE_FULL` wait; a FAT32 store refuses a file of known size above 4 GiB before the transfer as `FAILED(STORAGE_UNAVAILABLE)` ([11 Disk full](11-desktop.md#disk-full)). On both, freed storage (user delete, cleanup, a folder change) runs `DownloadDao.clearStorageWaits()` and `ensureScheduled` for both lanes.
 
 Runtime storage errors go through `StorageRoots.classify(e, dir)`. **Android:** `ErrnoException.errno` in the cause chain — `ENOSPC` → `FULL`, `EFBIG` (FAT32 4 GB file limit) → `TOO_LARGE`, `EROFS`, `EIO` or a vanished root → `UNAVAILABLE`. **Desktop:** the JVM reports these only as `IOException`s with OS-specific messages, so after a write failure `DesktopStorageRoots` re-reads the store's usable space (below 1 MiB → `FULL`) and the root's reachability (gone → `UNAVAILABLE`) ([11 Disk full](11-desktop.md#disk-full)). Then on both: `FULL` stops the transfer as `QUEUED(STORAGE)`, `lastError = STORAGE_FULL`, keeps the `.part`, stops every other transfer on the same root the same way and raises the storage-full alert — on Android `NOTIF_ID_STORAGE_FULL` on `download_errors` with a "Manage storage" action (`StorageManager.ACTION_MANAGE_STORAGE`, optionally `EXTRA_UUID` and `EXTRA_REQUESTED_BYTES`), on the desktop 11's notification "Storage full — downloads paused"; `TOO_LARGE` is `FAILED(STORAGE_UNAVAILABLE)`; `UNAVAILABLE` → `QUEUED(STORAGE)` with `STORAGE_UNAVAILABLE`; anything else is a transfer error ([Retries and backoff](#retries-and-backoff)).
@@ -1150,10 +1375,18 @@ Android only. The desktop has no share sheet: `shareableFile` returns null there
 
 ### LocalMediaIndex
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 1 preserves the shipped synchronous,
+thread-safe, non-blocking contract on every thread. Initial load130 completes
+before playback restoration; lazy early reads return null. If ordering cannot
+establish readiness, use a separate suspend readiness seam, never runBlocking
+inside this lookup. Publish completion only after the COMPLETED commit and index
+update; remove before deletion/MISSING. Cold-start and DB-held-open proof belongs
+to W5/W8.
+
 `LocalMediaIndexImpl` (common) mirrors `episodeId → finalUri` for `COMPLETED` rows (02's load query) for 06's `EpisodeResolver` (Android) and 11's `DesktopEpisodeSourceResolver` (desktop); both read `file:` URIs ([Verification and finalisation](#verification-and-finalisation)).
 
-- Loaded by an `AppInitializer` (order 130, after the database open at 100) and fully reloaded by reconcile.
-- `localUriOrNull(id)`: on the UI thread (Android main thread, Swing EDT) returns the current map value without waiting (06 uses it only as a seek-accuracy hint there); on any other thread (Media3's loader thread, 11's `nd-prepare` thread) waits up to 2 s for the initial load, then falls back to a single-row `runBlocking` query with a 2 s timeout ([01 Coroutines and threading](01-foundation.md#coroutines-and-threading)).
+- Loaded by an `AppInitializer` (order 130, after the database open at 100); reconcile refreshes checked entries individually.
+- `localUriOrNull(id)` returns the current memory snapshot immediately on every thread, including loader threads. It performs no storage access or blocking fallback; an early lookup may return null.
 - Ordering rules: `put` only after the `COMPLETED` commit; `remove` before a row is deleted or set `MISSING`; a root change (`download-move`, `downloads-move`, a re-pointed desktop root) updates the entry after the row update.
 
 ### SAF folder (v1.x design notes)
@@ -1170,13 +1403,21 @@ Serves R4.2, R4.6, N2, N4. Delivered in M6 (progress on both platforms, Android 
 
 `DownloadProgressHub` (common) keeps, per active transfer, an `AtomicLong` byte offset (`kotlin.concurrent.atomics`), the known total, the in-memory state (`RESOLVING`, `DOWNLOADING`, `VERIFYING`) and an exponentially weighted speed over about 3 s. A ticker on `@Dispatcher(Default)` publishes a `StateFlow<Map<Long, LiveProgress>>` snapshot every 250 ms while at least one transfer is active (≤ 4 Hz, canonical) and stops when none is. `observe(ids)` maps the snapshot to the requested IDs with `distinctUntilChanged()`. An entry is removed only **after** the transfer's final state is committed, so a consumer merging row and live value never sees the row's stale state in between.
 
-Persistence ([D17](../PLAN.md#3-key-decisions)): bytes are never written per buffer or per second; `downloadedBytes` reaches the row only at [persisted transitions](#persisted-transitions). The Downloads screen and rows therefore cost zero Room invalidations while bytes flow ([02 Invalidation hygiene](02-data-model.md#invalidation-hygiene)).
+Persistence ([D17](../PLAN.md#3-key-decisions)): bytes are never written per buffer or per second; `downloadedBytes` reaches the row only at [persisted transitions](#persisted-transitions). An unchanged representation therefore costs zero Room invalidations while bytes flow; a changed proof is checkpointed before replacement bytes ([02 Invalidation hygiene](02-data-model.md#invalidation-hygiene)).
 
 ### Inputs to live row state
 
 08's `EpisodeLiveStateSource` ([08 Live row state](08-ui-ux.md#live-row-state)) builds `RowLive.downloadState`, `waitReason`, `downloadedBytes` and `totalBytes` for visible IDs from two inputs: `DownloadDao.observeLiveFor(ids)` ([02 Live row state](02-data-model.md#live-row-state)) and `DownloadProgressSource.observe(ids)`. Merge rule: a live entry wins (state and bytes); otherwise the row (`downloadedBytes`; `totalBytes ?: estimatedBytes` for display, marked approximate). `DownloadController.observe(id)` applies the same rule for a single episode.
 
 ### Notifications
+
+Implementation note (2026-10-19, M6a): with no common `DownloadAlerts` producer
+in the frozen parallel-work base, W6's Android observer drives MANUAL failure
+and storage summaries from low-churn row transitions. The app supplies the
+existing shared `DownloadStatusText` wording without a dependency from downloads
+to UI. Common alert ownership and desktop/AUTO alert delivery remain integration
+work; this observer must not duplicate a later common alert collector.
+
 
 `DownloadAlerts` (common) decides *when* the user is told something outside the window: the failure summary (a `MANUAL` row became `FAILED`; updated, never one per row; dismissed until the next failure), the storage-full alert (once until the wait clears) and, on Android only, the progress and `NEEDS_FOREGROUND` notifications below. It hands `DownloadAlert` values (`FailuresChanged(count, firstTitle, errorText)`, `StorageFull(waiting)`, `Cleared(kind)`) to the platform `DownloadAlertPoster`: `DownloadNotifications` on Android (this table), `DesktopDownloadAlertPoster` in `:desktopApp` on the desktop (below).
 
@@ -1214,7 +1455,7 @@ Persistence ([D17](../PLAN.md#3-key-decisions)): bytes are never written per buf
 | `DATA_SAVER` | `ConnectivityManager.getRestrictBackgroundStatus() == RESTRICT_BACKGROUND_STATUS_ENABLED` and the network is metered | "Data Saver is on. Downloads over mobile data may pause while Neutrodyne is in the background." | open `Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS` for the package |
 | `BACKGROUND_RESTRICTED` | `ActivityManager.isBackgroundRestricted()` | "Background activity is restricted for Neutrodyne. Automatic downloads only run while the app is open." | open the app's details settings |
 | `NOTIFICATIONS_OFF` | API 33+, permission denied, `MANUAL` rows active | "Allow notifications to see download progress outside the app." | permission prompt (08) |
-| `CAP_REACHED` | `capBytes != null && usedBytes ≥ capBytes` | "Storage limit of {5 GB} reached. Automatic downloads are paused." | open Settings › Downloads |
+| `CAP_REACHED` | `StorageUsage.autoBlockedByCap` (shared quota, including AUTO reservations and the first refused estimate) | "Storage limit of {5 GB} reached. Automatic downloads are paused." | open Settings › Downloads |
 | `STORAGE_LOW` | rows waiting in `STORAGE` with `STORAGE_FULL` | "Not enough storage. {n} downloads are waiting." | "Manage storage" (Android); "Show folder" (desktop: 11's `RevealInFolder` on the current root) |
 | `ROOT_UNAVAILABLE` | the current root unavailable, or `MISSING(STORAGE_UNAVAILABLE)` rows | "The SD card is not available." (desktop: "The download folder isn't available.") | — (desktop: "Change folder…", Settings › Desktop) |
 | `YOUTUBE_PAUSED` | YouTube rows waiting on the breaker or rate limit | 04's breaker banner text | 04's "Try now" |
@@ -1264,6 +1505,13 @@ This confirms 02's reading: a **tombstoned episode does not occupy a `keepLatest
 
 ### Planner algorithm
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 10 preserves
+network/charging values in effective policy attribution, but desktop admission
+must write `allowMetered = true`, `requireCharging = false`; neither network nor
+charging holds desktop rows or gates cleanup. Adopted resolution 11 keeps the
+full-library watermark pass, with reads/writes batched at 500 bind variables
+and no write when watermarks are unchanged. W2 measures the pass in its tests; no planner cache is added.
+
 `AutoDownloadPlanner.plan(podcastIds)` (single flight; `@Dispatcher(IO)`):
 
 1. The [watermark pass](#no-backfill-watermark) over all podcasts (`observeAutoDownload()`'s current map, or `resolver.autoDownload(allSubscribedIds)` outside the collector); `eff` = its entries for `podcastIds`.
@@ -1311,6 +1559,14 @@ Serves R4.5, N6. Delivered in M6 (common planner on both platforms). [PO-12](../
 
 ### Cleanup triggers
 
+**Implementation note (2026-10-19, M6b).** W3 exposes `CleanupPlannerImpl.run`
+and a suspending `observePlayed()` collector with a 30 s debounce. W5/W7 own
+launching the collector and binding startup, policy, session and periodic
+triggers. The engine calls cleanup before committing a storage wait; if disk IO
+also prevents cleanup, it retains the storage wait and its retry. Startup/daily
+hosts verify completed rows before cleanup; cleanup itself repeats journal
+draining, the partial sweep and orphan reporting without resetting runners.
+
 `CleanupPlanner.run(reason)` (single flight) is called by `CleanupWorker` (`download-cleanup`, daily; on the desktop the `downloads-auto` lane's daily pass, [Desktop runners](#desktop-runners)), by the played-downloads observer (`DownloadDao.observePlayedCompletedIds()`, debounced 30 s, so "delete immediately" happens shortly after an episode is marked played — here, or on another device when sync applies the played state), when `play_session.currentEpisodeId` changes (deferred deletes, outgoing item), when `downloads.delete_after_played` or a scope override changes, and synchronously by the engine before a `STORAGE` wait for that root.
 
 ### Eligibility
@@ -1331,6 +1587,17 @@ Cleanup deletes with `byUser = false`: no `downloadDismissedAt`, so an episode r
 
 ### Deferral while playing
 
+**Implementation note (2026-10-19, M6b).** Cleanup journals candidates before
+the deletion transaction, then rechecks the SQL protected set and row snapshots
+inside that transaction. Index events occur outside the transaction so a
+subscriber can read the database; skipped or rolled-back rows regain their
+index entries. The frozen W1 port comment proposed releasing the claim mutex
+before disk work. M6a's `DeferredDeletes` requires it through the ownership
+check and file deletion to prevent a new claim reusing a checked path. Cleanup
+retains that existing barrier, with all disk IO outside DB transactions. A
+file that becomes current after its row is removed stays journaled until the
+session changes.
+
 06 may hold an open `Local` pin on the current item's file and re-open it on every seek ([06 EpisodeResolver](06-playback.md#episoderesolver)); on the desktop 11's engine keeps the current file open through its `FileByteSource` ([11 Sources and SpanCache](11-desktop.md#sources-and-spancache)), and Windows refuses to delete an open file. Therefore any deletion (user, cleanup, unsubscribe, move source) of a file whose episode is `play_session.currentEpisodeId` — read through `PlaySessionDao.observeCurrentEpisodeId()` (02; `:download:impl` may not depend on `:playback:api`, [01 Dependency rules](01-foundation.md#dependency-rules)) — removes the row and the index entry at once but hands the file to `DeferredDeletes`:
 
 - `DeferredDeletes` persists `"{episodeId}|{rootId}|{path}"` entries in `downloads.deferred_deletes` (`device_settings`) and deletes a file when `currentEpisodeId` changes away from its episode. The same set is the crash journal of every deletion ([Deleting a download](#deleting-a-download)).
@@ -1339,6 +1606,19 @@ Cleanup deletes with `byUser = false`: no `downloadDismissedAt`, so an episode r
 - If the file disappears anyway, 06's recovery re-pins to the stream at the same position and calls `reportFileMissing` ([06 Error recovery](06-playback.md#error-recovery)).
 
 ### Quota
+
+**Implementation note (2026-10-19, M6b).** `DownloadQuota` is the common
+AUTO admission budget. W2 calls `resetAdmission()` at the start of its
+admission pass and `admitsAuto(latestRows, estimate)` under the shared claim
+mutex before each insert. Exact fits are admitted; an unknown estimate uses
+150 binary MB. `DownloadStorage` observes the cap and rejected estimate and
+recomputes `autoBlockedByCap` as rows or settings change, so cleanup frees
+capacity without retaining a stale notice. Partials and orphans are reported
+separately and do not consume the admission budget. Manual requests never
+consult it. The integrated W2 planner and storage share the W3 quota instance;
+there is no planner-owned blocked flag or second reservation calculation.
+The notice table uses this admission result rather than completed bytes alone,
+because a candidate can be refused while completed bytes remain below the cap.
 
 `StorageUsage.usedBytes` = `SUM(totalBytes)` of `COMPLETED` rows ([02 Downloads](02-data-model.md#downloads)), never a file-system walk; `partialBytes` = sum of `.part` lengths of rows with a `tempPath` (cheap `stat` calls, refreshed on observation). The cap (`downloads.storage_cap_mb`: unlimited, 1 / 2 / 5 / 10 / 20 GB) only gates `AUTO` admission ([Planner algorithm](#planner-algorithm) step 7); manual downloads ignore it; reaching it shows `CAP_REACHED`.
 
@@ -1358,6 +1638,17 @@ Serves N1, N2, R4.2, R3.7, R7.3, R8.2 (downloads kept across desktop updates and
 
 ### DownloadReconciler
 
+**Implementation note (2026-10-19, M6a).** W5 serializes reset, claims,
+controller removal and journal drains with the common claim mutex. Runner tokens
+remain registered through their final commits; a newly registered runner cannot
+claim during reset. This provides the ownership barrier without holding an
+Android scheduler mutex across disk IO. Only startup replaces the complete index;
+later reconciliation updates individual checked entries, so a concurrent transfer
+completion cannot be erased by an older snapshot. Startup drains the journal at
+band 130 before playback can restore a file pin; later drains respect the current
+session. W3 performs torn-tail trimming and rename-before-commit adoption on the
+next prepare. No schema change is needed.
+
 `DownloadReconciler` is common code. `resetOrphanedRunners()` runs once per process at the first `drain` and in the start-up reconcile (`DownloadReconcileWorker` on Android, the desktop lanes' start-up pass), before any claim:
 
 1. Android API 34+: `ExitReasonProbe` applies the [Task Manager rule](#pause-cancel-and-task-manager-stops) (exit reason, `uidt:` token age, no pending job).
@@ -1372,11 +1663,21 @@ Then, in `DownloadReconcileWorker` on Android (`download-reconcile`, every proce
 7. Reloads `LocalMediaIndex` if anything changed.
 8. `ensureScheduled(MANUAL)` and `ensureScheduled(AUTO)`, then a planner pass. On Android the reconcile worker runs in the background, so on API 34+ `MANUAL` usually gets `download-lane-MANUAL` here; when the user opens the app, the `ON_START` hook upgrades the lane to a UIDT job. This also re-arms work lost to a force stop. On the desktop the lanes simply continue with their drain.
 
+**Implementation note (2026-10-19, M6b).** Android's startup worker verifies
+files, schedules both lanes, runs the enabled-podcast planner pass (including
+its full-library watermark pass), then runs `CleanupPlanner.run(STARTUP)`.
+Its daily worker verifies files, runs cleanup, plans, schedules both lanes and
+records `cleanup_last_at` only after success. Both resume a persisted move target.
+The Android charging monitor supplies both scheduler and engine conditions; the
+desktop retains its unconditional charging policy. `DownloadHost.beforeRunnerReset`
+is the W6 seam under the shared claim mutex, before generic orphan reset, and
+receives the live token snapshot. W5 supplies no Task Manager inference.
+
 `CleanupWorker` (Android) and the `downloads-auto` lane's daily pass (desktop) repeat steps 3–5 daily. A full pass over 1,000 completed files is about 1,000 `stat` calls (well under a second on IO).
 
 ### Process death
 
-Rows keep their last persisted transition; the `.part` length is the resume offset; the next `drain` or reconcile resets stale runners as above, and the torn-tail rule trims the last 64 KiB ([Transfer lifecycle recovery](#transfer-lifecycle-recovery)). WorkManager reruns interrupted work by itself; a stopped UIDT job is rescheduled with backoff when `onStopJob` returned true, or re-armed by reconcile. Desktop: a crash, a kill or a power loss leaves stale `desk:` tokens; the next start-up pass resets them the same way, and nothing reruns before the app is started again ([Desktop runners](#desktop-runners)).
+Rows keep their last persisted transition or changed-representation proof checkpoint; the `.part` length is the resume offset; the next `drain` or reconcile resets stale runners as above, and the torn-tail rule trims the last 64 KiB ([Transfer lifecycle recovery](#transfer-lifecycle-recovery)). WorkManager reruns interrupted work by itself; a stopped UIDT job is rescheduled with backoff when `onStopJob` returned true, or re-armed by reconcile. Desktop: a crash, a kill or a power loss leaves stale `desk:` tokens; the next start-up pass resets them the same way, and nothing reruns before the app is started again ([Desktop runners](#desktop-runners)).
 
 ### App update
 
@@ -1399,6 +1700,23 @@ Desktop: installing a new MSI, DMG, DEB or RPM, or unpacking a new ZIP or tar.gz
 
 ### Moving between roots
 
+**Implementation note (2026-10-19, M6b).** W4 uses the frozen first-batch
+`rowsOnOtherRoots(target, 20)` query and a keyset continuation query after skipped
+rows, so an unavailable first batch cannot hide later available files. The
+unavailable-only terminal rule in step 5 wins over its earlier pending wording:
+the target is cleared when only unavailable sources remain; current-file and IO
+failures keep it set. The notice combines the persisted target and W3's quota
+state (`MOVE_IN_PROGRESS`, `STORAGE_LOW`); the API has no skipped-count field.
+Bulk copying remains outside the claim mutex. Final ownership checks, journaling,
+rename, guarded row publication, index update and source deletion share that
+mutex, with the publication/rollback section non-cancellable. This prevents a
+controller deletion from racing the rename, without filesystem IO inside a Room
+transaction. Same-store rollback restores the source on a rejected transaction;
+a rename surviving process death is adopted by its target path and length.
+W5/W7 own worker-factory/lane bindings, scheduling and root/session event pokes;
+W4 exposes the mover and supplies tested, unbound hosts. The existing desktop
+root provider receives device settings and lazy row access for registration.
+
 `changeRoot(rootId, moveExisting)` makes `rootId` current — Android writes `downloads.root_id`; the desktop writes 11's `desktop.downloads_dir` (null for `dir:default`, the registered path otherwise; the root must come from `storageRoots()` or `registerFolderRoot`). New rows use the new root at once, and queued or paused rows follow it at their next prepare, `.part` included ([RSS prepare](#rss-prepare) step 3; YouTube rows use the same placement step). With `moveExisting = true` (Android's settings dialog "Move {n} downloads ({2.3 GB}) to {SD card}?", the desktop's "Move {n} downloads ({size}) to {folder}?" in [11 Change folder](11-desktop.md#change-folder)), the **completed** files follow through the common `DownloadMover`, run by `DownloadMoveWorker` on Android (`download-move` with `targetRootId`, 8-min soft deadline, continuation `APPEND_OR_REPLACE`) and by `DesktopMoveLane` on the desktop (lane `downloads-move`, no deadline; the target is persisted in `downloads.move_target`, so a quit or crash continues the move at the next start, [R8.8](../PLAN.md#21-functional-requirements)). `changeRoot(…, moveExisting = false)` clears `downloads.move_target`, so files left on the old root stay there.
 
 `DownloadMover.run(target, deadline)`:
@@ -1418,6 +1736,15 @@ Desktop: installing a new MSI, DMG, DEB or RPM, or unpacking a new ZIP or tar.gz
 `MOVE_IN_PROGRESS` shows while the move runs or is pending. Playback keeps using the row's current `finalUri`. An open `Local` pin (Android) or the desktop engine's open file keeps reading the source, which is not deleted or renamed while current.
 
 ### Unsubscribe, merge and retention
+
+**Implementation note (2026-10-19, M6a).** Adopted resolution 10: core:data uses the narrow
+core:domain DownloadLifecycle port before cascades, rather than consuming the
+download controller or adding an implementation dependency. beforeEpisodeRemoval,
+beforeEpisodeMerge(loser,winner) and beforeLibraryReplace await durable journaling
+and transfer stop acknowledgement; failure aborts the destructive operation.
+Cover PodcastMerger's raw moveDownload and restore Replace, including ID-based
+paths, index invalidation and artwork references. These lifecycle operations write
+no user-dismissal tombstone.
 
 03's `UnsubscribeUseCase`, and for unsubscribes pulled by sync `PodcastRepository.unsubscribe(ids, origin = SYNC)` after the mass-change guard let them through, call `delete(ids, byUser = false)` for the podcast's downloads before 02's cascade ([03 Unsubscribe and other podcast operations](03-feeds-and-discovery.md#unsubscribe-and-other-podcast-operations)); the current episode's file is deferred and deleted when the cascade clears `currentEpisodeId`. A podcast merge (03, including a merge the sync server arbitrated, [10 Identity mapping](10-sync.md#identity-mapping)) deletes only the downloads of matched loser episodes whose winner already has one; other `download` rows move to the winner's episodes with their files, which keep their old folder (files are never renamed). Retention never deletes episodes that have a `download` row ([02 Retention and maintenance](02-data-model.md#retention-and-maintenance)), so an episode that left its feed stays playable offline until its download is deleted.
 
@@ -1446,6 +1773,12 @@ Serves R7.3, N1. Delivered in MS2. Honours [D93](../PLAN.md#3-key-decisions), [P
 
 ## Backup exclusion
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 5: PLAN AC7 makes the real Podcasts bmgr
+transport assertion M6a, despite 09's M6b assignment. This baseline has no bmgr
+script/job or desktop matrix job. W10 must add honest transport evidence using
+the M3 snapshot trigger and a real completed media file. Static XML tests alone
+leave AC7 open; no absent CI lane is claimed as running.
+
 Serves R1.8, N1, N3. Delivered by 05's rules in M3; verified in M6 ([PLAN M6](../PLAN.md#m6-downloads) acceptance 7). Android: everything below. The desktop has no Auto Backup ([11 Behaviour differences from Android](11-desktop.md#behaviour-differences-from-android)); see the end of this section.
 
 Must never be in cloud backup or device-to-device transfer (Android):
@@ -1466,6 +1799,26 @@ Auto Backup includes `getExternalFilesDir()` by default. 05's include-only rules
 
 ## Settings
 
+**Implementation note (2026-10-19, M6b).** W11 records the integrated state:
+W2–W7 now bind the planner, cleanup, root registry, mover and both platform
+hosts, including W6's historical-exit inference. Earlier W1/W4 freeze notes
+describe delivery order. The [acceptance ledger](../evidence/m6b-acceptance.md)
+separates host assertions from device behavior; neither Task Manager/Recents,
+SD-card moves nor the real 24 h cleanup clock is device-verified here.
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 1 assigns
+`desktop_roots`, `move_target`, `cleanup_last_at`, folder registration, the folder
+picker and MOVE_EXISTING to M6b. The Podcasts bmgr assertion remains M6a.
+W1 freezes keys and owner contracts only; W4/W5/W7 bind root/move and AUTO hosts.
+M6a's explicit unavailable results remain until a real owner is supplied; root
+registration and changes now have a delegation seam rather than a successful no-op.
+
+
+**Implementation note (2026-10-19, M6a).** W1 registers only MANUAL_METERED (portable), ROOT_ID,
+NOTIFICATION_PROMPTED and DEFERRED_DELETES (device store), all unsynced. The
+remaining policy/registry/move/cleanup keys in the full table are deferred to M6b;
+registration is not a promise of working automatic policy in M6a.
+
 `DownloadSettingKeys` (`:core:model`, registered in 01's `AllSettingKeys`; conventions in [01 DataStore files and typed setting keys](01-foundation.md#datastore-files-and-typed-setting-keys)). These are the `downloads.*` globals that 05's resolver reads ([05 Effective settings resolution](05-groups-opml-backup.md#effective-settings-resolution)). Every key here is device-local: `SettingKey.synced = false`, so sync never carries any of them ([D93](../PLAN.md#3-key-decisions), [10 What syncs](10-sync.md#what-syncs)); the `settings`-file keys still travel in manual backups as 05's whitelist says. Both platforms show Settings › Downloads; rows marked "desktop: hidden" have no effect there (every network is unmetered and charging is ignored, [Desktop runners](#desktop-runners)), and 08 shows them as "Not used on computers" or hides them.
 
 | Key | Type | Default | File | UI location | Milestone |
@@ -1482,9 +1835,9 @@ Auto Backup includes `getExternalFilesDir()` by default. 05's include-only rules
 | `downloads.notification_prompted` | Bool | `false` | `device_settings` | none (contextual prompt flag; Android) | M6 |
 | `downloads.deferred_deletes` | TextSet (`{episodeId}\|{rootId}\|{path}`, split at the first two `\|` because desktop paths may contain one) | empty | `device_settings` | none (deferred deletes and deletion journal) | M6 |
 | `downloads.planner_baseline_at` | Long (epoch ms) | absent = 0 | `device_settings` | none (planner state, [No backfill watermark](#no-backfill-watermark)) | M6 |
-| `downloads.desktop_roots` (2026-10-05) | TextSet (`{rootId}\|{absolute path}`, split at the first `\|`) | empty | `device_settings` | none (desktop root registry, [Roots](#roots)) | M6a (desktop) |
-| `downloads.move_target` (2026-10-05) | Text (`rootId`) | absent | `device_settings` | none (pending desktop move, [Moving between roots](#moving-between-roots)) | M6b (desktop) |
-| `downloads.cleanup_last_at` (2026-10-05) | Long (epoch ms) | absent | `device_settings` | none (desktop daily pass, [Desktop runners](#desktop-runners)) | M6b (desktop) |
+| `downloads.desktop_roots` (2026-10-05) | TextSet (`{rootId}\|{absolute path}`, split at the first `\|`) | empty | `device_settings` | none (desktop root registry, [Roots](#roots)) | M6b (desktop) |
+| `downloads.move_target` (2026-10-05) | Text (`rootId`) | absent | `device_settings` | none (pending move on both platforms, [Moving between roots](#moving-between-roots)) | M6b |
+| `downloads.cleanup_last_at` (2026-10-05) | Long (epoch ms) | absent | `device_settings` | none (daily pass on both platforms; [Desktop runners](#desktop-runners)) | M6b |
 | `youtube.auto_download`, `youtube.auto_download_keep_latest`, `youtube.audio_quality` | 04's keys | — | — | Settings › Downloads › YouTube channels (with the engine) | M9a; MD3 (desktop) |
 
 Fixed in v1 (not settings): 3 parallel downloads (2 per host, 1 YouTube), retry schedule, free-space margin, 14-day `.part` age. Settings › Downloads also hosts "Clean up unknown files" (orphans) and shows `StorageUsage`.
@@ -1510,7 +1863,7 @@ Serves N1, N2, N11. Infrastructure, runners and CI wiring: [09 Test strategy](09
 | `DownloadControllerImplTest` | `desktopTest` + `TestDb` | metered matrix (`ASK`/`ALWAYS`/`NEVER` × metered/unmetered/offline); every `RejectReason`; requests over each existing state; `MANUAL` request clears a tombstone; `askNotificationPermission` (fake platform flag); (2026-10-05) `observeFailedCount` emits on `FAILED` transitions only; `registerFolderRoot` returns the existing root for a known path and `UNSUPPORTED` on the Android binding. M9a: `YOUTUBE_NOT_SUPPORTED` for every `ExternalReason`; `resume`, `retry` and `promote` of YouTube rows → `QUEUED(YOUTUBE_ENGINE_OFF)` for the waiting reasons, unchanged for `NOT_IN_THIS_APK` | M6, M9a |
 | `AutoDownloadPlannerTest` | `desktopTest` + `TestDb`, fake resolver | **M6 acceptance 4**: group keep 3 queues exactly the newest 3 unplayed episodes first seen after enabling, unmetered only; a user-deleted episode is never re-queued; a podcast in two groups follows D45 (one row per episode). Watermark pass: subscribe under an enabled group → watermark `subscribedAt`; subscribe under a disabled policy, enable later → `now`; process killed between subscribe and the first pass → still `subscribedAt`; killed before the baseline write → same decisions next pass. Also: enabling never backfills; `initialFetch` events ignored; tombstones and played episodes free slots; disable removes queued `AUTO` rows but keeps `PAUSED` and `COMPLETED`; round-robin across 3 podcasts; cap stops admission; changed enclosure re-queues a `FAILED(HTTP_NOT_FOUND)` row. M9a: a YouTube channel resolving to `NotSupported` keeps its queued `AUTO` rows and its watermark (`DISABLED_BY_USER`); when capabilities return, an episode first seen during the gap is planned; with `NOT_IN_THIS_APK` its failed `AUTO` rows are deleted and the watermark is kept | M6, M9a |
 | `CleanupPlannerTest` | `desktopTest` + `TestDb` | **M6 acceptance 5**: deleted at `playedAt + 24 h`, not at `+ 24 h − 1 s`; never favourites, the playing episode, the next 3 Up next items or unplayed manual downloads. Also: `IMMEDIATELY`, `NEVER`; played manual downloads deleted; in-progress `AUTO` protected; rolling keep-N; no tombstones; current file deferred | M6 |
-| `DownloadReconcilerTest` | `androidHostTest`, Robolectric + DB, fake `ExitReasonProbe`, fake `JobSchedulerFacade`, fake roots (the common reconcile rules run through the Android wiring here; the desktop wiring in `DesktopDownloadLaneTest`) | stale tokens → `QUEUED(SYSTEM)`; API 34+ `REASON_USER_REQUESTED` newer than the `uidt:` token with no pending job → those `MANUAL` rows and queued `MANUAL` rows `PAUSED`, worker-token rows `QUEUED(SYSTEM)`; same reason with the job still pending, an older exit, or API 33 → `QUEUED(SYSTEM)`; missing file → `MISSING`; unmounted root → `MISSING(STORAGE_UNAVAILABLE)` → remount → `COMPLETED`; orphan and 14-day `.part` handling; deferred deletes; orphan final files counted, not deleted. M9a, one case per `ExternalReason` (`FakeYouTubeCapabilitiesSource`): `NOT_IN_THIS_APK` → queued, paused and stale YouTube rows `FAILED(UNSUPPORTED_STREAM)`, `.part` deleted, `COMPLETED` and RSS rows untouched; `DISABLED_BY_USER`, `ENGINE_FAILED`, `NOT_YET_AVAILABLE` → nothing failed, queued YouTube rows `YOUTUBE_ENGINE_OFF`, `.part` kept; `null` → waits cleared and both lanes scheduled; a second `sync` with the same value writes nothing | M6, M9a |
+| `DownloadReconcilerTest` | `androidHostTest`, Robolectric + DB, `ShadowActivityManager` exit history and `JobScheduler` pending jobs, fake roots (the common reconcile rules run through the Android wiring here; the desktop wiring in `DesktopDownloadLaneTest`) | stale tokens → `QUEUED(SYSTEM)`; API 34+ `REASON_USER_REQUESTED` newer than the `uidt:` token with no pending job → those `MANUAL` rows and queued `MANUAL` rows `PAUSED`, worker-token rows `QUEUED(SYSTEM)`; same reason with the job still pending, an older exit, or API 33 → `QUEUED(SYSTEM)`; missing file → `MISSING`; unmounted root → `MISSING(STORAGE_UNAVAILABLE)` → remount → `COMPLETED`; orphan and 14-day `.part` handling; deferred deletes; orphan final files counted, not deleted. M9a, one case per `ExternalReason` (`FakeYouTubeCapabilitiesSource`): `NOT_IN_THIS_APK` → queued, paused and stale YouTube rows `FAILED(UNSUPPORTED_STREAM)`, `.part` deleted, `COMPLETED` and RSS rows untouched; `DISABLED_BY_USER`, `ENGINE_FAILED`, `NOT_YET_AVAILABLE` → nothing failed, queued YouTube rows `YOUTUBE_ENGINE_OFF`, `.part` kept; `null` → waits cleared and both lanes scheduled; a second `sync` with the same value writes nothing | M6, M9a |
 | `LocalMediaIndexTest` | `desktopTest` | the UI thread never blocks before the load (Swing EDT in the test); a loader thread waits; `put` after commit, `remove` before delete | M6 |
 | `DownloadProgressHubTest` | `commonTest` | snapshots every 250 ms only while a transfer is active; an entry is removed only after the final commit | M6 |
 | `DownloadMoveWorkerTest` | `androidHostTest`, Robolectric (the common `DownloadMover` through `DownloadMoveWorker`) | copy, verify, rename, row update, source deletion through the journal (deferred when current), row deleted during the copy → copy removed, unavailable source skipped, target full → stop with notice, continuation at the deadline | M6 |
@@ -1537,6 +1890,18 @@ Fixtures: `download/impl/testdata/media/` (registered as test resources of `desk
 | `DownloadsScreenStringsTest` (with 08, Roborazzi) | Robolectric | **M6 acceptance 8**: correct text for every `waitReason`, state and error |
 | `bmgr` check | 09's nightly `bmgr` job (android-emulator-runner, API 29 for `backup_rules.xml` and API 36 for `data_extraction_rules.xml`; `scripts/ci/bmgr-check.sh`); 07 adds its assertion in M6 | **M6 acceptance 7**: `adb shell bmgr enable true`; `bmgr transport com.android.localtransport/.LocalTransport`; download a 30 MB episode; `bmgr backupnow ch.lkmc.neutrodyne`; the local transport's stored backup for the package (Unverified path) contains no `Podcasts/` or `downloads/` entry |
 | `YouTubeReleaseSmokeTest` (09's E7, owned by 04) | GMD API 36 and API 37 16 KB image, on the release APK (R8, as published) and the debug APK | **M9 acceptance 9**: one chunked YouTube download through `:ytx` with recorded responses and a MockWebServer googlevideo stand-in completes and verifies ([04 Testing](04-youtube.md#testing)) |
+
+**W6 AC11 device evidence: Unverified (2026-10-19).** On an API 34+ device,
+start a UIDT download with additional MANUAL rows queued, use Task Manager
+"Stop", then relaunch: active UIDT-owned and queued MANUAL rows must be
+`PAUSED` with `STOP_USER_TASK_MANAGER`, while other stale runners recover as
+`QUEUED(SYSTEM)`. Record the device/API, latest `ApplicationExitInfo` reason
+and timestamp, stale token timestamp, and whether
+`JobScheduler.forNamespace("downloads").getPendingJob(1001)` is null before
+relaunch schedules anything. Repeat with a Recents swipe: the persisted manual
+job must remain pending and the MANUAL rows must not pause. Host shadow tests
+cover the inference, not these platform behaviors. An OEM that removes the
+job on Recents swipe remains a named AC11 device gap.
 
 **M6 device checklist** (recorded in the PR): reboot mid-download on API 34 and 33 (UIDT and worker resume, acceptance 2); Task Manager "Stop" on the UIDT entry (rows `PAUSED`; record the `ApplicationExitInfo` reason and whether `getPendingJob(1001)` is null afterwards); swipe the app from Recents during a UIDT download (must not pause); app update during a UIDT download (the job survives, or reconcile re-arms it); SD card removal and re-insertion; Data Saver on with mobile data; notification permission denied; `adb shell am set-standby-bucket ch.lkmc.neutrodyne restricted` (`NEEDS_FOREGROUND` and `BACKGROUND_RESTRICTED`); `adb shell dumpsys jobscheduler` shows namespace `downloads`, job 1001, user-initiated; notification update via `notify` vs `setNotification` on API 34 and 36.
 
