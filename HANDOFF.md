@@ -60,7 +60,8 @@ pass. Downloaded XML proves the five named smoke cases on CI API26/36 and nightl
 API26/33/34/36, with no failures/errors/skips or host-only failure fixtures.
 Actual-main [full recovery](https://github.com/L-K-M/Neutrodyne/actions/runs/39363070031)
 and [seeded restore](https://github.com/L-K-M/Neutrodyne/actions/runs/39363072325)
-are queued on `7615ae2f`; #214 stays open until main recovery. This does not
+both pass on `7615ae2f`; #214 closed after actual-main recovery. Parent checked
+the named smoke XML and strict non-skipped API26/API36 seeded case. This does not
 approve a scheduled/tagged release, native dialogs/providers, physical devices
 or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/evidence/`.
 
