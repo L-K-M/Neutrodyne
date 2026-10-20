@@ -862,11 +862,12 @@ there is no per-video refresh storm or inference from length, contents or
 nonempty blobs. The loader rechecks episode ownership and deadline and returns
 the immutable complete snapshot it acquired. A later blob replacement during
 an async call cannot change that snapshot. W7 must parse only the returned
-snapshot in its cancellable current-item service. No W7 implementation or
-production activation is included.
+snapshot in its cancellable current-item service. The portable W7a consumer
+is described in [Chapters from the description](#chapters-from-the-description);
+the I3 loader/codec contract and production bindings remain unchanged.
 
 These services remain behind ordinary external `NOT_YET_AVAILABLE` bindings.
-W4 transport, W7/W8 consumers, W10 lookup/search,
+W4 transport, W7b playback sources/recovery, W8 transfers, W10 lookup/search,
 W11 activation and the reference-device spike remain separate owner work.
 Portable controlled-transport/database evidence is not live or Android-host
 acceptance. No startup Python work, runtime update or JS provider is enabled.
@@ -1504,6 +1505,34 @@ The queue continues with the next playable item in every skip case (R3.8). Unava
 ### Chapters from the description
 
 `YouTubeChapters.parse(description: String, durationMs: Long?): List<ChapterSpec>` (pure); 06 stores the result with `ChapterSource.YOUTUBE_DESC` when the item becomes current and no higher-priority chapters exist ([06 Chapters](06-playback.md#chapters)). Rules: a line whose first token is a timestamp (`m:ss`, `mm:ss`, `h:mm:ss`, token grammar as 03's timestamp linkifier) followed by an optional separator (`-`, `–`, `—`, `|`, `:`) and a title; at least 3 such lines; the first is `0:00`; strictly ascending; each chapter ≥ 10 s; the last start before `durationMs` when known. Otherwise no chapters (timestamps still become seek links via 03). Unverified: these mirror YouTube's own chapter rules as commonly documented, not re-checked.
+
+**Implementation note (2026-10-20, W7a).** `ChapterSpec` contains only `startMs`
+and the nonempty title. The common parser uses 03's ASCII clock field widths,
+range checks and time-of-day exclusions, with 04's optional line separator.
+A numeric timestamp-like first token with malformed fields, overflow-width
+digits, a missing title, a duplicate or a short interval rejects the whole list.
+Unrelated prose is ignored. Parsing is linear in input size; more than 2 MiB
+UTF-8 or 1,000 chapters rejects the whole input rather than returning a prefix.
+A known duration must leave at least ten seconds after the final start;
+unknown duration leaves the final end open. Next-start bounds use the existing
+chapter normalization in 06.
+
+`ChapterRepository.ensureCurrentLoaded` first attempts the existing JSON path,
+then requests only the frozen loader's immutable proven-complete snapshot for
+an eligible current YouTube item without winning higher-priority chapters. Complete Atom notes
+work offline without facts. Unknown/truncated stored notes remain intact and
+authorize no chapters. No mutable description blob is reread after facts.
+The real write transaction rechecks episode/video/podcast ownership, YouTube
+source, winning priority, current duration and cancellation before replacing
+only `YOUTUBE_DESC`. Each current occurrence reparses its returned complete
+snapshot: changed notes replace that source, and an invalid complete list clears
+it. If the loader returns no snapshot, cached rows are preserved; unknown or
+truncated text cannot replace them. Identical normalized results do not write. The Android service
+calls this entry in its cancellable current-occurrence scope; browsing and
+completed downloads retain JSON-only `ensureLoaded` plus M6 local inspection.
+Both ordinary graphs supply the existing loader and still use external
+`NOT_YET_AVAILABLE`/`Unsupported` bindings. W7b Media3 pins/recovery/watchdog/
+prewarm, W4 host, W11 activation and live/device/audible acceptance remain pending.
 
 ### Watch on YouTube
 

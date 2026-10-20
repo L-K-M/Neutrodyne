@@ -27,6 +27,7 @@ class FakeChapterRepository : ChapterRepository {
     }
 
     val loads = mutableListOf<Long>()
+    val currentLoads = mutableListOf<Long>()
     val writes = mutableListOf<Write>()
     var failure: Throwable? = null
 
@@ -42,6 +43,11 @@ class FakeChapterRepository : ChapterRepository {
     override suspend fun ensureLoaded(episodeId: Long) {
         loads += episodeId
         failure?.let { throw it }
+    }
+
+    override suspend fun ensureCurrentLoaded(episodeId: Long) {
+        currentLoads += episodeId
+        ensureLoaded(episodeId)
     }
 
     override suspend fun replace(

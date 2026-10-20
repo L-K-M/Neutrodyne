@@ -11,12 +11,17 @@ import ch.lkmc.neutrodyne.core.artwork.ArtworkProviderGraph
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
+import ch.lkmc.neutrodyne.core.database.DescriptionFormat
+import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
@@ -38,6 +43,8 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feature.player.PlayerViewModel
 import ch.lkmc.neutrodyne.notifications.AndroidGroupChannelSync
 import ch.lkmc.neutrodyne.notifications.AndroidImportReportPoster
@@ -48,6 +55,7 @@ import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -107,6 +115,41 @@ class AndroidAppGraphTest {
         assertThat(graph.metroViewModelFactory).isNotNull()
         assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
     }
+
+    @Test
+    fun currentChaptersUseTheRealCompleteSnapshotLoaderInTheOrdinaryGraph() =
+        runBlocking<Unit> {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            try {
+                val channel =
+                    db.podcastDao().insertPodcast(
+                        podcastEntity().copy(
+                            sourceType = SourceType.YOUTUBE_CHANNEL,
+                            youtubeChannelId = "UC" + "0".repeat(21) + "A",
+                        ),
+                    )
+                val id =
+                    db.episodeDao().insertStub(
+                        episodeEntity(podcastId = channel).copy(externalMediaId = "aaaaaaaaaaA", durationMs = 30_000),
+                    )
+                db.ingestDao().fillYouTubeDescription(
+                    id,
+                    EpisodeDescriptionCodec.encode(
+                        "0:00 Intro\n0:10 Next\n0:20 End",
+                        DescriptionFormat.PLAIN_TEXT,
+                        DescriptionCompleteness.COMPLETE,
+                    ),
+                    "notes",
+                )
+                graph.chapterRepository().ensureCurrentLoaded(id)
+                val rows = graph.chapterRepository().observe(id).first()
+                assertThat(rows.map { it.startMs }).containsExactly(0L, 10_000L, 20_000L).inOrder()
+                assertThat(rows.map { it.source }.toSet()).containsExactly(ChapterSource.YOUTUBE_DESC)
+            } finally {
+                db.close()
+            }
+        }
 
     @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =

@@ -17,6 +17,10 @@ interface ChapterRepository {
      * Local-file/EmbeddedChapterReader support is M6. */
     suspend fun ensureLoaded(episodeId: Long)
 
+    /** Current occurrence only: JSON, then proven-complete YouTube description fallback.
+     * The caller owns cancellation on item changes and service teardown. */
+    suspend fun ensureCurrentLoaded(episodeId: Long)
+
     /** Local enrichment port; W8 implements offline extraction, including absent JSON URLs. */
     suspend fun ensureLocalLoaded(
         episodeId: Long,

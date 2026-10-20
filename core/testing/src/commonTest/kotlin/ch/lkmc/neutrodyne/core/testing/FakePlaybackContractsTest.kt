@@ -81,6 +81,9 @@ class FakePlaybackContractsTest {
             assertEquals(listOf(psc), repo.observe(1).first())
             repo.ensureLoaded(1)
             assertEquals(listOf(1L), repo.loads)
+            repo.ensureCurrentLoaded(2)
+            assertEquals(listOf(2L), repo.currentLoads)
+            assertEquals(listOf(1L, 2L), repo.loads)
             repo.failure = IllegalStateException("write failed")
             assertFailsWith<IllegalStateException> { repo.replace(1, psc.source, emptyList()) }
             assertEquals(listOf(psc), repo.observe(1).first())

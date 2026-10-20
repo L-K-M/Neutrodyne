@@ -168,7 +168,9 @@ interface QueueRepository {
 }
 interface ChapterRepository {
     fun observe(episodeId: Long): Flow<List<EpisodeChapter>>    // winning source only, hidden chapters excluded
-    suspend fun ensureLoaded(episodeId: Long, localFileUri: String? = null)   // 07 calls after COMPLETED
+    suspend fun ensureLoaded(episodeId: Long)                 // JSON only; browsing and 07 completion
+    suspend fun ensureCurrentLoaded(episodeId: Long)          // cancellable current occurrence only
+    suspend fun ensureLocalLoaded(episodeId: Long, fileUri: String): EmbeddedChapterResult
 }
 ```
 
@@ -1109,6 +1111,22 @@ stateDiagram-v2
 ## Chapters
 
 **Implementation note (2026-10-19, M5).** The M5 contracts place `EpisodeChapter`, `CurrentChapter`, `SleepTimerMode` and `SleepTimerState` in `core.model`, superseding their earlier API attribution. `ChapterRepository` observes winning visible rows, loads JSON with `ensureLoaded(episodeId)`, and replaces one source including hidden rows. Local-file support waits for M6. Selection belongs to model, scheduling to playback core, writes to core data; no `core:data → playback:core` dependency. Intervals are start-inclusive/end-exclusive; explicit shorter ends leave gaps, unknown final ends are open. Navigation never wraps; previous uses strictly >3 seconds.
+
+**Implementation note (2026-10-20, W7a).** The portable current-item entry is
+`ensureCurrentLoaded(id)`: existing JSON load followed by the complete-description
+fallback in [04 Chapters from the description](04-youtube.md#chapters-from-the-description).
+`Chapters.currentScope` owns cancellation on transitions and teardown. The data
+repository uses the existing immutable snapshot loader and rechecks ownership,
+priority, duration and cancellation inside its Room write transaction. Source
+selection remains JSON > PSC > ID3 > MP4 > YOUTUBE_DESC, including the existing
+hidden-only fallback. A returned complete snapshot can replace cached description
+rows, including clearing them for an invalid full list; absence of a snapshot
+preserves the cache. Browsing and download completion still call JSON-only
+`ensureLoaded`; M6 local extraction, retries and coalescing are unchanged.
+The ordinary Android/desktop graph tests exercise stored complete notes through
+the real repository/loader while preserving external `NOT_YET_AVAILABLE` and
+`Unsupported`. W7b Media3 source pins, recovery, watchdog and prewarm, W4 host,
+W11 production bindings and live/device/audible gates remain separate work.
 
 Serves R4.8, R3.5, R8.5. Delivered in M5 (P2.0 JSON, PSC, ID3, MP4), M6 (download-time extraction), M9a (YouTube descriptions). Table: [02 chapter](02-data-model.md#chapter). Placement: the priority, the current chapter and the next/previous targets are `ChapterIndex` (`:playback:core`); `ChapterRepositoryImpl` and `Podcasting20ChaptersParser` are `:core:data` code for both platforms; reading container chapters is the platform's `EmbeddedChapterReader` (Android `MetadataRetrieverChapterReader`, desktop `DesktopChapterExtractor`, [11 Chapters and metadata](11-desktop.md#chapters-and-metadata)) and, during playback, the adapter (Android `Chapters`, desktop `TracksKnown`). Chapters are device-local: each device fetches and extracts its own ([10 Never synced](10-sync.md#never-synced)).
 

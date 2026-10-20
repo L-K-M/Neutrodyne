@@ -178,6 +178,7 @@ class ChaptersTest {
                 runCurrent()
                 assertTrue(repo.writes.isEmpty())
                 assertEquals(listOf(1L, 2L), repo.loads)
+                assertEquals(listOf(1L, 2L), repo.currentLoads)
                 chapters.onTracksChanged(stale)
                 runCurrent()
                 assertTrue(repo.writes.isEmpty())
@@ -187,16 +188,21 @@ class ChaptersTest {
             }
         }
 
-    @Test fun pendingJsonDoesNotBlockMetadataOrCommandsAndDetaches() =
+    @Test fun pendingCurrentLoadDoesNotBlockMetadataOrCommandsAndDetaches() =
         runTest {
             val exo = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
             val player = TestPlayer(exo) { testScheduler.currentTime }
             val fake = FakeChapterRepository()
             val pending = CompletableDeferred<Unit>()
+            val cancelled = mutableListOf<Long>()
             val repository =
                 object : ChapterRepository by fake {
-                    override suspend fun ensureLoaded(episodeId: Long) {
-                        pending.await()
+                    override suspend fun ensureCurrentLoaded(episodeId: Long) {
+                        try {
+                            pending.await()
+                        } finally {
+                            cancelled += episodeId
+                        }
                     }
                 }
             val chapters = Chapters(player, repository, backgroundScope) {}
@@ -208,9 +214,13 @@ class ChaptersTest {
                 runCurrent()
                 chapters.command(PlaybackSessionCommands.CHAPTER_NEXT)
                 assertEquals(listOf(1000L), player.seeks)
-                chapters.detach()
-                pending.complete(Unit)
+                player.id = 2
+                chapters.onMediaItemTransition(player.currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
                 runCurrent()
+                assertEquals(listOf(1L), cancelled)
+                chapters.detach()
+                runCurrent()
+                assertEquals(listOf(1L, 2L), cancelled)
             } finally {
                 chapters.detach()
                 exo.release()

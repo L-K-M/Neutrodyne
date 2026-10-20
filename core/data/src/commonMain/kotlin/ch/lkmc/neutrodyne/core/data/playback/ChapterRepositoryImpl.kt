@@ -5,6 +5,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeDescriptionLoader
 import ch.lkmc.neutrodyne.core.database.ChapterEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
@@ -13,6 +14,8 @@ import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
+import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.youtube.api.YouTubeChapters
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -44,6 +47,7 @@ internal class ChapterRepositoryImpl(
     private val parser: Podcasting20ChaptersParser,
     private val network: NetworkMonitor,
     private val clock: Clock,
+    private val descriptions: YouTubeDescriptionLoader,
     private val embedded: EmbeddedChapterReader? = null,
 ) : ChapterRepository {
     private data class Load(
@@ -59,6 +63,54 @@ internal class ChapterRepositoryImpl(
     private val mutex = Mutex()
     private val inFlight = mutableMapOf<Long, Load>()
     private val failures = mutableMapOf<Long, Failure>()
+
+    override suspend fun ensureCurrentLoaded(episodeId: Long) {
+        ensureLoaded(episodeId)
+        val original = db.episodeDao().byId(episodeId) ?: return
+        val video = original.externalMediaId ?: return
+        if (db.podcastDao().byId(original.podcastId)?.sourceType != SourceType.YOUTUBE_CHANNEL) return
+        if (hasHigherPriorityChapters(episodeId)) return
+        // Stored complete notes work offline; absent notes must not start extraction offline.
+        if (!network.status.value.isConnected && db.episodeDao().description(episodeId) == null) return
+        val snapshot = descriptions.load(episodeId) ?: return
+        currentCoroutineContext().ensureActive()
+        db.withWriteTransaction {
+            currentCoroutineContext().ensureActive()
+            val current = db.episodeDao().byId(episodeId) ?: return@withWriteTransaction
+            if (current.podcastId != original.podcastId || current.externalMediaId != video ||
+                db.podcastDao().byId(current.podcastId)?.sourceType != SourceType.YOUTUBE_CHANNEL ||
+                hasHigherPriorityChapters(episodeId)
+            ) {
+                return@withWriteTransaction
+            }
+            // Only the acquired immutable complete text is parsed. Duration can have changed
+            // while facts were suspended, so validate it at the same boundary as the write.
+            val chapters = YouTubeChapters.parse(snapshot, current.durationMs)
+            val rows =
+                chapters.mapIndexed { index, chapter ->
+                    EpisodeChapter(
+                        chapter.startMs,
+                        if (index == chapters.lastIndex) current.durationMs else null,
+                        chapter.title,
+                        null,
+                        null,
+                        ChapterSource.YOUTUBE_DESC,
+                        false,
+                    )
+                }
+            currentCoroutineContext().ensureActive()
+            replace(episodeId, ChapterSource.YOUTUBE_DESC, rows)
+            currentCoroutineContext().ensureActive()
+        }
+    }
+
+    private suspend fun hasHigherPriorityChapters(episodeId: Long): Boolean {
+        val rows =
+            ChapterSource.entries
+                .takeWhile { it != ChapterSource.YOUTUBE_DESC }
+                .flatMap { db.chapterDao().ofSource(episodeId, it) }
+        return ChapterSource.winning(rows.map { it.toModel() }).isNotEmpty()
+    }
 
     override fun observe(episodeId: Long): Flow<List<EpisodeChapter>> =
         db

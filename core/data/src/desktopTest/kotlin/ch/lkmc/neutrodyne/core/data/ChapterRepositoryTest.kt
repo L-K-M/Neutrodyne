@@ -7,6 +7,8 @@ import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.playback.ChapterRepositoryImpl
 import ch.lkmc.neutrodyne.core.data.playback.Podcasting20ChaptersParser
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeDescriptionLoader
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImpl
 import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult
 import ch.lkmc.neutrodyne.core.model.ChapterSource
@@ -19,11 +21,15 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -44,6 +50,15 @@ class ChapterRepositoryTest {
     private val clients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent())
     private val client = clients.client(HttpClientKind.API)
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+    private val scope = CoroutineScope(SupervisorJob())
+    private val descriptions =
+        YouTubeDescriptionLoader(
+            db,
+            ControlledEnricher(clock),
+            YouTubeFactsWriterImpl(db, JsoupShowNotesSanitizer()),
+            clock,
+            scope,
+        )
     private val embedded =
         FakeEmbeddedChapterReader()
     private val repo =
@@ -56,10 +71,12 @@ class ChapterRepositoryTest {
             ),
             network,
             clock,
+            descriptions,
             embedded,
         )
 
     @After fun close() {
+        scope.cancel()
         clients.close()
         db.close()
     }
@@ -132,7 +149,8 @@ class ChapterRepositoryTest {
                         )
                     }
                 }
-            val repository = ChapterRepositoryImpl(db, Podcasting20ChaptersParser(clients), network, clock, reader)
+            val repository =
+                ChapterRepositoryImpl(db, Podcasting20ChaptersParser(clients), network, clock, descriptions, reader)
             repository.ensureLocalLoaded(id, uri)
             assertEquals(existing, repo.observe(id).first())
         }
@@ -270,6 +288,7 @@ class ChapterRepositoryTest {
                     ),
                     network,
                     clock,
+                    descriptions,
                 )
             another.ensureLoaded(id)
             assertEquals(1, serverRule.server.requestCount)
