@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
+import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.AutoDownloadPlanner
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
@@ -45,6 +46,7 @@ import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
 import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.api.RejectReason
 import ch.lkmc.neutrodyne.download.api.RequestResult
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
@@ -68,6 +70,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Test
@@ -217,6 +220,57 @@ class DesktopYouTubeJourneyTest {
             }
         }
 
+    @Test fun capabilityReenableAdmitsPersistedRowWithoutNetworkEmission() =
+        runBlocking {
+            val env = Env()
+            try {
+                val graph =
+                    env.open { opened ->
+                        opened.playback.setEngineEnabled(false)
+                        opened.awaitCapabilities(false)
+                    }
+                try {
+                    val (_, id) = graph.seed(VIDEO)
+                    val refused = graph.seed(VIDEO2).second
+                    // A YouTube row persisted while downloads were still allowed: validly queued,
+                    // now stranded by the engine-off capability state.
+                    graph.db.downloadDao().insert(
+                        DownloadEntity(
+                            id,
+                            DownloadLane.MANUAL,
+                            DownloadState.QUEUED,
+                            priority = 100,
+                            requestedAt = 1,
+                            sourceKind = SourceKind.YOUTUBE,
+                            sourceRef = VIDEO,
+                            rootId = "dir:default",
+                            allowMetered = true,
+                        ),
+                    )
+                    // New admissions keep rejecting; only the persisted row may recover.
+                    val result = graph.controller.request(listOf(refused), DownloadLane.MANUAL, null)
+                    val queued = assertIs<RequestResult.Queued>(result)
+                    assertEquals(0, queued.queued)
+                    assertEquals(RejectReason.YOUTUBE_NOT_SUPPORTED, queued.rejected[refused])
+                    graph.playback.reply { env.resolveJson(VIDEO) }
+                    graph.runner.start()
+                    graph.awaitWaitReason(id, WaitReason.YOUTUBE_ENGINE_OFF)
+                    // Only the capability flips: static network and charging never emit again.
+                    graph.playback.setEngineEnabled(true)
+                    graph.awaitCapabilities(true)
+                    graph.runner.poke("downloads-manual")
+                    val row = graph.awaitCompleted(id)
+                    assertEquals(listOf(range(0), range(1), range(2)), env.requests.toList())
+                    assertEquals(row.finalUri, graph.index.localUriOrNull(id))
+                    graph.runner.stop(RUNNER_GRACE)
+                } finally {
+                    env.close(graph)
+                }
+            } finally {
+                env.shutdown()
+            }
+        }
+
     private class Env(
         val blockSecondChunk: Boolean = false,
     ) {
@@ -264,10 +318,11 @@ class DesktopYouTubeJourneyTest {
                 """"ext":"m4a","acodec":"mp4a.40.2","tbr":128.0,"filesize":$TOTAL,""" +
                 """"language":null,"languagePreference":null,"formatNote":"medium","protocol":"http","xtags":null}]}"""
 
-        suspend fun open(): YouTubeJourneyGraph {
+        suspend fun open(beforeInitializers: suspend (YouTubeJourneyGraph) -> Unit = {}): YouTubeJourneyGraph {
             val info = BuildInfoLoader.load()
             val reporter = DesktopCrashReporter(dirs, info, DesktopClock, RecentLogBuffer())
             val graph = createGraphFactory<YouTubeJourneyGraph.Factory>().create(dirs, info, reporter)
+            beforeInitializers(graph)
             runInitializers(graph.initializers.filter { it.order <= 130 }.toSet())
             this.graph = graph
             return graph
@@ -321,6 +376,16 @@ class DesktopYouTubeJourneyTest {
         return channel to id
     }
 
+    private suspend fun YouTubeJourneyGraph.awaitCapabilities(expected: Boolean) =
+        withTimeout(TIMEOUT_MS) { playback.capabilities.capabilities.first { it.downloads == expected } }
+
+    private suspend fun YouTubeJourneyGraph.awaitWaitReason(
+        id: Long,
+        reason: WaitReason,
+    ) = withTimeout(TIMEOUT_MS) {
+        while (db.downloadDao().byEpisode(id)?.waitReason != reason) delay(POLL_MS)
+    }
+
     private suspend fun YouTubeJourneyGraph.awaitCompleted(id: Long) =
         withTimeout(TIMEOUT_MS) {
             var row = db.downloadDao().byEpisode(id)
@@ -343,6 +408,7 @@ class DesktopYouTubeJourneyTest {
     private companion object {
         const val CHANNEL = "UCaaaaaaaaaaaaaaaaaaaaaA"
         const val VIDEO = "ytvideo0001"
+        const val VIDEO2 = "ytvideo0002"
         const val TOTAL = 21 * 1024 * 1024 + 513
         const val CHUNK = 10L * 1024 * 1024
         const val TIMEOUT_MS = 60_000L

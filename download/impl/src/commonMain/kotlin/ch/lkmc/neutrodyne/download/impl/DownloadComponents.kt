@@ -145,7 +145,8 @@ internal class DownloadComponents(
         combine(
             network.status,
             host.charging,
-        ) { _, _ -> conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
+            capabilities.capabilities,
+        ) { _, _, _ -> conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
 
     // Large episode merges must not start an unbounded set of inspectors and JSON fetches.
     private val chapterReaders = Semaphore(MAX_CHAPTER_READERS)
