@@ -23,12 +23,15 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.AlreadySubscribed
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.YouTubeSearchKey
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -57,6 +60,7 @@ class AddPodcastRouteTest {
         ch.lkmc.neutrodyne.core.testing
             .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
+    private val capabilities = FakeYouTubeCapabilitiesSource()
     private val viewModel by lazy {
         AddPodcastViewModel(
             resolver,
@@ -66,8 +70,7 @@ class AddPodcastRouteTest {
                 .FakeYouTubeChannelResolver(),
             ch.lkmc.neutrodyne.core.testing
                 .FakeYouTubeChannelRepository(),
-            ch.lkmc.neutrodyne.core.testing
-                .FakeYouTubeCapabilitiesSource(),
+            capabilities,
         )
     }
     private val navigator = RecordingAppNavigator()
@@ -104,6 +107,28 @@ class AddPodcastRouteTest {
                 navigator.calls,
             )
             assertEquals(SnackbarDuration.Long, host.currentSnackbarData?.visuals?.duration)
+        }
+
+    @Test
+    fun youTubeSearchPopsTheSheetAndPushesTheDetailKey() =
+        runComposeUiTest {
+            capabilities.capabilities.value =
+                capabilities.capabilities.value.copy(channelSearch = true, externalReason = null)
+            resolver.nextResolution = AddResolution.Failure(AddPodcastError.NotAUrl("history"))
+            setRoute()
+
+            feedField().performTextInput("history")
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+            onNodeWithText("Search YouTube for ‘history’").performClick()
+
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(
+                    RecordingAppNavigator.Call.PopEntry(AddPodcastKey(null)),
+                    RecordingAppNavigator.Call.PushDetail(YouTubeSearchKey("history")),
+                ),
+                navigator.calls,
+            )
         }
 
     @Test

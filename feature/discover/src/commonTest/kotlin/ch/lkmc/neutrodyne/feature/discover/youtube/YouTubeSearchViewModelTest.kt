@@ -14,13 +14,17 @@ import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.SearchCursor
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -162,6 +166,34 @@ class YouTubeSearchViewModelTest : MainDispatcherTest() {
                     .single()
                     .title,
             )
+        }
+
+    @Test fun capabilityOffDropsInFlightPageAndReenableRestartsFromFirstPage() =
+        runTest {
+            // The parked page ignores cooperative cancellation: its late answer still lands on
+            // the coroutine and must be fenced by cancellation + generation, never mutate state.
+            val gate = CompletableDeferred<Unit>()
+            search.search = { _, _ ->
+                withContext(NonCancellable) { gate.await() }
+                ChannelSearchResult.Ok(listOf(hit(9)), SearchCursor("late"))
+            }
+            val viewModel = YouTubeSearchViewModel(key, search, capabilities, engine)
+            runCurrent()
+            assertTrue(viewModel.state.value.loading)
+
+            capabilities.capabilities.value = capabilities.capabilities.value.copy(channelSearch = false)
+            runCurrent()
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(YouTubeSearchState(capable = false), viewModel.state.value)
+
+            capabilities.capabilities.value = capabilities.capabilities.value.copy(channelSearch = true)
+            advanceUntilIdle()
+            assertEquals(
+                listOf<Pair<String, SearchCursor?>>("synthetic" to null, "synthetic" to null),
+                search.calls,
+            )
+            assertTrue(viewModel.state.value.capable)
         }
 
     private class RecordingEngine : YouTubeEngine {

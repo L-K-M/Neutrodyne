@@ -31,6 +31,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -179,6 +180,22 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             viewModel.resolve("history")
             advanceUntilIdle()
             assertEquals("history", assertIs<AddSheetStep.Input>(viewModel.uiState.value.step).searchQuery)
+        }
+
+    @Test
+    fun channelSearchFlagFollowsTheCapabilityFlowOffOnOff() =
+        runTest {
+            // The sheet's affordance gate mirrors the live capability (W10 D2): the observed
+            // flow off → on → off must flip `channelSearch` each time, not just the first.
+            viewModel.uiState.value.also { assertFalse(it.channelSearch) }
+            capabilities.capabilities.value =
+                capabilities.capabilities.value.copy(channelSearch = true, externalReason = null)
+            runCurrent()
+            assertTrue(viewModel.uiState.value.channelSearch)
+            capabilities.capabilities.value =
+                capabilities.capabilities.value.copy(channelSearch = false)
+            runCurrent()
+            assertFalse(viewModel.uiState.value.channelSearch)
         }
 
     @Test
