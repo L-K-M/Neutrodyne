@@ -83,6 +83,8 @@ class AddPodcastSheetTest {
                 .FakeYouTubeChannelResolver(),
             ch.lkmc.neutrodyne.core.testing
                 .FakeYouTubeChannelRepository(),
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeCapabilitiesSource(),
         )
     }
     private var openedPodcast: Long? = null

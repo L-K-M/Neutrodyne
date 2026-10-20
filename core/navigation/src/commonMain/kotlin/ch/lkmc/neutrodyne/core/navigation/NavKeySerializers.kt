@@ -31,6 +31,7 @@ public object NavKeySerializers {
                 subclass(AllGroupsKey::class)
                 subclass(DirectoryKey::class)
                 subclass(AddPodcastKey::class)
+                subclass(YouTubeSearchKey::class)
                 subclass(ImportFileKey::class)
                 subclass(ImportKey::class)
                 subclass(BackupKey::class)

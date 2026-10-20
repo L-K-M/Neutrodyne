@@ -66,6 +66,8 @@ class AddPodcastRouteTest {
                 .FakeYouTubeChannelResolver(),
             ch.lkmc.neutrodyne.core.testing
                 .FakeYouTubeChannelRepository(),
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeCapabilitiesSource(),
         )
     }
     private val navigator = RecordingAppNavigator()

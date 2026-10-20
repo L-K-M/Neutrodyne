@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.YouTubeSearchKey
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.add_open
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribed_toast
@@ -74,6 +75,9 @@ internal fun AddPodcastRoute(
         onLookupOnce = viewModel::lookupOnce,
         onSearch = { query ->
             if (navigator.pop(key)) navigator.pushDetail(DirectoryKey(query, null))
+        },
+        onYouTubeSearch = { query ->
+            if (navigator.pop(key)) navigator.pushDetail(YouTubeSearchKey(query))
         },
         onInputChange = viewModel::onInputChanged,
         onCandidate = viewModel::resolve,

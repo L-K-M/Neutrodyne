@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelResolver
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
@@ -48,7 +49,10 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
     private val subscribe = FakeSubscribeUseCase()
     private val channelResolver = FakeYouTubeChannelResolver()
     private val channels = FakeYouTubeChannelRepository()
-    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups, channelResolver, channels) }
+    private val capabilities = FakeYouTubeCapabilitiesSource()
+    private val viewModel by lazy {
+        AddPodcastViewModel(resolver, subscribe, groups, channelResolver, channels, capabilities)
+    }
     private val channel =
         ChannelResolution.Resolved(
             "UCBR8-60-B28hp2BmDPdntcQ",
@@ -103,7 +107,7 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
                         return alternative
                     }
                 }
-            val vm = AddPodcastViewModel(resolver, subscribe, groups, channelResolver, slow)
+            val vm = AddPodcastViewModel(resolver, subscribe, groups, channelResolver, slow, capabilities)
             resolver.nextResolution = AddResolution.YouTube(YtRef.Handle("@channel"))
             channelResolver.resolve = { _, _ -> channel }
             vm.resolve("@channel")

@@ -89,6 +89,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
 import ch.lkmc.neutrodyne.core.ui.resources.membership_create
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name
 import ch.lkmc.neutrodyne.core.ui.resources.membership_new
+import ch.lkmc.neutrodyne.core.ui.resources.youtube_search_for
 import ch.lkmc.neutrodyne.core.ui.resources.yt_edit_input
 import ch.lkmc.neutrodyne.core.ui.resources.yt_long_form_note
 import ch.lkmc.neutrodyne.core.ui.resources.yt_network_error
@@ -127,6 +128,7 @@ internal fun AddPodcastSheet(
     onCredentials: (BasicCredentials) -> Unit,
     onCancelResolve: () -> Unit,
     onSearch: (String) -> Unit = {},
+    onYouTubeSearch: (String) -> Unit = {},
     onLookupOnce: () -> Unit = {},
     onInputChange: (String) -> Unit,
     onCandidate: (String) -> Unit,
@@ -254,6 +256,14 @@ internal fun AddPodcastSheet(
                         stringResource(Res.string.discovery_search_for, step.searchQuery),
                         { onSearch(step.searchQuery) },
                     )
+                    // W10 D1: a second, independently capability-gated destination — the podcast
+                    // directory search above stays untouched when YouTube is unavailable.
+                    if (state.channelSearch) {
+                        NdTextButton(
+                            stringResource(Res.string.youtube_search_for, step.searchQuery),
+                            { onYouTubeSearch(step.searchQuery) },
+                        )
+                    }
                 }
                 if (step.auth) {
                     AuthFields(
