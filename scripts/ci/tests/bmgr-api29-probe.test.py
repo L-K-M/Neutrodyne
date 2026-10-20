@@ -421,6 +421,9 @@ class ProbeTest(unittest.TestCase):
             run3 = refusal28.replace("1 requested", "2 requested").replace("Package @pm@",
                 "Package --monitor with result: Package not found\nPackage @pm@")
             for bad in (run3, refusal(PKG), refusal28 + "Package " + PKG + " with result: Success\n",
+                        refusal28.replace(p.REJECTION, "Unexpected: " + p.REJECTION),
+                        refusal28.replace("Backup finished with result: Success",
+                                          "Backup finished with result: Unexpected: Success"),
                         refusal28.replace("Backup finished with result: Success",
                                           "Backup finished with result: Timeout"), ""):
                 with self.subTest(output=bad):

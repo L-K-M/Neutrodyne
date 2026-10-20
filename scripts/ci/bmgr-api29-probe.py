@@ -263,7 +263,8 @@ def api28_result(text, package):
             or not lines[-2].startswith("Package " + package + " with result: ")
             or not lines[-1].startswith("Backup finished with result: ")):
         return None
-    return lines[-2].rsplit(": ", 1)[-1], lines[-1].rsplit(": ", 1)[-1]
+    return (lines[-2].removeprefix("Package " + package + " with result: "),
+            lines[-1].removeprefix("Backup finished with result: "))
 
 
 def measurement(folder, package, certificate, platform, version, control, positive, profile):
