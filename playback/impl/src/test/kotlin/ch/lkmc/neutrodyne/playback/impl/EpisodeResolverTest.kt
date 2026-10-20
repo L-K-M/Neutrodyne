@@ -38,6 +38,14 @@ import java.util.concurrent.atomic.AtomicReference
 class EpisodeResolverTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun externalYouTubeCannotUseACompletedFile() {
+        SourceHarness(temporary.newFolder()).use { h ->
+            h.index.putAll(listOf(media(type = SourceType.YOUTUBE_CHANNEL)))
+            h.local.files[1] = "content://downloads/1"
+            assertThrows(YouTubeResolveException::class.java) { h.resolve() }
+        }
+    }
+
     @Test fun videoAlternateRequestsSelectedUrlAndLengthWithoutSwitchingCurrentPin() {
         SourceHarness(temporary.newFolder()).use { h ->
             val original = media(url = "https://cdn.example/movie.mp4").copy(isVideo = true, enclosureLength = 999)
@@ -119,7 +127,13 @@ class EpisodeResolverTest {
     }
 
     @Test fun localWinsEvenForYouTubeAndRemainsPinnedAfterRemoval() {
-        SourceHarness(temporary.newFolder()).use { h ->
+        val caps =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeCapabilitiesSource()
+        caps.capabilities.value =
+            ch.lkmc.neutrodyne.youtube.api
+                .YouTubeCapabilities(true, true, true, true, true, null)
+        SourceHarness(temporary.newFolder(), caps = caps).use { h ->
             h.index.putAll(listOf(media(type = SourceType.YOUTUBE_CHANNEL)))
             h.local.files[1] = "file:///download/episode.mp3"
             val local = h.resolve(position = 7, length = 9)
@@ -198,7 +212,7 @@ class EpisodeResolverTest {
     @Test fun missingUnsupportedSourcesAndUnsafeLocalUrisRefuse() {
         SourceHarness(temporary.newFolder()).use { h ->
             val empty = EpisodeSourceIndex { null }
-            val resolver = EpisodeResolver(empty, LocalMediaIndex { null }, h.owner)
+            val resolver = h.resolverFor(empty, LocalMediaIndex { null })
             assertThrows(EpisodeGoneException::class.java) { resolver.resolveDataSpec(DataSpec(episodeUri(99))) }
             for (source in listOf(media(url = null), media(url = "file:///untrusted/feed"))) {
                 h.index.putAll(listOf(source))
@@ -211,6 +225,7 @@ class EpisodeResolverTest {
                     assertThrows(YouTubeResolveException::class.java) { h.resolve() }.result,
                 )
             }
+            h.index.putAll(listOf(media()))
             h.local.files[1] = "https://not-local.example/1"
             assertThrows(NoMediaException::class.java) { h.resolve() }
         }
@@ -226,7 +241,7 @@ class EpisodeResolverTest {
                     finish.await()
                     media(it)
                 }
-            val resolver = EpisodeResolver(index, h.local, h.owner)
+            val resolver = h.resolverFor(index, h.local)
             val failure = AtomicReference<Throwable>()
             val loader =
                 Thread {

@@ -717,6 +717,28 @@ chapters. External mode keeps completed files unplayable; capability flips
 alone do not stop current audio. This integration keeps both shells externally bound.
 
 
+**Implementation note (2026-10-20, W7b B1).** `EpisodeResolver` applies the
+shared eligibility gate before local selection, so external YouTube cannot use
+a completed file. Eligible local and RSS routing retain their existing owners.
+Remote YouTube pins snapshot durable audio quality/levelling and app language;
+automatic repins retain those preferences and the per-occurrence invalidation
+budget. Each cache-hole upstream open resolves through the same W5 owner before
+accepting bytes, with full formatId/itag/clen/lmt checks. The cache protects shared
+video keys until the last pin leaves. Cache setup/reset IO retains RSS's existing
+first-error/uncached-retry behavior. Cancellation ends the occurrence's loader
+jobs without waiting for IO on main; its memory-only lease prevents an old open
+from attaching to another episode that shares the video/cache key.
+
+`ErrorRecovery` classifies typed YouTube outcomes first. Unavailable recording
+is cancellable and rechecks the captured occurrence before skipping. Breaker
+skips preserve queued rows; rate limiting pauses. A validated-network resolver
+timeout pauses for user retry; offline failures retain the foreground reconnect
+rule. One format change stops loaders, defers stale-resource reset to the loader,
+repins and prepares at the current time through `PositionTracker.coreSeek`;
+a second change skips. RSS authentication, DAI and local-file recovery remain
+separate. B2 control/prewarm/pre-resolve, W4 host, W11 activation and reference-device
+acceptance are not supplied by this portable consumer increment.
+
 Owned by [04 Playback integration](04-youtube.md#playback-integration): branch condition, `DataSpec` key, format pinning, expiry through the cache TTL, 403/410 self-heal, pre-warm and pre-resolve triggers, preroll wait and error mapping. The engine behind `YouTubeStreamResolver` — yt-dlp in CPython in the `:ytx` process, reached over Binder — is 04's ([04 YouTube engine](04-youtube.md#youtube-engine)); 06 only ever sees `resolveAudio` results. 06 implements:
 
 - `GuardedHttpDataSource` for keys starting `yt:`: on `InvalidResponseCodeException` 403 or 410, `yt.invalidate(videoId)` (videoId parsed from the key) at most twice per item per 60 s, then rethrow; Media3's retry re-enters `resolveDataSpec` at the same byte offset. A 403 that arrives before the pin's `availableAtMs` is rethrown without invalidating, so it is never reported to the breaker.
@@ -1125,8 +1147,8 @@ preserves the cache. Browsing and download completion still call JSON-only
 `ensureLoaded`; M6 local extraction, retries and coalescing are unchanged.
 The ordinary Android/desktop graph tests exercise stored complete notes through
 the real repository/loader while preserving external `NOT_YET_AVAILABLE` and
-`Unsupported`. W7b Media3 source pins, recovery, watchdog and prewarm, W4 host,
-W11 production bindings and live/device/audible gates remain separate work.
+`Unsupported`. Portable B1 is described in the YouTube branch; B2 prewarm/
+pre-resolve, W4 host, W11 production bindings and live/device/audible gates remain separate work.
 
 Serves R4.8, R3.5, R8.5. Delivered in M5 (P2.0 JSON, PSC, ID3, MP4), M6 (download-time extraction), M9a (YouTube descriptions). Table: [02 chapter](02-data-model.md#chapter). Placement: the priority, the current chapter and the next/previous targets are `ChapterIndex` (`:playback:core`); `ChapterRepositoryImpl` and `Podcasting20ChaptersParser` are `:core:data` code for both platforms; reading container chapters is the platform's `EmbeddedChapterReader` (Android `MetadataRetrieverChapterReader`, desktop `DesktopChapterExtractor`, [11 Chapters and metadata](11-desktop.md#chapters-and-metadata)) and, during playback, the adapter (Android `Chapters`, desktop `TracksKnown`). Chapters are device-local: each device fetches and extracts its own ([10 Never synced](10-sync.md#never-synced)).
 

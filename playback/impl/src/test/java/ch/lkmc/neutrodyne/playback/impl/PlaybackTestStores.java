@@ -32,5 +32,16 @@ final class PlaybackTestStores {
     return new QueueRepositoryImpl(db, sessions, keys, clock, caps);
   }
 
+  static ch.lkmc.neutrodyne.youtube.api.YouTubeExtractionHealth health(
+      ch.lkmc.neutrodyne.core.domain.SettingsRepository settings, Clock clock,
+      kotlinx.coroutines.CoroutineScope scope, kotlin.jvm.functions.Function0<kotlin.Unit> invalidate) {
+    return new ch.lkmc.neutrodyne.core.data.youtube.DefaultYouTubeHealth(
+        settings, clock, scope, 42, invalidate, continuation -> kotlin.Unit.INSTANCE);
+  }
+
+  static ch.lkmc.neutrodyne.core.domain.YouTubeAvailabilityRecorder availability(NeutrodyneDatabase db) {
+    return new ch.lkmc.neutrodyne.core.data.youtube.YouTubeAvailabilityRecorderImpl(db);
+  }
+
   private PlaybackTestStores() {}
 }

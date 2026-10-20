@@ -1502,6 +1502,24 @@ Serves R3.5, R3.8, R8.6. Delivered in M9a on Android (06's YouTube branch return
 
 The queue continues with the next playable item in every skip case (R3.8). Unavailable reasons recorded during playback remove the item from the projection window at the next diff (06's window skips `availability != AVAILABLE`).
 
+**Implementation note (2026-10-20, W7b B1).** The Android consumer now uses the
+existing stream resolver for initial pins and every actual HTTP upstream open,
+including cache holes and retries. An in-memory `DataSpec.customData` lease keeps
+same-video episode occurrences distinct; the original custom data reaches the
+MEDIA client. Pins retain the full representation and audio preference snapshot.
+YouTube resources use the existing cache owner with reference-counted pins;
+known incompatible lengths and stale redirect metadata are cleared before reuse.
+Cache setup errors retain the existing RSS policy: CacheDataSource observes the
+failure and bypasses cache on its retry, including after a stale-resource reset.
+The 35 s resolver watchdog excludes the interruptible preroll wait. Media callers
+own bounded 403/410 invalidation and fresh-403/429 reports; resolver reservations
+and URL-cache policy remain W5/W6-owned. Typed recovery precedes RSS HTTP/IO
+classification; format recovery preserves time and does not become a user seek.
+Health is obtained lazily so service injection does not open the database on main.
+Controlled portable tests do not establish host, device or audible acceptance.
+B2 prewarm/pre-resolve and W11 production activation remain deferred; ordinary
+bindings still return external `NOT_YET_AVAILABLE` and `Unsupported`.
+
 ### Chapters from the description
 
 `YouTubeChapters.parse(description: String, durationMs: Long?): List<ChapterSpec>` (pure); 06 stores the result with `ChapterSource.YOUTUBE_DESC` when the item becomes current and no higher-priority chapters exist ([06 Chapters](06-playback.md#chapters)). Rules: a line whose first token is a timestamp (`m:ss`, `mm:ss`, `h:mm:ss`, token grammar as 03's timestamp linkifier) followed by an optional separator (`-`, `–`, `—`, `|`, `:`) and a title; at least 3 such lines; the first is `0:00`; strictly ascending; each chapter ≥ 10 s; the last start before `durationMs` when known. Otherwise no chapters (timestamps still become seek links via 03). Unverified: these mirror YouTube's own chapter rules as commonly documented, not re-checked.
@@ -1531,8 +1549,8 @@ truncated text cannot replace them. Identical normalized results do not write. T
 calls this entry in its cancellable current-occurrence scope; browsing and
 completed downloads retain JSON-only `ensureLoaded` plus M6 local inspection.
 Both ordinary graphs supply the existing loader and still use external
-`NOT_YET_AVAILABLE`/`Unsupported` bindings. W7b Media3 pins/recovery/watchdog/
-prewarm, W4 host, W11 activation and live/device/audible acceptance remain pending.
+`NOT_YET_AVAILABLE`/`Unsupported` bindings. Portable B1 is described above; B2
+prewarm/pre-resolve, W4 host, W11 activation and live/device/audible acceptance remain pending.
 
 ### Watch on YouTube
 

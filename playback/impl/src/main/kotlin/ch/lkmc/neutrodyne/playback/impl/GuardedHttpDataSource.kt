@@ -31,7 +31,7 @@ internal class GuardedHttpDataSource internal constructor(
         val pin = resolver.remotePin(dataSpec.key)
         if (pin?.contentChanged == true) throw ContentChangedException()
         try {
-            val length = upstream.open(dataSpec)
+            val length = resolver.openYouTube(dataSpec, upstream) ?: upstream.open(dataSpec)
             if (pin != null) validate(pin)
             return length
         } catch (e: IOException) {

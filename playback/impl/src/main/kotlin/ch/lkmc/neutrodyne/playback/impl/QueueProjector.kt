@@ -502,6 +502,29 @@ internal class QueueProjector(
         live.seekToNextMediaItem()
     }
 
+    /** Breaker skips leave durable Up next rows intact; arrival still follows the normal writer. */
+    fun advancePastRemoteYouTube(allowSkip: (Long) -> Boolean) {
+        val live = player ?: return
+        var next = live.currentMediaItemIndex + 1
+        while (next < live.mediaItemCount) {
+            val id =
+                live
+                    .getMediaItemAt(next)
+                    .mediaId
+                    .removePrefix("episode:")
+                    .toLongOrNull() ?: break
+            if (!resolver.needsYouTube(id)) break
+            if (!allowSkip(id)) return
+            next++
+        }
+        if (next >= live.mediaItemCount) {
+            live.stop()
+            return
+        }
+        skipExit = PlaybackExit.ERROR_SKIP
+        live.seekTo(next, androidx.media3.common.C.TIME_UNSET)
+    }
+
     override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState != Player.STATE_ENDED || applying || external != null) return
         val boundary = player?.episodeIdOrNull()?.let { it to tracker.currentSinceMs }

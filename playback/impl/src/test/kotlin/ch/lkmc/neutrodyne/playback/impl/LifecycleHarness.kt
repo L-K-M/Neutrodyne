@@ -278,7 +278,154 @@ internal class LifecycleHarness(
             },
             ch.lkmc.neutrodyne.core.testing
                 .FakeLocalMediaReadiness(),
+            Provider {
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeAvailabilityRecorder()
+            },
         )
+
+    /** Build the actual Room ports and Media3 source graph after the real open gate. */
+    suspend fun realYouTubeAccess(
+        port: ch.lkmc.neutrodyne.core.testing.PortableYouTubePlayback,
+    ): PlaybackServiceAccess =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            opener.awaitOpen()
+            prefs.awaitReady()
+            val db = opener.requireDatabase()
+            val caps = port.capabilities
+            val media = PlaybackTestStores.media(db)
+            val writer = PlaybackTestStores.sessions(db, ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys, caps)
+            val positions = PlaybackTestStores.positions(db)
+            val queue =
+                PlaybackTestStores.queue(
+                    db,
+                    writer,
+                    ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys,
+                    clock,
+                    caps,
+                )
+            val resolver =
+                EpisodeResolver(
+                    index,
+                    local,
+                    sources.owner,
+                    port.streams,
+                    caps,
+                    Provider { port.health },
+                    clock,
+                    prefs,
+                    app,
+                )
+            val planner =
+                QueueWindowPlanner(
+                    queue,
+                    caps,
+                    positions,
+                    local,
+                    clock,
+                    WindowDiff(),
+                    StartPositionRule(),
+                    PlayedRule(),
+                )
+            val saver = PositionSaver(positions, clock, PlayedRule())
+            val starter =
+                PlayStarter(
+                    contexts,
+                    queue,
+                    writer,
+                    media,
+                    positions,
+                    caps,
+                    local,
+                    network,
+                    clock,
+                    StartPositionRule(),
+                    PlayedRule(),
+                    setOf(gate),
+                )
+            val tree =
+                MediaLibraryTree(
+                    opener,
+                    Provider { writer },
+                    Provider { media },
+                    Provider { items },
+                    caps,
+                    Provider { db },
+                    clock,
+                )
+            val hub =
+                PlaybackStateHub(
+                    opener,
+                    Provider { queue },
+                    Provider { media },
+                    Provider { positions },
+                    gate,
+                    clock,
+                    scope,
+                    Dispatchers.IO,
+                )
+            val factory =
+                PlayerFactory(
+                    app,
+                    NdMediaSourceFactory(
+                        app,
+                        sources.owner,
+                        resolver,
+                        GuardedHttpDataSource.Factory(mediaClients(), resolver),
+                        NdLoadErrorHandlingPolicy(),
+                    ),
+                    Provider { BoostLimiterProcessor() },
+                    Provider { prefs },
+                )
+            PlaybackServiceAccess(
+                Provider { factory },
+                resolver,
+                index,
+                prefs,
+                hub,
+                gate,
+                tree,
+                SavedResumption(
+                    opener,
+                    Provider { queue },
+                    Provider { media },
+                    Provider { positions },
+                    Provider { items },
+                    caps,
+                    Dispatchers.IO,
+                ),
+                network,
+                clock,
+                local,
+                caps,
+                history,
+                scope,
+                Dispatchers.IO,
+                opener,
+                Provider { starter },
+                Provider { planner },
+                Provider { saver },
+                Provider { effective },
+                Provider { writer },
+                Provider { queue },
+                Provider { positions },
+                Provider { media },
+                Provider { items },
+                Provider {
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeChapterRepository()
+                },
+                local,
+                Provider {
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeMissingLocalMediaReporter()
+                },
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeLocalMediaReadiness(),
+                Provider { PlaybackTestStores.availability(db) },
+            )
+        }
+
     val connection =
         PlayerConnection(
             androidx.lifecycle.ProcessLifecycleOwner

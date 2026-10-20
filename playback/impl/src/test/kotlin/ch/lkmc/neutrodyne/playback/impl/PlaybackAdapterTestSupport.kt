@@ -87,7 +87,23 @@ internal class AdapterFixture(
             Dispatchers.Unconfined,
             scope.backgroundScope,
         )
-    val resolver = EpisodeResolver(index, local, cache)
+    private val youtubeHealth =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeHealth()
+    val resolver =
+        EpisodeResolver(
+            index,
+            local,
+            cache,
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeStreamResolver(),
+            caps,
+            { youtubeHealth },
+            clock,
+        ) {
+            ch.lkmc.neutrodyne.youtube.api
+                .AudioPref()
+        }
     val failures = mutableListOf<Exception>()
     val events = mutableListOf<PlaybackEvent>()
     val tracker =
@@ -143,12 +159,31 @@ internal class AdapterFixture(
         applier.attach(exo)
     }
 
-    suspend fun seed(count: Int): List<Long> {
-        val podcast = db.podcastDao().insertPodcast(podcastEntity(subscribedAt = 0))
+    suspend fun seed(
+        count: Int,
+        youtube: Boolean = false,
+    ): List<Long> {
+        val podcast =
+            db.podcastDao().insertPodcast(
+                podcastEntity(subscribedAt = 0) {
+                    if (youtube) {
+                        copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            youtubeChannelId = "UC" + "0".repeat(21) + "A",
+                        )
+                    } else {
+                        this
+                    }
+                },
+            )
         return (1..count).map { n ->
             db.episodeDao().insertStub(
                 episodeEntity(podcastId = podcast, sortDate = n.toLong()) {
-                    copy(enclosureUrl = "https://example.com/$n.mp3", durationMs = DURATION_MS)
+                    copy(
+                        enclosureUrl = if (youtube) null else "https://example.com/$n.mp3",
+                        durationMs = DURATION_MS,
+                        externalMediaId = if (youtube) "abcdefghij$n" else null,
+                    )
                 },
             )
         }

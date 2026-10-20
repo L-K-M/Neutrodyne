@@ -62,6 +62,7 @@ public class PlaybackServiceAccess internal constructor(
     internal val localChanges: LocalMediaChanges,
     internal val missingLocalMedia: Provider<MissingLocalMediaReporter>,
     private val localReadiness: LocalMediaReadiness,
+    internal val availability: Provider<ch.lkmc.neutrodyne.core.domain.YouTubeAvailabilityRecorder>,
 ) {
     internal suspend fun open(): PlaybackPorts =
         withContext(io) {

@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -31,6 +33,8 @@ internal data class PlaybackPrefsSnapshot(
     val streamCacheMb: Int,
     val hardwareButtons: HardwareButtons = PlaybackSettingKeys.HARDWARE_BUTTONS.default,
     val smartResume: Boolean = PlaybackSettingKeys.SMART_RESUME.default,
+    val youtubeQuality: YouTubeAudioQuality = YouTubeSettingKeys.AUDIO_QUALITY.default,
+    val youtubeLevelling: Boolean = YouTubeSettingKeys.VOLUME_LEVELLING.default,
 ) {
     companion object {
         val DEFAULT: PlaybackPrefsSnapshot =
@@ -81,6 +85,14 @@ internal class PlaybackPrefs
                             repo.observe(PlaybackSettingKeys.SMART_RESUME),
                         ) { prefs, hardware, smart ->
                             prefs.copy(hardwareButtons = hardware, smartResume = smart)
+                        }
+                    }.let { base ->
+                        combine(
+                            base,
+                            repo.observe(YouTubeSettingKeys.AUDIO_QUALITY),
+                            repo.observe(YouTubeSettingKeys.VOLUME_LEVELLING),
+                        ) { prefs, quality, levelling ->
+                            prefs.copy(youtubeQuality = quality, youtubeLevelling = levelling)
                         }
                     }.distinctUntilChanged()
                         .collect {

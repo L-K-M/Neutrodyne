@@ -112,6 +112,9 @@ internal class AndroidServiceBridge(
             isForeground,
             access.hub::event,
             reportMissing = { access.missingLocalMedia().reportFileMissing(it) },
+            recorder = access.availability(),
+            capabilities = access.capabilities,
+            coreSeek = tracker::coreSeek,
             allowStream = { id ->
                 val row = ports.lookup.get(id)
                 val refusal = row?.let { access.gate.check(it, null) }
