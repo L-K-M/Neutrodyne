@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.dl_err_size
 import ch.lkmc.neutrodyne.core.ui.resources.dl_err_storage
 import ch.lkmc.neutrodyne.core.ui.resources.dl_err_stream
 import ch.lkmc.neutrodyne.core.ui.resources.dl_err_yt
+import ch.lkmc.neutrodyne.core.ui.resources.dl_interrupted
 import ch.lkmc.neutrodyne.core.ui.resources.dl_missing
 import ch.lkmc.neutrodyne.core.ui.resources.dl_paused
 import ch.lkmc.neutrodyne.core.ui.resources.dl_paused_system
@@ -48,6 +49,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_storage
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_storage_android
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_storage_desktop
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_wifi
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_folder_missing
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_too_large
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.feed_err_auth
 import ch.lkmc.neutrodyne.core.ui.resources.feed_err_forbidden
@@ -213,7 +216,15 @@ public object DownloadStatusText {
                     }
 
                     WaitReason.SYSTEM -> {
-                        UiText.Res(Res.string.dl_paused_system)
+                        UiText.Res(
+                            if (platform ==
+                                PlatformKind.DESKTOP
+                            ) {
+                                Res.string.dl_interrupted
+                            } else {
+                                Res.string.dl_paused_system
+                            },
+                        )
                     }
 
                     WaitReason.NEEDS_FOREGROUND -> {
@@ -240,7 +251,15 @@ public object DownloadStatusText {
 
             DownloadState.MISSING -> {
                 if (error == DownloadError.STORAGE_UNAVAILABLE) {
-                    UiText.Res(Res.string.dl_storage_unavailable)
+                    UiText.Res(
+                        if (platform ==
+                            PlatformKind.DESKTOP
+                        ) {
+                            Res.string.downloads_folder_missing
+                        } else {
+                            Res.string.dl_storage_unavailable
+                        },
+                    )
                 } else {
                     UiText.Res(Res.string.dl_missing)
                 }
@@ -300,7 +319,7 @@ public object DownloadStatusText {
             }
 
             DownloadError.STORAGE_UNAVAILABLE -> {
-                UiText.Res(Res.string.dl_storage_unavailable)
+                UiText.Res(Res.string.downloads_too_large)
             }
 
             DownloadError.YT_UNAVAILABLE -> {

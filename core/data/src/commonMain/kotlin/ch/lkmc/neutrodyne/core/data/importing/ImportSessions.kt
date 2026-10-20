@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.ImportWarning
 import ch.lkmc.neutrodyne.core.model.SourceGroup
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveException
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveReaderFactory
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.importing.ImportDocument
@@ -38,6 +39,10 @@ import ch.lkmc.neutrodyne.feeds.importing.SniffedFormat
 import ch.lkmc.neutrodyne.feeds.opml.OpmlFailure
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReadResult
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReader
+import ch.lkmc.neutrodyne.feeds.youtube.ImportParseException
+import ch.lkmc.neutrodyne.feeds.youtube.TakeoutSubscriptionsParser
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -49,8 +54,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okio.ByteString.Companion.decodeHex
 import okio.IOException
 import okio.Path
+import okio.buffer
 
 /**
  * The create half of `ImportRepository` (05 OPML import §1–§5): [create] acquires the payload
@@ -78,6 +85,27 @@ internal class ImportSessions(
     @ApplicationScope private val appScope: CoroutineScope,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) {
+    suspend fun upgradePreview(sessionId: Long) {
+        val session = db.importDao().sessionById(sessionId) ?: return
+        if (session.state != ImportState.PREVIEW || session.hasRestoreIntent()) return
+        val hasOldRows =
+            db.importDao().itemsByStatus(sessionId, listOf(ImportItemStatus.YOUTUBE_UNSUPPORTED_YET)).any {
+                it.errorDetail !=
+                    "playlist"
+            }
+        if (!hasOldRows) return
+        val entries =
+            suspendRunCatching {
+                withContext(io) {
+                    val path = session.payloadPath?.let(payloads::payloadFile) ?: return@withContext null
+                    if (session.sourceFormat != ImportFormat.OPML) return@withContext null
+                    val read = opmlReader.read({ payloads.open(path) }) as? OpmlReadResult.Ok
+                    read?.document?.let(ImportDocuments::fromOpml)?.entries
+                }
+            }.getOrNull()
+        upgradeYouTubePreview(db, sessionId, entries)
+    }
+
     suspend fun create(
         source: ImportSource,
         options: CreateImportOptions,
@@ -186,17 +214,7 @@ internal class ImportSessions(
                 }
 
                 is SniffResult.Recognized -> {
-                    when (sniffed.format) {
-                        SniffedFormat.OPML, SniffedFormat.NEUTRODYNE_BACKUP -> {
-                            ImportFormat.valueOf(sniffed.format.name)
-                        }
-
-                        // M3 has OPML and backup; the YouTube formats' parsers land in M8 (05
-                        // documents this interim mapping in a 2026-10-17 implementation note).
-                        else -> {
-                            return fail(staged, ImportError.Unsupported(UnsupportedSource.UNKNOWN))
-                        }
-                    }
+                    ImportFormat.valueOf(sniffed.format.name)
                 }
             }
 
@@ -209,8 +227,15 @@ internal class ImportSessions(
                     }
                 }
 
-                else -> {
+                ImportFormat.NEUTRODYNE_BACKUP -> {
                     null
+                }
+
+                else -> {
+                    when (val read = readYouTube(staged, format)) {
+                        is Outcome.Failure -> return fail(staged, read.error)
+                        is Outcome.Success -> read.value
+                    }
                 }
             }
 
@@ -223,7 +248,16 @@ internal class ImportSessions(
 
         val classified =
             try {
-                classifier.classify(document.entries)
+                classifier.classify(
+                    document.entries,
+                    if (format in
+                        setOf(ImportFormat.NEWPIPE_JSON, ImportFormat.LIBRETUBE_JSON, ImportFormat.TAKEOUT_CSV)
+                    ) {
+                        ImportClassifier.InputMode.YOUTUBE_ONLY
+                    } else {
+                        ImportClassifier.InputMode.MIXED
+                    },
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -231,6 +265,79 @@ internal class ImportSessions(
             }
         return persist(staged, fallbackName, format, options, adopted, document, classified)
     }
+
+    private fun readYouTube(
+        staged: PayloadStore.Staged,
+        format: ImportFormat,
+    ): Outcome<ImportDocument, ImportError> =
+        try {
+            val document =
+                when (format) {
+                    ImportFormat.NEWPIPE_JSON -> {
+                        ImportDocuments.fromNewPipe(payloads.open(staged.path))
+                    }
+
+                    ImportFormat.LIBRETUBE_JSON -> {
+                        ImportDocuments.fromLibreTube(payloads.open(staged.path))
+                    }
+
+                    ImportFormat.URL_LIST -> {
+                        ImportDocuments.fromUrlList(payloads.open(staged.path))
+                    }
+
+                    else -> {
+                        val zip = payloads.open(staged.path).buffer().use { it.rangeEquals(0, "504b0304".decodeHex()) }
+                        if (zip) {
+                            TakeoutSubscriptionsParser
+                                .parseZip(staged.path, archives) { input ->
+                                    when (YouTubeUrlClassifier().classify(input)) {
+                                        null, is YtRef.Playlist, is YtRef.Query -> false
+                                        else -> true
+                                    }
+                                }
+                        } else {
+                            ImportDocuments.fromTakeout(payloads.open(staged.path))
+                        }
+                    }
+                }
+            Outcome.Success(document)
+        } catch (e: ImportParseException) {
+            Outcome.Failure(
+                when (e.reason) {
+                    ImportParseException.Reason.TOO_LARGE -> {
+                        ImportError.Hostile(HostileInput.DOCUMENT_BYTES)
+                    }
+
+                    ImportParseException.Reason.TOO_MANY_ITEMS -> {
+                        ImportError.Hostile(
+                            HostileInput.TOO_MANY_FEEDS,
+                        )
+                    }
+
+                    ImportParseException.Reason.TOO_DEEP -> {
+                        ImportError.Hostile(
+                            HostileInput.TOO_DEEP,
+                        )
+                    }
+
+                    else -> {
+                        ImportError.Unsupported(UnsupportedSource.UNKNOWN)
+                    }
+                },
+            )
+        } catch (e: ArchiveException) {
+            Outcome.Failure(
+                if (e.kind ==
+                    ArchiveException.Kind.HOSTILE
+                ) {
+                    ImportError.Hostile(hostileCap(e.reason))
+                } else {
+                    ImportError.Unsupported(UnsupportedSource.ZIP)
+                },
+            )
+        } catch (_: IOException) {
+            Outcome.Failure(ImportError.Storage)
+        }
 
     private fun fail(
         staged: PayloadStore.Staged,
@@ -373,7 +480,12 @@ internal class ImportSessions(
         classified: ImportClassifier.Result?,
         adopted: Boolean,
     ): ImportOptions {
-        val sourceGroups = document?.groups?.mapNotNull(::sourceGroupOf).orEmpty()
+        val sourceGroups =
+            document
+                ?.groups
+                ?.mapNotNull(::sourceGroupOf)
+                ?.distinctBy { it.nameKey }
+                .orEmpty()
         return ImportOptions(
             importGroups = options.targetGroupId == null,
             excludedGroupKeys =
@@ -382,8 +494,34 @@ internal class ImportSessions(
                         group.nameKey.takeIf { group.excludedReason != null }
                     },
             targetGroupId = options.targetGroupId,
+            targetGroupName =
+                "YouTube".takeIf {
+                    options.targetGroupId == null &&
+                        document?.format in setOf("NEWPIPE_JSON", "TAKEOUT_CSV", "URL_LIST") &&
+                        classified?.items?.all {
+                            it.youTubeInput != null
+                        } == true
+                },
             fromAndroidBackup = adopted,
             sourceGroups = sourceGroups,
+            itemYouTubeInputs =
+                classified
+                    ?.items
+                    ?.mapNotNull {
+                        it.youTubeInput?.let { input ->
+                            it.ordinal to input
+                        }
+                    }?.toMap()
+                    .orEmpty(),
+            itemYouTubeVariants =
+                classified
+                    ?.items
+                    ?.mapNotNull {
+                        it.youTubeVariants?.let { mask ->
+                            it.ordinal to mask
+                        }
+                    }?.toMap()
+                    .orEmpty(),
             itemCustomTitles =
                 classified
                     ?.items
@@ -417,7 +555,11 @@ internal class ImportSessions(
             document.warnings
                 .map { ImportWarning(code = it.code, count = it.count) }
                 .toMutableList()
-        val truncated = classified?.truncatedNames ?: 0
+        val proposalTruncations =
+            document.groups.count {
+                GroupNames.validate(it.name) is GroupNames.Validation.TooLong
+            }
+        val truncated = (classified?.truncatedNames ?: 0) + proposalTruncations
         if (truncated > 0) {
             val index = warnings.indexOfFirst { it.code == ImportDocumentWarning.TRUNCATED_NAMES }
             if (index >= 0) {

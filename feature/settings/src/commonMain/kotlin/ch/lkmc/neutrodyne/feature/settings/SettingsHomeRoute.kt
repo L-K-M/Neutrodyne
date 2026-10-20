@@ -11,25 +11,41 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.download_desktop_settings
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
+import ch.lkmc.neutrodyne.feature.settings.resources.discover_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.discover_title
+import ch.lkmc.neutrodyne.feature.settings.resources.privacy_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.privacy_title
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_off
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_on
+import ch.lkmc.neutrodyne.feature.settings.resources.youtube_title
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
@@ -49,6 +65,10 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
             initialValue = FeedsSettingKeys.REFRESH_INTERVAL_MINUTES.default,
         )
 
+    val speedFlow = remember(settings) { settings.observe(PlaybackSettingKeys.SPEED) }
+    val silenceFlow = remember(settings) { settings.observe(PlaybackSettingKeys.SKIP_SILENCE) }
+    val speed by speedFlow.collectAsStateWithLifecycle(initialValue = PlaybackSettingKeys.SPEED.default)
+    val silence by silenceFlow.collectAsStateWithLifecycle(initialValue = PlaybackSettingKeys.SKIP_SILENCE.default)
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
             title = stringResource(Res.string.settings),
@@ -66,6 +86,49 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                 title = stringResource(Res.string.settings_feeds),
                 summary = feedsIntervalText(interval).asString(),
                 onClick = { navigator.push(SettingsKey(SettingsPage.FEEDS)) },
+            )
+            SettingsRow(
+                icon = NdIcons.PlayArrow,
+                title = stringResource(SettingsRes.string.settings_playback),
+                summary =
+                    stringResource(
+                        if (silence) {
+                            SettingsRes.string.settings_playback_summary_on
+                        } else {
+                            SettingsRes.string.settings_playback_summary_off
+                        },
+                        speed.toString(),
+                    ),
+                onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
+            )
+            SettingsRow(NdIcons.OpenInNew, stringResource(SettingsRes.string.youtube_title), null, {
+                navigator.push(SettingsKey(SettingsPage.YOUTUBE))
+            })
+            SettingsRow(NdIcons.Download, stringResource(Res.string.downloads_settings), null, {
+                navigator.push(SettingsKey(SettingsPage.DOWNLOADS))
+            })
+            if (LocalPlatformKind.current == PlatformKind.DESKTOP) {
+                SettingsRow(NdIcons.Computer, stringResource(Res.string.download_desktop_settings), null, {
+                    navigator.push(SettingsKey(SettingsPage.DESKTOP))
+                })
+            }
+            SettingsRow(
+                icon = NdIcons.History,
+                title = stringResource(SettingsRes.string.settings_backup),
+                summary = stringResource(SettingsRes.string.settings_backup_summary),
+                onClick = { navigator.push(BackupKey) },
+            )
+            SettingsRow(
+                NdIcons.Explore,
+                stringResource(SettingsRes.string.discover_title),
+                stringResource(SettingsRes.string.discover_summary),
+                { navigator.push(SettingsKey(SettingsPage.DISCOVER)) },
+            )
+            SettingsRow(
+                NdIcons.Info,
+                stringResource(SettingsRes.string.privacy_title),
+                stringResource(SettingsRes.string.privacy_summary),
+                { navigator.push(SettingsKey(SettingsPage.PRIVACY)) },
             )
             SettingsRow(
                 icon = NdIcons.Info,

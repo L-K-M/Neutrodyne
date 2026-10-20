@@ -65,7 +65,6 @@ import ch.lkmc.neutrodyne.core.ui.GroupTabLabel
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
-import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
@@ -90,12 +89,15 @@ internal fun FeedsScreen(
     state: FeedsUiState,
     pagingFor: (FeedSource) -> Flow<PagingData<FeedItem>>,
     onRefresh: (FeedSource) -> Unit,
+    onPlay: (FeedSource) -> Unit,
     onFiltersChange: (FeedSource, FeedFilters) -> Unit,
     onAction: (EpisodeAction) -> Unit,
     onMarkAllPlayedClick: (FeedSource) -> Unit,
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    onDownloadAll: (FeedSource) -> Unit = {},
+    onImport: () -> Unit = {},
     prefsFor: (FeedSource) -> Flow<FeedPrefs> = { flowOf(FeedPrefs(filters = state.filters)) },
     pageState: SaveableStateHolder = rememberSaveableStateHolder(),
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
@@ -104,8 +106,12 @@ internal fun FeedsScreen(
     onVisitStart: (FeedSource) -> Unit = {},
     onVisitEnd: (FeedSource) -> Unit = {},
     onAllGroups: () -> Unit = {},
-    onCreateGroup: () -> Unit = {},
+    suggestedGroups: @Composable () -> Unit = {},
+    outageBanner: @Composable () -> Unit = {},
     selection: EpisodeSelectionController? = null,
+    onPlayEpisode: ((FeedSource, Long) -> Unit)? = null,
+    onPlaySelectionNext: (() -> Unit)? = null,
+    onPlaySelectionLast: (() -> Unit)? = null,
 ) {
     val selectedIds =
         selection
@@ -114,6 +120,13 @@ internal fun FeedsScreen(
             ?.value
             .orEmpty()
     val loadedPages = remember { mutableMapOf<FeedSource, LazyPagingItems<FeedItem>>() }
+    val nativeIds =
+        loadedPages.values
+            .flatMap { it.itemSnapshotList.items }
+            .filterIsInstance<FeedItem.Episode>()
+            .filter { it.row.sourceType == ch.lkmc.neutrodyne.core.model.SourceType.RSS }
+            .mapTo(mutableSetOf()) { it.row.id }
+    val selectionPlayable = state.rowCaps.inAppPlayback || selectedIds.all { it in nativeIds }
     val tabs = state.tabs
     // A zero-page first measure would clamp restored pager selection before tabs arrive.
     if (tabs.isEmpty()) {
@@ -216,8 +229,15 @@ internal fun FeedsScreen(
                 }
             }.focusable(),
     ) {
+        outageBanner()
         if (selectedIds.isNotEmpty() && selection != null) {
-            SelectionTopBar(selection, selectedIds.size, selectAll)
+            SelectionTopBar(
+                selection,
+                selectedIds.size,
+                selectAll,
+                onPlayNext = onPlaySelectionNext.takeIf { selectionPlayable },
+                onPlayLast = onPlaySelectionLast.takeIf { selectionPlayable },
+            )
         } else {
             NdTopAppBar(
                 title = stringResource(Res.string.nav_feeds),
@@ -272,9 +292,7 @@ internal fun FeedsScreen(
                 )
             }
         }
-        if (state.hasSubscriptions && !state.hasGroups) {
-            SuggestedGroupsCard(onClick = onCreateGroup)
-        }
+        suggestedGroups()
         HorizontalPager(
             state = pager,
             beyondViewportPageCount = 1,
@@ -316,11 +334,20 @@ internal fun FeedsScreen(
                             onVisibleIds = { onVisibleIds(entry.ref, it) },
                             visitBaseline = state.visitBaselines[source],
                             onRefresh = { onRefresh(source) },
+                            onPlay = { onPlay(source) },
                             onFiltersChange = { onFiltersChange(source, it) },
-                            onAction = onAction,
+                            onAction = { action ->
+                                if (action is EpisodeAction.PlayToggle && onPlayEpisode != null) {
+                                    onPlayEpisode(source, action.episodeId)
+                                } else {
+                                    onAction(action)
+                                }
+                            },
                             onMarkAllPlayedClick = { onMarkAllPlayedClick(source) },
+                            onDownloadAll = if (source is FeedSource.Group) ({ onDownloadAll(source) }) else null,
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,
+                            onImport = onImport,
                         )
                     }
                 }

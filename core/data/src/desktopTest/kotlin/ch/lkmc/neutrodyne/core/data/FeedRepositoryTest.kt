@@ -22,7 +22,9 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakePlayContextResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -259,7 +261,14 @@ class FeedRepositoryTest {
     @Test fun settingsFailuresAreNotReportedAsSuccessfulWrites() =
         repositoryTest {
             val failingSettings = FakeSettingsRepository()
-            val failingRepo = FeedRepositoryImpl(db, failingSettings, clock)
+            val failingRepo =
+                FeedRepositoryImpl(
+                    db,
+                    failingSettings,
+                    clock,
+                    FakePlayContextResolver(),
+                    FakeYouTubeCapabilitiesSource(),
+                )
             failingSettings.failNextSet = SettingsError.WriteFailed
             assertFailsWith<IllegalStateException> {
                 failingRepo.setFilters(
@@ -298,7 +307,7 @@ class FeedRepositoryTest {
                 DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory)),
                 DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
             )
-        repo = FeedRepositoryImpl(db, settings, clock)
+        repo = FeedRepositoryImpl(db, settings, clock, FakePlayContextResolver(), FakeYouTubeCapabilitiesSource())
     }
 
     private suspend fun close() {

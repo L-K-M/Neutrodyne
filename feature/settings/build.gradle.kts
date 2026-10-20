@@ -6,6 +6,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":playback:api"))
+            implementation(project(":download:api"))
             implementation(project(":youtube:api"))
             implementation(libs.aboutlibraries.core)
         }

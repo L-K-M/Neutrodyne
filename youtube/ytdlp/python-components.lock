@@ -261,6 +261,38 @@ licence = "Unlicense"
 kind = "python"
 aboutLibrariesId = "neutrodyne-ytx"
 
-# M9a adds: yt-dlp (Unlicense, zipimport release under youtube/ytdlp/engine/, checked by
-# verifyBundledYtDlp) with yt-dlp-ejs (Unlicense; meriyah ISC, astring MIT), and QuickJS inside
-# quickjs-kt (MIT) only if the JS challenge provider ships.
+# Unmodified official zipimport release, verified before asset packaging. JS data ships
+# with ejs, but M9a registers no JS runtime/provider. Versions and notices are from
+# yt_dlp_ejs/yt/solver/lib.min.js in the signed bundle.
+
+[[component]]
+name = "yt-dlp"
+version = "2026.08.19"
+origin = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp"
+licence = "Unlicense"
+kind = "python"
+aboutLibrariesId = "yt-dlp"
+
+[[component]]
+name = "yt-dlp-ejs"
+version = "0.8.0"
+origin = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp"
+licence = "Unlicense"
+kind = "python"
+aboutLibrariesId = "yt-dlp-ejs"
+
+[[component]]
+name = "meriyah"
+version = "6.1.4"
+origin = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp"
+licence = "ISC"
+kind = "python"
+aboutLibrariesId = "meriyah"
+
+[[component]]
+name = "astring"
+version = "1.9.0"
+origin = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "astring"

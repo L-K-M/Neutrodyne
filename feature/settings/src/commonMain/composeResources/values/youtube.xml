@@ -1,0 +1,5 @@
+<resources>
+    <string name="youtube_title">YouTube</string>
+    <string name="youtube_suggest_rss">Suggest the podcast’s RSS feed</string>
+    <string name="youtube_mark_played">Mark played when opened on YouTube</string>
+</resources>

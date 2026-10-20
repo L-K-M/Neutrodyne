@@ -14,10 +14,13 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
+import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -55,7 +58,7 @@ internal class ImportFixUps(
         sessionId: Long,
         ordinals: Set<Int>,
     ) {
-        val eligible = eligibleItems(sessionId, ordinals, RETRYABLE_STATUSES, withPodcast = true)
+        val eligible = eligibleItems(sessionId, ordinals, RETRYABLE_STATUSES, withPodcast = false)
         if (eligible.isEmpty()) return
         for (podcastId in eligible.mapTo(LinkedHashSet()) { it.podcastId }) {
             podcastId?.let { suspendRunCatching { podcasts.retry(it, refresh = false) } }
@@ -75,7 +78,10 @@ internal class ImportFixUps(
     ): Outcome<Unit, AddPodcastError> {
         val item =
             eligibleItem(sessionId, ordinal, FIXUP_STATUSES) ?: return Outcome.Failure(AddPodcastError.InvalidUrl)
-        val podcastId = checkNotNull(item.podcastId) { "eligible fix-up item without podcastId" }
+        if (item.podcastId == null && item.kind == ImportItemKind.YOUTUBE) {
+            return editUnresolved(sessionId, ordinal, input)
+        }
+        val podcastId = item.podcastId ?: return Outcome.Failure(AddPodcastError.InvalidUrl)
         return when (val outcome = podcasts.editFeedUrl(podcastId, input)) {
             is Outcome.Failure -> {
                 outcome
@@ -108,6 +114,61 @@ internal class ImportFixUps(
         }
     }
 
+    private suspend fun editUnresolved(
+        sessionId: Long,
+        ordinal: Int,
+        input: String,
+    ): Outcome<Unit, AddPodcastError> {
+        val cleanInput = cleanYouTubeInput(input)
+        val ref = YouTubeUrlClassifier().classify(cleanInput)
+        if (ref == null || ref is YtRef.Playlist || ref is YtRef.Query) {
+            return Outcome.Failure(AddPodcastError.InvalidUrl)
+        }
+        val changed =
+            withContext(NonCancellable) {
+                val applied =
+                    db.withWriteTransaction {
+                        val dao = db.importDao()
+                        val session = dao.sessionById(sessionId) ?: return@withWriteTransaction false
+                        val options =
+                            session.optionsJson?.let(ImportOptionsJson::decodeOrNull)
+                                ?: return@withWriteTransaction false
+                        val row =
+                            dao.itemsByOrdinals(sessionId, listOf(ordinal)).singleOrNull()
+                                ?: return@withWriteTransaction false
+                        if (session.state !in FIXUP_STATES || row.status !in FIXUP_STATUSES || row.podcastId != null) {
+                            return@withWriteTransaction false
+                        }
+                        dao.updateItem(
+                            row.copy(
+                                originalUrl = cleanInput,
+                                normalizedUrl = null,
+                                status = ImportItemStatus.QUEUED,
+                                errorDetail = null,
+                            ),
+                        )
+                        dao.setOptionsJson(
+                            sessionId,
+                            ImportOptionsJson.encode(
+                                options.copy(
+                                    itemYouTubeInputs = options.itemYouTubeInputs + (ordinal to cleanInput),
+                                    attemptMarkerAt = clock.now(),
+                                    laneAttempts = 0,
+                                ),
+                            ),
+                        )
+                        if (session.state == ImportState.DONE) dao.setState(sessionId, ImportState.FETCHING)
+                        true
+                    }
+                if (applied) {
+                    suspendRunCatching { workScheduler.schedule(sessionId, ImportWorkPolicy.APPEND_OR_REPLACE) }
+                        .onFailure { Log.w(TAG, it) { "import fix-up scheduling failed for session $sessionId" } }
+                }
+                applied
+            }
+        return if (changed) Outcome.Success(Unit) else Outcome.Failure(AddPodcastError.InvalidUrl)
+    }
+
     /**
      * "Enter password": `PodcastRepository.setCredentials` probes, stores and refreshes the
      * podcast (03 Basic auth); a refused pair stays an inline `AuthRequired` and the row keeps
@@ -122,7 +183,7 @@ internal class ImportFixUps(
     ): Outcome<Unit, AddPodcastError> {
         val item =
             eligibleItem(sessionId, ordinal, FIXUP_STATUSES) ?: return Outcome.Failure(AddPodcastError.InvalidUrl)
-        val podcastId = checkNotNull(item.podcastId) { "eligible fix-up item without podcastId" }
+        val podcastId = item.podcastId ?: return Outcome.Failure(AddPodcastError.InvalidUrl)
         return when (val outcome = podcasts.setCredentials(podcastId, credentials)) {
             is Outcome.Failure -> {
                 outcome
@@ -145,7 +206,14 @@ internal class ImportFixUps(
         sessionId: Long,
         ordinals: Set<Int>,
     ) {
-        val removable = eligibleItems(sessionId, ordinals, REMOVABLE_STATUSES, withPodcast = false)
+        val removable =
+            db.withWriteTransaction {
+                val eligible = eligibleItems(sessionId, ordinals, REMOVABLE_STATUSES, withPodcast = false)
+                // Delete unresolved rows under the writer lock so a lookup cannot insert between
+                // the ownership check and deletion. Linked rows still use the domain unsubscribe.
+                db.importDao().deleteItems(sessionId, eligible.filter { it.podcastId == null }.map { it.ordinal })
+                eligible.filter { it.podcastId != null }
+            }
         if (removable.isEmpty()) return
         val podcastIds = removable.mapNotNull { it.podcastId }
         if (podcastIds.isNotEmpty()) unsubscribe(podcastIds)
@@ -194,8 +262,10 @@ internal class ImportFixUps(
                     val requeue =
                         dao
                             .itemsByOrdinals(sessionId, ordinals)
-                            .filter { it.status in statuses && it.podcastId != null && it.sessionOwned() }
-                            .map { it.ordinal }
+                            .filter {
+                                it.status in statuses &&
+                                    (it.podcastId != null || it.kind == ImportItemKind.YOUTUBE) && it.sessionOwned()
+                            }.map { it.ordinal }
                     if (requeue.isEmpty()) return@withWriteTransaction false
 
                     dao.requeueItems(sessionId, requeue)
@@ -224,7 +294,7 @@ internal class ImportFixUps(
         sessionId: Long,
         ordinal: Int,
         statuses: Set<ImportItemStatus>,
-    ): ImportItemEntity? = eligibleItems(sessionId, setOf(ordinal), statuses, withPodcast = true).singleOrNull()
+    ): ImportItemEntity? = eligibleItems(sessionId, setOf(ordinal), statuses, withPodcast = false).singleOrNull()
 
     private suspend fun eligibleItems(
         sessionId: Long,

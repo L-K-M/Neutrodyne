@@ -37,6 +37,20 @@ class ImportClassifierTest {
     }
 
     @Test
+    fun youtubeOnlyFormatsRejectForeignRssUrls() =
+        runTest {
+            val result =
+                classifier.classify(
+                    listOf(entry("https://rss.example/feed")),
+                    ImportClassifier.InputMode.YOUTUBE_ONLY,
+                )
+            val item = result.items.single()
+            assertEquals(ImportItemStatus.INVALID_URL, item.status)
+            assertNull(item.normalizedUrl)
+            assertTrue(!item.selected)
+        }
+
+    @Test
     fun normalisesFeedUrlsToCanonicalAndIdentity() =
         runTest {
             val items =
@@ -143,7 +157,7 @@ class ImportClassifierTest {
         }
 
     @Test
-    fun youtubeEntriesAreUnsupportedUntilM8() =
+    fun youtubeEntriesAreSelectableExceptPlaylists() =
         runTest {
             val items =
                 classify(
@@ -155,8 +169,8 @@ class ImportClassifierTest {
                 )
 
             assertTrue(items.all { it.kind == ImportItemKind.YOUTUBE })
-            assertTrue(items.all { it.status == ImportItemStatus.YOUTUBE_UNSUPPORTED_YET })
-            assertTrue(items.all { !it.selected })
+            assertTrue(items.take(4).all { it.status == ImportItemStatus.PREVIEW && it.selected })
+            assertEquals(ImportItemStatus.YOUTUBE_UNSUPPORTED_YET, items[4].status)
             // Only a channel ref resolves to the canonical feed URL.
             assertEquals(
                 "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
@@ -175,7 +189,7 @@ class ImportClassifierTest {
                     entry("https://youtube.com/@HANDLE"),
                 )
 
-            assertEquals(ImportItemStatus.YOUTUBE_UNSUPPORTED_YET, items[0].status)
+            assertEquals(ImportItemStatus.PREVIEW, items[0].status)
             assertEquals(ImportItemStatus.DUPLICATE_IN_FILE, items[1].status)
         }
 

@@ -129,7 +129,7 @@ internal class RestoreRunner(
                 }
             }
 
-        progressFlow.value = RestoreProgress.Running(PHASE_VALIDATE, 0, 0)
+        progressFlow.value = RestoreProgress.Running(sessionId, PHASE_VALIDATE, 0, 0)
         val staged =
             when (val outcome = stager.inspect(payloads.payloadFile(request.payloadPath), stagingRoot)) {
                 is Outcome.Failure -> return failRestore(sessionId, outcome.error, request.auto)
@@ -192,7 +192,7 @@ internal class RestoreRunner(
                 }
             val settled =
                 merger.mergeLibrary(staged, policy, request.categories) { done, total ->
-                    progressFlow.value = RestoreProgress.Running(PHASE_LIBRARY, done, total)
+                    progressFlow.value = RestoreProgress.Running(sessionId, PHASE_LIBRARY, done, total)
                 }
             val episodeResult =
                 episodes.mergeEpisodes(
@@ -202,7 +202,7 @@ internal class RestoreRunner(
                     request.categories,
                     episodeTotal = staged.episodeLines,
                 ) { done, total ->
-                    progressFlow.value = RestoreProgress.Running(PHASE_EPISODES, done, total)
+                    progressFlow.value = RestoreProgress.Running(sessionId, PHASE_EPISODES, done, total)
                 }
 
             var settingsApplied = 0
@@ -379,7 +379,7 @@ internal class RestoreRunner(
                     .getOrDefault(false)
             }
         if (!cancelled) return RestoreRunResult.Retry(sessionId, BackupError.Storage)
-        progressFlow.value = RestoreProgress.Failed(error)
+        progressFlow.value = RestoreProgress.Failed(sessionId, error)
         return RestoreRunResult.Failed(sessionId, error)
     }
 

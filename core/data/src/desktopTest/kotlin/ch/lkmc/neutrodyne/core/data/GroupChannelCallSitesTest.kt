@@ -41,7 +41,17 @@ class GroupChannelCallSitesTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val snapshots = FakeSnapshotScheduler()
     private val groups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, refresh, snapshots, scope)
-    private val settings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels, snapshots)
+    private val settings =
+        ScopeSettingsRepositoryImpl(
+            db,
+            FakeSettingsRepository(),
+            { refresh },
+            channels,
+            snapshots,
+            capabilities =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeCapabilitiesSource(),
+        )
 
     @AfterTest
     fun close() {
@@ -148,7 +158,16 @@ class GroupChannelCallSitesTest {
             val hookedGroups =
                 GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, controller, snapshots, scope)
             val hookedSettings =
-                ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { controller }, channels, snapshots)
+                ScopeSettingsRepositoryImpl(
+                    db,
+                    FakeSettingsRepository(),
+                    { controller },
+                    channels,
+                    snapshots,
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
+                )
             val id = assertIs<Outcome.Success<Long>>(hookedGroups.create(GroupDraft("Tech"))).value
             val token = assertIs<Outcome.Success<DeletedGroupToken>>(hookedGroups.delete(id)).value
             val writes: List<suspend () -> Unit> =

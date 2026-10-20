@@ -161,6 +161,7 @@ class EpisodeRowTest {
                 listOf(
                     "Download",
                     "Download now",
+                    "Download actions",
                     "Cancel download",
                     "Pause download",
                     "Resume download",
@@ -170,7 +171,7 @@ class EpisodeRowTest {
 
             downloadState = DownloadState.QUEUED
             waitForIdle()
-            assertEquals(listOf("Cancel download"), downloadActionLabels(downloadLabels))
+            assertEquals(listOf("Download actions"), downloadActionLabels(downloadLabels))
 
             downloadState = DownloadState.RESOLVING
             waitForIdle()
@@ -287,13 +288,58 @@ class EpisodeRowTest {
                     sourceType = SourceType.YOUTUBE_CHANNEL,
                     externalMediaId = "vid-42",
                 ),
-                caps = RowCaps.FULL.copy(inAppPlayback = false),
+                caps = RowCaps.FULL.copy(inAppPlayback = false, downloads = false),
                 onAction = { actions += it },
             )
             assertEquals("Watch on YouTube", firstCustomActionLabel())
+            val labels =
+                onNodeWithText("Episode 1")
+                    .fetchSemanticsNode()
+                    .config[SemanticsActions.CustomActions]
+                    .map { it.label }
+            assertFalse("Play next" in labels)
+            assertFalse("Play last" in labels)
+            assertFalse("Download" in labels)
+
             onNodeWithText("Episode 1")
                 .performCustomAccessibilityActionWithLabel("Watch on YouTube")
             assertEquals(listOf<EpisodeAction>(EpisodeAction.WatchOnYouTube(1, "vid-42")), actions)
+        }
+
+    @Test
+    fun queueRowAppendsTheSameMenuAndTalkbackActions() =
+        runDesktopComposeUiTest(width = 500, height = 250) {
+            val actions = mutableListOf<EpisodeAction>()
+            var removed = 0
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    EpisodeRow(
+                        testEpisodeRow(1),
+                        RowLive(isNowPlaying = true, isPlaying = true),
+                        EpisodeRowStyle.QUEUE,
+                        RowCaps.FULL.copy(downloads = false),
+                        false,
+                        null,
+                        { actions += it },
+                        additionalActions = listOf("Remove from Up next" to { removed++ }),
+                    )
+                }
+            }
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Pause")
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Play next")
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Play last")
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Remove from Up next")
+            assertEquals(
+                listOf(EpisodeAction.PlayToggle(1), EpisodeAction.PlayNext(1), EpisodeAction.PlayLast(1)),
+                actions,
+            )
+            assertEquals(1, removed)
+            val labels =
+                onNodeWithText(
+                    "Episode 1",
+                ).fetchSemanticsNode().config[SemanticsActions.CustomActions].map { it.label }
+            assertFalse("Select" in labels)
+            assertFalse("Download" in labels)
         }
 
     /** The leading custom action's label on the merged row node (08's playback slot). */

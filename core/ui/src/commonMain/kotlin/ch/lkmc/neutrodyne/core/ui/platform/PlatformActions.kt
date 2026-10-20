@@ -12,6 +12,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
  * action; screens hide the corresponding control then.
  */
 public interface PlatformActions {
+    /** Android system settings for download waits/notices; absent on desktop. */
+    public val settings: SystemSettingsOpener? get() = null
+
     /** Every link, "Watch on YouTube", update and help links. */
     public val urls: ExternalUrlOpener
 
@@ -26,6 +29,9 @@ public interface PlatformActions {
 
     /** Desktop only: "Show in Explorer / Finder / Files". */
     public val reveal: RevealInFolder?
+
+    /** Android 31+ app link preferences; null on older Android and desktop. */
+    public val appleLinks: AppleLinkSettings? get() = null
 
     /** Android 13+ only; `null` on the desktop and on API < 33. */
     public val notifications: NotificationPermissionRequester?
@@ -65,6 +71,9 @@ public interface ShareSheet {
  * cancelled. [pickFolder] is a desktop action; Android returns `null` at M0a (SAF folders are v1.x).
  */
 public interface FilePicker {
+    /** Opens any import format without a type filter; null means cancellation. */
+    public suspend fun openFile(): String? = pickFile(listOf("*/*"), emptyList())
+
     public suspend fun pickFile(
         mimeTypes: List<String>,
         extensions: List<String>,
@@ -102,3 +111,14 @@ public interface NotificationPermissionRequester {
 /** Provided by `NeutrodyneRoot` from the shell's platform implementation. */
 public val LocalPlatformActions: androidx.compose.runtime.ProvidableCompositionLocal<PlatformActions> =
     staticCompositionLocalOf { error("LocalPlatformActions not provided by the shell") }
+
+/** Opens Android's app-specific Open by default preferences after an explicit tap. */
+public fun interface AppleLinkSettings {
+    public fun openSettings(): OpenResult
+}
+
+public enum class SystemSettingsTarget { STORAGE, BACKGROUND_DATA, APP_DETAILS }
+
+public fun interface SystemSettingsOpener {
+    public fun open(target: SystemSettingsTarget): Boolean
+}

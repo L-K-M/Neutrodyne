@@ -41,6 +41,47 @@
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="feed" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="pcast" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="podcast" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="itpc" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="neutrodyne" android:host="subscribe" />
+      </intent-filter>
+      <intent-filter android:autoVerify="false">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="https" android:host="podcasts.apple.com" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="text/plain" />
+      </intent-filter>
     </activity>
 
     <!-- Internal routes are reachable only through this OS-protected entry point. -->
@@ -91,7 +132,14 @@
       android:exported="true"
       android:permission="android.permission.DUMP" />
 
-    <!-- Export share-sheet URIs (05 Destinations); the paths resource exposes only <cache>/export/. -->
+    <!-- System UI and Auto read public covers; ArtworkProvider rejects every write. -->
+    <provider
+      android:name="ch.lkmc.neutrodyne.core.artwork.ArtworkProvider"
+      android:authorities="${applicationId}.artwork"
+      android:exported="true"
+      tools:ignore="ExportedContentProvider" />
+
+    <!-- Export share-sheet URIs (05 Destinations); the paths resource exposes export cache and primary/internal Podcasts roots. -->
     <provider
       android:name="androidx.core.content.FileProvider"
       android:authorities="${applicationId}.fileprovider"

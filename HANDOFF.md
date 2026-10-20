@@ -1,8 +1,391 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-17.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3 is in progress. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-19.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3 and later local integration evidence is recorded in §0. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 ## 0. Implementation status
+
+### M8 I3 download integration (2026-10-19)
+
+`impl/m8-p1` integrates M6a/M6b through the requested `8ab74ff0`, over
+M8 W1–W7 at `e1ebc114`. The starting checkout lacked M7's completed
+Discover/link-entry and evidence work; those existing changes through
+`025cebff` are included to retain the discovery evidence gate alongside
+all download jobs, selectors and assertions. M6b W11 is not included.
+Both shells remain external YouTube mode (`NOT_YET_AVAILABLE`).
+
+The [integration report](.nd-context/m8-i3-report.md) records conflict
+resolutions, command receipts and per-task counts. M8 W8 remains separate:
+request/planner/bulk/restore gates are present, while direct DAO claim
+hardening and end-to-end capability/action evidence need W8 assessment.
+No schema, entity or index was changed. No push, PR, remote CI, external
+review, device run or packaged desktop acceptance is claimed.
+
+### M6b W11 documentation and acceptance (2026-10-19)
+
+`impl/m6b-p1` includes W1–W10 at `8ab74ff0`, including W6 `f945bae6`
+(after I2 below). W11 preserves dated notes and adds the
+[AC-by-AC ledger](docs/evidence/m6b-acceptance.md) plus PLAN/07/08/09/11
+qualifications. No M7 ledger existed. M6b acceptance remains open.
+
+The full gate passed once: allTests 6,592 passed/1 skipped; test 796/2;
+mutationTest 40/0. Benchmark assembly, Android instrumented/debug and desktop
+compilation, release lint and static gates passed. Both doc checks passed.
+Per-task counts/receipts/sizes: `.nd-context/m6b-w11-report.md`.
+No emulator/device/nightly/packaged desktop run; Task Manager/Recents,
+24 h cleanup and SD moves need operator evidence. No desktop-matrix job;
+published-release coverage remains open under benchmarkRelease; audio awaits MD1.
+Local commits only, no push/PR/external review (0 rounds). No new worktree.
+
+### M6b I2 local integration (2026-10-19)
+
+`impl/m6b-p1` integrates completed M6a (`38f139e2`) and M6b W9
+(`f17a9f4d`) through local merges `138053e3` and `9d6c1e9d`.
+M6a's playback/cascade cleanup, Downloads selection, live progress and manual
+consent coexist with M6b's planner, cleanup, moves and automatic lanes.
+W9 uses that Downloads screen and manual settings controls, shared notices,
+root move confirmation and notification prompts. Desktop file reveal uses
+the recorded local URI; storage actions use the selected root.
+Both W10 workflow job sets and evidence assertions are retained.
+
+The full gate ran once with cache restoration disabled. Its only failure was
+`SmartResumeTest.coldProjectionAndArrivalsReadTheLiveSmartResumeSetting`
+("Adapter did not converge"). The unchanged case passed alone, then all
+161 playback adapter tests passed serially. No playback code or timing
+threshold was changed. This observation is consistent with scheduling
+sensitivity; it does not establish a production root cause. Focused regressions
+first exposed the default-folder and bulk-prompt integration errors, then
+verified their fixes. The [integration report](.nd-context/m6b-i2-report.md)
+contains final per-task counts, command receipts, conflicts and file list.
+
+W6 is deliberately excluded; its pre-reset seam is preserved for the parallel
+branch. No schema, entity, index or dependency is changed by this integration.
+No device, physical radio/storage/Share, optimized-release journey, bmgr or
+packaged desktop run is claimed. MD1 still gates audible desktop acceptance.
+Work remains local only: no push, PR, CI execution or external review
+(0 review rounds), as the owner requested.
+
+### M6a W10 integration evidence (2026-10-19)
+
+Work is local on `impl/m6a-p1`, following W1–W9 at `bfa3ce48`.
+The owner requires local commits only, with no push or PR: CI and review
+have not run (0 review rounds). M6a acceptance remains open. The final
+local command/counts and measured P1/P2/P3 patch sizes are recorded in
+`.nd-context/m6a-w10-report.md`; that ignored operator report is retained
+in this worktree. Host tests do not establish the device/manual columns.
+No emulator existed before this run. An API30 default x86_64 software
+emulator connected but did not complete boot within 909 seconds; the host
+has no KVM. Only that instance was stopped. Instrumentation: 0 executed.
+No API33/34/36/37, release, bmgr or packaged desktop run is claimed.
+
+Current host reports after the gate repairs: `allTests` 6,268 passed / 1
+skipped, `test` 790 passed / 2 skipped, `mutationTest` 40 passed / 0 skipped.
+The initial full run found a stale queue-shortcut assertion which still
+removed the now-supported Downloaded filter; it now requires preservation.
+`BackupWorkHostTest.a library change after start-up pokes the debounced write`
+timed out in the loaded full run and passed unchanged in the serial rerun
+of all 139 data Android host cases. The 19 queue cases also passed.
+The three skips are Windows DPAPI and two desktop file-menu picker cases.
+The sync protocol mutation task has no cases and supplies no mutation proof.
+Per-task counts, final command status and patch sizes are in the report.
+
+All device method names below are in `ch.lkmc.neutrodyne.DownloadJourneyTest`.
+`downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete` is E4 and
+`@ReleaseSmoke`: it throttles a generated enclosure above 5 MiB, observes
+on-disk progress, and uses the real graph, HTTP client, scheduler, files,
+index, chapters, session and deferred deletion. The cover is generated
+locally and pre-pinned, so this proves offline availability rather than
+remote artwork acquisition. Media are the existing generated fixtures
+packaged only in the test APK through `app/build.gradle.kts`.
+Server-off proof does not establish airplane-mode radio behavior.
+
+| M6 AC | Host evidence (exact class/method; desktopTest unless stated) | Device or manual evidence still required |
+|---|---|---|
+| 1 | `RssTransferSourceTest.cutAtHalfResumesWithStrongValidatorAndActualLength`, `weakOrAbsentValidatorsRestartSameLengthReplacement`, `range416VerifiesWholeFileOrRestarts`, `htmlAndHlsAreRejectedBeforeAnyWrite`; actual-client suite also covers redirects/encoding | Real captive portal and radio/network transitions |
+| 2 | `DownloadReconcilerTest.processDeathTrimsOnlyTheTornTailBeforeResume`, `crashAfterRenameBeforeCompletionIsAdoptedWithoutTransfer`, `staleTokensResetOnceAndRegisteredOwnersSurviveParallelPasses` | External reboot mid-transfer on API33 worker and API34/36 UIDT; package update mid-transfer; in-process tests cannot kill themselves and prove recovery |
+| 3 | `DownloadWorkersTest.visiblePromotionAllowedOnlyBefore34` and `ManualDownloadJobServiceTest.notificationIsSynchronousWhileDatabaseOpenIsHeldAndPermissionDenied` (`testAndroidHostTest`) | `visibleApi33DownloadUsesDataSyncForegroundWorker` on API33; `backgroundUidtBesidePlaybackForTwentyMinutes` on both API34 and API36, with screen off, two notifications, continuing bytes and audio positions |
+| 6 | `DownloadReconcilerTest.controllerDeletesRowAndIndexButKeepsCurrentFileUntilSessionChanges`; `ChapterRepositoryTest` and playback adapter suites | E4 on API26/36, API37 and optimized release; physical airplane-mode sound/artwork and actual Share consumer grant |
+| 7 | `BackupRulesXmlTest.modernAndroidIncludesOnlySnapshotsAndPortableSettingsInBothModes` (`:app:testDebugUnitTest`) plus Python transport-archive fixtures | `seedCompletedDownloadsForBackupTransport` followed by `scripts/ci/bmgr-check.sh` on rootable API29/36 release builds; transport inspection, not static XML, closes exclusion |
+| 8 | `DownloadsScreenTest.offlineWaitAndFailureRowsHaveActionsAndDesktopHidesShare` and `DownloadsViewModelTest.allSectionCommandsAndDownloadsPlaybackUseThePublicController` (`:feature:downloads:desktopTest`) | Real accessibility, keyboard, denied notification permission and mounted/removable-root actions |
+| 9 | `DownloadEngineTest.freshSuccessHasExactlyThreeSqlWritesAndMemoryVerification`, `twoParallelDrainsNeverDoubleClaimAndInitializeOnce` and `progressTicksNeverWriteTheDatabase` | No extra platform claim from the host write/slot invariants |
+| 10 | `AndroidDownloadSchedulerTest.visibilityAndApiChooseUidtOrWorker`, `emptyAndBackoffQueuesNeverStartIdleRunner` and `runningUidtNeverReschedulesWhenNeedsChange` (`:download:impl:testAndroidHostTest`) | UIDT device soak plus invisible enqueue, restricted bucket, Data Saver, Wi-Fi/mobile/VPN and assigned-versus-default-network experiment |
+| 12 | `RssTransferSourceTest.onlyUnvalidatedAndroidHtmlWaitsForNetwork`; `DownloadReconcilerTest.missingLengthAndUnavailableRootsRemoveIndexThenRemountRewritesUri`; engine/filesystem faults | Physical SD unmount/remount, full disk, MTP/Files visibility, API26–29 `.nomedia` and keep-data uninstall |
+| 14 | `DesktopDownloadRestartTest.gracefulQuitAtHalfResumesWithoutTornTailTrimming` and `staleDesktopTokenAtHalfResetsAndTrimsTheTornTail` (`:desktopApp:test`) and `DesktopDownloadLaneTest.cancellationUsesQuitReasonKeepsPartAndUnregistersOnlyAfterCommit`, shared transfer suite | MD1 blocks audible offline desktop acceptance. Packaged Windows/macOS/Linux quit/restart, sleep/wake, cable loss, long/non-ASCII paths, ENOSPC and antivirus/rename behavior remain unexecuted |
+
+AC4/5/11/13/15 belong to M6b. Historical Task Manager inference, AUTO,
+cleanup/quota, root moves and out-of-process system tests remain there.
+Rename durability under power loss requires empirical evidence.
+
+CI with `run-instrumented` requires the named E4 result on API26/36.
+Nightly full runs API26/33/34/36 and requires worker33 plus 20-minute
+UIDT on34/36. Dispatch `scope=downloads` selects the app download class
+explicitly on that group, including API33. API37 and release smoke require
+E4 too. `bmgr-download-exclusion` runs a separate release matrix29/36,
+seeds real completed internal and external media without Orchestrator
+clearing data, triggers the M3 snapshot receiver and inspects LocalTransport.
+This exclusion job does not replace M3's reinstall/library restoration proof.
+Evidence gates require one non-skipped, non-failed result per named case
+and device, a finite soak duration of at least 1,200 seconds, and all nine
+nonempty media fixtures in the test APK. API-specific skips on other SDKs
+are not counted as evidence for the SDK under test.
+### M7 local integration (2026-10-19)
+
+Branch `impl/m7-p1` integrates W1–W7 through `c23d7140`, with W8 adding shared
+replay, Android/desktop screenshots, CI execution assertions and the
+[M7 acceptance ledger](docs/evidence/m7-discovery.md). W1 already recorded
+all adopted §4 resolutions in 03, 08, 09 and PLAN; W8 updates the stale
+implementation status and fixes 09's contradictory directory-fixture prose.
+No schema, index, entity or production dependency changed in W8.
+The owner requested local commits only: no push, PR, CI dispatch, review or
+merge (0 review rounds). M7 stays open for the ledger's device, cross-OS,
+network-capture, provider terms/key-permission and release evidence. Final
+local counts and the bounded emulator result appear in that ledger and
+`.nd-context/m7-w8-report.md`; earlier milestone gates remain open.
+
+### M5 local integration (2026-10-19)
+
+Branch `impl/m5-p1` integrates the M5 features on baseline `30eef445`.
+Local commits `f6f3e9ba` (service/graph integration) and `52b737a8`
+(device evidence gates) contain the verified code. The owner explicitly
+requested local commits only: no push, PR, merge, CI dispatch or automated
+review was performed (0 review rounds). No emulator, optimized-release,
+reboot, DHU, physical listening or accessibility run was performed.
+The only attached emulator reported offline and was left untouched.
+M5 remains open for the device and owner evidence in the
+[AC-by-AC ledger](docs/PLAN.md#m5-playback-features-and-system-surfaces).
+
+Both graphs resolve one `ChapterRepositoryImpl` from core data; desktop
+playback remains unavailable. Player construction now retains chapter and
+notes repository providers until observation needs them, preserving the
+foundation's database startup gate. Custom command registration uses one
+list, with sleep/chapter dispatch under the existing serialized callback.
+Departure capture precedes the queue projector, which freezes completion
+before the sleep observer disarms its own reason. Duration/chapter
+observers do not choose transitions. No schema, entity, index, dependency
+or D-id changed. The adopted M5 boundary resolutions remain in the owning
+design notes; no additional design deviation was needed.
+
+After running `spotlessApply` alone, this complete command passed with
+JDK 21, the Android SDK and the graphics environment loaded:
+
+```sh
+./gradlew --no-daemon --max-workers=2 \
+  -Pkotlin.incremental=false \
+  -Pkotlin.compiler.execution.strategy=in-process \
+  allTests test mutationTest :app:compileDebugAndroidTestKotlin \
+  spotlessCheck :app:lintRelease assertModuleGraph checkBannedApis \
+  :app:compileDebugKotlin :desktopApp:compileKotlin \
+  :app:assembleDebugAndroidTest --continue
+```
+
+The final gate took 6 min 26 s: 224 executed tasks, 8 reused from cache and
+1,212 up to date. Release lint reported 0 errors and 0 warnings. Counts
+below include current unchanged reports reused by Gradle; there are
+6,745 passes, 3 skips and 0 failures across the three selectors.
+
+| Selector | Passed | Skipped |
+|---|---|---|
+| `allTests` | 5,931 | 1 |
+| `test` | 774 | 2 |
+| `mutationTest` | 40 | 0 |
+
+The skips are the Windows-only DPAPI case and both desktop file-menu picker
+cases. The sync protocol mutation task has no matching cases and supplies
+no mutation evidence. The evidence checker's 7 Python tests, the reboot
+runner's 1 boundary test and the existing nightly reporter's 9 tests pass.
+Both workflow files parse as YAML. Both doc checks pass: 0 problems across
+14 files and 0 invalid of 78 Mermaid diagrams.
+
+The app debug test APK was assembled and inspected: all 9 nonempty media
+fixtures, all 4 playback device classes, and every one of the 15 API 37
+required method names are packaged. This is packaging proof only; it
+supplies no device pass count. Local logs, APK hash and complete per-task
+counts are retained under `build/reports/m5-integration/` (generated,
+ignored outputs). No optimized-release APK execution is claimed.
+
+The gates require 11 short cases on API 26 and 12 on API 36; nightly
+requires 13 on API 26, 14 on API 33/36 and 15 on API 34; API 37 requires
+15, and release smoke requires 8. The separate host reboot route requires
+3 non-skipped phases and archives the actual System UI card/artwork,
+source-restored resume, logs, SHA, ABI, image and APK hash. The host-only
+phases intentionally skip outside that route. All device counts remain
+unexecuted here. DHU and the physical matrix still require separate
+reports; AAOS retail installation remains unverified, desktop audio is
+MD1b, and real playing-download deletion is M6.
+
+The initial failures had identified causes: two service tests still
+assumed eager startup; the player resolved repositories before the
+database gate, crashing Android and blocking desktop; and the decoder
+probe's test visibility annotation rejected its same-package production
+caller in release lint. The blocked desktop worker was stopped after its
+thread stack established the cause. The artwork manifest test reproduced
+alone, so it was not load-sensitive: Robolectric left the implicit
+application process null, while the provider used Android's package-name
+default. Its assertion now honors that default. All affected tests pass in
+the final gate. There were no daemon/lock retries.
+
+Per-task XML totals (aggregator and no-source tasks omitted):
+
+| Task | Passed | Skipped |
+|---|---|---|
+| `:app:testDebugUnitTest` | 142 | 0 |
+| `:core:artwork:desktopTest` | 25 | 0 |
+| `:core:artwork:testAndroidHostTest` | 43 | 0 |
+| `:core:common:desktopTest` | 100 | 0 |
+| `:core:data:desktopTest` | 1,227 | 1 |
+| `:core:data:mutationTest` | 1 | 0 |
+| `:core:data:testAndroidHostTest` | 139 | 0 |
+| `:core:database:desktopTest` | 155 | 0 |
+| `:core:database:testAndroidHostTest` | 9 | 0 |
+| `:core:datastore:desktopTest` | 18 | 0 |
+| `:core:designsystem:desktopTest` | 14 | 0 |
+| `:core:domain:desktopTest` | 3 | 0 |
+| `:core:model:desktopTest` | 2,550 | 0 |
+| `:core:navigation:desktopTest` | 25 | 0 |
+| `:core:network:desktopTest` | 33 | 0 |
+| `:core:network:okhttp:test` | 45 | 0 |
+| `:core:network:testAndroidHostTest` | 6 | 0 |
+| `:core:testing:desktopTest` | 67 | 0 |
+| `:core:ui:desktopTest` | 154 | 0 |
+| `:core:ui:testAndroidHostTest` | 134 | 0 |
+| `:desktop:system:test` | 1 | 0 |
+| `:desktopApp:test` | 113 | 2 |
+| `:download:api:desktopTest` | 1 | 0 |
+| `:download:impl:desktopTest` | 1 | 0 |
+| `:feature:discover:desktopTest` | 40 | 0 |
+| `:feature:episode:desktopTest` | 48 | 0 |
+| `:feature:feeds:desktopTest` | 117 | 0 |
+| `:feature:feeds:testAndroidHostTest` | 70 | 0 |
+| `:feature:groups:desktopTest` | 82 | 0 |
+| `:feature:importexport:desktopTest` | 190 | 0 |
+| `:feature:library:desktopTest` | 57 | 0 |
+| `:feature:player:desktopTest` | 67 | 0 |
+| `:feature:podcast:desktopTest` | 110 | 0 |
+| `:feature:queue:desktopTest` | 19 | 0 |
+| `:feature:settings:desktopTest` | 38 | 0 |
+| `:feature:sync:desktopTest` | 1 | 0 |
+| `:feeds:desktopTest` | 215 | 0 |
+| `:feeds:jvm:mutationTest` | 38 | 0 |
+| `:feeds:jvm:test` | 252 | 0 |
+| `:playback:api:desktopTest` | 1 | 0 |
+| `:playback:core:desktopTest` | 120 | 0 |
+| `:playback:desktop:test` | 1 | 0 |
+| `:playback:engine:test` | 1 | 0 |
+| `:playback:impl:testDebugUnitTest` | 158 | 0 |
+| `:playback:native:test` | 1 | 0 |
+| `:sync:api:desktopTest` | 1 | 0 |
+| `:sync:impl:desktopTest` | 1 | 0 |
+| `:sync:protocol:desktopTest` | 27 | 0 |
+| `:sync:server:test` | 58 | 0 |
+| `:youtube:api:desktopTest` | 22 | 0 |
+| `:youtube:api:mutationTest` | 1 | 0 |
+| `:youtube:engine:test` | 1 | 0 |
+| `:youtube:impl:desktopTest` | 1 | 0 |
+| `:youtube:ytdlp-desktop:test` | 1 | 0 |
+
+### M4 integration status (2026-10-19)
+
+M4 integration (2026-10-19, branch `impl/m4-p1`) is local work only, per the
+owner's no-push instruction. The playback service adapters and full-player
+queue are integrated. Framework playback tests are hosted in the app test APK;
+labelled PR CI requires the short cases on API 26/36, nightly requires the
+30-minute screen-off stream on API 34, and the existing API 37 and release
+jobs require their playback cases. The result gate rejects skipped or empty
+suites. No device, nightly, release-APK or physical-audio result has been run
+for this integration. M4 acceptance 3/4/5/8/12 therefore remains unverified on
+devices, including abrupt process-kill recovery, cover/lock-screen inspection,
+TalkBack, calls/headsets and listening at 3x with skip silence. Local host-test
+results are recorded separately from those pending checks; M4 is not complete.
+
+### M4 local verification (2026-10-19)
+
+The requested full gate passed after `spotlessApply` ran alone, using JDK 21,
+the Android SDK and the graphics environment, `--no-daemon --max-workers=2`,
+`-Pkotlin.incremental=false` and
+`-Pkotlin.compiler.execution.strategy=in-process`. The gate included
+`allTests test mutationTest :app:compileDebugAndroidTestKotlin spotlessCheck
+:app:lintRelease assertModuleGraph checkBannedApis :app:compileDebugKotlin
+:desktopApp:compileKotlin --continue`. Release lint reported no errors or
+warnings. The build executed 93 tasks, reused 1 from cache and found 1,215
+up to date. Counts below include the unchanged tests' reused results.
+
+The host XML contains 6,625 passing cases and three environment-dependent
+skips: the Windows-only DPAPI test and two desktop file-menu UI cases.
+`allTests` accounts for 5,855 passes and one skip; `test` for 730 passes and
+two skips; `mutationTest` for 40 passes. The sync protocol mutation task has
+no matching cases and contributes no mutation evidence. The playback-report
+checker's five Python fixture tests also pass.
+
+The desktop localization case passed alone; the new socket cancellation
+regression then failed before its fix. The accept loop now preserves
+coroutine cancellation instead of leaking `ClosedByInterruptException` into
+later tests. The Android graph's 16 cases passed alone; the previous full
+run's SQLite JNI classloader conflict is avoided by sharing the startup
+suite's API 34 Robolectric sandbox. The final full suites pass.
+
+The debug instrumentation APK also assembles. Its ZIP contains all three
+synthetic MP3 assets under `assets/media/`, plus the manifest and DEX files.
+This proves packaging only; the APK was not installed or run on a device.
+
+Both documentation checks pass: 0 problems and 0 invalid Mermaid diagrams.
+Device suites, CI, automated PR review and physical audio were not run. No PR
+was opened or merged, following the owner's local-commit-only instruction.
+
+| Test task | Passed | Skipped |
+|---|---:|---:|
+| `:app:testDebugUnitTest` | 142 | 0 |
+| `:core:artwork:desktopTest` | 25 | 0 |
+| `:core:artwork:testAndroidHostTest` | 43 | 0 |
+| `:core:common:desktopTest` | 100 | 0 |
+| `:core:data:desktopTest` | 1193 | 1 |
+| `:core:data:mutationTest` | 1 | 0 |
+| `:core:data:testAndroidHostTest` | 139 | 0 |
+| `:core:database:desktopTest` | 152 | 0 |
+| `:core:database:testAndroidHostTest` | 9 | 0 |
+| `:core:datastore:desktopTest` | 18 | 0 |
+| `:core:designsystem:desktopTest` | 14 | 0 |
+| `:core:domain:desktopTest` | 3 | 0 |
+| `:core:model:desktopTest` | 2547 | 0 |
+| `:core:navigation:desktopTest` | 25 | 0 |
+| `:core:network:desktopTest` | 33 | 0 |
+| `:core:network:okhttp:test` | 45 | 0 |
+| `:core:network:testAndroidHostTest` | 6 | 0 |
+| `:core:testing:desktopTest` | 65 | 0 |
+| `:core:ui:desktopTest` | 151 | 0 |
+| `:core:ui:testAndroidHostTest` | 134 | 0 |
+| `:desktop:system:test` | 1 | 0 |
+| `:desktopApp:test` | 113 | 2 |
+| `:download:api:desktopTest` | 1 | 0 |
+| `:download:impl:desktopTest` | 1 | 0 |
+| `:feature:discover:desktopTest` | 40 | 0 |
+| `:feature:episode:desktopTest` | 46 | 0 |
+| `:feature:feeds:desktopTest` | 117 | 0 |
+| `:feature:feeds:testAndroidHostTest` | 70 | 0 |
+| `:feature:groups:desktopTest` | 82 | 0 |
+| `:feature:importexport:desktopTest` | 190 | 0 |
+| `:feature:library:desktopTest` | 57 | 0 |
+| `:feature:player:desktopTest` | 61 | 0 |
+| `:feature:podcast:desktopTest` | 110 | 0 |
+| `:feature:queue:desktopTest` | 19 | 0 |
+| `:feature:settings:desktopTest` | 35 | 0 |
+| `:feature:sync:desktopTest` | 1 | 0 |
+| `:feeds:desktopTest` | 215 | 0 |
+| `:feeds:jvm:mutationTest` | 38 | 0 |
+| `:feeds:jvm:test` | 252 | 0 |
+| `:playback:api:desktopTest` | 1 | 0 |
+| `:playback:core:desktopTest` | 100 | 0 |
+| `:playback:desktop:test` | 1 | 0 |
+| `:playback:engine:test` | 1 | 0 |
+| `:playback:impl:testDebugUnitTest` | 114 | 0 |
+| `:playback:native:test` | 1 | 0 |
+| `:sync:api:desktopTest` | 1 | 0 |
+| `:sync:impl:desktopTest` | 1 | 0 |
+| `:sync:protocol:desktopTest` | 27 | 0 |
+| `:sync:server:test` | 58 | 0 |
+| `:youtube:api:desktopTest` | 22 | 0 |
+| `:youtube:api:mutationTest` | 1 | 0 |
+| `:youtube:engine:test` | 1 | 0 |
+| `:youtube:impl:desktopTest` | 1 | 0 |
+| `:youtube:ytdlp-desktop:test` | 1 | 0 |
 
 | Milestone | State | Branch / PR | Notes |
 |---|---|---|---|
@@ -20,17 +403,52 @@ This file lets another person or agent take over the work at any point. **Last u
 | M1a acceptance | merged | [#105](https://github.com/L-K-M/Neutrodyne/pull/105) `173fd04`, [#106](https://github.com/L-K-M/Neutrodyne/pull/106) `26de636`, [#111](https://github.com/L-K-M/Neutrodyne/pull/111) `854d546` | The audit in `~/nd-wt/reviews/m1a-audit.md` listed automated gaps. #105 (two GLM rounds, no confirmed important finding; its "won't compile" claim refuted on the PR) proves the rewrite and catalogue journeys, the subscribe `syncId`, and the supplementary-reference corpus fixture (71 fixtures). It also narrows M1 AC11 to subscribe in a dated note, with import and restore moving to M3 acceptance 12. #111 proves AC2's M1a clauses (`FeedRefreshContractTest`), AC4 (`RefreshWorkManagerTest`, WorkManager `TestDriver`, mid-ingest cancellation rollback) and AC10's runner half. Its CI failure was a real test race: after a retry, WorkManager's reschedule pass cancels the scheduler's tokens asynchronously, so an early re-delivery was stopped. The test waits for `scheduleRequestedAt`; 10 of 10 runs pass under CPU load, against 5 of 10 failing before the fix. #106 runs the parser mutation gate in the PR unit job and adds the nightly `mutation-full`. Owner-run checks remain: AC5 on the reference device and AC10's manual desktop half (procedure in the audit). |
 | M1b | merged; device and Windows checks open | [#112](https://github.com/L-K-M/Neutrodyne/pull/112) `6efe483`, [#115](https://github.com/L-K-M/Neutrodyne/pull/115) `7707ed2`, [#117](https://github.com/L-K-M/Neutrodyne/pull/117) `77a1ee1`, [#120](https://github.com/L-K-M/Neutrodyne/pull/120) `03ff793`, [#113](https://github.com/L-K-M/Neutrodyne/pull/113) `51d4c18`, [#114](https://github.com/L-K-M/Neutrodyne/pull/114) `002f1a9`, [#116](https://github.com/L-K-M/Neutrodyne/pull/116) `03e257a`, [#118](https://github.com/L-K-M/Neutrodyne/pull/118) `b684817`, [#122](https://github.com/L-K-M/Neutrodyne/pull/122) `b909b52`, [#121](https://github.com/L-K-M/Neutrodyne/pull/121) `cce2a41` | Ten PRs from Codex's plan (`~/nd-wt/reviews/m1b-plan.md`), no schema change: the `SecretStore` and `CredentialCommitCoordinator` contracts, the shared store core with Android Keystore AES-GCM and the desktop secrets file (DPAPI on Windows, `0600` on macOS and Linux), credential persistence and wiring, lossless merges, permanent redirects and renormalisation, the `itunes:new-feed-url` probe, `editFeedUrl`, the enabled account controls, and RFC 5005 paging acceptance (AC8). Settled in dated notes: 02's provenance union runs as two statements on SQLite 3.18; a 301 ending in 304 gets one confirmation fetch, and only a body replaces the 304; AC8's 5,000-item stop applies to automatic sessions. Every PR had one or two GLM rounds; confirmed defects were fixed test-first (a desktop secret lost to a reconcile race, an unreadable secrets file overwritten, cleanup masking a commit failure, a failed redirect confirmation failing a healthy feed, failed probes cached as rejections, UI-scope exceptions). Open: AC9's real-Keystore device run (`:core:data` has no device-test source set) and AC12's DPAPI round-trip on a Windows host. |
 | M2 | merged; device checks open | all 28 of [#125](https://github.com/L-K-M/Neutrodyne/pull/125)–[#152](https://github.com/L-K-M/Neutrodyne/pull/152) merged (not in number order); the last was [#151](https://github.com/L-K-M/Neutrodyne/pull/151) `a712bef` | From the synthesized plan (`~/nd-wt/reviews/m2-plan.md`): groups, membership ordering, persisted tabs and visits, effective settings, mosaics, counts, the batched new-episode notifier and Android poster and channels, effective refresh intervals, delete with undo, the Feeds pager, group editor and manage screen, chips and add-to-groups, Library multi-select, counted mark-played, gestures and live rows, query-plan and invalidation-hygiene tests, and the desktop group journey. No schema change. Every PR had one to three GLM rounds; findings, refutations and deferrals per PR are in `~/nd-wt/reviews/m2-deferred.md`. In-progress and Downloaded filter chips stay hidden until M4/M6 (`FeedFilterCapabilities`). Owner checks open: AC2 timing on the reference device, AC8 TalkBack, AC6 real process death, the notification-permission flows. |
-| M3 | in progress | drafts [#155](https://github.com/L-K-M/Neutrodyne/pull/155) A7, [#156](https://github.com/L-K-M/Neutrodyne/pull/156) A2, [#157](https://github.com/L-K-M/Neutrodyne/pull/157) A1 | Plan: `~/nd-wt/reviews/m3-plan.md` (synthesis of Codex, Devin and DeepSeek plans), about 35 PRs in waves A (formats), B (persistence and services), C (platform hosts), D (UI) and E (acceptance). No schema change planned. Helper branches are pre-reviewed by an independent helper before they enter the serial GLM queue. |
+| M3 | candidate assembled; review and acceptance in progress | consolidated layers [#203](https://github.com/L-K-M/Neutrodyne/pull/203) through [#210](https://github.com/L-K-M/Neutrodyne/pull/210), plus [#212](https://github.com/L-K-M/Neutrodyne/pull/212), merged | Formats, durable import/restore services, backup controls, Android/desktop hosts, prepared-backup consent and scale/device tests are on main. Remaining candidate layers add preview/Android receiving, report/fix-ups/resume, then desktop inputs/backup UI. Original drafts are closed as their consolidated replacements open. No M3 schema change. Local implementation and pre-review do not close CI, review or device gates. |
 | M1a GUID provenance | merged | [#88](https://github.com/L-K-M/Neutrodyne/pull/88) `f56a2b9` (replaces #70 and the held #64) | D98/PO-49: feed-scoped GUID history and additive V1→V2 with the frozen V1 schema and fixture unchanged. Two Codex rounds before GLM; GLM r1's ten "critical" items were `execSQL` false positives. The V1→V2 device run passed on the managed devices. |
 | Navigation transitions | merged | [#73](https://github.com/L-K-M/Neutrodyne/pull/73) `ff6ad06` (code `08570c3`) | Instant tabs, cover on push, wipe on back and predictive back are as the owner asked; expanded two-pane in-pane swaps (Settings About → Licences → Back) now animate too. Three earlier in-pane designs animated inside one scene and each failed independent review (state loss, duplicate-provider crashes, over-pops, cross-tab mutation). A two-member committee (Sol, SWE-2) traced the root cause, and both candidate designs were built against a 26-test public-behavior gate suite (`PaneSwapGateTest`): the in-pane swap as a real Navigation3 scene change passed 26/26, the alternative pane animator stalled at 19/26. Later Codex closure rounds fixed an early predictive over-pop, completion-only Back over-pops, and cross-tab gesture completion; `0657504` closes with no important finding (86 host, 40 desktop, all gates), and the first GLM round was minor-only (its blocker was refuted against the `NavigationEvent` bytecode). Also fixed [#75](https://github.com/L-K-M/Neutrodyne/issues/75) (two-pane Back popped nothing in Feeds, over-popped in Library). Documented limitations: an expanded detail swap stops an in-progress list fling and ends an IME composition (focus restored); the post-decoration pane animator (`proto/nav73-e`) is the follow-up. Physical predictive gestures unverified. |
 
-**Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37, host CPython 3.14 for Chaquopy's `buildPython` (`neutrodyne.buildPython` in `~/.gradle/gradle.properties`; builds need `LANG=C.UTF-8`). No KVM on the development machine: instrumented tests and Gradle Managed Devices run only on CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
+### M3 candidate and remaining acceptance evidence
+
+At the 2026-10-20 checkpoint, `origin/main` is `2154edc7` (#215). The preceding
+L9 reviewed head `66af0a04` passed two GLM rounds, all required CI including server, and
+the fresh seeded [39257853895](https://github.com/L-K-M/Neutrodyne/actions/runs/39257853895)
+device gate on both APIs. [#215](https://github.com/L-K-M/Neutrodyne/pull/215)
+merged preview after three completed reviews and current-head CI. Android receiving
+is in [#216](https://github.com/L-K-M/Neutrodyne/pull/216); report and final
+backup/desktop UI layers remain local work in progress. A repeated-cancellation regression exposed an
+interrupted desktop handshake leaking an I/O exception into later tests. The
+narrow cancellation correction now passes all 110 executed desktop tests;
+two native-menu cases remain headless skips. CI and review are still required.
+The candidate uses the existing schema V2, preserves the unlinked sync state
+and keeps YouTube imports external until M8.
+
+| M3 acceptance | Candidate coverage | Evidence still required |
+|---|---|---|
+| 1 | OPML reader fixtures and preview assertions | Latest-candidate CI/review |
+| 2, 7 | `RoundTripPropertyTest`, import commit and membership tests | Latest-candidate CI/review |
+| 3 | Hostile-input, bounded JSON, archive and mutation tests; real 400k-row snapshot test in a 128 MiB JVM. [#213](https://github.com/L-K-M/Neutrodyne/pull/213) fixes the signed UTF-32 word stall with failing-first regressions, full local 1,000-iteration proof and hosted `mutation-full` recovery in [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995); [#211](https://github.com/L-K-M/Neutrodyne/issues/211) is closed. | Latest-candidate CI/review and a green scheduled release gate |
+| 4 | `ImportPipelineTest`, no-new-notification and inert-download assertions | Confirm the 300-feed/two-second acceptance measurement on the candidate |
+| 5, 11 | Restore merger/runner tests and `BackupCrossPlatformTest` | Actual Android-to-desktop and desktop-to-Android file round trip; native desktop drop/dialog checks |
+| 6, 8 | Real first-launch logical restore on API26/API36 in [39257853895](https://github.com/L-K-M/Neutrodyne/actions/runs/39257853895), including the named non-skipped-result gate; host foreign-snapshot and startup-race regressions | Local-transport `bmgr` uninstall/reinstall on API29/API36 and manual API26/28/31 checks. The logical device test is not transport evidence. |
+| 9, 10 | OPML writer, export warning/share and prepared-backup consent tests; route tests for backup/restore | Real share-sheet/SAF/provider journeys and latest-candidate UI checks |
+| 12 | `SyncInertTest` and round-trip tests cover unique/colliding `syncId` values and empty unlinked sync tables | Latest-candidate CI/review |
+
+The dispatched full nightly [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995)
+on `ef5fec26` passed mutation robustness, API37/16 KiB, release smoke and repro,
+but `instrumented-full` failed ([#214](https://github.com/L-K-M/Neutrodyne/issues/214)).
+Its API26/API33 XML records assumption failures; API33 also has two smoke-test
+Settings-selector failures. Investigation is in progress. This is not a green
+scheduled run or release approval. Preserve both nightly failure artifacts and
+the separate seeded first-launch XML under `~/nd-wt/reviews/evidence/`.
+
+**Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37. The configured Chaquopy `buildPython` path for CPython 3.14 is currently unavailable; local Kotlin compilation does not prove Python bytecode compilation. Available host CPython is 3.11.2; record any fallback explicitly. Builds need `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`. Local software-emulator attempts have not supplied usable device evidence; run instrumented tests and Gradle Managed Devices in CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
 
 **Owner execution instructions, retain through compaction:**
 
 - Follow `docs/IMPLEMENTATION-PROMPT.md` milestone by milestone through published v1.0.
 - Use available helpers, especially free models, Devin SWE-2 and Codex Sol. Since 2026-10-14 the owner has paused Z.ai models for helpers ("Don't use z.ai for subagents right now"); the CI GLM review continues. Check helper results before integration.
 - Periodically have Codex Sol 6.1 at maximum reasoning review merged `main`.
+- Continue across milestone boundaries without waiting for acknowledgements. Use `opencode/deepseek-v4.1-flash-free` where appropriate; Codex is the fallback when the shared free tier is rate-limited. Keep shared implementation ownership singular and never duplicate a running helper job.
 - Keep PRs small and GLM reviews serial to protect the Z.ai quota. Avoid pushes that cancel an active review. The owner allows waiving GLM after repeated integration failures; record the gap and waiver, never claim approval.
 - Helper CLIs are the default for independent work (owner's global instructions, 2026-10-16); Anthropic-backed workers only when they fit better. On 2026-10-17 `venice/*` ran out of credits and the free opencode models were rate-limited or overloaded; Devin SWE-2 carried implementation and pre-reviews. Opencode helpers cannot read files outside their worktree.
 

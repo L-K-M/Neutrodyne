@@ -1,0 +1,5 @@
+<resources>
+    <string name="install_help_title">Install &amp; updates</string>
+    <string name="install_help_android">Download the APK for your phone from the Neutrodyne GitHub release page. Allow your browser or file manager to install unknown apps, then open the APK. Install newer releases the same way; your library and settings stay. The app only notifies you about updates and opens the release page.\n\nAndroid Auto: every Neutrodyne install comes from GitHub. In Android Auto settings, open About and tap Version and permission info 10 times to enable developer mode. Open developer settings and enable Unknown sources. Neutrodyne then appears in Auto. The Desktop Head Unit needs the same setting. Availability on retail Android Automotive OS cars is unverified.</string>
+    <string name="install_help_close">Close</string>
+</resources>

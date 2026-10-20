@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemFilter
+import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportReportSection
@@ -92,7 +93,7 @@ internal data class ImportUiState(
  * Preview edits (`setSelected`, `updateOptions`) are serialized in acceptance order;
  * accepted edits, [confirm] and [cancelSession] run on `@ApplicationScope`, so a disappearing
  * route cannot take them down and the job itself owns `busy`. A `NEUTRODYNE_BACKUP` PREVIEW
- * session renders the unavailable body (the restore preview is D4) and no path here calls the
+ * session uses RestoreViewModel for its preview and no path here calls the
  * normal import [ImportRepository.confirm] for it — the committer would reject it anyway.
  */
 internal class ImportViewModel
@@ -434,7 +435,7 @@ internal class ImportViewModel
 
         private val ImportItemView.canFixUp: Boolean
             get() =
-                podcastId != null &&
+                (podcastId != null || kind == ImportItemKind.YOUTUBE) &&
                     reportSection() in FIXABLE_SECTIONS &&
                     !(status == ImportItemStatus.FETCH_FAILED && errorDetail == IMPORT_DEFERRED_DETAIL)
 

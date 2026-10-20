@@ -45,6 +45,12 @@ import dev.zacsweers.metro.SingleIn
 @BindingContainer
 @ContributesTo(AppScope::class)
 object AndroidDataBindings {
+    @Provides
+    @SingleIn(AppScope::class)
+    fun autodiscovery(): ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery =
+        ch.lkmc.neutrodyne.feeds.jvm.html
+            .JsoupAutodiscovery()
+
     /** AOSP's `XmlPullParser` (KXmlParser) behind the JVM parser's factory port. */
     @Provides
     fun pullParserFactory(): PullParserFactory = PullParserFactory { Xml.newPullParser() }

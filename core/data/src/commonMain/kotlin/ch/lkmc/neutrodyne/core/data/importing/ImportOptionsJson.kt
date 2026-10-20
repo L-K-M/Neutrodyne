@@ -11,6 +11,11 @@ import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.SourceGroup
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
+import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
+import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -43,6 +48,8 @@ internal data class ImportOptionsJson(
     val laneAttempts: Int = 0,
     val sourceGroups: List<SourceGroupJson> = emptyList(),
     val itemCustomTitles: Map<Int, String> = emptyMap(),
+    val itemYouTubeInputs: Map<Int, String> = emptyMap(),
+    val itemYouTubeVariants: Map<Int, Int> = emptyMap(),
     val committedAt: Long? = null,
     val attemptMarkerAt: Long? = null,
 ) {
@@ -64,6 +71,15 @@ internal data class ImportOptionsJson(
             laneAttempts = laneAttempts,
             sourceGroups = sourceGroups.map(SourceGroupJson::toModel),
             itemCustomTitles = itemCustomTitles,
+            itemYouTubeInputs =
+                itemYouTubeInputs
+                    .filterValues(
+                        ::validYouTubeInput,
+                    ).mapValues { cleanYouTubeInput(it.value) },
+            itemYouTubeVariants =
+                itemYouTubeVariants.filterValues(
+                    YouTubeVariantBits::isValid,
+                ),
             committedAt = committedAt,
             attemptMarkerAt = attemptMarkerAt,
         )
@@ -87,6 +103,14 @@ internal data class ImportOptionsJson(
                 laneAttempts = options.laneAttempts,
                 sourceGroups = options.sourceGroups.map(SourceGroupJson::fromModel),
                 itemCustomTitles = options.itemCustomTitles,
+                itemYouTubeInputs =
+                    options.itemYouTubeInputs.filterValues(::validYouTubeInput).mapValues {
+                        cleanYouTubeInput(it.value)
+                    },
+                itemYouTubeVariants =
+                    options.itemYouTubeVariants.filterValues(
+                        YouTubeVariantBits::isValid,
+                    ),
                 committedAt = options.committedAt,
                 attemptMarkerAt = options.attemptMarkerAt,
             )
@@ -184,3 +208,12 @@ private val json =
         encodeDefaults = false
         explicitNulls = false
     }
+
+private fun validYouTubeInput(input: String): Boolean =
+    when (YouTubeUrlClassifier().classify(input)) {
+        null, is YtRef.Playlist, is YtRef.Query -> false
+        else -> true
+    }
+
+internal fun cleanYouTubeInput(input: String): String =
+    (AddInputNormalizer.normalize(input) as? NormalizedInput.Url)?.url ?: input

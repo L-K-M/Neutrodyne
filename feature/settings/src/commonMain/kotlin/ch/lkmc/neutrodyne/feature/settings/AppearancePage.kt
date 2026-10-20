@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -33,17 +34,26 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_dark
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_light
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_system
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_youtube_channel_avatar
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_youtube_row_art
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_youtube_video_thumbnail
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
@@ -59,6 +69,7 @@ internal fun AppearancePage(
     settings: SettingsRepository,
     dynamicColorSupport: DynamicColorSupport,
     platform: PlatformKind = LocalPlatformKind.current,
+    hasChannels: Flow<Boolean> = flowOf(false),
 ) {
     val theme by
         settings
@@ -68,6 +79,14 @@ internal fun AppearancePage(
         settings
             .observe(AppearanceSettingKeys.DYNAMIC_COLOR)
             .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.DYNAMIC_COLOR.default)
+    val miniPlayerSkip by settings
+        .observe(AppearanceSettingKeys.MINI_PLAYER_SKIP)
+        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.MINI_PLAYER_SKIP.default)
+    val channelsExist by hasChannels.collectAsStateWithLifecycle(initialValue = false)
+    val rowArt by settings
+        .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
+        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
+    var showRowArtDialog by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbarHost = LocalSnackbarHost.current
     val saveFailed = stringResource(Res.string.settings_save_failed)
@@ -79,7 +98,12 @@ internal fun AppearancePage(
         value: T,
     ) {
         scope.launch {
-            if (settings.set(key, value) is Outcome.Failure) snackbarHost.showSnackbar(saveFailed)
+            if (suspendRunCatching {
+                    settings.set(key, value)
+                }.getOrNull() !is Outcome.Success
+            ) {
+                snackbarHost.showSnackbar(saveFailed)
+            }
         }
     }
 
@@ -95,6 +119,20 @@ internal fun AppearancePage(
                 summary = stringResource(themeLabel(theme)),
                 onClick = { showThemeDialog = true },
             )
+            SettingsSwitchRow(
+                title = stringResource(Res.string.appearance_mini_player_skip),
+                summary = stringResource(Res.string.appearance_mini_player_skip_summary),
+                checked = miniPlayerSkip,
+                onCheckedChange = { save(AppearanceSettingKeys.MINI_PLAYER_SKIP, it) },
+            )
+            if (channelsExist) {
+                SettingsRow(
+                    icon = NdIcons.Palette,
+                    title = stringResource(Res.string.appearance_youtube_row_art),
+                    summary = stringResource(rowArtLabel(rowArt)),
+                    onClick = { showRowArtDialog = true },
+                )
+            }
             if (platform == PlatformKind.ANDROID) GestureSettings(settings)
             if (dynamicColorSupport == DynamicColorSupport.AVAILABLE) {
                 SettingsSwitchRow(
@@ -107,6 +145,21 @@ internal fun AppearancePage(
                 )
             }
         }
+    }
+
+    if (showRowArtDialog && channelsExist) {
+        SettingsChoiceDialog(
+            icon = NdIcons.Palette,
+            title = stringResource(Res.string.appearance_youtube_row_art),
+            options = AppearanceSettingKeys.YOUTUBE_ROW_ART.values,
+            selected = rowArt,
+            label = { stringResource(rowArtLabel(it)) },
+            onSelect = {
+                showRowArtDialog = false
+                save(AppearanceSettingKeys.YOUTUBE_ROW_ART, it)
+            },
+            onDismissRequest = { showRowArtDialog = false },
+        )
     }
 
     if (showThemeDialog) {
@@ -169,3 +222,9 @@ private fun themeLabel(mode: ThemeMode): StringResource =
 
 private val RADIO_ROW_GAP = 6.dp
 private val RADIO_LABEL_GAP = 16.dp
+
+private fun rowArtLabel(choice: YouTubeRowArt): StringResource =
+    when (choice) {
+        YouTubeRowArt.VIDEO_THUMBNAIL -> Res.string.appearance_youtube_video_thumbnail
+        YouTubeRowArt.CHANNEL_AVATAR -> Res.string.appearance_youtube_channel_avatar
+    }

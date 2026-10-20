@@ -86,6 +86,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     // The generated Res class of the shell's own Compose resources (see below)
     implementation(libs.cmp.resources)
+    implementation(libs.cmp.material3)
     // Metro aggregation must read the features' @ViewModelKey/@ManualViewModelAssistedFactoryKey
     // map keys, and the window provides LocalMetroViewModelFactory to metroViewModel().
     implementation(libs.metrox.viewmodel)
@@ -109,6 +110,7 @@ dependencies {
     // The desktop graph test and the window-content Compose UI test (01 Testing, 11 Testing)
     testImplementation(project(":core:testing"))
     testImplementation(libs.junit4)
+    testImplementation(libs.okhttp.mockwebserver3)
     testImplementation(libs.truth)
     testImplementation(libs.cmp.ui.test)
     // Skiko natives so runComposeUiTest can render on this machine's OS

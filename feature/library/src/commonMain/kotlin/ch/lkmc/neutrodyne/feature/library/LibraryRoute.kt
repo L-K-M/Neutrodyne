@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
@@ -49,6 +50,7 @@ internal fun LibraryRoute(
     isCurrentEntry: () -> Boolean = rememberEntryIsCurrent(LibraryKey),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val feedHealth by viewModel.feedHealth.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val snackbar = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
@@ -115,6 +117,12 @@ internal fun LibraryRoute(
     }
 
     LibraryScreen(
+        outageBanner = {
+            if (feedHealth.feedOutageLevel > 0) {
+                ch.lkmc.neutrodyne.core.ui
+                    .YouTubeFeedBanner(viewModel::retryYouTubeFeeds)
+            }
+        },
         segment = state.segment,
         selectedIds = selection,
         onSegment = {
@@ -130,6 +138,7 @@ internal fun LibraryRoute(
         onManageGroups = { navigator.push(GroupsManageKey) },
         onExportGroup = { navigator.push(ExportKey(it)) },
         onExportSubscriptions = { navigator.push(ExportKey(null)) },
+        onImportSubscriptions = { navigator.push(ImportFileKey) },
         onOpenGroup = { id ->
             scope.launch {
                 if (viewModel.selectGroup(id)) {

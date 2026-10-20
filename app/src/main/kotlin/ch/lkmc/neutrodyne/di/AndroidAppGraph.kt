@@ -13,19 +13,35 @@ import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
+import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
+import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
+import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.impl.DownloadComponentsInjector
+import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.work.MetroWorkerFactory
 import ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -35,7 +51,7 @@ import kotlinx.coroutines.CoroutineScope
  * (D73): `:ytx` builds [YtxGraph], `:acra` builds nothing.
  */
 @DependencyGraph(AppScope::class, bindingContainers = [YouTubeBindingsModule::class])
-interface AndroidAppGraph {
+interface AndroidAppGraph : DownloadComponentsInjector {
     val application: Application
 
     @ApplicationScope
@@ -43,12 +59,34 @@ interface AndroidAppGraph {
 
     val initializers: Set<AppInitializer>
 
+    val playbackController: PlaybackController
+    val playbackStateSource: PlaybackStateSource
+    val playbackMaintenance: PlaybackMaintenance
+    val localMediaIndex: LocalMediaIndex
+    val youtubeEngine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+    val youtubeCapabilities: YouTubeCapabilitiesSource
+    val youtubeStreamResolver: YouTubeStreamResolver
+
+    /** Resolve database-backed playback ports only after the database open gate. */
+    val queueRepository: Provider<QueueRepository>
+    val playContextResolver: Provider<PlayContextResolver>
+    val playSessionStore: Provider<PlaySessionStore>
+    val positionStore: Provider<PositionStore>
+    val playbackMediaLookup: Provider<PlaybackMediaLookup>
+    val chapterRepository: Provider<ChapterRepository>
+
+    val downloadController: Provider<ch.lkmc.neutrodyne.download.api.DownloadController>
+
     val workerFactory: WorkerFactory
 
     val buildInfo: BuildInfo
 
     /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
     val settingsRepository: SettingsRepository
+
+    /** Discovery bindings remain safe to resolve before the database startup gate. */
+    val searchRepository: SearchRepository
+    val autodiscovery: Autodiscovery
 
     val groupChannelSync: GroupChannelSync
 

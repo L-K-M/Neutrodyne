@@ -6,6 +6,8 @@
     <!-- Settings home rows (the M0a subset of 08 Settings). -->
     <string name="settings_appearance">Appearance</string>
     <string name="settings_appearance_summary">Theme, dynamic colour and contrast</string>
+    <string name="settings_backup">Backup</string>
+    <string name="settings_backup_summary">Export subscriptions, back up or restore your library</string>
     <string name="settings_about">About</string>
     <string name="settings_about_summary">Version and build</string>
     <string name="settings_licences">Licences</string>
@@ -43,6 +45,38 @@
         <item quantity="one">%1$d library</item>
         <item quantity="other">%1$d libraries</item>
     </plurals>
+    <!-- Settings › Playback (the M4 rows of 06 Settings; 08 Settings screen structure). -->
+    <string name="settings_playback">Playback</string>
+    <string name="settings_playback_summary_on">%1$s×, skip silence on</string>
+    <string name="settings_playback_summary_off">%1$s×, skip silence off</string>
+    <string name="playback_default_speed">Default speed</string>
+    <string name="playback_speed_value">%1$s×</string>
+    <string name="playback_skip_silence">Skip silence</string>
+    <string name="playback_speed_presets">Speed presets</string>
+    <string name="playback_presets_label">Speeds, separated by commas</string>
+    <string name="playback_presets_invalid">Enter 2–8 speeds from 0.5 to 3.0 in steps of 0.05</string>
+    <string name="playback_skip_back">Skip back</string>
+    <string name="playback_skip_forward">Skip forward</string>
+    <plurals name="playback_seconds">
+        <item quantity="one">%1$d second</item>
+        <item quantity="other">%1$d seconds</item>
+    </plurals>
+    <string name="playback_pause_for_navigation">Pause for navigation prompts</string>
+    <string name="playback_stream_on_metered">Streaming on mobile data</string>
+    <string name="playback_metered_allow">Always</string>
+    <string name="playback_metered_ask">Ask every time</string>
+    <string name="playback_metered_never">Never</string>
+    <string name="playback_storage">Storage</string>
+    <string name="playback_stream_cache">Streaming cache size</string>
+    <string name="playback_cache_mb">%1$d MB</string>
+    <string name="playback_cache_used">%1$s MB used</string>
+    <string name="playback_clear_cache">Clear streaming cache</string>
+    <string name="playback_clear_cache_confirm">Delete the audio Neutrodyne cached while streaming? Downloads and the episode that is playing are not affected.</string>
+    <string name="playback_clear">Clear</string>
+    <string name="playback_cache_cleared">Streaming cache cleared</string>
+    <string name="playback_cache_read_failed">Couldn’t read the cache usage</string>
+    <string name="playback_cache_clear_failed">Couldn’t clear the streaming cache</string>
+
     <string name="settings_save_failed">Couldn’t save the setting</string>
     <string name="appearance_gestures">Gestures</string>
     <string name="appearance_feeds_row_swipe">Swipe episodes in Feeds</string>
@@ -50,4 +84,8 @@
     <string name="swipe_left">Swipe left</string>
     <string name="swipe_mark_played">Mark played / unplayed</string>
     <string name="swipe_none">None</string>
+    <string name="playback_hardware_buttons">Hardware next and previous</string>
+    <string name="playback_hardware_episode">Next and previous episode</string>
+    <string name="playback_hardware_skip">Skip forward and back</string>
+    <string name="playback_smart_resume">Smart resume</string>
 </resources>

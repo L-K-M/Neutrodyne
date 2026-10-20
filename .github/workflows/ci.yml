@@ -96,10 +96,17 @@ jobs:
         run: scripts/ci/check-frozen-schemas.sh
       # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
       # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
+      - name: Compile the opt-in system-test fixture driver
+        run: ./gradlew :app:compileBenchmarkReleaseKotlin -Pneutrodyne.systemTests=true
       - name: CI script fixture tests
         run: |
           scripts/ci/tests/install-android-sdk.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
+          python3 scripts/ci/tests/assert-playback-tests.test.py
+          python3 scripts/ci/tests/assert-download-tests.test.py
+          python3 scripts/ci/tests/assert-discovery-tests.test.py
+          python3 scripts/ci/tests/playback-reboot.test.py
+          python3 scripts/ci/tests/assert-system-tests.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
 
   unit:
@@ -130,7 +137,26 @@ jobs:
       # :youtube:ytdlp:shimTest :youtube:ytdlp-desktop:shimTestStdio
       # -Proborazzi.test.verify=true --continue
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
-        run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
+        run: >-
+          ./gradlew allTests test mutationTest
+          :desktopApp:test :app:testDebugUnitTest :core:data:testAndroidHostTest
+          :feature:discover:testAndroidHostTest :feature:podcast:testAndroidHostTest
+          -Proborazzi.test.verify=true --continue
+      - name: Require executed M7 discovery journeys and Android host replay
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci/assert-discovery-tests.py .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: discovery-host-results
+          path: |
+            desktopApp/build/test-results/test/
+            app/build/test-results/testDebugUnitTest/
+            feeds/build/test-results/desktopTest/
+            core/data/build/test-results/desktopTest/
+            core/data/build/test-results/testAndroidHostTest/
+            feature/discover/build/test-results/
+            feature/podcast/build/test-results/
       - name: Room schema drift
         run: test -z "$(git status --porcelain -- core/database/schemas)" || { echo "::error::Room schema changed without a committed version"; git status --porcelain -- core/database/schemas; exit 1; }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -164,7 +190,7 @@ jobs:
       # the runtime.lock/jlink setup that lands with the desktop package (it
       # fails at createRuntimeImage today).
       - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar -Pneutrodyne.abiSplits=true
+        run: ./gradlew assembleRelease assembleDebug :benchmark:assembleBenchmarkRelease :sync:server:fatJar -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
@@ -227,6 +253,11 @@ jobs:
       - name: GMD ci group (debug)
         timeout-minutes: 45
         run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest ciGroupAndroidDeviceTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+      - name: Require M7 discovery on both CI devices
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api36
+      - name: Require M4 and M5 playback cases on both CI devices
+        run: python3 scripts/ci/assert-playback-tests.py ci app/build/outputs/androidTest-results --device api26 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # Always upload, not only on failure: instrumented-device proofs on reviewable PRs are
         # verified from the per-device result XML, which only exists if success uploads too.

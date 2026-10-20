@@ -35,6 +35,7 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -48,6 +49,7 @@ import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.Dispatchers
 import okio.FileSystem
 import java.util.UUID
@@ -86,6 +88,9 @@ internal fun newRefresher(
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
     notifier: NewEpisodeNotifier = NewEpisodeNotifier(db, effectiveSettings, FakeNewEpisodePoster()),
+    youTubeMonitor: ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeFeedOutageMonitor(),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -111,6 +116,7 @@ internal fun newRefresher(
         secrets,
         coordinator,
         notifier,
+        youTubeMonitor,
     )
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */
@@ -358,4 +364,16 @@ private fun newFeedMoves(
     db: NeutrodyneDatabase,
     clock: Clock,
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
-) = FeedMoveCommitter(db, PodcastMerger(db, coordinator, clock), clock)
+) = FeedMoveCommitter(
+    db,
+    PodcastMerger(
+        db,
+        coordinator,
+        clock,
+        downloads =
+            Provider {
+                FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+            },
+    ),
+    clock,
+)

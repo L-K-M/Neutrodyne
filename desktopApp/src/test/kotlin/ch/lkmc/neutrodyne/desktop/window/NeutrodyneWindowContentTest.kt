@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.navigation3.runtime.NavKey
@@ -188,7 +189,11 @@ class NeutrodyneWindowContentTest {
             setWindowContent()
 
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences")
+                .onFirst()
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
 
             // The desktop source loads the generated aboutlibraries.json off the classpath. The
             // list is lazy and the OpenJDK entry sits in "Bundled components" at its end, so the

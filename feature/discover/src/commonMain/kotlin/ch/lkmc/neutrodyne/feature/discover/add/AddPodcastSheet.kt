@@ -56,6 +56,7 @@ import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
@@ -75,6 +76,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_field_label
 import ch.lkmc.neutrodyne.core.ui.resources.add_helper
 import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
 import ch.lkmc.neutrodyne.core.ui.resources.add_looking_up
+import ch.lkmc.neutrodyne.core.ui.resources.add_lookup_once
 import ch.lkmc.neutrodyne.core.ui.resources.add_might_be_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.add_open
 import ch.lkmc.neutrodyne.core.ui.resources.add_paste
@@ -82,10 +84,25 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_private
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribe
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribing
 import ch.lkmc.neutrodyne.core.ui.resources.add_title
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_search_for
 import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
 import ch.lkmc.neutrodyne.core.ui.resources.membership_create
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name
 import ch.lkmc.neutrodyne.core.ui.resources.membership_new
+import ch.lkmc.neutrodyne.core.ui.resources.yt_edit_input
+import ch.lkmc.neutrodyne.core.ui.resources.yt_long_form_note
+import ch.lkmc.neutrodyne.core.ui.resources.yt_network_error
+import ch.lkmc.neutrodyne.core.ui.resources.yt_not_found
+import ch.lkmc.neutrodyne.core.ui.resources.yt_page_error
+import ch.lkmc.neutrodyne.core.ui.resources.yt_playlist_unsupported
+import ch.lkmc.neutrodyne.core.ui.resources.yt_rate_limited
+import ch.lkmc.neutrodyne.core.ui.resources.yt_rss_offer
+import ch.lkmc.neutrodyne.core.ui.resources.yt_subscribe_owner
+import ch.lkmc.neutrodyne.core.ui.resources.yt_use_podcast
+import ch.lkmc.neutrodyne.core.ui.resources.yt_variants_note
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.FailReason
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -105,8 +122,12 @@ internal fun AddPodcastSheet(
     initialInput: String?,
     state: AddPodcastUiState,
     onResolve: (String) -> Unit,
+    onUsePodcast: () -> Unit = {},
+    onSubscribeOwner: () -> Unit = {},
     onCredentials: (BasicCredentials) -> Unit,
     onCancelResolve: () -> Unit,
+    onSearch: (String) -> Unit = {},
+    onLookupOnce: () -> Unit = {},
     onInputChange: (String) -> Unit,
     onCandidate: (String) -> Unit,
     onSubscribe: (Set<Long>) -> Unit,
@@ -142,15 +163,20 @@ internal fun AddPodcastSheet(
 
     val step = state.step
     val inputStep = step as? AddSheetStep.Input
-    val alreadyId = alreadySubscribedId(step)
+    val channel = step as? AddSheetStep.Channel
+    val subscribing = (step as? AddSheetStep.Preview)?.subscribing == true || channel?.subscribing == true
+    val alreadyId = channel?.alreadySubscribedId ?: alreadySubscribedId(step)
     // The primary action resolves the field until a subscribable preview stands, then subscribes
     // (08: "Enter runs Subscribe when it is enabled"). NoMedia previews are not subscribable.
     val canSubscribe =
-        step is AddSheetStep.Preview &&
+        (step is AddSheetStep.Preview || channel != null) &&
             !state.creatingGroup &&
-            !step.subscribing &&
+            !subscribing &&
             alreadyId == null &&
-            (step.preview.emptyFeed || step.preview.episodeCount > 0)
+            (
+                channel != null ||
+                    (step is AddSheetStep.Preview && (step.preview.emptyFeed || step.preview.episodeCount > 0))
+            )
 
     // Enter and the bottom button share this rule (08: "Enter runs Subscribe when it is
     // enabled"): a running lookup or subscribe may not be re-submitted, and while `Choose`
@@ -160,7 +186,7 @@ internal fun AddPodcastSheet(
             !state.creatingGroup &&
             step !is AddSheetStep.Resolving &&
             step !is AddSheetStep.Choosing &&
-            (step as? AddSheetStep.Preview)?.subscribing != true
+            !subscribing && step !is AddSheetStep.ChannelFailure
 
     // Subscribe's single submit: preview → subscribe, auth fields → credentialed resolve,
     // otherwise resolve the field's input. Enter, the button and a failed state's Retry share it.
@@ -220,6 +246,15 @@ internal fun AddPodcastSheet(
 
         when (step) {
             is AddSheetStep.Input -> {
+                if (step.lookupRequired != null) {
+                    NdTextButton(stringResource(Res.string.add_lookup_once), onLookupOnce)
+                }
+                if (step.searchQuery != null) {
+                    NdTextButton(
+                        stringResource(Res.string.discovery_search_for, step.searchQuery),
+                        { onSearch(step.searchQuery) },
+                    )
+                }
                 if (step.auth) {
                     AuthFields(
                         username = username,
@@ -274,43 +309,65 @@ internal fun AddPodcastSheet(
                 }
             }
 
+            is AddSheetStep.ChannelFailure -> {
+                ChannelFailure(step.result, {
+                    val owner = (step.result as? ChannelResolution.PlaylistUnsupported)?.ownerChannelId
+                    if (owner != null) input = YouTubeFeedUrls.channelPage(owner)
+                    onSubscribeOwner()
+                }, onEdit = {
+                    onCancelResolve()
+                    focusRequester.requestFocus()
+                }) {
+                    onResolve(input)
+                }
+            }
+
+            is AddSheetStep.Channel -> {
+                ChannelCard(step) {
+                    step.alternative?.let { input = it.feedUrl }
+                    onUsePodcast()
+                }
+            }
+
             is AddSheetStep.Preview -> {
                 PreviewCard(step)
-                Text(stringResource(Res.string.membership_add_to))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.groups.forEach { group ->
-                        NdFilterChip(
-                            selected = group.id in chosenGroups,
-                            label = group.name,
-                            onClick = {
-                                chosenGroups =
-                                    if (group.id in chosenGroups) chosenGroups - group.id else chosenGroups + group.id
-                            },
-                            enabled = !step.subscribing,
-                        )
-                    }
-                    NdAssistChip(
-                        label = stringResource(Res.string.membership_new),
-                        onClick = { newGroupName = "" },
-                        enabled = !step.subscribing && !state.creatingGroup,
+            }
+        }
+        if (step is AddSheetStep.Preview || channel != null) {
+            Text(stringResource(Res.string.membership_add_to))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.groups.forEach { group ->
+                    NdFilterChip(
+                        selected = group.id in chosenGroups,
+                        label = group.name,
+                        onClick = {
+                            chosenGroups =
+                                if (group.id in chosenGroups) chosenGroups - group.id else chosenGroups + group.id
+                        },
+                        enabled = !subscribing,
                     )
                 }
-                newGroupName?.let { name ->
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { newGroupName = it },
-                        label = { Text(stringResource(Res.string.membership_name)) },
-                        singleLine = true,
-                        isError = state.groupError != null,
-                        supportingText = state.groupError?.let { { Text(it.asString()) } },
-                        enabled = !state.creatingGroup && !step.subscribing,
-                    )
-                    NdTextButton(
-                        label = stringResource(Res.string.membership_create),
-                        onClick = { onCreateGroup(name) },
-                        enabled = !state.creatingGroup && !step.subscribing,
-                    )
-                }
+                NdAssistChip(
+                    label = stringResource(Res.string.membership_new),
+                    onClick = { newGroupName = "" },
+                    enabled = !subscribing && !state.creatingGroup,
+                )
+            }
+            newGroupName?.let { name ->
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { newGroupName = it },
+                    label = { Text(stringResource(Res.string.membership_name)) },
+                    singleLine = true,
+                    isError = state.groupError != null,
+                    supportingText = state.groupError?.let { { Text(it.asString()) } },
+                    enabled = !state.creatingGroup && !subscribing,
+                )
+                NdTextButton(
+                    label = stringResource(Res.string.membership_create),
+                    onClick = { onCreateGroup(name) },
+                    enabled = !state.creatingGroup && !subscribing,
+                )
             }
         }
 
@@ -339,6 +396,93 @@ internal fun AddPodcastSheet(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ChannelCard(
+    step: AddSheetStep.Channel,
+    onUsePodcast: () -> Unit,
+) {
+    val resolved = step.resolution
+    Column(Modifier.fillMaxWidth().padding(top = ROW_GAP)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val title = resolved.title ?: resolved.channelId
+            CoverArt(
+                ref = resolved.avatarUrl?.let { ArtworkRef(it, it, 0) },
+                monogram = rememberMonogram(title),
+                title = title,
+                modifier = Modifier.size(PREVIEW_COVER),
+            )
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = COVER_GAP))
+        }
+        Text(
+            stringResource(
+                if (step.variants ==
+                    YouTubeVariantBits.LONG_FORM
+                ) {
+                    Res.string.yt_long_form_note
+                } else {
+                    Res.string.yt_variants_note
+                },
+            ),
+        )
+        if (step.alreadySubscribedId != null) Text(stringResource(Res.string.add_already_subscribed))
+        step.alternative?.let { hit ->
+            Text(stringResource(Res.string.yt_rss_offer))
+            Text(hit.title)
+            NdTextButton(
+                label = stringResource(Res.string.yt_use_podcast),
+                enabled = !step.subscribing,
+                onClick = onUsePodcast,
+            )
+        }
+        step.subscribeError?.let { Text(it.asString(), color = MaterialTheme.colorScheme.error) }
+        if (step.subscribing) Text(stringResource(Res.string.add_subscribing))
+    }
+}
+
+@Composable
+private fun ChannelFailure(
+    result: ChannelResolution,
+    onOwner: () -> Unit,
+    onEdit: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    val message =
+        when (result) {
+            ChannelResolution.NotFound -> {
+                Res.string.yt_not_found
+            }
+
+            is ChannelResolution.PlaylistUnsupported -> {
+                Res.string.yt_playlist_unsupported
+            }
+
+            is ChannelResolution.Failed -> {
+                when (result.reason) {
+                    FailReason.NETWORK -> Res.string.yt_network_error
+                    FailReason.RATE_LIMITED -> Res.string.yt_rate_limited
+                    else -> Res.string.yt_page_error
+                }
+            }
+
+            else -> {
+                Res.string.yt_page_error
+            }
+        }
+    Text(stringResource(message), color = MaterialTheme.colorScheme.error)
+    val ownerId = (result as? ChannelResolution.PlaylistUnsupported)?.ownerChannelId
+    if (result is ChannelResolution.PlaylistUnsupported && ownerId != null) {
+        NdTextButton(
+            label = stringResource(Res.string.yt_subscribe_owner, result.ownerTitle ?: ownerId),
+            onClick = onOwner,
+        )
+    }
+    if (result is ChannelResolution.Failed && result.retryable) {
+        NdTextButton(label = stringResource(Res.string.action_retry), onClick = onRetry)
+    } else {
+        NdTextButton(label = stringResource(Res.string.yt_edit_input), onClick = onEdit)
     }
 }
 

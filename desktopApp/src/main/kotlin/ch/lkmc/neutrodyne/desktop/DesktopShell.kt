@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.window.application
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.DesktopNotification
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogLevel
+import ch.lkmc.neutrodyne.core.common.NotificationKind
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
@@ -17,6 +21,8 @@ import ch.lkmc.neutrodyne.desktop.log.ConsoleSink
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.log.RollingFileSink
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
+import ch.lkmc.neutrodyne.desktop.resources.Res
+import ch.lkmc.neutrodyne.desktop.resources.desktop_cannot_open_file
 import ch.lkmc.neutrodyne.desktop.shell.HandoffOutcome
 import ch.lkmc.neutrodyne.desktop.shell.HandoffRequest
 import ch.lkmc.neutrodyne.desktop.shell.InstanceHandshake
@@ -37,6 +43,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getString
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -49,8 +56,8 @@ import kotlin.time.Duration.Companion.seconds
  * files, session → the graph and initializer bands → the window (the AWT event thread) → the
  * clean shutdown when it closes. The owner serves hand-offs for the whole process life; SIGTERM
  * runs the same [ShutdownCoordinator] through its shutdown hook. Input routing through
- * `DesktopOpenHandler`/`IntentRouter`, the Windows AppUserModelID call and the `desktop.language`
- * locale of step 4 arrive with their milestones (11's implementation notes, 2026-10-06).
+ * `DesktopOpenHandler`/`IntentRouter` waits for the ready root's first frame. The Windows
+ * AppUserModelID call and the `desktop.language` locale remain in their desktop milestones.
  */
 internal object DesktopShell {
     private const val TAG = "Main"
@@ -180,6 +187,26 @@ internal object DesktopShell {
 
         // Step 5: the graph, the initializer bands and the hand-off server.
         val graph = createDesktopGraph(dirs, buildInfo, crashReporter)
+        val menuActions = DesktopMenuActions()
+        val openHandler =
+            DesktopOpenHandler(
+                scope = graph.appScope,
+                imports = { graph.importRepository },
+                dispatch = { menuActions.applyRoute(it) },
+                rejected = {
+                    graph.bannerNotifier.post(
+                        DesktopNotification(
+                            id = "desktop-open-rejected",
+                            kind = NotificationKind.IMPORT_BACKUP,
+                            title = getString(Res.string.desktop_cannot_open_file),
+                            route = null,
+                            body = "",
+                        ),
+                    )
+                },
+            )
+        openHandler.submit(inputs)
+        val openEvents = installDesktopOpenEvents(openHandler)
         graph.appScope.launch { runInitializers(graph.initializers) }
 
         // 08 Coil ImageLoader: every AsyncImage shares the artwork-aware singleton (D58), so a
@@ -195,7 +222,7 @@ internal object DesktopShell {
         val activator = WindowActivator()
         val serveJob =
             handshakeScope.launch {
-                handshake.serve { request -> onHandoff(request, activator) }
+                handshake.serve { request -> onHandoff(request, activator, openHandler) }
             }
         if (inputs.isNotEmpty()) {
             Log.i(TAG) { "${inputs.size} first-launch input(s) queued for the window" }
@@ -235,12 +262,22 @@ internal object DesktopShell {
         // closes — the M0b close rule: nothing is busy, so a close request quits — and the
         // clean shutdown runs before main returns. The content is gated on the database open
         // (band 100 above) exactly like Android's StartupGate.
-        val menuActions = DesktopMenuActions()
         // 11 Notifications' fallback: banner taps route through the root's navigator.
         graph.bannerNotifier.routeDispatch = menuActions::applyRoute
         application {
+            val rowArt =
+                graph.settingsRepository
+                    .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
+                    .collectAsState(initial = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
             NeutrodyneWindow(
+                rowArt = rowArt.value,
                 installers = graph.entryInstallers,
+                failedDownloads =
+                    kotlinx.coroutines.flow.flow {
+                        graph.databaseOpener.awaitOpen()
+                        graph.downloadController().observeFailedCount().collect { emit(it) }
+                    },
+                openHandler = openHandler,
                 menuActions = menuActions,
                 banners = graph.bannerNotifier,
                 activator = activator,
@@ -252,6 +289,7 @@ internal object DesktopShell {
                 onQuitRequest = ::exitApplication,
             )
         }
+        openEvents.close()
         coordinator.shutdown(REASON_WINDOW_CLOSED)
         return EXIT_OK
     }
@@ -293,14 +331,17 @@ internal object DesktopShell {
 
     /**
      * The owner's hand-off application (11 Hand-off row): the inputs go to `DesktopOpenHandler`
-     * and `IntentRouter` with their milestone — M0b records them in the log; `activate` shows
-     * the window (de-iconified, `toFront()`).
+     * and `IntentRouter` in the same queue as first-launch arguments and drops; `activate`
+     * shows the window (de-iconified, `toFront()`).
      */
     private fun onHandoff(
         request: HandoffRequest,
         activator: WindowActivator,
+        openHandler: DesktopOpenHandler,
     ) {
-        Log.i(TAG) { "hand-off: ${request.args.size} input(s) from ${request.cwd}, queued for the window" }
+        Log.i(TAG) { "hand-off: ${request.args.size} input(s) queued for the window" }
+        val cwd = runCatching { Path.of(request.cwd) }.getOrNull()
+        if (cwd == null) openHandler.submit(listOf("")) else openHandler.submit(request.args, cwd)
         if (request.activate) activator.bringToFront()
     }
 

@@ -10,9 +10,14 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.DeletedGroupToken
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.PodcastRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SuggestedGroups
+import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -54,7 +59,11 @@ internal enum class GroupMove { UP, DOWN, TOP }
 @Suppress("TooManyFunctions") // One screen's input handlers share its drag and write state.
 internal class GroupsManageViewModel(
     private val repository: GroupRepository,
+    podcasts: PodcastRepository,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
+    val suggestedGroups = SuggestedGroups(podcasts, repository, settings, viewModelScope)
+
     private val state = MutableStateFlow(GroupsManageUiState())
     val uiState = state.asStateFlow()
     private val messages = UserMessages()
@@ -66,6 +75,19 @@ internal class GroupsManageViewModel(
     init {
         viewModelScope.launch { messages.flow.collect { list -> state.update { it.copy(messages = list) } } }
         retry()
+    }
+
+    suspend fun openSuggested(uuid: String): Boolean {
+        val result =
+            suspendRunCatching {
+                settings.set(
+                    AppearanceSettingKeys.FEEDS_SELECTED_SOURCE,
+                    FeedSourceRef.Group(uuid).encode(),
+                )
+            }.getOrNull()
+        if (result is Outcome.Success) return true
+        messages.post(UiText.Res(Res.string.write_failed))
+        return false
     }
 
     fun retry() {

@@ -1,0 +1,13 @@
+{
+  "method": "tab_open",
+  "payload": {
+    "ctx": {
+      "hl": "en",
+      "gl": "US",
+      "ua": "Neutrodyne synthetic test",
+      "ipFamily": "V4"
+    },
+    "channelId": "UCaaaaaaaaaaaaaaaaaaaaaA",
+    "tab": "videos"
+  }
+}

@@ -42,11 +42,13 @@ import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -94,6 +96,7 @@ internal class FeedRefresher(
     private val secrets: SecretStore,
     private val coordinator: CredentialCommitCoordinator,
     private val notifier: NewEpisodeNotifier,
+    private val youTubeMonitor: YouTubeFeedOutageMonitor,
 ) {
     // Lock order, outermost first: the run [mutex] → [commitMutex] →
     // CredentialCommitCoordinator → the Room writer ([batcherLock] is a leaf guard).
@@ -402,7 +405,19 @@ internal class FeedRefresher(
                                             if (request.pagesOnly) {
                                                 runPagingSession(feed, adapter, request, hostPermits)
                                             } else {
-                                                refreshOne(feed, adapter, request, hostPermits) { slots[index] = it }
+                                                withContext(
+                                                    PostIngestContext(
+                                                        request.deadlineElapsedMs,
+                                                        request.origin,
+                                                    ),
+                                                ) {
+                                                    refreshOne(
+                                                        feed,
+                                                        adapter,
+                                                        request,
+                                                        hostPermits,
+                                                    ) { slots[index] = it }
+                                                }
                                             }
                                     }
                                 }
@@ -429,6 +444,35 @@ internal class FeedRefresher(
             bodyFailure = e
             throw e
         } finally {
+            // Controls need the caller's cancellation and the run's remaining deadline. Only the
+            // monitor's in-memory counter reset survives cancellation; no network runs below.
+            var healthCancellation: CancellationException? = null
+            try {
+                val healthBudget =
+                    if (request.deadlineElapsedMs == RefreshRequest.NO_DEADLINE) {
+                        HEALTH_FINALIZATION_MS
+                    } else {
+                        minOf(
+                            HEALTH_FINALIZATION_MS,
+                            (request.deadlineElapsedMs - clock.elapsedRealtime()).coerceAtLeast(1),
+                        )
+                    }
+                withTimeoutOrNull(healthBudget) {
+                    var total = 0
+                    try {
+                        total = db.podcastDao().youtubeChannelIds().size
+                    } finally {
+                        // Enter the monitor even when the count read is cancelled, so it resets.
+                        youTubeMonitor.onRunFinished(total, clock.now())
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) {
+                    healthCancellation = error
+                } else {
+                    Log.w(TAG, error) { "YouTube run finalization failed" }
+                }
+            }
             // Finalisation survives cancellation (03 Engine run): the buffered fetch-state rows
             // flush, and the finished slots still report their committed outcomes so the summary
             // and status reflect what actually landed.
@@ -495,6 +539,7 @@ internal class FeedRefresher(
                     primary.addSuppressed(flushFailure)
                 }
             }
+            if (bodyFailure == null) healthCancellation?.let { throw it }
         }
         return report ?: error("report unset")
     }
@@ -714,7 +759,10 @@ internal class FeedRefresher(
                     ),
                 )
                 // 03 Source adapters: `afterIngest` runs after Unchanged too, with empty lists.
-                callAfterIngest(refreshed, adapter, emptyList(), emptyList())
+                val promoted = callAfterIngest(refreshed, adapter, emptyList(), emptyList())
+                if (refreshed.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                    emitAnnouncement(refreshed.id, promoted, false)
+                }
                 move?.mergedInto?.let { FeedOutcome.Merged(it) } ?: FeedOutcome.Unchanged
             }
 
@@ -808,7 +856,20 @@ internal class FeedRefresher(
         // The ingest committed: a cancellation in these reads must not skip its announcement.
         target =
             withContext(NonCancellable) {
-                (db.podcastDao().dueFeedById(target.id) ?: target).also { rememberWarnings(it.id, ingest.warnings) }
+                (db.podcastDao().dueFeedById(target.id) ?: target).also { current ->
+                    rememberWarnings(current.id, ingest.warnings)
+                    if (ingest.emptyKind == null && !ingest.vanished) {
+                        val stored = db.podcastDao().byId(current.id)
+                        val base = stored?.nextRefreshAt
+                        if (base != null) {
+                            val next = adapter.nextRefreshAt(current, result, base)
+                            if (next != base) {
+                                // Only the schedule changes. A manual force mark racing the ingest wins.
+                                db.podcastDao().rebaseNextRefreshAt(current.id, next, stored?.lastAttemptAt ?: now)
+                            }
+                        }
+                    }
+                }
             }
         // `vanished` means the podcast row was deleted mid-run — there is no row left to write a
         // fetch state onto, and the row being gone is itself the terminal state.
@@ -1111,7 +1172,10 @@ internal class FeedRefresher(
             }
 
             is AdapterResult.Unchanged -> {
-                callAfterIngest(session.feed, session.adapter, emptyList(), emptyList())
+                val promoted = callAfterIngest(session.feed, session.adapter, emptyList(), emptyList())
+                if (session.feed.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                    emitAnnouncement(session.feed.id, promoted, false)
+                }
                 session.lastOutcome = FeedOutcome.Unchanged
                 false
             }
@@ -1237,49 +1301,89 @@ internal class FeedRefresher(
         ingest: IngestResult,
         initialFetch: Boolean,
     ) {
-        val announceIds =
-            withContext(NonCancellable) {
-                if (ingest.inserted.isNotEmpty() || ingest.rekeyed > 0) {
-                    try {
-                        syncHook.afterIngest(feed.id)
-                    } catch (e: Throwable) {
-                        // A failing hook is logged, never propagated (03 step 11).
-                        Log.w(TAG, e) { "sync hook failed for podcast ${feed.id}" }
-                    }
-                }
-                callAfterIngest(feed, adapter, ingest.inserted, ingest.newIds)
-            }
-        val emitIds = if (initialFetch) ingest.inserted else announceIds
-        if (emitIds.isEmpty()) return
-        // Emit and its bookkeeping share one non-cancellable section: a deadline landing between
-        // them would fire the event while dropping the announcements record.
         withContext(NonCancellable) {
-            eventBus.emit(feed.id, emitIds, initialFetch)
-            announcementsLock.withLock { announcements += NewEpisodes(feed.id, emitIds, initialFetch) }
+            if (ingest.inserted.isNotEmpty() || ingest.rekeyed > 0) {
+                try {
+                    syncHook.afterIngest(feed.id)
+                } catch (e: Throwable) {
+                    Log.w(TAG, e) { "sync hook failed for podcast ${feed.id}" }
+                }
+            }
+        }
+        val announceIds = callAfterIngest(feed, adapter, ingest.inserted, ingest.newIds)
+        emitAnnouncement(feed.id, if (initialFetch) ingest.inserted else announceIds, initialFetch)
+    }
+
+    private suspend fun emitAnnouncement(
+        id: Long,
+        ids: List<Long>,
+        initial: Boolean,
+    ) {
+        if (ids.isEmpty()) return
+        withContext(NonCancellable) {
+            eventBus.emit(id, ids, initial)
+            announcementsLock.withLock { announcements += NewEpisodes(id, ids, initial) }
         }
     }
 
-    /**
-     * `adapter.afterIngest` guarded: a throwing adapter falls back to `newIds`, and "a cancelled
-     * `afterIngest` emits `newIds`" (03 step 11) — inside `NonCancellable` the run's own deadline
-     * cannot throw here, so a `CancellationException` is the adapter's internal deadline.
-     */
+    /** Enrichment inherits cancellation. Only the committed event/filter fallback is shielded. */
     private suspend fun callAfterIngest(
         feed: DueFeed,
         adapter: SourceAdapter,
         inserted: List<Long>,
         newIds: List<Long>,
-    ): List<Long> =
-        withContext(NonCancellable) {
+    ): List<Long> {
+        val fallback =
+            withContext(NonCancellable) {
+                if (feed.sourceType != SourceType.YOUTUBE_CHANNEL) {
+                    newIds
+                } else {
+                    val pending =
+                        db
+                            .episodeDao()
+                            .youTubeCandidates(feed.id, clock.now())
+                            .filter { it.availability != ch.lkmc.neutrodyne.core.model.Availability.AVAILABLE }
+                            .map { it.id }
+                    (newIds + pending).distinct()
+                }
+            }
+        val context = currentCoroutineContext()[PostIngestContext]
+        val remaining =
+            context?.deadline?.let {
+                if (it ==
+                    Long.MAX_VALUE
+                ) {
+                    Long.MAX_VALUE
+                } else {
+                    (it - clock.elapsedRealtime()).coerceAtLeast(0)
+                }
+            }
+                ?: Long.MAX_VALUE
+        val ids =
             try {
-                adapter.afterIngest(feed.id, inserted, newIds)
+                if (feed.sourceType != SourceType.YOUTUBE_CHANNEL) {
+                    withContext(NonCancellable) { adapter.afterIngest(feed.id, inserted, newIds) }
+                } else if (remaining == Long.MAX_VALUE) {
+                    adapter.afterIngest(feed.id, inserted, newIds)
+                } else {
+                    withTimeoutOrNull(remaining) { adapter.afterIngest(feed.id, inserted, newIds) } ?: fallback
+                }
             } catch (e: CancellationException) {
-                newIds
+                fallback
             } catch (e: Throwable) {
                 Log.w(TAG, e) { "afterIngest failed for podcast ${feed.id}" }
-                newIds
+                fallback
+            }
+        return withContext(NonCancellable) {
+            if (feed.sourceType != SourceType.YOUTUBE_CHANNEL) {
+                ids
+            } else if (context?.origin in listOf(RefreshOrigin.IMPORT, RefreshOrigin.RESTORE)) {
+                emptyList()
+            } else {
+                db.episodeDao().youTubeAnnounceable(feed.id, ids)
             }
         }
+    }
 
     // --- Selection, force and fetch-state writes ------------------------------------------------
 
@@ -1506,6 +1610,7 @@ internal class FeedRefresher(
     )
 
     private companion object {
+        const val HEALTH_FINALIZATION_MS = 20_000L
         const val TAG = "FeedRefresher"
 
         /** The fan-out limits of 03 Engine run step 5: ≤ 6 concurrent feeds, ≤ 2 per host. */

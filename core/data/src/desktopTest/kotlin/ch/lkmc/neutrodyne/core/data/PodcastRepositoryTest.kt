@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useWriterConnection
+import app.cash.turbine.test
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
 import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
@@ -24,9 +25,12 @@ import ch.lkmc.neutrodyne.core.model.ChangeOrigin
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import dev.zacsweers.metro.Provider
@@ -74,13 +78,25 @@ class PodcastRepositoryTest {
     private fun repo(
         secrets: SecretStore = FakeSecretStore(),
         fetcherBundle: FetcherBundle? = null,
+        health: ch.lkmc.neutrodyne.youtube.api.YouTubeHealth =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeHealth(),
     ) = PodcastRepositoryImpl(
         db = db,
         refresher = newRefresher(db, emptyMap(), clock, settings),
         scheduler = scheduler,
         sanitizer = JsoupShowNotesSanitizer(),
         clock = clock,
-        merger = PodcastMerger(db, coordinator, clock),
+        merger =
+            PodcastMerger(
+                db,
+                coordinator,
+                clock,
+                downloads =
+                    Provider {
+                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                    },
+            ),
         resolver = unusedPreviewResolver,
         secrets = secrets,
         coordinator = coordinator,
@@ -91,7 +107,126 @@ class PodcastRepositoryTest {
                     storagePathsFor(File("build/tmp/m1b-repo").resolve(UUID.randomUUID().toString())),
                     FileSystem.SYSTEM,
                 ),
+        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+        youTubeHealth = health,
     )
+
+    @Test fun globalOutageSuppressesChannelBadgesAndRecoveryRestoresDiagnostics() =
+        runTest {
+            val health =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeHealth()
+            val id =
+                db.podcastDao().insertPodcast(
+                    podcastEntity {
+                        copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            failureCount = 10,
+                            lastSuccessAt = NOW - 8L * 86_400_000,
+                            gone = true,
+                            needsCredentials = true,
+                            lastErrorKind = ch.lkmc.neutrodyne.core.model.FeedErrorKind.HTTP_NOT_FOUND,
+                        )
+                    },
+                )
+            health.state.value =
+                ch.lkmc.neutrodyne.youtube.api
+                    .YouTubeHealthState(feedOutageLevel = 1)
+            val repository = repo(health = health)
+            val tile = repository.observeLibraryTiles(null).first().single()
+            assertFalse(tile.health.gone)
+            assertFalse(tile.health.needsCredentials)
+            assertFalse(tile.health.possiblyDead)
+            assertEquals(0, tile.health.failureCount)
+            assertNull(tile.health.lastErrorKind)
+            assertEquals(
+                0,
+                repository
+                    .observePodcast(id)
+                    .first()
+                    ?.health
+                    ?.failureCount,
+            )
+            health.state.value =
+                ch.lkmc.neutrodyne.youtube.api
+                    .YouTubeHealthState()
+            assertEquals(
+                10,
+                repository
+                    .observePodcast(id)
+                    .first()
+                    ?.health
+                    ?.failureCount,
+            )
+        }
+
+    @Test
+    fun categorySuggestionsUseDistinctNormalizedTopLevels() =
+        runTest {
+            db.podcastDao().insertPodcast(
+                podcastEntity(
+                    feedUrl = "https://one.example/feed",
+                ).copy(categoriesJson = "[[\"Technology\",\"Gadgets\"],[\" technology \"],[\"News\"],[]]"),
+            )
+            db.podcastDao().insertPodcast(
+                podcastEntity(
+                    feedUrl = "https://two.example/feed",
+                ).copy(categoriesJson = "[[\"Technology\"],[\"News\"],[\"Solo\"]]"),
+            )
+            db.podcastDao().insertPodcast(
+                podcastEntity(feedUrl = "https://bad.example/feed").copy(categoriesJson = "broken"),
+            )
+
+            val counts = repo().observeCategoryCounts().first()
+            assertEquals(listOf("News", "Technology"), counts.map { it.category })
+            assertTrue(counts.all { it.podcastIds.size == 2 && it.podcastIds.distinct().size == 2 })
+            db.close()
+        }
+
+    @Test
+    fun categorySuggestionsReactToGroupCreationAndDeletion() =
+        runTest {
+            repeat(2) { index ->
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedUrl = "https://category$index.example/feed")
+                        .copy(categoriesJson = "[[\"Café\"],[\"News\"]]"),
+                )
+            }
+            val repository = repo()
+            repository.observeCategoryCounts().test {
+                assertEquals(listOf("Café", "News"), awaitItem().map { it.category })
+                val id = db.groupDao().insert(groupEntity(name = "CAFÉ", orderKey = "0.5").copy(nameKey = "café"))
+                var names = awaitItem().map { it.category }
+                while ("Café" in names) names = awaitItem().map { it.category }
+                assertEquals(listOf("News"), names)
+                db.groupDao().deleteGroup(id)
+                names = awaitItem().map { it.category }
+                while ("Café" !in names) names = awaitItem().map { it.category }
+                assertEquals(listOf("Café", "News"), names)
+            }
+            db.close()
+        }
+
+    @Test
+    fun categorySuggestionsCapTiesAndRejectInvalidNames() =
+        runTest {
+            val categories = "[[\"Z\"],[\"F\"],[\"C\"],[\"B\"],[\"A\"],[\"D\"],[\"E\"],[\"   \"],[\"${"x".repeat(
+                41,
+            )}\"]]"
+            repeat(2) { index ->
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedUrl = "https://ties$index.example/feed").copy(categoriesJson = categories),
+                )
+            }
+            db.podcastDao().insertPodcast(
+                podcastEntity(feedUrl = "https://third.example/feed")
+                    .copy(categoriesJson = "[[\"Z\"]]"),
+            )
+            val counts = repo().observeCategoryCounts().first()
+            assertEquals(listOf("Z", "A", "B", "C", "D"), counts.map { it.category })
+            assertEquals(3, counts.first().podcastIds.size)
+            db.close()
+        }
 
     @Test
     fun aFeedMoveCarriesTheIdentityFormHost() =
@@ -368,12 +503,25 @@ class PodcastRepositoryTest {
                         scheduler = scheduler,
                         sanitizer = JsoupShowNotesSanitizer(),
                         clock = clock,
-                        merger = PodcastMerger(db, coordinator, clock),
+                        merger =
+                            PodcastMerger(
+                                db,
+                                coordinator,
+                                clock,
+                                downloads =
+                                    Provider {
+                                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                                    },
+                            ),
                         resolver = unusedPreviewResolver,
                         secrets = store,
                         coordinator = coordinator,
                         fetcher = Provider { bundle.fetcher },
                         tempFiles = bundle.tempFiles,
+                        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+                        youTubeHealth =
+                            ch.lkmc.neutrodyne.core.testing
+                                .FakeYouTubeHealth(),
                     )
 
                 val first =

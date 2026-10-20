@@ -8,6 +8,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import okio.Path.Companion.toPath
 
 /**
@@ -15,17 +16,17 @@ import okio.Path.Companion.toPath
  * process with `SingletonImageLoader.setSafe` by `NeutrodyneApplication` and the desktop's main.
  * The network fetcher and memory sizing are platform contributions; the disk cache is
  * `<cache>/coil` at 256 MB on both. Coil ignores `Cache-Control` — freshness is the store's
- * monthly refresh, not HTTP caching. `YouTubeThumbnailInterceptor` joins at M8,
- * `TinyImageInterceptor` at M4.
+ * monthly refresh, not HTTP caching. `YouTubeThumbnailInterceptor` selects video sizes;
+ * `TinyImageInterceptor` rejects tiny cover originals.
  */
 @Inject
 public class NeutrodyneImageLoaderFactory(
     private val network: ImageNetworkComponent,
     private val memory: ImageMemoryPolicy,
-    // Lazy: the store opens the database, which must not be required during `Application.onCreate`
+    // Deferred: the store opens the database, which must not be required during `Application.onCreate`
     // (the start-up gate may not have opened it yet). Coil calls `newImageLoader` on first use,
     // which always happens after the gate (08 Startup).
-    private val store: () -> ArtworkStore,
+    private val store: Provider<ArtworkStore>,
     private val paths: StoragePaths,
 ) : SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader =
@@ -34,6 +35,8 @@ public class NeutrodyneImageLoaderFactory(
             .components {
                 network.install(this)
                 add(ArtworkRefMapper(store()))
+                add(YouTubeThumbnailInterceptor(store()))
+                add(TinyImageInterceptor())
             }.memoryCache { memory.build(context) }
             .apply { memory.configure(this) }
             .diskCache {

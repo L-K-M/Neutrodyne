@@ -46,12 +46,15 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
+import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.MediaFilter
+import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -102,6 +105,39 @@ class PodcastScreenTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test fun pendingChannelFailureShowsErrorAndRetry() =
+        runComposeUiTest {
+            var retried = false
+            val detail =
+                testPodcastDetail(
+                    7,
+                    health = testFeedHealth(failureCount = 1, lastErrorKind = FeedErrorKind.TIMEOUT),
+                ).copy(
+                    sourceType = SourceType.YOUTUBE_CHANNEL,
+                    status = PodcastStatus.PENDING_FIRST_FETCH,
+                )
+            setPodcast(PodcastUiState(detail = detail, loaded = true), onRetryFeed = { retried = true })
+            onNodeWithText("Fetching episodes…").assertDoesNotExist()
+            onAllNodes(hasClickAction() and hasText("Retry")).onFirst().performClick()
+            assertEquals(true, retried)
+        }
+
+    @Test fun emptyChannelOffersSettings() =
+        runComposeUiTest {
+            var opened = false
+            setPodcast(
+                PodcastUiState(
+                    detail =
+                        testPodcastDetail(7).copy(sourceType = SourceType.YOUTUBE_CHANNEL),
+                    loaded = true,
+                ),
+                onOpenSettings = { opened = true },
+            )
+            onNodeWithText("No long-form videos yet.", substring = true).assertIsDisplayed()
+            onNodeWithText("Podcast settings").performClick()
+            assertEquals(true, opened)
+        }
 
     @Test
     fun loadingShowsSpinner() =
@@ -278,7 +314,7 @@ class PodcastScreenTest {
                             health =
                                 testFeedHealth(
                                     failureCount = 2,
-                                    lastErrorKind = ch.lkmc.neutrodyne.core.model.FeedErrorKind.TIMEOUT,
+                                    lastErrorKind = FeedErrorKind.TIMEOUT,
                                 ),
                         ),
                     loaded = true,

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="download_channel">Downloads</string>
+    <string name="download_error_channel">Download errors</string>
+    <string name="download_episode">Downloading “%1$s”</string>
+    <string name="download_bytes">%1$s of %2$s</string>
+    <string name="download_aggregate">%1$d %% · %2$s</string>
+    <string name="download_starting">Starting downloads</string>
+    <string name="download_pause_all">Pause all</string>
+    <string name="download_retry">Retry</string>
+    <string name="download_storage_full">Not enough storage for downloads</string>
+    <string name="download_manage_storage">Manage storage</string>
+    <string name="download_paused">Downloads paused</string>
+    <string name="download_open_to_continue">Open Neutrodyne to continue</string>
+    <plurals name="download_active"><item quantity="one">Downloading %d episode</item><item quantity="other">Downloading %d episodes</item></plurals>
+    <plurals name="download_failed"><item quantity="one">%d download failed</item><item quantity="other">%d downloads failed</item></plurals>
+    <plurals name="download_waiting"><item quantity="one">%d episode is waiting</item><item quantity="other">%d episodes are waiting</item></plurals>
+</resources>

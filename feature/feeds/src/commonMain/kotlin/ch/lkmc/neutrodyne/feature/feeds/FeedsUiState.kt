@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.FeedTab
 import ch.lkmc.neutrodyne.core.ui.FeedDates
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.SwipeConfig
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -37,6 +38,14 @@ public data class FeedsUiState(
     val filters: FeedFilters = FeedFilters(),
     val rowSwipe: Boolean = false,
     val swipe: SwipeConfig? = null,
+    val rowCaps: RowCaps =
+        RowCaps(
+            false,
+            false,
+            false,
+            null,
+            false,
+        ),
     val offline: Boolean = false,
     val refreshing: Boolean = false,
     val hasSubscriptions: Boolean = true,

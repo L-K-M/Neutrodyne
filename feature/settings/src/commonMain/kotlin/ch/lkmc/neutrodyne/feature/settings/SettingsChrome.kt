@@ -10,6 +10,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -43,6 +44,7 @@ internal fun SettingsRow(
     summary: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     ListItem(
         headlineContent = { Text(title) },
@@ -51,10 +53,13 @@ internal fun SettingsRow(
         trailingContent = { Icon(NdIcons.ArrowForwardIos, contentDescription = null) },
         modifier =
             modifier
-                .clickable(onClick = onClick)
-                .semantics { role = Role.Button },
+                .clickable(enabled = enabled, onClick = onClick)
+                .semantics { role = Role.Button }
+                .alpha(if (enabled) 1f else DISABLED_ALPHA),
     )
 }
+
+private const val DISABLED_ALPHA = 0.38f
 
 /**
  * A switch row (08 Settings: `NdSwitchRow` with the current state as subtitle). The whole row is

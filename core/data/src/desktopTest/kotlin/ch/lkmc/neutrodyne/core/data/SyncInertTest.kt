@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportCommitter
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.repo.GroupMerger
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeSubscriptionWriterImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
@@ -30,6 +31,7 @@ import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
@@ -51,6 +53,7 @@ import ch.lkmc.neutrodyne.feeds.opml.ExportGroup
 import ch.lkmc.neutrodyne.feeds.opml.OpmlLayout
 import ch.lkmc.neutrodyne.feeds.opml.OpmlWriter
 import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -150,6 +153,7 @@ class SyncInertTest {
                 channels = channels,
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
+                channelWriter = YouTubeSubscriptionWriterImpl(db, clock, ProtocolOrderKeys),
                 newSyncId = { Uuid.random().toString() },
             )
         val merger =
@@ -164,6 +168,7 @@ class SyncInertTest {
                 channelSync = channels,
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
+                downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
             )
         val runner =
             RestoreRunner(

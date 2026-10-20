@@ -57,6 +57,7 @@ import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
@@ -116,6 +117,32 @@ import kotlin.test.assertTrue
  * and the Android snapshot lane's adoption, controls and progress wiring.
  */
 class BackupRepositoryImplTest {
+    @Test
+    fun retainedFailureKeepsItsSessionWhileAnotherRestoreIsQueued() =
+        runTest {
+            val first = backupSession()
+            assertIs<Outcome.Success<*>>(repository.restore(first, RestoreRequest(RestoreMode.MERGE, emptySet())))
+            val path = checkNotNull(db.importDao().sessionById(first)?.payloadPath)
+            fileSystem.delete(payloads.payloadFile(path))
+            assertIs<RestoreRunResult.Failed>(runner.run(first))
+            assertEquals(ImportState.CANCELLED, db.importDao().sessionById(first)?.state)
+            assertEquals(RestoreProgress.Failed(first, BackupError.Io), repository.observeRestore().first())
+
+            val second = backupSession()
+            assertIs<Outcome.Success<*>>(repository.restore(second, RestoreRequest(RestoreMode.MERGE, emptySet())))
+            val pending = checkNotNull(db.importDao().sessionById(second))
+            assertEquals(ImportState.PREVIEW, pending.state)
+            assertNotNull(ImportOptionsJson.decode(checkNotNull(pending.optionsJson)).restoreRequestedAt)
+            assertEquals(
+                RestoreProgress.Failed(first, BackupError.Io),
+                repository.observeRestore().first(),
+                "A retained failure must still identify the first session while the second is queued",
+            )
+
+            assertIs<RestoreRunResult.Completed>(runner.run(second))
+            assertEquals(RestoreProgress.Finished(second, auto = false), repository.observeRestore().first())
+        }
+
     private val driver = CommitCancellingDriver()
     private val clock = TestClock()
     private val db = TestDb.inMemory(driver = driver, clock = clock)
@@ -174,6 +201,10 @@ class BackupRepositoryImplTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
     private val episodeMerger =
         RestoreEpisodeMerger(

@@ -77,6 +77,9 @@ class LibraryViewModelTest : MainDispatcherTest() {
             groups,
             feeds,
             clock,
+            youTubeHealth =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeHealth(),
         )
 
     private fun TestScope.collect(viewModel: LibraryViewModel) {

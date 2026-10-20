@@ -87,7 +87,17 @@ class CommitCancellationTest {
     @Test
     fun aGroupSettingCancelledAtCommitStillReschedulesAndSweeps() =
         runTest {
-            val settings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels, snapshots)
+            val settings =
+                ScopeSettingsRepositoryImpl(
+                    db,
+                    FakeSettingsRepository(),
+                    { refresh },
+                    channels,
+                    snapshots,
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
+                )
             val id = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("Tech"))).value
             channels.calls.clear()
             refresh.calls.clear()

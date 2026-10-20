@@ -63,6 +63,7 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_check_again
@@ -84,6 +85,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_resume_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_select
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_options
 import ch.lkmc.neutrodyne.core.ui.resources.episode_minutes_left
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_row
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
@@ -113,11 +115,14 @@ public fun EpisodeRow(
     selected: Boolean?,
     onAction: (EpisodeAction) -> Unit,
     modifier: Modifier = Modifier,
+    additionalActions: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     val nowMs = LocalUiClock.current.now()
     // 08 dims the whole row only for availability; offline-and-not-downloaded dims just the
     // play affordance (TrailingSlot's cloud_off at 60 %), the status line carries the reason.
-    val dimmed = row.availability != Availability.AVAILABLE
+    val dimmed =
+        row.availability != Availability.AVAILABLE ||
+            (style == EpisodeRowStyle.QUEUE && row.sourceType != SourceType.RSS && !caps.inAppPlayback)
     val summary =
         EpisodeRowSummary.describe(row, live, nowMs, LocalPlatformKind.current, caps).asString()
     val stateDesc = rowStateDescription(row, live)
@@ -133,7 +138,10 @@ public fun EpisodeRow(
         } else {
             MaterialTheme.colorScheme.surface
         }
-    val menuActions = rowMenuActions(row, live, caps)
+    val menuActions =
+        rowMenuActions(row, live, caps, style).map { (label, action) ->
+            label to { onAction(action) }
+        } + additionalActions
 
     EpisodeSwipe(row, caps.swipe, onAction, modifier) {
         Row(
@@ -174,7 +182,7 @@ public fun EpisodeRow(
                         customActions =
                             menuActions.map { (label, action) ->
                                 CustomAccessibilityAction(label) {
-                                    onAction(action)
+                                    action()
                                     true
                                 }
                             }
@@ -250,7 +258,7 @@ public fun EpisodeRow(
                         text = { Text(label) },
                         onClick = {
                             menuOpen = false
-                            onAction(action)
+                            action()
                         },
                     )
                 }
@@ -265,6 +273,7 @@ private fun rowMenuActions(
     row: EpisodeRow,
     live: RowLive?,
     caps: RowCaps,
+    style: EpisodeRowStyle,
 ): List<Pair<String, EpisodeAction>> {
     val downloadState = live?.downloadState ?: row.downloadState
     val actions = mutableListOf<Pair<String, EpisodeAction>>()
@@ -281,7 +290,9 @@ private fun rowMenuActions(
         actions += playActionLabel(row, live) to EpisodeAction.PlayToggle(row.id)
     }
     actions += stringResource(Res.string.action_open) to EpisodeAction.Open(row.id)
-    actions += stringResource(Res.string.action_select) to EpisodeAction.Select(row.id)
+    if (style != EpisodeRowStyle.QUEUE) {
+        actions += stringResource(Res.string.action_select) to EpisodeAction.Select(row.id)
+    }
     if (row.playedAt == null) {
         actions += stringResource(Res.string.action_mark_played) to
             EpisodeAction.SetPlayed(row.id, played = true)
@@ -289,48 +300,52 @@ private fun rowMenuActions(
         actions += stringResource(Res.string.action_mark_unplayed) to
             EpisodeAction.SetPlayed(row.id, played = false)
     }
-    actions += stringResource(Res.string.action_play_next) to EpisodeAction.PlayNext(row.id)
-    actions += stringResource(Res.string.action_play_last) to EpisodeAction.PlayLast(row.id)
-    when (downloadState) {
-        null -> {
-            actions += stringResource(Res.string.action_download) to
-                EpisodeAction.DownloadToggle(row.id)
-        }
+    if (row.sourceType == SourceType.RSS || caps.inAppPlayback) {
+        actions += stringResource(Res.string.action_play_next) to EpisodeAction.PlayNext(row.id)
+        actions += stringResource(Res.string.action_play_last) to EpisodeAction.PlayLast(row.id)
+    }
+    if (caps.downloads && (row.sourceType == SourceType.RSS || caps.inAppPlayback)) {
+        when (downloadState) {
+            null -> {
+                actions += stringResource(Res.string.action_download) to
+                    EpisodeAction.DownloadToggle(row.id)
+            }
 
-        DownloadState.COMPLETED -> {
-            actions += stringResource(Res.string.action_delete_download) to
-                EpisodeAction.DownloadToggle(row.id)
-        }
+            DownloadState.COMPLETED -> {
+                actions += stringResource(Res.string.action_delete_download) to
+                    EpisodeAction.DownloadToggle(row.id)
+            }
 
-        DownloadState.FAILED, DownloadState.MISSING -> {
-            actions += stringResource(Res.string.action_retry_download) to
-                EpisodeAction.DownloadToggle(row.id)
-        }
+            DownloadState.FAILED, DownloadState.MISSING -> {
+                actions += stringResource(Res.string.action_retry_download) to
+                    EpisodeAction.DownloadToggle(row.id)
+            }
 
-        // 08's tap table: Cancel while queued or resolving, no download action while
-        // verifying, Pause while downloading, Resume while paused. 08's "Download now"
-        // while queued is 07's `promote`, which one toggle cannot express next to Cancel;
-        // it arrives with M6's download actions.
-        DownloadState.QUEUED -> {
-            actions += stringResource(Res.string.action_cancel_download) to
-                EpisodeAction.DownloadToggle(row.id)
-        }
+            // 08's tap table: Cancel while queued or resolving, no download action while
+            // verifying, Pause while downloading, Resume while paused. 08's "Download now"
+            // while queued is 07's `promote`, which one toggle cannot express next to Cancel;
+            // it arrives with M6's download actions.
+            DownloadState.QUEUED -> {
+                actions += stringResource(Res.string.downloads_options) to
+                    EpisodeAction.DownloadToggle(row.id)
+            }
 
-        DownloadState.RESOLVING -> {
-            actions += stringResource(Res.string.action_cancel_download) to
-                EpisodeAction.DownloadToggle(row.id)
-        }
+            DownloadState.RESOLVING -> {
+                actions += stringResource(Res.string.action_cancel_download) to
+                    EpisodeAction.DownloadToggle(row.id)
+            }
 
-        DownloadState.VERIFYING -> {}
+            DownloadState.VERIFYING -> {}
 
-        DownloadState.DOWNLOADING -> {
-            actions += stringResource(Res.string.action_pause_download) to
-                EpisodeAction.DownloadToggle(row.id)
-        }
+            DownloadState.DOWNLOADING -> {
+                actions += stringResource(Res.string.action_pause_download) to
+                    EpisodeAction.DownloadToggle(row.id)
+            }
 
-        DownloadState.PAUSED -> {
-            actions += stringResource(Res.string.action_resume_download) to
-                EpisodeAction.DownloadToggle(row.id)
+            DownloadState.PAUSED -> {
+                actions += stringResource(Res.string.action_resume_download) to
+                    EpisodeAction.DownloadToggle(row.id)
+            }
         }
     }
     if (caps.recheck &&
@@ -347,7 +362,7 @@ private fun rowMenuActions(
     // playback slot above already carries it.
     if (row.sourceType != SourceType.RSS && videoId != null && caps.inAppPlayback) {
         actions += stringResource(Res.string.action_watch_on_youtube) to
-            EpisodeAction.WatchOnYouTube(row.id, videoId)
+            EpisodeAction.WatchOnYouTube(row.id, videoId, YouTubeWatchMode.PLAYABLE_OVERFLOW)
     }
     actions += stringResource(Res.string.action_go_to_podcast) to
         EpisodeAction.OpenPodcast(row.id, row.podcastId)
@@ -397,25 +412,26 @@ private fun LeadingSlot(
     row: EpisodeRow,
     style: EpisodeRowStyle,
 ) {
+    if (row.sourceType == SourceType.YOUTUBE_CHANNEL) {
+        val video = LocalYouTubeRowArt.current == YouTubeRowArt.VIDEO_THUMBNAIL
+        CoverArt(
+            ref = if (video) row.artwork else row.podcastArtwork,
+            monogram = rememberMonogram(if (video) row.title else row.podcastTitle),
+            modifier = Modifier.size(width = if (video) VIDEO_THUMB_WIDTH else COVER_SIZE, height = COVER_SIZE),
+            aspect = if (video) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
+            avgArgb = if (video) row.artworkAvgArgb else row.podcastArtworkAvgArgb,
+        )
+        return
+    }
+
     when (style) {
         EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE -> {
-            if (row.sourceType != SourceType.RSS) {
-                // YouTube rows show the 16:9 thumbnail (08; CHANNEL_AVATAR arrives with M8's setting).
-                CoverArt(
-                    ref = row.artwork,
-                    monogram = rememberMonogram(row.title),
-                    modifier = Modifier.size(width = VIDEO_THUMB_WIDTH, height = COVER_SIZE),
-                    aspect = CoverAspect.WIDE_16_9,
-                    avgArgb = row.artworkAvgArgb,
-                )
-            } else {
-                CoverArt(
-                    ref = row.artwork,
-                    monogram = rememberMonogram(row.podcastTitle),
-                    modifier = Modifier.size(COVER_SIZE),
-                    avgArgb = row.artworkAvgArgb,
-                )
-            }
+            CoverArt(
+                ref = row.artwork,
+                monogram = rememberMonogram(row.podcastTitle),
+                modifier = Modifier.size(COVER_SIZE),
+                avgArgb = row.artworkAvgArgb,
+            )
         }
 
         EpisodeRowStyle.PODCAST -> {

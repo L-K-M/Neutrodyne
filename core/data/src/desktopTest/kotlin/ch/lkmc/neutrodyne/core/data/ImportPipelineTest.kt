@@ -106,6 +106,107 @@ class ImportPipelineTest {
         root.deleteRecursively()
     }
 
+    @Test
+    fun allNewFormatsCreateDurablePreviewsAndSuggestGroupsOnlyForAllYouTubeLists() =
+        runTest {
+            val id = "UCBJycsmduvYEL83R_U4JriQ"
+            val cases =
+                listOf(
+                    ImportFormat.NEWPIPE_JSON to """{"subscriptions":[{"service_id":0,"url":"$id","name":"Tech"}]}""",
+                    ImportFormat.LIBRETUBE_JSON to (
+                        """{"format":"Piped","localSubscriptions":[{"channelId":"$id"}],""" +
+                            """"groups":[{"groupName":"Tech","channels":["$id"]}]}"""
+                    ),
+                    ImportFormat.TAKEOUT_CSV to "Id,Url,Title\n$id,ignored,Tech\n",
+                    ImportFormat.URL_LIST to "@$id\n",
+                )
+            for ((format, text) in cases) {
+                val uri = "content://w5/${format.name}"
+                payloads.register(uri, bytes = text.encodeToByteArray())
+                val created = sessions.create(ImportSource(uri, null), CreateImportOptions())
+                val sid = assertIs<Outcome.Success<Long>>(created).value
+                val session = db.importDao().sessionById(sid)!!
+                assertEquals(format, session.sourceFormat)
+                assertEquals(ImportState.PREVIEW, session.state)
+                val options = ImportOptionsJson.decode(session.optionsJson!!)
+                assertEquals(if (format == ImportFormat.LIBRETUBE_JSON) null else "YouTube", options.targetGroupName)
+                assertEquals(1, options.itemYouTubeInputs.size)
+                assertEquals(1, options.itemYouTubeVariants.values.single())
+            }
+            payloads.register("content://w5/mixed", bytes = "$id\nhttps://rss.example/feed\n".encodeToByteArray())
+            val mixedCreated = sessions.create(ImportSource("content://w5/mixed", null), CreateImportOptions())
+            val mixed = assertIs<Outcome.Success<Long>>(mixedCreated).value
+            assertNull(ImportOptionsJson.decode(db.importDao().sessionById(mixed)!!.optionsJson!!).targetGroupName)
+            assertTrue(db.podcastDao().allForExport().isEmpty())
+        }
+
+    @Test
+    fun reopeningOldPreviewRecoversHtmlInputButHistoricalReportsStayUntouched() =
+        runTest {
+            val xml = """<opml version="2.0"><body><outline xmlUrl="invalid"
+            htmlUrl="https://www.youtube.com/@channel" title="Title"/></body></opml>"""
+            payloads.register("content://w5/old-preview", bytes = xml.encodeToByteArray())
+            val created = sessions.create(ImportSource("content://w5/old-preview", null), CreateImportOptions())
+            val sid = assertIs<Outcome.Success<Long>>(created).value
+            val item = db.importDao().itemsOf(sid).single()
+            db.importDao().updateItem(item.copy(status = ImportItemStatus.YOUTUBE_UNSUPPORTED_YET, selected = false))
+            db.importDao().setOptionsJson(sid, "{}")
+            sessions.upgradePreview(sid)
+            assertEquals(
+                ImportItemStatus.PREVIEW,
+                db
+                    .importDao()
+                    .itemsOf(sid)
+                    .single()
+                    .status,
+            )
+            assertEquals(
+                "https://www.youtube.com/@channel",
+                ImportOptionsJson
+                    .decode(
+                        db.importDao().sessionById(sid)!!.optionsJson!!,
+                    ).itemYouTubeInputs[item.ordinal],
+            )
+            db.importDao().updateItem(item.copy(status = ImportItemStatus.YOUTUBE_UNSUPPORTED_YET, selected = false))
+            db.importDao().setState(sid, ImportState.FETCHING)
+            db.importDao().markDone(sid, clock.now())
+            sessions.upgradePreview(sid)
+            assertEquals(
+                ImportItemStatus.YOUTUBE_UNSUPPORTED_YET,
+                db
+                    .importDao()
+                    .itemsOf(sid)
+                    .single()
+                    .status,
+            )
+        }
+
+    @Test
+    fun oldPreviewWithoutPayloadRetainsOriginalVariantHint() =
+        runTest {
+            val input = "https://www.youtube.com/feeds/videos.xml?playlist_id=UUSHBJycsmduvYEL83R_U4JriQ"
+            val canonical = "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ"
+            val item =
+                importItem(
+                    0,
+                    input,
+                    normalizedUrl = canonical,
+                    kind = ImportItemKind.YOUTUBE,
+                    status = ImportItemStatus.YOUTUBE_UNSUPPORTED_YET,
+                )
+            val sid = db.seedImportSession(state = ImportState.PREVIEW, items = listOf(item))
+            sessions.upgradePreview(sid)
+            val options = ImportOptionsJson.decode(db.importDao().sessionById(sid)!!.optionsJson!!)
+            assertEquals(2, options.itemYouTubeVariants[0])
+            assertTrue(
+                db
+                    .importDao()
+                    .itemsOf(sid)
+                    .single()
+                    .selected,
+            )
+        }
+
     // --- AC1 corpus previews ----------------------------------------------------------------------
 
     @Test
@@ -214,12 +315,12 @@ class ImportPipelineTest {
             assertEquals(4, items.size)
             val channel = items[1]
             assertEquals(ImportItemKind.YOUTUBE, channel.kind)
-            assertEquals(ImportItemStatus.YOUTUBE_UNSUPPORTED_YET, channel.status)
+            assertEquals(ImportItemStatus.PREVIEW, channel.status)
             assertEquals(
                 "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
                 channel.normalizedUrl,
             )
-            assertTrue(!channel.selected)
+            assertTrue(channel.selected)
 
             val options = optionsOf(session)
             // Our own export's proposal set round-trips with look fields intact.

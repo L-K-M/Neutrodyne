@@ -125,6 +125,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_groups_master
 import ch.lkmc.neutrodyne.core.ui.resources.import_groups_section
 import ch.lkmc.neutrodyne.core.ui.resources.import_header_in
 import ch.lkmc.neutrodyne.core.ui.resources.import_load_error
+import ch.lkmc.neutrodyne.core.ui.resources.import_newpipe_service
 import ch.lkmc.neutrodyne.core.ui.resources.import_no_media_hint
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_notify
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_treat_played
@@ -135,8 +136,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_progress
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_already
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_merged
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_merged_count
-import ch.lkmc.neutrodyne.core.ui.resources.import_restore_pending_body
-import ch.lkmc.neutrodyne.core.ui.resources.import_restore_pending_title
 import ch.lkmc.neutrodyne.core.ui.resources.import_search
 import ch.lkmc.neutrodyne.core.ui.resources.import_select_item
 import ch.lkmc.neutrodyne.core.ui.resources.import_select_none
@@ -170,6 +169,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_warn_salvaged
 import ch.lkmc.neutrodyne.core.ui.resources.import_warn_truncated
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_count
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_later
+import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_resolution_failed
 import ch.lkmc.neutrodyne.core.ui.resources.selection_select_all
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -217,10 +217,6 @@ internal fun ImportScreen(
     var fixUpFor by remember { mutableStateOf<Pair<ImportItemView, ImportFixUp>?>(null) }
     val session = state.session
     val editable = state.previewEditable
-    val backupPending =
-        state.loaded &&
-            session?.format == ImportFormat.NEUTRODYNE_BACKUP &&
-            session.state == ImportState.PREVIEW
     var showStopDialog by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
@@ -228,10 +224,6 @@ internal fun ImportScreen(
             NdTopAppBar(
                 title =
                     when {
-                        backupPending -> {
-                            stringResource(Res.string.import_restore_pending_title)
-                        }
-
                         session?.state == ImportState.CANCELLED -> {
                             stringResource(Res.string.import_cancelled_title)
                         }
@@ -261,10 +253,6 @@ internal fun ImportScreen(
 
                 session == null -> {
                     ImportUnavailableBody(onBack)
-                }
-
-                backupPending -> {
-                    ImportRestorePendingBody(onBack)
                 }
 
                 else -> {
@@ -335,18 +323,6 @@ internal fun ImportUnavailableBody(onBack: () -> Unit) {
         icon = NdIcons.LinkOff,
         title = stringResource(Res.string.import_unavailable_title),
         body = stringResource(Res.string.import_unavailable_body),
-        actionLabel = stringResource(Res.string.back),
-        onAction = onBack,
-    )
-}
-
-/** A `NEUTRODYNE_BACKUP` PREVIEW: restore lands with D4, so the preview itself is staged. */
-@Composable
-private fun ImportRestorePendingBody(onBack: () -> Unit) {
-    EmptyState(
-        icon = NdIcons.Info,
-        title = stringResource(Res.string.import_restore_pending_title),
-        body = stringResource(Res.string.import_restore_pending_body),
         actionLabel = stringResource(Res.string.back),
         onAction = onBack,
     )
@@ -1033,6 +1009,12 @@ private fun statusLabel(
 @Composable
 private fun statusDescription(item: ImportItemView): String? =
     when (item.status) {
+        ImportItemStatus.INVALID_URL -> {
+            item.errorDetail?.takeIf { it.startsWith("newpipe_service:") }?.let {
+                stringResource(Res.string.import_newpipe_service, it.substringAfter(':'))
+            }
+        }
+
         ImportItemStatus.YOUTUBE_UNSUPPORTED_YET -> {
             stringResource(Res.string.import_youtube_later)
         }
@@ -1059,6 +1041,8 @@ private fun statusDescription(item: ImportItemView): String? =
                     IMPORT_DEFERRED_DETAIL
                 ) {
                     Res.string.import_deferred_hint
+                } else if (item.errorDetail == "YOUTUBE_RESOLUTION_FAILED") {
+                    Res.string.import_youtube_resolution_failed
                 } else {
                     Res.string.import_failure_retry_hint
                 },

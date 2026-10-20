@@ -142,14 +142,36 @@ class IntentRouterTest {
     }
 
     @Test
-    fun externalDeepLinksMapToNoneInM0a() {
-        assertEquals(Route.None, IntentRouter.route(RouteInput(Action.VIEW, uri = "feed:https://example.com/x")))
-        assertEquals(Route.None, IntentRouter.route(RouteInput(Action.SEND, text = "https://example.com/feed.xml")))
+    fun externalPodcastLinksAndDroppedUrlsOpenTheAddSheet() {
+        for (uri in listOf(
+            "feed:https://example.com/x",
+            "pcast://example.com/x",
+            "podcast:https://example.com/x",
+            "itpc://example.com/x",
+            "https://podcasts.apple.com/us/podcast/id1",
+            "neutrodyne://subscribe?url=https://example.com/x",
+        )) {
+            assertEquals(Route.Push(AddPodcastKey(uri)), IntentRouter.route(RouteInput(Action.VIEW, uri = uri)))
+        }
+        val url = "https://example.com/feed.xml"
+        assertEquals(Route.Push(AddPodcastKey(url)), IntentRouter.route(RouteInput(Action.SEND, text = url)))
         assertEquals(Route.None, IntentRouter.route(RouteInput(Action.OPEN_FILE, uri = "file:///tmp/list.opml")))
+    }
+
+    @Test
+    fun externalInputsAreBoundedAndCannotSpoofInternalRoutes() {
+        assertEquals(Route.None, IntentRouter.route(RouteInput(Action.SEND, text = "x".repeat(4097))))
+        assertEquals(Route.None, IntentRouter.route(RouteInput(Action.SEND, text = "é".repeat(2049))))
         assertEquals(
             Route.None,
-            IntentRouter.route(RouteInput(Action.VIEW, uri = "neutrodyne://subscribe?url=https://example.com/x")),
+            IntentRouter.route(RouteInput(Action.VIEW, uri = "feed:" + "x".repeat(4096), text = "short")),
         )
+        assertEquals(
+            Route.None,
+            IntentRouter.route(RouteInput(Action.VIEW, uri = "https://podcasts.apple.com.evil.test/x")),
+        )
+        assertEquals(Route.None, IntentRouter.route(RouteInput(Action.VIEW, uri = "https://example.com/x")))
+        assertEquals(Route.None, IntentRouter.route(RouteInput(Action.VIEW, uri = "neutrodyne://open/import/1")))
     }
 
     @Test

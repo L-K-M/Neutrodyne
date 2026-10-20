@@ -13,6 +13,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
@@ -41,13 +42,18 @@ import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
+import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
@@ -91,6 +97,21 @@ class EpisodeScreenTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test fun timestampTapDispatchesExactPositionOnce() =
+        runComposeUiTest {
+            val seeks = mutableListOf<Long>()
+            val notes = ShowNotes(listOf(ShowNoteBlock.Paragraph(listOf(ShowNoteSpan.Timestamp("12:34", 754_000)))))
+            setEpisode(
+                loadedState(
+                    episode = testEpisodeDetail(9, podcastId = 7).copy(durationMs = 900_000),
+                    notes = notes,
+                ),
+                onTimestamp = seeks::add,
+            )
+            scrollTo(hasText("12:34")).performClick()
+            assertEquals(listOf(754_000L), seeks)
+        }
 
     @Test
     fun loadingShowsSkeleton() =
@@ -216,6 +237,25 @@ class EpisodeScreenTest {
         }
 
     @Test
+    fun currentDetailShowsPauseEvenWhenOffline() =
+        runComposeUiTest {
+            val actions = mutableListOf<EpisodeAction>()
+            setEpisode(
+                loadedState(offline = true).copy(isNowPlaying = true, isPlaying = true),
+                onAction = { actions += it },
+            )
+            onNodeWithText("Pause").performClick()
+            assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(9)), actions)
+        }
+
+    @Test
+    fun pausedDetailShowsResume() =
+        runComposeUiTest {
+            setEpisode(loadedState().copy(isNowPlaying = true))
+            onNodeWithText("Resume").assertIsDisplayed()
+        }
+
+    @Test
     fun offlineDownloadedKeepsPlayable() =
         runComposeUiTest {
             val actions = mutableListOf<EpisodeAction>()
@@ -249,6 +289,24 @@ class EpisodeScreenTest {
             onNodeWithText("Opens in YouTube").assertIsDisplayed()
             onNodeWithText("Watch on YouTube").performClick()
             assertEquals(listOf<EpisodeAction>(EpisodeAction.WatchOnYouTube(9, "abc123")), actions)
+        }
+
+    @Test fun externalEpisodeWithoutVideoIdCannotFallBackToNativePlay() =
+        runComposeUiTest {
+            setEpisode(
+                loadedState(
+                    episode =
+                        testEpisodeDetail(
+                            9,
+                            sourceType = SourceType.YOUTUBE_CHANNEL,
+                            externalMediaId = null,
+                        ),
+                ),
+            )
+            onNodeWithText("Watch on YouTube").assertIsNotEnabled()
+            onNodeWithText("Play").assertDoesNotExist()
+            onNodeWithText("Download").assertDoesNotExist()
+            onNodeWithText("Up next").assertDoesNotExist()
         }
 
     @Test
@@ -434,7 +492,32 @@ class EpisodeScreenTest {
         episodes.episodes.value = mapOf(9L to episode)
         episodes.notes.value = if (notes != null) mapOf(9L to notes) else emptyMap()
         val viewModel =
-            EpisodeViewModel(9, episodes, FakeSettingsRepository(), FakeNetworkMonitor(FakeNetworkMonitor.ONLINE))
+            EpisodeViewModel(
+                9,
+                episodes,
+                FakeChapterRepository(),
+                FakePodcastRepository(),
+                FakeSettingsRepository(),
+                FakePlaybackController(),
+                FakePlaybackStateSource(),
+                testPlatformInfo,
+                FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+                downloadController =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeDownloadController(),
+                liveStateSource =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeEpisodeLiveStateSource(),
+                externalOpenService =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeExternalOpen(),
+                capabilities =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeCapabilitiesSource(),
+                engine =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeEngine(),
+            )
         val owner =
             object : LifecycleOwner {
                 override val lifecycle =
@@ -479,6 +562,7 @@ class EpisodeScreenTest {
         onAction: (EpisodeAction) -> Unit = {},
         onFavorite: (Boolean) -> Unit = {},
         fontScale: Float = 1f,
+        onTimestamp: (Long) -> Unit = {},
     ) {
         setContent {
             CompositionLocalProvider(
@@ -497,6 +581,7 @@ class EpisodeScreenTest {
                             state = state,
                             onAction = onAction,
                             onFavorite = onFavorite,
+                            onTimestamp = onTimestamp,
                             onOpenLink = { platformActions.urls.open(it) },
                         )
                     }

@@ -39,6 +39,9 @@ internal class FeedFetcher(
     private val credentialLookup: CredentialLookup,
     private val clock: Clock,
 ) {
+    private val youTube =
+        ch.lkmc.neutrodyne.youtube.api
+            .YouTubeUrlClassifier()
     private val client = httpClients.client(HttpClientKind.FEED)
 
     /** Fetches [req]; follows the redirect chain by hand and records every hop. */
@@ -50,6 +53,11 @@ internal class FeedFetcher(
         var permanentUrl: String? = null
 
         while (true) {
+            if (req.purpose == FeedRequestPurpose.ADD &&
+                (youTube.classify(url) != null || youTube.isYouTubeHost(url))
+            ) {
+                return FetchOutcome.Network(ADD_YOUTUBE_REJECTED, rejectedYouTubeUrl = url)
+            }
             val result =
                 try {
                     oneRequest(req, url, hops, permanentUrl)
@@ -93,80 +101,87 @@ internal class FeedFetcher(
         // the first request's (a cross-scheme/host/port hop never carries them).
         val firstOrigin = UrlNormalizer.origin(req.url)
         val hopOrigin = UrlNormalizer.origin(url)
+        val discardLimit = req.sniffOnlyBytes?.toLong() ?: DISCARD_MAX_BYTES
         val validatorsSent = req.conditional && (req.etag != null || req.lastModified != null)
-        client
-            .prepareGet(url) {
-                header(HttpHeaders.Accept, FEED_ACCEPT)
-                if (req.conditional) {
-                    req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }
-                    req.lastModified?.let { header(HttpHeaders.IfModifiedSince, it) }
-                }
-                if (req.credentials != null && hopOrigin != null && hopOrigin == firstOrigin) {
-                    val it = req.credentials
-                    header(
-                        HttpHeaders.Authorization,
-                        "Basic " +
-                            "${it.username}:${it.password}".encodeToByteArray().toByteString().base64(),
-                    )
-                }
-            }.execute { response ->
-                status = response.status.value
-                when {
-                    // A 304 counts only when this request actually sent validators (03 Response
-                    // handling); an unsolicited 304 is a client-visible HTTP error below.
-                    status == 304 && validatorsSent -> {
-                        response.discardBody()
-                        outcome =
-                            FetchOutcome.NotModified(
-                                etag = response.headers[FeedHttpHeaders.ETAG],
-                                lastModified = response.headers[FeedHttpHeaders.LAST_MODIFIED],
-                                maxAgeSec =
-                                    FeedHttpHeaders.maxAgeSec(
-                                        response.headers[FeedHttpHeaders.CACHE_CONTROL],
-                                    ),
-                                serverDateMs =
-                                    FeedHttpHeaders.serverDateMs(response.headers[FeedHttpHeaders.DATE]),
-                                finalUrl = url,
-                                permanentUrl = permanentUrl,
-                            )
+        try {
+            client
+                .prepareGet(url) {
+                    header(HttpHeaders.Accept, req.accept)
+                    if (req.conditional) {
+                        req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }
+                        req.lastModified?.let { header(HttpHeaders.IfModifiedSince, it) }
                     }
+                    if (req.credentials != null && hopOrigin != null && hopOrigin == firstOrigin) {
+                        val it = req.credentials
+                        header(
+                            HttpHeaders.Authorization,
+                            "Basic " +
+                                "${it.username}:${it.password}".encodeToByteArray().toByteString().base64(),
+                        )
+                    }
+                }.execute { response ->
+                    status = response.status.value
+                    when {
+                        // A 304 counts only when this request actually sent validators (03 Response
+                        // handling); an unsolicited 304 is a client-visible HTTP error below.
+                        status == 304 && validatorsSent -> {
+                            response.discardBody(discardLimit)
+                            outcome =
+                                FetchOutcome.NotModified(
+                                    etag = response.headers[FeedHttpHeaders.ETAG],
+                                    lastModified = response.headers[FeedHttpHeaders.LAST_MODIFIED],
+                                    maxAgeSec =
+                                        FeedHttpHeaders.maxAgeSec(
+                                            response.headers[FeedHttpHeaders.CACHE_CONTROL],
+                                        ),
+                                    serverDateMs =
+                                        FeedHttpHeaders.serverDateMs(response.headers[FeedHttpHeaders.DATE]),
+                                    finalUrl = url,
+                                    permanentUrl = permanentUrl,
+                                )
+                        }
 
-                    status in FOLLOWABLE_STATUSES && response.headers[FeedHttpHeaders.LOCATION] != null -> {
-                        response.discardBody()
-                        location = response.headers[FeedHttpHeaders.LOCATION]
-                        outcome =
-                            FetchOutcome.Http(
-                                code = status,
-                                retryAfterMs = null,
-                                basicChallenge = false,
-                                realm = null,
-                            )
-                    }
+                        status in FOLLOWABLE_STATUSES && response.headers[FeedHttpHeaders.LOCATION] != null -> {
+                            response.discardBody(discardLimit)
+                            location = response.headers[FeedHttpHeaders.LOCATION]
+                            outcome =
+                                FetchOutcome.Http(
+                                    code = status,
+                                    retryAfterMs = null,
+                                    basicChallenge = false,
+                                    realm = null,
+                                )
+                        }
 
-                    response.status.isSuccess() -> {
-                        outcome = readBody(req, url, hops, permanentUrl, response)
-                    }
+                        response.status.isSuccess() -> {
+                            outcome = readBody(req, url, hops, permanentUrl, response)
+                        }
 
-                    else -> {
-                        response.discardBody()
-                        val (basic, realm) =
-                            FeedHttpHeaders.basicChallenge(
-                                response.headers.getAll(FeedHttpHeaders.WWW_AUTHENTICATE),
-                            )
-                        outcome =
-                            FetchOutcome.Http(
-                                code = status,
-                                retryAfterMs =
-                                    FeedHttpHeaders.retryAfterMs(
-                                        response.headers[FeedHttpHeaders.RETRY_AFTER],
-                                        clock.now(),
-                                    ),
-                                basicChallenge = basic,
-                                realm = realm,
-                            )
+                        else -> {
+                            response.discardBody(discardLimit)
+                            val (basic, realm) =
+                                FeedHttpHeaders.basicChallenge(
+                                    response.headers.getAll(FeedHttpHeaders.WWW_AUTHENTICATE),
+                                )
+                            outcome =
+                                FetchOutcome.Http(
+                                    code = status,
+                                    retryAfterMs =
+                                        FeedHttpHeaders.retryAfterMs(
+                                            response.headers[FeedHttpHeaders.RETRY_AFTER],
+                                            clock.now(),
+                                        ),
+                                    basicChallenge = basic,
+                                    realm = realm,
+                                )
+                        }
                     }
                 }
-            }
+        } catch (failure: Throwable) {
+            // Statement cleanup can suspend after readBody completed; ownership has not transferred yet.
+            (outcome as? FetchOutcome.Body)?.let { tempFiles.delete(it.file) }
+            throw failure
+        }
         return HopResult(outcome, location, status)
     }
 
@@ -208,14 +223,26 @@ internal class FeedFetcher(
         val sniffTarget = req.sniffOnlyBytes?.toLong() ?: FeedSniffer.PROBE_BYTES.toLong()
         val chunk = ByteArray(CHUNK_BYTES)
         var tooLarge = false
+        var detectedSniff: Sniff? = null
 
         try {
             // Inside the try: a throw here must still close the sink and delete the temp file.
             val channel = response.bodyAsChannel()
             while (true) {
+                if (req.htmlReadLimit != null && detectedSniff == null && probeBytes > 0) {
+                    val kind = FeedSniffer.sniff(probe.snapshot().toByteArray())
+                    if (kind != Sniff.OTHER || probeBytes == sniffTarget) detectedSniff = kind
+                }
+                val htmlLimit = req.htmlReadLimit?.takeIf { detectedSniff == Sniff.HTML }
+                val readLimit = listOfNotNull(req.sniffOnlyBytes?.toLong(), htmlLimit).minOrNull()
+                if (readLimit != null && total >= readLimit) {
+                    channel.cancel(null)
+                    break
+                }
+                val remaining = readLimit?.minus(total) ?: chunk.size.toLong()
                 val read =
                     try {
-                        channel.readAvailable(chunk, 0, chunk.size)
+                        channel.readAvailable(chunk, 0, minOf(chunk.size.toLong(), remaining).toInt())
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Throwable) {
@@ -249,7 +276,10 @@ internal class FeedFetcher(
                     tooLarge = true
                     break
                 }
-                if (req.sniffOnlyBytes != null && total >= req.sniffOnlyBytes) break
+                if (req.sniffOnlyBytes != null && total >= req.sniffOnlyBytes) {
+                    channel.cancel(null)
+                    break
+                }
             }
             try {
                 sink.close()
@@ -295,10 +325,10 @@ internal class FeedFetcher(
      * unbounded error body; the drain stops at [DISCARD_MAX_BYTES] and cancels the channel —
      * the bytes are never used, so draining them is waste, not correctness.
      */
-    private suspend fun HttpResponse.discardBody() {
+    private suspend fun HttpResponse.discardBody(limit: Long) {
         val channel = bodyAsChannel()
         val chunk = ByteArray(CHUNK_BYTES)
-        var remaining = DISCARD_MAX_BYTES
+        var remaining = limit
         while (remaining > 0 && !channel.isClosedForRead) {
             val read = channel.readAvailable(chunk, 0, minOf(chunk.size.toLong(), remaining).toInt())
             if (read == -1) break

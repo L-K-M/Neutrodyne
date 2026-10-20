@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
@@ -23,7 +24,11 @@ import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
@@ -31,20 +36,35 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.Group
+import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.withCapabilities
+import ch.lkmc.neutrodyne.core.ui.DownloadAllController
+import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
+import ch.lkmc.neutrodyne.core.ui.PlaybackActions
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_undo
 import ch.lkmc.neutrodyne.core.ui.resources.membership_changed
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed_from_group
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.download.api.DownloadController
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
@@ -59,7 +79,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -75,19 +98,79 @@ public class PodcastViewModel
     constructor(
         @Assisted private val podcastId: Long,
         private val podcasts: PodcastRepository,
+        private val channels: YouTubeChannelRepository,
         private val feedRepository: FeedRepository,
         private val episodes: EpisodeRepository,
         private val groups: GroupRepository,
         private val refreshController: RefreshController,
         private val unsubscribe: UnsubscribeUseCase,
+        private val settings: SettingsRepository,
+        private val playbackController: PlaybackController,
+        playbackStates: PlaybackStateSource,
+        platformInfo: PlatformInfo,
         network: NetworkMonitor,
         liveStateSource: EpisodeLiveStateSource,
         clock: Clock,
+        downloadController: DownloadController,
+        externalOpenService: YouTubeExternalOpen,
+        private val capabilities: YouTubeCapabilitiesSource,
+        private val engine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine,
     ) : ViewModel() {
+        init {
+            viewModelScope.launch {
+                suspendRunCatching { channels.ensureChannelArt(podcastId) }
+                    .onFailure { Log.w("PodcastViewModel", it) { "Channel artwork refresh failed" } }
+            }
+        }
+
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
         private val userMessages = UserMessages()
+        public val externalOpen =
+            ExternalOpenHandler(
+                viewModelScope,
+                userMessages,
+                mark = { externalOpenService.onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+                undo = { externalOpenService.undo(it) },
+                onFailure = ::reportWriteFailed,
+            )
+        public val downloads =
+            DownloadRequestHandler(
+                viewModelScope,
+                downloadController,
+                userMessages,
+                allowAlways = {
+                    check(
+                        settings.set(DownloadSettingKeys.MANUAL_METERED, ManualMeteredPolicy.ALWAYS) is Outcome.Success,
+                    )
+                },
+                markNotificationPrompted = {
+                    check(settings.set(DownloadSettingKeys.NOTIFICATION_PROMPTED, true) is Outcome.Success)
+                },
+                onFailure = ::reportWriteFailed,
+            )
+
         private val visibleIds = MutableStateFlow<Set<Long>>(emptySet())
+        private var screenPrewarm: kotlinx.coroutines.Job? = null
+
+        public fun onVisible() {
+            if (screenPrewarm != null) return
+            screenPrewarm =
+                viewModelScope.launch {
+                    val podcast = detail.filterNotNull().first()
+                    if (podcast.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                        capabilities.capabilities.value.inAppPlayback
+                    ) {
+                        engine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+                    }
+                }
+        }
+
+        public fun onHidden() {
+            visibleIds.value = emptySet()
+            screenPrewarm?.cancel()
+            screenPrewarm = null
+        }
 
         /** Shown Undo snackbar's message id → the membership it may restore (05 Membership). */
         private val membershipUndos = mutableMapOf<Long, Long>()
@@ -127,10 +210,47 @@ public class PodcastViewModel
                 state.copy(groups = memberships.toImmutableList())
             }.combine(userMessages.flow) { state, messages ->
                 state.copy(messages = messages)
+            }.combine(capabilities.capabilities) { state, caps ->
+                state.copy(
+                    rowCaps =
+                        RowCaps(
+                            caps.inAppPlayback,
+                            caps.downloads,
+                            caps.enrichment,
+                            null,
+                            state.offline,
+                        ),
+                )
             }.stateIn(viewModelScope, SHARING, PodcastUiState())
 
         public val episodeSelection =
             EpisodeSelectionController(viewModelScope, episodes::setPlayed, ::reportWriteFailed)
+
+        /**
+         * Shared start/queue/consent handling (08 Issues, results and events); the route also
+         * resolves playback snackbar actions through `playback.onMessageAction`.
+         */
+        public val playback =
+            PlaybackActions(
+                viewModelScope,
+                playbackController,
+                playbackStates,
+                userMessages,
+                platformInfo.kind,
+                allowMeteredStreaming = ::allowMeteredStreaming,
+                onFailure = ::reportWriteFailed,
+            )
+
+        /** Selection mode's "Play next"/"Play last" (08 Selection mode); clears the selection. */
+        public fun playSelectionNext() {
+            val ids = episodeSelection.ids.value.toList()
+            playback.playNext(ids) { episodeSelection.deselect(ids) }
+        }
+
+        public fun playSelectionLast() {
+            val ids = episodeSelection.ids.value.toList()
+            playback.playLast(ids) { episodeSelection.deselect(ids) }
+        }
 
         /** Repository-owned row actions; the route owns navigation and external URLs. */
         public fun onRowAction(action: EpisodeAction) {
@@ -143,7 +263,32 @@ public class PodcastViewModel
                     write { episodes.setPlayed(listOf(action.episodeId), action.played) }
                 }
 
-                // PlayToggle/queue actions need the player (M4); DownloadToggle needs M6.
+                // 05 Start rules: this screen's source is its own podcast with the transient
+                // chips and the effective order; the tapped row is the start anchor.
+                is EpisodeAction.PlayToggle -> {
+                    playback.playToggle(action.episodeId, feedTitle()) {
+                        playbackController.playFeed(
+                            FeedSource.Podcast(podcastId),
+                            filters.value,
+                            uiState.value.effectiveOrder,
+                            action.episodeId,
+                        )
+                    }
+                }
+
+                is EpisodeAction.DownloadToggle -> {
+                    downloads.toggle(action.episodeId)
+                }
+
+                is EpisodeAction.PlayNext -> {
+                    playback.playNext(listOf(action.episodeId))
+                }
+
+                is EpisodeAction.PlayLast -> {
+                    playback.playLast(listOf(action.episodeId))
+                }
+
+                // Availability checks need the YouTube engine (M8).
                 else -> {
                     Unit
                 }
@@ -183,6 +328,14 @@ public class PodcastViewModel
         public fun unsubscribe() {
             write { unsubscribe(listOf(podcastId)) }
         }
+
+        public val downloadAll: DownloadAllController =
+            DownloadAllController(
+                viewModelScope,
+                feedRepository::downloadAllEstimate,
+                downloadController,
+                downloads::askNotifications,
+            )
 
         public val markPlayed: MarkFeedPlayedController =
             MarkFeedPlayedController(viewModelScope, clock, feedRepository::countUnplayed) { source, before, count ->
@@ -263,7 +416,34 @@ public class PodcastViewModel
         public fun onMessageShown(id: Long) {
             // A dismissed Undo snackbar can never fire its action; drop the stale mapping.
             membershipUndos.remove(id)
+            playback.onMessageShown(id)
+            externalOpen.shown(id)
             userMessages.shown(id)
+        }
+
+        /** The refused YouTube start's watch URL, when the episode still has one (08). */
+        public suspend fun youtubeWatchUrl(episodeId: Long): String? =
+            suspendRunCatching { episodes.observeEpisode(episodeId).first()?.externalMediaId }
+                .getOrNull()
+                ?.let(YouTubeLinks::watch)
+
+        /** The show's title for "Nothing unplayed in '{context}'" (08). */
+        private fun feedTitle(): UiText? =
+            uiState.value.detail
+                ?.displayTitle
+                ?.let(UiText::Raw)
+
+        /** Always-consent persists `playback.stream_on_metered = ALLOW` (08's metered dialog). */
+        private suspend fun allowMeteredStreaming() {
+            when (val result = settings.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.ALLOW)) {
+                is Outcome.Success -> {
+                    Unit
+                }
+
+                is Outcome.Failure -> {
+                    error("playback.stream_on_metered write failed: ${result.error}")
+                }
+            }
         }
 
         /** The unsubscribe confirmation's downloaded-episode count (08's wording). */

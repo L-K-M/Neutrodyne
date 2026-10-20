@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 plugins {
     alias(libs.plugins.neutrodyne.jvm.island)
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 dependencies {

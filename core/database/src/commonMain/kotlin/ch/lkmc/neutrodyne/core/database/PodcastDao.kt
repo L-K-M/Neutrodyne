@@ -22,6 +22,35 @@ import kotlinx.coroutines.flow.Flow
 abstract class PodcastDao(
     private val db: NeutrodyneDatabase,
 ) {
+    @Query("UPDATE podcast SET youtubeVariants = :variants WHERE id = :id AND sourceType = 'YOUTUBE_CHANNEL'")
+    abstract suspend fun setYouTubeVariants(
+        id: Long,
+        variants: Int,
+    )
+
+    /** Page metadata never overwrites Atom's authoritative title. Null keeps prior page data. */
+    @Query(
+        "UPDATE podcast SET artworkUrl = COALESCE(:artworkUrl, artworkUrl)," +
+            " artworkKey = COALESCE(:artworkKey, artworkKey), bannerUrl = COALESCE(:bannerUrl, bannerUrl)," +
+            " descriptionHtml = COALESCE(:descriptionHtml, descriptionHtml), channelMetadataAt = :channelMetadataAt" +
+            " WHERE id = :id AND sourceType = 'YOUTUBE_CHANNEL'",
+    )
+    abstract suspend fun applyYouTubeChannelMetadata(
+        id: Long,
+        artworkUrl: String?,
+        artworkKey: String?,
+        bannerUrl: String?,
+        descriptionHtml: String?,
+        channelMetadataAt: Long,
+    )
+
+    /** Directory annotations use existing feed/alias indexes in one bounded read. */
+    @Query(
+        "SELECT feedKey AS url, id AS podcastId FROM podcast WHERE feedKey IN (:keys) " +
+            "UNION ALL SELECT url, podcastId FROM podcast_url_alias WHERE url IN (:keys)",
+    )
+    abstract suspend fun directorySubscriptions(keys: List<String>): List<DirectorySubscription>
+
     /**
      * Every insert path — subscribe (03), import commit (05), restore (05), sync apply (10) —
      * supplies a fresh `syncId` (UUIDv4, lowercase) on the entity (02 podcast.syncId).
@@ -55,6 +84,30 @@ abstract class PodcastDao(
 
     @Query("SELECT id FROM podcast WHERE id IN (:ids)")
     protected abstract suspend fun existingIdsChunk(ids: List<Long>): List<Long>
+
+    /** D67 reads only the planner-owned column and subscription time, at the bind limit. */
+    suspend fun autoDownloadWatermarks(ids: Collection<Long>): List<AutoDownloadWatermark> =
+        ids.distinct().chunked(BIND_CHUNK).flatMap { autoDownloadWatermarkChunk(it) }
+
+    @Query("SELECT id, subscribedAt, autoDownloadEligibleAfter FROM podcast WHERE id IN (:ids)")
+    protected abstract suspend fun autoDownloadWatermarkChunk(ids: List<Long>): List<AutoDownloadWatermark>
+
+    /** Caller groups equal values and commits the complete pass before persisting its baseline. */
+    suspend fun setAutoDownloadWatermarks(
+        ids: List<Long>,
+        eligibleAfter: Long?,
+    ) {
+        ids.distinct().chunked(BIND_CHUNK).forEach { setAutoDownloadWatermarkChunk(it, eligibleAfter) }
+    }
+
+    @Query(
+        "UPDATE podcast SET autoDownloadEligibleAfter = :eligibleAfter WHERE id IN (:ids)" +
+            " AND autoDownloadEligibleAfter IS NOT :eligibleAfter",
+    )
+    protected abstract suspend fun setAutoDownloadWatermarkChunk(
+        ids: List<Long>,
+        eligibleAfter: Long?,
+    )
 
     @Query("SELECT * FROM podcast WHERE feedKey = :feedKey")
     abstract suspend fun byFeedKey(feedKey: String): PodcastEntity?
@@ -392,6 +445,17 @@ abstract class PodcastDao(
     @Update(entity = PodcastEntity::class)
     abstract suspend fun updateFetchStates(rows: List<PodcastFetchState>)
 
+    /** All channel subscriptions, including blocked rows, for whole-library outage accounting. */
+    @Query("SELECT id FROM podcast WHERE sourceType = 'YOUTUBE_CHANNEL' ORDER BY id")
+    abstract suspend fun youtubeChannelIds(): List<Long>
+
+    /** Car library order uses displayed titles, including custom titles, with stable ties. */
+    @Query(
+        "SELECT * FROM podcast WHERE (:youtubePlayable = 1 OR sourceType = 'RSS')" +
+            " ORDER BY COALESCE(customTitle, title) COLLATE NOCASE, id",
+    )
+    abstract suspend fun listForBrowse(youtubePlayable: Boolean): List<PodcastEntity>
+
     // --- Library tiles and mosaics (02; M1: groupId = null → all) ---------------------------------
 
     @Query(
@@ -506,3 +570,16 @@ abstract class PodcastDao(
                 " lastAttemptAt, lastErrorKind, guidCoverageSince"
     }
 }
+
+/** Projection only; this introduces no persistent schema. */
+data class DirectorySubscription(
+    val url: String,
+    val podcastId: Long,
+)
+
+/** The D67 pass never rewrites unrelated podcast metadata or sync fields. */
+data class AutoDownloadWatermark(
+    val id: Long,
+    val subscribedAt: Long,
+    val autoDownloadEligibleAfter: Long?,
+)

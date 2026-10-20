@@ -19,6 +19,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.isDisplayed
@@ -95,6 +96,127 @@ class NeutrodyneRootTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test fun downloadsBadgeWaitsForTheStartupGate() =
+        runComposeUiTest {
+            var subscribed = false
+            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
+            val counts =
+                kotlinx.coroutines.flow.flow {
+                    subscribed = true
+                    emit(3)
+                }
+            setContent { TestRoot(startup = startup, failedDownloads = counts) }
+            runOnIdle { kotlin.test.assertFalse(subscribed) }
+
+            runOnIdle { startup = StartupGateState.Ready }
+            onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
+            runOnIdle { kotlin.test.assertTrue(subscribed) }
+        }
+
+    @Test
+    fun downloadsBadgeTracksOnlyTheFailureCountFlow() =
+        runComposeUiTest {
+            val count = kotlinx.coroutines.flow.MutableStateFlow(3)
+            setContent { TestRoot(failedDownloads = count) }
+            onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
+            count.value = 0
+            waitForIdle()
+            onAllNodesWithContentDescription("3 failed downloads").assertCountEquals(0)
+        }
+
+    @Test
+    fun restoredExpandedPlayerMeasuresBeforeHidingSuite() =
+        runComposeUiTest {
+            var lastSlot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(
+                            player = { slot ->
+                                lastSlot = slot
+                                androidx.compose.runtime.SideEffect { slot.onExpandedSettled(true) }
+                            },
+                            userMessages = emptyFlow(),
+                        ),
+                )
+            }
+            runOnIdle { kotlin.test.assertTrue(requireNotNull(lastSlot).contentBottomPx > 0f) }
+        }
+
+    @Test
+    fun rootProvidesDesktopBackDispatcherToThePlayerSlot() =
+        runComposeUiTest {
+            var owner: androidx.navigationevent.NavigationEventDispatcherOwner? = null
+            setContent {
+                TestRoot(
+                    slots =
+                        RootSlots(player = {
+                            owner = androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner.current
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { kotlin.test.assertNotNull(owner) }
+        }
+
+    @Test
+    fun playerSlotNavigationRequestsCollapse() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            setContent { TestRoot(slots = RootSlots(player = { slot = it }, userMessages = emptyFlow())) }
+            runOnIdle { requireNotNull(slot).navigate(PodcastKey(3)) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(1, slot?.collapseRequest) }
+            runOnIdle { requireNotNull(slot).navigate(DiscoverKey) }
+            onAllNodesWithText("discover-content").onFirst().assertIsDisplayed()
+            runOnIdle { kotlin.test.assertTrue(requireNotNull(slot).collapseRequest > 1) }
+            onNodeWithTag("nav_feeds").performClick()
+            onNodeWithText("podcast-3").assertIsDisplayed()
+        }
+
+    @Test
+    fun playerExpansionRouteReachesSlotAndKeepsWideLayoutAsSheet() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            val routes = pending.receiveAsFlow()
+            var lastSlot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot -> lastSlot = slot }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { pending.trySend(Route.ExpandPlayer) }
+            waitForIdle()
+            runOnIdle {
+                kotlin.test.assertEquals(1, lastSlot?.expandRequest)
+                kotlin.test.assertEquals(false, lastSlot?.layout?.playerPanel)
+                kotlin.test.assertTrue(requireNotNull(lastSlot).contentBottomPx > 0f)
+                lastSlot?.onExpandedSettled?.invoke(true)
+            }
+            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            runOnIdle { lastSlot?.onExpandedSettled?.invoke(false) }
+            onNodeWithTag("nav_feeds").assertExists()
+        }
+
+    @Test
+    fun screenRoutesRequestPlayerCollapse() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            val routes = pending.receiveAsFlow()
+            var lastSlot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    slots = RootSlots(player = { slot -> lastSlot = slot }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { pending.trySend(Route.Push(PodcastKey(3))) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(1, lastSlot?.collapseRequest) }
+        }
 
     @Test
     fun groupNotificationSelectsFeedsInsteadOfDroppingTheRoute() =
@@ -541,10 +663,12 @@ private fun TestRoot(
     selectFeedSource: suspend (String?) -> Boolean = { true },
     slots: RootSlots = TestSlots,
     state: RootUiState = RootUiState.READY.copy(startup = startup),
+    failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
             state = state,
+            failedDownloads = failedDownloads,
             routes = routes,
             actions = testActions(selectFeedSource),
             slots = slots,

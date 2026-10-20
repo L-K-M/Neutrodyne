@@ -15,6 +15,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -23,6 +25,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -62,6 +65,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.ImportWarning
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
@@ -96,13 +100,104 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ImportRouteTest {
+    @Test fun englishBackupPreviewUsesSingularWarningCounts() =
+        backupPreviewWarnings(
+            Locale.ENGLISH,
+            1,
+            "Listening history",
+            "1 listening history line was skipped.",
+            "1 unknown backup entry was ignored.",
+        )
+
+    @Test fun englishBackupPreviewUsesPluralWarningCounts() =
+        backupPreviewWarnings(
+            Locale.ENGLISH,
+            2,
+            "Listening history",
+            "2 listening history lines were skipped.",
+            "2 unknown backup entries were ignored.",
+        )
+
+    @Test fun germanBackupPreviewUsesSingularWarningCounts() =
+        backupPreviewWarnings(
+            Locale.GERMAN,
+            1,
+            "Hörverlauf",
+            "1 Zeile des Hörverlaufs wurde übersprungen.",
+            "1 unbekannter Sicherungseintrag wurde ignoriert.",
+        )
+
+    @Test fun germanBackupPreviewUsesPluralWarningCounts() =
+        backupPreviewWarnings(
+            Locale.GERMAN,
+            2,
+            "Hörverlauf",
+            "2 Zeilen des Hörverlaufs wurden übersprungen.",
+            "2 unbekannte Sicherungseinträge wurden ignoriert.",
+        )
+
+    private fun backupPreviewWarnings(
+        locale: Locale,
+        count: Int,
+        historyLabel: String,
+        skipped: String,
+        ignored: String,
+    ) = runComposeUiTest {
+        Locale.setDefault(locale)
+        backups.inspectOutcome =
+            Outcome.Success(
+                restorePreview().copy(
+                    warnings = listOf(ImportWarning("SKIPPED_LINES", count), ImportWarning("IGNORED_ENTRIES", count)),
+                ),
+            )
+        val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+        setRouteContent(ImportKey(id.toString()))
+        assertDisplayedWhenReady(historyLabel)
+        onNodeWithText(skipped).assertExists()
+        onNodeWithText(ignored).assertExists()
+        assertTrue(backups.restoreRequests.isEmpty())
+    }
+
+    @Test fun backupPreviewDisclosesSkippedHistoryLinesBeforeReplaceConfirmation() =
+        runComposeUiTest {
+            backups.inspectOutcome =
+                Outcome.Success(
+                    restorePreview().copy(
+                        warnings =
+                            listOf(
+                                ch.lkmc.neutrodyne.core.model
+                                    .ImportWarning("SKIPPED_LINES", 2),
+                            ),
+                    ),
+                )
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Listening history")
+            onNodeWithText("2 listening history lines were skipped.")
+                .assertExists("Skipped backup history must be disclosed before Replace")
+            onNodeWithText("Replace").performClick()
+            onNodeWithText("2 listening history lines were skipped.").assertExists()
+            onNodeWithText("Restore").performClick()
+            onNodeWithText("Replace your library?").assertExists()
+            assertTrue(backups.restoreRequests.isEmpty())
+        }
+
     private lateinit var previousLocale: Locale
     private val imports = FakeImportRepository()
     private val podcasts = FakePodcastRepository()
+    private val backups =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeBackupRepository()
+    private val playback =
+        ch.lkmc.neutrodyne.core.testing
+            .FakePlaybackController()
+    private var playbackController: ch.lkmc.neutrodyne.playback.api.PlaybackController = playback
     private val groups = FakeGroupRepository()
     private val visibility = ImportScreenVisibility()
     private val navigator = RecordingAppNavigator()
     private val host = SnackbarHostState()
+    private var restoreFile: String? = null
+    private var restorePickCalls = 0
 
     /** The VM's injected `@ApplicationScope` stand-in — confirm/cancel outlive the route. */
     private val appScope = CoroutineScope(SupervisorJob() + kotlinx.coroutines.test.UnconfinedTestDispatcher())
@@ -119,7 +214,10 @@ class ImportRouteTest {
                     override suspend fun pickFile(
                         mimeTypes: List<String>,
                         extensions: List<String>,
-                    ): String? = null
+                    ): String? {
+                        restorePickCalls++
+                        return restoreFile
+                    }
 
                     override suspend fun pickFolder(title: String): String? = null
                 }
@@ -546,7 +644,24 @@ class ImportRouteTest {
                                 if (key.sessionId.toLongOrNull() == null) {
                                     ImportRoute(key)
                                 } else {
-                                    ImportSessionRoute(key, sessionId, vm)
+                                    ImportSessionRoute(
+                                        key,
+                                        sessionId,
+                                        vm,
+                                        RestoreViewModel(
+                                            sessionId,
+                                            backups,
+                                            imports,
+                                            playbackController,
+                                            appScope,
+                                            ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
+                                                ch.lkmc.neutrodyne.core.testing
+                                                    .FakeDownloadController(),
+                                                ch.lkmc.neutrodyne.core.testing
+                                                    .FakePlaybackMediaLookup(),
+                                            ),
+                                        ),
+                                    )
                                 }
                             }
                         }
@@ -925,12 +1040,171 @@ class ImportRouteTest {
         }
 
     @Test
-    fun aBackupPreviewShowsTheRestorePendingBody() =
+    fun aBackupInspectErrorOffersAnotherFile() =
         runComposeUiTest {
             val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
             setRouteContent(ImportKey(id.toString()))
 
-            onNodeWithText("Restoring a backup isn't available in this build yet.").assertExists()
+            assertDisplayedWhenReady("Choose another file")
+        }
+
+    @Test fun backupPreviewShowsInspectedCountsDefaultsAndReplaceConfirmation() =
+        runComposeUiTest {
+            backups.inspectOutcome = Outcome.Success(restorePreview())
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Listening history")
+            onNodeWithText(
+                "142 podcasts, 6 groups, 3214 played episodes, 12 in Up next, 8 settings.",
+                substring = true,
+            ).assertExists()
+            onNodeWithText("Made on Android").assertExists()
+            onNodeWithText("This backup includes passwords for private feeds.").assertExists()
+            onNodeWithText("Listening history").assertIsOn()
+            onNodeWithText("Up next").assertIsOn()
+            onNodeWithText("Settings").assertIsOff()
+            onNodeWithText("Replace").performClick()
+            onNodeWithText("Settings").assertIsOn()
+            onNodeWithText("Restore").performClick()
+            assertDisplayedWhenReady(
+                "Removes 9 podcasts and 2 groups that are not in the backup, " +
+                    "and replaces your listening history",
+            )
+            assertTrue(backups.restoreRequests.isEmpty())
+            onAllNodesWithText("Cancel").fetchSemanticsNodes().let { assertTrue(it.isNotEmpty()) }
+            onAllNodesWithText("Replace").onLast().performClick()
+            waitUntil(timeoutMillis = 5_000) { backups.restoreRequests.size == 1 }
+            assertEquals(1, playback.pauseCalls)
+            assertTrue(imports.calls.none { it.startsWith("confirm(") })
+        }
+
+    @Test fun replacePausesPlaybackOnTheMainDispatcher() =
+        runComposeUiTest {
+            val pausedOnMain = AtomicBoolean(false)
+            playbackController =
+                object : ch.lkmc.neutrodyne.playback.api.PlaybackController by playback {
+                    override fun pause() {
+                        pausedOnMain.set(java.awt.EventQueue.isDispatchThread())
+                        playback.pause()
+                    }
+                }
+            backups.inspectOutcome = Outcome.Success(restorePreview())
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Replace")
+            onNodeWithText("Replace").performClick()
+            onNodeWithText("Restore").performClick()
+            onAllNodesWithText("Replace").onLast().performClick()
+            waitUntil(timeoutMillis = 5_000) { backups.restoreRequests.size == 1 }
+            assertTrue(pausedOnMain.get(), "Playback pause must run on the main dispatcher")
+        }
+
+    @Test fun backupProgressHandsOffToTheExistingReport() =
+        runComposeUiTest {
+            backups.inspectOutcome = Outcome.Success(restorePreview())
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            imports.sessions.value =
+                imports.sessions.value +
+                (
+                    id to
+                        imports.sessions.value
+                            .getValue(id)
+                            .copy(options = ImportOptions(restoreRequestedAt = 1L))
+                )
+            backups.restoreProgress.value =
+                ch.lkmc.neutrodyne.core.domain.RestoreProgress
+                    .Running(id, "episodes", 12, 20)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Restoring… Listening history 12 of 20")
+            runOnIdle {
+                setState(id, ImportState.DONE)
+                backups.restoreProgress.value =
+                    ch.lkmc.neutrodyne.core.domain.RestoreProgress
+                        .Finished(id, false)
+            }
+            assertDisplayedWhenReady("Import finished")
+        }
+
+    @Test fun restoreRunningIsShownInsteadOfNormalImportConfirmation() =
+        runComposeUiTest {
+            backups.inspectOutcome = Outcome.Success(restorePreview())
+            backups.restoreOutcome = Outcome.Failure(ch.lkmc.neutrodyne.core.domain.BackupError.RestoreRunning)
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Restore")
+            onNodeWithText("Restore").performClick()
+            assertDisplayedWhenReady("A restore is already running")
+            onNodeWithText("Choose another file").assertExists()
+            assertTrue(imports.calls.none { it.startsWith("confirm(") })
+        }
+
+    @Test fun inspectErrorCanChooseAnotherBackupAndPickerCancelDoesNothing() =
+        runComposeUiTest {
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Choose another file")
+            val before = imports.sessions.value.size
+            onNodeWithText("Choose another file").performClick()
+            waitUntil(timeoutMillis = 5_000) { restorePickCalls == 1 }
+            assertEquals(before, imports.sessions.value.size)
+            assertTrue(navigator.calls.isEmpty())
+            restoreFile = "file:///another.zip"
+            onNodeWithText("Choose another file").performClick()
+            waitUntil(timeoutMillis = 5_000) { navigator.calls.any { it is RecordingAppNavigator.Call.PushDetail } }
+            assertEquals(before + 1, imports.sessions.value.size)
+        }
+
+    @Test fun newerBackupErrorIncludesUpdateAndChooseAnotherActions() =
+        runComposeUiTest {
+            backups.inspectOutcome =
+                Outcome.Failure(
+                    ch.lkmc.neutrodyne.core.domain.BackupError
+                        .NewerFormat(99),
+                )
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady(
+                "This backup was made by a newer version of Neutrodyne. " +
+                    "Update the app to restore it.",
+            )
+            onNodeWithText("Choose another file").assertExists()
+            onNodeWithText("Check for updates").assertExists()
+        }
+
+    @Test fun germanRestorePreviewUsesLocalizedLabels() =
+        runComposeUiTest {
+            Locale.setDefault(Locale.GERMAN)
+            backups.inspectOutcome = Outcome.Success(restorePreview())
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Hörverlauf")
+            onNodeWithText("Zusammenführen").assertExists()
+            onNodeWithText("Einstellungen").assertIsOff()
+            onNodeWithText("Ersetzen").performClick()
+            onNodeWithText("Einstellungen").assertIsOn()
+        }
+
+    @Test fun aCommittedBackupReopensItsReportWithoutLiveRestoreProgress() =
+        runComposeUiTest {
+            backups.inspectOutcome = Outcome.Success(restorePreview())
+            val id =
+                seed(
+                    format = ImportFormat.NEUTRODYNE_BACKUP,
+                    sessionItems =
+                        listOf(
+                            item(0, status = ImportItemStatus.QUEUED),
+                            item(1, status = ImportItemStatus.QUEUED),
+                        ),
+                )
+            imports.sessions.value = imports.sessions.value + (
+                id to
+                    imports.sessions.value.getValue(id).copy(
+                        state = ImportState.COMMITTED,
+                        options = ImportOptions(restoreRequestedAt = 1L),
+                    )
+            )
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Fetched 0 of 2")
         }
 
     @Test

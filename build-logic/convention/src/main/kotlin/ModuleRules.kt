@@ -89,10 +89,12 @@ internal fun Project.configureModuleGraphAssert() {
                 ":core:designsystem -> :core:model",
                 ":core:ui -> :core:(designsystem|model|common|navigation)",
                 ":core:ui -> :download:api",
+                ":core:ui -> :playback:api",
                 ":core:testing -> :core:(domain|model|common|database|navigation)",
                 ":core:testing -> :(playback|download|youtube|sync):api",
                 ":core:testing -> :sync:protocol",
                 ":core:testing -> :feeds",
+                ":core:testing -> :youtube:engine", // Platform test fakes for JVM host ports.
                 ":(playback|download|youtube|sync):api -> :core:(model|common)",
                 ":core:(database|datastore) -> :core:(model|common)",
                 ":core:network -> :core:(model|common|network:okhttp)",

@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.data.execSql
 import ch.lkmc.neutrodyne.core.data.newDb
 import ch.lkmc.neutrodyne.core.data.newUnsubscribe
 import ch.lkmc.neutrodyne.core.data.repo.GroupMerger
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.CredentialEntity
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
@@ -22,14 +23,18 @@ import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.StoredSecret
+import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
+import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -45,6 +50,7 @@ import ch.lkmc.neutrodyne.feeds.backup.OverridesV1
 import ch.lkmc.neutrodyne.feeds.backup.PodcastV1
 import ch.lkmc.neutrodyne.feeds.backup.QueueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -71,6 +77,7 @@ class RestoreMergerTest {
     private val coordinator = FakeCredentialCommitCoordinator()
     private val channels = FakeGroupChannelSync()
     private val scheduler = FakeRefreshScheduler()
+    private val downloads = FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
     private val merger =
         RestoreMerger(
             db = db,
@@ -83,6 +90,8 @@ class RestoreMergerTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider { downloads },
         )
 
     @AfterTest fun close() = db.close()
@@ -100,6 +109,65 @@ class RestoreMergerTest {
             }
             assertTrue(db.podcastDao().allForExport().isEmpty())
             assertTrue(db.groupDao().groupsInOrder().isEmpty())
+        }
+
+    @Test fun restoreDropsInvalidAutoKeepLatestInsteadOfActivatingIt() =
+        runTest {
+            val staged =
+                stagedOf(
+                    podcasts =
+                        listOf(
+                            podcastV1(
+                                "https://invalid/feed",
+                                settings = OverridesV1(autoDownload = true, autoDownloadKeepLatest = 99),
+                            ),
+                            podcastV1("https://valid/feed", settings = OverridesV1(autoDownloadKeepLatest = 7)),
+                        ),
+                )
+            merger.mergeLibrary(staged, MergePolicy.RESTORE_REPLACE, ALL_CATEGORIES)
+            val invalid = requireNotNull(db.podcastDao().byFeedKey("https://invalid/feed")).id
+            val valid = requireNotNull(db.podcastDao().byFeedKey("https://valid/feed")).id
+            assertEquals(
+                null,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(invalid)
+                    ?.o
+                    ?.autoDownloadKeepLatest,
+            )
+            assertEquals(
+                7,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(valid)
+                    ?.o
+                    ?.autoDownloadKeepLatest,
+            )
+        }
+
+    @Test fun restoreClearsDisabledGroupDependentsAndPreservesDeletionPolicy() =
+        runTest {
+            val staged =
+                stagedOf(
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "disabled",
+                                name = "Disabled",
+                                settings =
+                                    OverridesV1(
+                                        autoDownload = false,
+                                        autoDownloadKeepLatest = 5,
+                                        deleteAfterPlayed = "NEVER",
+                                    ),
+                            ),
+                        ),
+                )
+            merger.mergeLibrary(staged, MergePolicy.RESTORE_REPLACE, ALL_CATEGORIES)
+            val group = db.groupDao().groupsInOrder().single()
+            val stored = requireNotNull(db.scopeSettingsDao().forGroup(group.id)).o
+            assertEquals(null, stored.autoDownloadKeepLatest)
+            assertEquals(ch.lkmc.neutrodyne.core.model.DeleteAfter.NEVER, stored.deleteAfterPlayed)
         }
 
     // --- Podcasts ----------------------------------------------------------------------------------
@@ -904,9 +972,11 @@ class RestoreMergerTest {
             assertNotNull(db.podcastDao().byId(only))
             assertNotNull(db.groupDao().groupById(onlyGroup))
 
+            assertEquals(0, downloads.replacements)
             // Replace unsubscribes the local-only podcast (episodes cascade, D24) and deletes
             // the local-only group without undo; matched rows stay.
             merger.mergeLibrary(staged, MergePolicy.RESTORE_REPLACE, ALL_CATEGORIES)
+            assertEquals(1, downloads.replacements)
             assertNotNull(db.podcastDao().byId(matched))
             assertNull(db.podcastDao().byId(only))
             assertNull(db.episodeDao().byId(ep))
@@ -1081,6 +1151,82 @@ class RestoreMergerTest {
             // The backup row replaces the local row; a backup without settings deletes it.
             assertEquals(ScopeOverrides(boostDb = 4.0f), db.scopeSettingsDao().forPodcast(p)?.o)
             assertNull(db.scopeSettingsDao().forGroup(g))
+        }
+
+    /**
+     * 05 Rules 4 (W4): an `OverridesV1` speed outside the 0.5–3.0/0.05 grid drops before persistence;
+     * the effective value inherits and valid speeds round-trip verbatim.
+     */
+    @Test
+    fun outOfRangeScopeSpeedsDropBeforePersistence() =
+        runTest {
+            merger.mergeLibrary(
+                stagedOf(
+                    podcasts =
+                        listOf(
+                            podcastV1(
+                                "https://a/feed",
+                                settings = OverridesV1(playbackSpeed = 9.9f, skipSilence = true),
+                            ),
+                            podcastV1("https://b/feed", settings = OverridesV1(playbackSpeed = 1.5f)),
+                        ),
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "u-1",
+                                name = "News",
+                                members = listOf("https://a/feed"),
+                                settings = OverridesV1(playbackSpeed = 1.25f),
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_MERGE,
+                ALL_CATEGORIES,
+            )
+
+            val resolver = EffectiveSettingsResolverImpl(db, FakeSettingsRepository())
+            val a = assertNotNull(db.podcastDao().byFeedKey("https://a/feed")).id
+            val b = assertNotNull(db.podcastDao().byFeedKey("https://b/feed")).id
+            val group = db.groupDao().groupsInOrder().single()
+            val groupId = group.id
+
+            assertNull(
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(a)
+                    ?.o
+                    ?.playbackSpeed,
+            )
+            assertEquals(
+                true,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(a)
+                    ?.o
+                    ?.skipSilence,
+            )
+            assertEquals(
+                1.5f,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(b)
+                    ?.o
+                    ?.playbackSpeed,
+            )
+
+            // a's invalid 9.9 drops: the valid context-group override takes over (dropped = inherit).
+            assertEquals(
+                Effective(1.25f, SettingSource.Group(group.uuid, "News")),
+                resolver.playback(a, groupId).speed,
+            )
+            assertEquals(
+                Effective(true, SettingSource.PodcastOverride),
+                resolver.playback(a, groupId).skipSilence,
+            )
+            // With no context group the invalid speed drops straight to the global default.
+            assertEquals(Effective(1.0f, SettingSource.AppDefault), resolver.playback(a, null).speed)
+            // A valid scope speed restores verbatim and wins the chain.
+            assertEquals(Effective(1.5f, SettingSource.PodcastOverride), resolver.playback(b, groupId).speed)
         }
 
     // --- Credentials ------------------------------------------------------------------------------
@@ -1387,6 +1533,10 @@ class RestoreMergerTest {
             channelSync = channels,
             orderKeys = orderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
 
     /**

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="discover_title">Discover</string>
+    <string name="privacy_title">Privacy</string>
+    <string name="privacy_inventory">What Neutrodyne connects to</string>
+    <string name="discover_summary">Choose directories, country and Podcast Index credentials</string>
+    <string name="privacy_summary">Network destinations and what they receive</string>
+    <string name="discover_country_hint">Two-letter country code; leave empty for system region (%1$s).</string>
+    <string name="discover_country_edit">Country code</string>
+    <string name="discover_save">Save</string>
+    <string name="discover_cancel">Cancel</string>
+    <string name="discover_no_key">No key. Podcast Index receives no requests. Enter your own key to use it.</string>
+    <string name="discover_user_key">Your key is stored on this device. It overrides any build key.</string>
+    <string name="discover_build_key">Using credentials bundled with this build; they can be extracted from the app. Removing your own key falls back to them.</string>
+    <string name="discover_disabled">Off. No automatic requests. Explicit Apple links ask before a one-time lookup.</string>
+    <string name="discover_pi_disabled">Off. No searches or ID lookups are sent to Podcast Index.</string>
+    <string name="discover_key_rejected">Credentials were rejected. Re-enter a working pair or remove your own key.</string>
+    <string name="discover_provider_failed">The last request failed. Try again when connected.</string>
+    <string name="discover_provider_busy">The provider is busy. Try again later.</string>
+    <string name="discover_key_entry">Use my own Podcast Index API key</string>
+    <string name="discover_key_remove">Remove my Podcast Index key</string>
+    <string name="discover_key">API key</string>
+    <string name="discover_secret">API secret</string>
+    <string name="discover_verify">Verify and save</string>
+    <string name="discover_verifying">Updating Podcast Index credentials…</string>
+    <string name="discover_key_help">Verification sends a test query “podcast” and authentication headers to api.podcastindex.org. A failed or cancelled replacement keeps your previous key. Fields are cleared after submission; re-enter them to retry.</string>
+    <string name="discover_storage">Your entered key and secret stay out of settings backups and sync. Android encrypts the entered API secret with Keystore; Windows protects the secrets file with user-bound DPAPI. macOS and Linux use a file protected by 0600 permissions, without encryption. Your API key identifier is also stored unencrypted in local credential metadata.</string>
+    <string name="discover_apple_links">Open by default settings</string>
+    <string name="discover_apple_links_help">Allow supported Apple Podcasts links in Android settings. Browser and device choices can still affect which app opens them.</string>
+    <string name="discover_open_failed">No app can open these settings.</string>
+    <string name="discover_saved">Credentials verified and saved.</string>
+    <string name="discover_removed">Your key was removed. A build key is used if available.</string>
+    <string name="discover_invalid_country">Enter two ASCII letters, or leave the country empty for the system region.</string>
+    <string name="discover_save_failed">Could not save. Try again; your previous settings or key are kept.</string>
+    <string name="discover_key_failed">Could not verify the pair. Check both fields and your connection, then re-enter them. Your previous key is kept.</string>
+    <string name="discover_key_busy">Podcast Index is busy. Wait, then re-enter the pair to try again.</string>
+    <string name="discover_key_invalid">Enter both the API key and API secret.</string>
+    <string name="privacy_providers">Discover providers</string>
+    <string name="privacy_notes_images">Show-notes images</string>
+    <string name="privacy_intro">Requests made by Neutrodyne expose your IP address and the app User-Agent (version and platform). Neutrodyne adds no tracking identifier and stores no directory cookies. Provider switches control automatic requests; URLs are never automatically searched.</string>
+    <string name="privacy_on">On</string>
+    <string name="privacy_off">Off</string>
+    <string name="privacy_keyless">Off: no effective key</string>
+</resources>

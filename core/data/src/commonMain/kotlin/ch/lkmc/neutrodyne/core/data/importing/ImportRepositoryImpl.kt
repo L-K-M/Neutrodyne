@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -169,7 +170,10 @@ internal class ImportRepositoryImpl(
         }
     }
 
-    override suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> = committer.confirm(sessionId)
+    override suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> {
+        sessions.upgradePreview(sessionId)
+        return committer.confirm(sessionId)
+    }
 
     /**
      * 05 §9 / the state table: `PREVIEW` loses payload then row — the ownership re-check,
@@ -277,7 +281,9 @@ internal class ImportRepositoryImpl(
             db.importDao().observeProgress(sessionId),
             db.importDao().observeItemTallies(sessionId),
             db.importDao().observeNoMediaOrdinals(sessionId),
-        ) { session, progress, tallies, noMedia -> session?.toView(progress, tallies, noMedia) }
+        ) { session, progress, tallies, noMedia -> session?.toView(progress, tallies, noMedia) }.onStart {
+            sessions.upgradePreview(sessionId)
+        }
 
     private fun ImportSessionEntity.toView(
         progress: List<ImportStatusCount>,

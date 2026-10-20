@@ -25,7 +25,37 @@ enum class Availability {
 enum class OwnerType { PODCAST, EPISODE }
 
 /** Where `chapter` rows came from (02 `chapter.source`). */
-enum class ChapterSource { PODCASTING20_JSON, PSC, ID3, MP4, YOUTUBE_DESC }
+enum class ChapterSource {
+    PODCASTING20_JSON,
+    PSC,
+    ID3,
+    MP4,
+    YOUTUBE_DESC,
+    ;
+
+    companion object {
+        /** Never merge sources. A hidden-only or invalid source cannot mask a visible fallback. */
+        fun winning(rows: List<EpisodeChapter>): List<EpisodeChapter> =
+            entries.firstNotNullOfOrNull { source ->
+                normalize(rows.filter { it.source == source }).filterNot { it.hidden }.takeIf { it.isNotEmpty() }
+            } ?: emptyList()
+
+        /**
+         * One source at a time: stable first duplicate wins, negative starts are discarded.
+         * Missing/invalid ends use the next start; valid ends are capped there. Explicit shorter
+         * ends leave gaps; the last unknown end stays null. Hidden rows retain their boundaries.
+         */
+        fun normalize(rows: List<EpisodeChapter>): List<EpisodeChapter> {
+            require(rows.map { it.source }.distinct().size <= 1) { "Normalize one chapter source at a time" }
+            val sorted = rows.filter { it.startMs >= 0 }.sortedBy { it.startMs }.distinctBy { it.startMs }
+            return sorted.mapIndexed { index, chapter ->
+                val next = sorted.getOrNull(index + 1)?.startMs
+                val validEnd = chapter.endMs?.takeIf { it > chapter.startMs }
+                chapter.copy(endMs = validEnd?.let { end -> next?.let { end.coerceAtMost(it) } ?: end } ?: next)
+            }
+        }
+    }
+}
 
 /**
  * What the feed-scoped `episode_guid_provenance` table knows about one canonical GUID (02, D98;

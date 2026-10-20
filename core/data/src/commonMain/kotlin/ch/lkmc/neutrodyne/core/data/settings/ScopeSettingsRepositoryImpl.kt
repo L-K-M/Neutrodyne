@@ -18,8 +18,19 @@ import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
+import ch.lkmc.neutrodyne.core.model.PlaybackScopeWrite
+import ch.lkmc.neutrodyne.core.model.PlaybackSettingChange
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
+import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SettingSource
+import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.hasSupportedKeepLatest
+import ch.lkmc.neutrodyne.core.model.hasSupportedPlaybackSpeed
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.withGroupAutoDownloadGating
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -28,6 +39,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 @Inject
@@ -39,12 +52,26 @@ internal class ScopeSettingsRepositoryImpl(
     private val refresh: Provider<RefreshController>,
     private val channelSync: GroupChannelSync,
     private val snapshots: SnapshotScheduler,
+    private val capabilities: YouTubeCapabilitiesSource,
 ) : ScopeSettingsRepository {
     private val dao get() = db.scopeSettingsDao()
 
     override fun observePodcast(podcastId: Long): Flow<ScopedSettingsView?> =
-        combine(dao.observePodcastScope(podcastId), settings.observeScopeDefaults()) { rows, defaults ->
-            rows.takeIf { it.isNotEmpty() }?.resolvePodcast(defaults)
+        combine(
+            dao.observePodcastScope(podcastId),
+            settings.observeScopeDefaults(),
+            capabilities.capabilities.map { it.downloads },
+        ) { rows, defaults, downloads ->
+            rows.takeIf { it.isNotEmpty() }?.resolvePodcast(defaults)?.let { view ->
+                if (rows.first().sourceType != SourceType.YOUTUBE_CHANNEL || downloads) {
+                    view
+                } else {
+                    view.copy(
+                        effective = view.effective.copy(autoDownload = false),
+                        sources = view.sources + AUTO_FIELDS.associateWith { SettingSource.NotSupported },
+                    )
+                }
+            }
         }.distinctUntilChanged()
 
     override fun observeGroup(groupId: Long): Flow<ScopedSettingsView?> =
@@ -57,11 +84,32 @@ internal class ScopeSettingsRepositoryImpl(
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
         write {
-            if (db.podcastDao().byId(podcastId) == null) return@write Outcome.Success(ScopeWrite.UNCHANGED)
+            val podcast = db.podcastDao().byId(podcastId) ?: return@write Outcome.Success(ScopeWrite.UNCHANGED)
             val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
-            val next = change(previous.toModel())
+            val edited = change(previous.toModel())
+            val next =
+                if (podcast.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                    !capabilities.capabilities.value.downloads
+                ) {
+                    edited.copy(
+                        autoDownload = previous.autoDownload,
+                        autoDownloadKeepLatest = previous.autoDownloadKeepLatest,
+                        autoDownloadNetwork = previous.autoDownloadNetwork,
+                        autoDownloadRequireCharging = previous.autoDownloadRequireCharging,
+                        includeVideoInAutoDownload = previous.includeVideoInAutoDownload,
+                    )
+                } else {
+                    edited
+                }
+            if (next != edited) return@write Outcome.Failure(SettingsError.OutOfRange("autoDownload"))
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
-            val stored = previous.withM2Fields(next)
+            if (!next.hasSupportedPlaybackSpeed()) return@write invalidSpeed()
+            if (!next.hasSupportedKeepLatest()) {
+                return@write Outcome.Failure(
+                    SettingsError.OutOfRange("autoDownloadKeepLatest"),
+                )
+            }
+            val stored = previous.withEditableFields(next)
             if (stored == ScopeOverrides()) {
                 dao.deletePodcast(podcastId)
             } else if (stored != previous) {
@@ -82,9 +130,15 @@ internal class ScopeSettingsRepositoryImpl(
         write(afterCommit = ::syncGroupChannels) {
             if (db.groupDao().groupById(groupId) == null) return@write Outcome.Success(ScopeWrite.UNCHANGED)
             val previous = dao.forGroup(groupId)?.o ?: ScopeOverrides()
-            val next = change(previous.toModel())
+            val next = change(previous.toModel()).withGroupAutoDownloadGating()
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
-            val stored = previous.withM2Fields(next)
+            if (!next.hasSupportedPlaybackSpeed()) return@write invalidSpeed()
+            if (!next.hasSupportedKeepLatest()) {
+                return@write Outcome.Failure(
+                    SettingsError.OutOfRange("autoDownloadKeepLatest"),
+                )
+            }
+            val stored = previous.withEditableFields(next)
             if (stored == ScopeOverrides()) {
                 dao.deleteGroup(groupId)
             } else if (stored != previous) {
@@ -97,6 +151,106 @@ internal class ScopeSettingsRepositoryImpl(
                 ),
             )
         }
+
+    override suspend fun writePlayback(
+        podcastId: Long,
+        contextGroupId: Long?,
+        scope: SettingScope,
+        change: PlaybackSettingChange,
+    ): Outcome<PlaybackScopeWrite, SettingsError> =
+        withContext(NonCancellable) {
+            if (change is PlaybackSettingChange.Speed && !PlaybackSettingKeys.isValidSpeed(change.value)) {
+                return@withContext invalidSpeed()
+            }
+
+            var mutated = false
+            val result: PlaybackScopeWrite =
+                try {
+                    db.withWriteTransaction {
+                        val rows = dao.podcastScopes(listOf(podcastId))
+                        if (rows.isEmpty()) return@withWriteTransaction PlaybackScopeWrite.MISSING_PODCAST
+                        val groupId = rows.mapNotNull { it.groupId }.firstOrNull { it == contextGroupId }
+                        if (scope == SettingScope.GROUP && groupId == null) {
+                            return@withWriteTransaction PlaybackScopeWrite.NO_CONTEXT_GROUP
+                        }
+
+                        val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
+                        val podcastEdit = if (scope == SettingScope.PODCAST) OverrideEdit.SET else OverrideEdit.CLEAR
+                        val next = previous.withPlayback(change, podcastEdit)
+                        mutated = savePodcast(podcastId, previous, next)
+                        if (scope != SettingScope.PODCAST && groupId != null) {
+                            val previousGroup = dao.forGroup(groupId)?.o ?: ScopeOverrides()
+                            val groupEdit = if (scope == SettingScope.GROUP) OverrideEdit.SET else OverrideEdit.CLEAR
+                            val nextGroup = previousGroup.withPlayback(change, groupEdit)
+                            mutated = saveGroup(groupId, previousGroup, nextGroup) || mutated
+                        }
+                        if (scope == SettingScope.GLOBAL) {
+                            // Run clears first so SQL faults cannot change the global. A store failure
+                            // throws through Room so it rolls back every scoped clear as well.
+                            val global =
+                                when (change) {
+                                    is PlaybackSettingChange.Speed -> {
+                                        settings.set(PlaybackSettingKeys.SPEED, change.value)
+                                    }
+
+                                    is PlaybackSettingChange.SkipSilence -> {
+                                        settings.set(PlaybackSettingKeys.SKIP_SILENCE, change.value)
+                                    }
+                                }
+                            if (global is Outcome.Failure) throw PlaybackWriteFailure(global.error)
+                            mutated = true
+                        }
+                        PlaybackScopeWrite.APPLIED
+                    }
+                } catch (error: PlaybackWriteFailure) {
+                    return@withContext Outcome.Failure(error.error)
+                } catch (error: SQLiteException) {
+                    Log.w("ScopeSettings", error) { "Playback scope write failed" }
+                    return@withContext Outcome.Failure(SettingsError.WriteFailed)
+                }
+            if (mutated) {
+                suspendRunCatching { snapshots.requestSoon() }
+                    .onFailure { error ->
+                        Log.w("ScopeSettings", error) { "Snapshot request failed after playback settings write" }
+                    }
+            }
+            Outcome.Success(result)
+        }
+
+    private suspend fun savePodcast(
+        id: Long,
+        previous: ScopeOverrides,
+        next: ScopeOverrides,
+    ): Boolean {
+        if (next == previous) return false
+        if (next == ScopeOverrides()) dao.deletePodcast(id) else dao.upsertPodcast(PodcastSettingsEntity(id, next))
+        return true
+    }
+
+    private suspend fun saveGroup(
+        id: Long,
+        previous: ScopeOverrides,
+        next: ScopeOverrides,
+    ): Boolean {
+        if (next == previous) return false
+        if (next == ScopeOverrides()) dao.deleteGroup(id) else dao.upsertGroup(PodcastGroupSettingsEntity(id, next))
+        return true
+    }
+
+    private enum class OverrideEdit { SET, CLEAR }
+
+    private fun ScopeOverrides.withPlayback(
+        change: PlaybackSettingChange,
+        edit: OverrideEdit,
+    ): ScopeOverrides =
+        when (change) {
+            is PlaybackSettingChange.Speed -> copy(playbackSpeed = change.value.takeIf { edit == OverrideEdit.SET })
+            is PlaybackSettingChange.SkipSilence -> copy(skipSilence = change.value.takeIf { edit == OverrideEdit.SET })
+        }
+
+    private class PlaybackWriteFailure(
+        val error: SettingsError,
+    ) : RuntimeException()
 
     // Reconcile channels after committing and releasing the Room writer.
     private suspend fun syncGroupChannels() {
@@ -155,11 +309,46 @@ internal class ScopeSettingsRepositoryImpl(
         }
     }
 
-    private fun ScopeOverrides.toModel(): SettingOverrides = SettingOverrides(refreshIntervalMinutes, notifyNewEpisodes)
+    private fun ScopeOverrides.toModel(): SettingOverrides =
+        SettingOverrides(
+            refreshIntervalMinutes,
+            notifyNewEpisodes,
+            playbackSpeed?.takeIf(PlaybackSettingKeys::isValidSpeed),
+            skipSilence,
+            autoDownload = autoDownload,
+            autoDownloadKeepLatest = autoDownloadKeepLatest,
+            autoDownloadNetwork = autoDownloadNetwork,
+            autoDownloadRequireCharging = autoDownloadRequireCharging,
+            includeVideoInAutoDownload = includeVideoInAutoDownload,
+            deleteAfterPlayed = deleteAfterPlayed,
+        )
 
-    private fun ScopeOverrides.withM2Fields(value: SettingOverrides): ScopeOverrides =
-        copy(refreshIntervalMinutes = value.refreshIntervalMinutes, notifyNewEpisodes = value.notifyNewEpisodes)
+    private fun ScopeOverrides.withEditableFields(value: SettingOverrides): ScopeOverrides =
+        copy(
+            refreshIntervalMinutes = value.refreshIntervalMinutes,
+            notifyNewEpisodes = value.notifyNewEpisodes,
+            playbackSpeed = value.playbackSpeed,
+            skipSilence = value.skipSilence,
+            autoDownload = value.autoDownload,
+            autoDownloadKeepLatest = value.autoDownloadKeepLatest,
+            autoDownloadNetwork = value.autoDownloadNetwork,
+            autoDownloadRequireCharging = value.autoDownloadRequireCharging,
+            includeVideoInAutoDownload = value.includeVideoInAutoDownload,
+            deleteAfterPlayed = value.deleteAfterPlayed,
+        )
+
+    private fun invalidSpeed(): Outcome<Nothing, SettingsError> =
+        Outcome.Failure(SettingsError.OutOfRange("playbackSpeed"))
 
     private fun invalidRefresh(): Outcome<Nothing, SettingsError> =
         Outcome.Failure(SettingsError.OutOfRange("refreshIntervalMinutes"))
 }
+
+private val AUTO_FIELDS =
+    setOf(
+        SettingField.AUTO_DOWNLOAD,
+        SettingField.AUTO_DOWNLOAD_KEEP_LATEST,
+        SettingField.AUTO_DOWNLOAD_NETWORK,
+        SettingField.AUTO_DOWNLOAD_REQUIRE_CHARGING,
+        SettingField.INCLUDE_VIDEO_IN_AUTO_DOWNLOAD,
+    )

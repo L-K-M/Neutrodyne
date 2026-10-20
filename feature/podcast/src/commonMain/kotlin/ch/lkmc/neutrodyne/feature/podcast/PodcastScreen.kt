@@ -82,6 +82,7 @@ import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
+import ch.lkmc.neutrodyne.core.ui.forSource
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -95,6 +96,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
+import ch.lkmc.neutrodyne.core.ui.resources.download_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
@@ -118,6 +120,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_title
 import ch.lkmc.neutrodyne.core.ui.resources.ps_edit_url
 import ch.lkmc.neutrodyne.core.ui.resources.ps_feed_copied
+import ch.lkmc.neutrodyne.core.ui.resources.yt_empty_channel
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
@@ -157,10 +160,13 @@ internal fun PodcastScreen(
     onDismissUnsubscribe: () -> Unit,
     onRemoveGroup: (Group) -> Unit,
     modifier: Modifier = Modifier,
+    onDownloadAll: () -> Unit = {},
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
     selection: EpisodeSelectionController? = null,
+    onPlaySelectionNext: (() -> Unit)? = null,
+    onPlaySelectionLast: (() -> Unit)? = null,
 ) {
     val selectedIds =
         selection
@@ -183,7 +189,21 @@ internal fun PodcastScreen(
 
     Column(modifier = modifier.fillMaxSize().episodeSelectionKeys(selection, selectAll)) {
         if (selectedIds.isNotEmpty() && selection != null) {
-            SelectionTopBar(selection, selectedIds.size, selectAll)
+            SelectionTopBar(
+                selection,
+                selectedIds.size,
+                selectAll,
+                onPlayNext =
+                    onPlaySelectionNext.takeIf {
+                        detail?.sourceType == SourceType.RSS ||
+                            state.rowCaps.inAppPlayback
+                    },
+                onPlayLast =
+                    onPlaySelectionLast.takeIf {
+                        detail?.sourceType == SourceType.RSS ||
+                            state.rowCaps.inAppPlayback
+                    },
+            )
         } else {
             NdTopAppBar(
                 title = if (headerGone) detail?.displayTitle.orEmpty() else "",
@@ -202,9 +222,11 @@ internal fun PodcastScreen(
                     )
                     PodcastOverflow(
                         detail = detail,
+                        caps = state.rowCaps,
                         feedUrl = state.feedUrl,
                         onOpenSettings = onOpenSettings,
                         onMarkAllPlayedClick = onMarkAllPlayedClick,
+                        onDownloadAll = onDownloadAll,
                         onUnsubscribe = onUnsubscribeRequest,
                     )
                 },
@@ -307,21 +329,37 @@ internal fun PodcastScreen(
                     // 08's `emptyFeed` doubles as the filtered-empty state: a fetched feed
                     // holding zero episodes gets the bare copy, while an active filter adds
                     // the reset action.
-                    if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading) {
+                    val pendingChannel =
+                        detail.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                            detail.status == PodcastStatus.PENDING_FIRST_FETCH
+                    if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading && !pendingChannel) {
                         item(key = "empty", contentType = "empty") {
                             EmptyState(
                                 icon = NdIcons.FilterList,
-                                title = stringResource(Res.string.podcast_no_episodes),
+                                title =
+                                    stringResource(
+                                        if (detail.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                                            state.filters == FeedFilters()
+                                        ) {
+                                            Res.string.yt_empty_channel
+                                        } else {
+                                            Res.string.podcast_no_episodes
+                                        },
+                                    ),
                                 body = "",
                                 actionLabel =
                                     if (state.filters != FeedFilters()) {
                                         stringResource(Res.string.feeds_show_played)
+                                    } else if (detail.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                                        stringResource(Res.string.podcast_settings)
                                     } else {
                                         null
                                     },
                                 onAction =
                                     if (state.filters != FeedFilters()) {
                                         { onFiltersChange(FeedFilters()) }
+                                    } else if (detail.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                                        onOpenSettings
                                     } else {
                                         null
                                     },
@@ -360,7 +398,7 @@ internal fun PodcastScreen(
                                 row = row,
                                 live = rowLive,
                                 style = EpisodeRowStyle.PODCAST,
-                                caps = RowCaps.FULL.copy(offline = state.offline),
+                                caps = state.rowCaps.forSource(row.sourceType).copy(offline = state.offline),
                                 highlightNew = false,
                                 selected = selectedIds.takeIf { it.isNotEmpty() }?.contains(row.id),
                                 onAction = { action ->
@@ -445,9 +483,11 @@ internal fun PodcastScreen(
 @Composable
 private fun PodcastOverflow(
     detail: PodcastDetail?,
+    caps: RowCaps,
     feedUrl: String?,
     onOpenSettings: () -> Unit,
     onMarkAllPlayedClick: () -> Unit,
+    onDownloadAll: () -> Unit,
     onUnsubscribe: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -467,6 +507,12 @@ private fun PodcastOverflow(
             contentDescription = stringResource(Res.string.action_more),
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (detail?.sourceType == SourceType.RSS || caps.downloads) {
+                DropdownMenuItem(text = { Text(stringResource(Res.string.download_all)) }, onClick = {
+                    open = false
+                    onDownloadAll()
+                })
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.podcast_settings)) },
                 onClick = {
@@ -630,7 +676,7 @@ private fun FeedStateBanner(
             )
         }
 
-        detail.status == PodcastStatus.PENDING_FIRST_FETCH -> {
+        detail.status == PodcastStatus.PENDING_FIRST_FETCH && health.lastErrorKind == null -> {
             NdBanner(
                 message = stringResource(Res.string.podcast_fetching),
                 icon = NdIcons.ProgressActivity,

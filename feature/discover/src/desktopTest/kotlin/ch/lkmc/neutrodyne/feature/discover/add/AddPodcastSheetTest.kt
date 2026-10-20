@@ -47,6 +47,8 @@ import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.testFeedPreview
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
 import kotlinx.coroutines.CompletableDeferred
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -72,7 +74,17 @@ class AddPodcastSheetTest {
         ch.lkmc.neutrodyne.core.testing
             .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
+    private val viewModel by lazy {
+        AddPodcastViewModel(
+            resolver,
+            subscribe,
+            groups,
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeChannelResolver(),
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeChannelRepository(),
+        )
+    }
     private var openedPodcast: Long? = null
     private var dismissed = false
 
@@ -87,6 +99,41 @@ class AddPodcastSheetTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test fun channelPreviewShowsMetadataVariantsAndOpenWithoutEpisodeCount() =
+        runComposeUiTest {
+            val resolved =
+                ChannelResolution.Resolved(
+                    "UCBR8-60-B28hp2BmDPdntcQ",
+                    "Channel title",
+                    null,
+                    null,
+                    null,
+                    ResolvedVia.STATIC,
+                )
+            setSheet(
+                initialInput = "@channel",
+                onResolve = {},
+                stateOverride =
+                    AddPodcastUiState(step = AddSheetStep.Channel(resolved, 1, alreadySubscribedId = 44)),
+            )
+            onNodeWithText("Channel title").assertIsDisplayed()
+            onNodeWithText("Long-form uploads only; change in podcast settings").assertIsDisplayed()
+            onNodeWithText("Already subscribed").assertIsDisplayed()
+            onNodeWithText("Open").performClick()
+            assertEquals(44, openedPodcast)
+            onNodeWithText("0 episodes").assertDoesNotExist()
+        }
+
+    @Test fun playlistFailureOffersOwnerWithoutSubscribe() =
+        runComposeUiTest {
+            val failure = ChannelResolution.PlaylistUnsupported("PL1234567890123", "UCBR8-60-B28hp2BmDPdntcQ", "Owner")
+            val state = AddPodcastUiState(step = AddSheetStep.ChannelFailure(failure))
+            setSheet(initialInput = "playlist", onResolve = {}, stateOverride = state)
+            onNodeWithText("YouTube playlists can’t be subscribed to yet.").assertIsDisplayed()
+            onNodeWithText("Subscribe to Owner").assertIsDisplayed()
+            onNodeWithText("Subscribe", substring = false).assertIsNotEnabled()
+        }
 
     @Test
     fun newGroupCanBeSubscribedBeforeGroupObserverCatchesUp() =

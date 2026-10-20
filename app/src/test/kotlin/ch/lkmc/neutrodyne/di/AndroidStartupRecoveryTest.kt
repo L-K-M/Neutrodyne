@@ -82,7 +82,8 @@ class AndroidStartupRecoveryTest {
             }
             pumpUntil { initializers.isCompleted }
             assertIs<DatabaseOpenState.Opened>(graph.databaseOpener.openState.value)
-            assertEquals(1 to 1, periodicWork().size to (lifecycle.observerCount - observersBefore))
+            // Refresh, playback and manual downloads each install one process observer.
+            assertEquals(1 to PROCESS_OBSERVERS, periodicWork().size to (lifecycle.observerCount - observersBefore))
             val work = periodicWork().single()
 
             // The gate and concurrent open callers only reopen the gate, never rerun bands.
@@ -92,7 +93,7 @@ class AndroidStartupRecoveryTest {
             }
             pumpFor(100)
             assertEquals(work.id, periodicWork().single().id)
-            assertEquals(observersBefore + 1, lifecycle.observerCount)
+            assertEquals(observersBefore + PROCESS_OBSERVERS, lifecycle.observerCount)
             assertEquals(
                 POST_OPEN_INITIALIZERS.map { it to graph.databaseOpener.openState.value },
                 postOpenRuns,
@@ -137,6 +138,7 @@ class AndroidStartupRecoveryTest {
          * 28 s under CPU contention, where a 10 s bound on the Robolectric start-up failed.
          */
         const val STARTUP_BOUND_SECONDS = 60L
+        const val PROCESS_OBSERVERS = 3
 
         /**
          * Bands that must never run while the database is still closed — the M1b credential load
@@ -150,6 +152,7 @@ class AndroidStartupRecoveryTest {
                 // open result only inside `run`, which must wait on Opened.
                 "FirstLaunchRestoreInitializer",
                 "CredentialLoadInitializer",
+                "DownloadIndexInitializer",
                 "PeriodicRefreshInitializer",
                 "RefreshForegroundObserverInitializer",
             )

@@ -58,7 +58,6 @@ public object ImportSourceSniffer {
     /** Text sniffing never reads past this many leading bytes (05 Sniffing). */
     private const val SNIFF_BYTES: Long = 64L * 1024
     private const val CSV_SUFFIX = ".csv"
-    private const val TAKEOUT_COLUMNS = 3
 
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
     private val GZIP_MAGIC = byteArrayOf(0x1F, 0x8B.toByte())
@@ -69,7 +68,7 @@ public object ImportSourceSniffer {
     private val UTF16_BE_LT = byteArrayOf(0x00, 0x3C)
 
     /** A URL-list line (04): an `http(s)` URL, a `UC…` channel ID or an `@handle`. */
-    private val LIST_TOKEN = Regex("^(https?://\\S+|UC[\\w-]{22}|@[\\w.-]+)$")
+    private val LIST_TOKEN = Regex("^(https?://\\S+|UC[A-Za-z0-9_-]{21}[AQgw]|@[^\\s/]+)$")
 
     private val codec = BackupCodec()
 
@@ -183,6 +182,8 @@ public object ImportSourceSniffer {
                 "subscriptions" -> {
                     if (i < text.length && text[i] == '[' && subscriptionsLookNewPipe(text, i)) {
                         newPipe = true
+                    } else if (i < text.length && text[i] == '[') {
+                        libreTube = true
                     }
                 }
 
@@ -221,14 +222,10 @@ public object ImportSourceSniffer {
             else -> SniffResult.Unsupported("unknown")
         }
 
-    /** Takeout's `subscriptions.csv`: a 3-column header, then a line starting with `UC` (04). */
-    private fun isTakeoutCsv(text: String): Boolean {
-        val lines = text.lineSequence().iterator()
-        if (!lines.hasNext()) return false
-        val header = lines.next()
-        if (!lines.hasNext()) return false
-        return header.split(',').size == TAKEOUT_COLUMNS && lines.next().startsWith("UC")
-    }
+    /** Uses the same RFC 4180 rules as the full reader, including localized quoted headings. */
+    private fun isTakeoutCsv(text: String): Boolean =
+        ch.lkmc.neutrodyne.feeds.youtube.TakeoutSubscriptionsParser
+            .looksLikeCsv(text)
 
     /** ≥ 80% of the non-empty, non-`#` lines are URLs, `UC…` IDs or `@handles` (04). */
     private fun isUrlList(text: String): Boolean {

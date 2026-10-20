@@ -2,11 +2,12 @@
 
 package ch.lkmc.neutrodyne.core.data.importing
 
-import ch.lkmc.neutrodyne.core.data.add.AddInputNormalizer
-import ch.lkmc.neutrodyne.core.data.add.NormalizedInput
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
+import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
+import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.importing.ImportEntry
@@ -21,8 +22,8 @@ import dev.zacsweers.metro.Inject
  * directly).
  *
  * YouTube is routed through [YouTubeUrlClassifier] first (04 OPML): any ref makes the item
- * `kind = YOUTUBE`, and before M8 every YouTube item is `YOUTUBE_UNSUPPORTED_YET` — only a
- * `Channel` ref carries a canonical `normalizedUrl`; `Playlist` adds `errorDetail = "playlist"`.
+ * `kind = YOUTUBE`. Channels and resolvable inputs are selectable; only a `Channel` carries a
+ * canonical `normalizedUrl`. Playlists remain unsupported with `errorDetail = "playlist"`.
  */
 @Inject
 internal class ImportClassifier(
@@ -51,6 +52,8 @@ internal class ImportClassifier(
         val status: ImportItemStatus,
         val podcastId: Long?,
         val errorDetail: String?,
+        val youTubeInput: String? = null,
+        val youTubeVariants: Int? = null,
     )
 
     class Result
@@ -60,7 +63,12 @@ internal class ImportClassifier(
             val truncatedNames: Int,
         )
 
-    suspend fun classify(entries: List<ImportEntry>): Result {
+    enum class InputMode { MIXED, YOUTUBE_ONLY }
+
+    suspend fun classify(
+        entries: List<ImportEntry>,
+        mode: InputMode = InputMode.MIXED,
+    ): Result {
         val items = ArrayList<ClassifiedItem>(entries.size)
         // nameKey → name per item, so a duplicate's groups can union into its winner (05 §3.3).
         val groupsByItem = ArrayList<LinkedHashMap<String, String>>()
@@ -69,8 +77,9 @@ internal class ImportClassifier(
         var truncated = 0
 
         for (entry in entries) {
-            val ref = youTube.classify(entry.url) ?: entry.htmlUrl?.let(youTube::classify)
-            val target = classificationOf(entry, ref)
+            val input = if (youTube.classify(entry.url) != null) entry.url else entry.htmlUrl
+            val ref = input?.let(youTube::classify)
+            val target = classificationOf(entry, ref, mode)
             val names = groupNamesOf(entry.groupNames)
             truncated += names.truncated
 
@@ -114,6 +123,18 @@ internal class ImportClassifier(
                     status = status,
                     podcastId = podcastId,
                     errorDetail = target.errorDetail,
+                    youTubeInput =
+                        input
+                            ?.let {
+                                (AddInputNormalizer.normalize(it) as? NormalizedInput.Url)?.url ?: it
+                            }?.takeIf { ref != null && ref !is YtRef.Playlist && entry.errorDetail == null },
+                    youTubeVariants =
+                        if (ref != null) {
+                            entry.youtubeVariantsHint?.takeIf(YouTubeVariantBits::isValid)
+                                ?: (ref as? YtRef.Channel)?.variantsHint ?: YouTubeVariantBits.LONG_FORM
+                        } else {
+                            null
+                        },
                 )
             groupsByItem += names.byKey
         }
@@ -136,7 +157,11 @@ internal class ImportClassifier(
     private fun classificationOf(
         entry: ImportEntry,
         ref: YtRef?,
+        mode: InputMode,
     ): Shape {
+        if (entry.errorDetail != null) {
+            return Shape(ImportItemKind.YOUTUBE, null, null, ImportItemStatus.INVALID_URL, entry.errorDetail)
+        }
         if (ref != null) {
             val canonical =
                 (ref as? YtRef.Channel)?.let { "$YOUTUBE_CHANNEL_FEED${it.id}" }
@@ -172,10 +197,19 @@ internal class ImportClassifier(
                 kind = ImportItemKind.YOUTUBE,
                 normalizedUrl = canonical,
                 identity = identity,
-                // 05 §3.1: before M8 every YouTube item reports the same "supported later" status.
-                status = ImportItemStatus.YOUTUBE_UNSUPPORTED_YET,
+                // Playlists retain the later-build report until M14.
+                status =
+                    if (ref is YtRef.Playlist) {
+                        ImportItemStatus.YOUTUBE_UNSUPPORTED_YET
+                    } else {
+                        ImportItemStatus.PREVIEW
+                    },
                 errorDetail = if (ref is YtRef.Playlist) PLAYLIST_DETAIL else null,
             )
+        }
+
+        if (mode == InputMode.YOUTUBE_ONLY) {
+            return Shape(ImportItemKind.YOUTUBE, null, null, ImportItemStatus.INVALID_URL)
         }
 
         return when (val normalized = AddInputNormalizer.normalize(entry.url)) {

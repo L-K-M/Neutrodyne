@@ -18,9 +18,11 @@ import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeScopeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingEdit
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -42,16 +44,25 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PodcastSettingsViewModelTest : MainDispatcherTest() {
+    private val channels = FakeYouTubeChannelRepository()
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
 
     private val scopes = FakeScopeSettingsRepository().apply { seedPodcast(7) }
 
-    private fun viewModel(podcastId: Long = 7) = PodcastSettingsViewModel(podcastId, podcasts, feeds, scopes)
+    private fun viewModel(podcastId: Long = 7) = PodcastSettingsViewModel(podcastId, podcasts, feeds, scopes, channels)
 
     private fun TestScope.collect(viewModel: PodcastSettingsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun channelVariantsWriteThroughChannelService() =
+        runTest {
+            val vm = viewModel()
+            vm.setVariants(3)
+            advanceUntilIdle()
+            assertEquals(3, channels.variants[7])
+        }
 
     @Test
     fun effectiveSettingsObserveEveryAttributionAndManualOnlyGroup() =
@@ -81,15 +92,15 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
             vm.setNotifyNewEpisodes(false, null)
             advanceUntilIdle()
             assertEquals(
-                SettingOverrides(60, false),
+                SettingOverrides(60, false, 1f, false),
                 vm.uiState.value.scoped!!
                     .effective,
             )
-            assertTrue(
+            val sourcesAfterEdit =
                 vm.uiState.value.scoped!!
-                    .sources.values
-                    .all { it == SettingSource.PodcastOverride },
-            )
+                    .sources
+            assertEquals(SettingSource.PodcastOverride, sourcesAfterEdit[SettingField.REFRESH_INTERVAL_MINUTES])
+            assertEquals(SettingSource.PodcastOverride, sourcesAfterEdit[SettingField.NOTIFY_NEW_EPISODES])
         }
 
     @Test
@@ -225,7 +236,15 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
                         change: (SettingOverrides) -> SettingOverrides,
                     ): Outcome<Unit, SettingsError> = Outcome.Failure(SettingsError.WriteFailed)
                 }
-            val vm = PodcastSettingsViewModel(7, podcasts, feeds, failing)
+            val vm =
+                PodcastSettingsViewModel(
+                    7,
+                    podcasts,
+                    feeds,
+                    failing,
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeChannelRepository(),
+                )
             val requester = RecordingPermissionRequester()
             collect(vm)
             vm.setNotifyNewEpisodes(true, requester)
@@ -441,6 +460,44 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
                 viewModel.uiState.value.messages
                     .isNotEmpty(),
             )
+        }
+
+    @Test fun downloadOverridesUseAtomicEditsAndAllowInheritance() =
+        runTest {
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            vm.setRefreshIntervalMinutes(60)
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Enabled(true),
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Keep(9),
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Video(true),
+            )
+            advanceUntilIdle()
+            assertEquals(
+                9,
+                vm.uiState.value.scoped
+                    ?.own
+                    ?.autoDownloadKeepLatest,
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Keep(null),
+            )
+            advanceUntilIdle()
+            val own =
+                vm.uiState.value.scoped!!
+                    .own
+            assertNull(own.autoDownloadKeepLatest)
+            assertEquals(true, own.includeVideoInAutoDownload)
+            assertEquals(60, own.refreshIntervalMinutes)
         }
 }
 

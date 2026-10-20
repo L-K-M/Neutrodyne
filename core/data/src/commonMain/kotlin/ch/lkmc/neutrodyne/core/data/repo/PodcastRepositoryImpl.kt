@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -37,9 +38,12 @@ import ch.lkmc.neutrodyne.core.model.FeedInfo
 import ch.lkmc.neutrodyne.core.model.FeedMove
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
+import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.identity.PrivateFeedUrls
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -74,6 +78,8 @@ internal class PodcastRepositoryImpl(
     // eagerly would resolve the whole client family for a path only `setCredentials` uses.
     private val fetcher: Provider<FeedFetcher>,
     private val tempFiles: FeedTempFiles,
+    private val downloads: Provider<DownloadLifecycle>,
+    private val youTubeHealth: YouTubeHealth,
 ) : PodcastRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -84,7 +90,7 @@ internal class PodcastRepositoryImpl(
             // The window is fixed at subscription time — a long-lived collector doesn't re-anchor
             // it (self-corrects on resubscribe).
             .observeLibraryTiles(clock.now() - TILE_COUNTS_WINDOW_MS, groupId)
-            .map { rows ->
+            .combine(youTubeHealth.state) { rows, health ->
                 rows
                     .map { row ->
                         LibraryTile(
@@ -102,6 +108,8 @@ internal class PodcastRepositoryImpl(
                                     row.lastSuccessAt,
                                     row.lastErrorKind,
                                     row.subscribedAt,
+                                    row.sourceType,
+                                    health.feedOutageLevel > 0,
                                 ),
                             latestEpisodeAt = row.latestEpisodeAt,
                             subscribedAt = row.subscribedAt,
@@ -114,8 +122,9 @@ internal class PodcastRepositoryImpl(
         combine(
             db.podcastDao().observeById(podcastId),
             db.podcastDao().observeEpisodeCount(podcastId),
-        ) { entity, count ->
-            entity?.let { detailOf(it, count) }
+            youTubeHealth.state,
+        ) { entity, count, health ->
+            entity?.let { detailOf(it, count, health.feedOutageLevel > 0) }
         }
 
     override fun observeFeedInfo(podcastId: Long): Flow<FeedInfo?> =
@@ -161,8 +170,12 @@ internal class PodcastRepositoryImpl(
         return withContext(NonCancellable) {
             // One transaction for the whole list: a crash mid-loop must not leave a half-unsubscribed
             // library with stale periodic scheduling (03 Unsubscribe).
+            downloads().beforeEpisodeRemoval(db.downloadDao().downloadedEpisodeIds(podcastIds))
             coordinator.withCredentialCommit {
                 db.withWriteTransaction {
+                    check(db.downloadDao().downloadedEpisodeIds(podcastIds).isEmpty()) {
+                        "Downloads changed during unsubscribe cleanup; retry unsubscribe"
+                    }
                     for (id in podcastIds) {
                         if (dao.byId(id) == null) continue
                         dao.deleteCascade(id, clock.now())
@@ -346,23 +359,36 @@ internal class PodcastRepositoryImpl(
     }
 
     override fun observeCategoryCounts(): Flow<List<CategoryCount>> =
-        db.podcastDao().observeCategoryRows().map { rows ->
-            val byCategory = LinkedHashMap<String, MutableList<Long>>()
+        combine(db.podcastDao().observeCategoryRows(), db.groupDao().observeGroups()) { rows, groups ->
+            val existing = groups.map { it.group.nameKey }.toSet()
+            val names = mutableMapOf<String, String>()
+            val members = mutableMapOf<String, MutableSet<Long>>()
             for (row in rows) {
                 val categories =
                     runCatching {
                         json.decodeFromString<List<List<String>>>(row.categoriesJson ?: return@runCatching null)
                     }.getOrNull() ?: continue
                 for (path in categories) {
-                    byCategory.getOrPut(path.joinToString(" > ")) { mutableListOf() } += row.id
+                    val name =
+                        GroupNames.validate(path.firstOrNull() ?: continue) as? GroupNames.Validation.Valid ?: continue
+                    if (name.nameKey in existing) continue
+                    // Choose a stable display spelling regardless of DAO/category order.
+                    names[name.nameKey] = minOf(names[name.nameKey] ?: name.name, name.name)
+                    members.getOrPut(name.nameKey) { mutableSetOf() }.add(row.id)
                 }
             }
-            byCategory.map { (category, ids) -> CategoryCount(category, ids) }
+            members.entries
+                .filter { it.value.size >= MIN_SUGGESTED_MEMBERS }
+                .sortedWith(
+                    compareByDescending<Map.Entry<String, MutableSet<Long>>> { it.value.size }.thenBy { it.key },
+                ).take(MAX_SUGGESTED_GROUPS)
+                .map { (key, ids) -> CategoryCount(names.getValue(key), ids.sorted()) }
         }
 
     private suspend fun detailOf(
         p: PodcastEntity,
         episodeCount: Int,
+        outage: Boolean = false,
     ): PodcastDetail =
         PodcastDetail(
             id = p.id,
@@ -382,12 +408,22 @@ internal class PodcastRepositoryImpl(
             latestEpisodeAt = p.latestEpisodeAt,
             status = p.status,
             health =
-                healthOf(p.gone, p.needsCredentials, p.failureCount, p.lastSuccessAt, p.lastErrorKind, p.subscribedAt),
+                healthOf(
+                    p.gone,
+                    p.needsCredentials,
+                    p.failureCount,
+                    p.lastSuccessAt,
+                    p.lastErrorKind,
+                    p.subscribedAt,
+                    p.sourceType,
+                    outage,
+                ),
             isPrivate = PrivateFeedUrls.looksPrivate(p.feedUrl),
             episodeOrder = p.episodeOrder,
             showType = p.showType,
             includeInAll = p.includeInAll,
             hasOlderPages = p.pagingNextUrl != null,
+            youtubeVariants = p.youtubeVariants,
         )
 
     /** 03 Per-feed states: `gone = 0 AND failureCount ≥ 10 AND COALESCE(lastSuccessAt, subscribedAt) < now − 7 d`. */
@@ -398,15 +434,18 @@ internal class PodcastRepositoryImpl(
         lastSuccessAt: Long?,
         lastErrorKind: FeedErrorKind?,
         subscribedAt: Long,
+        sourceType: SourceType,
+        outage: Boolean,
     ): FeedHealth =
         FeedHealth(
-            gone = gone,
-            needsCredentials = needsCredentials,
-            failureCount = failureCount,
+            gone = gone && sourceType == SourceType.RSS,
+            needsCredentials = needsCredentials && sourceType == SourceType.RSS,
+            failureCount = if (sourceType == SourceType.YOUTUBE_CHANNEL && outage) 0 else failureCount,
             lastSuccessAt = lastSuccessAt,
-            lastErrorKind = lastErrorKind,
+            lastErrorKind = lastErrorKind.takeUnless { sourceType == SourceType.YOUTUBE_CHANNEL && outage },
             possiblyDead =
-                !gone && failureCount >= DEAD_FAILURE_COUNT &&
+                !(sourceType == SourceType.YOUTUBE_CHANNEL && outage) && !(gone && sourceType == SourceType.RSS) &&
+                    failureCount >= DEAD_FAILURE_COUNT &&
                     (lastSuccessAt ?: subscribedAt) < clock.now() - DEAD_WINDOW_MS,
         )
 
@@ -421,3 +460,6 @@ internal class PodcastRepositoryImpl(
         const val HTTP_FORBIDDEN = 403
     }
 }
+
+private const val MIN_SUGGESTED_MEMBERS = 2
+private const val MAX_SUGGESTED_GROUPS = 5

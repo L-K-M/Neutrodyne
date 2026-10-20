@@ -7,6 +7,9 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.DiscoverSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import kotlinx.collections.immutable.ImmutableSet
@@ -16,6 +19,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Shared behaviour every [SettingsRepository] must show (09 fake contract tests): the fakes in
@@ -163,6 +168,32 @@ abstract class SettingsRepositoryContract {
             assertEquals(LibrarySegment.PODCASTS, repository.get(restrictedChoice))
         }
 
+    /**
+     * 05 Rules 4 via the shared validator: out-of-range or ill-formed values fail with
+     * `OutOfRange` and leave the stored value alone; a hostile record can never write them.
+     */
+    @Test
+    fun setRejectsValuesOutsideAKeysDeclaredRanges() =
+        runTest {
+            val repository = createRepository()
+            for (bad in listOf(0.4f, 3.1f, 1.51f, Float.NaN)) {
+                assertEquals(
+                    Outcome.Failure(SettingsError.OutOfRange(PlaybackSettingKeys.SPEED.name)),
+                    repository.set(PlaybackSettingKeys.SPEED, bad),
+                    "speed $bad should be rejected",
+                )
+            }
+            assertEquals(
+                Outcome.Failure(SettingsError.OutOfRange(PlaybackSettingKeys.SKIP_BACK_MS.name)),
+                repository.set(PlaybackSettingKeys.SKIP_BACK_MS, 7_000L),
+            )
+            assertEquals(PlaybackSettingKeys.SPEED.default, repository.get(PlaybackSettingKeys.SPEED))
+
+            // A valid value still lands.
+            assertEquals(Outcome.Success(Unit), repository.set(PlaybackSettingKeys.SPEED, 1.5f))
+            assertEquals(1.5f, repository.get(PlaybackSettingKeys.SPEED))
+        }
+
     @Test
     fun portableSnapshotMirrorsTheRegisteredPortableKeys() =
         runTest {
@@ -173,6 +204,55 @@ abstract class SettingsRepositoryContract {
                     .associate { key -> key.name to repository.get(asAnyKey(key)) }
 
             assertEquals(expected, repository.observePortableSnapshot().first())
+        }
+
+    @Test fun m5DefaultsAndRoundTripsUsePortableKeys() =
+        runTest {
+            val repository = createRepository()
+            assertEquals(
+                HardwareButtons.EPISODE,
+                repository.get(PlaybackSettingKeys.HARDWARE_BUTTONS),
+            )
+            assertEquals(true, repository.get(PlaybackSettingKeys.SMART_RESUME))
+            assertEquals(30, repository.get(PlaybackSettingKeys.SLEEP_LAST_MINUTES))
+            repository.set(
+                PlaybackSettingKeys.HARDWARE_BUTTONS,
+                HardwareButtons.SKIP,
+            )
+            repository.set(PlaybackSettingKeys.SMART_RESUME, false)
+            repository.set(PlaybackSettingKeys.SLEEP_LAST_MINUTES, 240)
+            assertEquals(
+                HardwareButtons.SKIP,
+                repository.get(PlaybackSettingKeys.HARDWARE_BUTTONS),
+            )
+            assertEquals(false, repository.get(PlaybackSettingKeys.SMART_RESUME))
+            assertEquals(240, repository.get(PlaybackSettingKeys.SLEEP_LAST_MINUTES))
+        }
+
+    @Test fun discoverValidationAndBackupClassification() =
+        runTest {
+            val repository = createRepository()
+            val keys = DiscoverSettingKeys
+            assertEquals(Outcome.Success(Unit), repository.set(keys.COUNTRY, "CH"))
+            for (bad in listOf("ch", "USA", " US", "1A", "ÜS")) {
+                assertEquals(
+                    Outcome.Failure(SettingsError.OutOfRange(keys.COUNTRY.name)),
+                    repository.set(keys.COUNTRY, bad),
+                )
+                assertEquals("CH", repository.get(keys.COUNTRY))
+            }
+            repository.set(keys.APPLE_ENABLED, false)
+            repository.set(keys.FYYD_ENABLED, false)
+            repository.set(keys.PODCASTINDEX_ENABLED, false)
+            repository.set(keys.SUGGESTED_GROUPS_DISMISSED, true)
+            val snapshot = repository.observePortableSnapshot().first()
+            assertEquals("CH", snapshot[keys.COUNTRY.name])
+            for (key in listOf(keys.APPLE_ENABLED, keys.FYYD_ENABLED, keys.PODCASTINDEX_ENABLED)) {
+                assertEquals(false, snapshot[key.name])
+            }
+            assertFalse(keys.SUGGESTED_GROUPS_DISMISSED.name in snapshot)
+            assertTrue(keys.ALL.none { it.synced })
+            assertEquals(Outcome.Success(Unit), repository.set(keys.COUNTRY, ""))
         }
 
     @Suppress("UNCHECKED_CAST")

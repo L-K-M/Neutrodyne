@@ -401,6 +401,15 @@ The channel group `grp_new_episodes` and the default channel `new_episodes` are 
 
 ## Group feeds
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 8 places
+`DownloadAllEstimate(episodeIds, totalCandidates, knownBytes, unknownSizeCount,
+capped)` in `core:model`, following this document's fuller shape rather than the
+plan's abbreviated field list. W8 owns the repository operation and estimates.
+Adopted resolution 7 limits the new action to a visible group/podcast action;
+it creates MANUAL rows at priority 100, never implicit Downloads-screen requests.
+The restore re-download offer remains M6a.
+
+
 Serves R2.3, R2.4 (data side), R2.5, R2.8, R2.9, R3.4, R8.1. Delivered in [M1](../PLAN.md#m1-subscribe-and-ingest-rss) (All and Podcast sources) and [M2](../PLAN.md#m2-groups-and-group-feeds) (everything else), on both platforms from the same common code. Honours [D16](../PLAN.md#3-key-decisions), [D30](../PLAN.md#3-key-decisions). SQL, indices and EXPLAIN expectations: [02 Feed pages](02-data-model.md#feed-pages), [02 Feed counts](02-data-model.md#feed-counts).
 
 ```kotlin
@@ -533,6 +542,18 @@ confirmation retains the unchecked two-argument overload until its own PR.
 
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 
+Implementation note (2026-10-19, M6b): W8 reads the candidate IDs and the full
+count in one read transaction. `knownBytes` and `unknownSizeCount` describe
+only the offered IDs (at most 200), while `totalCandidates` is uncapped. The
+source-only signature reads persisted feed filters and the current hour-rounded
+age bound. Podcast has no persisted filters, so it uses its default unfiltered
+view; transient screen filters cannot be supplied through this signature.
+The duration fallback uses 16 bytes per millisecond, as corrected in
+[07 Estimates](07-downloads.md#estimates), with positive durations and
+saturating arithmetic for large hints and totals. The 100 KB threshold means
+100,000 bytes, matching manual requests. The estimate creates no download rows;
+the visible caller submits the returned IDs to the existing MANUAL request API.
+
 ### Performance
 
 Budgets are [R2.9](../PLAN.md#21-functional-requirements): first page (COUNT + 80 rows) ≤ 60 ms for a group, ≤ 100 ms for All on the reference device with 300 podcasts, 50,000 episodes and 20 groups; counts for 20 groups ≤ 50 ms (recorded). They are measured by 02's `FeedQueryTimingTest`. If All misses its budget with LIMIT/OFFSET, only All switches to a keyset `PagingSource` keyed by `(sortDate, id)` behind `pagedFeed` (risk [T6](../PLAN.md#8-risks-and-mitigations)); callers do not change.
@@ -540,6 +561,17 @@ Budgets are [R2.9](../PLAN.md#21-functional-requirements): first page (COUNT + 8
 ---
 
 ## Effective settings resolution
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 4 freezes
+`core:model`'s `EffectiveAutoDownload(enabled, keepLatest, network,
+requireCharging, includeVideo, deleteAfterPlayed, source)`. `source` attributes
+the enabled decision using `SettingSource`, including `NotSupported`; this differs
+from a user disabling automatic downloads. The resolver emits the full distinct
+map immediately; its planner consumer owns the 2 s debounce. Group dependent
+fields clear atomically when auto-download is false or inherited. Policies and
+overrides are device-local for sync (PO-37), while portable settings and overrides
+remain eligible for manual backup with range/type validation.
+
 
 Serves R2.7, R3.7 (auto-download side), R4.4, R4.5, R7.3. Delivered in M2 (refresh interval, notifications), M4 (speed, skip silence), M6 (auto-download, delete after played), M9a (YouTube auto-download globals with the engine), MS2 (sync classification); the resolver is common code used by both platforms. Honours [D20](../PLAN.md#3-key-decisions), [D45](../PLAN.md#3-key-decisions), [D93](../PLAN.md#3-key-decisions), [PO-37](../PLAN.md#48-further-product-owner-decisions). Storage: `podcast_settings` and `podcast_group_settings` share 02's `ScopeOverrides` columns; `null` = inherit ([02 podcast_settings](02-data-model.md#podcast_settings)). There are no per-episode overrides in v1.
 
@@ -652,6 +684,22 @@ observable refresh/notification batch reads alongside the snapshot methods.
 
 ### Writing overrides
 
+**Implementation note (2026-10-18, M4).** The playback settings implementation extends the existing M2 models
+with `playbackSpeed`, `skipSilence`, their attributed sources and
+`GroupPlaybackHint`s. Podcast settings resolve playback without a context;
+member-group overrides are hints rather than inherited defaults. Playback
+resolution uses only the requested context group after checking membership,
+including for Up next items. Refresh and notification merges remain unchanged.
+Player writes use the additive `ScopeSettingsRepository.writePlayback` operation
+so membership validation, the chosen scoped value and more-specific clears share
+one Room writer transaction. Only the edited field on the current member chain
+is cleared; other fields, podcasts and groups survive. Invalid legacy speeds read
+as inherit in the write callback too, so they cannot block unrelated edits. A failed global DataStore
+write rolls back the scoped clears. Room and DataStore have no shared commit:
+if the final Room commit fails after DataStore succeeds, the global can remain
+stored, the scoped overrides survive and the operation reports failure. No
+schema or backup format change is needed.
+
 ```kotlin
 // :core:model — mirror of 02's ScopeOverrides (all nullable)
 data class SettingOverrides(
@@ -743,11 +791,13 @@ An episode is in the tail iff **all** hold (evaluated live on every projector qu
 
 ### Start rules
 
+**Implementation note (2026-10-18, M4).** The owner adopted playable-first automatic starts: retain unplayable queue rows, try the first playable Up next entry, then eligible context. Explicit row starts return the refusal for that row. An automatic queue start keeps a null context anchor; a context fallback anchors at the selected item. The M4 contracts freeze this policy; `PlayStarter` implements selection, with `PlayContextResolver` supplying eligible context queries.
+
 1. **Row tapped (explicit start):** current = that episode, anchor = that episode; Up next is kept and plays next, then the tail continues after the anchor.
-2. **"Play" without a start and Up next non-empty:** current = the head of Up next (06 moves it out of Up next per its rules), anchor = null, so after Up next the tail starts at the beginning of the order (M4 acceptance 6: two Up next items, then tech's unplayed episodes newest first).
-3. **"Play" without a start and Up next empty:** current = `startItem(spec)`, anchor = that item.
+2. **"Play" without a start and Up next non-empty:** current = the first playable Up next entry (06 moves it out of Up next per its rules; unplayable entries stay greyed in place), anchor = null, so after Up next the tail starts at the beginning of the order (M4 acceptance 6: two Up next items, then tech's unplayed episodes newest first).
+3. **"Play" without a start and no playable Up next entry:** current = `startItem(spec)`, anchor = that item.
 4. **`startItem`:** the first tail item from the beginning of the order (02's start-item query). For `GROUP` with `OLDEST_FIRST` (`boundStartBySubscription = true`) the first search adds `e.sortDate >= p.subscribedAt`, so "Play fiction" does not start at a 2011 episode of a show subscribed this year; if that finds nothing, a second search runs without the bound (only the back catalogue is left unplayed). `PODCAST` with `OLDEST_FIRST` never uses the bound (serial shows start at episode 1).
-5. `startItem == null` and Up next empty → `PlaybackController.playFeed` returns an outcome the UI shows as "Nothing unplayed in 'tech'"; in external mode, a group whose unplayed items are all YouTube shows "Episodes in 'tech' open in YouTube".
+5. `startItem == null` and no playable Up next entry → `PlaybackController.playFeed` returns an outcome the UI shows as "Nothing unplayed in 'tech'"; in external mode, a group whose unplayed items are all YouTube shows "Episodes in 'tech' open in YouTube".
 
 ```mermaid
 sequenceDiagram
@@ -1319,6 +1369,26 @@ close as if deletion succeeded.
 
 ## Other import formats
 
+Implementation note (2026-10-19, M8): W5 activates NewPipe, LibreTube/Piped,
+Takeout CSV/ZIP and mixed URL-list imports through the existing durable session
+pipeline. Takeout uses the existing ZipGuard factory with no extraction: 10,000
+central-directory entries, at most 50 CSV candidates, 5 MB per entry and 250 MB
+inflated total. JSON is limited to 10 MB and 10,000 rows while decoding; URL lists
+to 1 MB and 5,000 physical lines. All MB limits here are decimal. Invalid NewPipe
+services remain per-item errors. No schema, entity or index changes are made.
+Resolution failures have Retry, Edit URL and Remove even before a podcast exists.
+A cancel keeps committed channels
+and prevents late lookups from inserting new ones. Imported channel art continues
+through the ordinary refresh metadata coordinator. Full-library NewPipe export
+uses build identity and canonical channel page URLs (adopted resolution 8).
+Parser byte-limit failures use `Hostile(DOCUMENT_BYTES)` with format-specific size
+text, preserving `TooLarge` for the 50 MiB acquisition cap. Android keeps the narrow
+file-intent filters below and accepts JSON/CSV/text through its existing unrestricted
+picker. Desktop file hand-off additionally accepts `.json`, `.csv`, `.txt` and `.tgz`;
+all inputs are still sniffed, and `.tgz` gives the explicit choose-ZIP message.
+
+Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` in `optionsJson` default to empty for old sessions and survive preview edits. They retain a classified `htmlUrl` input and validated variant precedence without schema changes. Unfinished M3 previews upgrade when reopened or confirmed, while historical reports retain their old meaning. Static and resolved imports use the same canonical-key transaction writer as Add to dedupe channels and union memberships without handle aliases (adopted resolution 7).
+
 Serves R1.6, R1.7, R8.1. Delivered in [M3](../PLAN.md#m3-import-export-and-backup) on both platforms (sniffing, backups, YouTube reported as unsupported) and [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) (YouTube formats). Format specifications and parsers: [04 Import and export formats](04-youtube.md#import-and-export-formats); this section is how they enter the pipeline.
 
 ### Sniffing
@@ -1593,9 +1663,10 @@ data class BackupPreview(
 )
 data class BackupSummary(val bytes: Long, val podcasts: Int, val episodeLines: Int)
 sealed interface RestoreProgress {
-    data class Running(val phase: String, val done: Int, val total: Int) : RestoreProgress
-    data class Finished(val sessionId: Long, val auto: Boolean) : RestoreProgress
-    data class Failed(val error: BackupError) : RestoreProgress
+    val sessionId: Long
+    data class Running(override val sessionId: Long, val phase: String, val done: Int, val total: Int) : RestoreProgress
+    data class Finished(override val sessionId: Long, val auto: Boolean) : RestoreProgress
+    data class Failed(override val sessionId: Long, val error: BackupError) : RestoreProgress
 }
 data class SnapshotStatus(val supported: Boolean,               // false on the desktop (no Auto Backup)
                           val enabled: Boolean, val lastWrittenAt: Long?, val bytes: Long?, val level: Int,
@@ -1618,6 +1689,12 @@ could have produced. The verdict rule below is unchanged: `enabled = false` read
 typed failures read `error …`.
 
 The receiver starts its reporting coroutine undispatched so an already-cancelled application scope still enters the finalizer. Injection failures and cancellation also complete the ordered-broadcast result; they never claim a successful write. The write remains an independent application-owned job, so the eight-second wait cannot cancel it.
+
+**M3 D4 correction (2026-10-18):** every restore-progress emission carries its
+session ID. A preview observes only its own session's progress, including retained
+failures while a different restore waits for its worker. Before confirmation, the
+preview shows the inspected `SKIPPED_LINES` and `IGNORED_ENTRIES` warning counts
+with localized singular and plural wording.
 
 Preview text: "Backup from 4 Oct 2026 (Neutrodyne 1.3): 142 podcasts, 6 groups, 3,214 played episodes, 12 in Up next, settings." Checkboxes: Listening history, Up next, Settings (Merge default: history and Up next on, settings off; Replace: all on). Mode: **Merge** (default, [canonical defaults](#settings)) or **Replace**; Replace requires a confirmation naming its effect ("Removes 9 podcasts and 2 groups that are not in the backup, and replaces your listening history"). Confirming Replace first calls `PlaybackController.pause()` from the feature layer. A backup made on the other platform says so ("Backup from 4 Oct 2026, made on Android"). While the device is linked the preview adds "This device syncs with sync.example.org", and Replace asks how far it reaches ([Restore while linked](#restore-while-linked)).
 
@@ -1797,6 +1874,15 @@ YouTube-engine and update-check keys (owned by 04 and 09; [D76](../PLAN.md#3-key
 The planned keys `updates.mode`, `updates.channel` and `updates.whats_new_version_code` were dropped before any build had them (PO-31, PO-33); like every unknown key they would be skipped by a restore ([Restore algorithm](#restore-algorithm) step 7). The existing `youtube.audio_quality`, `youtube.volume_levelling` and `youtube.auto_download*` keys stay portable and travel to every APK; they only take effect where the engine runs. A restored value is a preference, never a fact about the target device: run-time checks win. `youtube.engine_enabled = true` restored on the `armeabi-v7a` APK still yields `ExternalReason.NOT_IN_THIS_APK`; a restored `updates.check_enabled` is a preference too, and debug builds (`BuildInfo.debug`) stay `UpdateCheckState.Disabled(DEV_BUILD)` whatever it says ([09 Update check](09-quality-and-release.md#update-check)). The desktop reads the same `updates.*` keys. Because `updates.first_run_choice_done` is a `DEVICE` key, a new device may see 09's first-run update card again ([Open questions](#open-questions) 16).
 
 ### After restore
+
+**Implementation note (2026-10-19, M6a).** Restore Replace invokes the domain
+`DownloadLifecycle.beforeLibraryReplace` before its destructive pre-step, removing
+local download rows and journaling their files without dismissal tombstones.
+The existing visible Replace confirmation and playback pause remain required.
+The report's re-download offer filters missing episodes, completed downloads and
+YouTube hints, then calls MANUAL request only on a user tap. Metered ASK is answered
+through the same controller consent path; restore itself never starts transfers.
+
 
 - Restored podcasts fetch through `import-{sessionId}` with `initialFetch = 1`: no `isNew`, no notifications, no auto-download storm ([D66](../PLAN.md#3-key-decisions)); 07 sets `autoDownloadEligibleAfter` when policies resolve to enabled, so nothing is backfilled ([D67](../PLAN.md#3-key-decisions)).
 - The report is the import report of the restore session; podcasts with `AUTH_REQUIRED` show "Enter password" (stored credentials are bound to their device — an Android Keystore key, a DPAPI blob or a `0600` file — and never move, [03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore)).

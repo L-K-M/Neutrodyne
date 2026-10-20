@@ -6,4 +6,6 @@ import java.text.Normalizer
 
 actual object Nfc {
     actual fun normalize(text: String): String = Normalizer.normalize(text, Normalizer.Form.NFC)
+
+    actual fun compatibility(text: String): String = Normalizer.normalize(text, Normalizer.Form.NFKC)
 }

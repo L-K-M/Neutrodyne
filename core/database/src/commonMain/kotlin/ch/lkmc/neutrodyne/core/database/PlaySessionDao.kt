@@ -6,6 +6,7 @@ import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
+import androidx.room3.Update
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
@@ -17,7 +18,7 @@ import kotlinx.coroutines.flow.Flow
  * insert fires no Room trigger. Every other write is an `UPDATE … WHERE id = 0`.
  */
 @Dao
-interface PlaySessionDao {
+interface PlaySessionDao : DownloadSessionQueries {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun ensure(row: PlaySessionEntity): Long
 
@@ -30,7 +31,7 @@ interface PlaySessionDao {
 
     /** 07's deferral check and the now-playing sources (02 Downloads): low-churn observation. */
     @Query("SELECT currentEpisodeId FROM play_session WHERE id = 0")
-    fun observeCurrentEpisodeId(): Flow<Long?>
+    override fun observeCurrentEpisodeId(): Flow<Long?>
 
     /**
      * 05 Replace pre-step (UP_NEXT): the local context is cleared before the backup's session
@@ -72,4 +73,8 @@ interface PlaySessionDao {
         onlyWhenIdle: Boolean,
         now: Long,
     ): Int
+
+    /** Session fields are one atomic record; writers supply generation + 1 inside a transaction. */
+    @Update
+    suspend fun write(row: PlaySessionEntity)
 }

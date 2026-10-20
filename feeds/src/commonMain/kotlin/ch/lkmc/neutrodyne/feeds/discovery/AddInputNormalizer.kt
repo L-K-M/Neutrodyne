@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 
-package ch.lkmc.neutrodyne.core.data.add
+package ch.lkmc.neutrodyne.feeds.discovery
 
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.identity.UrlUserInfo
@@ -8,7 +8,7 @@ import okio.Buffer
 import kotlin.io.encoding.Base64
 
 /** What [AddInputNormalizer] produced (03 Input normalisation). */
-internal sealed interface NormalizedInput {
+sealed interface NormalizedInput {
     /** A fetchable `http(s)` URL; [schemeGuessed] retries `http://` once on transport failure. */
     data class Url(
         val url: String,
@@ -26,12 +26,8 @@ internal sealed interface NormalizedInput {
     ) : NormalizedInput
 }
 
-/**
- * The add-input normaliser of 03 Input normalisation. Deviation (2026-10-07): the design places
- * it in `:feeds/discovery`; it lives here for M1a because the `:feeds` half was fixed by the
- * parser package. It moves to `:feeds` with the M7 discovery work.
- */
-internal object AddInputNormalizer {
+/** Pure add-input normalisation shared by Add and import (03). */
+object AddInputNormalizer {
     /** 03 step 1: share-intent text is trimmed and capped. */
     private const val MAX_INPUT_CHARS = 4_096
 
@@ -140,7 +136,7 @@ internal object AddInputNormalizer {
     /** `host.tld` or `host.tld/…` (with optional port/userinfo); rejects scheme-less garbage. */
     private fun looksLikeHost(text: String): Boolean {
         val host = text.substringBefore('/').substringAfterLast('@').substringBefore(':')
-        return host.contains('.') && host.none { it.isWhitespace() }
+        return host.trimEnd('.').contains('.') && host.none { it.isWhitespace() }
     }
 
     private fun invalidOrNotAUrl(text: String): NormalizedInput =

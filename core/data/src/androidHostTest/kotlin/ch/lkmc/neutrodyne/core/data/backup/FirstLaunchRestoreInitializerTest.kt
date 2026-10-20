@@ -44,6 +44,7 @@ import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
@@ -389,6 +390,10 @@ class FirstLaunchRestoreInitializerTest {
             channelSync = FakeGroupChannelSync(),
             orderKeys = ProtocolOrderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
 
     private fun restoreRunner(
@@ -428,12 +433,29 @@ class FirstLaunchRestoreInitializerTest {
                 scheduler = FakeRefreshScheduler(),
                 sanitizer = JsoupShowNotesSanitizer(),
                 clock = clock,
-                merger = PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
+                merger =
+                    PodcastMerger(
+                        db,
+                        FakeCredentialCommitCoordinator(),
+                        clock,
+                        downloads =
+                            dev.zacsweers.metro
+                                .Provider {
+                                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                                },
+                    ),
                 resolver = NoPreviewResolver,
                 secrets = secrets,
                 coordinator = FakeCredentialCommitCoordinator(),
                 fetcher = Provider { error("setCredentials is not wired in this fixture") },
                 tempFiles = FeedTempFiles(storagePaths, fileSystem),
+                downloads =
+                    Provider {
+                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                    },
+                youTubeHealth =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeHealth(),
             ),
             FakeNewEpisodePoster(),
         )

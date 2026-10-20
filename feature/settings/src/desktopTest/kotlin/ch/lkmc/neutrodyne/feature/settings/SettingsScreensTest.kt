@@ -32,6 +32,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -48,6 +49,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
+import dev.zacsweers.metro.Provider
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.flow.emptyFlow
@@ -104,6 +106,18 @@ class SettingsScreensTest {
             onNodeWithText("Debug build").assertExists()
             onNodeWithText("GNU LGPL 2.1", substring = true).assertExists()
             onNodeWithText("Source code and releases").performScrollTo().assertIsDisplayed()
+        }
+
+    @Test fun androidInstallHelpExplainsAutoAndCloses() =
+        runComposeUiTest {
+            setSettingsRoot(buildInfo = FakeBuildInfo.copy(platform = BuildInfo.Platform.ANDROID, desktop = null))
+            openSettings()
+            onAllNodesWithText("About").onFirst().performClick()
+            onNodeWithText("Install & updates").performScrollTo().performClick()
+            onNodeWithText("Unknown sources", substring = true).assertExists()
+            onNodeWithText("10 times", substring = true).assertExists()
+            onNodeWithText("Close").performClick()
+            onNodeWithText("Unknown sources", substring = true).assertDoesNotExist()
         }
 
     @Test
@@ -264,6 +278,9 @@ class SettingsScreensTest {
                                 licencesSource,
                                 settingsRepository,
                                 platformInfo,
+                                Provider { FakePodcastRepository() },
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeCapabilitiesSource(),
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )

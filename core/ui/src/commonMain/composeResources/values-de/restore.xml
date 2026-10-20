@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="restore_title">Sicherung wiederherstellen</string>
+    <string name="restore_preview">Sicherung vom %1$s (Neutrodyne %2$s): %3$d Podcasts, %4$d Gruppen, %5$d abgespielte Episoden, %6$d in „Als Nächstes“, %7$d Einstellungen.</string>
+    <string name="restore_written_android">Auf Android erstellt</string>
+    <string name="restore_written_desktop">Auf einem Computer erstellt</string>
+    <string name="restore_linked">Dieses Gerät synchronisiert mit %1$s</string>
+    <string name="restore_credentials">Diese Sicherung enthält Passwörter für private Feeds.</string>
+    <string name="restore_merge">Zusammenführen</string>
+    <string name="restore_replace">Ersetzen</string>
+    <string name="restore_history">Hörverlauf</string>
+    <string name="restore_queue">Als Nächstes</string>
+    <string name="restore_settings">Einstellungen</string>
+    <string name="restore_action">Wiederherstellen</string>
+    <string name="restore_replace_title">Deine Bibliothek ersetzen?</string>
+    <string name="restore_replace_effect">Entfernt %1$d Podcasts und %2$d Gruppen, die nicht in der Sicherung sind, und ersetzt deinen Hörverlauf</string>
+    <string name="restore_choose_another">Andere Datei auswählen</string>
+    <string name="restore_progress">Wiederherstellen… %1$s %2$d von %3$d</string>
+    <string name="restore_waiting">Wiederherstellen…</string>
+    <string name="restore_phase_validate">Sicherung prüfen</string>
+    <string name="restore_phase_library">Bibliothek</string>
+    <string name="restore_phase_episodes">Hörverlauf</string>
+    <string name="restore_phase_other">Daten wiederherstellen</string>
+    <string name="restore_updates">Nach Updates suchen</string>
+    <plurals name="restore_warn_skipped_lines">
+        <item quantity="one">%1$d Zeile des Hörverlaufs wurde übersprungen.</item>
+        <item quantity="other">%1$d Zeilen des Hörverlaufs wurden übersprungen.</item>
+    </plurals>
+    <plurals name="restore_warn_ignored_entries">
+        <item quantity="one">%1$d unbekannter Sicherungseintrag wurde ignoriert.</item>
+        <item quantity="other">%1$d unbekannte Sicherungseinträge wurden ignoriert.</item>
+    </plurals>
+</resources>

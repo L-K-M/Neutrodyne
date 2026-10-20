@@ -35,6 +35,7 @@ import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.data.storagePathsFor
 import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.data.testClassifier
+import ch.lkmc.neutrodyne.core.data.testImportCommitter
 import ch.lkmc.neutrodyne.core.data.testUserAgent
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
@@ -50,6 +51,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -59,6 +61,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelResolver
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -152,6 +155,10 @@ class DesktopImportBackupLaneTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
     private val episodeMerger =
         RestoreEpisodeMerger(
@@ -512,7 +519,17 @@ class DesktopImportBackupLaneTest {
         return DesktopImportBackupLane(
             db = db,
             restores = restores,
-            fetches = ImportFetchRunner(db, engine, snapshots, reports, clock),
+            fetches =
+                ImportFetchRunner(
+                    db,
+                    engine,
+                    snapshots,
+                    reports,
+                    clock,
+                    FakeYouTubeChannelResolver(),
+                    testImportCommitter(db, clock),
+                    kotlin.random.Random(0),
+                ),
             cleaner = cleaner,
             work = work,
             settings = settings,

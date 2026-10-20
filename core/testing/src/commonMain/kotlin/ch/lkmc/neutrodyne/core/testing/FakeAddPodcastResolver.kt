@@ -41,6 +41,14 @@ class FakeAddPodcastResolver : AddPodcastResolver {
         return nextResolution
     }
 
+    val oneTimeInputs = mutableListOf<String>()
+
+    override suspend fun lookupOnce(input: String): AddResolution {
+        oneTimeInputs += input
+        gate?.await()
+        return nextResolution
+    }
+
     override suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError> {
         inputs += "preview:$feedUrl"
         return nextPreview

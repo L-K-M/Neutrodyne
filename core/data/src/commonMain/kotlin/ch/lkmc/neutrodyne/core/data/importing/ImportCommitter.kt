@@ -10,8 +10,6 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.Redactor
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
-import ch.lkmc.neutrodyne.core.data.add.AddInputNormalizer
-import ch.lkmc.neutrodyne.core.data.add.NormalizedInput
 import ch.lkmc.neutrodyne.core.data.credentials.removeUnreferenced
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -27,6 +25,9 @@ import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.YouTubeDuplicatePolicy
+import ch.lkmc.neutrodyne.core.domain.YouTubeSubscriptionDisposition
+import ch.lkmc.neutrodyne.core.domain.YouTubeSubscriptionWriter
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.GroupIcons
 import ch.lkmc.neutrodyne.core.model.GroupPalette
@@ -37,8 +38,16 @@ import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
+import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
+import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -93,8 +102,83 @@ internal class ImportCommitter(
     private val channels: GroupChannelSync,
     private val orderKeys: OrderKeys,
     private val clock: Clock,
+    private val channelWriter: YouTubeSubscriptionWriter,
     private val newSyncId: () -> String = { Uuid.random().toString() },
 ) {
+    /** The input witness prevents a late resolution from defeating Edit URL or cancellation. */
+    suspend fun commitResolved(
+        sessionId: Long,
+        ordinal: Int,
+        input: String,
+        resolution: ChannelResolution.Resolved,
+        attemptMarkerAt: Long?,
+    ) {
+        db.withWriteTransaction {
+            val dao = db.importDao()
+            val session = dao.sessionById(sessionId) ?: return@withWriteTransaction
+            if (session.state != ImportState.FETCHING &&
+                session.state != ImportState.COMMITTED
+            ) {
+                return@withWriteTransaction
+            }
+            val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
+            val item = dao.itemsByOrdinals(sessionId, listOf(ordinal)).singleOrNull() ?: return@withWriteTransaction
+            if (item.status != ImportItemStatus.QUEUED || item.podcastId != null || item.normalizedUrl != null ||
+                (options.itemYouTubeInputs[ordinal] ?: item.originalUrl) != input ||
+                options.attemptMarkerAt != attemptMarkerAt
+            ) {
+                return@withWriteTransaction
+            }
+            val ctx = ChunkContext(resolveGroups(options, listOf(Work.YouTube(item))), mutableMapOf())
+            val now = clock.now()
+            ctx.ensureGroups(now)
+            writeChannel(sessionId, item, resolution, options, ctx, now)
+        }
+    }
+
+    private suspend fun writeChannel(
+        sessionId: Long,
+        item: ImportItemEntity,
+        resolution: ChannelResolution.Resolved,
+        options: ImportOptions,
+        ctx: ChunkContext,
+        now: Long,
+    ) {
+        val outcome =
+            channelWriter.write(
+                resolution.copy(
+                    title = item.title ?: resolution.title,
+                    avatarUrl = null,
+                    bannerUrl = null,
+                    description = null,
+                ),
+                options.itemYouTubeVariants[item.ordinal]
+                    ?: (
+                        YouTubeUrlClassifier().classify(
+                            item.normalizedUrl ?: item.originalUrl,
+                        ) as? YtRef.Channel
+                    )?.variantsHint
+                    ?: YouTubeVariantBits.LONG_FORM,
+                emptySet(),
+                YouTubeDuplicatePolicy.KEEP_EXISTING,
+                options.itemCustomTitles[item.ordinal],
+            )
+        val result = (outcome as? Outcome.Success)?.value ?: error("channel transaction failed")
+        db.importDao().updateItem(item.copy(normalizedUrl = YouTubeFeedUrls.canonical(resolution.channelId)))
+        if (result.disposition == YouTubeSubscriptionDisposition.INSERTED) {
+            if (options.notifyNewEpisodes) {
+                db.scopeSettingsDao().upsertPodcast(
+                    PodcastSettingsEntity(result.podcastId, ScopeOverrides(notifyNewEpisodes = true)),
+                )
+            }
+            db.importDao().markQueued(sessionId, item.ordinal, result.podcastId)
+        } else {
+            db.importDao().markAlreadySubscribed(sessionId, item.ordinal, result.podcastId)
+        }
+        attachMemberships(item, result.podcastId, ctx, ctx.targetGroupId(options), now)
+        db.groupDao().touchUpdatedAt(ctx.stampedGroupIds, now)
+    }
+
     suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> =
         try {
             when (coordinator.withCredentialCommit { commitLocked(sessionId) }) {
@@ -259,6 +343,23 @@ internal class ImportCommitter(
         for (entry in work) {
             val item = entry.item
             when (entry) {
+                is Work.YouTube -> {
+                    val input = options.itemYouTubeInputs[item.ordinal] ?: item.normalizedUrl ?: item.originalUrl
+                    val ref = YouTubeUrlClassifier().classify(input)
+                    if (ref is YtRef.Channel) {
+                        writeChannel(
+                            sessionId,
+                            item,
+                            ChannelResolution.Resolved(ref.id, item.title, null, null, null, ResolvedVia.STATIC),
+                            options,
+                            ctx,
+                            now,
+                        )
+                    } else {
+                        db.importDao().markQueued(sessionId, item.ordinal, null)
+                    }
+                }
+
                 is Work.New -> {
                     var podcastId = existingOwner(entry.feedKey)
                     val inserted = podcastId == null
@@ -369,6 +470,7 @@ internal class ImportCommitter(
         now: Long,
     ) {
         // A subscribe-page URI can contain encoded credentials; its wrapper is not a feed identity.
+        if (item.kind == ImportItemKind.YOUTUBE) return
         val original = AddInputNormalizer.normalize(item.originalUrl) as? NormalizedInput.Url ?: return
         val originalKey = UrlNormalizer.forIdentity(original.url) ?: return
         if (originalKey == feedKey) return
@@ -593,6 +695,10 @@ internal class ImportCommitter(
         val ordinal: Int
             get() = item.ordinal
 
+        data class YouTube(
+            override val item: ImportItemEntity,
+        ) : Work
+
         /** A selected new RSS item — subscribes unless an owner is found in-transaction. */
         data class New(
             override val item: ImportItemEntity,
@@ -606,16 +712,14 @@ internal class ImportCommitter(
         ) : Work
     }
 
-    private fun newWork(item: ImportItemEntity): Work.New? {
-        if (item.kind != ImportItemKind.RSS) return null
+    private fun newWork(item: ImportItemEntity): Work? {
+        if (item.kind == ImportItemKind.YOUTUBE) return Work.YouTube(item)
         val feedKey = item.normalizedUrl?.let(UrlNormalizer::forIdentity) ?: return null
         return Work.New(item, feedKey)
     }
 
     private fun memberWork(item: ImportItemEntity): Work.MemberOnly? {
-        // YouTube rows are gated until M8: they are never committed into subscriptions or
-        // re-marked — only a feedKey-carrying RSS row can resolve memberships.
-        if (item.kind != ImportItemKind.RSS) return null
+        // Existing rows keep their settings; import only unions their memberships.
         return Work.MemberOnly(item, item.normalizedUrl?.let(UrlNormalizer::forIdentity))
     }
 

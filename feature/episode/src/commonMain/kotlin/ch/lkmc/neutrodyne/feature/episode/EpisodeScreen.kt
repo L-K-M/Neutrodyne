@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,7 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -56,10 +57,13 @@ import ch.lkmc.neutrodyne.core.ui.AvailabilityText
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.FeedDates
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
+import ch.lkmc.neutrodyne.core.ui.YouTubeWatchMode
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -73,10 +77,12 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_open_website
+import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_again
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_last
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_next
+import ch.lkmc.neutrodyne.core.ui.resources.action_resume
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.action_unfavorite
 import ch.lkmc.neutrodyne.core.ui.resources.action_up_next
@@ -85,20 +91,17 @@ import ch.lkmc.neutrodyne.core.ui.resources.episode_loading
 import ch.lkmc.neutrodyne.core.ui.resources.episode_no_notes
 import ch.lkmc.neutrodyne.core.ui.resources.episode_not_found
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_row
-import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.summary_downloaded
 import ch.lkmc.neutrodyne.core.ui.resources.summary_video
-import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.showNotes
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 /**
  * The episode detail screen (08 Episode detail): a 120 dp cover beside the title (YouTube renders
  * its art 16:9 full width instead), the meta line, the action row and the sanitised show notes as
  * one lazy item per block. Play, download and Up-next actions dispatch to the route's handler and
- * stay inert until M4/M6; timestamp taps wait for M5's seek — both deviations recorded in 08.
+ * use the shared playback actions for explicit timestamp seeks; downloads wait for M6.
  */
 @Composable
 internal fun EpisodeScreen(
@@ -106,11 +109,10 @@ internal fun EpisodeScreen(
     onAction: (EpisodeAction) -> Unit,
     onFavorite: (Boolean) -> Unit,
     onOpenLink: (String) -> Unit,
+    onTimestamp: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val episode = state.episode
-    val snackbar = LocalSnackbarHost.current
-    val scope = rememberCoroutineScope()
     var imagesRevealed by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -118,7 +120,7 @@ internal fun EpisodeScreen(
             title = "",
             navigation = { NavBackButton() },
             actions = {
-                episode?.let { EpisodeChrome(it, onAction, onFavorite, onOpenLink) }
+                episode?.let { EpisodeChrome(it, state.rowCaps, onAction, onFavorite, onOpenLink) }
             },
         )
         when {
@@ -138,8 +140,16 @@ internal fun EpisodeScreen(
                 LazyColumn(Modifier.fillMaxSize()) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
-                        EpisodeHeader(episode, state, onAction) { message ->
-                            scope.launch { snackbar.showSnackbar(message) }
+                        EpisodeHeader(episode, state, onAction)
+                    }
+                    if (state.chapters.isNotEmpty()) {
+                        item(key = "chapters", contentType = "chapters") {
+                            ch.lkmc.neutrodyne.core.ui.ChapterList(
+                                state.chapters,
+                                state.currentChapter,
+                                onTimestamp,
+                                Modifier.heightIn(max = 320.dp),
+                            )
                         }
                     }
                     val notes = state.notes
@@ -166,7 +176,7 @@ internal fun EpisodeScreen(
                             durationMs = episode.durationMs,
                             onLink = onOpenLink,
                             // M5 seeks; M1a timestamps render but do nothing (deviation in 08).
-                            onTimestamp = {},
+                            onTimestamp = onTimestamp,
                             onLoadImages = { imagesRevealed = true },
                         )
                     }
@@ -180,6 +190,7 @@ internal fun EpisodeScreen(
 @Composable
 private fun EpisodeChrome(
     episode: EpisodeDetail,
+    caps: RowCaps,
     onAction: (EpisodeAction) -> Unit,
     onFavorite: (Boolean) -> Unit,
     onOpenLink: (String) -> Unit,
@@ -243,7 +254,19 @@ private fun EpisodeChrome(
                     text = { Text(stringResource(Res.string.action_watch_on_youtube)) },
                     onClick = {
                         menuOpen = false
-                        onAction(EpisodeAction.WatchOnYouTube(episode.id, externalMediaId!!))
+                        onAction(
+                            EpisodeAction.WatchOnYouTube(
+                                episode.id,
+                                externalMediaId!!,
+                                if (caps.inAppPlayback &&
+                                    episode.availability == ch.lkmc.neutrodyne.core.model.Availability.AVAILABLE
+                                ) {
+                                    YouTubeWatchMode.PLAYABLE_OVERFLOW
+                                } else {
+                                    YouTubeWatchMode.EXTERNAL_OR_UNPLAYABLE
+                                },
+                            ),
+                        )
                     },
                 )
             }
@@ -289,7 +312,6 @@ private fun EpisodeHeader(
     episode: EpisodeDetail,
     state: EpisodeUiState,
     onAction: (EpisodeAction) -> Unit,
-    toast: (String) -> Unit,
 ) {
     val isYouTube = episode.sourceType != SourceType.RSS
     Column(Modifier.fillMaxWidth().padding(horizontal = H_PADDING)) {
@@ -359,7 +381,7 @@ private fun EpisodeHeader(
             }
         }
 
-        ActionRow(episode, state, isYouTube, onAction, toast)
+        ActionRow(episode, state, isYouTube, onAction)
     }
 }
 
@@ -405,8 +427,8 @@ private fun metaLine(episode: EpisodeDetail): UiText {
 
 /**
  * The action row (08 Episode detail): the primary play affordance — "Watch on YouTube" for
- * YouTube sources while external mode is the only mode (M8 adds the engine's Play), the
- * offline-undownloaded state shows `cloud_off` "Offline" and toasts on tap — plus Download, Up
+ * YouTube sources while external mode is the only mode (M9a / MD3 add the engine's Play), the
+ * offline-undownloaded state shows `cloud_off` "Offline" and dispatches the playback intent — plus Download, Up
  * next and the played toggle as icon-label buttons. `FlowRow` wraps them onto extra lines so
  * every action stays reachable at 200 % text on a compact width (08's fontScale ≥ 1.5 rule).
  */
@@ -417,11 +439,9 @@ private fun ActionRow(
     state: EpisodeUiState,
     isYouTube: Boolean,
     onAction: (EpisodeAction) -> Unit,
-    toast: (String) -> Unit,
 ) {
-    val offlineToast = stringResource(Res.string.episode_offline_toast)
-    val downloaded = episode.downloadState == DownloadState.COMPLETED
-    val playableOffline = !state.offline || downloaded
+    val downloaded = (state.downloadLive?.downloadState ?: episode.downloadState) == DownloadState.COMPLETED
+    val playableOffline = state.isNowPlaying || !state.offline || downloaded
     var upNextMenu by remember { mutableStateOf(false) }
 
     FlowRow(
@@ -430,16 +450,15 @@ private fun ActionRow(
         modifier = Modifier.padding(top = BUTTONS_TOP),
     ) {
         val mediaId = episode.externalMediaId
-        if (isYouTube && mediaId != null) {
-            NdButton(onClick = {
-                onAction(EpisodeAction.WatchOnYouTube(episode.id, mediaId))
+        if (isYouTube && !state.rowCaps.inAppPlayback) {
+            NdButton(enabled = mediaId != null, onClick = {
+                mediaId?.let { onAction(EpisodeAction.WatchOnYouTube(episode.id, it)) }
             }) {
                 Text(stringResource(Res.string.action_watch_on_youtube))
             }
         } else if (!playableOffline) {
             NdButton(onClick = {
                 onAction(EpisodeAction.PlayToggle(episode.id))
-                toast(offlineToast)
             }) {
                 Icon(
                     NdIcons.CloudOff,
@@ -454,16 +473,17 @@ private fun ActionRow(
         } else {
             NdButton(onClick = { onAction(EpisodeAction.PlayToggle(episode.id)) }) {
                 Icon(
-                    NdIcons.PlayArrow,
+                    if (state.isNowPlaying && state.isPlaying) NdIcons.Pause else NdIcons.PlayArrow,
                     contentDescription = null,
                     modifier = Modifier.size(BUTTON_ICON),
                 )
                 Text(
                     stringResource(
-                        if (episode.playedAt != null) {
-                            Res.string.action_play_again
-                        } else {
-                            Res.string.action_play
+                        when {
+                            state.isNowPlaying && state.isPlaying -> Res.string.action_pause
+                            state.isNowPlaying -> Res.string.action_resume
+                            episode.playedAt != null -> Res.string.action_play_again
+                            else -> Res.string.action_play
                         },
                     ),
                     modifier = Modifier.padding(start = BUTTON_LABEL_GAP),
@@ -471,36 +491,64 @@ private fun ActionRow(
             }
         }
 
-        IconLabelButton(
-            icon = if (downloaded) NdIcons.DownloadDone else NdIcons.Download,
-            label =
-                stringResource(
-                    if (downloaded) Res.string.summary_downloaded else Res.string.action_download,
-                ),
-            onClick = { onAction(EpisodeAction.DownloadToggle(episode.id)) },
-        )
+        if (!isYouTube || state.rowCaps.downloads) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onAction(EpisodeAction.DownloadToggle(episode.id)) },
+            ) {
+                ch.lkmc.neutrodyne.core.ui.DownloadStateButton(
+                    state = state.downloadLive?.downloadState ?: episode.downloadState,
+                    waitReason = state.downloadLive?.waitReason,
+                    progress = state.downloadLive?.downloadProgress(),
+                    onClick = { onAction(EpisodeAction.DownloadToggle(episode.id)) },
+                    modifier = Modifier.clearAndSetSemantics {},
+                )
+                val status =
+                    ch.lkmc.neutrodyne.core.ui.DownloadStatusText.describe(
+                        state.downloadLive?.downloadState ?: episode.downloadState,
+                        state.downloadLive?.waitReason,
+                        state.downloadLive?.downloadProgress(),
+                        state.downloadLive?.lastError,
+                        state.downloadLive?.nextAttemptAt,
+                        ch.lkmc.neutrodyne.core.ui.LocalUiClock.current
+                            .now(),
+                        LocalPlatformKind.current,
+                    )
+                Text(
+                    status?.asString() ?: stringResource(
+                        if (downloaded) {
+                            Res.string.summary_downloaded
+                        } else {
+                            Res.string.action_download
+                        },
+                    ),
+                )
+            }
+        }
 
-        Box {
-            IconLabelButton(
-                icon = NdIcons.QueueMusic,
-                label = stringResource(Res.string.action_up_next),
-                onClick = { upNextMenu = true },
-            )
-            DropdownMenu(expanded = upNextMenu, onDismissRequest = { upNextMenu = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.action_play_next)) },
-                    onClick = {
-                        upNextMenu = false
-                        onAction(EpisodeAction.PlayNext(episode.id))
-                    },
+        if (!isYouTube || state.rowCaps.inAppPlayback) {
+            Box {
+                IconLabelButton(
+                    icon = NdIcons.QueueMusic,
+                    label = stringResource(Res.string.action_up_next),
+                    onClick = { upNextMenu = true },
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.action_play_last)) },
-                    onClick = {
-                        upNextMenu = false
-                        onAction(EpisodeAction.PlayLast(episode.id))
-                    },
-                )
+                DropdownMenu(expanded = upNextMenu, onDismissRequest = { upNextMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(Res.string.action_play_next)) },
+                        onClick = {
+                            upNextMenu = false
+                            onAction(EpisodeAction.PlayNext(episode.id))
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(Res.string.action_play_last)) },
+                        onClick = {
+                            upNextMenu = false
+                            onAction(EpisodeAction.PlayLast(episode.id))
+                        },
+                    )
+                }
             }
         }
 
