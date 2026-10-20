@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
@@ -67,33 +68,53 @@ internal class EffectiveSettingsResolverImpl(
         dao.podcastScopes(podcastIds).resolveAutoDownload(
             settings.scopeDefaults(),
             capabilities?.capabilities?.value?.downloads == true,
+            youtubeDefaults(),
         )
 
     override fun observeAutoDownload(): Flow<Map<Long, EffectiveAutoDownload>> =
         combine(
-            dao.observeAllPodcastScopes(),
-            settings.observeScopeDefaults(),
-            capabilities?.capabilities?.map { it.downloads }?.distinctUntilChanged()
-                ?: kotlinx.coroutines.flow.flowOf(false),
-        ) { rows, defaults, downloads ->
-            rows.resolveAutoDownload(defaults, downloads)
+            combine(
+                dao.observeAllPodcastScopes(),
+                settings.observeScopeDefaults(),
+                capabilities?.capabilities?.map { it.downloads }?.distinctUntilChanged()
+                    ?: kotlinx.coroutines.flow.flowOf(false),
+            ) { rows, defaults, downloads -> Triple(rows, defaults, downloads) },
+            settings.observe(YouTubeSettingKeys.AUTO_DOWNLOAD),
+            settings.observe(YouTubeSettingKeys.AUTO_DOWNLOAD_KEEP_LATEST),
+        ) { (rows, defaults, downloads), enabled, keep ->
+            rows.resolveAutoDownload(defaults, downloads, enabled to keep)
         }.distinctUntilChanged()
+
+    private suspend fun youtubeDefaults(): Pair<Boolean, Int> =
+        settings.get(YouTubeSettingKeys.AUTO_DOWNLOAD) to
+            settings.get(YouTubeSettingKeys.AUTO_DOWNLOAD_KEEP_LATEST)
 
     private fun List<PodcastScopeRow>.resolveAutoDownload(
         defaults: SettingOverrides,
         downloads: Boolean,
+        youtubeDefaults: Pair<Boolean, Int>,
     ): Map<Long, EffectiveAutoDownload> =
         groupBy { it.podcastId }.mapValues { (_, rows) ->
-            if (rows.first().sourceType == SourceType.YOUTUBE_CHANNEL && !downloads) {
-                EffectiveAutoDownload(
-                    false,
-                    requireNotNull(defaults.autoDownloadKeepLatest),
-                    requireNotNull(defaults.autoDownloadNetwork),
-                    requireNotNull(defaults.autoDownloadRequireCharging),
-                    requireNotNull(defaults.includeVideoInAutoDownload),
-                    requireNotNull(defaults.deleteAfterPlayed),
-                    SettingSource.NotSupported,
-                )
+            if (rows.first().sourceType == SourceType.YOUTUBE_CHANNEL) {
+                if (!downloads) {
+                    EffectiveAutoDownload(
+                        false,
+                        youtubeDefaults.second,
+                        requireNotNull(defaults.autoDownloadNetwork),
+                        requireNotNull(defaults.autoDownloadRequireCharging),
+                        requireNotNull(defaults.includeVideoInAutoDownload),
+                        requireNotNull(defaults.deleteAfterPlayed),
+                        SettingSource.NotSupported,
+                    )
+                } else {
+                    rows
+                        .resolvePodcast(
+                            defaults.copy(
+                                autoDownload = youtubeDefaults.first,
+                                autoDownloadKeepLatest = youtubeDefaults.second,
+                            ),
+                        ).autoDownload()
+                }
             } else {
                 rows.resolvePodcast(defaults).autoDownload()
             }

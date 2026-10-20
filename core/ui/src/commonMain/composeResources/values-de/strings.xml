@@ -715,4 +715,5 @@
     <string name="download_desktop_settings">Desktop</string>
     <string name="download_size_mb_decimal">%1$d,%2$d MB</string>
     <string name="download_size_gb_decimal">%1$d,%2$d GB</string>
+    <string name="dl_wait_youtube_engine">Warten auf die YouTube-Engine</string>
 </resources>

@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.desktop.youtube
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
@@ -34,6 +35,8 @@ object DesktopYouTubeBindingsModule {
     private val lookup = NoExtractorChannelLookup()
 
     @Provides fun capabilities(): YouTubeCapabilitiesSource = external
+
+    @Provides fun audioLanguage(): DownloadAudioLanguage = DownloadAudioLanguage { Locale.getDefault().language }
 
     @Provides fun engine(): YouTubeEngine = control
 
