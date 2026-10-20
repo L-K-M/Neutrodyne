@@ -15,12 +15,14 @@ import ch.lkmc.neutrodyne.core.model.DeleteAfter
 import ch.lkmc.neutrodyne.core.model.EffectiveAutoDownload
 import ch.lkmc.neutrodyne.core.model.NetworkPolicy
 import ch.lkmc.neutrodyne.core.model.SettingSource
+import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
@@ -35,6 +37,7 @@ import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
 import ch.lkmc.neutrodyne.download.api.ShareableFile
 import ch.lkmc.neutrodyne.download.api.StorageUsage
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -599,6 +602,37 @@ class AutoDownloadPlannerTest {
             assertFalse(admitted.requireCharging)
         }
 
+    @Test fun youtubeAutoAdmitsOnlyUnderCapabilityAndByVideoId() =
+        plannerTest {
+            val channel =
+                podcast(
+                    sourceType = SourceType.YOUTUBE_CHANNEL,
+                    youtubeChannelId = "UCaaaaaaaaaaaaaaaaaaaaaA",
+                )
+            val ids =
+                (1..3).map { n ->
+                    episode(channel, n.toLong()) {
+                        copy(
+                            externalMediaId = "ytvideo000$n",
+                            enclosureUrl = null,
+                            enclosureType = null,
+                        )
+                    }
+                }
+            planner.plan(listOf(channel))
+            assertTrue(dao.allRows().isEmpty())
+            caps.capabilities.value = YouTubeCapabilities(true, true, true, true, true, null)
+            planner.plan(listOf(channel))
+            val rows = dao.allRows()
+            assertEquals(ids.toSet(), rows.map { it.episodeId }.toSet())
+            assertTrue(rows.all { it.sourceKind == SourceKind.YOUTUBE && it.lane == Lane.AUTO })
+            assertEquals(
+                setOf("ytvideo0001", "ytvideo0002", "ytvideo0003"),
+                rows.map { it.sourceRef }.toSet(),
+            )
+            assertTrue(rows.all { !it.allowMetered })
+        }
+
     private fun plannerTest(block: suspend Rig.() -> Unit) =
         runTest {
             Rig(this).use { it.block() }
@@ -632,6 +666,7 @@ class AutoDownloadPlannerTest {
             }
         val claimMutex = Mutex()
         val roots = TestRoots()
+        val caps = FakeYouTubeCapabilitiesSource()
         val media = FakePlaybackMediaLookup()
         val scheduled = mutableListOf<Lane>()
         val stops = mutableListOf<Pair<Long, StopIntent>>()
@@ -716,17 +751,23 @@ class AutoDownloadPlannerTest {
             media,
             platform,
             dispatcher,
+            capabilities = caps,
         )
 
         suspend fun podcast(
             subscribedAt: Long = 100L,
             watermark: Long? = 100L,
             sourceType: SourceType = SourceType.RSS,
+            youtubeChannelId: String? = null,
         ): Long {
             val id =
                 db.podcastDao().insertPodcast(
                     podcastEntity(subscribedAt = subscribedAt) {
-                        copy(autoDownloadEligibleAfter = watermark, sourceType = sourceType)
+                        copy(
+                            autoDownloadEligibleAfter = watermark,
+                            sourceType = sourceType,
+                            youtubeChannelId = youtubeChannelId,
+                        )
                     },
                 )
             policy(id, enabled)

@@ -288,6 +288,7 @@ class RssCrashProofTest {
                 plan: TransferPlan,
                 part: PartFile,
                 sink: ProgressSink,
+                attempt: TransferAttempt,
             ): TransferResult =
                 source.transfer(
                     plan,

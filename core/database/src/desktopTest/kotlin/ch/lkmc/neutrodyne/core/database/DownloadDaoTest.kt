@@ -36,6 +36,32 @@ class DownloadDaoTest {
 
     @After fun close() = db.close()
 
+    @Test fun eligibleYouTubeIdentityCanBeSelectedOnlyWithExplicitCapability() =
+        runTest {
+            val channel =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(id = 0, feedKey = "youtube-claim").copy(
+                        sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                        youtubeChannelId = "UCBR8-60-B28hp2BmDPdntcQ",
+                    ),
+                )
+            val videoId = "abcdefghijk"
+            val id =
+                db.episodeDao().insertStub(
+                    episodeEntity(id = 0, podcastId = channel, identityKey = "yt:$videoId").copy(
+                        externalMediaId = videoId,
+                    ),
+                )
+            dao.insert(row(id).copy(sourceKind = SourceKind.YOUTUBE, sourceRef = videoId))
+            assertTrue(dao.candidates(listOf(Lane.MANUAL), 100, true, true, false).isEmpty())
+            assertEquals(
+                listOf(id),
+                dao.candidates(listOf(Lane.MANUAL), 100, true, true, true).map { it.episodeId },
+                "Explicitly admitted YouTube rows must reach the existing transactional claimer",
+            )
+            assertEquals(0, dao.claim(id, "default-external"))
+        }
+
     @Test fun externalChannelsCannotBeClaimedEvenWithRssTaggedDownloads() =
         runTest {
             val channel =
@@ -470,6 +496,49 @@ class DownloadDaoTest {
             assertEquals(listOf(ids[3], ids[1]), dao.autoCandidates(podcast, 1, 3, false, false).map { it.id })
             assertEquals(State.QUEUED, dao.autoCandidates(podcast, 1, 1, false, false).single().downloadState)
             assertTrue(dao.autoCandidates(podcast, 4, 3, false, false).isEmpty())
+        }
+
+    @Test fun c0dReaderCandidateQueryExecutesAndNeverSeesYouTubeRows() =
+        runTest {
+            val podcast = db.podcastDao().insertPodcast(podcastEntity(feedKey = "rss"))
+            val rss =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = podcast) { copy(enclosureUrl = "https://origin/a.mp3") },
+                )
+            dao.insert(row(rss).copy(sourceKind = SourceKind.RSS_ENCLOSURE, sourceRef = "https://origin/a.mp3"))
+            val channel =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "yt").copy(
+                        sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                        youtubeChannelId = "UCBR8-60-B28hp2BmDPdntcQ",
+                    ),
+                )
+            val video =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = channel, identityKey = "yt:abcdefghijk").copy(
+                        externalMediaId = "abcdefghijk",
+                    ),
+                )
+            dao.insert(row(video).copy(sourceKind = SourceKind.YOUTUBE, sourceRef = "abcdefghijk"))
+            val legacy =
+                "SELECT episodeId FROM download WHERE state = 'QUEUED' AND runnerToken IS NULL" +
+                    " AND lane IN ('MANUAL', 'AUTO')" +
+                    " AND (nextAttemptAt IS NULL OR nextAttemptAt <= 100)" +
+                    " AND (allowMetered = 1 OR 1 = 1) AND (requireCharging = 0 OR 1 = 1)" +
+                    " AND EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+                    " WHERE e.id = download.episodeId AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL)" +
+                    " AND (? = 1 OR sourceKind <> 'YOUTUBE')" +
+                    " ORDER BY priority DESC, requestedAt, episodeId"
+            for (allowed in listOf(0L, 1L)) {
+                val ids = mutableListOf<Long>()
+                db.useWriterConnection { connection ->
+                    connection.usePrepared(legacy) { statement ->
+                        statement.bindLong(1, allowed)
+                        while (statement.step()) ids += statement.getLong(0)
+                    }
+                }
+                assertEquals(listOf(rss), ids, "old-reader candidates must never admit YouTube rows")
+            }
         }
 
     private fun row(id: Long) =

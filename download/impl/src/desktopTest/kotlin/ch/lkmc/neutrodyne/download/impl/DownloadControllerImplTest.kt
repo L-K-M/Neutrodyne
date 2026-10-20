@@ -11,12 +11,16 @@ import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
+import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadRootRegistration
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
@@ -32,6 +36,7 @@ import ch.lkmc.neutrodyne.download.api.RootChangeResult
 import ch.lkmc.neutrodyne.download.api.ShareableFile
 import ch.lkmc.neutrodyne.download.api.StorageRootInfo
 import ch.lkmc.neutrodyne.download.api.StorageUsage
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -73,6 +78,59 @@ class DownloadControllerImplTest {
                 assertEquals(0, result.queued)
                 assertEquals(before, f.row(id))
                 assertEquals(0, f.db.downloadDao().claim(id, "direct"))
+            }
+        }
+
+    @Test fun youtubeRequestQueuesWithVideoIdSourceRefAndQuality() =
+        runTest {
+            fixture { f ->
+                val channel =
+                    f.db.podcastDao().insertPodcast(
+                        podcastEntity {
+                            copy(
+                                sourceType = SourceType.YOUTUBE_CHANNEL,
+                                youtubeChannelId = "UCaaaaaaaaaaaaaaaaaaaaaA",
+                            )
+                        },
+                    )
+                val id =
+                    f.db.episodeDao().insertStub(
+                        episodeEntity(podcastId = channel) {
+                            copy(externalMediaId = "ytvideo0001", enclosureUrl = null, enclosureType = null)
+                        },
+                    )
+                f.caps.capabilities.value = YouTubeCapabilities(true, true, true, true, true, null)
+                f.settings.set(YouTubeSettingKeys.AUDIO_QUALITY, YouTubeAudioQuality.OPUS)
+                val result = assertIs<RequestResult.Queued>(f.controller.request(listOf(id), Lane.MANUAL, true))
+                assertEquals(1, result.queued)
+                val row = f.row(id)
+                assertEquals(SourceKind.YOUTUBE, row.sourceKind)
+                assertEquals("ytvideo0001", row.sourceRef)
+                assertEquals("OPUS", row.formatPref)
+            }
+        }
+
+    @Test fun youtubeRequestRejectsWhileEngineOff() =
+        runTest {
+            fixture { f ->
+                val channel =
+                    f.db.podcastDao().insertPodcast(
+                        podcastEntity {
+                            copy(
+                                sourceType = SourceType.YOUTUBE_CHANNEL,
+                                youtubeChannelId = "UCaaaaaaaaaaaaaaaaaaaaaA",
+                            )
+                        },
+                    )
+                val id =
+                    f.db.episodeDao().insertStub(
+                        episodeEntity(podcastId = channel) {
+                            copy(externalMediaId = "ytvideo0001", enclosureUrl = null, enclosureType = null)
+                        },
+                    )
+                val result = assertIs<RequestResult.Queued>(f.controller.request(listOf(id), Lane.MANUAL, true))
+                assertEquals(mapOf(id to RejectReason.YOUTUBE_NOT_SUPPORTED), result.rejected)
+                assertNull(f.dao.byEpisode(id))
             }
         }
 
@@ -499,6 +557,7 @@ class DownloadControllerImplTest {
         val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
         val settings = FakeSettingsRepository()
         val media = FakePlaybackMediaLookup()
+        val caps = FakeYouTubeCapabilitiesSource()
         val mutex = Mutex()
         val scheduled = mutableListOf<Lane>()
         val events = mutableListOf<String>()
@@ -597,6 +656,7 @@ class DownloadControllerImplTest {
                 media,
                 { false },
                 rootRegistration = registration,
+                capabilities = caps,
             )
 
         suspend fun episode(block: EpisodeEntity.() -> EpisodeEntity = { this }): Long =
