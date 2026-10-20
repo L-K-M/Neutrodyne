@@ -9,6 +9,10 @@ Two modes:
   `scripts/ci/bmgr-check.sh` evidence tree (one `apiNN/` directory per leg).
 - `--bmgr-tar TAR EXPECTATION_JSON`: single-TAR payload verification used by
   the script itself, writing `TAR.members` next to the archive.
+- `--bmgr-encoff LOG PACKAGE`: the shared strict parser for the encryption-off
+  `bmgr backupnow --monitor` log; prints the verbatim package verdict. Used by
+  the script itself and by the aggregate — only a closed, diagnosed policy
+  exclusion is accepted.
 """
 
 import argparse
@@ -87,6 +91,74 @@ ENTRY_NAMES = {
 REQUIRED_ENTRIES = ENTRY_NAMES - {"subscriptions.opml"}
 NONCE = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+# `bmgr backupnow` verdicts that can certify an encryption-off exclusion (the
+# BackupObserver status strings, upstream Bmgr.java). Transport/agent errors,
+# quota, cancel and "Unknown error" are failures, never exclusions.
+ENCOFF_POLICY_VERDICTS = {
+    "Backup is not allowed",
+    "Transport rejected package because it wasn't able to process it at the time",
+}
+
+
+def parse_encoff_backupnow(text, package, device="encoff"):
+    """Strict verdict extraction from a `bmgr backupnow --monitor` log.
+
+    Returns the verbatim package verdict only for a closed diagnosed policy
+    exclusion: the run line, a successful @pm@ metadata verdict, exactly one
+    verdict for the expected package in ENCOFF_POLICY_VERDICTS, an
+    ERROR_PREFLIGHT monitor event naming it, and a single successful finish.
+    """
+    text = text.replace("\r", "")
+    if not re.search(r"^Running (non-)?incremental backup for \d+ requested "
+                     r"packages\.$", text, re.M):
+        raise ValueError(f"{device}: enc-off log lacks the backupnow run line")
+    verdicts = re.findall(r"^Package (\S+) with result: (.+)$", text, re.M)
+    if not verdicts:
+        raise ValueError(f"{device}: enc-off log has no package verdicts")
+    names = [name for name, _ in verdicts]
+    if len(names) != len(set(names)):
+        raise ValueError(f"{device}: duplicate package verdict {sorted(names)}")
+    own = []
+    pm_metadata = 0
+    for name, verdict in verdicts:
+        verdict = verdict.strip()
+        if name == "@pm@":
+            if verdict != "Success":
+                raise ValueError(f"{device}: @pm@ verdict is {verdict!r}, not Success")
+            pm_metadata += 1
+        elif name == package:
+            own.append(verdict)
+        else:
+            raise ValueError(f"{device}: unexpected package verdict for {name}")
+    if pm_metadata != 1:
+        raise ValueError(f"{device}: expected one @pm@ metadata success")
+    if len(own) != 1:
+        raise ValueError(f"{device}: expected exactly one verdict for {package}")
+    verdict = own[0]
+    if verdict not in ENCOFF_POLICY_VERDICTS:
+        raise ValueError(f"{device}: {verdict!r} is not a policy exclusion")
+    events = re.findall(r"^=> Event\{[^}]*package = (\S+?)\(v\d+\)[^}]*\}$",
+                        text, re.M)
+    for event_package in events:
+        if event_package not in {package, "@pm@"}:
+            raise ValueError(
+                f"{device}: monitor event names foreign package {event_package}")
+    if not any(line.startswith("=> Event{") and "ERROR_PREFLIGHT" in line
+               and f"package = {package}(" in line
+               for line in text.splitlines()):
+        raise ValueError(f"{device}: no ERROR_PREFLIGHT event for {package}")
+    finishes = re.findall(r"^Backup finished with result: (.+)$", text, re.M)
+    if finishes != ["Success"]:
+        raise ValueError(
+            f"{device}: backup finish evidence {finishes} != ['Success']")
+    return verdict
+
+
+def run_bmgr_encoff(log_path, package):
+    verdict = parse_encoff_backupnow(Path(log_path).read_text(errors="replace"),
+                                   package)
+    print(verdict)
 
 
 def sha256_hex(data):
@@ -220,7 +292,8 @@ def check_bmgr_device(root, device, api):
     run = json.loads((directory / "run.json").read_text())
     if run.get("schema") != "bmgr-evidence/v1" or run.get("api") != api:
         raise ValueError(f"{device}: run.json schema/api mismatch")
-    if not run.get("fingerprint") or run.get("abi") != "x86_64":
+    if not run.get("fingerprint") or run.get("abi") != "x86_64" \
+            or not run.get("avd"):
         raise ValueError(f"{device}: emulator identity evidence missing")
     if not NONCE.fullmatch(run.get("nonce", "")):
         raise ValueError(f"{device}: run nonce invalid")
@@ -255,15 +328,36 @@ def check_bmgr_device(root, device, api):
     if status_values(logs["verify"], "bmgrExpected") or status_values(logs["empty"], "bmgrExpected"):
         raise ValueError(f"{device}: bmgrExpected may only appear in the prepare leg")
 
+    for field in ("unencryptedBackupnowExit", "positiveBackupnowExit"):
+        if run.get(field) != 0:
+            raise ValueError(f"{device}: {field} is {run.get(field)!r}, not 0")
+    if run.get("cleanupStatus") != "ok":
+        raise ValueError(
+            f"{device}: cleanup status is {run.get('cleanupStatus')!r}, not 'ok'")
+    for label in ("encoff-pre", "encoff", "positive", "empty"):
+        receipt = directory / f"init-{label}.txt"
+        if not receipt.is_file() or "Initialization result: 0" not in \
+                receipt.read_text(errors="replace"):
+            raise ValueError(
+                f"{device}: missing a successful init-{label}.txt receipt")
+
     backup = (directory / "backupnow-positive.log").read_text(errors="replace")
     for needle in (f"Package {exp['package']} with result: Success",
                    "Backup finished with result: Success"):
         if needle not in backup:
             raise ValueError(f"{device}: backupnow log misses {needle!r}")
-    if "encoff" not in run.get("unencryptedDiagnosis", "") or not run.get("unencryptedDiagnosis"):
-        raise ValueError(f"{device}: missing encryption-off control diagnosis")
-    if not (directory / "backupnow-encoff.log").is_file():
+    encoff_log = directory / "backupnow-encoff.log"
+    if not encoff_log.is_file():
         raise ValueError(f"{device}: missing backupnow-encoff.log")
+    verdict = parse_encoff_backupnow(encoff_log.read_text(errors="replace"),
+                                   exp["package"], device)
+    if run.get("unencryptedDiagnosis") != f"encoff:{verdict}":
+        raise ValueError(
+            f"{device}: unencryptedDiagnosis does not match the log verdict")
+    payload = directory / "encoff-payload.txt"
+    if not payload.is_file() or payload.read_text(errors="replace").strip():
+        raise ValueError(
+            f"{device}: enc-off payload receipt is missing or non-empty")
 
     tar_path = directory / "transport.tar"
     if not tar_path.is_file():
@@ -309,15 +403,20 @@ def main():
                         help="strict M3 bmgr evidence root (api31/api36 dirs)")
     parser.add_argument("--bmgr-tar", nargs=2, metavar=("TAR", "EXPECTATION_JSON"),
                         help="verify one transport TAR and write TAR.members")
+    parser.add_argument("--bmgr-encoff", nargs=2, metavar=("LOG", "PACKAGE"),
+                        help="strict enc-off backupnow verdict parser")
     args = parser.parse_args()
     try:
         if args.bmgr is not None:
             check_bmgr(args.bmgr)
+        elif args.bmgr_encoff is not None:
+            run_bmgr_encoff(*args.bmgr_encoff)
         elif args.bmgr_tar is not None:
             run_bmgr_tar(*args.bmgr_tar)
         else:
             if args.results is None:
-                parser.error("results is required without --bmgr/--bmgr-tar")
+                parser.error(
+                    "results is required without --bmgr/--bmgr-tar/--bmgr-encoff")
             for device in DEVICES:
                 check_device(args.results, device)
     except (OSError, ValueError, ET.ParseError, json.JSONDecodeError,

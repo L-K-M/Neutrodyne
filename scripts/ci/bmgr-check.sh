@@ -17,26 +17,34 @@
 # no file copies, no reseed, no app launch after reinstall. On any failure the
 # trap still writes every collected artifact. `check-first-launch-restore-results.py
 # --bmgr` is the strict aggregate over both legs' evidence.
+#
+# Safety: the script only mutates the named disposable emulator the CI job
+# created (BMGR_DISPOSABLE_API<api>=1 + BMGR_EXPECT_AVD under GITHUB_ACTIONS),
+# and the trap reverts only the changes this invocation owns.
 
 set -euo pipefail
 
-API="${1:?usage: bmgr-check.sh <api> <evidence-dir>}"
-EV="$(cd "${2:?usage: bmgr-check.sh <api> <evidence-dir>}" >/dev/null 2>&1 && pwd || { mkdir -p "$2"; cd "$2" && pwd; })"
-REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." >/dev/null 2>&1 && pwd -P)"
-cd "$REPO_ROOT"
-mkdir -p "$EV"
-exec > >(tee -a "$EV/script.log") 2>&1
-
 ADB="${ADB:-adb}"
+API="${API:-}"                    # 31 or 36 only, set inside main
+EV="${EV:-}"                      # evidence dir, set inside main
+REPO_ROOT=""
 PKG="ch.lkmc.neutrodyne"
 CLASS="ch.lkmc.neutrodyne.BmgrTransportDeviceTest"
 RUNNER_PKG=""                     # filled from `pm list instrumentation`
-TRANSPORT=""                      # the actual transport name, from `bmgr list transports`
+TRANSPORT="${TRANSPORT:-}"        # the actual transport name, from `bmgr list transports`
 DATA_DIR="/data/data/$PKG"
 TRANSPORT_DIR="/data/data/com.android.localtransport/files"
 PARAMS_ON="is_encrypted=true,is_device_transfer=false,fake_encryption_flag=false"
 PARAMS_OFF="is_encrypted=false,is_device_transfer=false,fake_encryption_flag=false"
 NONCE="run-$(date +%s)-$RANDOM"
+
+# Ownership ledger. A flag arms before its mutating call so even a failed
+# mutation is reverted; unarmed flags mean the trap must not touch that state.
+ARMED=""
+OWNED_TRANSPORT=""; OWNED_ENABLED=""; OWNED_AUTORESTORE=""; OWNED_PARAMS=""
+INSTALLED_PKG=""; INSTALLED_RUNNER=""
+ORIG_TRANSPORT=""; ORIG_ENABLED=""; ORIG_AUTORESTORE=""; ORIG_PARAMS="null"
+LOGCAT_PID=""
 
 log() { echo "[bmgr-check $(date +%H:%M:%S)] $*"; }
 fail() { echo "[bmgr-check] FAIL: $*" >&2; exit 1; }
@@ -47,8 +55,6 @@ out() {  # bounded device capture
     timeout 120 "$@" > "$EV/$file" 2>&1 || log "capture $file failed ($?)"
 }
 
-ORIG_TRANSPORT=""; ORIG_ENABLED=""; ORIG_AUTORESTORE=""; ORIG_PARAMS="null"
-LOGCAT_PID=""
 finish_run_json() {
     python3 - "$EV" <<'PY' || true
 import json, sys
@@ -79,8 +85,13 @@ run = {
     "testApkSha256": facts.get("testApkSha256", ""),
     "certSha256": facts.get("certSha256", ""),
     "transport": facts.get("transport", ""),
+    "avd": facts.get("avd", ""),
     "tarSha256": facts.get("tarSha256", ""),
+    "tarDevicePath": facts.get("tarDevicePath", ""),
     "unencryptedDiagnosis": facts.get("unencryptedDiagnosis", ""),
+    "unencryptedBackupnowExit": int(facts.get("unencryptedBackupnowExit", "-1")),
+    "positiveBackupnowExit": int(facts.get("positiveBackupnowExit", "-1")),
+    "cleanupStatus": facts.get("cleanupStatus", ""),
     "startedAt": facts.get("startedAt", ""),
     "finishedAt": facts.get("finishedAt", ""),
     "selectors": selectors,
@@ -88,29 +99,57 @@ run = {
 (ev / "run.json").write_text(json.dumps(run, indent=2) + "\n")
 PY
 }
+restore_secure() {  # <key> <raw>: put the captured value back, or re-delete an absent one
+    if [ -z "$2" ] || [ "$2" = "null" ]; then
+        timeout 60 "$ADB" shell settings delete secure "$1"
+    else
+        timeout 60 "$ADB" shell settings put secure "$1" "$2"
+    fi
+}
+
 cleanup() {
     status=$?
-    fact finishedAt "$(date -u +%FT%TZ)"
-    finish_run_json
     [ -n "$LOGCAT_PID" ] && kill "$LOGCAT_PID" 2>/dev/null || true
+    # Diagnostics are read-only and run even when nothing was ever owned.
     timeout 60 "$ADB" shell dumpsys backup > "$EV/dumpsys-final.txt" 2>&1 || true
     timeout 60 "$ADB" shell bmgr list transports > "$EV/transports-final.txt" 2>&1 || true
-    # Restore every transport/backup setting this run touched; only our packages leave.
-    if [ -n "$ORIG_TRANSPORT" ] && [ "$ORIG_TRANSPORT" != "$TRANSPORT" ]; then
-        timeout 60 "$ADB" shell bmgr transport "$ORIG_TRANSPORT" || true
+    failed=0
+    if [ -n "$ARMED" ]; then
+        if [ -n "$OWNED_PARAMS" ]; then
+            restore_secure backup_local_transport_parameters "$ORIG_PARAMS" || failed=1
+        fi
+        if [ -n "$OWNED_TRANSPORT" ]; then
+            if [ -n "$ORIG_TRANSPORT" ]; then
+                timeout 60 "$ADB" shell bmgr transport "$ORIG_TRANSPORT" || failed=1
+            else
+                log "no originally selected transport recorded — cannot restore it"
+                failed=1
+            fi
+        fi
+        if [ -n "$OWNED_AUTORESTORE" ]; then
+            restore_secure backup_auto_restore "$ORIG_AUTORESTORE" || failed=1
+        fi
+        if [ -n "$OWNED_ENABLED" ]; then
+            restore_secure backup_enabled "$ORIG_ENABLED" || failed=1
+        fi
+        if [ -n "$INSTALLED_PKG" ]; then
+            timeout 60 "$ADB" shell pm uninstall --user 0 "$PKG" || true
+            [ -z "$(timeout 60 "$ADB" shell pm path "$PKG" 2>/dev/null | tr -d '\r')" ] \
+                || failed=1
+        fi
+        if [ -n "$INSTALLED_RUNNER" ]; then
+            timeout 60 "$ADB" shell pm uninstall --user 0 "$RUNNER_PKG" || true
+            [ -z "$(timeout 60 "$ADB" shell pm path "$RUNNER_PKG" 2>/dev/null | tr -d '\r')" ] \
+                || failed=1
+        fi
     fi
-    [ -n "$ORIG_ENABLED" ] && timeout 60 "$ADB" shell bmgr enable "$ORIG_ENABLED" || true
-    [ -n "$ORIG_AUTORESTORE" ] && timeout 60 "$ADB" shell bmgr autorestore "$ORIG_AUTORESTORE" || true
-    if [ "$ORIG_PARAMS" = "null" ]; then
-        timeout 60 "$ADB" shell settings delete secure backup_local_transport_parameters || true
-    elif [ -n "$ORIG_PARAMS" ]; then
-        timeout 60 "$ADB" shell settings put secure backup_local_transport_parameters "$ORIG_PARAMS" || true
-    fi
-    timeout 60 "$ADB" shell pm uninstall --user 0 "$PKG" || true
-    [ -n "$RUNNER_PKG" ] && timeout 60 "$ADB" shell pm uninstall --user 0 "$RUNNER_PKG" || true
-    log "evidence left in $EV (exit $status)"
+    if [ "$failed" -eq 0 ]; then fact cleanupStatus ok; else fact cleanupStatus failed; fi
+    fact finishedAt "$(date -u +%FT%TZ)"
+    finish_run_json
+    log "evidence left in $EV (exit $status, cleanup failures $failed)"
+    [ "$failed" -eq 0 ] || exit 1
+    exit "$status"
 }
-trap cleanup EXIT
 
 require_disk() {  # >= 10 GiB before every heavy step
     local free
@@ -118,9 +157,26 @@ require_disk() {  # >= 10 GiB before every heavy step
     [ "${free:-0}" -ge 10485760 ] || fail "disk headroom under 10 GiB ($free KiB)"
 }
 
-current_token() {  # newest restore-set token — `bmgr init` rotates it, never hardcode one
-    timeout 60 "$ADB" shell bmgr list sets | tr -d '\r' \
-        | awk '$1 ~ /^[0-9]+$/ {if ($1+0 > m) m = $1+0} END {if (m) print m}'
+# `bmgr list transports` pads the selected line "  * name", others "    name".
+selected_transport() { sed -n 's/^ *\* //p' "$1" | tr -d '\r' | head -1; }
+
+raw_setting() {  # <secure key>: the raw 0/1/value or literal null — never a bmgr getter
+    timeout 60 "$ADB" shell settings get secure "$1" 2>/dev/null | tr -d '\r' || true
+}
+
+bmgr_init() {  # <label>: init only our transport and require its real result
+    local label="$1" file="$EV/init-$1.txt" rc=0
+    timeout 60 "$ADB" shell bmgr init "$TRANSPORT" > "$file" 2>&1 || rc=$?
+    [ "$rc" -eq 0 ] \
+        || fail "bmgr init $TRANSPORT ($label) failed rc=$rc: $(tr -d '\r' < "$file" | tr '\n' ' ')"
+    tr -d '\r' < "$file" | grep -q '^Initialization result: 0$' \
+        || fail "bmgr init $TRANSPORT ($label) gave no success: $(tr -d '\r' < "$file" | tr '\n' ' ')"
+}
+
+find_payload() {  # every _full/$PKG file under the transport store, whatever the token dir
+    timeout 60 "$ADB" shell \
+        "find '$TRANSPORT_DIR' -type f -path '*/_full/$PKG' 2>/dev/null" 2>/dev/null \
+        | tr -d '\r' || true
 }
 
 instrument() {  # <phase> <method> <extra args...>; strict raw stream kept
@@ -142,17 +198,42 @@ tool() {  # build-tools binary: PATH first, then the newest SDK build-tools dir
 }
 
 main() {
+    API="${1:?usage: bmgr-check.sh <api> <evidence-dir>}"
+    EV="$(cd "${2:?usage: bmgr-check.sh <api> <evidence-dir>}" >/dev/null 2>&1 && pwd \
+        || { mkdir -p "$2"; cd "$2" && pwd; })"
+    REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." >/dev/null 2>&1 && pwd -P)"
+    cd "$REPO_ROOT"
+    mkdir -p "$EV"
+    exec > >(tee -a "$EV/script.log") 2>&1
+    trap cleanup EXIT
+
     require_disk
     fact device "api$API"; fact api "$API"; fact nonce "$NONCE"
     fact startedAt "$(date -u +%FT%TZ)"
     fact sourceSha "$(git rev-parse HEAD)"
 
-    # --- device: the disposable rooted default-image emulator, already booted ---
+    # --- disposable-job guard: no device contact outside the CI matrix ---
+    [ "$API" = "31" ] || [ "$API" = "36" ] || fail "api must be 31 or 36, got '$API'"
+    [ "${GITHUB_ACTIONS:-}" = "true" ] \
+        || fail "bmgr-check.sh only runs inside a GitHub Actions job"
+    DISPOSABLE="BMGR_DISPOSABLE_API$API"
+    [ "${!DISPOSABLE:-}" = "1" ] \
+        || fail "set $DISPOSABLE=1 to acknowledge a disposable emulator"
+    [ -n "${BMGR_EXPECT_AVD:-}" ] \
+        || fail "BMGR_EXPECT_AVD must name the workflow-created AVD"
+
+    # --- device: the named disposable qemu emulator the job booted ---
     timeout 660 "$ADB" wait-for-device
     for _ in $(seq 1 60); do
         [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
         sleep 10
     done
+    AVD="$(timeout 60 "$ADB" emu avd name 2>/dev/null | head -1 | tr -d '\r' || true)"
+    [ "$AVD" = "$BMGR_EXPECT_AVD" ] \
+        || fail "connected AVD '$AVD' is not the expected '$BMGR_EXPECT_AVD'"
+    fact avd "$AVD"
+    [ "$(timeout 60 "$ADB" shell getprop ro.kernel.qemu | tr -d '\r')" = "1" ] \
+        || fail "the device is not a qemu emulator"
     timeout 120 "$ADB" root && sleep 2 && timeout 120 "$ADB" wait-for-device
     [ "$("$ADB" shell id -u | tr -d '\r')" = "0" ] || fail "adbd is not root"
     SDK="$("$ADB" shell getprop ro.build.version.sdk | tr -d '\r')"
@@ -164,21 +245,39 @@ main() {
     "$ADB" logcat -v threadtime > "$EV/logcat.txt" 2>/dev/null &
     LOGCAT_PID=$!
 
-    # --- original backup state (restored in the trap) ---
+    # --- original backup state: raw secure values captured before any change ---
     out transports-before.txt "$ADB" shell bmgr list transports
     TRANSPORT="$(grep -o 'com\.android\.localtransport/\.LocalTransport' "$EV/transports-before.txt" | head -1)"
     [ -n "$TRANSPORT" ] || fail "local transport not in: $(cat "$EV/transports-before.txt")"
-    ORIG_TRANSPORT="$(grep '^\*' "$EV/transports-before.txt" | sed 's/^[* ]*//' | head -1)"
-    ORIG_ENABLED="$(timeout 60 "$ADB" shell bmgr enabled | tr -d '\r' | grep -o 'enabled\|disabled' | head -1)"
-    ORIG_AUTORESTORE="$(timeout 60 "$ADB" shell bmgr autorestore | tr -d '\r' | grep -o 'enabled\|disabled' | head -1)"
-    ORIG_PARAMS="$(timeout 60 "$ADB" shell settings get secure backup_local_transport_parameters | tr -d '\r' || true)"
+    ORIG_TRANSPORT="$(selected_transport "$EV/transports-before.txt")"
+    out enabled-before.txt "$ADB" shell bmgr enabled
+    ORIG_ENABLED="$(raw_setting backup_enabled)"
+    ORIG_AUTORESTORE="$(raw_setting backup_auto_restore)"
+    ORIG_PARAMS="$(raw_setting backup_local_transport_parameters)"
+    {
+        printf 'transport=%s\n' "$ORIG_TRANSPORT"
+        printf 'backup_enabled=%s\n' "$ORIG_ENABLED"
+        printf 'backup_auto_restore=%s\n' "$ORIG_AUTORESTORE"
+        printf 'backup_local_transport_parameters=%s\n' "$ORIG_PARAMS"
+    } > "$EV/originals.txt"
     log "originals: transport=$ORIG_TRANSPORT enabled=$ORIG_ENABLED autorestore=$ORIG_AUTORESTORE params=$ORIG_PARAMS"
 
+    # A disposable emulator carries neither our app nor its test package already.
+    [ -z "$(timeout 60 "$ADB" shell pm path "$PKG" 2>/dev/null | tr -d '\r')" ] \
+        || fail "refusing a device with a preexisting $PKG install"
+    ! timeout 60 "$ADB" shell pm list instrumentation | grep -qF "(target=$PKG)" \
+        || fail "refusing a device with a preexisting test install"
+    ARMED=1
+
+    OWNED_ENABLED=1
     timeout 60 "$ADB" shell bmgr enable true
+    OWNED_AUTORESTORE=1
     timeout 60 "$ADB" shell bmgr autorestore true
+    OWNED_TRANSPORT=1
     timeout 60 "$ADB" shell bmgr transport "$TRANSPORT"
-    timeout 60 "$ADB" shell bmgr list transports | grep -E "^\* +$TRANSPORT" \
-        || fail "local transport not selected"
+    timeout 60 "$ADB" shell bmgr list transports > "$EV/transports-selected.txt" 2>&1 || true
+    [ "$(selected_transport "$EV/transports-selected.txt")" = "$TRANSPORT" ] \
+        || fail "local transport not selected: $(tr '\n' ' ' < "$EV/transports-selected.txt")"
     fact transport "$TRANSPORT"
 
     # --- APK gates: the published-artifact checks already own debuggable/signer facts ---
@@ -196,7 +295,9 @@ main() {
     fact apkBytes "$(stat -c%s "$APK")"
     fact testApkSha256 "$(sha256sum "$TESTAPK" | cut -d' ' -f1)"
     fact certSha256 "$(timeout 120 "$(tool apksigner)" verify --print-certs "$APK" | grep -o 'SHA-256 digest: .*' | head -1 | cut -d' ' -f3-)"
+    INSTALLED_PKG=1
     timeout 300 "$ADB" install --user 0 "$APK" | tee "$EV/install-initial.txt"
+    INSTALLED_RUNNER=1
     timeout 300 "$ADB" install -t --user 0 "$TESTAPK" | tee "$EV/install-test.txt"
     RUNNER_PKG="$(timeout 60 "$ADB" shell pm list instrumentation | grep "(target=$PKG)" \
         | sed 's/instrumentation://; s|/.*||' | tr -d '\r')"
@@ -233,30 +334,43 @@ main() {
     fi
 
     # --- encryption-off control: fresh dataset, same flow must produce no payload ---
-    timeout 60 "$ADB" shell bmgr init || fail "bmgr init (enc-off) failed"
+    # `bmgr init` needs the transport named (bare init prints usage and returns);
+    # `--monitor` is what emits the ERROR_PREFLIGHT evidence the parser binds.
+    bmgr_init encoff-pre
+    OWNED_PARAMS=1
     timeout 60 "$ADB" shell settings put secure backup_local_transport_parameters "$PARAMS_OFF"
-    timeout 60 "$ADB" shell bmgr init || log "params re-init skipped"
-    timeout 300 "$ADB" shell bmgr backupnow "$PKG" 2>&1 | tee "$EV/backupnow-encoff.log" || true
-    TOKEN="$(current_token)"
-    [ -n "$TOKEN" ] || fail "no current restore set after enc-off init"
-    if timeout 60 "$ADB" shell ls "$TRANSPORT_DIR/$TOKEN/_full/$PKG" 2>/dev/null | grep -q .; then
-        fail "unencrypted transport still received an app payload"
-    fi
-    fact unencryptedDiagnosis "encoff:$(grep -o 'Package .* with result: [A-Za-z ]*' "$EV/backupnow-encoff.log" | tail -1 | tr -d ' ')"
+    bmgr_init encoff
+    rc=0
+    timeout 300 "$ADB" shell bmgr backupnow --monitor "$PKG" \
+        2>&1 | tee "$EV/backupnow-encoff.log" || rc=$?
+    fact unencryptedBackupnowExit "$rc"
+    VERDICT="$(python3 scripts/ci/check-first-launch-restore-results.py --bmgr-encoff \
+        "$EV/backupnow-encoff.log" "$PKG")" \
+        || fail "enc-off backupnow was not a diagnosed policy exclusion: $(tail -3 "$EV/backupnow-encoff.log" | tr '\n' ' ')"
+    fact unencryptedDiagnosis "encoff:$VERDICT"
+    find_payload > "$EV/encoff-payload.txt"
+    ! grep -q . "$EV/encoff-payload.txt" \
+        || fail "unencrypted transport still received an app payload: $(tr '\n' ' ' < "$EV/encoff-payload.txt")"
     selector unencryptedTransportExcluded
-    log "encryption-off control: $(tail -3 "$EV/backupnow-encoff.log" | tr '\n' ' ')"
+    log "encryption-off control: $VERDICT"
 
     # --- positive leg: fresh dataset so a stale archive cannot satisfy the TAR ---
     timeout 60 "$ADB" shell settings put secure backup_local_transport_parameters "$PARAMS_ON"
-    timeout 60 "$ADB" shell bmgr init || log "params re-init skipped"
-    timeout 300 "$ADB" shell bmgr backupnow "$PKG" 2>&1 | tee "$EV/backupnow-positive.log" || true
+    bmgr_init positive
+    rc=0
+    timeout 300 "$ADB" shell bmgr backupnow "$PKG" \
+        2>&1 | tee "$EV/backupnow-positive.log" || rc=$?
+    fact positiveBackupnowExit "$rc"
     grep -q "Package $PKG with result: Success" "$EV/backupnow-positive.log" \
         || fail "package backup did not report Success"
     grep -q "Backup finished with result: Success" "$EV/backupnow-positive.log" \
         || fail "overall backup did not report Success"
-    TOKEN="$(current_token)"
-    [ -n "$TOKEN" ] || fail "no current restore set for the positive leg"
-    TAR_DEV="$TRANSPORT_DIR/$TOKEN/_full/$PKG"
+    out sets-positive.txt "$ADB" shell bmgr list sets
+    find_payload > "$EV/transport-find.txt"
+    [ "$(wc -l < "$EV/transport-find.txt")" -eq 1 ] \
+        || fail "expected exactly one _full/$PKG payload, got: $(tr '\n' ' ' < "$EV/transport-find.txt")"
+    TAR_DEV="$(head -1 "$EV/transport-find.txt")"
+    fact tarDevicePath "$TAR_DEV"
     timeout 60 "$ADB" shell ls -l "$TAR_DEV" | tee "$EV/transport-ls.txt"
     timeout 120 "$ADB" exec-out cat "$TAR_DEV" > "$EV/transport.tar"
     [ -s "$EV/transport.tar" ] || fail "transport archive absent or empty at $TAR_DEV"
@@ -308,7 +422,7 @@ main() {
     timeout 60 "$ADB" shell bmgr list sets > "$EV/sets.txt" 2>&1 || true
 
     # --- empty-dataset control: fresh init, reinstall, nothing may come back ---
-    timeout 60 "$ADB" shell bmgr init
+    bmgr_init empty
     timeout 60 "$ADB" shell pm uninstall --user 0 "$PKG" | tee "$EV/uninstall-empty.txt"
     timeout 300 "$ADB" install --user 0 "$APK" | tee "$EV/install-empty.txt"
     # A transport restore would create files/ early; poll so a late delivery cannot hide.
@@ -324,4 +438,6 @@ main() {
     log "api$API leg complete"
 }
 
-main "$@"
+if [ "${BMGR_CHECK_LIB_ONLY:-}" != "1" ]; then
+    main "$@"
+fi

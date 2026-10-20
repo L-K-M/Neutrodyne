@@ -283,12 +283,16 @@ class BmgrEvidenceTest(unittest.TestCase):
         tar = bmgr_tar(exp, snapshot_zip)
         b64 = base64.urlsafe_b64encode(
             json.dumps(exp).encode()).decode().rstrip("=")
+        refusal = "Transport rejected package because it wasn't able to process it at the time"
         run = {
             "schema": "bmgr-evidence/v1", "device": device, "api": api,
             "fingerprint": "google/sdk/fp", "abi": "x86_64", "nonce": exp["nonce"],
             "sourceSha": "abc", "apkSha256": "a" * 64, "testApkSha256": "b" * 64,
             "certSha256": "c" * 64, "transport": "com.android.localtransport/.LocalTransport",
-            "tarSha256": _sha(tar), "unencryptedDiagnosis": "encoff:PackageXwithresult:Skipped",
+            "tarSha256": _sha(tar), "unencryptedDiagnosis": "encoff:" + refusal,
+            "unencryptedBackupnowExit": 0, "positiveBackupnowExit": 0,
+            "cleanupStatus": "ok", "avd": f"bmgr-api{api}",
+            "tarDevicePath": f"/data/data/com.android.localtransport/files/1/_full/{exp['package']}",
             "selectors": {name: "pass" for name in (
                 "apkNonDebuggable", "apkSignatureStable", "testInstrumentationAvailable",
                 "expectationCaptured", "unencryptedTransportExcluded",
@@ -297,10 +301,20 @@ class BmgrEvidenceTest(unittest.TestCase):
         (directory / "run.json").write_text(json.dumps(run))
         (directory / "expectation.json").write_text(json.dumps(exp))
         (directory / "transport.tar").write_bytes(tar)
+        for label in ("encoff-pre", "encoff", "positive", "empty"):
+            (directory / f"init-{label}.txt").write_text(
+                "Initializing transports: [com.android.localtransport/.LocalTransport]\n"
+                "Initialization result: 0\n")
+        (directory / "encoff-payload.txt").write_text("")
         (directory / "backupnow-positive.log").write_text(
             f"Package {exp['package']} with result: Success\n"
             "Backup finished with result: Success\n")
-        (directory / "backupnow-encoff.log").write_text("Package X with result: Skipped\n")
+        (directory / "backupnow-encoff.log").write_text(
+            "Running incremental backup for 1 requested packages.\n"
+            "Package @pm@ with result: Success\n"
+            f"=> Event{{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = {exp['package']}(v1)}}\n"
+            f"Package {exp['package']} with result: {refusal}\n"
+            "Backup finished with result: Success\n")
         (directory / "restored-files.txt").write_text(
             f"{exp['snapshotSha256']}  files/backup/auto-snapshot.zip\n"
             f"{exp['portableSha256']}  files/datastore/settings.preferences_pb\n"
@@ -332,6 +346,56 @@ class BmgrEvidenceTest(unittest.TestCase):
         result = self.check()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("bmgr: PASS api31 + api36", result.stdout)
+
+    def test_rejects_undiagnosed_encryption_off_controls(self):
+        pkg = "ch.lkmc.neutrodyne"
+        refusal = "Transport rejected package because it wasn't able to process it at the time"
+        valid = ("Package @pm@ with result: Success\n"
+                 f"=> Event{{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = {pkg}(v1)}}\n"
+                 f"Package {pkg} with result: {refusal}\n"
+                 "Backup finished with result: Success\n")
+        invalid = (
+            ("empty", "", "encoff:"),
+            ("transport error", f"Package {pkg} with result: Transport error\n", "encoff:Transport error"),
+            ("agent error", f"Package {pkg} with result: Agent error\n", "encoff:Agent error"),
+            ("wrong package", valid.replace(pkg, "ch.lkmc.other"), "encoff:" + refusal),
+            ("contradictory finish", valid + "Backup finished with result: Error\n", "encoff:" + refusal),
+            ("successful backup", f"Package {pkg} with result: Success\nBackup finished with result: Success\n", "encoff:Success"),
+            ("metadata error", valid.replace("Package @pm@ with result: Success", "Package @pm@ with result: Error"), "encoff:" + refusal),
+            ("mismatched diagnosis", valid, "encoff:Backup is not allowed"),
+        )
+        for label, text, diagnosis in invalid:
+            with self.subTest(control=label):
+                def mutate(directory, run, exp, logs):
+                    run["unencryptedDiagnosis"] = diagnosis
+                    (directory / "run.json").write_text(json.dumps(run))
+                    (directory / "backupnow-encoff.log").write_text(text)
+                self.build(mutate={"api31": mutate})
+                result = self.check()
+                self.assertNotEqual(0, result.returncode, result.stdout)
+
+    def test_host_never_cleans_up_an_unverified_device(self):
+        adb = self.root / "adb"
+        calls = self.root / "adb-calls.jsonl"
+        adb.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os, sys\n"
+            "with open(os.environ['ADB_CALLS'], 'a') as out:\n"
+            "    out.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "sys.exit(1)\n")
+        adb.chmod(0o755)
+        result = subprocess.run(
+            ["bash", str(REPO / "scripts/ci/bmgr-check.sh"), "31", str(self.root / "evidence")],
+            env={**os.environ, "ADB": str(adb), "ADB_CALLS": str(calls),
+                 "GITHUB_ACTIONS": "true", "BMGR_DISPOSABLE_API31": "1"},
+            capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(0, result.returncode)
+        observed = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+        destructive = [args for args in observed if args[:3] in (
+            ["shell", "pm", "uninstall"], ["shell", "settings", "delete"],
+            ["shell", "settings", "put"], ["shell", "bmgr", "init"],
+            ["shell", "bmgr", "enable"], ["shell", "bmgr", "autorestore"])]
+        self.assertEqual([], destructive)
 
     def test_rejects_a_missing_leg(self):
         self.build(("api31",))
@@ -458,6 +522,166 @@ class BmgrEvidenceTest(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(0, result.returncode)
         self.assertIn("successful runner completion", result.stderr)
+
+
+SCRIPT_SH = REPO / "scripts/ci/bmgr-check.sh"
+MUTATING_PREFIXES = (
+    ("shell", "pm", "uninstall"), ("shell", "settings", "delete"),
+    ("shell", "settings", "put"), ("shell", "bmgr", "init"),
+    ("shell", "bmgr", "enable"), ("shell", "bmgr", "autorestore"),
+    ("shell", "bmgr", "transport"), ("shell", "bmgr", "backupnow"),
+    ("shell", "am", "start"), ("install",), ("install-incremental",),
+)
+
+
+class BmgrHostScriptTest(unittest.TestCase):
+    """Fake-ADB conformance for scripts/ci/bmgr-check.sh — argv-level, offline."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.calls = self.root / "adb-calls.jsonl"
+        self.adb = self.root / "adb"
+        self.adb.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os, sys\n"
+            "args = sys.argv[1:]\n"
+            "calls = os.environ['ADB_CALLS']\n"
+            "state = [json.loads(l) for l in open(calls)] if os.path.exists(calls) else []\n"
+            "with open(calls, 'a') as out:\n"
+            "    out.write(json.dumps(args) + '\\n')\n"
+            "if os.environ.get('ADB_FAIL_ALL'):\n"
+            "    sys.exit(1)\n"
+            "def done(text='', rc=0):\n"
+            "    sys.stdout.write(text); sys.exit(rc)\n"
+            "if args == ['wait-for-device'] or args == ['root']:\n"
+            "    done()\n"
+            "if args[:2] == ['emu', 'avd']:\n"
+            "    done(os.environ.get('FAKE_AVD_NAME', 'bmgr-api31') + '\\n')\n"
+            "if args[:2] == ['shell', 'getprop']:\n"
+            "    done({'sys.boot_completed': '1',\n"
+            "          'ro.build.version.sdk': os.environ.get('FAKE_SDK', '31'),\n"
+            "          'ro.product.cpu.abi': 'x86_64', 'ro.build.fingerprint': 'g/f/p',\n"
+            "          'ro.kernel.qemu': '1'}.get(args[2], '') + '\\n')\n"
+            "if args[:2] == ['shell', 'id']:\n"
+            "    done('0\\n')\n"
+            "if args[:2] == ['shell', 'dumpsys'] or args[:1] == ['logcat']:\n"
+            "    done()\n"
+            "if args[:3] == ['shell', 'settings', 'get']:\n"
+            "    done({'backup_enabled': '0', 'backup_auto_restore': 'null',\n"
+            "          'backup_local_transport_parameters': 'null'}.get(args[4], 'null') + '\\n')\n"
+            "if args[:3] == ['shell', 'bmgr', 'enabled']:\n"
+            "    done('Backup Manager currently disabled\\n')\n"
+            "if args[:3] == ['shell', 'bmgr', 'list'] and args[3:] == ['transports']:\n"
+            "    if any(a[:3] == ['shell', 'bmgr', 'transport'] for a in state):\n"
+            "        done('    com.example.stub/.OtherTransport\\n'\n"
+            "             '  * com.android.localtransport/.LocalTransport\\n')\n"
+            "    done('  * com.example.stub/.OtherTransport\\n'\n"
+            "         '    com.android.localtransport/.LocalTransport\\n')\n"
+            "if args[:3] == ['shell', 'pm', 'path'] or args[:3] == ['shell', 'pm', 'list']:\n"
+            "    done()\n"
+            "if args[:3] == ['shell', 'bmgr', 'init']:\n"
+            "    done(os.environ.get('FAKE_INIT', 'Initialization result: 0') + '\\n')\n"
+            "done()\n")
+        self.adb.chmod(0o755)
+        # A scratch repo keeps the APK gate deterministic: no app/build/ exists there.
+        script = self.root / "repo/scripts/ci/bmgr-check.sh"
+        script.parent.mkdir(parents=True)
+        shutil.copyfile(SCRIPT_SH, script)
+        subprocess.run(["git", "init", "-q"], cwd=script.parents[2], check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "--allow-empty", "-m", "x"],
+                       cwd=script.parents[2], check=True)
+        self.script = script
+        self.evidence = self.root / "evidence"
+
+    def run_script(self, drop=(), **extra_env):
+        env = {**os.environ, "ADB": str(self.adb), "ADB_CALLS": str(self.calls),
+               "GITHUB_ACTIONS": "true", "BMGR_DISPOSABLE_API31": "1",
+               "BMGR_EXPECT_AVD": "bmgr-api31"}
+        for key in drop:
+            env.pop(key, None)
+        env.update(extra_env)
+        result = subprocess.run(
+            ["bash", str(self.script), "31", str(self.evidence)],
+            env=env, capture_output=True, text=True, timeout=60)
+        observed = ([json.loads(l) for l in self.calls.read_text().splitlines()]
+                    if self.calls.exists() else [])
+        return result, observed
+
+    def mutating(self, observed):
+        return [a for a in observed
+                if any(tuple(a[:len(p)]) == p for p in MUTATING_PREFIXES)]
+
+    def test_host_restores_only_owned_changes(self):
+        result, observed = self.run_script()
+        self.assertNotEqual(0, result.returncode)
+        calls = [tuple(a) for a in observed]
+        # The verified device was configured, then the run failed at the APK gate.
+        for expected in (
+                ("shell", "bmgr", "enable", "true"),
+                ("shell", "bmgr", "autorestore", "true"),
+                ("shell", "bmgr", "transport", "com.android.localtransport/.LocalTransport")):
+            self.assertIn(expected, calls)
+        # Cleanup reverted exactly those changes to their raw captured state.
+        self.assertIn(("shell", "bmgr", "transport", "com.example.stub/.OtherTransport"), calls)
+        self.assertIn(("shell", "settings", "put", "secure", "backup_enabled", "0"), calls)
+        self.assertIn(("shell", "settings", "delete", "secure", "backup_auto_restore"), calls)
+        # Nothing else was owned: no package uninstall, no params write, no init.
+        self.assertNotIn(("shell", "settings", "delete", "secure",
+                          "backup_local_transport_parameters"), calls)
+        self.assertFalse(any(a[:3] == ["shell", "pm", "uninstall"] for a in observed))
+        self.assertFalse(any(a[:3] == ["shell", "bmgr", "init"] for a in observed))
+        # Bare getter forms that upstream maps to usage must never be invoked.
+        self.assertNotIn(("shell", "bmgr", "autorestore"), calls)
+        self.assertNotIn(("shell", "bmgr", "init"), calls)
+        run = json.loads((self.evidence / "run.json").read_text())
+        self.assertEqual("ok", run.get("cleanupStatus"))
+
+    def test_host_refuses_an_unguarded_environment(self):
+        result, observed = self.run_script(drop=("BMGR_DISPOSABLE_API31",))
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual([], self.mutating(observed))
+
+    def test_host_refuses_an_unexpected_avd(self):
+        result, observed = self.run_script(FAKE_AVD_NAME="somebody-elses-avd")
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual([], self.mutating(observed))
+
+    def test_host_bmgr_command_conformance(self):
+        driver = self.root / "drive.sh"
+        driver.write_text(textwrap.dedent(f"""\
+            set -uo pipefail
+            export BMGR_CHECK_LIB_ONLY=1
+            ADB={self.adb}
+            EV={self.root / "lib-ev"}
+            TRANSPORT=com.android.localtransport/.LocalTransport
+            mkdir -p "$EV"
+            source {self.script} 31 "$EV"
+            printf '  * com.example.stub/.OtherTransport\\n    com.android.localtransport/.LocalTransport\\n' \\
+                > "$EV/t.txt"
+            [ "$(selected_transport "$EV/t.txt")" = "com.example.stub/.OtherTransport" ] \\
+                || {{ echo "starred line not parsed"; exit 2; }}
+            printf '    com.a/.B\\n    com.c/.D\\n' > "$EV/t2.txt"
+            [ -z "$(selected_transport "$EV/t2.txt")" ] \\
+                || {{ echo "unselected line parsed"; exit 2; }}
+            bmgr_init ok || {{ echo "bmgr_init rejected Initialization result: 0"; exit 2; }}
+            ( FAKE_INIT="usage: bmgr init TRANSPORT..." bmgr_init bad ) \\
+                && {{ echo "bmgr_init accepted usage output"; exit 2; }}
+            echo LIB-OK
+        """))
+        env = {**os.environ, "ADB_CALLS": str(self.calls)}
+        result = subprocess.run(["bash", str(driver)], env=env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertIn("LIB-OK", result.stdout, result.stderr + result.stdout)
+        observed = ([json.loads(l) for l in self.calls.read_text().splitlines()]
+                    if self.calls.exists() else [])
+        inits = [a for a in observed if a[:3] == ["shell", "bmgr", "init"]]
+        self.assertTrue(inits, "bmgr_init never ran")
+        for a in inits:
+            self.assertEqual(["shell", "bmgr", "init",
+                              "com.android.localtransport/.LocalTransport"], a)
 
 
 if __name__ == "__main__":

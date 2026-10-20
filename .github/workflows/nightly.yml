@@ -458,8 +458,12 @@ jobs:
         continue-on-error: true # api36's evidence is required even when this leg fails
         timeout-minutes: 20
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          BMGR_DISPOSABLE_API31: "1" # acknowledges the disposable-AVD guard
+          BMGR_EXPECT_AVD: bmgr-api31
         with:
           api-level: 31
+          avd-name: bmgr-api31
           target: default # the rootable default image — never google_play
           arch: x86_64
           force-avd-creation: true
@@ -473,8 +477,12 @@ jobs:
         continue-on-error: true
         timeout-minutes: 20
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          BMGR_DISPOSABLE_API36: "1"
+          BMGR_EXPECT_AVD: bmgr-api36
         with:
           api-level: 36
+          avd-name: bmgr-api36
           target: default
           arch: x86_64
           force-avd-creation: true
