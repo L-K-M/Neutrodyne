@@ -44,6 +44,7 @@ ARMED=""
 OWNED_TRANSPORT=""; OWNED_ENABLED=""; OWNED_AUTORESTORE=""; OWNED_PARAMS=""
 INSTALLED_PKG=""; INSTALLED_RUNNER=""
 ORIG_TRANSPORT=""; ORIG_ENABLED=""; ORIG_AUTORESTORE=""; ORIG_PARAMS="null"
+ORIG_ENABLED_BOOL=""; ORIG_AUTORESTORE_BOOL=""
 LOGCAT_PID=""
 
 log() { echo "[bmgr-check $(date +%H:%M:%S)] $*"; }
@@ -100,7 +101,7 @@ run = {
 PY
 }
 restore_secure() {  # <key> <raw>: put the captured value back, or re-delete an absent one
-    if [ -z "$2" ] || [ "$2" = "null" ]; then
+    if [ "$2" = "null" ]; then
         timeout 60 "$ADB" shell settings delete secure "$1"
     else
         timeout 60 "$ADB" shell settings put secure "$1" "$2"
@@ -127,10 +128,24 @@ cleanup() {
             fi
         fi
         if [ -n "$OWNED_AUTORESTORE" ]; then
+            timeout 60 "$ADB" shell bmgr autorestore "$ORIG_AUTORESTORE_BOOL" || failed=1
             restore_secure backup_auto_restore "$ORIG_AUTORESTORE" || failed=1
         fi
         if [ -n "$OWNED_ENABLED" ]; then
+            # BackupManager caches these flags; backup_enabled is file-persisted on API31.
+            # Restoring only secure settings does not undo the bmgr calls above.
+            timeout 60 "$ADB" shell bmgr enable "$ORIG_ENABLED_BOOL" || failed=1
             restore_secure backup_enabled "$ORIG_ENABLED" || failed=1
+        fi
+        if [ -n "$OWNED_ENABLED" ]; then
+            timeout 60 "$ADB" shell bmgr enabled > "$EV/enabled-restored.txt" 2>&1 || failed=1
+            [ "$(backup_flag "$EV/enabled-restored.txt" 'Backup Manager currently')" = "$ORIG_ENABLED_BOOL" ] \
+                || failed=1
+        fi
+        if [ -n "$OWNED_AUTORESTORE" ]; then
+            timeout 60 "$ADB" shell dumpsys backup > "$EV/dumpsys-restored.txt" 2>&1 || failed=1
+            [ "$(backup_flag "$EV/dumpsys-restored.txt" 'Auto-restore is')" = "$ORIG_AUTORESTORE_BOOL" ] \
+                || failed=1
         fi
         if [ -n "$INSTALLED_PKG" ]; then
             timeout 60 "$ADB" shell pm uninstall --user 0 "$PKG" || true
@@ -161,7 +176,17 @@ require_disk() {  # >= 10 GiB before every heavy step
 selected_transport() { sed -n 's/^ *\* //p' "$1" | tr -d '\r' | head -1; }
 
 raw_setting() {  # <secure key>: the raw 0/1/value or literal null — never a bmgr getter
-    timeout 60 "$ADB" shell settings get secure "$1" 2>/dev/null | tr -d '\r' || true
+    timeout 60 "$ADB" shell settings get secure "$1" 2>/dev/null | tr -d '\r'
+}
+
+backup_flag() {  # <receipt> <prefix>: require exactly one effective service-state line
+    local value
+    value="$(tr -d '\r' < "$1" | grep -E "^$2 (enabled|disabled)$" || true)"
+    case "$value" in
+        "$2 enabled") printf true ;;
+        "$2 disabled") printf false ;;
+        *) return 1 ;;
+    esac
 }
 
 bmgr_init() {  # <label>: init only our transport and require its real result
@@ -250,14 +275,23 @@ main() {
     TRANSPORT="$(grep -o 'com\.android\.localtransport/\.LocalTransport' "$EV/transports-before.txt" | head -1)"
     [ -n "$TRANSPORT" ] || fail "local transport not in: $(cat "$EV/transports-before.txt")"
     ORIG_TRANSPORT="$(selected_transport "$EV/transports-before.txt")"
+    [ -n "$ORIG_TRANSPORT" ] || fail "the original selected transport is unknown"
     out enabled-before.txt "$ADB" shell bmgr enabled
-    ORIG_ENABLED="$(raw_setting backup_enabled)"
-    ORIG_AUTORESTORE="$(raw_setting backup_auto_restore)"
-    ORIG_PARAMS="$(raw_setting backup_local_transport_parameters)"
+    ORIG_ENABLED_BOOL="$(backup_flag "$EV/enabled-before.txt" 'Backup Manager currently')" \
+        || fail "the original effective backup state is unknown"
+    ORIG_AUTORESTORE_BOOL="$(backup_flag "$EV/dumpsys-before.txt" 'Auto-restore is')" \
+        || fail "the original effective auto-restore state is unknown"
+    ORIG_ENABLED="$(raw_setting backup_enabled)" || fail "cannot read original backup_enabled"
+    ORIG_AUTORESTORE="$(raw_setting backup_auto_restore)" || fail "cannot read original backup_auto_restore"
+    ORIG_PARAMS="$(raw_setting backup_local_transport_parameters)" || fail "cannot read original transport parameters"
+    case "$ORIG_ENABLED" in 0|1|null) ;; *) fail "invalid original backup_enabled value" ;; esac
+    case "$ORIG_AUTORESTORE" in 0|1|null) ;; *) fail "invalid original backup_auto_restore value" ;; esac
     {
         printf 'transport=%s\n' "$ORIG_TRANSPORT"
         printf 'backup_enabled=%s\n' "$ORIG_ENABLED"
         printf 'backup_auto_restore=%s\n' "$ORIG_AUTORESTORE"
+        printf 'backup_enabled_effective=%s\n' "$ORIG_ENABLED_BOOL"
+        printf 'backup_auto_restore_effective=%s\n' "$ORIG_AUTORESTORE_BOOL"
         printf 'backup_local_transport_parameters=%s\n' "$ORIG_PARAMS"
     } > "$EV/originals.txt"
     log "originals: transport=$ORIG_TRANSPORT enabled=$ORIG_ENABLED autorestore=$ORIG_AUTORESTORE params=$ORIG_PARAMS"

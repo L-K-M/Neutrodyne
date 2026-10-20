@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36)"
+        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36)"
         default: full
 
 permissions:

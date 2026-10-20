@@ -350,17 +350,19 @@ class BmgrEvidenceTest(unittest.TestCase):
     def test_rejects_undiagnosed_encryption_off_controls(self):
         pkg = "ch.lkmc.neutrodyne"
         refusal = "Transport rejected package because it wasn't able to process it at the time"
-        valid = ("Package @pm@ with result: Success\n"
+        valid = ("Running incremental backup for 1 requested packages.\n"
+                 "Package @pm@ with result: Success\n"
                  f"=> Event{{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = {pkg}(v1)}}\n"
                  f"Package {pkg} with result: {refusal}\n"
                  "Backup finished with result: Success\n")
         invalid = (
             ("empty", "", "encoff:"),
-            ("transport error", f"Package {pkg} with result: Transport error\n", "encoff:Transport error"),
-            ("agent error", f"Package {pkg} with result: Agent error\n", "encoff:Agent error"),
+            ("transport error", valid.replace(refusal, "Transport error"), "encoff:Transport error"),
+            ("agent error", valid.replace(refusal, "Agent error"), "encoff:Agent error"),
             ("wrong package", valid.replace(pkg, "ch.lkmc.other"), "encoff:" + refusal),
             ("contradictory finish", valid + "Backup finished with result: Error\n", "encoff:" + refusal),
-            ("successful backup", f"Package {pkg} with result: Success\nBackup finished with result: Success\n", "encoff:Success"),
+            ("contradictory event", valid + f"=> Event{{BACKUP_MANAGER_POLICY / SUCCESS : package = {pkg}(v1)}}\n", "encoff:" + refusal),
+            ("successful backup", valid.replace(refusal, "Success"), "encoff:Success"),
             ("metadata error", valid.replace("Package @pm@ with result: Success", "Package @pm@ with result: Error"), "encoff:" + refusal),
             ("mismatched diagnosis", valid, "encoff:Backup is not allowed"),
         )
@@ -555,6 +557,11 @@ class BmgrHostScriptTest(unittest.TestCase):
             "    sys.exit(1)\n"
             "def done(text='', rc=0):\n"
             "    sys.stdout.write(text); sys.exit(rc)\n"
+            "def cached(command, default):\n"
+            "    for call in reversed(state):\n"
+            "        if call[:3] == ['shell', 'bmgr', command] and len(call) == 4:\n"
+            "            return call[3] == 'true'\n"
+            "    return default\n"
             "if args == ['wait-for-device'] or args == ['root']:\n"
             "    done()\n"
             "if args[:2] == ['emu', 'avd']:\n"
@@ -566,13 +573,20 @@ class BmgrHostScriptTest(unittest.TestCase):
             "          'ro.kernel.qemu': '1'}.get(args[2], '') + '\\n')\n"
             "if args[:2] == ['shell', 'id']:\n"
             "    done('0\\n')\n"
-            "if args[:2] == ['shell', 'dumpsys'] or args[:1] == ['logcat']:\n"
+            "if args[:2] == ['shell', 'dumpsys']:\n"
+            "    enabled = 'enabled' if cached('enable', False) else 'disabled'\n"
+            "    auto = cached('autorestore', os.environ.get('FAKE_AUTO_STATE', 'enabled') == 'enabled')\n"
+            "    done('Backup Manager is ' + enabled + ' / provisioned / not pending init\\n'\n"
+            "         + 'Auto-restore is ' + ('enabled' if auto else 'disabled') + '\\n')\n"
+            "if args[:1] == ['logcat']:\n"
             "    done()\n"
             "if args[:3] == ['shell', 'settings', 'get']:\n"
-            "    done({'backup_enabled': '0', 'backup_auto_restore': 'null',\n"
+            "    if os.environ.get('FAKE_SETTINGS_FAILURE') == args[4]:\n"
+            "        done('', 1)\n"
+            "    done({'backup_enabled': '0', 'backup_auto_restore': os.environ.get('FAKE_AUTO_RAW', 'null'),\n"
             "          'backup_local_transport_parameters': 'null'}.get(args[4], 'null') + '\\n')\n"
             "if args[:3] == ['shell', 'bmgr', 'enabled']:\n"
-            "    done('Backup Manager currently disabled\\n')\n"
+            "    done('Backup Manager currently ' + ('enabled' if cached('enable', False) else 'disabled') + '\\n')\n"
             "if args[:3] == ['shell', 'bmgr', 'list'] and args[3:] == ['transports']:\n"
             "    if any(a[:3] == ['shell', 'bmgr', 'transport'] for a in state):\n"
             "        done('    com.example.stub/.OtherTransport\\n'\n"
@@ -626,6 +640,8 @@ class BmgrHostScriptTest(unittest.TestCase):
             self.assertIn(expected, calls)
         # Cleanup reverted exactly those changes to their raw captured state.
         self.assertIn(("shell", "bmgr", "transport", "com.example.stub/.OtherTransport"), calls)
+        self.assertIn(("shell", "bmgr", "enable", "false"), calls)
+        self.assertEqual(2, calls.count(("shell", "bmgr", "autorestore", "true")))
         self.assertIn(("shell", "settings", "put", "secure", "backup_enabled", "0"), calls)
         self.assertIn(("shell", "settings", "delete", "secure", "backup_auto_restore"), calls)
         # Nothing else was owned: no package uninstall, no params write, no init.
@@ -638,6 +654,19 @@ class BmgrHostScriptTest(unittest.TestCase):
         self.assertNotIn(("shell", "bmgr", "init"), calls)
         run = json.loads((self.evidence / "run.json").read_text())
         self.assertEqual("ok", run.get("cleanupStatus"))
+
+    def test_host_restores_disabled_autorestore(self):
+        result, observed = self.run_script(FAKE_AUTO_RAW="0", FAKE_AUTO_STATE="disabled")
+        self.assertNotEqual(0, result.returncode)
+        auto = [a for a in observed if a[:3] == ["shell", "bmgr", "autorestore"]]
+        self.assertEqual(["shell", "bmgr", "autorestore", "false"], auto[-1])
+        run = json.loads((self.evidence / "run.json").read_text())
+        self.assertEqual("ok", run.get("cleanupStatus"))
+
+    def test_host_refuses_failed_original_setting_capture(self):
+        result, observed = self.run_script(FAKE_SETTINGS_FAILURE="backup_enabled")
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual([], self.mutating(observed))
 
     def test_host_refuses_an_unguarded_environment(self):
         result, observed = self.run_script(drop=("BMGR_DISPOSABLE_API31",))

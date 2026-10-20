@@ -138,16 +138,11 @@ def parse_encoff_backupnow(text, package, device="encoff"):
     verdict = own[0]
     if verdict not in ENCOFF_POLICY_VERDICTS:
         raise ValueError(f"{device}: {verdict!r} is not a policy exclusion")
-    events = re.findall(r"^=> Event\{[^}]*package = (\S+?)\(v\d+\)[^}]*\}$",
-                        text, re.M)
-    for event_package in events:
-        if event_package not in {package, "@pm@"}:
-            raise ValueError(
-                f"{device}: monitor event names foreign package {event_package}")
-    if not any(line.startswith("=> Event{") and "ERROR_PREFLIGHT" in line
-               and f"package = {package}(" in line
-               for line in text.splitlines()):
-        raise ValueError(f"{device}: no ERROR_PREFLIGHT event for {package}")
+    events = [line for line in text.splitlines() if line.startswith("=> Event{")]
+    expected_event = (r"=> Event\{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = "
+                      + re.escape(package) + r"\(v\d+\)\}")
+    if len(events) != 1 or not re.fullmatch(expected_event, events[0]):
+        raise ValueError(f"{device}: expected only the ERROR_PREFLIGHT event for {package}")
     finishes = re.findall(r"^Backup finished with result: (.+)$", text, re.M)
     if finishes != ["Success"]:
         raise ValueError(
