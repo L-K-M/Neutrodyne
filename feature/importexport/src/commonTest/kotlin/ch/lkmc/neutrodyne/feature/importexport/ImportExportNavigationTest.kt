@@ -6,6 +6,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import kotlin.test.Test
@@ -19,12 +20,17 @@ class ImportExportNavigationTest {
         assertEquals(NdSceneMetadata.dialog(), provider(ExportKey(5L)).metadata)
     }
 
+    @Test fun thePickerIsRegisteredAsADialog() {
+        val provider = entryProvider<NavKey> { ImportExportNavigation.entries().invoke(this) }
+        assertEquals(NdSceneMetadata.dialog(), provider(ImportFileKey).metadata)
+    }
+
     @Test fun theImportSessionResolvesAsADetailPane() {
         val provider = entryProvider<NavKey> { ImportExportNavigation.entries().invoke(this) }
         assertEquals(NdSceneMetadata.paneDetail(), provider(ImportKey("7")).metadata)
     }
 
-    @Test fun theBackupKeyStaysOnItsPendingPlaceholder() {
+    @Test fun theBackupKeyResolvesAsADetailPane() {
         val pending = entryProvider<NavKey> { ImportExportPendingNavigation.entries().invoke(this) }
         assertEquals(NdSceneMetadata.paneDetail(), pending(BackupKey).metadata)
         // ImportKey must not stay registered twice — D1's real entry lives beside ExportKey.

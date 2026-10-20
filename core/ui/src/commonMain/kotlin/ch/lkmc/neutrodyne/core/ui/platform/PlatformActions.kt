@@ -65,6 +65,9 @@ public interface ShareSheet {
  * cancelled. [pickFolder] is a desktop action; Android returns `null` at M0a (SAF folders are v1.x).
  */
 public interface FilePicker {
+    /** Opens any import format without a type filter; null means cancellation. */
+    public suspend fun openFile(): String? = pickFile(listOf("*/*"), emptyList())
+
     public suspend fun pickFile(
         mimeTypes: List<String>,
         extensions: List<String>,

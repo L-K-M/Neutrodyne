@@ -1593,9 +1593,10 @@ data class BackupPreview(
 )
 data class BackupSummary(val bytes: Long, val podcasts: Int, val episodeLines: Int)
 sealed interface RestoreProgress {
-    data class Running(val phase: String, val done: Int, val total: Int) : RestoreProgress
-    data class Finished(val sessionId: Long, val auto: Boolean) : RestoreProgress
-    data class Failed(val error: BackupError) : RestoreProgress
+    val sessionId: Long
+    data class Running(override val sessionId: Long, val phase: String, val done: Int, val total: Int) : RestoreProgress
+    data class Finished(override val sessionId: Long, val auto: Boolean) : RestoreProgress
+    data class Failed(override val sessionId: Long, val error: BackupError) : RestoreProgress
 }
 data class SnapshotStatus(val supported: Boolean,               // false on the desktop (no Auto Backup)
                           val enabled: Boolean, val lastWrittenAt: Long?, val bytes: Long?, val level: Int,
@@ -1618,6 +1619,12 @@ could have produced. The verdict rule below is unchanged: `enabled = false` read
 typed failures read `error …`.
 
 The receiver starts its reporting coroutine undispatched so an already-cancelled application scope still enters the finalizer. Injection failures and cancellation also complete the ordered-broadcast result; they never claim a successful write. The write remains an independent application-owned job, so the eight-second wait cannot cancel it.
+
+**M3 D4 correction (2026-10-18):** every restore-progress emission carries its
+session ID. A preview observes only its own session's progress, including retained
+failures while a different restore waits for its worker. Before confirmation, the
+preview shows the inspected `SKIPPED_LINES` and `IGNORED_ENTRIES` warning counts
+with localized singular and plural wording.
 
 Preview text: "Backup from 4 Oct 2026 (Neutrodyne 1.3): 142 podcasts, 6 groups, 3,214 played episodes, 12 in Up next, settings." Checkboxes: Listening history, Up next, Settings (Merge default: history and Up next on, settings off; Replace: all on). Mode: **Merge** (default, [canonical defaults](#settings)) or **Replace**; Replace requires a confirmation naming its effect ("Removes 9 podcasts and 2 groups that are not in the backup, and replaces your listening history"). Confirming Replace first calls `PlaybackController.pause()` from the feature layer. A backup made on the other platform says so ("Backup from 4 Oct 2026, made on Android"). While the device is linked the preview adds "This device syncs with sync.example.org", and Replace asks how far it reaches ([Restore while linked](#restore-while-linked)).
 

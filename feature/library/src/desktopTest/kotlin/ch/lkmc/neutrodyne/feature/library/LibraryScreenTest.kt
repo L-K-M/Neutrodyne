@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
@@ -155,7 +156,7 @@ class LibraryScreenTest {
 
     /**
      * 08's no-subscriptions empty state (94-6): "Your feeds live here" with Search podcasts,
-     * Add by URL or YouTube link and (deferred) Import subscriptions — not a single Add.
+     * Add by URL or YouTube link and Import subscriptions — not a single Add.
      */
     @Test
     fun emptyLibraryShowsOnboarding() =
@@ -164,6 +165,18 @@ class LibraryScreenTest {
             onNodeWithText("Your feeds live here").assertIsDisplayed()
             onNodeWithText("Search podcasts").assertIsDisplayed()
             onNodeWithText("Add by URL or YouTube link").assertIsDisplayed()
+        }
+
+    @Test
+    fun emptyLibraryImportOpensTheSharedPickerEntry() =
+        runComposeUiTest {
+            setLibraryRoute(tiles = emptyList())
+            onNodeWithText("Import subscriptions").performClick()
+            waitForIdle()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(ImportFileKey)),
+                navigator.calls,
+            )
         }
 
     /** "Search podcasts" selects the Discover tab through the real navigator (94-6). */

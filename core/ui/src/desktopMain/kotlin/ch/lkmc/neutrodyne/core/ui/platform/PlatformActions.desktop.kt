@@ -26,12 +26,12 @@ import kotlin.coroutines.resumeWithException
  * The desktop [PlatformActions] (08 Modules). `NeutrodyneWindow` calls this with the
  * `LinuxDesktopPortal` bound in `DesktopAppGraph` (null off Linux) so the Linux file chooser and
  * "Show in Files" use the D-Bus portal without `:core:ui` depending on dbus-java. URLs go through
- * `java.awt.Desktop`; file dialogs use the OS dialogs (`FileDialog` on macOS, `JFileChooser` on
- * Windows, the portal on Linux where available — 11 Desktop downloads and storage).
+ * `java.awt.Desktop`; folder selection uses `FileDialog` on macOS and `JFileChooser` on Windows.
+ * Linux uses the portal when available, otherwise `JFileChooser` (11 Desktop downloads and storage).
  *
- * M0a simplification recorded for S9: while the portal's file-open call is not yet needed (imports
- * arrive in M5), [FilePicker.pickFile] uses `FileDialog` on every desktop OS, and [RevealInFolder]
- * falls back to opening the parent folder where `ShowItems` is unavailable.
+ * File-open uses `FileDialog` on every desktop OS; [FilePicker.openFile] supplies no filter
+ * so providers without an OPML mapping still show every supported import format.
+ * [RevealInFolder] opens the parent folder where `ShowItems` is unavailable.
  */
 @Composable
 public fun rememberDesktopPlatformActions(portal: LinuxDesktopPortal? = null): PlatformActions {
@@ -191,21 +191,25 @@ private fun showFileDialog(
         if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) return null
         return chooser.selectedFile?.absolutePath
     }
-    val dialog = FileDialog(null as Frame?, null, FileDialog.LOAD)
-    pending.dialog = dialog
-    if (directoriesOnly) {
-        System.setProperty("apple.awt.fileDialogForDirectories", "true")
-        dialog.mode = FileDialog.LOAD
+    val mode = if (directoriesOnly) FileDialogMode.DIRECTORY else FileDialogMode.FILE
+    return withFileDialogMode(mode) {
+        val dialog = FileDialog(null as Frame?, null, FileDialog.LOAD)
+        pending.dialog = dialog
+        if (extensions.isNotEmpty()) {
+            dialog.filenameFilter =
+                FilenameFilter { _, name ->
+                    extensions.any { name.endsWith(".$it", ignoreCase = true) }
+                }
+        }
+        try {
+            dialog.isVisible = true
+            val file = dialog.file ?: return@withFileDialogMode null
+            if (directoriesOnly) File(dialog.directory, file).absolutePath else openedFileUri(dialog.directory, file)
+        } finally {
+            pending.dialog = null
+            dialog.dispose()
+        }
     }
-    if (extensions.isNotEmpty()) {
-        dialog.filenameFilter =
-            FilenameFilter { _, name ->
-                extensions.any { name.endsWith(".$it", ignoreCase = true) }
-            }
-    }
-    dialog.isVisible = true
-    val file = dialog.file ?: return null
-    return File(dialog.directory, file).absolutePath
 }
 
 private fun isMacOs(): Boolean =
@@ -265,3 +269,25 @@ private fun localFile(path: String): File? =
     } catch (e: Exception) {
         null
     }
+
+internal fun openedFileUri(
+    directory: String,
+    chosenName: String,
+): String = File(directory, chosenName).toPath().toUri().toASCIIString()
+
+internal enum class FileDialogMode { FILE, DIRECTORY }
+
+// A folder chooser must not leave subsequent file dialogs in directories-only mode.
+internal fun <T> withFileDialogMode(
+    mode: FileDialogMode,
+    block: () -> T,
+): T {
+    val key = "apple.awt.fileDialogForDirectories"
+    val previous = System.getProperty(key)
+    System.setProperty(key, (mode == FileDialogMode.DIRECTORY).toString())
+    try {
+        return block()
+    } finally {
+        if (previous == null) System.clearProperty(key) else System.setProperty(key, previous)
+    }
+}

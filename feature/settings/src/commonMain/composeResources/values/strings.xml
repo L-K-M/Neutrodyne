@@ -6,6 +6,8 @@
     <!-- Settings home rows (the M0a subset of 08 Settings). -->
     <string name="settings_appearance">Appearance</string>
     <string name="settings_appearance_summary">Theme, dynamic colour and contrast</string>
+    <string name="settings_backup">Backup</string>
+    <string name="settings_backup_summary">Export subscriptions, back up or restore your library</string>
     <string name="settings_about">About</string>
     <string name="settings_about_summary">Version and build</string>
     <string name="settings_licences">Licences</string>

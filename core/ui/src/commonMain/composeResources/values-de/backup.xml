@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backup_title">Sichern und wiederherstellen</string>
+    <string name="backup_export">Export</string>
+    <string name="backup_export_opml">Abonnements exportieren (OPML)</string>
+    <string name="backup_section">Sicherung</string>
+    <string name="backup_password_note">Passwörter werden unverschlüsselt in der Datei gespeichert</string>
+    <string name="backup_create">Sicherung erstellen</string>
+    <string name="backup_working">Bitte warten…</string>
+    <string name="backup_last">Letzte Sicherung: %1$s</string>
+    <string name="backup_never">Noch keine Sicherung</string>
+    <string name="backup_saved">Sicherung gespeichert (%1$s)</string>
+    <string name="backup_restore_section">Wiederherstellen</string>
+    <string name="backup_restore_file">Aus Sicherung wiederherstellen</string>
+    <string name="backup_computer">Computer haben keine automatische Sicherung. Erstelle gelegentlich eine Sicherung oder halte deine Bibliothek mit Sync auf dem gleichen Stand.</string>
+    <string name="backup_sync">Sync-Einstellungen</string>
+    <string name="backup_android">Android-Sicherung</string>
+    <string name="backup_auto">Bibliothek in Android-Sicherung aufnehmen</string>
+    <string name="backup_lock">Erfordert eine Displaysperre</string>
+    <string name="backup_transport">Funktioniert nur, wenn der Sicherungsdienst deines Telefons (zum Beispiel Google Backup oder Seedvault) eingeschaltet ist. Verwende andernfalls „Sicherung erstellen“.</string>
+    <string name="backup_updated">Aktualisiert %1$s · %2$s</string>
+    <string name="backup_too_large_snapshot">Android-Sicherung konnte nicht aktualisiert werden: Bibliothek zu groß</string>
+    <string name="backup_foreign">Eine Sicherung aus einer anderen Installation wartet</string>
+    <string name="backup_discard">Verwerfen</string>
+    <string name="backup_discard_question">Die wartende Android-Sicherung verwerfen?</string>
+    <string name="backup_snapshot_now">Snapshot jetzt schreiben</string>
+    <string name="backup_err_not_backup">Diese Datei ist keine Neutrodyne-Sicherung.</string>
+    <string name="backup_err_newer">Diese Sicherung wurde mit einer neueren Version von Neutrodyne erstellt. Aktualisiere die App, um sie wiederherzustellen.</string>
+    <string name="backup_err_corrupt">Diese Sicherungsdatei ist beschädigt (%1$s).</string>
+    <string name="backup_err_large">Diese Sicherungsdatei ist zu groß.</string>
+    <string name="backup_err_io">Sicherungsdatei konnte nicht gelesen oder geschrieben werden.</string>
+    <string name="backup_err_running">Eine Wiederherstellung läuft bereits</string>
+    <string name="backup_err_expired">Diese vorbereitete Sicherung ist nicht mehr verfügbar. Erstelle eine neue Sicherung.</string>
+    <string name="backup_err_unsupported">Diese Wiederherstellung wird noch nicht unterstützt.</string>
+    <string name="backup_import_unreadable">Diese Datei konnte nicht geöffnet werden. Prüfe, ob Neutrodyne sie lesen darf.</string>
+    <string name="backup_import_large">Diese Datei ist zu groß für eine Abonnementliste (maximal 50 MB).</string>
+    <string name="backup_import_hostile">Diese Datei kann nicht sicher importiert werden.</string>
+    <string name="backup_import_empty">Keine Podcasts in dieser Datei gefunden.</string>
+    <string name="backup_import_unsupported">Diese Datei ist keine unterstützte Abonnementliste oder Sicherung.</string>
+    <string name="backup_import_single">Dies ist ein Podcast-Feed, keine Abonnementliste.</string>
+    <string name="backup_size">%1$d,%2$d MB</string>
+</resources>

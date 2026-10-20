@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
@@ -256,6 +257,7 @@ class DesktopAppGraphTest {
                 PodcastKey(7),
                 PodcastSettingsKey(7),
                 AddPodcastKey(null),
+                ImportFileKey,
             )
 
         /** The keys `FeedsRoute` pushes: row tap, the row menu's podcast jump and the empty state. */
@@ -264,6 +266,7 @@ class DesktopAppGraphTest {
                 EpisodeKey(7),
                 PodcastKey(7),
                 AddPodcastKey(null),
+                ImportFileKey,
             )
     }
 }

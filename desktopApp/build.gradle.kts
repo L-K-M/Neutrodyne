@@ -86,6 +86,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     // The generated Res class of the shell's own Compose resources (see below)
     implementation(libs.cmp.resources)
+    implementation(libs.cmp.material3)
     // Metro aggregation must read the features' @ViewModelKey/@ManualViewModelAssistedFactoryKey
     // map keys, and the window provides LocalMetroViewModelFactory to metroViewModel().
     implementation(libs.metrox.viewmodel)

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="backup_title">Backup and restore</string>
+    <string name="backup_export">Export</string>
+    <string name="backup_export_opml">Export subscriptions (OPML)</string>
+    <string name="backup_section">Backup</string>
+    <string name="backup_password_note">Passwords are stored unencrypted in the file</string>
+    <string name="backup_create">Create backup</string>
+    <string name="backup_working">Working…</string>
+    <string name="backup_last">Last backup: %1$s</string>
+    <string name="backup_never">No backup yet</string>
+    <string name="backup_saved">Backup saved (%1$s)</string>
+    <string name="backup_restore_section">Restore</string>
+    <string name="backup_restore_file">Restore from backup</string>
+    <string name="backup_computer">Computers have no automatic backup. Create a backup now and then, or keep your library in step with Sync.</string>
+    <string name="backup_sync">Sync settings</string>
+    <string name="backup_android">Android backup</string>
+    <string name="backup_auto">Include your library in Android backup</string>
+    <string name="backup_lock">Requires a screen lock</string>
+    <string name="backup_transport">Works only when your phone’s backup service (for example Google backup or Seedvault) is on. Otherwise use Create backup.</string>
+    <string name="backup_updated">Updated %1$s · %2$s</string>
+    <string name="backup_too_large_snapshot">Android backup couldn’t be updated: library too large</string>
+    <string name="backup_foreign">A backup from another installation is waiting</string>
+    <string name="backup_discard">Discard</string>
+    <string name="backup_discard_question">Discard the waiting Android backup?</string>
+    <string name="backup_snapshot_now">Write snapshot now</string>
+    <string name="backup_err_not_backup">This file is not a Neutrodyne backup.</string>
+    <string name="backup_err_newer">This backup was made by a newer version of Neutrodyne. Update the app to restore it.</string>
+    <string name="backup_err_corrupt">This backup file is damaged (%1$s).</string>
+    <string name="backup_err_large">This backup file is too large.</string>
+    <string name="backup_err_io">Couldn’t read or write the backup file.</string>
+    <string name="backup_err_running">A restore is already running</string>
+    <string name="backup_err_expired">This prepared backup is no longer available. Create a new backup.</string>
+    <string name="backup_err_unsupported">This restore is not supported yet.</string>
+    <string name="backup_import_unreadable">Couldn’t open this file. Check that Neutrodyne may read it.</string>
+    <string name="backup_import_large">This file is too large to be a subscription list (limit 50 MB).</string>
+    <string name="backup_import_hostile">This file can’t be imported safely.</string>
+    <string name="backup_import_empty">No podcasts found in this file.</string>
+    <string name="backup_import_unsupported">This file is not a supported subscription list or backup.</string>
+    <string name="backup_import_single">This is a podcast feed, not a list of subscriptions.</string>
+    <string name="backup_size">%1$d.%2$d MB</string>
+</resources>

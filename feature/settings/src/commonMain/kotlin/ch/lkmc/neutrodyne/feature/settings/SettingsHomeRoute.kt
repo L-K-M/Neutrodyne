@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -28,6 +29,8 @@ import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
 import org.jetbrains.compose.resources.stringResource
@@ -66,6 +69,12 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                 title = stringResource(Res.string.settings_feeds),
                 summary = feedsIntervalText(interval).asString(),
                 onClick = { navigator.push(SettingsKey(SettingsPage.FEEDS)) },
+            )
+            SettingsRow(
+                icon = NdIcons.History,
+                title = stringResource(SettingsRes.string.settings_backup),
+                summary = stringResource(SettingsRes.string.settings_backup_summary),
+                onClick = { navigator.push(BackupKey) },
             )
             SettingsRow(
                 icon = NdIcons.Info,

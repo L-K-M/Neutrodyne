@@ -50,9 +50,9 @@ public sealed interface Route {
 }
 
 /**
- * Turns a [RouteInput] into a [Route]. In M0a only the internal `neutrodyne://open/…` routes exist;
- * external deep links (`feed:`, shared text, dropped files) arrive with their milestones and map to
- * [Route.None] until then. Inputs that are not `internal` can never reach the `open/…` routes, so a
+ * Turns a [RouteInput] into a [Route]. External links and shared text only open the add sheet;
+ * files need an import session created by the shell before routing its internal preview URI.
+ * Inputs that are not `internal` can never reach the `open/…` routes, so a
  * foreign program cannot jump into Settings or open a release page.
  */
 public object IntentRouter {
@@ -86,9 +86,13 @@ public object IntentRouter {
 
     /** Maps [input] to its route, or [Route.None] when nothing matches. */
     public fun route(input: RouteInput): Route {
-        if (!input.internal) {
+        if (listOfNotNull(input.text, input.uri).any {
+                it.length > MAX_INPUT_BYTES || it.encodeToByteArray().size > MAX_INPUT_BYTES
+            }
+        ) {
             return Route.None
         }
+        if (!input.internal) return externalRoute(input)
 
         val segments = openSegments(input.uri)
 
@@ -97,6 +101,32 @@ public object IntentRouter {
         }
 
         return match(segments)
+    }
+
+    private const val MAX_INPUT_BYTES = 4 * 1024
+    private val podcastSchemes = setOf("feed", "podcast", "pcast", "itpc")
+
+    private fun externalRoute(input: RouteInput): Route {
+        if (input.action == RouteInput.Action.SEND) {
+            val text = input.text?.trim()?.takeIf { it.isNotEmpty() } ?: return Route.None
+            return Route.Push(AddPodcastKey(text))
+        }
+        if (input.action != RouteInput.Action.VIEW) return Route.None
+
+        val uri = input.uri?.trim() ?: return Route.None
+        val scheme = uri.substringBefore(':').lowercase()
+        if (scheme in podcastSchemes && uri.substringAfter(':', "").isNotBlank()) {
+            return Route.Push(AddPodcastKey(uri))
+        }
+        val authorityAndPath = uri.substringAfter("://", "")
+        if (scheme == SCHEME && authorityAndPath.startsWith("subscribe?", ignoreCase = true)) {
+            return Route.Push(AddPodcastKey(uri))
+        }
+        val authority = authorityAndPath.substringBefore('/').substringBefore('?').substringBefore('#')
+        if (scheme == "https" && authority.lowercase() in setOf("podcasts.apple.com", "podcasts.apple.com:443")) {
+            return Route.Push(AddPodcastKey(uri))
+        }
+        return Route.None
     }
 
     // Splits a `neutrodyne://open/…` URI into its path segments, or an empty list when the input is

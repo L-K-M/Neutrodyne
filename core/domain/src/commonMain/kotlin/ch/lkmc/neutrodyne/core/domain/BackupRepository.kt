@@ -91,18 +91,23 @@ interface BackupRepository {
  * (2026-10-17 M3 note in 05).
  */
 sealed interface RestoreProgress {
+    /** Every emission belongs to one restore, including retained terminal progress. */
+    val sessionId: Long
+
     data class Running(
+        override val sessionId: Long,
         val phase: String,
         val done: Int,
         val total: Int,
     ) : RestoreProgress
 
     data class Finished(
-        val sessionId: Long,
+        override val sessionId: Long,
         val auto: Boolean,
     ) : RestoreProgress
 
     data class Failed(
+        override val sessionId: Long,
         val error: BackupError,
     ) : RestoreProgress
 }
