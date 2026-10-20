@@ -21,7 +21,7 @@ interface DownloadQueries {
         now: Long,
         unmetered: Boolean,
         charging: Boolean,
-        youtubeAllowed: Boolean,
+        youtubeAllowed: Boolean = false,
         offset: Int = 0,
     ): List<DownloadEntity>
 
@@ -41,6 +41,7 @@ interface DownloadQueries {
     suspend fun claim(
         episodeId: Long,
         token: String,
+        youtubeAllowed: Boolean = false,
     ): Int
 
     /** Atomic token-owned checkpoint; source and current controller policy are preserved.
@@ -77,6 +78,7 @@ interface DownloadQueries {
     suspend fun queuedNeeds(
         lane: DownloadLane,
         now: Long,
+        youtubeAllowed: Boolean = false,
     ): QueuedDownloadNeeds
 
     suspend fun markWait(

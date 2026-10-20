@@ -38,9 +38,7 @@ abstract class DownloadDao : DownloadQueries {
         "SELECT * FROM download WHERE state = 'QUEUED' AND runnerToken IS NULL AND lane IN (:lanes)" +
             " AND (nextAttemptAt IS NULL OR nextAttemptAt <= :now)" +
             " AND (allowMetered = 1 OR :unmetered = 1) AND (requireCharging = 0 OR :charging = 1)" +
-            " AND EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
-            " WHERE e.id = download.episodeId AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL)" +
-            " AND (:youtubeAllowed = 1 OR sourceKind <> 'YOUTUBE')" +
+            " AND waitReason <> 'YOUTUBE_ENGINE_OFF' AND " + DOWNLOAD_SOURCE_ELIGIBLE +
             " ORDER BY priority DESC, requestedAt, episodeId LIMIT $DOWNLOAD_CANDIDATE_PAGE_SIZE OFFSET :offset",
     )
     abstract override suspend fun candidates(
@@ -67,7 +65,7 @@ abstract class DownloadDao : DownloadQueries {
         val pick =
             candidates(lanes, now, unmetered, charging, youtubeAllowed, offset).firstOrNull(hostHasSlot)
                 ?: return null
-        return if (claim(pick.episodeId, token) == 1) {
+        return if (claim(pick.episodeId, token, youtubeAllowed) == 1) {
             pick.copy(state = DownloadState.RESOLVING, waitReason = WaitReason.NONE, runnerToken = token)
         } else {
             null
@@ -78,12 +76,12 @@ abstract class DownloadDao : DownloadQueries {
         "UPDATE download SET state = 'RESOLVING', waitReason = 'NONE', runnerToken = :token" +
             " WHERE episodeId = :episodeId AND state = 'QUEUED' AND runnerToken IS" +
             " NULL AND length(trim(:token)) > 0" +
-            " AND EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
-            " WHERE e.id = download.episodeId AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL)",
+            " AND waitReason <> 'YOUTUBE_ENGINE_OFF' AND " + DOWNLOAD_SOURCE_ELIGIBLE,
     )
     abstract override suspend fun claim(
         episodeId: Long,
         token: String,
+        youtubeAllowed: Boolean,
     ): Int
 
     @Transaction
@@ -163,12 +161,12 @@ abstract class DownloadDao : DownloadQueries {
             " SUM(MAX(COALESCE(totalBytes, estimatedBytes, $UNKNOWN_DOWNLOAD_BYTES)" +
             " - downloadedBytes, 0)) AS remainingBytes" +
             " FROM download WHERE state = 'QUEUED' AND runnerToken IS NULL AND lane = :lane" +
-            " AND EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
-            " WHERE e.id = download.episodeId AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL)",
+            " AND waitReason <> 'YOUTUBE_ENGINE_OFF' AND " + DOWNLOAD_SOURCE_ELIGIBLE,
     )
     abstract override suspend fun queuedNeeds(
         lane: DownloadLane,
         now: Long,
+        youtubeAllowed: Boolean,
     ): QueuedDownloadNeeds
 
     @Query(
@@ -186,6 +184,35 @@ abstract class DownloadDao : DownloadQueries {
         "UPDATE download SET waitReason = 'NONE' WHERE state = 'QUEUED' AND runnerToken IS NULL AND waitReason = 'STORAGE'",
     )
     abstract override suspend fun clearStorageWaits(): Int
+
+    @Query(
+        "UPDATE download SET waitReason = 'YOUTUBE_ENGINE_OFF' WHERE sourceKind = 'YOUTUBE'" +
+            " AND state = 'QUEUED' AND runnerToken IS NULL AND waitReason <> 'YOUTUBE_ENGINE_OFF'",
+    )
+    abstract suspend fun markYouTubeEngineWaits(): Int
+
+    @Query(
+        "UPDATE download SET waitReason = 'NONE' WHERE sourceKind = 'YOUTUBE' AND state = 'QUEUED'" +
+            " AND runnerToken IS NULL AND waitReason = 'YOUTUBE_ENGINE_OFF'",
+    )
+    abstract suspend fun clearYouTubeEngineWaits(): Int
+
+    @Query(
+        "UPDATE download SET state = 'FAILED', waitReason = 'NONE', lastError = 'UNSUPPORTED_STREAM'," +
+            " nextAttemptAt = NULL WHERE sourceKind = 'YOUTUBE' AND state <> 'COMPLETED' AND runnerToken IS NULL" +
+            " AND (state <> 'FAILED' OR lastError IS NOT 'UNSUPPORTED_STREAM')",
+    )
+    abstract suspend fun failYouTubeRowsWithoutEngine(): Int
+
+    @Query(
+        "UPDATE download SET waitReason = 'BACKOFF', nextAttemptAt = :untilMs WHERE sourceKind = 'YOUTUBE'" +
+            " AND state = 'QUEUED' AND runnerToken IS NULL AND (nextAttemptAt IS NULL OR nextAttemptAt <= :now)" +
+            " AND waitReason <> 'YOUTUBE_ENGINE_OFF'",
+    )
+    abstract suspend fun markYouTubeGateWaits(
+        now: Long,
+        untilMs: Long,
+    ): Int
 
     @Query(
         "SELECT episodeId, rootId, relativePath, tempPath FROM download WHERE relativePath IS NOT NULL OR tempPath IS NOT NULL",
@@ -365,3 +392,15 @@ private val OWNED_STATES = setOf(DownloadState.RESOLVING, DownloadState.DOWNLOAD
 
 private const val DOWNLOAD_CANDIDATE_PAGE_SIZE = 20
 private const val UNKNOWN_DOWNLOAD_BYTES = 150L * 1024 * 1024
+
+// Keep candidate, direct claim and runnable summaries identical, including restored/forged rows.
+private const val DOWNLOAD_SOURCE_ELIGIBLE =
+    "EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+        " WHERE e.id = download.episodeId AND ((download.sourceKind = 'RSS_ENCLOSURE'" +
+        " AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL) OR" +
+        " (:youtubeAllowed = 1 AND download.sourceKind = 'YOUTUBE' AND p.sourceType = 'YOUTUBE_CHANNEL'" +
+        " AND length(p.youtubeChannelId) = 24 AND substr(p.youtubeChannelId, 1, 2) = 'UC'" +
+        " AND p.youtubeChannelId NOT GLOB '*[^A-Za-z0-9_-]*'" +
+        " AND substr(p.youtubeChannelId, 24, 1) IN ('A','Q','g','w')" +
+        " AND length(e.externalMediaId) = 11 AND e.externalMediaId NOT GLOB '*[^A-Za-z0-9_-]*'" +
+        " AND download.sourceRef = e.externalMediaId)))"
