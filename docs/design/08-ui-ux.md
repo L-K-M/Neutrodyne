@@ -377,11 +377,16 @@ Selection mode registers its handler inside the screen's entry (composed inside 
   six-width root regression still fails: its exact-child restore returns false
   after placement. Full integration acceptance and native/foreign clear coverage
   remain open; no first-child fallback or deferred retry is permitted. Two
-  existing Escape/Back dismissal cases are also red: their injected keys do not
-  reach the root key callback or navigation pop in the captured trace.
-  Read-only pinned native inspection finds no active focus target in those cases;
-  both key phases require a focused path. No-focus modifier-order controls also
-  receive no keys, so a boundary-placement repair is not established. The lazy
+  existing Escape/Back dismissal cases are also red. A same-test comparison with
+  the passing pre-transaction tree shows both lose the real clicked child's focus
+  during reparenting; the old exact-child restore reacquires that same child. In
+  the candidate, a valid installation closes at its first global callback while
+  the child is still focused. Nav3 subsequently moves the scene through its
+  transition effect, detaching the child without another capture/install. No key
+  reaches the root afterward. The empty-root control does not isolate this loss.
+  A fresh transaction at the actual scene move needs an ownership/binding contract;
+  keeping the closed permission for a later loss would violate the no-loss rule.
+  No keyboard-only correction is established. The separate lazy-path
   trace identifies the missing saved child at the intermediate Never-focusable
   container, while row 20 remains attached, placed and eligible. Retaining only
   the entry's immediate child does not retain that nested exact-descendant path.
