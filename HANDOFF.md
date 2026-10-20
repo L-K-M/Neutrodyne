@@ -2,6 +2,10 @@
 
 This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first slice is a local candidate (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
+**Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
+MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
+`helper-models zai-quota` reports spare quota. This supersedes older helper notes below.
+
 ## 0. Implementation status
 
 | Milestone | State | Branch / PR | Notes |
