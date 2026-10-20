@@ -104,7 +104,7 @@ def build():
     for tool in [*tools.values(), android]:
         if not tool.is_file():
             raise RuntimeError(f"Missing installed SDK/JDK tool: {tool}")
-    inputs = {"source": command(work, "source", ["git", "rev-parse", "HEAD"]),
+    inputs = {"source": command(work, "source", ["git", "-C", str(ROOT), "rev-parse", "HEAD"]),
               "implementation": digest(Path(__file__).read_bytes()),
               "tools": {n: {"path": str(p), "sha256": digest(p.read_bytes())} for n, p in tools.items()},
               "androidJar": digest(android.read_bytes()), "fixtures": {}}
@@ -278,6 +278,7 @@ def evaluate():
         result = json.loads((OUT / "result.json").read_text())
         inputs = (OUT / "inputs.json").read_bytes()
         built = json.loads((OUT / "build.json").read_text())
+        # Older failed captures used error.json; never certify those as complete.
         if (OUT / "error.json").exists() or result.get("error") or result["collection"] != "COMPLETE" or result["cleanup"] != "COMPLETE":
             raise ValueError("Failed/incomplete run or stale error")
         if cleanup_failure():
@@ -299,7 +300,7 @@ def probe():
     built = json.loads((OUT / "build.json").read_text())
     if built["status"] != "COMPLETE" or built["inputsSha256"] != digest((OUT / "inputs.json").read_bytes()) or inputs["implementation"] != digest(Path(__file__).read_bytes()):
         raise RuntimeError("Incomplete/stale builder receipt")
-    if command(OUT, "probe-source", ["git", "rev-parse", "HEAD"]) != inputs["source"]:
+    if command(OUT, "probe-source", ["git", "-C", str(ROOT), "rev-parse", "HEAD"]) != inputs["source"]:
         raise RuntimeError("Stale build source")
     for variant in VARIANTS:
         if digest((OUT / (variant + ".apk")).read_bytes()) != inputs["fixtures"][variant]["apkSha256"]:

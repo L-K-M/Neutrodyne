@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import tarfile
 import tempfile
 import unittest
@@ -250,13 +251,21 @@ class ProbeTest(unittest.TestCase):
 
     def test_workflow_is_isolated_and_builds_before_one_probe_line(self):
         workflow = (ROOT / ".github/workflows/nightly.yml").read_text()
-        job = workflow.split("\n  bmgr-api29-probe:\n")[1]
-        self.assertIn("if: inputs.scope == 'bmgr-api29-probe'", job)
-        self.assertIn("timeout-minutes: 30", job)
-        self.assertLess(job.index(".py build"), job.index("android-emulator-runner@"))
-        self.assertEqual(1, job.count("script: python3 scripts/ci/bmgr-api29-probe.py probe"))
-        self.assertIn("if: always()", job)
-        self.assertNotIn("./gradlew", job)
+        marker = "\n  bmgr-api29-probe:\n"
+        self.assertIn(marker, workflow)
+        body = workflow.split(marker, 1)[1]
+        following_job = (
+            "\n  unrelated:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n"
+            "    steps:\n      - run: ./gradlew help\n"
+        )
+        for suffix in ("", following_job):
+            job = re.split(r"\n  (?=[A-Za-z0-9_-]+:)", body + suffix, maxsplit=1)[0]
+            self.assertIn("if: inputs.scope == 'bmgr-api29-probe'", job)
+            self.assertIn("timeout-minutes: 30", job)
+            self.assertLess(job.index(".py build"), job.index("android-emulator-runner@"))
+            self.assertEqual(1, job.count("script: python3 scripts/ci/bmgr-api29-probe.py probe"))
+            self.assertIn("if: always()", job)
+            self.assertNotIn("./gradlew", job)
 
 
 if __name__ == "__main__":

@@ -708,6 +708,7 @@ separately. The installed LocalTransport APK is collected only as image evidence
 
 | Script | Purpose |
 |---|---|
+| `scripts/ci/bmgr-api29-probe.py build\|probe\|verify` | Opt-in stock API29 LocalTransport diagnostic with synthetic fixtures and retained raw evidence; never M3 acceptance |
 | `scripts/ci/check-apk.sh [--published\|--no-engine\|--alignment-only] <apk…>` | per-ABI size budgets, 16 KB alignment including Chaquopy's asset-extracted `.so` files, forbidden content (debug code included), allowed native libraries and Python packages, manifest facts of a published release build (not debuggable, no `testOnly`), locale config, metadata hygiene, signer ([Build-output checks](#build-output-checks)) |
 | `scripts/ci/public-cert-sha256.sh [--colons]` | prints the SHA-256 of the certificate in the committed `signing/neutrodyne-public.keystore` (`keytool -list -v -keystore signing/neutrodyne-public.keystore -storepass neutrodyne -alias neutrodyne`), lower-case hex or colon-separated; the expected signer for `release.yml`'s `android` job and `check-apk.sh --published` ([Committed keystore](#committed-keystore)) |
 | `scripts/ci/check-desktop-image.sh [--no-engine] <image dir>` | 11's [image scan rules](11-desktop.md#image-scan-rules) on an app image (the Linux image in `desktop-smoke`, every target's images in `desktop-matrix` and `release.yml`); prints installed and package sizes (PB27); with `--no-engine` also asserts that no Python tree, yt-dlp file or `:youtube:ytdlp-desktop` JAR is present |
