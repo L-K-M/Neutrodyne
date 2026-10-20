@@ -8,7 +8,6 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
-import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.ui.EmptyState
@@ -26,12 +25,11 @@ import org.jetbrains.compose.resources.stringResource
 @ContributesTo(AppScope::class)
 @BindingContainer
 public object ImportExportPendingNavigation {
-    // shortcut: D1/D4 replace these unavailable entries when their detail screens land.
+    // shortcut: D4 replaces this unavailable entry when its restore detail screen lands.
     @Provides
     @IntoSet
     public fun entries(): EntryProviderInstaller =
         {
-            entry<ImportKey>(metadata = NdSceneMetadata.paneDetail()) { PendingDetails(it) }
             entry<BackupKey>(metadata = NdSceneMetadata.paneDetail()) { PendingDetails(it) }
         }
 }
