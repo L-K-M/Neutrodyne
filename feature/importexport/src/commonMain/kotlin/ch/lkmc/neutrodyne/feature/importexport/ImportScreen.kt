@@ -73,6 +73,7 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupProposal
+import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
@@ -993,7 +994,7 @@ private fun statusLabel(
         ImportItemStatus.FETCH_FAILED -> {
             stringResource(
                 if (item.errorDetail ==
-                    DEFERRED
+                    IMPORT_DEFERRED_DETAIL
                 ) {
                     Res.string.import_status_later
                 } else {
@@ -1029,7 +1030,7 @@ private fun statusDescription(item: ImportItemView): String? =
         ImportItemStatus.FETCH_FAILED -> {
             stringResource(
                 if (item.errorDetail ==
-                    DEFERRED
+                    IMPORT_DEFERRED_DETAIL
                 ) {
                     Res.string.import_deferred_hint
                 } else {
@@ -1331,7 +1332,6 @@ private fun groupErrorText(error: GroupError): String =
 
 private const val EXCLUDED_WRAPPER = "wrapper"
 private const val EXCLUDED_GPODDER_SECTION = "gpodder_section"
-private const val DEFERRED = "DEFERRED"
 
 private val FETCH_OUTCOMES =
     setOf(
