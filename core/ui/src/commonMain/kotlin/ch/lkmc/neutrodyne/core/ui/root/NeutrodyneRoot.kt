@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.root
 
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -56,6 +59,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
@@ -242,6 +246,7 @@ private fun ReadyRoot(
         onDispose { if (eventDispatcher != null) eventDispatcher.removeInput(backInput) }
     }
 
+    val importContentFocus = remember { FocusRequester() }
     val miniInset = if (!layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
         LocalPaneLayout provides layout,
@@ -283,9 +288,17 @@ private fun ReadyRoot(
                         onFeedsOrLibrary =
                             navigation.selectedTab == FeedsKey ||
                                 navigation.selectedTab == LibraryKey,
+                        importResume = { available ->
+                            val top = navigation.stack(navigation.selectedTab).lastOrNull()
+                            slots.importResume(available && (top == FeedsKey || top == LibraryKey)) { id ->
+                                // The banner's focused button disappears on push; retain a key-event target.
+                                importContentFocus.requestFocus()
+                                navigation.push(ImportKey(id.toString()))
+                            }
+                        },
                     )
                     Row(Modifier.fillMaxWidth().weight(1f)) {
-                        Box(Modifier.weight(1f)) {
+                        Box(Modifier.weight(1f).focusRequester(importContentFocus).focusable()) {
                             NeutrodyneNavHost(
                                 state = navigation,
                                 installers = installers,

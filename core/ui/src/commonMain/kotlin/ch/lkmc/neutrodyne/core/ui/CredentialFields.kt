@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 
-package ch.lkmc.neutrodyne.feature.podcast
+package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,14 +36,15 @@ import org.jetbrains.compose.resources.stringResource
  * `ContentType` marks both fields for the platform's autofill/credential manager (CMP 1.12).
  */
 @Composable
-internal fun CredentialFields(
+public fun CredentialFields(
     username: String,
     onUsernameChange: (String) -> Unit,
     password: String,
     onPasswordChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var showPassword by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(FIELD_GAP)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(FIELD_GAP)) {
         OutlinedTextField(
             value = username,
             onValueChange = onUsernameChange,

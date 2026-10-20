@@ -58,8 +58,15 @@ interface ImportRepository {
     /** Commits the selected items in chunks and schedules the fetch (05 6. Commit). */
     suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError>
 
-    /** PREVIEW: deletes the session; COMMITTED/FETCHING: stops the worker, state CANCELLED. */
+    /**
+     * Deletes an owned PREVIEW, preserving requested restores. Throws [IllegalStateException] if
+     * safe preview deletion fails. COMMITTED/FETCHING: requests worker cancellation and records
+     * CANCELLED; DONE/CANCELLED are unchanged.
+     */
     suspend fun cancel(sessionId: Long)
+
+    /** Atomically deletes only an owned PREVIEW, keeping active imports and restore intents. */
+    suspend fun discardPreview(sessionId: Long): DiscardPreviewResult
 
     suspend fun retry(
         sessionId: Long,
@@ -133,3 +140,6 @@ enum class HostileInput {
     ZIP_PATH,
     ZIP_ENTRIES,
 }
+
+/** A preview discard must never be mistaken for an active-import stop or a failed delete. */
+enum class DiscardPreviewResult { DISCARDED, NOT_PREVIEW, FAILED }

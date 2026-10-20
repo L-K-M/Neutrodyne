@@ -98,6 +98,9 @@ data class ImportSessionView(
     /** Selected YouTube items — the header's "and N YouTube channels". */
     val youtubeCount: Int,
     val createdAt: Long,
+    /** Report metadata covers the whole session, including unloaded pages. */
+    val deferredCount: Int = 0,
+    val noMediaOrdinals: Set<Int> = emptySet(),
 )
 
 /** One importable entry in preview order; rows show monogram, title and host — never the URL. */
