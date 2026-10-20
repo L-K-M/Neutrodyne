@@ -2063,11 +2063,11 @@ sequenceDiagram
 **Implementation note (2026-10-16, M2):** B5 uses the existing `PositionDao.upsert` and ignored `EpisodeStateDao.ensure` with pre-seeded `startedAt` for the 100 position-only writes; the guarded position-save sequence belongs to M4 and is not implemented yet. A separate test creates the state row with `startedAt` in the first position transaction and permits exactly one invalidation, then none on subsequent saves. Session updates and queue reorders use test-only SQL because their M4 DAO writers are also absent. Both desktop and bundled-driver device legs drain Room tracking between writes and reload a fresh source after every invalidation, so notifications cannot coalesce into a false pass. The timing legs use the full 300/50,000/20 seed and file-backed WAL databases; GMD emits the samples and medians to stdout and the instrumentation stream collected with the existing `androidTest-results` reports. Timings are recorded only, with reference-device acceptance still manual.
 
 **Implementation note (2026-10-18, M4).** The shared desktop/device hygiene
-probe now uses the guarded position-save DAO sequence, `markStarted`, and
-the production session and queue writers. The data-layer hygiene tests also
-exercise the actual playback stores and verify that steady position saves
-leave feed pages and low-churn queue/media observers alone. No schema or
-index change is required by these queries.
+probe now uses the guarded position-save DAO sequence (`insertIfAbsent` +
+`updateGuarded` + `markStarted`), the production `PlaySessionDao` write path
+and the queue order-key update, one transaction per step. The data-layer
+store-level hygiene test lands with its queue/media store slice. No schema
+or index change is required by these queries.
 
 ---
 

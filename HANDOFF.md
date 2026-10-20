@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3 is merged through #218; its remaining acceptance evidence is listed below. M4's first slice is in local assembly (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first slice is a local candidate (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 ## 0. Implementation status
 
@@ -137,21 +137,29 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, first slice in local assembly
+### M4 playback, first slice a local candidate
 
-M4 plan row P1 is being assembled on a local branch (`impl/m4-p1-persistence`)
-from the frozen source record `453ea570`. The slice carries the widened playback
+M4 plan row P1 is a local candidate on `impl/m4-p1-persistence`, assembled from
+the frozen source record `453ea570`. It carries the widened playback
 API/model/domain contracts, the recording fakes, `PlayedRule` /
 `StartPositionRule` / `PositionSaver`, the durable `SessionWriter` /
 `PositionWriter` / `PlayedWrites` / `QueueKeyWrites` stores with their Room DAO
-additions, the `LocalMediaIndex` and external-only YouTube contracts, and the
-truthful unavailable playback bindings on both shells (database-backed ports
-exposed as Metro `Provider<T>`, resolved only after `awaitOpen()`). No schema
-change. Queue/context/lookup implementations, Media3 adapters, the playback
-service, settings and player UI remain in their own M4 slices; playback stays
-truthfully unavailable on both platforms. Physical-device, native, transport
+additions, the `LocalMediaIndex` and external-only YouTube contracts, and one
+truthful unavailable playback binding per shell (both stores exposed as Metro
+`Provider<T>` roots, resolved only after `awaitOpen()`). No schema change.
+Playback really is unavailable on both platforms — nothing plays; the queue/
+context/lookup implementations, Media3 adapters, the playback service, settings
+and player UI remain in their own M4 slices. Physical-device, native, transport
 (`bmgr`), audible and release evidence is not produced by this work and remains
 open with the rest of M4's acceptance.
+
+Main `96224e00` evidence update: the full and seeded device runs on that head
+passed — the full run's first attempt failed before any test for an unavailable
+runner accelerator, and the failed-job-only retry recovered
+([#219](https://github.com/L-K-M/Neutrodyne/issues/219) closed). Receipts are in
+`~/nd-wt/reviews/evidence/main-96224-{full,seeded}/EVIDENCE.md`. These are
+actual-main device results, not scheduled/tagged, native, physical, provider or
+`bmgr` acceptance.
 
 ## 1. What this repository is
 
