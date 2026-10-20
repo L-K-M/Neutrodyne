@@ -9,6 +9,7 @@ import androidx.room3.Query
 import androidx.room3.Upsert
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
+import ch.lkmc.neutrodyne.core.model.PositionSource
 import kotlinx.coroutines.flow.Flow
 
 // The remaining one-DAO-per-area surface (02 "New names introduced here"). M1a adds only the row
@@ -409,6 +410,35 @@ interface EpisodeStateDao {
             " FROM episode_state WHERE episodeId IN (:ids)",
     )
     fun observeFor(ids: List<Long>): Flow<List<EpisodeStateLiveRow>>
+
+    /** Written once at the first positive position, never at tick cadence. */
+    @Query(
+        "UPDATE episode_state SET startedAt = :now, updatedAt = :now" +
+            " WHERE episodeId = :id AND startedAt IS NULL AND playedAt IS NULL",
+    )
+    suspend fun markStarted(
+        id: Long,
+        now: Long,
+    ): Int
+
+    @Query(
+        "UPDATE episode_state SET lastPlayedAt = :now, updatedAt = :now" +
+            " WHERE episodeId = :id AND lastPlayedAt IS NOT :now",
+    )
+    suspend fun touchLastPlayed(
+        id: Long,
+        now: Long,
+    )
+
+    /** Explicit position reset leaves played status alone, but is no longer in progress. */
+    @Query(
+        "UPDATE episode_state SET startedAt = NULL, updatedAt = :now" +
+            " WHERE episodeId = :id AND startedAt IS NOT NULL",
+    )
+    suspend fun clearStarted(
+        id: Long,
+        now: Long,
+    ): Int
 }
 
 /** `episode_position` (M4: position saves and `applyRemote`). */
@@ -436,6 +466,26 @@ interface PositionDao {
             " FROM episode_position WHERE episodeId IN (:ids)",
     )
     fun observeFor(ids: List<Long>): Flow<List<EpisodePositionEntity>>
+
+    @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(row: EpisodePositionEntity): Long
+
+    /** Both guards also cover writers that bypass the player (bulk marks and restore). */
+    @Query(
+        "UPDATE episode_position SET positionMs = :pos, durationMs = COALESCE(:dur, durationMs)," +
+            " positionSource = :src, updatedAt = :now WHERE episodeId = :id" +
+            " AND (:pos > 0 OR positionMs = 0)" +
+            " AND NOT EXISTS (SELECT 1 FROM episode_state s" +
+            " WHERE s.episodeId = :id AND s.playedAt >= :pinStartedAt)",
+    )
+    suspend fun updateGuarded(
+        id: Long,
+        pos: Long,
+        dur: Long?,
+        src: PositionSource,
+        now: Long,
+        pinStartedAt: Long,
+    ): Int
 }
 
 /** `queue_entry` (M4: Up next ordering, adds and moves). */
@@ -461,6 +511,28 @@ interface QueueDao {
     /** The mark-played chain's Up-next removal (02 User-state writes). */
     @Query("DELETE FROM queue_entry WHERE episodeId IN (:ids)")
     suspend fun removeEpisodes(ids: List<Long>)
+
+    /**
+     * 02 "Move between neighbours": one guarded key write per moved row. The value-differs
+     * predicate keeps a no-change write from firing Room invalidation or the `ok` sync trigger.
+     */
+    @Query("UPDATE queue_entry SET orderKey = :orderKey WHERE id = :entryId AND orderKey <> :orderKey")
+    suspend fun updateOrderKey(
+        entryId: Long,
+        orderKey: String,
+    ): Int
+
+    /**
+     * 02 "Up next ordering", Observe row: the complete persisted order joined to the feed row:
+     * unplayable rows included. `episode_position` is deliberately not joined (02: never joined
+     * by list queries); positions reach the UI through the live-row channel instead.
+     */
+    @Query(
+        "SELECT q.id AS entryId, q.orderKey, q.episodeId, " + FeedQueryBuilder.ROW_COLUMNS +
+            " FROM queue_entry q JOIN episode e ON e.id = q.episodeId JOIN podcast p ON p.id = e.podcastId" +
+            " " + FeedQueryBuilder.ROW_JOINS + " ORDER BY q.orderKey, q.id",
+    )
+    fun observeUpNext(): Flow<List<UpNextRow>>
 }
 
 /** `download` (M6: the claim/state machine of 07). */
