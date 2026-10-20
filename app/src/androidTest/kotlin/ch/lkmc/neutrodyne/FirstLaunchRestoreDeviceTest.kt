@@ -4,16 +4,13 @@ package ch.lkmc.neutrodyne
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.work.WorkManager
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
-import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -21,17 +18,14 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
-import java.util.concurrent.TimeUnit
 
 /**
  * The genuine first-launch restore gate (05 First-launch restore; M3's `FirstLaunchRestoreTest`
@@ -85,7 +79,7 @@ class FirstLaunchRestoreDeviceTest {
             // The real WorkManager restore — found by its public `restore-session-{id}` tag and
             // required to reach SUCCEEDED; FAILED/CANCELLED are immediate failures, never retried
             // into a pass, and the bounded poll turns a hang into a failure.
-            val sessionId = awaitRestoreSucceeded()
+            val sessionId = RestoredLibraryAsserts.awaitRestoreSucceeded(app)
 
             // The public session view carries the exact first-launch contract.
             val session =
@@ -115,7 +109,11 @@ class FirstLaunchRestoreDeviceTest {
                 session.counts.values.sum(),
             )
 
-            assertLibraryEqualsFixture(app)
+            RestoredLibraryAsserts.assertLibraryEqualsFixture(
+                app,
+                FirstLaunchRestoreSeed.Fixture.PODCASTS.associate { it.feedKey to it.syncId },
+                FirstLaunchRestoreSeed.Fixture.GROUPS.associate { it.name to it.uuid },
+            )
 
             // SETTINGS is intentionally outside the first-launch request: Auto Backup restored
             // the portable PB itself, so the post-snapshot value must be what survives — and a
@@ -145,168 +143,11 @@ class FirstLaunchRestoreDeviceTest {
             assertEquals(
                 "the adopted payload must hash to the seeded archive",
                 marker.snapshotSha256,
-                sha256Hex(payload),
+                FirstLaunchRestoreChecks.sha256Hex(payload.readBytes()),
             )
 
-            assertSnapshotEndState(marker)
+            RestoredLibraryAsserts.assertSnapshotEndState(app, marker.snapshotSha256, marker.installationId)
         }
-
-    /**
-     * `backup-restore` carries the public `restore-session-{id}` tag; wait until the real
-     * enqueue exists and reaches SUCCEEDED. A retrying work stays ENQUEUED and keeps polling;
-     * FAILED/CANCELLED and the deadline fail loudly.
-     */
-    private suspend fun awaitRestoreSucceeded(): Long {
-        val workManager = WorkManager.getInstance(app)
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(RESTORE_TIMEOUT_MS)
-        while (true) {
-            val infos =
-                FirstLaunchRestoreChecks.awaitRestoreQuery(
-                    workManager.getWorkInfosForUniqueWork(RESTORE_WORK_NAME),
-                    deadline - System.nanoTime(),
-                )
-            FirstLaunchRestoreChecks.restoreSessionId(infos)?.let { return it }
-            check(System.nanoTime() < deadline) {
-                "backup-restore did not reach SUCCEEDED within ${RESTORE_TIMEOUT_MS} ms" +
-                    " (states: ${infos.joinToString { it.state.name }})"
-            }
-            delay(POLL_MS)
-        }
-    }
-
-    /** Logical content equality — every seeded row's carried fields, not row counts. */
-    private suspend fun assertLibraryEqualsFixture(app: NeutrodyneApplication) {
-        val fixture = FirstLaunchRestoreSeed.Fixture
-        val db = app.graph.databaseOpener.requireDatabase()
-
-        for (spec in fixture.PODCASTS) {
-            val podcast =
-                checkNotNull(db.podcastDao().byFeedKey(spec.feedKey)) {
-                    "podcast ${spec.feedKey} must be restored"
-                }
-            assertEquals(spec.feedUrl, podcast.feedUrl)
-            assertEquals(spec.title, podcast.title)
-            assertEquals(spec.link, podcast.link)
-            assertEquals(spec.syncId, podcast.syncId)
-        }
-
-        for (spec in fixture.GROUPS) {
-            val group =
-                checkNotNull(
-                    db.groupDao().groupsInOrder().firstOrNull { it.name == spec.name },
-                ) { "group ${spec.name} must be restored" }
-            // 05 B10 note: Merge adopts a backup uuid only in Replace; a restored new group
-            // gets a fresh canonical v4 uuid, like a user-created one.
-            check(spec.uuid.isNotEmpty()) { "the seed must mint group ${spec.name}'s backup uuid" }
-            assertNotEquals(spec.uuid, group.uuid)
-            assertTrue("group ${spec.name} uuid ${group.uuid}", CANONICAL_UUID.matches(group.uuid))
-            assertEquals(
-                spec.members.map { it.feedKey },
-                db.groupDao().membersOf(group.id).map { member ->
-                    checkNotNull(db.podcastDao().byId(member.podcastId)).feedKey
-                },
-            )
-        }
-        assertEquals(
-            fixture.GROUPS.map { it.name },
-            db.groupDao().groupsInOrder().map { it.name },
-        )
-
-        for (spec in fixture.EPISODES) {
-            val podcastId = checkNotNull(db.podcastDao().byFeedKey(spec.podcast.feedKey)).id
-            val episode =
-                checkNotNull(db.episodeDao().byIdentityKey(podcastId, spec.identityKey)) {
-                    "episode ${spec.identityKey} must be restored"
-                }
-            assertEquals(spec.title, episode.title)
-            assertEquals(spec.guid, episode.guid)
-            assertEquals(spec.pubDate, episode.pubDate)
-            assertEquals(spec.enclosureUrl, episode.enclosureUrl)
-            assertEquals(spec.enclosureType, episode.enclosureType)
-            assertEquals(spec.durationMs, episode.durationMs)
-            assertEquals(spec.link, episode.link)
-            // A restored episode is a stub until its podcast's first fetch: `inFeed = false`
-            // is the marker that the row came through the restore path, not an ingest.
-            assertFalse("a restored episode is a stub (inFeed = 0)", episode.inFeed)
-
-            val state = db.episodeStateDao().byEpisode(episode.id)
-            if (spec.hasState) {
-                checkNotNull(state) { "episode ${spec.guid} must carry its state row" }
-                assertEquals(spec.playedAt, state.playedAt)
-                assertEquals(spec.playCount, state.playCount)
-                assertEquals(spec.lastPlayedAt, state.lastPlayedAt)
-                assertEquals(spec.favorite, state.isFavorite)
-                assertEquals(spec.measuredDurationMs, state.measuredDurationMs)
-                assertEquals(spec.startedAt, state.startedAt)
-            } else {
-                assertNull("a state-free line must not gain a state row", state)
-            }
-
-            val position = db.positionDao().byEpisode(episode.id)
-            if (spec.positionMs > 0) {
-                checkNotNull(position) { "episode ${spec.guid} must carry its position" }
-                assertEquals(spec.positionMs, position.positionMs)
-                assertEquals(spec.durationMs, position.durationMs)
-                assertEquals(spec.positionAt, position.updatedAt)
-            } else {
-                assertNull("a position-free line must not gain a position", position)
-            }
-        }
-
-        assertEquals(
-            "Up next must be restored in archive order",
-            fixture.QUEUE.map { it.guid },
-            db.queueDao().entries().map { checkNotNull(db.episodeDao().byId(it.episodeId)).guid },
-        )
-
-        val playSession = checkNotNull(db.playSessionDao().get())
-        val currentId = checkNotNull(playSession.currentEpisodeId) { "the session's current episode must be restored" }
-        assertEquals(
-            FirstLaunchRestoreSeed.Fixture.SESSION_CURRENT.guid,
-            checkNotNull(db.episodeDao().byId(currentId)).guid,
-        )
-        assertEquals(ContextType.GROUP, playSession.contextType)
-        val contextGroup = checkNotNull(db.groupDao().groupById(checkNotNull(playSession.contextId)))
-        assertEquals(FirstLaunchRestoreSeed.Fixture.SESSION_GROUP.name, contextGroup.name)
-        assertEquals(currentId, playSession.contextAnchorEpisodeId)
-        assertEquals(FirstLaunchRestoreSeed.Fixture.SESSION_CURRENT.pubDate, playSession.contextAnchorSortDate)
-    }
-
-    /**
-     * Success retires `auto-snapshot.zip` to `restored-{epochMs}.zip`; an already-scheduled
-     * periodic write may legitimately have replaced it afterwards — accept the matching retired
-     * hash or a valid replacement from the current installation. Resample if the writer's
-     * cleanup removes a listed retired file.
-     */
-    private suspend fun assertSnapshotEndState(marker: SeedMarker) {
-        val backupDir = File(app.filesDir, "backup")
-        val auto = File(backupDir, "auto-snapshot.zip")
-
-        FirstLaunchRestoreChecks.assertSnapshotEndState(
-            seededHash = marker.snapshotSha256,
-            sample = {
-                val retired =
-                    backupDir
-                        .listFiles { file ->
-                            file.name.startsWith("restored-") && file.name.endsWith(".zip")
-                        }.orEmpty()
-                FirstLaunchRestoreChecks.SnapshotSample(
-                    retired.map { FirstLaunchRestoreChecks.readRetiredSnapshot(it) },
-                    auto.isFile,
-                )
-            },
-            validateReplacement = {
-                FirstLaunchRestoreChecks.assertReplacementSnapshot(
-                    auto,
-                    marker.snapshotSha256,
-                    marker.installationId,
-                    app.graph.settingsRepository.get(BackupSettingKeys.INSTALLATION_ID),
-                )
-            },
-        )
-    }
-
-    private fun sha256Hex(file: File): String = FirstLaunchRestoreChecks.sha256Hex(file.readBytes())
 
     /** The seed's `files/first-launch-seed.json` record. */
     private class SeedMarker(
@@ -328,14 +169,7 @@ class FirstLaunchRestoreDeviceTest {
     }
 
     private companion object {
-        /** 05's work table — the unique-work name, spelled out so no internal constant is needed. */
-        const val RESTORE_WORK_NAME = "backup-restore"
-
-        /** 02 Naming and types: lowercase canonical version-4 UUID. */
-        val CANONICAL_UUID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
-        const val RESTORE_TIMEOUT_MS = 180_000L
-        const val OPEN_TIMEOUT_MS = 60_000L
-        const val POLL_MS = 500L
+        const val OPEN_TIMEOUT_MS = RestoredLibraryAsserts.OPEN_TIMEOUT_MS
 
         /** Covers the sequential worst case of every bounded wait plus the assertion pass. */
         const val TEST_TIMEOUT_MS = 400_000L
