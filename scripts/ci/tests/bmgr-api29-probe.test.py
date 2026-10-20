@@ -33,6 +33,10 @@ def archive(extra=(), payload=p.PAYLOAD, manifest=MANIFEST):
 
 
 class ProbeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        (ROOT / "build").mkdir(exist_ok=True)
+
     def complete_raw_run(self, folder):
         fixtures = {v: {"package": p.PREFIX + v, "certificate": CERT} for v in p.VARIANTS}
         (folder / "inputs.json").write_text(json.dumps({"source": "a" * 40, "fixtures": fixtures}))
