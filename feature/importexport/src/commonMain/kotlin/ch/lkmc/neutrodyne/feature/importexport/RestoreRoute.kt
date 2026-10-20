@@ -98,6 +98,8 @@ internal fun RestoreSessionRoute(
     val preview = importState.session?.state == ImportState.PREVIEW
     val running = requested && preview && progress !is RestoreProgress.Finished && state.error == null
     val failed = requested && progress is RestoreProgress.Failed && importState.session?.state == ImportState.CANCELLED
+    // Import persistence can arrive before the restore VM projects the same error.
+    val restoreError = state.error ?: (progress as? RestoreProgress.Failed)?.error?.takeIf { failed }
     // Persisted committed work already belongs to the report, even after progress-flow loss.
     if (!preview && !failed) {
         report()
@@ -135,8 +137,8 @@ internal fun RestoreSessionRoute(
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
 
-                state.error != null || state.preview == null -> {
-                    Text(backupErrorText(state.error ?: BackupError.Io).asString())
+                restoreError != null || state.preview == null -> {
+                    Text(backupErrorText(restoreError ?: BackupError.Io).asString())
                     NdButton(stringResource(Res.string.restore_choose_another), {
                         scope.launch {
                             viewModel
@@ -144,7 +146,7 @@ internal fun RestoreSessionRoute(
                                 ?.let { navigator.pushDetail(ImportKey(it.toString())) }
                         }
                     }, enabled = !state.busy)
-                    if (state.error is BackupError.NewerFormat) {
+                    if (restoreError is BackupError.NewerFormat) {
                         NdTextButton(
                             stringResource(Res.string.restore_updates),
                             { navigator.push(SettingsKey(SettingsPage.UPDATES)) },
@@ -152,7 +154,7 @@ internal fun RestoreSessionRoute(
                     }
                 }
 
-                else -> {
+                !requested -> {
                     RestorePreview(state, viewModel::selectMode, viewModel::setCategory)
                     NdButton(stringResource(Res.string.restore_action), {
                         scope.launch { viewModel.requestRestore() }

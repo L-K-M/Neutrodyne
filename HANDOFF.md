@@ -48,7 +48,7 @@ and keeps YouTube imports external until M8.
 |---|---|---|
 | 1 | OPML reader fixtures and preview assertions | Latest-candidate CI/review |
 | 2, 7 | `RoundTripPropertyTest`, import commit and membership tests | Latest-candidate CI/review |
-| 3 | Hostile-input, bounded JSON, archive and mutation tests; real 400k-row snapshot test in a 128 MiB JVM. [#213](https://github.com/L-K-M/Neutrodyne/pull/213) fixes the signed UTF-32 word stall with failing-first regressions, full local 1,000-iteration proof and hosted `mutation-full` recovery in [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995); [#211](https://github.com/L-K-M/Neutrodyne/issues/211) is closed. | Latest-candidate CI/review and a green scheduled release gate |
+| 3 | Hostile-input, bounded JSON, archive and mutation tests; real 400k-row snapshot test in a 128 MiB JVM. [#213](https://github.com/L-K-M/Neutrodyne/pull/213) fixes the signed UTF-32 word stall with failing-first regressions, full local 1,000-iteration proof and `mutation-full` recovery within [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995) (that run's `instrumented-full` job failed under #214); [#211](https://github.com/L-K-M/Neutrodyne/issues/211) is closed. | Latest-candidate CI/review and a green scheduled release gate |
 | 4 | `ImportPipelineTest`, no-new-notification and inert-download assertions | Confirm the 300-feed/two-second acceptance measurement on the candidate |
 | 5, 11 | Restore merger/runner tests and `BackupCrossPlatformTest` | Actual Android-to-desktop and desktop-to-Android file round trip; native desktop drop/dialog checks |
 | 6, 8 | Real first-launch logical restore on API26/API36 in [39257853895](https://github.com/L-K-M/Neutrodyne/actions/runs/39257853895), including the named non-skipped-result gate; host foreign-snapshot and startup-race regressions | Local-transport `bmgr` uninstall/reinstall on API29/API36 and manual API26/28/31 checks. The logical device test is not transport evidence. |
@@ -65,7 +65,7 @@ pass. Downloaded XML proves the five named smoke cases on CI API26/36 and nightl
 API26/33/34/36, with no failures/errors/skips or host-only failure fixtures.
 Actual-main [full recovery](https://github.com/L-K-M/Neutrodyne/actions/runs/39363070031)
 and [seeded restore](https://github.com/L-K-M/Neutrodyne/actions/runs/39363072325)
-both pass on `7615ae2f`; #214 closed after actual-main recovery. Parent checked
+both pass on `7615ae2f`, the main ancestor before #217; #214 closed after actual-main recovery. Parent checked
 the named smoke XML and strict non-skipped API26/API36 seeded case. This does not
 approve a scheduled/tagged release, native dialogs/providers, physical devices
 or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/evidence/`.

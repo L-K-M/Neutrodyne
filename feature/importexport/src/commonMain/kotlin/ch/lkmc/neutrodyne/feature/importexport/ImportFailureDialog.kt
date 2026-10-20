@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.dismiss
 import ch.lkmc.neutrodyne.core.ui.resources.import_err_empty
+import ch.lkmc.neutrodyne.core.ui.resources.import_err_gone
 import ch.lkmc.neutrodyne.core.ui.resources.import_err_hostile
 import ch.lkmc.neutrodyne.core.ui.resources.import_err_network
 import ch.lkmc.neutrodyne.core.ui.resources.import_err_single_feed
@@ -69,7 +70,7 @@ public fun ImportFailureDialog(
             }
 
             ImportError.SessionGone -> {
-                Res.string.import_err_empty
+                Res.string.import_err_gone
             }
         }
     NdDialog(

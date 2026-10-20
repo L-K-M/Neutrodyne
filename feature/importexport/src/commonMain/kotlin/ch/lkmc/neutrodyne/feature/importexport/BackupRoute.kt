@@ -50,7 +50,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.backup_android
 import ch.lkmc.neutrodyne.core.ui.resources.backup_auto
 import ch.lkmc.neutrodyne.core.ui.resources.backup_computer
 import ch.lkmc.neutrodyne.core.ui.resources.backup_create
-import ch.lkmc.neutrodyne.core.ui.resources.backup_creating
 import ch.lkmc.neutrodyne.core.ui.resources.backup_discard
 import ch.lkmc.neutrodyne.core.ui.resources.backup_discard_question
 import ch.lkmc.neutrodyne.core.ui.resources.backup_export
@@ -69,6 +68,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.backup_title
 import ch.lkmc.neutrodyne.core.ui.resources.backup_too_large_snapshot
 import ch.lkmc.neutrodyne.core.ui.resources.backup_transport
 import ch.lkmc.neutrodyne.core.ui.resources.backup_updated
+import ch.lkmc.neutrodyne.core.ui.resources.backup_working
 import ch.lkmc.neutrodyne.core.ui.resources.export_include_passwords
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.metroViewModel
@@ -124,7 +124,7 @@ internal fun BackupRoute(
             )
             if (state.busy) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(stringResource(Res.string.backup_creating))
+                Text(stringResource(Res.string.backup_working))
             }
             Text(
                 if (state.lastBackupAt ==

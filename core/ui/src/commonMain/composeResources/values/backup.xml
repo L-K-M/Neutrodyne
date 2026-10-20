@@ -6,7 +6,7 @@
     <string name="backup_section">Backup</string>
     <string name="backup_password_note">Passwords are stored unencrypted in the file</string>
     <string name="backup_create">Create backup</string>
-    <string name="backup_creating">Creating backup…</string>
+    <string name="backup_working">Working…</string>
     <string name="backup_last">Last backup: %1$s</string>
     <string name="backup_never">No backup yet</string>
     <string name="backup_saved">Backup saved (%1$s)</string>

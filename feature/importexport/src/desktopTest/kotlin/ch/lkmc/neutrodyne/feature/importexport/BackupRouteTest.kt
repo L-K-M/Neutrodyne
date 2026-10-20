@@ -2,6 +2,8 @@
 package ch.lkmc.neutrodyne.feature.importexport
 
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -14,19 +16,27 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.BackupError
+import ch.lkmc.neutrodyne.core.domain.ImportRepository
+import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.model.ImportFormat
+import ch.lkmc.neutrodyne.core.model.ImportOptions
+import ch.lkmc.neutrodyne.core.model.ImportSource
+import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeBackupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
@@ -37,20 +47,27 @@ import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class BackupRouteTest {
     private lateinit var locale: Locale
+    private lateinit var restoreViewModel: RestoreViewModel
+    private val viewModels = ViewModelStore()
     private val backups =
         FakeBackupRepository().apply {
             snapshotStatus.value =
@@ -59,7 +76,8 @@ class BackupRouteTest {
     private val imports = FakeImportRepository()
     private val navigator = RecordingAppNavigator()
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val vm = BackupViewModel(backups, imports, FakeSettingsRepository(), appScope)
+    private val vm =
+        BackupViewModel(backups, imports, FakeSettingsRepository(), appScope).also { viewModels.put("backup", it) }
     private val host = SnackbarHostState()
     private var target: String? = "file:///backup.zip"
     private var source: String? = null
@@ -97,11 +115,14 @@ class BackupRouteTest {
     }
 
     @AfterTest fun tearDown() {
+        viewModels.clear()
         appScope.cancel()
         Locale.setDefault(locale)
     }
 
-    private fun androidx.compose.ui.test.ComposeUiTest.content() {
+    private fun androidx.compose.ui.test.ComposeUiTest.content(
+        block: @Composable () -> Unit = { if (visible.value) BackupRoute(viewModel = vm) },
+    ) {
         setContent {
             CompositionLocalProvider(
                 LocalLifecycleOwner provides Owner(),
@@ -113,7 +134,7 @@ class BackupRouteTest {
                 NeutrodyneTheme(
                     AppearancePrefs(),
                     SystemUiState.DEFAULT,
-                ) { if (visible.value) BackupRoute(viewModel = vm) }
+                ) { block() }
             }
         }
         waitForIdle()
@@ -207,6 +228,76 @@ class BackupRouteTest {
             // The shared export warning supplies its existing German translation.
             assertTrue(saves.isEmpty())
         }
+
+    @Test fun failedProgressShowsRecoveryBeforeTheRestoreCollectorSeesTheRequest() =
+        runComposeUiTest {
+            restoreContent(prepareRestore(ImportState.CANCELLED) { RestoreProgress.Failed(it, BackupError.Io) })
+            onNodeWithText("Couldn’t read or write the backup file.").assertExists()
+            onNodeWithText("Choose another file").assertExists()
+            onNodeWithText("Merge").assertDoesNotExist()
+        }
+
+    @Test fun finishedProgressDoesNotReopenSelectionBeforeTheImportCollectorSeesCompletion() =
+        runComposeUiTest {
+            restoreContent(prepareRestore(ImportState.PREVIEW) { RestoreProgress.Finished(it, auto = false) })
+            onNodeWithText("Merge").assertDoesNotExist()
+            onNodeWithText("Restore").assertDoesNotExist()
+            onNodeWithText("terminal-report").assertDoesNotExist()
+        }
+
+    @Test fun failedNewerFormatProgressOffersUpdatesBeforeTheRestoreCollectorCatchesUp() =
+        runComposeUiTest {
+            restoreContent(
+                prepareRestore(ImportState.CANCELLED) { RestoreProgress.Failed(it, BackupError.NewerFormat(2)) },
+            )
+            onNodeWithText("Check for updates").assertExists()
+            onNodeWithText("Choose another file").assertExists()
+            onNodeWithText("Merge").assertDoesNotExist()
+        }
+
+    private suspend fun prepareRestore(
+        state: ImportState,
+        progress: (Long) -> RestoreProgress,
+    ): ImportUiState {
+        imports.createFormat = ImportFormat.NEUTRODYNE_BACKUP
+        val id = (imports.create(ImportSource("file:///restore.zip", "restore.zip")) as Outcome.Success).value
+        val session =
+            imports.sessions.value
+                .getValue(id)
+                .copy(state = state, options = ImportOptions(restoreRequestedAt = 20L))
+        imports.sessions.value = imports.sessions.value + (id to session)
+        backups.inspectOutcome = Outcome.Success(restorePreview())
+        backups.restoreProgress.value = progress(id)
+        val gate = CompletableDeferred<Unit>()
+        // The import collector can observe persistence before the restore VM's separate collector.
+        val delayed =
+            object : ImportRepository by imports {
+                override fun observeSession(sessionId: Long) =
+                    flow {
+                        gate.await()
+                        emitAll(imports.observeSession(sessionId))
+                    }
+            }
+        restoreViewModel = RestoreViewModel(id, backups, delayed, FakePlaybackController(), appScope)
+        viewModels.put("restore", restoreViewModel)
+        return ImportUiState(loaded = true, session = session)
+    }
+
+    private fun androidx.compose.ui.test.ComposeUiTest.restoreContent(state: ImportUiState) {
+        content {
+            RestoreSessionRoute(
+                state.session!!.id,
+                state,
+                onCancel = { error("Terminal restore must not offer cancellation") },
+                report = { Text("terminal-report") },
+                providedViewModel = restoreViewModel,
+            )
+        }
+        waitUntil { !restoreViewModel.uiState.value.loading && restoreViewModel.uiState.value.progress != null }
+        waitForIdle()
+        assertFalse(restoreViewModel.uiState.value.requested)
+        assertNull(restoreViewModel.uiState.value.error)
+    }
 
     private class Owner : LifecycleOwner {
         override val lifecycle =

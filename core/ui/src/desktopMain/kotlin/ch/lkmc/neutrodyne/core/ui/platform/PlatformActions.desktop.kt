@@ -26,8 +26,8 @@ import kotlin.coroutines.resumeWithException
  * The desktop [PlatformActions] (08 Modules). `NeutrodyneWindow` calls this with the
  * `LinuxDesktopPortal` bound in `DesktopAppGraph` (null off Linux) so the Linux file chooser and
  * "Show in Files" use the D-Bus portal without `:core:ui` depending on dbus-java. URLs go through
- * `java.awt.Desktop`; file dialogs use the OS dialogs (`FileDialog` on macOS, `JFileChooser` on
- * Windows, the portal on Linux where available — 11 Desktop downloads and storage).
+ * `java.awt.Desktop`; folder selection uses `FileDialog` on macOS and `JFileChooser` on Windows.
+ * Linux uses the portal when available, otherwise `JFileChooser` (11 Desktop downloads and storage).
  *
  * File-open uses `FileDialog` on every desktop OS; [FilePicker.openFile] supplies no filter
  * so providers without an OPML mapping still show every supported import format.
