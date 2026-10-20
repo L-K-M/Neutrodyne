@@ -82,7 +82,8 @@ internal data class TransferMetadata(
 
 internal interface ProgressSink {
     /** Await the engine's token-owned DOWNLOADING commit before writing the first accepted byte.
-     * The engine writes this once per claim; subsequent in-attempt restarts remain in memory. */
+     * The engine commits first acceptance and changed representation/part-placement proof under the
+     * current state and token. Equal proof, including after Restart, and byte ticks add no writes. */
     suspend fun started(metadata: TransferMetadata)
 
     fun bytes(

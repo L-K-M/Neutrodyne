@@ -376,6 +376,12 @@ internal class DownloadEngine(
         }
     }
 
+    private data class AcceptedProof(
+        val rootId: String,
+        val tempPath: String?,
+        val metadata: TransferMetadata,
+    )
+
     /** This mutable checkpoint belongs to one child. Retries never persist byte ticks. */
     private inner class Attempt(
         private var row: DownloadEntity,
@@ -388,6 +394,7 @@ internal class DownloadEngine(
         private var retries = 0
         private var restarts = 0
         private var restartBudgetExhausted = false
+        private var persistedProof: AcceptedProof? = null
 
         override suspend fun started(metadata: TransferMetadata) {
             row =
@@ -400,11 +407,15 @@ internal class DownloadEngine(
                     lastModified = metadata.lastModified,
                     resolvedItag = metadata.resolvedItag,
                 )
-            if (state == DownloadState.RESOLVING) {
+            // Offset is live progress, not representation identity. Keep the last committed proof
+            // separately: Restart clears row's validators even when the next response is identical.
+            val proof = AcceptedProof(row.rootId, row.tempPath, metadata.copy(offset = 0))
+            if (proof != persistedProof) {
                 // SQLite may commit before cancellation reaches the suspended DAO caller.
                 withContext(NonCancellable) {
                     if (dao.transition(row, state, token) == 0) throw CancellationException("Stale download owner")
                     state = DownloadState.DOWNLOADING
+                    persistedProof = proof
                 }
             }
             bytes(metadata.offset, metadata.total)
