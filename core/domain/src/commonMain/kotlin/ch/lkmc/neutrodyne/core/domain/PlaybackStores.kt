@@ -81,7 +81,8 @@ data class Departure(
 /**
  * Main-safe position persistence. Writes serialize and return after commit; failures propagate
  * for caller retry. Milliseconds/now are non-negative wall-clock values where timestamps apply.
- * Regular saves never replace non-zero with zero and reject playedAt >= pinStartedAt; reset bypasses the zero guard.
+ * Regular saves never replace non-zero with zero and are rejected when the stored
+ * `episode_state.playedAt >= pinStartedAt`; reset bypasses the zero guard.
  */
 interface PositionStore {
     fun observe(episodeId: Long): Flow<StoredPosition?>
