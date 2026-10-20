@@ -99,6 +99,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
@@ -185,7 +186,7 @@ public fun NeutrodyneRoot(
                                         collapseRequest++
                                         navigation.open(FeedsKey, emptyList())
                                     } else {
-                                        snackbarHost.showSnackbar(getString(Res.string.write_failed))
+                                        launch { snackbarHost.showSnackbar(getString(Res.string.write_failed)) }
                                     }
                                 }
 

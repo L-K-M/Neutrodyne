@@ -564,6 +564,7 @@
     <string name="import_filter_not_imported">Not imported</string>
     <string name="import_filter_attention">Needs attention</string>
     <string name="import_search">Search title or host</string>
+    <string name="import_load_error">Couldn&apos;t load the import</string>
     <string name="import_select_none">Select none</string>
     <string name="import_subscribe">Subscribe</string>
     <plurals name="import_subscribe_count">

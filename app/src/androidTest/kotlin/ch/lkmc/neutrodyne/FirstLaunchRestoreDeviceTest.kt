@@ -46,8 +46,8 @@ import java.util.concurrent.TimeUnit
  * `NEUTRODYNE_BACKUP` session and enqueueing `backup-restore`, the real `RestoreWorker`/
  * `RestoreRunner` MERGE of HISTORY and UP_NEXT, and the snapshot's retirement.
  *
- * Caveats kept honest by construction: without `firstLaunchSeed=restore` every case here skips
- * via [assumeTrue] (a skip is never counted as a pass — the seeded scope `first-launch-restore`
+ * Caveats kept honest by construction: without `firstLaunchSeed=restore` the runner deselects
+ * this class; [assumeTrue] also guards execution (neither is a pass; the seeded scope `first-launch-restore`
  * in `nightly.yml` is the authority); a `RETRY` or a hang can never be misreported (only a
  * `SUCCEEDED` `WorkInfo` carrying a `restore-session-{id}` tag ends the wait); the native fetch
  * that follows a commit may legitimately advance the session to `FETCHING`/`DONE`, so the

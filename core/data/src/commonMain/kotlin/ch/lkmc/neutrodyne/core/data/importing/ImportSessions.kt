@@ -154,7 +154,7 @@ internal class ImportSessions(
             } else {
                 // The receiver no longer awaits this result. The application owns both
                 // persistence and its completion notice, even if the activity is destroyed.
-                appScope.launch(io) { postDetachedCompletion(deferred) }
+                appScope.launch(io) { postDetachedCompletion(deferred, staged.path) }
             }
             throw e
         } catch (_: Exception) {
@@ -162,9 +162,18 @@ internal class ImportSessions(
             Outcome.Failure(ImportError.Storage)
         }
 
-    private suspend fun postDetachedCompletion(deferred: Deferred<Outcome<Long, ImportError>>) {
+    private suspend fun postDetachedCompletion(
+        deferred: Deferred<Outcome<Long, ImportError>>,
+        stagedPath: Path,
+    ) {
+        val outcome =
+            suspendRunCatching { deferred.await() }.getOrElse { error ->
+                payloads.delete(stagedPath)
+                Log.w("ImportSessions", error) { "Detached import staging failed" }
+                return
+            }
+        val result = outcome as? Outcome.Success ?: return
         suspendRunCatching {
-            val result = deferred.await() as? Outcome.Success ?: return@suspendRunCatching
             val dao = db.importDao()
             val session = dao.sessionById(result.value) ?: return@suspendRunCatching
             if (session.state != ImportState.PREVIEW) return@suspendRunCatching

@@ -3,6 +3,9 @@
 package ch.lkmc.neutrodyne.feature.importexport
 
 import androidx.lifecycle.ViewModelStore
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.testing.asPagingSourceFactory
 import androidx.paging.testing.asSnapshot
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -52,6 +55,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -420,7 +424,7 @@ class ImportViewModelTest : MainDispatcherTest() {
 
     @Test fun acceptedRenameAndConfirmSurviveClearingTheViewModel() =
         runTest {
-            val id = seed()
+            val id = seed(sessionProposals = listOf(proposal("tech")))
             val gate = CompletableDeferred<Unit>()
             val repo =
                 object : ImportRepository by imports {
@@ -1017,6 +1021,37 @@ class ImportViewModelTest : MainDispatcherTest() {
             assertTrue(imports.calls.none { it.startsWith("setSelected") || it.startsWith("updateOptions") })
         }
 
+    @Test fun failedNameCheckDoesNotReturnSaveSuccess() =
+        runTest {
+            val broken =
+                object : ch.lkmc.neutrodyne.core.domain.GroupRepository by groups {
+                    override suspend fun checkName(
+                        name: String,
+                        excludingGroupId: Long?,
+                    ): Outcome<String, GroupError> = error("check failed")
+                }
+            val id = seed()
+            val vm =
+                ImportViewModel(
+                    id,
+                    imports,
+                    broken,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
+            advanceUntilIdle()
+            assertFailsWith<IllegalStateException> { vm.setTargetGroupName("News") }
+            assertNull(session(id)!!.options.targetGroupName)
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                vm.messages.value
+                    .single()
+                    .text,
+            )
+        }
+
     @Test fun theSearchNarrowsThePagedRows() =
         runTest {
             val id =
@@ -1034,6 +1069,55 @@ class ImportViewModelTest : MainDispatcherTest() {
             val rows = vm.items.take(1).asSnapshot()
 
             assertEquals(listOf(0), rows.map { it.ordinal })
+        }
+
+    @Test fun searchIncludesFuturePagesAndRepeatedQueriesKeepOriginalOrdinals() =
+        runTest {
+            val rows =
+                (0 until 320).map { ordinal ->
+                    item(
+                        ordinal,
+                        title = if (ordinal == 15 || ordinal == 275) "Distant Needle $ordinal" else "Show $ordinal",
+                        host = if (ordinal == 310) "needle.example.com" else "host$ordinal.example.com",
+                    )
+                }
+            val id = seed(sessionItems = rows)
+            val repo =
+                object : ImportRepository by imports {
+                    override fun pagedItems(
+                        sessionId: Long,
+                        filter: ImportItemFilter,
+                    ) = Pager(
+                        PagingConfig(pageSize = 40, initialLoadSize = 80, enablePlaceholders = false),
+                        pagingSourceFactory = rows.asPagingSourceFactory(),
+                    ).flow
+                }
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
+            advanceUntilIdle()
+            val initial = vm.items.take(1).asSnapshot()
+            assertTrue(initial.size < 275, "The distant matches must start beyond the initial load")
+
+            vm.setQuery("NEEDLE")
+            advanceUntilIdle()
+            val matches = vm.items.take(1).asSnapshot { appendScrollWhile { true } }
+            assertEquals(listOf(15, 275, 310), matches.map { it.ordinal })
+            vm.setQuery("needle.example.com")
+            advanceUntilIdle()
+            assertEquals(
+                listOf(310),
+                vm.items
+                    .take(1)
+                    .asSnapshot()
+                    .map { it.ordinal },
+            )
+            vm.setQuery("missing")
+            advanceUntilIdle()
+            assertEquals(emptyList(), vm.items.take(1).asSnapshot())
+            vm.setQuery("")
+            advanceUntilIdle()
+            val restored = vm.items.take(1).asSnapshot { appendScrollWhile { true } }
+            assertEquals(rows, restored)
         }
 
     @Test fun theReportPagesAllRowsAfterAnOnlyNewPreview() =

@@ -53,6 +53,7 @@ class YtxSelfTestInstrumentedTest {
     }
 
     @Test
+    @SupportedPythonDevice
     fun selftestAnswersThroughIYtxEngineInYtx() {
         val engine = bind()
 
