@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.download.api.LocalMediaReadiness
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoMap
@@ -171,6 +172,7 @@ object AndroidDownloadBindings {
         opener: DatabaseOpener,
         network: NetworkMonitor,
         charging: DownloadChargingMonitor,
+        capabilities: YouTubeCapabilitiesSource,
         visibility: DownloadAppVisibility,
         queue: DownloadWorkQueue,
         runtime: Lazy<AndroidDownloadRuntime>,
@@ -193,7 +195,13 @@ object AndroidDownloadBindings {
             },
             conditions = {
                 val status = network.status.value
-                Conditions(status.isConnected, !status.isMetered, charging.charging.value, false, status.isValidated)
+                Conditions(
+                    status.isConnected,
+                    !status.isMetered,
+                    charging.charging.value,
+                    capabilities.capabilities.value.downloads,
+                    status.isValidated,
+                )
             },
             visible = visibility::isVisible,
             backgroundLimited = { backgroundLimited(application) },
