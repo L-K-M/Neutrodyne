@@ -708,9 +708,12 @@ The opt-in `nightly.yml` scopes `bmgr-api29-probe` (focused stock API 29 leg) an
 `bmgr-legacy-negative` (closed API 28/29 matrix) build SDK-only synthetic
 `ch.lkmc.neutrodyne.transportprobe.*` APKs and collect stock LocalTransport
 capability evidence with `scripts/ci/bmgr-api29-probe.py`. A green diagnostic can
-record `PREFLIGHT_REJECTED`/`REJECTED` — the observed controlled refusal of
-flagged packages, which requires a verified same-phase control — or BLOCKED; it
-is never M3 acceptance, real-app archive/restore, encryption or D2D transfer
+record the controlled refusal of flagged packages — `PREFLIGHT_REJECTED` on
+API 29 (its `bmgr` supports `--monitor` and reports the `ERROR_PREFLIGHT`
+event) or `PACKAGE_REJECTED` on API 28 (its `bmgr` has no `--monitor`, so the
+refusal is measured in the bare-argv output of its `DOWNLOAD_CACHE`-bound
+dataset) — each requiring a verified same-phase control, or BLOCKED; it is
+never M3 acceptance, real-app archive/restore, encryption or D2D transfer
 proof, and never a claim that legacy app backup support was dropped. No
 scheduled/full job or production backup rule is changed.
 Offline `verify` rechecks retained TARs without extraction; `result.json` separates

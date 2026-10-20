@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Unlicense
 """SDK-only synthetic build, disposable hosted legacy-transport probe, offline verifier.
 
-Two closed profiles measure the stock API 28/29 LocalTransport refusal: a
-PREFLIGHT_REJECTED case needs a verified same-phase control, exact fixture
-preparation, a fresh transport path, the named BACKUP_MANAGER_POLICY /
-ERROR_PREFLIGHT event and package rejection with overall Success, and missing
-or zero payload receipts. An observed rejection is not a successful encrypted
-backup, not an unbounded unsupported claim, and never M3 acceptance. Never
-invokes Gradle; probe mode refuses local hosts and non-owned devices.
+Two closed profiles measure the stock API 28/29 LocalTransport refusal: API29's
+PREFLIGHT_REJECTED needs the named ERROR_PREFLIGHT event and package rejection;
+API28's bmgr has no --monitor, so PACKAGE_REJECTED needs the closed bare-arg
+output (preamble, @pm@ ack, named rejection, overall Success) under the
+download-cache-bound dataset. Both need a verified control, fresh path and
+missing/zero payload. A refusal is never a successful encrypted backup, never
+an unbounded claim, never M3 acceptance. Never Gradle; probe refuses local hosts.
 """
 import hashlib
 import io
@@ -32,15 +32,18 @@ EXPECTED = {"files/allowed/payload": PAYLOAD, "files/other/excluded": b"excluded
             "no_backup/excluded": b"excluded-no-backup-canary\n"}
 LIMIT = 4 * 1024 * 1024
 MIN_SDK = "28"
-# Closed legacy profiles only: API28's transport is framework-owned (no standalone
-# service/APK guaranteed) under the old name and cache dataset; API29's is the
-# installed com.android.localtransport package under its app-private files path.
+# Closed legacy profiles: API28's transport is framework-owned (no standalone
+# service/APK guaranteed) with a DOWNLOAD_CACHE-bound dataset and bare bmgr argv
+# (no --monitor); API29's is the installed package under app-private files.
+CACHE_ROOTS = ("/cache", "/data/cache")
 PROFILES = {
     "api28": {
         "env": "BMGR_DISPOSABLE_API28", "sdk": "28", "avd": "nd-bmgr-api28-probe",
         "transport": "android/com.android.internal.backup.LocalTransport",
-        "dataset": "/cache/backup/1/_full/", "image": "system-images/android-28/default/x86_64",
+        "dataset": None, "suffix": "/backup/1/_full/",
+        "image": "system-images/android-28/default/x86_64",
         "service": None, "framework": "/system/framework/framework.jar",
+        "backupnow": ["bmgr", "backupnow"],
     },
     "api29": {
         "env": "BMGR_DISPOSABLE_API29", "sdk": "29", "avd": "nd-bmgr-api29-probe",
@@ -48,9 +51,18 @@ PROFILES = {
         "dataset": "/data/user/0/com.android.localtransport/files/1/_full/",
         "image": "system-images/android-29/default/x86_64",
         "service": "com.android.localtransport/.LocalTransportService", "framework": None,
+        "backupnow": ["bmgr", "backupnow", "--monitor"],
     },
 }
 REJECTION = "Transport rejected package because it wasn't able to process it at the time"
+
+
+def cache_root(text, code):
+    """A failed or empty capture cannot establish a default storage location."""
+    lines = text.splitlines()
+    if code != 0 or len(lines) != 1 or lines[0] not in CACHE_ROOTS:
+        raise ValueError("Unknown/ambiguous download cache root")
+    return lines[0]
 
 
 def digest(data):
@@ -90,8 +102,7 @@ def command(folder, name, args, timeout=60, required=True):
 
 
 def prepare_fixture(call, variant):
-    # NoDisplay finishes in onCreate without a window. Readiness belongs to its files,
-    # not am start -W; launch acknowledgement alone can precede the writes.
+    # NoDisplay finishes in onCreate; readiness is its files, not am start -W.
     call("launch-" + variant, "shell", "am", "start", "-n",
          PREFIX + variant + "/" + PREFIX[:-1] + ".ProbeActivity", timeout=15)
     deadline, attempt = time.monotonic() + 30, 0
@@ -222,17 +233,19 @@ def verify_archive(raw, package, certificate, platform, version):
     return "PAYLOAD" if base + "f/allowed/payload" in seen else "EMPTY"
 
 
-def preflight_rejected(folder, package, version, text):
-    """Only the observed stock refusal: fresh path, the named monitor event and
-    known package rejection with overall Success, and missing/zero payload.
-    Arbitrary transport, agent, timeout or tampered output is not a refusal."""
+def payload_absent(folder):
     size = json.loads((folder / "size.json").read_text())
+    missing = size["exit"] != 0 and "No such file" in (folder / "size.err").read_text()
+    empty = size["exit"] == 0 and (folder / "size.out").read_text().strip() == "0"
+    return not (folder / "transport.tar").exists() and (missing or empty)
+
+
+def preflight_rejected(folder, package, version, text):
+    """Only the observed refusal: fresh path, named event, rejection, Success."""
     event = "=> Event{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = " + package + "(v" + version + ")}"
     result = "Package " + package + " with result: "
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    missing = size["exit"] != 0 and "No such file" in (folder / "size.err").read_text()
-    empty = size["exit"] == 0 and (folder / "size.out").read_text().strip() == "0"
-    return (not (folder / "transport.tar").exists() and (missing or empty)
+    return (payload_absent(folder)
             and [line for line in lines if line.startswith("=> Event{")] == [event]
             and [line for line in lines if line.startswith("Backup finished with result: ")]
             == ["Backup finished with result: Success"]
@@ -240,14 +253,35 @@ def preflight_rejected(folder, package, version, text):
             == ["Package @pm@ with result: Success", result + REJECTION])
 
 
-def measurement(folder, package, certificate, platform, version, control, positive):
+def api28_result(text, package):
+    """API28's closed bare-arg output → (named result, finish) or None."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    progress = re.compile(re.escape("Package " + package + " with progress: ") + r"\d+/\d+")
+    if (len(lines) < 4 or not all(progress.fullmatch(line) for line in lines[2:-2])
+            or lines[:2] != ["Running incremental backup for 1 requested packages.",
+                             "Package @pm@ with result: Success"]
+            or not lines[-2].startswith("Package " + package + " with result: ")
+            or not lines[-1].startswith("Backup finished with result: ")):
+        return None
+    return lines[-2].rsplit(": ", 1)[-1], lines[-1].rsplit(": ", 1)[-1]
+
+
+def measurement(folder, package, certificate, platform, version, control, positive, profile):
     try:
         fresh = json.loads((folder / "fresh.json").read_text())
         status = json.loads((folder / "backup.json").read_text())
         text = (folder / "backup.out").read_text()
         if fresh["exit"] != 0 or status["exit"] != 0:
             return "ERROR"
-        if preflight_rejected(folder, package, version, text):
+        if profile == "api28":
+            shape = api28_result(text, package)
+            if shape is None or shape[1] != "Success":
+                return "ERROR"
+            if shape[0] == REJECTION:
+                if not payload_absent(folder) or package == PREFIX + "control":
+                    return "ERROR"
+                return "PACKAGE_REJECTED" if control else "UNAVAILABLE"
+        elif preflight_rejected(folder, package, version, text):
             if package == PREFIX + "control":
                 return "ERROR"
             return "PREFLIGHT_REJECTED" if control else "UNAVAILABLE"
@@ -278,7 +312,8 @@ def collect_cases(profile):
             item = inputs["fixtures"][variant]
             folder = OUT / phase / variant
             verdict = measurement(folder, item["package"], item["certificate"], platform,
-                                  item["version"], variant == "control" or control, variant == phase)
+                                  item["version"], variant == "control" or control,
+                                  variant == phase, profile)
             if variant == "control":
                 control = verdict == "CONTROL"
             observations.append({"phase": phase, "variant": variant, "status": verdict,
@@ -287,9 +322,8 @@ def collect_cases(profile):
             if archive.exists() and archive.stat().st_size <= LIMIT:
                 observations[-1]["archiveSha256"] = digest(archive.read_bytes())
     complete = all(o["status"] not in ("ERROR", "UNAVAILABLE") for o in observations)
-    # OBSERVED = a protected payload actually crossed; REJECTED = every controlled
-    # protected observation was a measured refusal or gated absence — never an
-    # unsupported claim and never application acceptance.
+    # OBSERVED = a protected payload crossed; REJECTED = controlled refusals or
+    # gated absences — never an unsupported claim, never acceptance.
     capability = "OBSERVED" if any(o["status"] == "OBSERVED" for o in observations) else "REJECTED"
     return {"source": inputs["source"], "inputs": "inputs.json", "image": "image", "profile": profile,
             "collection": "COMPLETE" if complete else "ERROR",
@@ -408,6 +442,37 @@ def receipt_problem(result):
                 return "framework"
         except (OSError, ValueError, KeyError):
             return "framework"
+    dataset = profile["dataset"]
+    if dataset is None:
+        try:
+            capture = json.loads((OUT / "download-cache.json").read_text())
+            argv = capture.get("argv")
+            if not isinstance(argv, list) or argv[-3:] != ["shell", "printenv", "DOWNLOAD_CACHE"]:
+                return "download-cache"
+            dataset = cache_root((OUT / "download-cache.out").read_text(), capture["exit"]) + profile["suffix"]
+        except (OSError, ValueError, KeyError):
+            return "download-cache"
+    for phase in ("cse", "d2d"):
+        for variant in VARIANTS:
+            part, path = OUT / phase / variant, dataset + PREFIX + variant
+            for name, tail in (("fresh", ["shell", "test", "!", "-e", path]),
+                               ("backup", ["shell", *profile["backupnow"], PREFIX + variant]),
+                               ("size", ["shell", "stat", "-c", "%s", path])):
+                try:
+                    argv = json.loads((part / (name + ".json")).read_text())["argv"][-len(tail):]
+                except (OSError, ValueError, KeyError):
+                    argv = []
+                if argv != tail:
+                    return phase + "/" + variant + "/" + name
+            if (part / "transport.tar").is_file():
+                try:
+                    pull = json.loads((part / "transport.json").read_text())
+                    argv = pull.get("argv")
+                    if (pull["exit"] != 0 or not isinstance(argv, list)
+                            or argv[-3:] != ["exec-out", "cat", path]):
+                        return phase + "/" + variant + "/transport"
+                except (OSError, ValueError, KeyError):
+                    return phase + "/" + variant + "/transport"
     return None
 
 
@@ -417,7 +482,7 @@ def evaluate():
         result = json.loads((OUT / "result.json").read_text())
         inputs = (OUT / "inputs.json").read_bytes()
         built = json.loads((OUT / "build.json").read_text())
-        # Older failed captures used error.json; never certify those as complete.
+        # Older failed captures used error.json; never certify those.
         if (OUT / "error.json").exists() or result.get("error") or result["collection"] != "COMPLETE" or result["cleanup"] != "COMPLETE":
             raise ValueError("Failed/incomplete run or stale error")
         if cleanup_failure():
@@ -459,6 +524,7 @@ def probe():
     def shell(name, *args, **kw):
         return call(name, "shell", *args, **kw)
     old, installed, transport, safe, changed = {}, [], None, False, False
+    dataset = profile["dataset"]
     error = None
     save(OUT / "result.json", {"profile": selected[0], "collection": "RUNNING",
                                "cleanup": "PENDING", "acceptance": "NOT_TESTED"})
@@ -513,6 +579,9 @@ def probe():
             sha = shell("transport-framework-sha", "sha256sum", profile["framework"])
             save(OUT / "image/framework.json",
                  {"path": profile["framework"], "size": int(size), "sha256": sha.split()[0]})
+            raw = shell("download-cache", "printenv", "DOWNLOAD_CACHE", required=False)
+            code = json.loads((OUT / "download-cache.json").read_text())["exit"]
+            dataset = cache_root(raw, code) + profile["suffix"]
         for key in ("backup_enabled", "backup_auto_restore", "backup_local_transport_parameters"):
             old[key] = shell(key, "settings", "get", "secure", key)
         listed = shell("transports", "bmgr", "list", "transports")
@@ -543,9 +612,9 @@ def probe():
             shell(phase + "-before", "dumpsys", "backup")
             for variant in VARIANTS:
                 folder, pkg = OUT / phase / variant, PREFIX + variant
-                path = profile["dataset"] + pkg
+                path = dataset + pkg
                 shell("fresh", "test", "!", "-e", path, folder=folder)
-                shell("backup", "bmgr", "backupnow", "--monitor", pkg, folder=folder, required=False, timeout=120)
+                shell("backup", *profile["backupnow"], pkg, folder=folder, required=False, timeout=120)
                 size = shell("size", "stat", "-c", "%s", path, folder=folder, required=False)
                 if size.isdecimal() and 0 < int(size) <= LIMIT:
                     call("transport", "exec-out", "cat", path, folder=folder)
@@ -572,8 +641,9 @@ def probe():
                           *([] if value == "null" else [value]), required=False)
                     shell("restored-" + key, "settings", "get", "secure", key, required=False)
             shell("restore-selection", "bmgr", "list", "transports", required=False)
-            for variant in VARIANTS:
-                shell("cleanup-empty-" + variant, "test", "!", "-e", profile["dataset"] + PREFIX + variant, required=False)
+            if dataset:
+                for variant in VARIANTS:
+                    shell("cleanup-empty-" + variant, "test", "!", "-e", dataset + PREFIX + variant, required=False)
     failed = cleanup_failure() if changed else "cleanup not reached"
     if safe:
         for name in ["final-backup", "logcat"] + (["final-service"] if profile["service"] else []):
