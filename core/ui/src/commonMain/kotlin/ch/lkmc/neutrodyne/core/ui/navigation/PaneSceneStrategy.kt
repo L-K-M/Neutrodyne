@@ -98,6 +98,19 @@ internal class PaneSceneStrategy(
             navigation.stack(tab).map { entryProvider(it, tab) }
         }
 
+    private fun isCurrentFocusScene(
+        key: PaneSceneKey,
+        target: PaneSnapshot,
+    ): Boolean {
+        if (key != activeKey || key.tab != currentTab) return false
+        val live = liveEntries()
+        // Window overlays own their focus. Default/non-pane scenes have no pane installation.
+        if (live.lastOrNull()?.metadata?.containsKey(NdSceneMetadata.KEY_OVERLAY) == true) return false
+        val scene = with(adaptive) { SceneStrategyScope<NavKey>().calculateScene(live) } ?: return false
+        // Allocation deliberately retains this scene's key; only changed pane owners make it outgoing.
+        return snapshot(scene.entries).tops == target.tops
+    }
+
     /** Only actual stack emissions advance anchors; predictive prefixes merely query them. */
     internal fun updateCurrent(
         adaptive: ListDetailSceneStrategy<NavKey>,
@@ -159,7 +172,16 @@ internal class PaneSceneStrategy(
             }
         val entering = if (key == activeKey && snapshot == render.snapshot) render.enteringRoles else emptySet()
 
-        return PaneScene(delegate, key, snapshot, claims, previous, entering) { activeKey }
+        return PaneScene(
+            delegate,
+            key,
+            snapshot,
+            claims,
+            previous,
+            entering,
+            { activeKey },
+            { isCurrentFocusScene(key, snapshot) },
+        )
     }
 
     private fun prepareEntry(entry: NavEntry<NavKey>): NavEntry<NavKey> {
@@ -286,6 +308,7 @@ private class PaneScene(
     override val previousEntries: List<NavEntry<NavKey>>,
     private val enteringRoles: Set<PaneRole>,
     private val activeKey: () -> PaneSceneKey?,
+    private val isCurrentFocusScene: () -> Boolean,
 ) : Scene<NavKey> {
     override val metadata: Map<String, Any> get() = delegate.metadata
 
@@ -300,8 +323,19 @@ private class PaneScene(
         SideEffect { owner?.navigationEventDispatcher?.isEnabled = active }
         val exiting = !active && LocalNavAnimatedContentScope.current.transition.targetState == EnterExitState.PostExit
 
+        // NavDisplay applies scenes after its transition effect. Capture here, before movable entries.
+        val focusOwner = LocalPaneFocusOwner.current
+        val focusModifier =
+            focusOwner?.let {
+                Modifier.paneFocusTransaction(it, it.capture(isCurrentFocusScene))
+            } ?: Modifier
         // These dispatchers seek native preview only; real completion is owned outside NavDisplay.
-        Box(Modifier.fillMaxSize().then(if (exiting) Modifier.clearAndSetSemantics {} else Modifier)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (exiting) Modifier.clearAndSetSemantics {} else Modifier)
+                .then(focusModifier),
+        ) {
             // A committed exit is no longer an accessible screen; a cancellable source remains active.
             CompositionLocalProvider(LocalPaneSceneMotion provides PaneSceneMotion(key, enteringRoles)) {
                 if (owner == null) {

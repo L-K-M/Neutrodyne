@@ -66,8 +66,13 @@ internal fun PaneFocusTransactionHost(
     installation: PaneFocusInstallation = owner.capture(),
     content: @Composable BoxScope.() -> Unit,
 ) {
-    Box(modifier.fillMaxSize().then(PaneHostElement(owner, installation)), content = content)
+    Box(modifier.fillMaxSize().paneFocusTransaction(owner, installation), content = content)
 }
+
+internal fun Modifier.paneFocusTransaction(
+    owner: PaneFocusOwner,
+    installation: PaneFocusInstallation,
+): Modifier = then(PaneHostElement(owner, installation))
 
 internal class PaneFocusOwner {
     private var root: PaneRootNode? = null
@@ -77,17 +82,23 @@ internal class PaneFocusOwner {
     private var current: PaneFocusInstallation? = null
     internal val hasFocus: Boolean get() = root?.let { it.isAttached && it.target.focusState.hasFocus } == true
 
-    internal fun capture(): PaneFocusInstallation {
+    internal fun capture(hostIsCurrent: () -> Boolean = { true }): PaneFocusInstallation {
         // No ledger, registration, save request or other side effect during speculative composition.
-        val entry = if (hasFocus) entries.singleOrNull { it.hasFocus && it.authorized() } else null
+        val entry = if (hostIsCurrent() && hasFocus) entries.singleOrNull { it.hasFocus && it.authorized() } else null
         val proposal = entry?.proposal(intentRevision)
         return PaneFocusInstallation(
             proposal,
             bindingRevision,
+            hostIsCurrent,
         )
     }
 
     internal fun install(installation: PaneFocusInstallation) {
+        // Retained outgoing/preview hosts must not supersede the current scene's installation.
+        if (!installation.hostIsCurrent()) {
+            installation.closed = true
+            return
+        }
         val fresh = installation.capturedBindingRevision == bindingRevision
         bindingRevision++
         current?.closed = true
@@ -109,7 +120,7 @@ internal class PaneFocusOwner {
         // The first boundary closes permission, including no loss, failed readiness and redirect.
         installation.closed = true
         val proposal = installation.proposal ?: return
-        if (!attached || !valid(proposal) || hasFocus || !proposal.entry.placed) return
+        if (!installation.hostIsCurrent() || !attached || !valid(proposal) || hasFocus || !proposal.entry.placed) return
         proposal.entry.restore()
     }
 
@@ -160,6 +171,7 @@ internal data class PaneFocusProposal(
 internal class PaneFocusInstallation(
     val proposal: PaneFocusProposal?,
     val capturedBindingRevision: Long,
+    val hostIsCurrent: () -> Boolean = { true },
 ) {
     internal var boundRevision: Long? = null
     internal var installed = false

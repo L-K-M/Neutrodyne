@@ -8,6 +8,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
@@ -101,7 +102,7 @@ public fun NeutrodyneNavHost(
     // The scene transitions share the pane-swap spec so reduced motion snaps both (see 08).
     val motionSpec = NeutrodyneMotion.navigation<IntOffset>()
 
-    PaneFocusTransactionHost(focusOwner, modifier, focusOwner.capture()) {
+    Box(modifier.fillMaxSize()) {
         SharedTransitionLayout {
             val sharedScope = this.takeIf { directive.maxHorizontalPartitions == 1 && !LocalReducedMotion.current }
             NavigationBackDispatch(panes, sharedScope) {

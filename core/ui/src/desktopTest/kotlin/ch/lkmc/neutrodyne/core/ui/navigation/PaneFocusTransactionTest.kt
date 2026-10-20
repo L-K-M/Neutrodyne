@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.ui.navigation
 
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -97,6 +98,12 @@ class PaneFocusTransactionTest {
 
     @Test fun reentrantRedirectIsTerminal() = verify(Scenario.Redirect)
 
+    @Test fun inactiveSceneHostCannotSupersedeTheCurrentInstall() = verify(Scenario.InactiveHost)
+
+    @Test fun sceneDepartureBeforeBindingRejectsTheCapture() = verify(Scenario.SceneBeforeBind)
+
+    @Test fun sceneDepartureAfterBindingRejectsTheGlobal() = verify(Scenario.SceneBeforeGlobal)
+
     private fun verify(scenario: Scenario) =
         runDesktopComposeUiTest(width = 1400, height = 900) {
             val fixture = Fixture(scenario)
@@ -107,7 +114,7 @@ class PaneFocusTransactionTest {
             }
             var captured: PaneFocusInstallation? = null
             runOnIdle {
-                captured = fixture.owner.capture()
+                captured = fixture.owner.capture { fixture.sceneCurrent }
                 if (scenario != Scenario.MissingCapture) assertNotNull(captured?.proposal)
                 fixture.ticket = captured
                 fixture.moved = scenario !in listOf(Scenario.NoLoss, Scenario.Superseded, Scenario.RetainedOutgoing)
@@ -137,6 +144,17 @@ class PaneFocusTransactionTest {
                                 assertTrue(captured?.installed == true)
                                 fixture.acquireOutside()
                                 fixture.manager.clearFocus()
+                            }
+                        }
+
+                        Scenario.SceneBeforeBind -> {
+                            fixture.sceneCurrent = false
+                        }
+
+                        Scenario.SceneBeforeGlobal -> {
+                            fixture.afterAttach = {
+                                assertTrue(captured?.installed == true)
+                                fixture.sceneCurrent = false
                             }
                         }
 
@@ -237,6 +255,7 @@ class PaneFocusTransactionTest {
                     Scenario.NoLoss,
                     Scenario.Reattach,
                     Scenario.Superseded,
+                    Scenario.InactiveHost,
                 )
             ) {
                 onNodeWithTag("a").assertIsFocused()
@@ -338,6 +357,9 @@ private enum class Scenario {
     MissingCapture,
     Unready,
     Redirect,
+    InactiveHost,
+    SceneBeforeBind,
+    SceneBeforeGlobal,
 }
 
 private class Fixture(
@@ -381,6 +403,7 @@ private class Fixture(
     var bGlobals = 0
     var globals = 0
     var redirect = false
+    var sceneCurrent = true
 
     fun acquireOutside() {
         outsideAcquired = outside.requestFocus()
@@ -456,6 +479,10 @@ private class Fixture(
                             key("original") { Column(placement) { entry() } }
                         }
                     }
+                }
+                if (scenario == Scenario.InactiveHost) {
+                    // A real sibling modifier installs after the current host, before layout dispatch.
+                    Box(Modifier.paneFocusTransaction(owner, owner.capture { false }))
                 }
             }
         }
