@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupProposal
+import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
@@ -436,7 +437,7 @@ internal class ImportViewModel
             get() =
                 (podcastId != null || kind == ImportItemKind.YOUTUBE) &&
                     reportSection() in FIXABLE_SECTIONS &&
-                    !(status == ImportItemStatus.FETCH_FAILED && errorDetail == "DEFERRED")
+                    !(status == ImportItemStatus.FETCH_FAILED && errorDetail == IMPORT_DEFERRED_DETAIL)
 
         private suspend fun performWrite(write: suspend () -> Unit): Boolean {
             val error =

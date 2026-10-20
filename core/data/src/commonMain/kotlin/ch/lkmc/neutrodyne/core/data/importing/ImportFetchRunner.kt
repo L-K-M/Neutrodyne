@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
+import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -481,7 +482,7 @@ internal class ImportFetchRunner(
             }
 
             is FeedOutcome.Deferred -> {
-                ImportItemStatus.FETCH_FAILED to DETAIL_DEFERRED
+                ImportItemStatus.FETCH_FAILED to IMPORT_DEFERRED_DETAIL
             }
 
             is FeedOutcome.Failed -> {
@@ -633,9 +634,6 @@ internal class ImportFetchRunner(
 
         /** 05 §7: a run that would start this close to the host deadline retries instead. */
         const val HOST_DEADLINE_MARGIN_MS = 30_000L
-
-        /** `errorDetail` of a `Deferred` outcome — 05 §8's "Will load later" bucket. */
-        const val DETAIL_DEFERRED = "DEFERRED"
 
         /** `errorDetail` of items the lane never fetched (exhaustion, a lost podcast row). */
         const val DETAIL_NOT_ATTEMPTED = "NOT_ATTEMPTED"
