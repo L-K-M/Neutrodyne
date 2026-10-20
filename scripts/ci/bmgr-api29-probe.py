@@ -63,6 +63,35 @@ def command(folder, name, args, timeout=60, required=True):
     return stdout.decode("utf-8", "replace").strip()
 
 
+def prepare_fixture(call, variant):
+    # NoDisplay finishes in onCreate without a window. Readiness belongs to its files,
+    # not am start -W; launch acknowledgement alone can precede the writes.
+    call("launch-" + variant, "shell", "am", "start", "-n",
+         PREFIX + variant + "/" + PREFIX[:-1] + ".ProbeActivity", timeout=15)
+    expected = {"files/allowed/payload": PAYLOAD, "files/other/excluded": b"excluded-files-canary\n",
+                "no_backup/excluded": b"excluded-no-backup-canary\n"}
+    deadline, attempt = time.monotonic() + 30, 0
+    while True:
+        ready = True
+        for path, data in expected.items():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Fixture preparation timed out: " + variant)
+            receipt = variant + "-" + path.replace("/", "-") + (f"-retry-{attempt}" if attempt else "")
+            call(receipt, "exec-out", "cat", "/data/user/0/" + PREFIX + variant + "/" + path,
+                 required=False, timeout=min(5, remaining))
+            status = json.loads((OUT / (receipt + ".json")).read_text())
+            if status["exit"] != 0 or (OUT / (receipt + ".out")).read_bytes() != data:
+                ready = False
+        if ready and time.monotonic() <= deadline:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Fixture preparation timed out: " + variant)
+        time.sleep(min(0.25, remaining))
+        attempt += 1
+
+
 def build():
     sdk = Path(os.environ["ANDROID_HOME"])
     bt, android = sdk / "build-tools/36.0.0", sdk / "platforms/android-37.0/android.jar"
@@ -343,13 +372,7 @@ def probe():
         for variant in VARIANTS:
             installed.append(PREFIX + variant)
             call("install-" + variant, "install", "--user", "0", str(OUT / (variant + ".apk")))
-            shell("launch-" + variant, "am", "start", "-W", "-n", PREFIX + variant + "/" + PREFIX[:-1] + ".ProbeActivity")
-            for path, data in {"files/allowed/payload": PAYLOAD, "files/other/excluded": b"excluded-files-canary\n",
-                               "no_backup/excluded": b"excluded-no-backup-canary\n"}.items():
-                receipt = variant + "-" + path.replace("/", "-")
-                call(receipt, "exec-out", "cat", "/data/user/0/" + PREFIX + variant + "/" + path)
-                if (OUT / (receipt + ".out")).read_bytes() != data:
-                    raise RuntimeError("Missing fixture bytes/canaries")
+            prepare_fixture(call, variant)
         for phase in ("cse", "d2d"):
             params = f"is_encrypted={'true' if phase == 'cse' else 'false'},is_device_transfer={'true' if phase == 'd2d' else 'false'},fake_encryption_flag=false"
             shell(phase + "-parameters", "settings", "put", "secure", "backup_local_transport_parameters", params)

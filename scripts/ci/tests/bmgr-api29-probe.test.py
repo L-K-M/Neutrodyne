@@ -37,6 +37,70 @@ class ProbeTest(unittest.TestCase):
     def setUpClass(cls):
         (ROOT / "build").mkdir(exist_ok=True)
 
+    def prepare_offline(self, folder, variant, read):
+        """Exercise real receipt/byte checks; subprocess and elapsed time are offline stubs."""
+        clock, reads = [0.0], []
+        expected = {"files/allowed/payload": p.PAYLOAD, "files/other/excluded": b"excluded-files-canary\n",
+                    "no_backup/excluded": b"excluded-no-backup-canary\n"}
+        def run(argv, capture_output, timeout):
+            self.assertEqual(["adb", "-s", "emulator-5554"], argv[:3])
+            if argv[3:6] == ["shell", "am", "start"]:
+                self.assertEqual(["-n", p.PREFIX + variant + "/" + p.PREFIX[:-1] + ".ProbeActivity"], argv[6:])
+                return p.subprocess.CompletedProcess(argv, 0, b"Starting: Intent\n", b"")
+            self.assertEqual(["exec-out", "cat"], argv[3:5])
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, min(5, 30 - clock[0]))
+            path = argv[5].removeprefix("/data/user/0/" + p.PREFIX + variant + "/")
+            reads.append(path)
+            code, data, elapsed = read(path, expected[path], len(reads))
+            clock[0] += min(elapsed, timeout)
+            if code == 124:
+                raise p.subprocess.TimeoutExpired(argv, timeout, output=data, stderr=b"read timeout")
+            return p.subprocess.CompletedProcess(argv, code, data, b"not ready" if code else b"")
+        def call(name, *args, timeout=60, required=True):
+            return p.command(folder, name, ["adb", "-s", "emulator-5554", *args], timeout, required)
+        def sleep(seconds):
+            clock[0] += seconds
+        with patch.object(p, "OUT", folder), patch.object(p.subprocess, "run", side_effect=run), \
+                patch.object(p.time, "monotonic", side_effect=lambda: clock[0]), patch.object(p.time, "sleep", side_effect=sleep):
+            p.prepare_fixture(call, variant)
+        return reads
+
+    def test_launch_has_no_window_wait_and_observes_all_exact_files(self):
+        for variant in p.VARIANTS:
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+                reads = self.prepare_offline(Path(tmp), variant, lambda path, data, n: (0, data, 0))
+                self.assertEqual(["files/allowed/payload", "files/other/excluded", "no_backup/excluded"], reads)
+
+    def test_not_ready_reads_require_another_complete_observation(self):
+        failures = [("files/allowed/payload", 1, b""), ("files/other/excluded", 0, b"short"),
+                    ("no_backup/excluded", 0, b"x" * 26), ("files/allowed/payload", 1, p.PAYLOAD),
+                    ("no_backup/excluded", 124, b"")]
+        for path, code, bad in failures:
+            with self.subTest(path=path, code=code), tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+                folder = Path(tmp)
+                def read(current, expected, n):
+                    return (code, bad, 0) if current == path and n <= 3 else (0, expected, 0)
+                self.assertEqual(6, len(self.prepare_offline(folder, "control", read)))
+                name = "control-" + path.replace("/", "-")
+                self.assertEqual(code, json.loads((folder / (name + ".json")).read_text())["exit"])
+                self.assertEqual(bad, (folder / (name + ".out")).read_bytes())
+                self.assertTrue((folder / (name + "-retry-1.json")).is_file())
+
+    def test_never_ready_times_out_and_cannot_certify_a_complete_looking_run(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            folder = Path(tmp)
+            self.complete_raw_run(folder)
+            self.complete_cleanup(folder)
+            with self.assertRaisesRegex(RuntimeError, "Fixture preparation timed out") as failure:
+                self.prepare_offline(folder, "control", lambda path, data, n: (124, b"", 5))
+            with patch.object(p, "OUT", folder):
+                result = p.finish_run(str(failure.exception), "COMPLETE")
+                self.assertEqual("ERROR", result["collection"])
+                self.assertEqual("UNAVAILABLE", result["capability"])
+                self.assertEqual("NOT_TESTED", result["acceptance"])
+                self.assertEqual("ERROR", p.evaluate()["collection"])
+
     def complete_raw_run(self, folder):
         fixtures = {v: {"package": p.PREFIX + v, "certificate": CERT} for v in p.VARIANTS}
         (folder / "inputs.json").write_text(json.dumps({"source": "a" * 40, "fixtures": fixtures}))
