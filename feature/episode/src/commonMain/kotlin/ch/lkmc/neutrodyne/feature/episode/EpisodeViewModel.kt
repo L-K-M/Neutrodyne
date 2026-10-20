@@ -61,6 +61,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -119,9 +120,11 @@ public class EpisodeViewModel
         downloadController: DownloadController,
         liveStateSource: EpisodeLiveStateSource,
         externalOpenService: YouTubeExternalOpen,
-        capabilities: YouTubeCapabilitiesSource,
+        private val capabilities: YouTubeCapabilitiesSource,
+        private val engine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine,
     ) : ViewModel() {
         private val visibleDownloadIds = MutableStateFlow<Set<Long>>(emptySet())
+        private var screenPrewarm: kotlinx.coroutines.Job? = null
         private val userMessages = UserMessages()
         public val externalOpen =
             ExternalOpenHandler(
@@ -214,11 +217,23 @@ public class EpisodeViewModel
 
         public fun onVisible() {
             visibleDownloadIds.value = setOf(episodeId)
+            if (screenPrewarm != null) return
+            screenPrewarm =
+                viewModelScope.launch {
+                    val episode = episodes.observeEpisode(episodeId).filterNotNull().first()
+                    if (episode.sourceType == ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL &&
+                        !episode.externalMediaId.isNullOrBlank() && capabilities.capabilities.value.inAppPlayback
+                    ) {
+                        engine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+                    }
+                }
         }
 
         /** Release the window even while stateIn retains its upstream during the sharing grace. */
         public fun onHidden() {
             visibleDownloadIds.value = emptySet()
+            screenPrewarm?.cancel()
+            screenPrewarm = null
         }
 
         public fun onTimestamp(positionMs: Long) {

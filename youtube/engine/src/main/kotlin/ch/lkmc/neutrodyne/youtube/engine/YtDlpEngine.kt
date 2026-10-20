@@ -222,6 +222,7 @@ class YtDlpEngine(
                 EngineAvailability.NOT_IN_THIS_APK -> ExternalReason.NOT_IN_THIS_APK
                 EngineAvailability.DISABLED -> ExternalReason.DISABLED_BY_USER
                 EngineAvailability.FAILED -> ExternalReason.ENGINE_FAILED
+                EngineAvailability.NOT_YET_AVAILABLE -> ExternalReason.NOT_YET_AVAILABLE
                 else -> null
             }
         mutableStatus.value =

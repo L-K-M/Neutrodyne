@@ -38,6 +38,106 @@ import java.io.IOException
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
 class QueueProjectorTest {
+    @Test fun projectionPrewarmsOnOwnStartAndRenewedNextEligibility() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                f.caps.capabilities.value =
+                    f.caps.capabilities.value
+                        .copy(inAppPlayback = true)
+                val ids = f.seed(3, youtube = true)
+                f.attach()
+                f.start(ids)
+                awaitAdapter { f.player.ids() == ids }
+                assertEquals(listOf(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION), f.engine.prewarms)
+                f.fakeClock.advanceTime(50 * 60_000)
+                f.queue.move(ids[2], 0)
+                awaitAdapter { f.player.ids() == listOf(ids[0], ids[2], ids[1]) }
+                assertEquals(2, f.engine.prewarms.size)
+            } finally {
+                f.close()
+            }
+        }
+
+    @Test fun projectionEligibilityFlipsAndLocalChangesDoNotWarmMetadataOrRss() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                f.caps.capabilities.value =
+                    f.caps.capabilities.value
+                        .copy(inAppPlayback = true)
+                val ids = f.seed(2, youtube = true)
+                f.attach()
+                f.start(ids)
+                awaitAdapter { f.engine.prewarms.size == 1 }
+                val podcast = f.lookup.get(ids[0])!!.podcastId
+                f.db.podcastDao().setCustomTitle(podcast, "Renamed")
+                awaitAdapter {
+                    f.player.currentMediaItem!!
+                        .mediaMetadata.albumTitle
+                        .toString() == "Renamed"
+                }
+                assertEquals(1, f.engine.prewarms.size)
+                f.caps.capabilities.value =
+                    f.caps.capabilities.value
+                        .copy(inAppPlayback = false)
+                awaitAdapter { f.player.ids() == ids.take(1) }
+                assertNull(f.projector.preResolveWindow(ids[0])?.next)
+                assertEquals(1, f.engine.prewarms.size)
+                f.caps.capabilities.value =
+                    f.caps.capabilities.value
+                        .copy(inAppPlayback = true)
+                awaitAdapter { f.player.ids() == ids && f.engine.prewarms.size == 2 }
+                f.player.calls.clear()
+                f.local.publish(mapOf(ids[1] to "file:///completed.mp3"))
+                awaitAdapter { "remove" in f.player.calls && f.projector.preResolveWindow(ids[0])?.next == null }
+                assertEquals(2, f.engine.prewarms.size)
+                f.local.publish(emptyMap())
+                awaitAdapter { f.engine.prewarms.size == 3 }
+                assertEquals(
+                    ids[1],
+                    f.projector
+                        .preResolveWindow(ids[0])
+                        ?.next
+                        ?.episodeId,
+                )
+                val rss = f.seed(1).single()
+                f.start(listOf(rss))
+                awaitAdapter { f.player.ids() == listOf(rss, ids[1]) }
+                assertEquals(3, f.engine.prewarms.size)
+            } finally {
+                f.close()
+            }
+        }
+
+    @Test fun projectionWarmsOnlyAfterMatchedExternalWindowCommit() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                f.caps.capabilities.value =
+                    f.caps.capabilities.value
+                        .copy(inAppPlayback = true)
+                val ids = f.seed(3, youtube = true)
+                f.attach()
+                f.projector.beginOwnWrite()
+                f.sessions.commitStart(SessionStart(ids[0], null, ContextRetention.REPLACE, null, null), f.clock.now())
+                f.queue.addLast(listOf(ids[1]))
+                val initial = f.projector.prepareExternalStart(StartOutcome.Committed(f.sessions.virtualQueue(20), 0))
+                assertTrue(f.engine.prewarms.isEmpty())
+                f.player.setMediaItems(initial, 0, 0)
+                awaitAdapter { f.engine.prewarms.size == 1 }
+                f.projector.beginOwnWrite()
+                f.queue.addLast(listOf(ids[2]))
+                val added = f.projector.prepareExternalEdit(f.sessions.virtualQueue(20))
+                assertEquals(1, f.engine.prewarms.size)
+                f.player.addMediaItems(added.drop(initial.size))
+                awaitAdapter { f.engine.prewarms.size == 2 }
+                assertEquals(ids, f.player.ids())
+            } finally {
+                f.close()
+            }
+        }
+
     @Test fun completionAndDeletionReloadOnlyNonCurrentPins() =
         runTest {
             val f = AdapterFixture(this)

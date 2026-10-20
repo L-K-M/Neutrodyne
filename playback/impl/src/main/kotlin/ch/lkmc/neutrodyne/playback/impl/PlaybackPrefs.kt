@@ -36,6 +36,10 @@ internal data class PlaybackPrefsSnapshot(
     val youtubeQuality: YouTubeAudioQuality = YouTubeSettingKeys.AUDIO_QUALITY.default,
     val youtubeLevelling: Boolean = YouTubeSettingKeys.VOLUME_LEVELLING.default,
 ) {
+    fun audioPref(language: String) =
+        ch.lkmc.neutrodyne.youtube.api
+            .AudioPref(youtubeQuality, youtubeLevelling, preferredLanguage = language)
+
     companion object {
         val DEFAULT: PlaybackPrefsSnapshot =
             PlaybackPrefsSnapshot(

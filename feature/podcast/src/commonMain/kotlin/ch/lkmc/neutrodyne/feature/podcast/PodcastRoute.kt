@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
@@ -52,6 +53,10 @@ internal fun PodcastRoute(key: PodcastKey) {
         assistedMetroViewModel<PodcastViewModel, PodcastViewModel.Factory> {
             create(key.podcastId)
         }
+    LifecycleStartEffect(viewModel) {
+        viewModel.onVisible()
+        onStopOrDispose { viewModel.onHidden() }
+    }
     DownloadDialogs(viewModel.downloads)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()

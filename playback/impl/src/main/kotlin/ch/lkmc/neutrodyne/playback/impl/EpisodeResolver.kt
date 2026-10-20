@@ -99,12 +99,9 @@ internal class EpisodeResolver internal constructor(
     ) : this(index, localMedia, streamingCache, streams, capabilities, { health() }, clock, {
         prefs.awaitReady()
         val snapshot = prefs.current.value
-        AudioPref(
-            snapshot.youtubeQuality,
-            snapshot.youtubeLevelling,
-            preferredLanguage =
-                application.resources.configuration.locales[0]
-                    .language,
+        snapshot.audioPref(
+            application.resources.configuration.locales[0]
+                .language,
         )
     })
 
@@ -227,6 +224,14 @@ internal class EpisodeResolver internal constructor(
 
     fun needsYouTube(episodeId: Long): Boolean =
         index[episodeId]?.sourceType == SourceType.YOUTUBE_CHANNEL && localMedia.localUriOrNull(episodeId) == null
+
+    /** Non-reserving eligibility read; does not establish or modify a playback pin. */
+    fun remoteYouTubeVideoId(episodeId: Long): String? =
+        index[episodeId]
+            ?.takeIf {
+                it.sourceType == SourceType.YOUTUBE_CHANNEL && it.refusal(capabilities.capabilities.value) == null &&
+                    localMedia.localUriOrNull(episodeId) == null
+            }?.externalMediaId
 
     fun streamKind(episodeId: Long): StreamKind? =
         when (pins[episodeId]?.pin) {

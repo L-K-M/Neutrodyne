@@ -38,6 +38,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
@@ -78,6 +79,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -111,7 +113,8 @@ public class PodcastViewModel
         clock: Clock,
         downloadController: DownloadController,
         externalOpenService: YouTubeExternalOpen,
-        capabilities: YouTubeCapabilitiesSource,
+        private val capabilities: YouTubeCapabilitiesSource,
+        private val engine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine,
     ) : ViewModel() {
         init {
             viewModelScope.launch {
@@ -148,6 +151,26 @@ public class PodcastViewModel
             )
 
         private val visibleIds = MutableStateFlow<Set<Long>>(emptySet())
+        private var screenPrewarm: kotlinx.coroutines.Job? = null
+
+        public fun onVisible() {
+            if (screenPrewarm != null) return
+            screenPrewarm =
+                viewModelScope.launch {
+                    val podcast = detail.filterNotNull().first()
+                    if (podcast.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                        capabilities.capabilities.value.inAppPlayback
+                    ) {
+                        engine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+                    }
+                }
+        }
+
+        public fun onHidden() {
+            visibleIds.value = emptySet()
+            screenPrewarm?.cancel()
+            screenPrewarm = null
+        }
 
         /** Shown Undo snackbar's message id → the membership it may restore (05 Membership). */
         private val membershipUndos = mutableMapOf<Long, Long>()

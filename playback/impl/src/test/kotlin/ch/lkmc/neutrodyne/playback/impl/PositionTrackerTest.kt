@@ -22,6 +22,33 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
 class PositionTrackerTest {
+    @Test fun existingFiveSecondTickCapturesOnlyPlayingCurrentAndStopsAtDetach() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                val id = f.seed(1).single()
+                f.attach()
+                f.start(listOf(id), 81_000)
+                awaitAdapter { f.player.episodeIdOrNull() == id }
+                f.player.advancing = false
+                runCurrent()
+                advanceTimeBy(5_000)
+                runCurrent()
+                assertTrue(f.ticks.isEmpty())
+                f.player.advancing = true
+                advanceTimeBy(5_000)
+                runCurrent()
+                assertEquals(id, f.ticks.single().episodeId)
+                assertEquals(f.player.currentPosition, f.ticks.single().positionMs)
+                f.tracker.detach(null)
+                advanceTimeBy(5_000)
+                runCurrent()
+                assertEquals(1, f.ticks.size)
+            } finally {
+                f.close()
+            }
+        }
+
     @Test fun outgoingDiscontinuityUsesOldPositionBeforeNextListener() =
         runTest {
             val f = AdapterFixture(this)

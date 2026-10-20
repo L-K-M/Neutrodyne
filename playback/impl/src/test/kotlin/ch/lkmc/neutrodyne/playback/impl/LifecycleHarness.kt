@@ -282,6 +282,11 @@ internal class LifecycleHarness(
                 ch.lkmc.neutrodyne.core.testing
                     .FakeYouTubeAvailabilityRecorder()
             },
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeEngine(),
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeStreamResolver(),
+            app,
         )
 
     /** Build the actual Room ports and Media3 source graph after the real open gate. */
@@ -423,6 +428,9 @@ internal class LifecycleHarness(
                 ch.lkmc.neutrodyne.core.testing
                     .FakeLocalMediaReadiness(),
                 Provider { PlaybackTestStores.availability(db) },
+                port.control,
+                port.streams,
+                app,
             )
         }
 

@@ -40,6 +40,16 @@ class PortableYouTubePlayback(
         )
     val capabilities: YouTubeCapabilitiesSource get() = engine
     val streams: YouTubeStreamResolver get() = resolver
+    val control: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine get() = engine
+
+    /** A persisted compiled-store result, without performing interpreter preparation. */
+    fun compiledStore() {
+        store.preparation.value = ch.lkmc.neutrodyne.youtube.engine.EnginePreparation.COMPILED
+    }
+
+    fun prewarms(): List<ch.lkmc.neutrodyne.youtube.api.PrewarmReason> = transport.prewarms.toList()
+
+    fun preparations(): Int = store.preparations
 
     init {
         val hints =

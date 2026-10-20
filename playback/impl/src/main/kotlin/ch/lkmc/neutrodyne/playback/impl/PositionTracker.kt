@@ -32,6 +32,7 @@ internal class PositionTracker(
     private val applicationScope: CoroutineScope,
     private val streamSource: (Long) -> PositionSource = { PositionSource.STREAM },
     private val reportFailure: (Exception) -> Unit = { android.util.Log.w(TAG, "Position save failed") },
+    private val onTick: (PlaybackTick) -> Unit = {},
 ) : Player.Listener {
     private var player: Player? = null
     private var ticker: Job? = null
@@ -39,6 +40,7 @@ internal class PositionTracker(
     private var outgoing: PositionCapture? = null
     private var loadedId: Long? = null
     private var loadedDurationMs: Long? = null
+    private var occurrence = 0L
     var currentSinceMs: Long = 0
         private set
 
@@ -54,7 +56,13 @@ internal class PositionTracker(
                     val live = this@PositionTracker.player ?: break
                     val position = live.currentPosition.coerceAtLeast(0)
                     val duration = live.knownDuration()
-                    if (live.isPlaying) result(saver.onTick(position, duration, true))
+                    if (live.isPlaying) {
+                        val id = loadedId
+                        if (id != null && live.episodeIdOrNull() == id) {
+                            onTick(PlaybackTick(id, occurrence, position, duration ?: loadedDurationMs))
+                        }
+                        result(saver.onTick(position, duration, true))
+                    }
                 }
             }
     }
@@ -67,6 +75,7 @@ internal class PositionTracker(
         allowed: () -> Boolean = { true },
     ) {
         loadedId = episodeId
+        occurrence++
         loadedDurationMs = durationMs
         currentSinceMs = clock.now()
         saver.load(episodeId, currentSinceMs, streamSource(episodeId), replay, allowed)

@@ -71,6 +71,9 @@ internal class AdapterFixture(
         }
     val db = TestDb.inMemory(app, clock = clock)
     val caps = FakeYouTubeCapabilitiesSource()
+    val engine =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeEngine()
     val local = FakeLocalMediaIndex()
     val sessions = sessionStore(PlaybackTestStores.sessions(db, ProtocolOrderKeys, caps))
     val positions = PlaybackTestStores.positions(db)
@@ -106,6 +109,7 @@ internal class AdapterFixture(
         }
     val failures = mutableListOf<Exception>()
     val events = mutableListOf<PlaybackEvent>()
+    val ticks = mutableListOf<PlaybackTick>()
     val tracker =
         PositionTracker(
             PositionSaver(positions, clock, PlayedRule()),
@@ -122,6 +126,7 @@ internal class AdapterFixture(
                 }
             },
             failures::add,
+            onTick = ticks::add,
         )
     val settingsResolver = FakeEffectiveSettingsResolver()
     val settings = EffectivePlaybackSettings(settingsResolver, FakeScopeSettingsRepository(), FakeSettingsRepository())
@@ -138,6 +143,7 @@ internal class AdapterFixture(
             lookup,
             positions,
             caps,
+            engine,
             index,
             resolver,
             factory,

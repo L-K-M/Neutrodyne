@@ -46,6 +46,12 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeViewModelTest : MainDispatcherTest() {
+    private val engine =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeEngine()
+    private val caps =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeCapabilitiesSource()
     private val downloads =
         ch.lkmc.neutrodyne.core.testing
             .FakeDownloadController()
@@ -77,14 +83,67 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             externalOpenService =
                 ch.lkmc.neutrodyne.core.testing
                     .FakeYouTubeExternalOpen(),
-            capabilities =
-                ch.lkmc.neutrodyne.core.testing
-                    .FakeYouTubeCapabilitiesSource(),
+            capabilities = caps,
+            engine = engine,
         )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun screenPrewarmWaitsForIdentityAndRunsOncePerOpening() =
+        runTest {
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = true)
+            val model = viewModel()
+            model.onVisible()
+            runCurrent()
+            assertTrue(engine.prewarms.isEmpty())
+            episodes.episodes.value =
+                mapOf(
+                    5L to
+                        testEpisodeDetail(5).copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            externalMediaId = "abcdefghijk",
+                        ),
+                )
+            runCurrent()
+            model.onVisible()
+            episodes.episodes.value = episodes.episodes.value.mapValues { (_, row) -> row.copy(title = "Renamed") }
+            runCurrent()
+            assertEquals(listOf(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN), engine.prewarms)
+            model.onHidden()
+            model.onVisible()
+            runCurrent()
+            assertEquals(2, engine.prewarms.size)
+            model.onHidden()
+        }
+
+    @Test fun hiddenUnknownRssAndExternalScreensNeverPrewarm() =
+        runTest {
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = true)
+            val model = viewModel()
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            episodes.episodes.value = mapOf(5L to testEpisodeDetail(5))
+            runCurrent()
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = false)
+            episodes.episodes.value =
+                mapOf(
+                    5L to
+                        testEpisodeDetail(5).copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            externalMediaId = "abcdefghijk",
+                        ),
+                )
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            assertTrue(engine.prewarms.isEmpty())
+        }
 
     @Test fun progressWindowTracksVisibilityAndClearsDuringTheSharingGrace() =
         runTest {

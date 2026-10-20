@@ -514,6 +514,9 @@ class EpisodeScreenTest {
                 capabilities =
                     ch.lkmc.neutrodyne.core.testing
                         .FakeYouTubeCapabilitiesSource(),
+                engine =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeEngine(),
             )
         val owner =
             object : LifecycleOwner {

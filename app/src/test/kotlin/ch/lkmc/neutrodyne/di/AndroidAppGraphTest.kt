@@ -216,6 +216,14 @@ class AndroidAppGraphTest {
             graph.playbackController.pause()
             // Dismiss is a durable command; it is deliberately not invoked by a graph-construction test.
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+            assertThat(graph.youtubeEngine).isSameInstanceAs(graph.youtubeEngine)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+            graph.youtubeEngine.retryStart()
+            assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
+                ch.lkmc.neutrodyne.youtube.api.EngineAvailability.NOT_YET_AVAILABLE,
+            )
+            assertThat(graph.youtubeEngine.status.value.version).isNull()
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
             assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
             assertThat(

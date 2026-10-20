@@ -1517,8 +1517,21 @@ and URL-cache policy remain W5/W6-owned. Typed recovery precedes RSS HTTP/IO
 classification; format recovery preserves time and does not become a user seek.
 Health is obtained lazily so service injection does not open the database on main.
 Controlled portable tests do not establish host, device or audible acceptance.
-B2 prewarm/pre-resolve and W11 production activation remain deferred; ordinary
-bindings still return external `NOT_YET_AVAILABLE` and `Unsupported`.
+Ordinary bindings still return external `NOT_YET_AVAILABLE` and `Unsupported`.
+
+**Implementation note (2026-10-20, W7b B2).** Projection/screens require
+`YouTubeEngine` directly. Both shells bind `DeferredYouTubeEngine`: transient
+`NOT_YET_AVAILABLE`, unknown version, inert prewarm/retry. This status is not
+persisted; prior enum entries and fake defaults are unchanged. W11 must alias
+the real singleton used by extraction with its complete activation set.
+
+Installed-window commits request `PROJECTION` for new remote YouTube occurrences
+and renewed next eligibility. Known episode/channel visibility requests `SCREEN`
+once per opening; hidden, RSS and external screens do no work. No facts/chapters
+are fetched. The five-second playing tick drives service-owned `PreResolver`
+with known remaining media time in [0,60s], immutable occurrence identity and
+playback's preferences/PLAYBACK stream owner. It takes no pin or health token.
+Host/device/latency/audible acceptance remains pending.
 
 ### Chapters from the description
 
@@ -1549,8 +1562,8 @@ truncated text cannot replace them. Identical normalized results do not write. T
 calls this entry in its cancellable current-occurrence scope; browsing and
 completed downloads retain JSON-only `ensureLoaded` plus M6 local inspection.
 Both ordinary graphs supply the existing loader and still use external
-`NOT_YET_AVAILABLE`/`Unsupported` bindings. Portable B1 is described above; B2
-prewarm/pre-resolve, W4 host, W11 activation and live/device/audible acceptance remain pending.
+`NOT_YET_AVAILABLE`/`Unsupported` bindings. Portable B1/B2 are described above;
+W4 host, W11 activation and live/device/audible acceptance remain pending.
 
 ### Watch on YouTube
 

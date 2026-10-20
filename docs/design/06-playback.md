@@ -738,8 +738,29 @@ timeout pauses for user retry; offline failures retain the foreground reconnect
 rule. One format change stops loaders, defers stale-resource reset to the loader,
 repins and prepares at the current time through `PositionTracker.coreSeek`;
 a second change skips. RSS authentication, DAI and local-file recovery remain
-separate. B2 control/prewarm/pre-resolve, W4 host, W11 activation and reference-device
-acceptance are not supplied by this portable consumer increment.
+separate. W4 host, W11 activation and reference-device acceptance remain pending.
+
+**Implementation note (2026-10-20, W7b B2).** `YouTubeEngine` is required, superseding
+this document's earlier nullable-control sketch. Both ordinary shells provide a
+truthful deferred control with `NOT_YET_AVAILABLE` status and no host actions.
+Own/external commits, diffs and capability/local-index changes request
+`PROJECTION` for new remote entries or renewed index-1 eligibility. Occurrence
+identities survive metadata/reorders.
+
+The playing tick captures immutable current/next occurrences, position and
+duration before suspended position IO. `PreResolver` rechecks the installed
+timeline and remote eligibility. Unknown duration, remaining time outside [0,60s],
+missing/local/external next, offline or blocked metered streaming admits no work.
+It attempts each next occurrence once per current occurrence, retains attempts
+across seeks/reorders and prunes departed entries to the bounded installed window.
+Preferences use playback's quality/levelling/language mapping; W5 owns coalescing,
+URL cache and health completion. Detach stops callbacks; admitted app-scope work
+may finish warming W5's cache, without later player reads.
+
+Episode and podcast routes request `SCREEN` once per visible opening after known
+YouTube identity; hiding cancels an outstanding identity wait. Generic chapter
+loading remains JSON-only. Host lifecycle/latency, W11 activation and device/audio
+gates remain separate; combined HTTP-format-recovery proof remains deferred.
 
 Owned by [04 Playback integration](04-youtube.md#playback-integration): branch condition, `DataSpec` key, format pinning, expiry through the cache TTL, 403/410 self-heal, pre-warm and pre-resolve triggers, preroll wait and error mapping. The engine behind `YouTubeStreamResolver` — yt-dlp in CPython in the `:ytx` process, reached over Binder — is 04's ([04 YouTube engine](04-youtube.md#youtube-engine)); 06 only ever sees `resolveAudio` results. 06 implements:
 
@@ -1149,8 +1170,8 @@ preserves the cache. Browsing and download completion still call JSON-only
 `ensureLoaded`; M6 local extraction, retries and coalescing are unchanged.
 The ordinary Android/desktop graph tests exercise stored complete notes through
 the real repository/loader while preserving external `NOT_YET_AVAILABLE` and
-`Unsupported`. Portable B1 is described in the YouTube branch; B2 prewarm/
-pre-resolve, W4 host, W11 production bindings and live/device/audible gates remain separate work.
+`Unsupported`. Portable B1/B2 are described in the YouTube branch; W4 host,
+W11 production bindings and live/device/audible gates remain separate work.
 
 Serves R4.8, R3.5, R8.5. Delivered in M5 (P2.0 JSON, PSC, ID3, MP4), M6 (download-time extraction), M9a (YouTube descriptions). Table: [02 chapter](02-data-model.md#chapter). Placement: the priority, the current chapter and the next/previous targets are `ChapterIndex` (`:playback:core`); `ChapterRepositoryImpl` and `Podcasting20ChaptersParser` are `:core:data` code for both platforms; reading container chapters is the platform's `EmbeddedChapterReader` (Android `MetadataRetrieverChapterReader`, desktop `DesktopChapterExtractor`, [11 Chapters and metadata](11-desktop.md#chapters-and-metadata)) and, during playback, the adapter (Android `Chapters`, desktop `TracksKnown`). Chapters are device-local: each device fetches and extracts its own ([10 Never synced](10-sync.md#never-synced)).
 

@@ -52,6 +52,7 @@ internal class AndroidServiceBridge(
     private val stopService: () -> Unit,
 ) : ServiceBridge,
     Player.Listener {
+    private val preResolver = PreResolver(access.streams, access.applicationScope)
     private val tracker =
         PositionTracker(
             ports.saver,
@@ -67,6 +68,7 @@ internal class AndroidServiceBridge(
                     PositionSource.STREAM
                 }
             },
+            onTick = ::onPositionTick,
         )
     private val applier = EffectivePlaybackApplier(ports.effective, scope)
     private val arbiter = EndOfItemPauseArbiter(player)
@@ -85,6 +87,7 @@ internal class AndroidServiceBridge(
             ports.lookup,
             ports.positions,
             access.capabilities,
+            access.engine,
             access.index,
             access.resolver,
             ports.items,
@@ -136,6 +139,12 @@ internal class AndroidServiceBridge(
     private var reservationTimeout: Job? = null
     private val jobs = mutableListOf<Job>()
     private var detached = false
+
+    private fun onPositionTick(tick: PlaybackTick) {
+        if (access.network.status.value.isConnected && !access.gate.blockBeforeNext(local = false)) {
+            preResolver.onTick(tick, projector.preResolveWindow(tick.episodeId), access.audioPref())
+        }
+    }
 
     fun attach(hasPendingStart: Boolean = false) {
         // Capture departures first; the projector freezes completion before sleep disarms its reason.
@@ -566,6 +575,7 @@ internal class AndroidServiceBridge(
     fun detach() {
         if (detached) return
         detached = true
+        preResolver.detach()
         val snapshot = tracker.flush(PositionFlushReason.DESTROY)
         cancelPending()
         releaseReservation()
