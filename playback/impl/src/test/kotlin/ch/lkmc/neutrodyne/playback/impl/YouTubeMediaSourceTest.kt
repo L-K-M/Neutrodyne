@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.youtube.api.BreakerState
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.api.YouTubeResolveException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,9 +44,11 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.InterruptedIOException
+import java.lang.management.ManagementFactory
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.LockSupport
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -98,6 +101,122 @@ class YouTubeMediaSourceTest {
                     .cacheSpace,
             )
         }
+    }
+
+    @Test fun compatibleResolveUnpinPreservesOtherOwnersCache() =
+        releaseAtPublication(Acquisition.COMPATIBLE, Departure.UNPIN)
+
+    @Test fun compatibleResolveRepinPreservesOtherOwnersCache() =
+        releaseAtPublication(Acquisition.COMPATIBLE, Departure.REPIN)
+
+    @Test fun initialResolveUnpinCompensatesItsNewReference() =
+        releaseAtPublication(
+            Acquisition.INITIAL,
+            Departure.UNPIN,
+        )
+
+    @Test fun initialResolveRepinCompensatesItsNewReference() =
+        releaseAtPublication(
+            Acquisition.INITIAL,
+            Departure.REPIN,
+        )
+
+    private enum class Acquisition { INITIAL, COMPATIBLE }
+
+    private enum class Departure { UNPIN, REPIN }
+
+    private fun releaseAtPublication(
+        acquisition: Acquisition,
+        departure: Departure,
+    ) {
+        Fixture().use { f ->
+            f.h.index.putAll(listOf(media(id = 2, type = SourceType.YOUTUBE_CHANNEL)))
+            val second = f.h.resolve(id = 2)
+            val cache = f.h.owner.cache()
+            cache.write(checkNotNull(second.key), "abc")
+            val entered = CountDownLatch(1)
+            val response = CompletableDeferred<Unit>()
+            val source: DataSource
+            val spec: DataSpec
+            when (acquisition) {
+                Acquisition.COMPATIBLE -> {
+                    spec = f.h.resolve(position = 3, length = 3)
+                    // The existing lease bypasses the outer resolver's earlier pins lock.
+                    source = f.cacheFactory.createDataSource()
+                }
+
+                Acquisition.INITIAL -> {
+                    spec = f.spec(3, 3)
+                    source = f.factory.createDataSource()
+                    f.port.streams.invalidateAll()
+                    f.port.reply {
+                        entered.countDown()
+                        response.await()
+                        f.reply()
+                    }
+                }
+            }
+            val result = AtomicReference<Throwable>()
+            val loader =
+                Thread {
+                    try {
+                        read(source, spec)
+                    } catch (error: Throwable) {
+                        result.set(error)
+                    }
+                }
+            val monitor = PlaybackTestStores.publicationMonitor(f.h.resolver)
+            try {
+                if (acquisition == Acquisition.INITIAL) {
+                    loader.start()
+                    assertTrue(entered.await(5, TimeUnit.SECONDS))
+                }
+                synchronized(monitor) {
+                    if (acquisition == Acquisition.INITIAL) response.complete(Unit) else loader.start()
+                    // This is the actual monitor inside resolve, after old was read and any
+                    // initial reference acquired. JVM monitor entry cannot abort on job cancel.
+                    awaitPublication(loader, monitor)
+                    when (departure) {
+                        Departure.UNPIN -> f.h.resolver.unpin(1)
+                        Departure.REPIN -> f.h.resolver.repin(1)
+                    }
+                }
+                loader.join(5000)
+                assertFalse("Release must finish the actual loader", loader.isAlive)
+                assertTrue("Expected interruption, got ${result.get()}", result.get() is InterruptedIOException)
+                assertEquals(0, f.server.requestCount)
+                assertEquals(if (acquisition == Acquisition.INITIAL) 2 else 1, f.port.nativeCalls())
+                runBlocking { f.h.owner.clearStreamingCache() }
+                assertEquals("The remaining episode still owns the cached bytes", 3L, cache.cacheSpace)
+                f.h.resolver.unpin(2)
+                runBlocking { f.h.owner.clearStreamingCache() }
+                assertEquals("The last departure makes the bytes removable", 0L, cache.cacheSpace)
+            } finally {
+                response.complete(Unit)
+                loader.interrupt()
+                loader.join(5000)
+            }
+        }
+    }
+
+    private fun awaitPublication(
+        loader: Thread,
+        monitor: Any,
+    ) {
+        val threads = ManagementFactory.getThreadMXBean()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline) {
+            val info = threads.getThreadInfo(loader.id, 32) ?: break
+            if (info.threadState == Thread.State.BLOCKED &&
+                info.lockInfo?.identityHashCode == System.identityHashCode(monitor) &&
+                info.lockInfo?.className == monitor.javaClass.name &&
+                info.stackTrace.any { it.className == EpisodeResolver::class.java.name && it.methodName == "resolve" }
+            ) {
+                return
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1))
+        }
+        throw AssertionError("Loader did not block at resolve publication: ${threads.getThreadInfo(loader.id, 32)}")
     }
 
     @Test fun sameVideoUpstreamLoadBelongsToItsEpisodeRatherThanFirstMatchingCacheKey() {

@@ -324,7 +324,8 @@ internal class EpisodeResolver internal constructor(
             }
             synchronized(pins) {
                 if (slot.released) {
-                    streamingCache.unpin("yt:${pin.videoId}:${audio.formatId}")
+                    // Release already removed a published pin's reference; compensate only a new one.
+                    if (old == null) streamingCache.unpin("yt:${pin.videoId}:${audio.formatId}")
                     throw InterruptedIOException("Episode pin released")
                 }
                 pin.audio = audio

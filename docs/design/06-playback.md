@@ -724,7 +724,9 @@ Remote YouTube pins snapshot durable audio quality/levelling and app language;
 automatic repins retain those preferences and the per-occurrence invalidation
 budget. Each cache-hole upstream open resolves through the same W5 owner before
 accepting bytes, with full formatId/itag/clen/lmt checks. The cache protects shared
-video keys until the last pin leaves. Cache setup/reset IO retains RSS's existing
+video keys until the last pin leaves. A cancelled resolve compensates only a
+reference acquired by that invocation; release already removes a published pin's
+reference. Cache setup/reset IO retains RSS's existing
 first-error/uncached-retry behavior. Cancellation ends the occurrence's loader
 jobs without waiting for IO on main; its memory-only lease prevents an old open
 from attaching to another episode that shares the video/cache key.
