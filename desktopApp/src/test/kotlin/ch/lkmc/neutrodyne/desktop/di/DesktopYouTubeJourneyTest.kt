@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
 import ch.lkmc.neutrodyne.core.common.DesktopNotifier
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
@@ -21,6 +22,7 @@ import ch.lkmc.neutrodyne.core.domain.AutoDownloadPlanner
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -28,6 +30,7 @@ import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.network.DesktopNetworkMonitor
 import ch.lkmc.neutrodyne.core.network.DesktopNetworkMonitorBindings
@@ -48,18 +51,22 @@ import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.download.api.RejectReason
 import ch.lkmc.neutrodyne.download.api.RequestResult
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.ChannelSearchResult
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
+import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
+import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelSearch
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEnricher
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedMetadataReader
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
 import ch.lkmc.neutrodyne.youtube.impl.DefaultYouTubeChannelResolver
-import ch.lkmc.neutrodyne.youtube.impl.NoExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.impl.NoOpYouTubeEnricher
-import ch.lkmc.neutrodyne.youtube.impl.UnsupportedYouTubeChannelSearch
 import com.sun.net.httpserver.HttpServer
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
@@ -271,6 +278,55 @@ class DesktopYouTubeJourneyTest {
             }
         }
 
+    /**
+     * W10 journey leg: the explicit channel search runs the real client/lookup/search pipeline,
+     * a hit's channel-page URL is what `AddPodcastKey` would carry, and the normal Add path —
+     * Layer A resolver + `subscribeUseCase.youTube` — lands a YOUTUBE_CHANNEL row. Synthetic
+     * wire answers only; nothing touches the network.
+     */
+    @Test fun searchHitEntersNormalAddAndSubscribes() =
+        runBlocking {
+            val env = Env()
+            try {
+                val graph = env.open()
+                graph.playback.compiledStore()
+                graph.playback.setEngineEnabled(true)
+                graph.awaitCapabilities(true)
+                graph.playback.replyFor { method, _ ->
+                    when (method) {
+                        "search_open" -> env.searchJson()
+                        "lookup" -> env.lookupJson()
+                        else -> error("unexpected $method")
+                    }
+                }
+                val page = assertIs<ChannelSearchResult.Ok>(graph.channelSearch.search("synthetic"))
+                val hit = page.hits.single()
+                assertEquals(HIT_CHANNEL, hit.channelId)
+                // The UI turns a hit into AddPodcastKey(YouTubeFeedUrls.channelPage(id)); the same
+                // classification → resolve → subscribe pipeline then owns the channel.
+                val ref = YouTubeUrlClassifier().classify(YouTubeFeedUrls.channelPage(hit.channelId))
+                val resolution =
+                    assertIs<ChannelResolution.Resolved>(
+                        graph.channelResolver.resolve(checkNotNull(ref), MetadataDepth.AVATAR),
+                    )
+                assertEquals(HIT_CHANNEL, resolution.channelId)
+                assertEquals(ResolvedVia.EXTRACTOR, resolution.via)
+                val outcome =
+                    graph.subscribeUseCase.youTube(resolution, YouTubeVariantBits.LONG_FORM, emptySet())
+                val podcastId = assertIs<Outcome.Success<Long>>(outcome).value
+                val row = checkNotNull(graph.db.podcastDao().byId(podcastId))
+                assertEquals(SourceType.YOUTUBE_CHANNEL, row.sourceType)
+                assertEquals(HIT_CHANNEL, row.youtubeChannelId)
+                assertEquals(
+                    listOf("search_open", "lookup"),
+                    graph.playback.transportCallNames(),
+                )
+                env.close(graph)
+            } finally {
+                env.shutdown()
+            }
+        }
+
     private class Env(
         val blockSecondChunk: Boolean = false,
     ) {
@@ -310,6 +366,15 @@ class DesktopYouTubeJourneyTest {
             }
             server.start()
         }
+
+        fun searchJson(): String =
+            """{"cursor":null,"hits":[{"channelId":"$HIT_CHANNEL","title":"Synthetic channel",""" +
+                """"handle":"@synthetic","followerCount":null,"avatar":null,"description":null,""" +
+                """"verified":false}],"hasMore":false}"""
+
+        fun lookupJson(): String =
+            """{"channelId":"$HIT_CHANNEL","title":"Synthetic channel","handle":"@synthetic",""" +
+                """"description":null,"followerCount":null,"avatars":[],"banners":[]}"""
 
         fun resolveJson(videoId: String): String =
             """{"videoId":"$videoId","duration":120,"liveStatus":"not_live","formats":[""" +
@@ -407,6 +472,7 @@ class DesktopYouTubeJourneyTest {
 
     private companion object {
         const val CHANNEL = "UCaaaaaaaaaaaaaaaaaaaaaA"
+        const val HIT_CHANNEL = "UCbbbbbbbbbbbbbbbbbbbbbA"
         const val VIDEO = "ytvideo0001"
         const val VIDEO2 = "ytvideo0002"
         const val TOTAL = 21 * 1024 * 1024 + 513
@@ -433,6 +499,9 @@ internal interface YouTubeJourneyGraph {
     val db: NeutrodyneDatabase
     val settings: SettingsRepository
     val playback: PortableYouTubePlayback
+    val channelResolver: YouTubeChannelResolver
+    val channelSearch: YouTubeChannelSearch
+    val subscribeUseCase: SubscribeUseCase
     val initializers: Set<AppInitializer>
 
     @ApplicationScope val scope: CoroutineScope
@@ -483,9 +552,9 @@ internal interface YouTubeJourneyGraph {
 
     @Provides fun enricher(): YouTubeEnricher = NoOpYouTubeEnricher()
 
-    @Provides fun channelSearch(): YouTubeChannelSearch = UnsupportedYouTubeChannelSearch()
+    @Provides fun channelSearch(playback: PortableYouTubePlayback): YouTubeChannelSearch = playback.search
 
-    @Provides fun channelLookup(): ExtractorChannelLookup = NoExtractorChannelLookup()
+    @Provides fun channelLookup(playback: PortableYouTubePlayback): ExtractorChannelLookup = playback.lookup
 
     @Provides fun channelResolver(
         clients: NeutrodyneHttpClients,

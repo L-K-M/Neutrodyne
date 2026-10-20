@@ -526,8 +526,8 @@ sizes are not evidence for changing that policy.
 `YtDlpChannelLookup : ExtractorChannelLookup` calls the engine's `lookup` for `Handle` (`https://www.youtube.com/@{enc}`), `LegacyPath` (`https://www.youtube.com/{path}`) and, for metadata, `Channel` (`https://www.youtube.com/channel/{id}`). The shim runs `extract_info(url, process=False)` and reads only the playlist-level fields — `channel_id`, `channel`, `uploader_id` (the handle), `description`, `channel_follower_count` and `thumbnails` — without iterating `entries` ([Shared engine module](#shared-engine-module)). It splits `thumbnails` into avatar and banner candidates — yt-dlp 2026.08.19 marks the originals `avatar_uncropped` and `banner_uncropped`; otherwise the aspect ratio decides (about square, or wide) ([Artwork and thumbnails](#artwork-and-thumbnails)); `AVATAR` depth returns the avatar only, `FULL` the banner too (one call either way). Rules:
 
 - External mode → `null` without starting the engine host; `extractionGate` denied → `null`. Both fall back to HTML.
-- `UNAVAILABLE` (the channel URL answered 404) → `ChannelResolution.NotFound`.
-- `EXTRACTION` → reported as a parse failure to the breaker, then `null`; `RATE_LIMITED` → `health.reportRateLimited(now)`, then `null`; `NETWORK`, `TIMEOUT`, `ENGINE_UNAVAILABLE` → `null`. A lookup failure is never user-visible; the HTML path decides.
+- `UNAVAILABLE` is ambiguous — the shim uses it for removed/terminated channels, URL rejection and missing resources alike — so it maps to `Failed(PAGE_UNREADABLE, retryable = false)` and Layer A HTML decides. Only a definite Layer A HTTP 404/410 (or an authoritative port `NotFound`) short-circuits to `ChannelResolution.NotFound` (M9a W10 review override; the coarse wire code never proves a missing identity).
+- `EXTRACTION` → reported as a parse failure to the breaker, then `Failed(PAGE_UNREADABLE)`; `RATE_LIMITED` → `health.reportRateLimited(now)`, then `Failed(RATE_LIMITED)`; `NETWORK`, `TIMEOUT` → `Failed(NETWORK)`; `ENGINE_UNAVAILABLE`, `BREAKER_OPEN` → `null`. A lookup failure is never user-visible; the HTML path decides.
 - Result `Resolved(via = EXTRACTOR)`. Unverified: the number of InnerTube requests a lookup costs (the spike logs it).
 
 ### Subscribe flow
@@ -603,6 +603,19 @@ metadata and directory answers.
 ### Channel search
 
 With the engine only, M9a. Discover offers an explicit "Search YouTube channels" action (opening it calls `prewarm(SEARCH)`); YouTube is queried only on that action, never on every keystroke of the podcast search (N3: typed podcast searches never reach YouTube). `YtDlpChannelSearch` calls `search_open`: the shim runs `extract_info('https://www.youtube.com/results?search_query={q}&sp=EgIQAg%253D%253D', process=False)` — YouTube's search URL with the channel filter, the URL yt-dlp's own tests use — and returns the first 20 channel entries (`channel_id`, `title`, `uploader_id`, `channel_follower_count`, a thumbnail, `description`, `channel_is_verified`) with a `SearchCursor` token; `search_next` pulls the next page from the generator held in the engine host, up to 3 pages on scroll. `CURSOR_EXPIRED` ends paging (`next = null`): the visible hits stay, and a new search starts over. A hit opens `AddPodcastKey("https://www.youtube.com/channel/{id}")`, i.e. the normal subscribe flow. External mode → `Unsupported`; breaker open, rate limited, `ENGINE_UNAVAILABLE` or a timeout → `Failed`, shown as "YouTube search is temporarily unavailable".
+
+Implementation note (2026-10-20, M9a W10 portable slice): the portable
+implementation now exists — `YtDlpChannelLookup`/`YtDlpChannelSearch` in
+`:youtube:engine` on the shared `YtDlpClient` (one health reservation per
+operation, `INTERACTIVE` priority, 20 s budget, `SEARCH_PAGE_SIZE` = 20, opaque
+host cursors), plus the explicit `YouTubeSearchKey` page in `:feature:discover`
+(max three pages, generation-fenced, capability-gated, `prewarm(SEARCH)` on the
+explicit action only) and the add sheet's second, independently gated
+"Search YouTube" affordance; `DirectoryKey` podcast search is unchanged. Test
+fixtures and replay scenarios remain synthetic/modelled — none are live
+captures — and the ordinary Android/desktop production graphs still bind
+`UnsupportedYouTubeChannelSearch`/`NoExtractorChannelLookup`; only the injected
+test island wires the real ports.
 
 ### Channel metadata refresh
 

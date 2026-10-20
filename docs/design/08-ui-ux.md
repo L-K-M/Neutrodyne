@@ -184,6 +184,7 @@ Pane roles apply when the [pane directive](#pane-directive) allows two or more p
 | [Downloads](#downloads) | `DownloadsKey` | `:feature:downloads` | list | M0 (empty), M6 |
 | [Discover](#discover) | `DiscoverKey` | `:feature:discover` | list | M0 (empty), M1, M7 |
 | [Directory results](#directory-results) | `DirectoryKey(query, genreId)` | `:feature:discover` | list | M7 |
+| [YouTube channel results](#youtube-channel-results) | `YouTubeSearchKey(query)` | `:feature:discover` | list | M9a |
 | [Add podcast sheet](#add-podcast-sheet) | `AddPodcastKey(input)` | `:feature:discover` | sheet | M1, M7, M8 |
 | [Import](#import) (preview, progress, report, restore preview) | `ImportKey(sessionId)` | `:feature:importexport` | detail | M3 |
 | [Backup and restore](#backup-and-restore) | `BackupKey` | `:feature:importexport` | detail | M3 |
@@ -871,6 +872,10 @@ internal-routes rejected), only navigating to Add cold/warm.
 ```
 
 A list of `DirectoryHit` cards: 64 dp cover, title, author, "120 episodes · updated 3 days ago", providers line ("Apple, fyyd"), "Subscribed" chip when `subscribedPodcastId != null`. Tap → `PodcastKey(subscribedPodcastId)` or `pushDetail(PodcastPreviewKey(feedUrl))`. Partial results banner per provider status; loading: 6 skeleton cards; empty: "No podcasts found for 'xyz'" + "Add by URL"; all providers failed: "Search isn't available right now" + Retry; offline: "You're offline" + Retry. Results are not persisted: after process death the query re-runs.
+
+### YouTube channel results
+
+`YouTubeSearchKey(query)`, `:feature:discover`, M9a (portable slice). Reached only through the Add sheet's explicit, capability-gated "Search YouTube channels" action (opens with `prewarm(SEARCH)`; typed podcast searches never reach it). A `ChannelHit` list: 56 dp avatar or monogram, verified marker, title, subscriber count, two-line description. Paging loads up to 3 × 20 hits on scroll; `CURSOR_EXPIRED` ends paging but keeps the hits; `Failed` → "YouTube search is temporarily unavailable" + Retry; empty → "No YouTube channels found for 'xyz'". A hit navigates to `AddPodcastKey("https://www.youtube.com/channel/{id}")` — the normal subscribe flow. Capability loss drops in-flight work and the hits; results and cursors are not persisted.
 
 ### Add podcast sheet
 
