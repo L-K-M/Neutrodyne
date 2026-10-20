@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance)"
+        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
         default: full
 
 permissions:

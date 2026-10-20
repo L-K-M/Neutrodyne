@@ -246,12 +246,16 @@ class ProbeTest(unittest.TestCase):
             (folder / "transport.tar").unlink()
             for bad, expected in ((refusal(PKG).replace("ERROR_PREFLIGHT", "ERROR_FULL_BACKUP"), "ERROR"),
                         (refusal(PKG, version="2"), "ERROR"),
-                        (refusal(PKG).replace(p.REJECTION, "Success"), "UNAVAILABLE"),
-                        (refusal(PKG) + "Package " + PKG + " with result: Success\n", "ERROR"),
-                        (refusal(PKG).replace("Backup finished with result: Success", "Backup finished with result: Timeout"), "ERROR"),
-                        ("", "ERROR")):
-                (folder / "backup.out").write_text(bad)
-                self.assertEqual(expected, measure())
+                         (refusal(PKG).replace(p.REJECTION, "Success"), "UNAVAILABLE"),
+                         (refusal(PKG) + "Package " + PKG + " with result: Success\n", "ERROR"),
+                         (refusal(PKG) + "Backup finished with result: Error\n", "ERROR"),
+                         (refusal(PKG) + f"=> Event{{BACKUP_MANAGER_POLICY / SUCCESS : package = {PKG}(v1)}}\n", "ERROR"),
+                         (refusal(PKG).replace("Package @pm@ with result: Success", "Package @pm@ with result: Error"), "ERROR"),
+                         (refusal(PKG).replace("Backup finished with result: Success", "Backup finished with result: Timeout"), "ERROR"),
+                         ("", "ERROR")):
+                with self.subTest(output=bad):
+                    (folder / "backup.out").write_text(bad)
+                    self.assertEqual(expected, measure())
             (folder / "backup.out").write_text(refusal(PKG))
             p.save(folder / "size.json", {"exit": 0})
             (folder / "size.out").write_text("0\n")

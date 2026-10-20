@@ -233,8 +233,11 @@ def preflight_rejected(folder, package, version, text):
     missing = size["exit"] != 0 and "No such file" in (folder / "size.err").read_text()
     empty = size["exit"] == 0 and (folder / "size.out").read_text().strip() == "0"
     return (not (folder / "transport.tar").exists() and (missing or empty)
-            and lines.count(event) == 1 and lines.count("Backup finished with result: Success") == 1
-            and [line for line in lines if line.startswith(result)] == [result + REJECTION])
+            and [line for line in lines if line.startswith("=> Event{")] == [event]
+            and [line for line in lines if line.startswith("Backup finished with result: ")]
+            == ["Backup finished with result: Success"]
+            and [line for line in lines if line.startswith("Package ")]
+            == ["Package @pm@ with result: Success", result + REJECTION])
 
 
 def measurement(folder, package, certificate, platform, version, control, positive):
