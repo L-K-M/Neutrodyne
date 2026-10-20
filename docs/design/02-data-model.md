@@ -1464,7 +1464,7 @@ WHERE <source predicate> AND <filters> AND <VISIBLE>
   AND e.availability = 'AVAILABLE'
   AND s.playedAt IS NULL
   AND NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)
-  AND (:youtubePlayable = 1 OR p.sourceType != 'YOUTUBE_CHANNEL')
+  AND (:youtubePlayable = 1 OR p.sourceType = 'RSS')
   AND e.sortDate >= :minSortDate
   AND (e.sortDate, e.id) < (:anchorSortDate, :anchorId)       -- omitted when the anchor is null
 ORDER BY e.sortDate DESC, e.id DESC
@@ -1475,6 +1475,13 @@ LIMIT :k
 - `:minSortDate` is bound as `0` when `contextMinSortDate` is null (all `sortDate`s are after 1990, 03).
 - `youtubePlayable` = `YouTubeCapabilitiesSource.capabilities.value.inAppPlayback` (false in external mode, [R3.7](../PLAN.md#21-functional-requirements), [D77](../PLAN.md#3-key-decisions)). Capabilities change at run time (engine switched off or on, engine start failures, M9a), and the bound value is not a table Room observes, so callers (06's `QueueProjector`, 05's `PlayContextResolver`) re-run their context-tail and start-item queries when `capabilities` emits a different `inAppPlayback`.
 - **Start item** ("Play group" without a chosen episode): the null-anchor form with `LIMIT 1`. For `GROUP` with `OLDEST_FIRST` and `boundStartBySubscription`, the first attempt adds `AND e.sortDate >= p.subscribedAt` and a second attempt runs without it (05 start rule 4).
+
+**Implementation note (2026-10-18, M4).** The capability gate above covers
+both YouTube source types, channels and playlists, as required by 05's
+membership rule. M3 restore can retain an anchor date when its episode
+reference cannot be resolved. Playback reads such an incomplete pair as a null anchor without rewriting the restored session.
+Complete stored pairs still keyset after an anchor whose episode was deleted.
+
 - **Auto browse lists** (06, M5): `FeedDao.contextList(query: RoomRawQuery)` is the same builder output with `LIMIT :limit OFFSET :offset` and the [Feed pages](#feed-pages) row columns, one-shot (not observed); completed downloads use the `DOWNLOADS` source; podcasts by title use `observeLibraryTiles`' columns as a one-shot `PodcastDao.listForBrowse()` sorted in Kotlin; Assistant search: `EpisodeDao.searchTitles(pattern, limit)` = `… WHERE (e.title LIKE :pattern ESCAPE '\' OR p.title LIKE :pattern ESCAPE '\' OR p.customTitle LIKE :pattern ESCAPE '\') AND <VISIBLE> ORDER BY e.sortDate DESC, e.id DESC LIMIT :limit` with `%`/`_`/`\` in the user text escaped (a full scan of `episode`, acceptable for an explicit voice search; FTS arrives in M15).
 
 ### Media lookup
@@ -1501,6 +1508,13 @@ WHERE e.id IN (:ids)
 ```
 
 The mapper picks the first `http(s)` URI from `audioAlternateSourcesJson` (JSON is never read in SQL); no such URI → no alternate.
+
+**Implementation note (2026-10-18, M4).** `PlaybackMediaInfo` carries a
+`podcastArtwork` reference as well as the episode-preferred `artwork`. Its
+constructor default is `artwork`, preserving existing callers. The media
+lookup fills both from the query above so 06's system artwork rule can use
+the podcast avatar or fallback without another database read; in-app player
+art remains the episode's own art when present.
 
 ### Up next ordering
 
@@ -1590,6 +1604,17 @@ Column-scoped statements ([DAO rules](#dao-rules)); semantics owned by 06 (playe
     // clearDismissed(id, now); setMeasuredDuration(id, ms) — each with a "value differs" predicate
 }
 ```
+
+**Implementation note (2026-10-18, M4).** `PositionWriter` checks the
+played-after-start and zero guards inside the write transaction before
+`insertIfAbsent`, as well as in `updateGuarded`. Guarding only the update in
+the illustrative sequence above would allow a first position row after a
+mark-played. The `allowed()` predicate is also evaluated inside that
+transaction, before any write. All local mark-played callers share the same
+chunked chain, including episode actions, bulk actions, import and playback.
+An explicit position reset also clears `startedAt` with a guarded state
+update, as the `episode_state` lifecycle requires; it preserves `playedAt`.
+The position-only reset statement above is only one step of that transaction.
 
 **Mark played, every path** (06's player rule, 03's `EpisodeRepository.setPlayed`/`markFeedPlayed`, 05's import option): one `withWriteTransaction`, IDs chunked at 500, running `ensureAll(ids)`, `markPlayed(ids)`, `PositionDao.reset(ids)` and `QueueDao` "Remove" for the same IDs. **Mark unplayed** (user): `markUnplayed(ids)` + `PositionDao.reset(ids)`. Re-listening (06) calls `markUnplayed` for the one episode at its first `isPlaying`. `playCount` therefore counts transitions to played by any path.
 
@@ -2036,6 +2061,13 @@ sequenceDiagram
 5. From MS0 (MS0 acceptance 3): steps 1–4 run a second time with the capture triggers installed and `sync_state.enabled = 1`; the invalidation counts must equal those of the first run, and a flow on `sync_outbox` must see the captures (positive control).
 
 **Implementation note (2026-10-16, M2):** B5 uses the existing `PositionDao.upsert` and ignored `EpisodeStateDao.ensure` with pre-seeded `startedAt` for the 100 position-only writes; the guarded position-save sequence belongs to M4 and is not implemented yet. A separate test creates the state row with `startedAt` in the first position transaction and permits exactly one invalidation, then none on subsequent saves. Session updates and queue reorders use test-only SQL because their M4 DAO writers are also absent. Both desktop and bundled-driver device legs drain Room tracking between writes and reload a fresh source after every invalidation, so notifications cannot coalesce into a false pass. The timing legs use the full 300/50,000/20 seed and file-backed WAL databases; GMD emits the samples and medians to stdout and the instrumentation stream collected with the existing `androidTest-results` reports. Timings are recorded only, with reference-device acceptance still manual.
+
+**Implementation note (2026-10-18, M4).** The shared desktop/device hygiene
+probe now uses the guarded position-save DAO sequence (`insertIfAbsent` +
+`updateGuarded` + `markStarted`), the production `PlaySessionDao` write path
+and the queue order-key update, one transaction per step. The data-layer
+store-level hygiene test lands with its queue/media store slice. No schema
+or index change is required by these queries.
 
 ---
 

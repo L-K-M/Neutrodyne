@@ -743,11 +743,13 @@ An episode is in the tail iff **all** hold (evaluated live on every projector qu
 
 ### Start rules
 
+**Implementation note (2026-10-18, M4).** The owner adopted playable-first automatic starts: retain unplayable queue rows, try the first playable Up next entry, then eligible context. Explicit row starts return the refusal for that row. An automatic queue start keeps a null context anchor; a context fallback anchors at the selected item. The M4 contracts freeze this policy; `PlayStarter` implements selection, with `PlayContextResolver` supplying eligible context queries.
+
 1. **Row tapped (explicit start):** current = that episode, anchor = that episode; Up next is kept and plays next, then the tail continues after the anchor.
-2. **"Play" without a start and Up next non-empty:** current = the head of Up next (06 moves it out of Up next per its rules), anchor = null, so after Up next the tail starts at the beginning of the order (M4 acceptance 6: two Up next items, then tech's unplayed episodes newest first).
-3. **"Play" without a start and Up next empty:** current = `startItem(spec)`, anchor = that item.
+2. **"Play" without a start and Up next non-empty:** current = the first playable Up next entry (06 moves it out of Up next per its rules; unplayable entries stay greyed in place), anchor = null, so after Up next the tail starts at the beginning of the order (M4 acceptance 6: two Up next items, then tech's unplayed episodes newest first).
+3. **"Play" without a start and no playable Up next entry:** current = `startItem(spec)`, anchor = that item.
 4. **`startItem`:** the first tail item from the beginning of the order (02's start-item query). For `GROUP` with `OLDEST_FIRST` (`boundStartBySubscription = true`) the first search adds `e.sortDate >= p.subscribedAt`, so "Play fiction" does not start at a 2011 episode of a show subscribed this year; if that finds nothing, a second search runs without the bound (only the back catalogue is left unplayed). `PODCAST` with `OLDEST_FIRST` never uses the bound (serial shows start at episode 1).
-5. `startItem == null` and Up next empty → `PlaybackController.playFeed` returns an outcome the UI shows as "Nothing unplayed in 'tech'"; in external mode, a group whose unplayed items are all YouTube shows "Episodes in 'tech' open in YouTube".
+5. `startItem == null` and no playable Up next entry → `PlaybackController.playFeed` returns an outcome the UI shows as "Nothing unplayed in 'tech'"; in external mode, a group whose unplayed items are all YouTube shows "Episodes in 'tech' open in YouTube".
 
 ```mermaid
 sequenceDiagram

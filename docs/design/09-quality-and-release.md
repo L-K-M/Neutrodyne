@@ -313,6 +313,16 @@ Package `ch.lkmc.neutrodyne.core.testing`; dependencies per rule 9 (`:core:{doma
 | `Nightly`, `ReleaseSmoke` (Android annotations, `androidMain`); `Flaky`, `CrossDevice` (JUnit categories, `desktopMain`); `ScreenshotTier`, `assumeTier` (common) | test selection | 09 | M0a, M2, MS2 |
 | `*Contract` bases | [fake contract tests](#fake-contract-tests) | 09 | with each fake |
 
+**Implementation note (2026-10-18, M4).** The M4 contracts add `FakePlaySessionStore`,
+`FakePositionStore`, `FakePlaybackMediaLookup` and `FakeStartGate`, alongside the
+playback, queue, context and maintenance fakes above. `FakeLocalMediaIndex`,
+`FakeYouTubeStreamResolver` and `FakeYouTubeCapabilitiesSource` also arrive with those contracts
+for the M4 gates; their defaults are no file, unsupported and external mode.
+The recording controller retains `pauseCalls` and exposes a mutable state source.
+Call records may be typed values rather than strings. Session/queue reads are
+published explicitly by tests, avoiding a second implementation of the durable playback stores' SQL rules.
+Chapter, download-controller and sync fakes stay in their listed milestones.
+
 Rule: an interface added to `:core:domain`, `:*:api` or `:sync:api` by any document gets its `Fake<Name>` in the same PR. Fakes are backed by `MutableStateFlow`, expose test-only mutators (`emit…`, `failNext: <ErrorType>?`) and a call log (`calls: List<String>`), and never sleep.
 
 **Not in `:core:testing`** (rule 9 forbids the dependencies, or the helper is one platform's):

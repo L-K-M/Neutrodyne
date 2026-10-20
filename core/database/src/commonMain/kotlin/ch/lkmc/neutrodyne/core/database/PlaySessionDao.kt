@@ -6,6 +6,7 @@ import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
+import androidx.room3.Update
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
@@ -72,4 +73,8 @@ interface PlaySessionDao {
         onlyWhenIdle: Boolean,
         now: Long,
     ): Int
+
+    /** Session fields are one atomic record; writers supply generation + 1 inside a transaction. */
+    @Update
+    suspend fun write(row: PlaySessionEntity)
 }
