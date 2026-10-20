@@ -640,4 +640,11 @@
     <string name="export_subscriptions">Export subscriptions…</string>
     <string name="group_export_opml">Export group as OPML…</string>
     <string name="group_share_opml">Share as OPML</string>
+    <string name="notification_import_ready_title">Ready to review</string>
+    <plurals name="notification_import_ready">
+        <item quantity="one">%1$d podcast from %2$s</item>
+        <item quantity="other">%1$d podcasts from %2$s</item>
+    </plurals>
+    <string name="notification_import_ready_source">file</string>
+    <string name="notification_import_ready_file">From %1$s</string>
 </resources>

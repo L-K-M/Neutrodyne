@@ -4,4 +4,15 @@
   <string name="channel_group_new_episodes">Neue Episoden</string>
   <string name="channel_new_episodes_default">Andere Podcasts</string>
   <string name="channel_import_backup">Import und Sicherung</string>
+  <string name="import_into_neutrodyne">In Neutrodyne importieren</string>
+  <string name="nothing_to_import">Nichts zu importieren</string>
+  <string name="import_unreadable">Diese Datei konnte nicht geöffnet werden. Wähle sie direkt in Neutrodyne aus.</string>
+  <string name="import_too_large">Diese Datei ist zu groß für eine Abonnementliste (Grenze 50 MB).</string>
+  <string name="import_unsupported">Diese Datei ist keine unterstützte Abonnementliste oder Sicherung.</string>
+  <string name="import_single_feed">Das ist ein Podcast-Feed, keine Abonnementliste.</string>
+  <string name="import_hostile">Diese Datei kann nicht sicher importiert werden.</string>
+  <string name="import_empty">In dieser Datei wurden keine Podcasts gefunden.</string>
+  <string name="import_storage">Nicht genug Speicherplatz.</string>
+  <string name="import_gone">Dieser Import ist nicht mehr verfügbar</string>
+  <string name="import_network">Keine Verbindung. Prüfe das Netzwerk und versuche es erneut.</string>
 </resources>

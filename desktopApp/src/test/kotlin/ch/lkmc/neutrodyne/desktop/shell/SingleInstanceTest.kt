@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.desktop.shell
 
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -55,6 +56,25 @@ class SingleInstanceTest {
             deliveryAttempts = attempts,
             retryDelay = retryDelayMs.milliseconds,
         )
+
+    @Test
+    fun `cancelling the accept loop does not report a failure`() =
+        runBlocking {
+            val failures = Channel<Throwable>(Channel.UNLIMITED)
+            val handler = CoroutineExceptionHandler { _, error -> failures.trySend(error) }
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + handler)
+            try {
+                repeat(20) {
+                    val serving = scope.launch { fastHandshake().serve {} }
+                    awaitPortFile()
+                    delay(20)
+                    serving.cancelAndJoin()
+                }
+                assertThat(failures.tryReceive().getOrNull()).isNull()
+            } finally {
+                scope.cancel()
+            }
+        }
 
     @Test
     fun `a second launch delivers its arguments to the owner and exits`() =

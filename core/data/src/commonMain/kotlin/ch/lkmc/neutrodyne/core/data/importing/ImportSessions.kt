@@ -6,13 +6,16 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.HostileInput
 import ch.lkmc.neutrodyne.core.domain.ImportError
+import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import ch.lkmc.neutrodyne.core.domain.UnsupportedSource
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
@@ -42,6 +45,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okio.IOException
@@ -69,6 +74,7 @@ internal class ImportSessions(
     private val opmlReader: OpmlReader,
     private val archives: ArchiveReaderFactory,
     private val clock: Clock,
+    private val reports: ImportReportPoster,
     @ApplicationScope private val appScope: CoroutineScope,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) {
@@ -115,12 +121,41 @@ internal class ImportSessions(
             // (teardown, or a cancel landing inside stage/persist) leaves it to no one, so
             // sweep here. A committed session is safe either way: publish() already moved
             // its payload off the staged path.
-            if (deferred.isCancelled) payloads.delete(staged.path)
+            if (deferred.isCancelled) {
+                payloads.delete(staged.path)
+            } else {
+                // The receiver no longer awaits this result. The application owns both
+                // persistence and its completion notice, even if the activity is destroyed.
+                appScope.launch(io) { postDetachedCompletion(deferred, staged.path) }
+            }
             throw e
         } catch (_: Exception) {
             payloads.delete(staged.path)
             Outcome.Failure(ImportError.Storage)
         }
+
+    private suspend fun postDetachedCompletion(
+        deferred: Deferred<Outcome<Long, ImportError>>,
+        stagedPath: Path,
+    ) {
+        val outcome =
+            suspendRunCatching { deferred.await() }.getOrElse { error ->
+                payloads.delete(stagedPath)
+                Log.w("ImportSessions", error) { "Detached import staging failed" }
+                return
+            }
+        val result = outcome as? Outcome.Success ?: return
+        suspendRunCatching {
+            val dao = db.importDao()
+            val session = dao.sessionById(result.value) ?: return@suspendRunCatching
+            if (session.state != ImportState.PREVIEW) return@suspendRunCatching
+
+            val count = dao.observeItemTallies(session.id).first().itemCount
+            reports.postReady(session.id, count, session.sourceName)
+        }.onFailure { error ->
+            Log.w("ImportSessions", error) { "Could not post detached import completion" }
+        }
+    }
 
     /**
      * Sniff → parse → classify → persist of one staged payload. Failure paths delete [staged]'s

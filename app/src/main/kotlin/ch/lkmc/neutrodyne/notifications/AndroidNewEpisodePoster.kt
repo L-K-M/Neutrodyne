@@ -13,7 +13,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.core.net.toUri
-import ch.lkmc.neutrodyne.MainActivity
+import ch.lkmc.neutrodyne.INTERNAL_MAIN_ACTIVITY
 import ch.lkmc.neutrodyne.R
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
@@ -214,7 +214,7 @@ internal class AndroidNewEpisodePoster(
             notice.episodes.singleOrNull()?.let { "episode/${it.episodeId}" }
                 ?: notice.groupUuid?.let { "group/$it" }
         val intent =
-            Intent(application, MainActivity::class.java).apply {
+            Intent().setClassName(application, INTERNAL_MAIN_ACTIVITY).apply {
                 if (route == null) {
                     action = Intent.ACTION_MAIN
                     addCategory(Intent.CATEGORY_LAUNCHER)
