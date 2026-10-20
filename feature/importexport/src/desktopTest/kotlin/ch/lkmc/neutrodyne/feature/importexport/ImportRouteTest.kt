@@ -1070,7 +1070,7 @@ class ImportRouteTest {
         runComposeUiTest {
             val pausedOnMain = AtomicBoolean(false)
             playbackController =
-                object : ch.lkmc.neutrodyne.playback.api.PlaybackController {
+                object : ch.lkmc.neutrodyne.playback.api.PlaybackController by playback {
                     override fun pause() {
                         pausedOnMain.set(java.awt.EventQueue.isDispatchThread())
                         playback.pause()
