@@ -223,6 +223,31 @@ runner accelerator, and the failed-job-only retry recovered
 actual-main device results, not scheduled/tagged, native, physical, provider or
 `bmgr` acceptance.
 
+**2026-10-21 M3 transport follow-up ([#223](https://github.com/L-K-M/Neutrodyne/pull/223)).**
+The positive API31/API36 candidate now uses a separate self-instrumenting driver
+APK and host-side evidence checks; no test classes enter the published app's
+process. The original debug logical-restore gate is restored verbatim. Five
+harness defects found in independent review have production-grounded regression
+tests and a completed fix review; local native runs are not claimed. Current
+source builds, exact-SHA hosted transport evidence, CI and formal review remain
+parent gates. The published app's code, R8, signing and backup rules are intact.
+
+The first black-box run on `eb79f8f9` failed both API31/36 legs before seeding:
+the host expanded an unset phase variable. Its ordinary CI also exposed a driver
+self-test decoding ZIP bytes as JSON on API26/36. Both are corrected locally;
+the encrypted-input assertion now also accepts refusal while opening the ZIP,
+as API31's platform source requires. Original failures remain retained. The
+47-case host suite passes; final-head CI and actual restore proof remain required.
+
+The next run on `22266282` reached the restore surface but its fixture had
+noncanonical feed keys and invalid sync UUIDs. Those identities and a duplicated
+instrumentation-status prefix are corrected. Unarmed driver tests now check the
+encoded library and status value; actual final-head device proof remains open.
+
+The retained API31/36 hierarchies show that checkbox/radio state belongs to the
+checkable parent, not its text child. The driver now targets that parent; the
+next real run must verify the complete journey without relaxing its checks.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:

@@ -1,10 +1,35 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Unlicense
-"""Require named, unskipped first-launch restore evidence from both GMDs."""
+"""Require named, unskipped first-launch restore evidence.
+
+Two modes:
+
+- default: the GMD XML gate (`api26`/`api36` managed-device reports), unchanged.
+- `--bmgr ROOT`: the M3 AC6 local-transport gate — strict verification of the
+  `scripts/ci/bmgr-check.sh` evidence tree (one `apiNN/` directory per leg).
+- `--bmgr-tar TAR EXPECTATION_JSON`: single-TAR payload verification used by
+  the script itself, writing `TAR.members` next to the archive.
+- `--bmgr-encoff LOG PACKAGE`: the shared strict parser for the encryption-off
+  `bmgr backupnow --monitor` log; prints the verbatim package verdict. Used by
+  the script itself and by the aggregate — only a closed, diagnosed policy
+  exclusion is accepted.
+- `--bmgr-pb PB_FILE KEY`: prints one decoded androidx.datastore
+  `preferences_pb` value (a closed wire-format reader; nothing is skipped).
+- `--bmgr-pull EVIDENCE_DIR`: validates one leg's post-restore quiescent
+  capture — pulled payload pair, preferences_pb contents, pre-launch gate,
+  restored database content and the empty leg. `bmgr-check.sh` runs it right
+  after the pull and the `--bmgr` aggregate re-runs it verbatim.
+"""
 
 import argparse
-from pathlib import Path
+import hashlib
+import io
+import json
+import re
 import sys
+import tarfile
+import zipfile
+from pathlib import Path
 import xml.etree.ElementTree as ET
 
 
@@ -46,14 +71,836 @@ def check_device(results, device):
     print(f"{device}: PASS {TEST_CLASS}: {', '.join(sorted(TEST_CASES))}")
 
 
+# ---- M3 AC6 bmgr local-transport gate ---------------------------------------
+
+BMGR_DEVICES = {"api31": 31, "api36": 36}
+BMGR_TARGET = "ch.lkmc.neutrodyne"
+BMGR_CLASS = "ch.lkmc.neutrodyne.tools.bmgrdriver.BmgrDriverTest"
+BMGR_METHODS = {
+    "seed": "seedImport",
+    "flip": "settingsFlip",
+    "encrypted": "encryptedImportRejected",
+}
+BMGR_LOGS = {phase: f"instrument-{phase}.log" for phase in BMGR_METHODS}
+BMGR_SELECTORS = (
+    "apkNonDebuggable", "apkSignatureStable", "driverInstrumentationAvailable",
+    "expectationCaptured", "unencryptedTransportExcluded", "positivePayloadVerified",
+    "restoreAdoptionObserved", "restoredLibraryVerified", "emptyLegExcluded",
+)
+TAR_MANIFEST_SUFFIX = "/_manifest"
+TAR_SNAPSHOT_REL = "f/backup/auto-snapshot.zip"
+TAR_PORTABLE_REL = "f/datastore/settings.preferences_pb"
+ENTRY_NAMES = {
+    "manifest.json", "library.json", "episodes.jsonl",
+    "queue.json", "settings.json", "subscriptions.opml",
+}
+REQUIRED_ENTRIES = ENTRY_NAMES - {"subscriptions.opml"}
+NONCE = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+# `bmgr backupnow` verdicts that can certify an encryption-off exclusion (the
+# BackupObserver status strings, upstream Bmgr.java). Transport/agent errors,
+# quota, cancel and "Unknown error" are failures, never exclusions.
+ENCOFF_POLICY_VERDICTS = {
+    "Backup is not allowed",
+    "Transport rejected package because it wasn't able to process it at the time",
+}
+
+
+def parse_encoff_backupnow(text, package, device="encoff"):
+    """Strict verdict extraction from a `bmgr backupnow --monitor` log.
+
+    Returns the verbatim package verdict only for a closed diagnosed policy
+    exclusion: the run line, a successful @pm@ metadata verdict, exactly one
+    verdict for the expected package in ENCOFF_POLICY_VERDICTS, an
+    ERROR_PREFLIGHT monitor event naming it, and a single successful finish.
+    """
+    text = text.replace("\r", "")
+    if not re.search(r"^Running (non-)?incremental backup for \d+ requested "
+                     r"packages\.$", text, re.M):
+        raise ValueError(f"{device}: enc-off log lacks the backupnow run line")
+    verdicts = re.findall(r"^Package (\S+) with result: (.+)$", text, re.M)
+    if not verdicts:
+        raise ValueError(f"{device}: enc-off log has no package verdicts")
+    names = [name for name, _ in verdicts]
+    if len(names) != len(set(names)):
+        raise ValueError(f"{device}: duplicate package verdict {sorted(names)}")
+    own = []
+    pm_metadata = 0
+    for name, verdict in verdicts:
+        verdict = verdict.strip()
+        if name == "@pm@":
+            if verdict != "Success":
+                raise ValueError(f"{device}: @pm@ verdict is {verdict!r}, not Success")
+            pm_metadata += 1
+        elif name == package:
+            own.append(verdict)
+        else:
+            raise ValueError(f"{device}: unexpected package verdict for {name}")
+    if pm_metadata != 1:
+        raise ValueError(f"{device}: expected one @pm@ metadata success")
+    if len(own) != 1:
+        raise ValueError(f"{device}: expected exactly one verdict for {package}")
+    verdict = own[0]
+    if verdict not in ENCOFF_POLICY_VERDICTS:
+        raise ValueError(f"{device}: {verdict!r} is not a policy exclusion")
+    events = [line for line in text.splitlines() if line.startswith("=> Event{")]
+    expected_event = (r"=> Event\{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = "
+                      + re.escape(package) + r"\(v\d+\)\}")
+    if len(events) != 1 or not re.fullmatch(expected_event, events[0]):
+        raise ValueError(f"{device}: expected only the ERROR_PREFLIGHT event for {package}")
+    finishes = re.findall(r"^Backup finished with result: (.+)$", text, re.M)
+    if finishes != ["Success"]:
+        raise ValueError(
+            f"{device}: backup finish evidence {finishes} != ['Success']")
+    return verdict
+
+
+def run_bmgr_encoff(log_path, package):
+    verdict = parse_encoff_backupnow(Path(log_path).read_text(errors="replace"),
+                                   package)
+    print(verdict)
+
+
+def sha256_hex(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def instrument_cases(text):
+    """Ordered (class, test, code) triples from a raw `am instrument -r` stream."""
+    cases, props = [], {}
+    for line in text.splitlines():
+        line = line.rstrip("\r").strip()
+        if line.startswith("INSTRUMENTATION_STATUS: "):
+            key, _, value = line[len("INSTRUMENTATION_STATUS: "):].partition("=")
+            props[key] = value
+        elif line.startswith("INSTRUMENTATION_STATUS_CODE:"):
+            code = int(line.partition(":")[2].strip())
+            if "class" in props and "test" in props:
+                cases.append((props["class"], props["test"], code))
+            props = {}
+    return cases
+
+
+def status_values(text, key):
+    return re.findall(rf"^INSTRUMENTATION_STATUS: {re.escape(key)}=(.*)$",
+                      text, re.M)
+
+
+def check_instrument_log(device, phase, nonce, text):
+    expected = [(BMGR_CLASS, BMGR_METHODS[phase], 1),
+                (BMGR_CLASS, BMGR_METHODS[phase], 0)]
+    cases = instrument_cases(text)
+    if cases != expected:
+        raise ValueError(
+            f"{device}: {phase} instrument evidence mismatch "
+            f"(want exactly {expected}, got {cases})")
+    for bad in ("INSTRUMENTATION_FAILED", "INSTRUMENTATION_ABORTED",
+                "FAILURES", "shortMsg", "longMsg"):
+        if bad in text:
+            raise ValueError(f"{device}: {phase} log contains {bad!r}")
+    if not re.search(r"^INSTRUMENTATION_CODE: -1\s*$", text, re.M):
+        raise ValueError(f"{device}: {phase} log lacks a successful runner completion")
+    markers = status_values(text, "bmgrDriver")
+    if markers != [f"{phase}:{nonce}:ok"]:
+        raise ValueError(
+            f"{device}: {phase} marker evidence {markers!r} "
+            f"!= {phase}:{nonce}:ok")
+    if f"{phase}:{nonce}:ok" not in markers[0]:
+        raise ValueError(f"{device}: {phase} marker is not the armed nonce")
+
+
+def check_driver_status(device, phase, nonce, api, driver_pkg, path):
+    """The durable per-phase record — a foreign, stale or unknown status fails."""
+    try:
+        status = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"{device}: {phase} status record unreadable") from error
+    if status.get("v") != 1 or status.get("phase") != phase \
+            or status.get("nonce") != nonce or status.get("api") != api \
+            or status.get("driverPackage") != driver_pkg \
+            or status.get("targetPackage") != BMGR_TARGET \
+            or status.get("result") != "ok":
+        raise ValueError(f"{device}: {phase} status identity/result mismatch")
+    steps = status.get("steps")
+    if not isinstance(steps, list) or not steps \
+            or any(not isinstance(s.get("name"), str) or not isinstance(s.get("at"), int)
+                   for s in steps):
+        raise ValueError(f"{device}: {phase} status has malformed steps")
+    required = {"seed": {"built", "launched", "preview", "categories", "requested"},
+                "flip": {"built", "launched", "preview", "categories", "requested"},
+                "encrypted": {"built", "launched", "rejected"}}[phase]
+    names = [s["name"] for s in steps]
+    if len(names) != len(set(names)) or not required <= set(names):
+        raise ValueError(f"{device}: {phase} status misses steps {sorted(required - set(names))}")
+
+
+# ---- preferences_pb wire parser ---------------------------------------------
+# androidx.datastore preferences_pb.proto:
+#   PreferencesMap { map<string, Value> value = 1; }
+#   Value: oneof { bool=1 float=2 int32=3 int64=4 string=5 string_set=6
+#                  double=7 bytes=8 }
+# The parser is intentionally a closed reader: unknown wire types or malformed
+# entries raise instead of being skipped, so a tampered PB fails closed.
+
+def _varint(buf, pos):
+    value = 0
+    shift = 0
+    while True:
+        if pos >= len(buf) or shift > 63:
+            raise ValueError("malformed varint")
+        byte = buf[pos]
+        pos += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, pos
+        shift += 7
+
+
+def _pb_fields(buf):
+    """Yield (field_no, wire_type, value) for every field; LEN gives a slice."""
+    pos = 0
+    while pos < len(buf):
+        tag, pos = _varint(buf, pos)
+        field, wire = tag >> 3, tag & 7
+        if field == 0:
+            raise ValueError("field number 0")
+        if wire == 0:
+            value, pos = _varint(buf, pos)
+        elif wire == 1:
+            value = buf[pos:pos + 8]
+            pos += 8
+        elif wire == 2:
+            length, pos = _varint(buf, pos)
+            value = buf[pos:pos + length]
+            if len(value) != length:
+                raise ValueError("truncated LEN field")
+            pos += length
+        elif wire == 5:
+            value = buf[pos:pos + 4]
+            pos += 4
+        else:
+            raise ValueError(f"unsupported wire type {wire}")
+        yield field, wire, value
+
+
+def pb_preferences(data):
+    """{key: value} from a PreferencesMap blob; values lose the oneof tag."""
+    prefs = {}
+    for field, wire, entry in _pb_fields(data):
+        if field != 1 or wire != 2:
+            raise ValueError("PreferencesMap carries a non-map field")
+        key = None
+        value = None
+        for efield, ewire, evalue in _pb_fields(entry):
+            if efield == 1 and ewire == 2:
+                key = evalue.decode("utf-8")
+            elif efield == 2 and ewire == 2:
+                for vfield, vwire, vvalue in _pb_fields(evalue):
+                    if vfield == 5 and vwire == 2:
+                        value = vvalue.decode("utf-8")
+                    elif vfield == 1 and vwire == 0:
+                        value = bool(vvalue)
+                    elif vfield in (3, 4) and vwire == 0:
+                        value = vvalue
+                    elif vfield == 6 and vwire == 2:
+                        value = sorted(s.decode("utf-8")
+                                       for _, _, s in _pb_fields(vvalue))
+                    else:
+                        raise ValueError(
+                            f"unsupported Value field {vfield}/{vwire}")
+        if key is None:
+            raise ValueError("map entry without a key")
+        prefs[key] = value
+    return prefs
+
+
+def run_bmgr_pb(pb_path, key):
+    value = pb_preferences(Path(pb_path).read_bytes()).get(key)
+    if value is not None:
+        print(value if not isinstance(value, bool) else str(value).lower())
+
+
+# ---- post-restore quiescent-capture validation --------------------------------
+
+UUID4 = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+SNAPSHOT_REL = "files/backup/auto-snapshot.zip"
+PORTABLE_REL = "files/datastore/settings.preferences_pb"
+DEVICE_PB_REL = "files/datastore/device_settings.preferences_pb"
+
+
+def open_db(device, path):
+    """Read-only sqlite open; a corrupt or absent pull fails closed."""
+    import sqlite3
+    if not path.is_file() or path.stat().st_size == 0:
+        raise ValueError(f"{device}: pulled DB missing or empty: {path.name}")
+    try:
+        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as error:
+        raise ValueError(f"{device}: pulled DB {path.name} unreadable") from error
+
+
+def pull_listing(path):
+    return [line.strip() for line in path.read_text(errors="replace").splitlines()
+            if line.strip()]
+
+
+def check_prelaunch(device, directory):
+    """The pre-launch gate listing: only the delivered payload pair plus dirs."""
+    listing = pull_listing(directory / "prelaunch-files.txt")
+    data = f"/data/data/{BMGR_TARGET}"
+    if not listing or any(not p.startswith(f"{data}/") for p in listing):
+        raise ValueError(f"{device}: prelaunch listing malformed")
+    allowed = {
+        f"{data}/files", f"{data}/files/backup", f"{data}/files/backup/auto-snapshot.zip",
+        f"{data}/files/datastore", f"{data}/files/datastore/settings.preferences_pb",
+        f"{data}/lib",
+    }
+    extra = set(listing) - allowed
+    if extra:
+        raise ValueError(f"{device}: pre-launch entries outside the payload pair: "
+                         f"{sorted(extra)}")
+    ps = (directory / "prelaunch-ps.txt").read_text(errors="replace")
+    if "NeutrodyneApplication" in ps or "FATAL EXCEPTION" in ps:
+        raise ValueError(f"{device}: prelaunch process evidence shows app init")
+
+
+def check_source_db(device, directory):
+    """The pre-uninstall ledger: exactly the two manual seed/flip imports. They
+    die with the source install — a fresh reinstall can never carry them."""
+    src = directory / "pulls/source"
+    db = open_db(device, src / "databases/neutrodyne.db")
+    sessions = db.execute(
+        "SELECT id, sourceFormat, state, finishedAt, payloadPath, optionsJson "
+        "FROM import_session ORDER BY id").fetchall()
+    db.close()
+    if len(sessions) != 2:
+        raise ValueError(
+            f"{device}: expected 2 source import_session rows, got {len(sessions)}")
+    for row in sessions:
+        opts = json.loads(row[5])
+        if row[1] != "NEUTRODYNE_BACKUP" or row[2] != "DONE" or row[3] is None \
+                or opts.get("restoreMode") != "MERGE" \
+                or opts.get("fromAndroidBackup"):
+            raise ValueError(f"{device}: manual session row {row[0]} malformed")
+        if Path(row[4] or "").name != f"{row[0]}.bin":
+            raise ValueError(f"{device}: session {row[0]} payloadPath is not its own")
+    seed_opts = json.loads(sessions[0][5])
+    if sorted(seed_opts.get("restoreCategories", [])) != \
+            ["HISTORY", "SETTINGS", "UP_NEXT"]:
+        raise ValueError(f"{device}: seed session categories mismatch")
+    flip_opts = json.loads(sessions[1][5])
+    if flip_opts.get("restoreCategories") != ["SETTINGS"]:
+        raise ValueError(f"{device}: flip session categories mismatch")
+
+
+def check_restored_db(device, directory, exp):
+    """Terminal proof over the coherent pulled DB — fixture content, session
+    lifecycle, queue/session anchors and the WorkSpec ledger."""
+    post = directory / "pulls/post"
+    db = open_db(device, post / "databases/neutrodyne.db")
+    fixture = exp["fixture"]
+    podcasts = {p["key"]: p for p in fixture["podcasts"]}
+    episodes = fixture["episodes"]
+
+    # Session ledger: exactly one row — the adopted Android-backup restore.
+    # The manual seed/flip sessions lived in the uninstalled source DB
+    # (pulls/source); a forged extra row here is evidence tampering.
+    sessions = db.execute(
+        "SELECT id, sourceFormat, state, finishedAt, payloadPath, optionsJson "
+        "FROM import_session ORDER BY id").fetchall()
+    if len(sessions) != 1:
+        raise ValueError(
+            f"{device}: expected 1 adopted import_session row, got {len(sessions)}")
+    adopted = sessions[0]
+    adopted_opts = json.loads(adopted[5])
+    if adopted[1] != "NEUTRODYNE_BACKUP" or adopted[2] != "DONE" \
+            or adopted[3] is None or not adopted_opts.get("fromAndroidBackup") \
+            or adopted_opts.get("restoreMode") != "MERGE" \
+            or "SETTINGS" in adopted_opts.get("restoreCategories", []) \
+            or not {"HISTORY", "UP_NEXT"} <= set(adopted_opts.get("restoreCategories", [])):
+        raise ValueError(f"{device}: adopted restore session malformed")
+    payload_rel = adopted[4]
+    if not payload_rel or not payload_rel.startswith("import/") \
+            or ".." in payload_rel:
+        raise ValueError(f"{device}: adopted payloadPath {payload_rel!r} invalid")
+    payload = post / "cache" / payload_rel
+    if not payload.is_file() or sha256_hex(payload.read_bytes()) != exp["snapshotSha256"]:
+        raise ValueError(
+            f"{device}: adopted restore payload is not the transported snapshot")
+
+    # Library: exact feedKey<->syncId mapping and fixture identity.
+    rows = db.execute(
+        "SELECT feedKey, syncId, feedUrl, title, link FROM podcast ORDER BY feedKey"
+        ).fetchall()
+    if len(rows) != len(podcasts):
+        raise ValueError(f"{device}: restored podcast count {len(rows)}")
+    for key, sync_id, url, title, link in rows:
+        spec = podcasts.get(key)
+        if spec is None or spec["syncId"] != sync_id or spec["feedUrl"] != url \
+                or spec["title"] != title or spec["link"] != link:
+            raise ValueError(f"{device}: restored podcast {key} mismatches fixture")
+
+    # Groups: same names/members, fresh v4 uuids (never the seed uuid).
+    group_rows = db.execute(
+        "SELECT id, uuid, name FROM podcast_group ORDER BY name").fetchall()
+    fixture_groups = {g["name"]: g for g in fixture["groups"]}
+    if len(group_rows) != len(fixture_groups):
+        raise ValueError(f"{device}: restored group count {len(group_rows)}")
+    by_episode_id = dict(db.execute("SELECT id, identityKey FROM episode"))
+    feedkey_by_id = dict(db.execute("SELECT id, feedKey FROM podcast"))
+    for gid, uuid, name in group_rows:
+        spec = fixture_groups.get(name)
+        if spec is None or not UUID4.fullmatch(uuid) or uuid == spec["uuid"]:
+            raise ValueError(f"{device}: group {name!r} uuid not freshly minted")
+        members = sorted(feedkey_by_id[pid] for (pid,) in db.execute(
+            "SELECT podcastId FROM podcast_group_member WHERE groupId=?", (gid,)))
+        if members != sorted(spec["members"]):
+            raise ValueError(f"{device}: group {name!r} members mismatch {members}")
+
+    # Episodes: identity + the merged state rows (episode_state/position).
+    ep_rows = db.execute(
+        "SELECT identityKey, title, guid FROM episode").fetchall()
+    want = {e["k"]: e for e in episodes}
+    if {r[0] for r in ep_rows} != set(want) or len(ep_rows) != len(want):
+        raise ValueError(f"{device}: restored episode identities mismatch")
+    id_by_key = {k: i for i, k in by_episode_id.items()}
+    for spec in episodes:
+        eid = id_by_key.get(spec["k"])
+        if eid is None:
+            raise ValueError(f"{device}: episode {spec['k']} missing")
+        state = db.execute(
+            "SELECT startedAt, playedAt, playCount, lastPlayedAt, isFavorite, "
+            "measuredDurationMs FROM episode_state WHERE episodeId=?",
+            (eid,)).fetchone()
+        position = db.execute(
+            "SELECT positionMs, positionSource FROM episode_position WHERE episodeId=?",
+            (eid,)).fetchone()
+        want_state = (spec.get("st"), spec.get("pl"), spec.get("pc", 0),
+                      spec.get("lp"), 1 if spec.get("fav") else 0, spec.get("md"))
+        got_state = state or (None, None, 0, None, 0, None)
+        if got_state != want_state:
+            raise ValueError(
+                f"{device}: episode {spec['k']} state {got_state} != {want_state}")
+        if spec.get("pos") is None:
+            if position is not None:
+                raise ValueError(f"{device}: episode {spec['k']} has a stray position")
+        elif position is None or position[0] != spec["pos"] \
+                or position[1] != spec.get("posSrc", "STREAM"):
+            raise ValueError(f"{device}: episode {spec['k']} position {position}")
+
+    # Queue: exactly the fixture refs, in order.
+    queue_ids = [r[0] for r in db.execute(
+        "SELECT episodeId FROM queue_entry ORDER BY orderKey")]
+    inv = {v: k for k, v in id_by_key.items()}
+    queue_order = [inv.get(i) for i in queue_ids]
+    if queue_order != [r["k"] for r in fixture["queue"]]:
+        raise ValueError(f"{device}: queue order {queue_order} != fixture")
+    play = db.execute(
+        "SELECT currentEpisodeId, contextType, contextId FROM play_session WHERE id=0"
+        ).fetchone()
+    session = fixture.get("session")
+    if session and session.get("current"):
+        want_current = id_by_key.get(session["current"]["k"])
+        if play is None or play[0] != want_current:
+            raise ValueError(f"{device}: play_session current {play} != fixture")
+        if session.get("contextType") == "GROUP":
+            want_group = next(g[0] for g in group_rows
+                              if fixture_groups[g[2]]["uuid"] == session["contextGroupUuid"])
+            if play[1] != "GROUP" or play[2] != want_group:
+                raise ValueError(f"{device}: play_session context {play[1:]} != fixture")
+
+    # WorkSpec ledger: the adopted restore's tagged spec must be terminal-done.
+    try:
+        workdb = open_db(device, post / "databases/androidx.work.workdb")
+        specs = workdb.execute(
+            "SELECT w.id, w.state FROM workspec w JOIN worktag t ON w.id=t.work_spec_id "
+            "WHERE t.tag=?", (f"restore-session-{adopted[0]}",)).fetchall()
+        if len(specs) != 1 or specs[0][1] != 2:
+            raise ValueError(f"{device}: adopted restore WorkSpec {specs} not SUCCEEDED")
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError(f"{device}: workdb ledger unreadable")
+    db.close()
+
+
+def check_pull(device, directory, exp, run):
+    """The whole post-restore capture — run by the script and re-run verbatim by
+    the aggregate, so a premature pull can never pass."""
+    nonce = run["nonce"]
+    post = directory / "pulls/post"
+    pre = directory / "pulls/pre"
+    source = directory / "pulls/source"
+    for path in (pre / SNAPSHOT_REL, pre / PORTABLE_REL, pre / DEVICE_PB_REL,
+                 source / "databases/neutrodyne.db",
+                 post / PORTABLE_REL, post / "databases/neutrodyne.db",
+                 post / "databases/androidx.work.workdb"):
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ValueError(f"{device}: missing pulled evidence {path}")
+
+    # The transported pair binds to the expectation byte-for-byte.
+    if sha256_hex((pre / SNAPSHOT_REL).read_bytes()) != exp["snapshotSha256"] \
+            or (pre / SNAPSHOT_REL).stat().st_size != exp["snapshotBytes"] \
+            or sha256_hex((pre / PORTABLE_REL).read_bytes()) != exp["portableSha256"] \
+            or (pre / PORTABLE_REL).stat().st_size != exp["portableBytes"]:
+        raise ValueError(f"{device}: prebackup payload pull mismatches expectation")
+    validate_snapshot_zip(device, (pre / SNAPSHOT_REL).read_bytes(), exp)
+
+    # Device PB: fresh installationId + the receiver's recorded write.
+    match = re.fullmatch(r"ok at=(\d+) bytes=(\d+) level=(\d+)", exp["receiverLine"])
+    if not match:
+        raise ValueError(f"{device}: receiverLine {exp['receiverLine']!r} malformed")
+    dev_pb = pb_preferences((pre / DEVICE_PB_REL).read_bytes())
+    if dev_pb.get("backup.installation_id") != exp["installationId"]:
+        raise ValueError(f"{device}: device PB installationId != expectation")
+    at, bts, lvl = int(match[1]), int(match[2]), int(match[3])
+    if dev_pb.get("backup.last_snapshot_at") != at \
+            or dev_pb.get("backup.last_snapshot_bytes") != bts \
+            or dev_pb.get("backup.last_snapshot_level") != lvl \
+            or bts != exp["snapshotBytes"]:
+        raise ValueError(f"{device}: device PB snapshot status != receiver line")
+    # Only file=SettingsFile.DEVICE keys may live in the device PB (05's
+    # BackupSettingKeys) — a portable key here is evidence of the wrong file.
+    if {"backup.auto_snapshot_enabled", "backup.opml_layout"} & set(dev_pb):
+        raise ValueError(f"{device}: device PB carries portable keys")
+    portable_pre = pb_preferences((pre / PORTABLE_REL).read_bytes())
+    if not portable_pre.get("backup.auto_snapshot_enabled"):
+        raise ValueError(f"{device}: portable PB auto-snapshot flag unset")
+    if portable_pre.get(exp["portableKey"]) != exp["portableAfter"] \
+            or "backup.installation_id" in portable_pre:
+        raise ValueError(f"{device}: prebackup portable PB not the flipped value")
+
+    # Canary receipt: every planted canary was in the pre-backup tree.
+    prebackup = pull_listing(pre / "prebackup-files.txt")
+    for rel in exp.get("canaries", []):
+        want = f"/data/data/{BMGR_TARGET}/{rel}" \
+            if not rel.startswith("external/") \
+            else f"/sdcard/Android/data/{BMGR_TARGET}/{rel[len('external/'):]}"
+        if want not in prebackup:
+            raise ValueError(f"{device}: canary {rel} absent from the prebackup tree")
+
+    check_prelaunch(device, directory)
+    check_source_db(device, directory)
+    check_restored_db(device, directory, exp)
+
+    # Post-restore file domains: retired/replaced snapshot + restored PB only.
+    portable_post = pb_preferences((post / PORTABLE_REL).read_bytes())
+    if portable_post.get(exp["portableKey"]) != exp["portableAfter"] \
+            or "backup.installation_id" in portable_post \
+            or not portable_post.get("backup.auto_snapshot_enabled"):
+        raise ValueError(f"{device}: post-restore portable PB != FLAT/clean")
+    backup_dir = post / "files/backup"
+    retired = sorted(p.name for p in backup_dir.glob("restored-*.zip")) \
+        if backup_dir.is_dir() else []
+    replaced = backup_dir / "auto-snapshot.zip"
+    if retired:
+        # A retired blob is the transported bytes moved aside, verbatim.
+        retired_path = backup_dir / retired[0]
+        if len(retired) != 1 \
+                or sha256_hex(retired_path.read_bytes()) != exp["snapshotSha256"]:
+            raise ValueError(f"{device}: retired snapshot mismatch {retired}")
+    if replaced.is_file():
+        # A legitimate replacement is the NEW install's debounce product: the
+        # post-restore device installationId and the current FLAT settings —
+        # FirstLaunchRestoreChecks.assertReplacementSnapshot's contract.
+        replaced_pb = pb_preferences((post / DEVICE_PB_REL).read_bytes()) \
+            if (post / DEVICE_PB_REL).is_file() else {}
+        new_id = replaced_pb.get("backup.installation_id")
+        if not new_id or new_id == exp["installationId"]:
+            raise ValueError(
+                f"{device}: post-restore device PB installationId unusable")
+        validate_snapshot_zip(device, replaced.read_bytes(), exp,
+                              installation_id=new_id,
+                              portable_value=exp["portableAfter"])
+        if sha256_hex(replaced.read_bytes()) == exp["snapshotSha256"]:
+            raise ValueError(f"{device}: replacement snapshot is the old one")
+    elif not retired:
+        raise ValueError(f"{device}: restored snapshot neither retired nor replaced")
+    post_files = pull_listing(directory / "postlaunch-files.txt")
+    canary_hits = [p for p in post_files if f"bmgr-canary-{nonce}" in p]
+    if canary_hits:
+        raise ValueError(f"{device}: canary leaked post-restore {canary_hits}")
+
+    # Empty leg: opened, and verifiably still a fresh install.
+    empty = directory / "pulls/empty"
+    empty_db = open_db(device, empty / "databases/neutrodyne.db")
+    for table in ("podcast", "episode", "podcast_group", "queue_entry",
+                  "import_session", "episode_state"):
+        count = empty_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        if count != 0:
+            raise ValueError(f"{device}: empty-leg {table} has {count} rows")
+    empty_db.close()
+    empty_listing = pull_listing(empty / "files/.listing")
+    delivered = [p for p in empty_listing if "/backup/" in p or "restored" in p]
+    if delivered:
+        raise ValueError(f"{device}: empty leg delivered files {delivered}")
+
+
+def validate_snapshot_zip(device, data, exp, installation_id=None,
+                          portable_value=None):
+    """The structural snapshot contract. The transported/retired input carries
+    the source install's id and the pre-snapshot value; a legitimate
+    replacement carries the new install's id and the current value."""
+    want_id = exp["installationId"] if installation_id is None else installation_id
+    want_value = exp["portableInSnapshot"] if portable_value is None else portable_value
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as error:
+        raise ValueError(f"{device}: transported snapshot is not a ZIP") from error
+    names = zf.namelist()
+    if len(names) != len(set(names)):
+        raise ValueError(f"{device}: snapshot ZIP has duplicate entries")
+    if not set(names) <= ENTRY_NAMES:
+        raise ValueError(f"{device}: snapshot ZIP carries unknown entries "
+                         f"{sorted(set(names) - ENTRY_NAMES)}")
+    if not REQUIRED_ENTRIES <= set(names):
+        raise ValueError(f"{device}: snapshot ZIP misses {sorted(REQUIRED_ENTRIES - set(names))}")
+    manifest_bytes = zf.read("manifest.json")
+    if len(manifest_bytes) > 1024 * 1024:
+        raise ValueError(f"{device}: manifest.json exceeds its cap")
+    manifest = json.loads(manifest_bytes.decode("utf-8"))
+    if manifest.get("format") != "neutrodyne-backup":
+        raise ValueError(f"{device}: snapshot manifest format mismatch")
+    if manifest.get("formatVersion", 0) < 1 or manifest.get("minReaderVersion", 99) > 1:
+        raise ValueError(f"{device}: snapshot manifest version mismatch")
+    if manifest.get("kind") != "AUTO_SNAPSHOT":
+        raise ValueError(f"{device}: transported snapshot is not an AUTO_SNAPSHOT")
+    if manifest.get("installationId") != want_id:
+        raise ValueError(f"{device}: snapshot installationId != expectation")
+    declared = {e["name"]: e for e in manifest.get("entries", [])}
+    if len(declared) != len(manifest.get("entries", [])) or not set(declared) <= set(names):
+        raise ValueError(f"{device}: snapshot manifest declares a duplicate or missing entry")
+    if not set(names) - {"manifest.json"} <= set(declared):
+        raise ValueError(f"{device}: snapshot ZIP carries an undeclared payload")
+    for name, entry in declared.items():
+        payload = zf.read(name)
+        if entry.get("bytes") != len(payload) or entry.get("sha256") != sha256_hex(payload):
+            raise ValueError(f"{device}: snapshot entry {name} fails its declared hash/size")
+    settings = json.loads(zf.read("settings.json").decode("utf-8"))
+    values = {v.get("key"): v.get("value") for v in settings.get("values", [])}
+    if values.get(exp["portableKey"]) != want_value:
+        raise ValueError(f"{device}: snapshot settings value mismatch")
+
+
+def check_transport_tar(tar_path, exp, device="tar"):
+    """Exactly `_manifest` plus the two allowed `f/` payloads, bytes and hashes checked."""
+    pkg = exp.get("package")
+    if not pkg or not re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+        raise ValueError(f"{device}: expectation package name invalid")
+    base = f"apps/{pkg}"
+    allowed = {f"{base}{TAR_MANIFEST_SUFFIX}", f"{base}/{TAR_SNAPSHOT_REL}",
+               f"{base}/{TAR_PORTABLE_REL}"}
+    expected = {f"{base}/{TAR_SNAPSHOT_REL}": (exp["snapshotSha256"], exp["snapshotBytes"]),
+                f"{base}/{TAR_PORTABLE_REL}": (exp["portableSha256"], exp["portableBytes"])}
+    rows, payloads = [], {}
+    with tarfile.open(tar_path, "r:*") as tar:
+        for member in tar:
+            name = member.name
+            if not member.isfile():
+                raise ValueError(f"{device}: non-regular TAR member {name}")
+            if name != name.lstrip("./") or ".." in name.split("/"):
+                raise ValueError(f"{device}: unsafe TAR member path {name}")
+            if name in payloads:
+                raise ValueError(f"{device}: duplicate TAR member {name}")
+            if not name.startswith(f"{base}/"):
+                raise ValueError(f"{device}: TAR member for another app {name}")
+            data = tar.extractfile(member).read()
+            payloads[name] = data
+            rows.append(f"{name}\t{len(data)}\t{sha256_hex(data)}")
+    if set(payloads) != allowed:
+        raise ValueError(f"{device}: TAR members {sorted(payloads)} != {sorted(allowed)}")
+    for name, (sha, size) in expected.items():
+        data = payloads[name]
+        if len(data) != size or sha256_hex(data) != sha:
+            raise ValueError(f"{device}: TAR payload {name} fails its expected hash/size")
+    validate_snapshot_zip(device, payloads[f"{base}/{TAR_SNAPSHOT_REL}"], exp)
+    return rows
+
+
+def run_bmgr_tar(tar, expectation_path):
+    exp = json.loads(Path(expectation_path).read_text())
+    rows = check_transport_tar(Path(tar), exp)
+    Path(str(tar) + ".members").write_text("\n".join(rows) + "\n")
+    print(f"bmgr-tar: PASS {len(rows)} members")
+
+
+def check_bmgr_device(root, device, api):
+    directory = root / device
+    if not directory.is_dir():
+        raise ValueError(f"{device}: evidence directory missing")
+    run = json.loads((directory / "run.json").read_text())
+    if run.get("schema") != "bmgr-evidence/v2" or run.get("api") != api:
+        raise ValueError(f"{device}: run.json schema/api mismatch")
+    if not run.get("fingerprint") or run.get("abi") != "x86_64" \
+            or not run.get("avd"):
+        raise ValueError(f"{device}: emulator identity evidence missing")
+    if not NONCE.fullmatch(run.get("nonce", "")):
+        raise ValueError(f"{device}: run nonce invalid")
+    nonce = run["nonce"]
+    if run.get("apkSha256") == run.get("driverApkSha256") \
+            or not SHA256.fullmatch(run.get("apkSha256", "")) \
+            or not SHA256.fullmatch(run.get("driverApkSha256", "")):
+        raise ValueError(f"{device}: apk/driver sha256 evidence missing or shared")
+    if run.get("driverPackage") == BMGR_TARGET or not run.get("driverPackage") \
+            or not run.get("driverRunner"):
+        raise ValueError(f"{device}: driver identity evidence missing")
+    instruments = (directory / "instrumentations.txt").read_text(errors="replace") \
+        if (directory / "instrumentations.txt").is_file() else ""
+    if f"instrumentation:{run['driverPackage']}/{run['driverRunner']} " \
+            f"(target={run['driverPackage']})" not in instruments \
+            or f"(target={BMGR_TARGET})" in instruments:
+        raise ValueError(f"{device}: driver instrumentation not self-targeting")
+    exp = json.loads((directory / "expectation.json").read_text())
+    if exp.get("v") != 2 or exp.get("nonce") != nonce or exp.get("api") != api \
+            or exp.get("package") != BMGR_TARGET:
+        raise ValueError(f"{device}: expectation nonce/api/package mismatch")
+    for field in ("snapshotSha256", "portableSha256", "installationId",
+                  "receiverLine", "portableKey", "seedSha256", "fixture"):
+        if not exp.get(field):
+            raise ValueError(f"{device}: expectation misses {field}")
+    for field in ("snapshotSha256", "portableSha256", "seedSha256"):
+        if not SHA256.fullmatch(exp[field]):
+            raise ValueError(f"{device}: expectation {field} is not SHA-256")
+    selectors = run.get("selectors")
+    if not isinstance(selectors, dict) or any(selectors.get(n) != "pass" for n in BMGR_SELECTORS):
+        missing = [n for n in BMGR_SELECTORS if (selectors or {}).get(n) != "pass"]
+        raise ValueError(f"{device}: selectors not all 'pass' ({', '.join(missing)})")
+
+    # The driver-owned sidecar binds the fixture to the expectation verbatim.
+    sidecar = json.loads((directory / "seed.expected.json").read_text())
+    if sidecar.get("v") != 1 or sidecar.get("nonce") != nonce \
+            or sidecar.get("api") != api \
+            or sidecar.get("seedSha256") != exp["seedSha256"] \
+            or sidecar.get("fixture") != exp["fixture"]:
+        raise ValueError(f"{device}: sidecar/expectation fixture binding broken")
+    if {p["key"]: p["syncId"] for p in exp["fixture"]["podcasts"]} != exp["syncIds"] \
+            or {g["name"]: g["uuid"] for g in exp["fixture"]["groups"]} != exp["groupUuids"]:
+        raise ValueError(f"{device}: expectation lookup maps != fixture")
+
+    for phase, name in BMGR_LOGS.items():
+        path = directory / name
+        if not path.is_file():
+            raise ValueError(f"{device}: missing {name}")
+        check_instrument_log(device, phase, nonce, path.read_text(errors="replace"))
+        status_path = directory / f"driver-status-{phase}.json"
+        if not status_path.is_file():
+            raise ValueError(f"{device}: missing driver-status-{phase}.json")
+        check_driver_status(device, phase, nonce, api, run["driverPackage"], status_path)
+
+    for field in ("unencryptedBackupnowExit", "positiveBackupnowExit"):
+        if run.get(field) != 0:
+            raise ValueError(f"{device}: {field} is {run.get(field)!r}, not 0")
+    if run.get("cleanupStatus") != "ok":
+        raise ValueError(
+            f"{device}: cleanup status is {run.get('cleanupStatus')!r}, not 'ok'")
+    for label in ("encoff-pre", "encoff", "positive", "empty"):
+        receipt = directory / f"init-{label}.txt"
+        if not receipt.is_file() or "Initialization result: 0" not in \
+                receipt.read_text(errors="replace"):
+            raise ValueError(
+                f"{device}: missing a successful init-{label}.txt receipt")
+
+    backup = (directory / "backupnow-positive.log").read_text(errors="replace")
+    for needle in (f"Package {exp['package']} with result: Success",
+                   "Backup finished with result: Success"):
+        if needle not in backup:
+            raise ValueError(f"{device}: backupnow log misses {needle!r}")
+    encoff_log = directory / "backupnow-encoff.log"
+    if not encoff_log.is_file():
+        raise ValueError(f"{device}: missing backupnow-encoff.log")
+    verdict = parse_encoff_backupnow(encoff_log.read_text(errors="replace"),
+                                   exp["package"], device)
+    if run.get("unencryptedDiagnosis") != f"encoff:{verdict}":
+        raise ValueError(
+            f"{device}: unencryptedDiagnosis does not match the log verdict")
+    payload = directory / "encoff-payload.txt"
+    if not payload.is_file() or payload.read_text(errors="replace").strip():
+        raise ValueError(
+            f"{device}: enc-off payload receipt is missing or non-empty")
+
+    tar_path = directory / "transport.tar"
+    if not tar_path.is_file():
+        raise ValueError(f"{device}: missing transport.tar")
+    if sha256_hex(tar_path.read_bytes()) != run.get("tarSha256"):
+        raise ValueError(f"{device}: transport.tar hash does not match run.json")
+    check_transport_tar(tar_path, exp, device)
+
+    # The whole quiescent capture again — the aggregate re-proves what the
+    # script already validated, so no host-side short-circuit is possible.
+    check_pull(device, directory, exp, run)
+    print(f"{device}: PASS bmgr black-box lifecycle "
+          f"(seed/snapshot/flip/encrypted -> backup -> install-restore -> pulls)")
+
+
+def check_bmgr(root):
+    runs = {}
+    for device, api in BMGR_DEVICES.items():
+        check_bmgr_device(root, device, api)
+        runs[device] = json.loads((root / device / "run.json").read_text())
+    a, b = runs["api31"], runs["api36"]
+    for field in ("sourceSha", "apkSha256", "driverApkSha256",
+                  "driverPackage", "driverRunner"):
+        if not a.get(field) or a[field] != b.get(field):
+            raise ValueError(f"bmgr: {field} differs across legs")
+    print("bmgr: PASS api31 + api36")
+
+
+def run_bmgr_pull(directory):
+    """The pre-cleanup pull gate binds the closed facts, never run.json — the
+    final run record is written only by cleanup(), so nothing in-progress can
+    stand in for it."""
+    directory = Path(directory)
+    facts = {}
+    for line in (directory / "facts.txt").read_text().splitlines():
+        key, _, value = line.partition("=")
+        facts[key] = value
+    nonce = facts.get("nonce", "")
+    if not NONCE.fullmatch(nonce):
+        raise ValueError(f"bmgr-pull: facts.txt nonce {nonce!r} invalid")
+    exp = json.loads((directory / "expectation.json").read_text())
+    if exp.get("nonce") != nonce:
+        raise ValueError("bmgr-pull: expectation nonce != facts nonce")
+    run = {"nonce": nonce, "device": facts.get("device") or "pull"}
+    check_pull(run["device"], directory, exp, run)
+    print("bmgr-pull: PASS")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("results", type=Path, help="managedDevice/debug result directory")
+    parser.add_argument("results", type=Path, nargs="?",
+                        help="managedDevice/debug result directory")
+    parser.add_argument("--bmgr", metavar="ROOT", type=Path,
+                        help="strict M3 bmgr evidence root (api31/api36 dirs)")
+    parser.add_argument("--bmgr-tar", nargs=2, metavar=("TAR", "EXPECTATION_JSON"),
+                        help="verify one transport TAR and write TAR.members")
+    parser.add_argument("--bmgr-encoff", nargs=2, metavar=("LOG", "PACKAGE"),
+                        help="strict enc-off backupnow verdict parser")
+    parser.add_argument("--bmgr-pb", nargs=2, metavar=("PB_FILE", "KEY"),
+                        help="print one decoded preferences_pb value (or nothing)")
+    parser.add_argument("--bmgr-pull", metavar="EVIDENCE_DIR", type=Path,
+                        help="validate one leg's quiescent pull capture")
     args = parser.parse_args()
     try:
-        for device in DEVICES:
-            check_device(args.results, device)
-    except (OSError, ValueError, ET.ParseError) as error:
+        if args.bmgr is not None:
+            check_bmgr(args.bmgr)
+        elif args.bmgr_encoff is not None:
+            run_bmgr_encoff(*args.bmgr_encoff)
+        elif args.bmgr_tar is not None:
+            run_bmgr_tar(*args.bmgr_tar)
+        elif args.bmgr_pb is not None:
+            run_bmgr_pb(*args.bmgr_pb)
+        elif args.bmgr_pull is not None:
+            run_bmgr_pull(args.bmgr_pull)
+        else:
+            if args.results is None:
+                parser.error(
+                    "results is required without a --bmgr* mode")
+            for device in DEVICES:
+                check_device(args.results, device)
+    except (OSError, ValueError, ET.ParseError, json.JSONDecodeError,
+            tarfile.TarError, KeyError, UnicodeDecodeError) as error:
         print(f"first-launch-restore: {error}", file=sys.stderr)
         return 1
     return 0
