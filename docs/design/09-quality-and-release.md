@@ -615,7 +615,7 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 | `server-image-smoke` | MS1 | build the image from the fat JAR (`docker buildx build --load`), run the reference `sync/server/deploy/compose.yaml` with a test domain and Caddy's internal CA, `/readyz` through Caddy, an SSE stream held for 5 min through Caddy and through the nginx example (S17, [10 nginx](10-sync.md#nginx)), the nightly `VACUUM INTO` backup triggered and restored with `restore`; `check-server-image.sh`; a `tcpdump` of the compose network showing no outbound request except the update check (`NEUTRODYNE_SERVER_UPDATE_CHECK` pointed at a local stub; [10 Update notice](10-sync.md#update-notice)) | yes |
 | `benchmark-dryrun` | M10 | Macrobenchmark journeys against `:app`'s `benchmarkRelease` with `-Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.dryRunMode.enable=true` on `bench34` (catches broken journeys; timings are meaningless on emulators) | no |
 | `repro` | M0a | [two signed builds and a diff](#nightly-reproducibility-job) of the APKs, from M0b the desktop application JARs and the server JAR; report-only permanently ([D79](../PLAN.md#3-key-decisions)) | no |
-| `bmgr` | M3 | android-emulator-runner API 31 and API 36 (the owner-fixed positive matrix of 2026-10-21), image `default`: `scripts/ci/bmgr-check.sh <api> <evidence-dir>` on the untouched published release `x86_64` APK — the black-box harness: the self-instrumenting `:tools:bmgrdriver` APK seeds through the production `ExternalImportActivity` over UiAutomator, the host triggers the shell-only `SnapshotNowReceiver`, verifies the raw LocalTransport TAR, reinstalls the identical APK and validates the pulled post-restore tree with `check-first-launch-restore-results.py --bmgr-pull`/`--bmgr` ([05 Testing with bmgr](05-groups-opml-backup.md#testing-with-bmgr), plus 07's "no `Podcasts/`" assertion). No test code or hooks in the release process; needs root uninstall/reinstall, which an in-process instrumented test cannot do | yes |
+| `bmgr` | M3 | android-emulator-runner API 31 and API 36 (`data_extraction_rules.xml`), image `default`: `scripts/ci/bmgr-check.sh <api> <evidence-dir>` on the untouched published release `x86_64` APK — the black-box harness: the self-instrumenting `:tools:bmgrdriver` APK seeds through the production `ExternalImportActivity` over UiAutomator, the host triggers the shell-only `SnapshotNowReceiver`, verifies the raw LocalTransport TAR, reinstalls the identical APK and validates the pulled post-restore tree with `check-first-launch-restore-results.py --bmgr-pull`/`--bmgr` ([05 Testing with bmgr](05-groups-opml-backup.md#testing-with-bmgr), plus 07's "no `Podcasts/`" assertion). No test code or hooks in the release process; needs root uninstall/reinstall, which an in-process instrumented test cannot do. The legacy `backup_rules.xml` path (API 28–30) is covered by `BackupRulesTest` and the negative API 28/29 diagnostic below, not by a positive app leg ([PO-50](../PLAN.md#48-further-product-owner-decisions)) | yes |
 | `first-launch-restore` | M3 | opt-in scope only: `./gradlew --max-workers=2 :app:api26DebugAndroidTest :app:api36DebugAndroidTest -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest -Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore` — the seeded cold-start restore gate ([05 Testing](05-groups-opml-backup.md#testing)); its XML goes to the `first-launch-restore-results` artifact on success and failure | no (not part of `full`) |
 | `screenshots-full` | M10 | `./gradlew allTests test --tests '*Screenshot*' -PscreenshotTier=full -Proborazzi.test.verify=true` (the Android and desktop sets; Unverified that `--tests` applies across `allTests`, fallback: the Roborazzi verify tasks per module) | yes |
 | `mutation-full` | M1a | `./gradlew mutationTest -PmutationIterations=1000` | yes |
@@ -704,8 +704,30 @@ Pushing commits from workflows is deliberately avoided: pushes made with `GITHUB
 
 ### CI scripts
 
+The opt-in `nightly.yml` scopes `bmgr-api29-probe` (focused stock API 29 leg) and
+`bmgr-legacy-negative` (closed API 28/29 matrix) build SDK-only synthetic
+`ch.lkmc.neutrodyne.transportprobe.*` APKs and collect stock LocalTransport
+capability evidence with `scripts/ci/bmgr-api29-probe.py`. A green diagnostic can
+record the controlled refusal of flagged packages — `PREFLIGHT_REJECTED` on
+API 29 (its `bmgr` supports `--monitor` and reports the `ERROR_PREFLIGHT`
+event) or `PACKAGE_REJECTED` on API 28 (its `bmgr` has no `--monitor`, so the
+refusal is measured in the bare-argv output of its `DOWNLOAD_CACHE`-bound
+dataset) — each requiring a verified same-phase control, or BLOCKED; it is
+never M3 acceptance, real-app archive/restore, encryption or D2D transfer
+proof, and never a claim that legacy app backup support was dropped. No
+scheduled/full job or production backup rule is changed.
+Offline `verify` rechecks retained TARs without extraction; `result.json` separates
+collection, observed capability and untested acceptance. Missing control/root,
+preparation, profile or transport receipts and arbitrary errors cannot establish
+exclusion or rejection.
+The final outcome is written after owned cleanup; offline verification rejects
+incomplete/failed runs and rechecks raw receipts. Historical attempts are retained
+separately. The installed LocalTransport APK (API 29) or bounded framework-file
+metadata (API 28, framework-owned transport) is collected only as image evidence.
+
 | Script | Purpose |
 |---|---|
+| `scripts/ci/bmgr-api29-probe.py build\|probe\|verify` | Opt-in stock LocalTransport diagnostic on the closed API 28/29 profiles (scopes `bmgr-api29-probe`, `bmgr-legacy-negative`) with synthetic fixtures and retained raw evidence; never M3 acceptance |
 | `scripts/ci/check-apk.sh [--published\|--no-engine\|--alignment-only] <apk…>` | per-ABI size budgets, 16 KB alignment including Chaquopy's asset-extracted `.so` files, forbidden content (debug code included), allowed native libraries and Python packages, manifest facts of a published release build (not debuggable, no `testOnly`), locale config, metadata hygiene, signer ([Build-output checks](#build-output-checks)) |
 | `scripts/ci/public-cert-sha256.sh [--colons]` | prints the SHA-256 of the certificate in the committed `signing/neutrodyne-public.keystore` (`keytool -list -v -keystore signing/neutrodyne-public.keystore -storepass neutrodyne -alias neutrodyne`), lower-case hex or colon-separated; the expected signer for `release.yml`'s `android` job and `check-apk.sh --published` ([Committed keystore](#committed-keystore)) |
 | `scripts/ci/check-desktop-image.sh [--no-engine] <image dir>` | 11's [image scan rules](11-desktop.md#image-scan-rules) on an app image (the Linux image in `desktop-smoke`, every target's images in `desktop-matrix` and `release.yml`); prints installed and package sizes (PB27); with `--no-engine` also asserts that no Python tree, yt-dlp file or `:youtube:ytdlp-desktop` JAR is present |

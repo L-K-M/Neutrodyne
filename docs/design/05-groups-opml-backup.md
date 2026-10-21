@@ -1890,7 +1890,7 @@ Both Android sections must stay present: a missing `<cloud-backup>` or `<device-
 ```
 
 - Manifest attributes (01 merges them): `android:allowBackup="true"`, `android:dataExtractionRules="@xml/data_extraction_rules"`, `android:fullBackupContent="@xml/backup_rules"`; no `backupAgent`, no `fullBackupOnly` (a custom agent would run in restricted mode, without the app graph).
-- **Unverified, checked in M3 with `bmgr` on API 26, 28, 31 and 36 images ([Testing with bmgr](#testing-with-bmgr)):** (a) two `<include>` elements for one path with different `requireFlags` are accepted and each is evaluated on its own (two elements rather than one attribute listing both flags, because a combined attribute requires both flags at once); (b) an include of a path that never exists yields an empty backup on API 26–27, not the default full backup. Fallbacks: (a) drop the D2D includes on API 28–30; (b) set `android:allowBackup` through a resource bool that is `false` below API 28 (`values-v28` = `true`).
+- **Unverified, checked in M3 with `bmgr` on API 26, 31 and 36 images plus the API 28/29 legacy negative diagnostic ([Testing with bmgr](#testing-with-bmgr), [PO-50](../PLAN.md#48-further-product-owner-decisions)):** (a) two `<include>` elements for one path with different `requireFlags` are accepted and each is evaluated on its own (two elements rather than one attribute listing both flags, because a combined attribute requires both flags at once); (b) an include of a path that never exists yields an empty backup on API 26–27, not the default full backup. Fallbacks: (a) drop the D2D includes on API 28–30; (b) set `android:allowBackup` through a resource bool that is `false` below API 28 (`values-v28` = `true`).
 - Consequence of PO-15: devices on Android 8.0–8.1, and devices without a screen lock, have no cloud backup of the library ([Open questions](#open-questions)).
 
 ### Snapshot production
@@ -1990,7 +1990,7 @@ stateDiagram-v2
 
 ### Testing with bmgr
 
-M3 acceptance 6. Scripted as `scripts/ci/bmgr-check.sh` in 09's nightly `bmgr` job (API 31 and 36 emulators — the positive capability matrix the owner fixed on 2026-10-21; [09 CI pipelines](09-quality-and-release.md#ci-pipelines)) against the published build: the `x86_64` APK of `assembleRelease` — a non-debuggable release build signed with the committed key, package `ch.lkmc.neutrodyne` ([D2](../PLAN.md#3-key-decisions), [D96](../PLAN.md#3-key-decisions)). Run once by hand in M3 on API 26 (expect an empty backup set), 28 and 31 images to settle the Unverified points of [Rules XML](#rules-xml) ([Test backup and restore](https://developer.android.com/identity/data/testingbackup)):
+M3 acceptance 6. Scripted as `scripts/ci/bmgr-check.sh` in 09's nightly `bmgr` job (API 31 and 36 emulators, [09 CI pipelines](09-quality-and-release.md#ci-pipelines)) against the published build: the `x86_64` APK of `assembleRelease` — a non-debuggable release build signed with the committed key, package `ch.lkmc.neutrodyne` ([D2](../PLAN.md#3-key-decisions), [D96](../PLAN.md#3-key-decisions)). Run once by hand in M3 on API 26 (expect an empty backup set) and 31 images to settle the Unverified points of [Rules XML](#rules-xml); API 28 and 29 run the legacy negative diagnostic instead — the `bmgr-legacy-negative` scope measures whether stock LocalTransport refuses `requireFlags`-flagged packages at preflight, a limitation of the stock transport, not dropped app-backup support on legacy Android ([PO-50](../PLAN.md#48-further-product-owner-decisions); [Test backup and restore](https://developer.android.com/identity/data/testingbackup)):
 
 **Black-box harness (owner decision 2026-10-21).** The nightly gate proves the lifecycle on the *untouched* published APK — nothing is loaded into its process and no test hook or selector tag ships in it:
 
@@ -2001,8 +2001,9 @@ M3 acceptance 6. Scripted as `scripts/ci/bmgr-check.sh` in 09's nightly `bmgr` j
 pkg=ch.lkmc.neutrodyne                     # the published release build; a local debug build is ch.lkmc.neutrodyne.debug
 adb shell bmgr enable true
 adb shell bmgr transport com.android.localtransport/.LocalTransport
-adb shell settings put secure backup_local_transport_parameters 'is_encrypted=true,fake_encryption_flag=true'
-# is_encrypted: else disableIfNoEncryptionCapabilities skips us (API 31+); fake_encryption_flag: the API 28–30 name (Unverified)
+adb shell settings put secure backup_local_transport_parameters 'is_encrypted=true,is_device_transfer=false,fake_encryption_flag=false'
+# real capability values only: is_encrypted so disableIfNoEncryptionCapabilities does not skip us (API 31+);
+# is_device_transfer=false for the cloud-backup leg; fake_encryption_flag must never admit a payload
 adb shell am broadcast --include-stopped-packages -n "$pkg/ch.lkmc.neutrodyne.SnapshotNowReceiver"
 # expect "Broadcast completed: result=-1, data="ok …""; on data="pending" send again (at most 5 times, 5 s apart)
 adb shell bmgr backupnow "$pkg"            # expect "Package … with result: Success"

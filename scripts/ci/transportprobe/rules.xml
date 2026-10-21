@@ -1,0 +1,4 @@
+<!-- SPDX-License-Identifier: Unlicense -->
+<full-backup-content>
+    <include domain="file" path="allowed/payload" FLAGS />
+</full-backup-content>
