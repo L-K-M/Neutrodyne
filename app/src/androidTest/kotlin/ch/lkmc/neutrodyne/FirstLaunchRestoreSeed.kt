@@ -158,8 +158,8 @@ internal object FirstLaunchRestoreSeed {
         }
     }
 
-    /** The library rows, in the order a user would have produced them. Also the transport gate's fixture. */
-    internal suspend fun seedLibrary(db: NeutrodyneDatabase) {
+    /** The library rows, in the order a user would have produced them. */
+    private suspend fun seedLibrary(db: NeutrodyneDatabase) {
         val podcastIds =
             Fixture.PODCASTS.associate { spec ->
                 spec.syncId = Uuid.random().toString()
