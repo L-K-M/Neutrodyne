@@ -3,20 +3,29 @@
 #
 # bmgr-check.sh <api> <evidence-dir>
 #
-# The M3 AC6 positive local-transport gate: one full host-driven cycle on a rooted
-# `default` x86_64 emulator of the given API (31 or 36, owner matrix 2026-10-20).
-# Runs the published release APK — no debuggable target, no -t/-r on it — through:
+# The M3 AC6 positive local-transport gate — the black-box release harness
+# (owner decision 2026-10-21): one full host-driven cycle on a rooted `default`
+# x86_64 emulator of the given API (31 or 36) against the *untouched* published
+# release APK — no debuggable target, no -t/-r on it, no test class loaded in
+# the target process:
 #
-#   install -> prepare (real first start, receiver-published snapshot, canaries)
+#   install -> real launch -> driver `seed` UI import -> SnapshotNowReceiver
+#   -> driver `flip` settings-only import -> driver `encrypted` rejection
+#   -> host root canaries + payload pull -> expectation record
 #   -> encryption-off control -> encryption-on backup -> real TAR verification
 #   -> pm uninstall -> identical-APK reinstall -> install-time transport restore
-#   -> verify (real production first-launch logical restore)
+#   -> pre-launch gate (restricted default agent permitted and recorded, never a
+#      normal bind) -> force-stop -> normal launch -> adoption/worker observables
+#   -> force-stop -> coherent read-only pull -> strict host validation
 #   -> empty-transport control leg
 #
-# The script never repairs the positive leg: no `bmgr restore 1`, no `pm clear`,
-# no file copies, no reseed, no app launch after reinstall. On any failure the
-# trap still writes every collected artifact. `check-first-launch-restore-results.py
-# --bmgr` is the strict aggregate over both legs' evidence.
+# The driver (`:tools:bmgrdriver`, self-instrumenting, own package/process) only
+# acts and records; the host owns every assertion. The script never repairs the
+# positive leg: no `bmgr restore`, no `pm clear`, no file copies into restored
+# domains, no manual worker invocation, no sleep-as-proof — every wait is a
+# bounded poll for a real observable. On any failure the trap still writes every
+# collected artifact. `check-first-launch-restore-results.py --bmgr` is the
+# strict aggregate over both legs' evidence.
 #
 # Safety: the script only mutates the named disposable emulator the CI job
 # created (BMGR_DISPOSABLE_API<api>=1 + BMGR_EXPECT_AVD under GITHUB_ACTIONS),
@@ -29,10 +38,12 @@ API="${API:-}"                    # 31 or 36 only, set inside main
 EV="${EV:-}"                      # evidence dir, set inside main
 REPO_ROOT=""
 PKG="ch.lkmc.neutrodyne"
-CLASS="ch.lkmc.neutrodyne.BmgrTransportDeviceTest"
-RUNNER_PKG=""                     # filled from `pm list instrumentation`
+DRIVER_CLASS="ch.lkmc.neutrodyne.tools.bmgrdriver.BmgrDriverTest"
+DRIVER_RUNNER="ch.lkmc.neutrodyne.tools.bmgrdriver.BmgrDriverRunner"
+DRIVER_PKG=""                     # from the driver APK badging
 TRANSPORT="${TRANSPORT:-}"        # the actual transport name, from `bmgr list transports`
 DATA_DIR="/data/data/$PKG"
+DRIVER_DATA_DIR=""                # /data/data/$DRIVER_PKG, once discovered
 TRANSPORT_DIR="/data/data/com.android.localtransport/files"
 PARAMS_ON="is_encrypted=true,is_device_transfer=false,fake_encryption_flag=false"
 PARAMS_OFF="is_encrypted=false,is_device_transfer=false,fake_encryption_flag=false"
@@ -42,7 +53,7 @@ NONCE="run-$(date +%s)-$RANDOM"
 # mutation is reverted; unarmed flags mean the trap must not touch that state.
 ARMED=""
 OWNED_TRANSPORT=""; OWNED_ENABLED=""; OWNED_AUTORESTORE=""; OWNED_PARAMS=""
-INSTALLED_PKG=""; INSTALLED_RUNNER=""
+INSTALLED_PKG=""; INSTALLED_DRIVER=""
 ORIG_TRANSPORT=""; ORIG_ENABLED=""; ORIG_AUTORESTORE=""; ORIG_PARAMS="null"
 ORIG_ENABLED_BOOL=""; ORIG_AUTORESTORE_BOOL=""
 LOGCAT_PID=""
@@ -70,11 +81,11 @@ if f.is_file():
 selectors = {}
 s = ev / "selectors.txt"
 if s.is_file():
-    for line in s.read_text().splitlines():
+    for line in f.read_text().splitlines():
         k, _, v = line.partition("=")
         selectors[k] = v
 run = {
-    "schema": "bmgr-evidence/v1",
+    "schema": "bmgr-evidence/v2",
     "device": facts.get("device", ""),
     "api": int(facts.get("api", "0")),
     "fingerprint": facts.get("fingerprint", ""),
@@ -83,7 +94,9 @@ run = {
     "sourceSha": facts.get("sourceSha", ""),
     "apkSha256": facts.get("apkSha256", ""),
     "apkBytes": int(facts.get("apkBytes", "0")),
-    "testApkSha256": facts.get("testApkSha256", ""),
+    "driverApkSha256": facts.get("driverApkSha256", ""),
+    "driverPackage": facts.get("driverPackage", ""),
+    "driverRunner": facts.get("driverRunner", ""),
     "certSha256": facts.get("certSha256", ""),
     "transport": facts.get("transport", ""),
     "avd": facts.get("avd", ""),
@@ -133,7 +146,6 @@ cleanup() {
         fi
         if [ -n "$OWNED_ENABLED" ]; then
             # BackupManager caches these flags; backup_enabled is file-persisted on API31.
-            # Restoring only secure settings does not undo the bmgr calls above.
             timeout 60 "$ADB" shell bmgr enable "$ORIG_ENABLED_BOOL" || failed=1
             restore_secure backup_enabled "$ORIG_ENABLED" || failed=1
         fi
@@ -152,9 +164,9 @@ cleanup() {
             [ -z "$(timeout 60 "$ADB" shell pm path "$PKG" 2>/dev/null | tr -d '\r')" ] \
                 || failed=1
         fi
-        if [ -n "$INSTALLED_RUNNER" ]; then
-            timeout 60 "$ADB" shell pm uninstall --user 0 "$RUNNER_PKG" || true
-            [ -z "$(timeout 60 "$ADB" shell pm path "$RUNNER_PKG" 2>/dev/null | tr -d '\r')" ] \
+        if [ -n "$INSTALLED_DRIVER" ]; then
+            timeout 60 "$ADB" shell pm uninstall --user 0 "$DRIVER_PKG" || true
+            [ -z "$(timeout 60 "$ADB" shell pm path "$DRIVER_PKG" 2>/dev/null | tr -d '\r')" ] \
                 || failed=1
         fi
     fi
@@ -204,22 +216,127 @@ find_payload() {  # every _full/$PKG file under the transport store, whatever th
         | tr -d '\r' || true
 }
 
-instrument() {  # <phase> <method> <extra args...>; strict raw stream kept
-    local phase="$1" method="$2"
-    local log_file="$EV/instrument-$phase.log"
-    shift 2
-    log "instrument $phase: $CLASS#$method"
-    timeout 420 "$ADB" shell am instrument -w -r \
-        -e bmgrPhase "$phase" -e class "$CLASS#$method" "$@" \
-        "$RUNNER_PKG/ch.lkmc.neutrodyne.NeutrodyneTestRunner" 2>&1 | tee "$log_file" || true
-    grep -q "^INSTRUMENTATION_CODE: -1" "$log_file" \
-        || fail "instrument $phase did not complete successfully"
-}
-
 tool() {  # build-tools binary: PATH first, then the newest SDK build-tools dir
     command -v "$1" 2>/dev/null && return
     ls -d "${ANDROID_HOME:-/nonexistent}"/build-tools/*/ 2>/dev/null \
         | sort -V | tail -1 | xargs -I{} echo "{}$1"
+}
+
+# --- black-box helpers ---------------------------------------------------------
+
+run_driver() {  # <phase> <method>: armed driver call; the raw stream is kept verbatim
+    local phase="$1" method="$2" log_file="$EV/instrument-$phase.log"
+    log "driver $phase: $DRIVER_CLASS#$method"
+    timeout 600 "$ADB" shell am instrument -w -r \
+        -e bmgrPhase "$phase" -e bmgrNonce "$NONCE" \
+        -e class "$DRIVER_CLASS#$method" \
+        "$DRIVER_PKG/$DRIVER_RUNNER" 2>&1 | tee "$log_file" || true
+    grep -q "^INSTRUMENTATION_CODE: -1" "$log_file" \
+        || fail "driver $phase instrumentation did not complete"
+    grep -q "INSTRUMENTATION_STATUS: bmgrDriver=$phase:$NONCE:ok" "$log_file" \
+        || fail "driver $phase did not report ok for nonce $NONCE"
+    timeout 30 "$ADB" exec-out cat \
+        "$DRIVER_DATA_DIR/files/bmgr/bmgr-status-$phase.json" > "$EV/driver-status-$phase.json" \
+        2>/dev/null || fail "driver $phase left no status record"
+    [ -s "$EV/driver-status-$phase.json" ] || fail "driver $phase status record empty"
+}
+
+shadow_query() {  # <sql>: torn sequential copy of the live DB — LIVENESS HINT ONLY
+    mkdir -p "$EV/shadow"
+    for ext in "" "-wal" "-shm"; do
+        timeout 30 "$ADB" exec-out cat "$DATA_DIR/databases/neutrodyne.db$ext" \
+            > "$EV/shadow/neutrodyne.db$ext" 2>/dev/null \
+            || rm -f "$EV/shadow/neutrodyne.db$ext"
+    done
+    python3 - "$EV/shadow/neutrodyne.db" "$1" <<'PY'
+import sqlite3, sys
+try:
+    con = sqlite3.connect(sys.argv[1])
+    print(con.execute(sys.argv[2]).fetchall())
+except Exception as e:
+    print(f"SHADOW-QUERY-ERROR {e}")
+PY
+}
+
+wait_import_terminal() {  # <expected DONE count> <seconds>: bounded poll, liveness only
+    local want="$1" budget="$2" seen="" answer
+    for _ in $(seq 1 "$budget"); do
+        answer="$(shadow_query "SELECT CASE WHEN (SELECT COUNT(*) FROM import_session \
+            WHERE state='CANCELLED')>0 THEN 'CANCELLED' WHEN (SELECT COUNT(*) \
+            FROM import_session WHERE state='DONE' AND finishedAt IS NOT NULL)>=$want \
+            THEN 'DONE' ELSE 'WAIT' END")"
+        case "$answer" in
+            *DONE*) seen=1; break ;;
+            *CANCELLED*) fail "an import session cancelled while waiting ($want DONE)" ;;
+        esac
+        sleep 2
+    done
+    [ -n "$seen" ] || fail "no terminal import session inside ${budget}s (wanted $want DONE)"
+}
+
+pull_tree() {  # <remote dir> <local dir>: recursive read-only pull (root exec-out)
+    local remote="$1" local_dir="$2"
+    mkdir -p "$local_dir"
+    timeout 60 "$ADB" shell "find '$remote' -mindepth 1 2>/dev/null | sort" \
+        | tr -d '\r' > "$local_dir/.listing" || true
+    while IFS= read -r dev_path; do
+        [ -n "$dev_path" ] || continue
+        local rel="${dev_path#$remote/}"
+        if timeout 30 "$ADB" shell test -d "$dev_path" 2>/dev/null; then
+            mkdir -p "$local_dir/$rel"
+        elif timeout 30 "$ADB" shell test -L "$dev_path" 2>/dev/null; then
+            printf 'SYMLINK -> %s\n' "$(timeout 30 "$ADB" shell readlink "$dev_path" | tr -d '\r')" \
+                > "$local_dir/$rel.symlink"
+        else
+            mkdir -p "$local_dir/$(dirname "$rel")"
+            timeout 60 "$ADB" exec-out cat "$dev_path" > "$local_dir/$rel" 2>/dev/null \
+                || log "pull miss: $dev_path"
+        fi
+    done < "$local_dir/.listing"
+}
+
+snapshot_now() {  # the DUMP-protected production receiver; bounded pending retries
+    local line data
+    for _ in $(seq 1 5); do
+        timeout 90 "$ADB" shell am broadcast --include-stopped-packages \
+            -n "$PKG/ch.lkmc.neutrodyne.SnapshotNowReceiver" > "$EV/snapshot.txt" 2>&1 || true
+        data="$(grep -o 'data="[^"]*"' "$EV/snapshot.txt" | tail -1 | sed 's/^data="//; s/"$//')"
+        case "$data" in
+            ok\ *) line="$data"; break ;;
+            pending) sleep 5 ;;
+            *) fail "SnapshotNowReceiver answered '$data'" ;;
+        esac
+    done
+    [ -n "${line:-}" ] || fail "SnapshotNowReceiver never answered 'ok'"
+    printf '%s\n' "$line"
+}
+
+write_canaries() {  # root writes into excluded domains only — never DB/PB/snapshot
+    local canaries=()
+    local blob="canary-$NONCE"
+    for rel in \
+        "databases/bmgr-canary-$NONCE.db" \
+        "files/downloads/bmgr-canary-$NONCE.dat" \
+        "files/artwork/bmgr-canary-$NONCE.dat" \
+        "files/other/bmgr-canary-$NONCE.dat" \
+        "cache/bmgr-canary-$NONCE.dat" \
+        "no_backup/bmgr-canary-$NONCE.dat"; do
+        timeout 60 "$ADB" shell \
+            "mkdir -p '$DATA_DIR/$(dirname "$rel")' && printf '%s' '$blob-$rel' > '$DATA_DIR/$rel'" \
+            || fail "canary write failed: $rel"
+        canaries+=("$(printf '%s' "$blob-$rel" | sha256sum | cut -d' ' -f1)|$rel")
+    done
+    timeout 60 "$ADB" shell \
+        "mkdir -p '/sdcard/Android/data/$PKG/files' && printf '%s' '$blob-external' \
+         > '/sdcard/Android/data/$PKG/files/bmgr-canary-$NONCE.dat'" \
+        || fail "external canary write failed"
+    canaries+=("$(printf '%s' "$blob-external" | sha256sum | cut -d' ' -f1)|external/files/bmgr-canary-$NONCE.dat")
+    printf '%s\n' "${canaries[@]}"
+}
+
+pb_key() {  # <local pb> <key>: value or empty — the checker's own wire parser
+    python3 scripts/ci/check-first-launch-restore-results.py \
+        --bmgr-pb "$1" "$2" 2>/dev/null || true
 }
 
 main() {
@@ -296,11 +413,9 @@ main() {
     } > "$EV/originals.txt"
     log "originals: transport=$ORIG_TRANSPORT enabled=$ORIG_ENABLED autorestore=$ORIG_AUTORESTORE params=$ORIG_PARAMS"
 
-    # A disposable emulator carries neither our app nor its test package already.
+    # A disposable emulator carries neither our app nor the driver already.
     [ -z "$(timeout 60 "$ADB" shell pm path "$PKG" 2>/dev/null | tr -d '\r')" ] \
         || fail "refusing a device with a preexisting $PKG install"
-    ! timeout 60 "$ADB" shell pm list instrumentation | grep -qF "(target=$PKG)" \
-        || fail "refusing a device with a preexisting test install"
     ARMED=1
 
     OWNED_ENABLED=1
@@ -314,62 +429,145 @@ main() {
         || fail "local transport not selected: $(tr '\n' ' ' < "$EV/transports-selected.txt")"
     fact transport "$TRANSPORT"
 
-    # --- APK gates: the published-artifact checks already own debuggable/signer facts ---
+    # --- APK gates: published-artifact checks own debuggable/signer facts ---
     require_disk
     APK="$(ls app/build/outputs/apk/release/app-x86_64-release.apk 2>/dev/null || true)"
     [ -n "$APK" ] || APK="$(find app/build/outputs/apk/release -name 'app-*-release.apk' | head -1)"
-    TESTAPK=app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+    DRIVER_APK="${BMGR_DRIVER_APK:-}"
+    [ -n "$DRIVER_APK" ] || DRIVER_APK="$(find tools/bmgrdriver/build/outputs -name '*.apk' | head -1)"
     [ -f "$APK" ] || fail "release APK missing — build before boot"
-    [ -f "$TESTAPK" ] || fail "releaseAndroidTest APK missing — build before boot"
+    [ -f "$DRIVER_APK" ] || fail "driver APK missing — build :tools:bmgrdriver deviceTest"
     scripts/ci/check-apk.sh --published "$APK" | tee "$EV/check-apk.txt"
     timeout 60 "$(tool aapt2)" dump badging "$APK" > "$EV/apk-badging.txt" 2>&1 || true
     ! grep -q "application-debuggable" "$EV/apk-badging.txt" || fail "release APK is debuggable"
     selector apkNonDebuggable
     fact apkSha256 "$(sha256sum "$APK" | cut -d' ' -f1)"
     fact apkBytes "$(stat -c%s "$APK")"
-    fact testApkSha256 "$(sha256sum "$TESTAPK" | cut -d' ' -f1)"
+    fact driverApkSha256 "$(sha256sum "$DRIVER_APK" | cut -d' ' -f1)"
     fact certSha256 "$(timeout 120 "$(tool apksigner)" verify --print-certs "$APK" | grep -o 'SHA-256 digest: .*' | head -1 | cut -d' ' -f3-)"
+
+    # --- driver identity: self-instrumenting package discovered from its badging ---
+    timeout 60 "$(tool aapt2)" dump badging "$DRIVER_APK" > "$EV/driver-badging.txt" 2>&1 \
+        || fail "driver APK badging unreadable"
+    DRIVER_PKG="$(grep -o "package: name='[^']*'" "$EV/driver-badging.txt" | head -1 | cut -d"'" -f2)"
+    [ -n "$DRIVER_PKG" ] || fail "driver package unknown: $(head -3 "$EV/driver-badging.txt")"
+    [ "$DRIVER_PKG" != "$PKG" ] || fail "driver APK shares the target package"
+    DRIVER_DATA_DIR="/data/data/$DRIVER_PKG"
+    fact driverPackage "$DRIVER_PKG"
+    fact driverRunner "$DRIVER_RUNNER"
     INSTALLED_PKG=1
     timeout 300 "$ADB" install --user 0 "$APK" | tee "$EV/install-initial.txt"
-    INSTALLED_RUNNER=1
-    timeout 300 "$ADB" install -t --user 0 "$TESTAPK" | tee "$EV/install-test.txt"
-    RUNNER_PKG="$(timeout 60 "$ADB" shell pm list instrumentation | grep "(target=$PKG)" \
-        | sed 's/instrumentation://; s|/.*||' | tr -d '\r')"
-    [ -n "$RUNNER_PKG" ] || fail "no instrumentation targets $PKG"
-    selector testInstrumentationAvailable
-    log "runner component: $RUNNER_PKG"
+    INSTALLED_DRIVER=1
+    timeout 300 "$ADB" install -t --user 0 "$DRIVER_APK" | tee "$EV/install-driver.txt"
+    timeout 60 "$ADB" shell pm list instrumentation > "$EV/instrumentations.txt" 2>&1 || true
+    grep -q "instrumentation:$DRIVER_PKG/$DRIVER_RUNNER (target=$DRIVER_PKG)" \
+        "$EV/instrumentations.txt" \
+        || fail "driver instrumentation not self-targeting: $(tr '\n' ' ' < "$EV/instrumentations.txt")"
+    ! grep -q "(target=$PKG)" "$EV/instrumentations.txt" \
+        || fail "an instrumentation targets $PKG — the release build stays instrument-free"
+    selector driverInstrumentationAvailable
+    log "driver component: $DRIVER_PKG/$DRIVER_RUNNER"
 
-    # --- prepare: the ordinary first start seeds, publishes, records expectations ---
-    instrument prepare prepareLocalTransportBackup -e bmgrNonce "$NONCE"
-    grep -o 'INSTRUMENTATION_STATUS: bmgrExpected=[^ ]*' "$EV/instrument-prepare.log" \
-        | sed 's/.*=//' > "$EV/expected.b64"
-    [ -s "$EV/expected.b64" ] || fail "prepare did not emit bmgrExpected"
-    python3 -c 'import base64,sys,json; print(json.dumps(json.loads(base64.urlsafe_b64decode(sys.stdin.read()+"===")),indent=2))' \
-        < "$EV/expected.b64" > "$EV/expectation.json"
+    # Notifications are how the app reports import completion; grant so dumpsys shows them.
+    if [ "$SDK" -ge 33 ]; then
+        timeout 60 "$ADB" shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
+    fi
+
+    # --- real first launch: makes the package backup-eligible and opens the graph ---
+    timeout 60 "$ADB" shell am start -n "$PKG/.MainActivity" | tee "$EV/launch.txt"
+    for _ in $(seq 1 30); do
+        timeout 30 "$ADB" shell test -f "$DATA_DIR/databases/neutrodyne.db" 2>/dev/null && break
+        sleep 2
+    done
+    timeout 30 "$ADB" shell test -f "$DATA_DIR/databases/neutrodyne.db" \
+        || fail "the first launch never opened the database"
+
+    # --- driver seed import through the production ExternalImportActivity ---
+    run_driver seed seedImport
+    timeout 30 "$ADB" exec-out cat "$DRIVER_DATA_DIR/files/bmgr/seed.expected.json" \
+        > "$EV/seed.expected.json" || fail "driver wrote no seed.expected.json"
+    [ -s "$EV/seed.expected.json" ] || fail "seed.expected.json empty"
+    grep -q '"nonce": *"'"$NONCE"'"' "$EV/seed.expected.json" || fail "sidecar nonce mismatch"
+    wait_import_terminal 1 90
+
+    # --- production snapshot trigger (shell-only DUMP-protected receiver) ---
+    RECEIVER_LINE="$(snapshot_now)"
+    log "snapshot receiver: $RECEIVER_LINE"
+
+    # --- driver settings-only flip + encrypted rejection, same production path ---
+    run_driver flip settingsFlip
+    wait_import_terminal 2 90
+    run_driver encrypted encryptedImportRejected
+    timeout 60 "$ADB" shell dumpsys notification > "$EV/notifications.txt" 2>&1 || true
+
+    # --- host-owned prebackup capture: canaries, payload pair, device PB, expectation ---
+    write_canaries > "$EV/canaries.txt"
+    PULL_PRE="$EV/pulls/pre"
+    mkdir -p "$PULL_PRE"
+    for rel in \
+        files/backup/auto-snapshot.zip \
+        files/datastore/settings.preferences_pb \
+        files/datastore/device_settings.preferences_pb; do
+        mkdir -p "$PULL_PRE/$(dirname "$rel")"
+        timeout 60 "$ADB" exec-out cat "$DATA_DIR/$rel" > "$PULL_PRE/$rel" \
+            || fail "prebackup pull miss: $rel"
+        [ -s "$PULL_PRE/$rel" ] || fail "prebackup pull empty: $rel"
+    done
+    timeout 60 "$ADB" shell "find '$DATA_DIR' -type f | sort" \
+        | tr -d '\r' > "$PULL_PRE/prebackup-files.txt" || true
+    python3 - "$EV" "$PULL_PRE" <<'PY' || fail "expectation assembly failed"
+import json, sys
+from pathlib import Path
+ev, pre = Path(sys.argv[1]), Path(sys.argv[2])
+sidecar = json.loads((ev / "seed.expected.json").read_text())
+facts = {}
+for line in (ev / "facts.txt").read_text().splitlines():
+    k, _, v = line.partition("=")
+    facts[k] = v
+exp = {
+    "v": 2,
+    "nonce": facts["nonce"],
+    "package": "ch.lkmc.neutrodyne",
+    "api": int(facts["api"]),
+    "installationId": None,  # filled by the caller from the decoded device PB
+    "snapshotSha256": "", "snapshotBytes": 0,
+    "portableSha256": "", "portableBytes": 0,
+    "portableKey": "backup.opml_layout",
+    "portableInSnapshot": "GROUPED",
+    "portableAfter": "FLAT",
+    "seedSha256": sidecar["seedSha256"],
+    "seedBytes": sidecar["seedBytes"],
+    "syncIds": {p["key"]: p["syncId"] for p in sidecar["fixture"]["podcasts"]},
+    "groupUuids": {g["name"]: g["uuid"] for g in sidecar["fixture"]["groups"]},
+    "fixture": sidecar["fixture"],
+    "canaries": [line.rsplit("|", 1)[1] for line in (ev / "canaries.txt").read_text().splitlines()],
+    "receiverLine": None,  # filled by the caller
+    "preparedAt": int(__import__("time").time() * 1000),
+}
+(ev / "expectation-part.json").write_text(json.dumps(exp) + "\n")
+PY
+    INSTALL_ID="$(pb_key "$PULL_PRE/files/datastore/device_settings.preferences_pb" backup.installation_id)"
+    [ -n "$INSTALL_ID" ] || fail "device PB lacks backup.installation_id"
+    SNAP_SHA="$(sha256sum "$PULL_PRE/files/backup/auto-snapshot.zip" | cut -d' ' -f1)"
+    SNAP_BYTES="$(stat -c%s "$PULL_PRE/files/backup/auto-snapshot.zip")"
+    PORT_SHA="$(sha256sum "$PULL_PRE/files/datastore/settings.preferences_pb" | cut -d' ' -f1)"
+    PORT_BYTES="$(stat -c%s "$PULL_PRE/files/datastore/settings.preferences_pb")"
+    python3 - "$EV" "$INSTALL_ID" "$SNAP_SHA" "$SNAP_BYTES" "$PORT_SHA" "$PORT_BYTES" \
+        "$RECEIVER_LINE" <<'PY' || fail "expectation completion failed"
+import json, sys
+from pathlib import Path
+ev = Path(sys.argv[1])
+exp = json.loads((ev / "expectation-part.json").read_text())
+exp["installationId"] = sys.argv[2]
+exp["snapshotSha256"], exp["snapshotBytes"] = sys.argv[3], int(sys.argv[4])
+exp["portableSha256"], exp["portableBytes"] = sys.argv[5], int(sys.argv[6])
+exp["receiverLine"] = sys.argv[7]
+(ev / "expectation.json").write_text(json.dumps(exp, indent=2) + "\n")
+PY
     grep -q '"nonce": "'"$NONCE"'"' "$EV/expectation.json" || fail "expectation nonce mismatch"
     selector expectationCaptured
 
-    # --- eligibility: an instrumentation-finished package may sit stopped; a normal
-    #     user launch before backup clears it (never a force-stop, never a clear) ---
-    timeout 60 "$ADB" shell dumpsys package "$PKG" > "$EV/dumpsys-package.txt" || true
-    if grep -q 'stopped=true' "$EV/dumpsys-package.txt"; then
-        log "package is stopped — one normal launcher run restores backup eligibility"
-        timeout 60 "$ADB" shell am start -n "$PKG/.MainActivity" | tee "$EV/launch.txt"
-        for _ in $(seq 1 15); do
-            timeout 60 "$ADB" shell dumpsys package "$PKG" > "$EV/dumpsys-package.txt" || true
-            ! grep -q 'stopped=true' "$EV/dumpsys-package.txt" && break
-            sleep 2
-        done
-        ! grep -q 'stopped=true' "$EV/dumpsys-package.txt" || fail "package stayed stopped"
-        timeout 30 "$ADB" shell input keyevent KEYCODE_HOME || true
-        sleep 5
-    else
-        log "package is not stopped; instrumentation launch already made it backup-eligible"
-    fi
-
     # --- encryption-off control: fresh dataset, same flow must produce no payload ---
-    # `bmgr init` needs the transport named (bare init prints usage and returns);
-    # `--monitor` is what emits the ERROR_PREFLIGHT evidence the parser binds.
     bmgr_init encoff-pre
     OWNED_PARAMS=1
     timeout 60 "$ADB" shell settings put secure backup_local_transport_parameters "$PARAMS_OFF"
@@ -413,7 +611,7 @@ main() {
         "$EV/transport.tar" "$EV/expectation.json" | tee "$EV/bmgr-tar.txt"
     selector positivePayloadVerified
 
-    # --- real lifecycle: uninstall, verify absence, identical reinstall, wait restore ---
+    # --- real lifecycle: uninstall, verify absence, identical reinstall, restore ---
     timeout 60 "$ADB" shell pm uninstall --user 0 "$PKG" | tee "$EV/uninstall.txt"
     [ -z "$(timeout 60 "$ADB" shell pm path "$PKG" | tr -d '\r')" ] || fail "package still installed"
     timeout 60 "$ADB" shell ls "$DATA_DIR" > /dev/null 2>&1 \
@@ -424,34 +622,71 @@ main() {
     selector apkSignatureStable
     out dumpsys-restore.txt "$ADB" shell dumpsys backup
 
-    log "waiting for install-time restore (<=120s)..."
+    # --- install-time restore: bounded poll for the delivered payload pair ---
+    log "waiting for install-time restore (<=180s)..."
     restored=""
-    for _ in $(seq 1 60); do
+    for _ in $(seq 1 90); do
         if timeout 30 "$ADB" shell test -f "$DATA_DIR/files/backup/auto-snapshot.zip" \
            -a -f "$DATA_DIR/files/datastore/settings.preferences_pb" 2>/dev/null; then
             restored=1; break
         fi
         sleep 2
     done
-    [ -n "$restored" ] || fail "install-time restore did not deliver the payloads in 120s"
-    {
-        for rel in files/backup/auto-snapshot.zip files/datastore/settings.preferences_pb; do
-            printf '%s  %s\n' \
-                "$(timeout 30 "$ADB" exec-out cat "$DATA_DIR/$rel" | sha256sum | cut -d' ' -f1)" "$rel"
-        done
-        timeout 30 "$ADB" shell "find $DATA_DIR -type f 2>/dev/null | sort" || true
-    } > "$EV/restored-files.txt"
-    grep -c '^[0-9a-f]\\{64\\}  files/' "$EV/restored-files.txt" | grep -q '^2$' \
-        || fail "restored-files.txt lacks both payload hashes"
-    timeout 30 "$ADB" shell test -f "$DATA_DIR/databases/neutrodyne.db" 2>/dev/null \
-        && fail "a database file was restored" || true
-    selector restoredFilesMatched
+    [ -n "$restored" ] || fail "install-time restore did not deliver the payloads in 180s"
 
-    # Reinstall the test APK only if uninstall of the target took it down (same cert keeps it).
-    timeout 60 "$ADB" shell pm path "$RUNNER_PKG" | grep -q . \
-        || timeout 300 "$ADB" install -t --user 0 "$TESTAPK" | tee "$EV/install-test-2.txt"
-    instrument verify firstLaunchRestoresTransportedSnapshot \
-        -e bmgrNonce "$NONCE" -e bmgrExpected "$(cat "$EV/expected.b64")"
+    # --- pre-launch gate: the restricted default-agent window is recorded, and the
+    #     only tolerated process evidence; no normal bind may precede our launch ---
+    timeout 60 "$ADB" shell "find '$DATA_DIR' -mindepth 1 | sort" \
+        | tr -d '\r' > "$EV/prelaunch-files.txt" || true
+    timeout 30 "$ADB" shell "ps -A 2>/dev/null | grep '$PKG'" \
+        | tr -d '\r' > "$EV/prelaunch-ps.txt" || true
+    if [ -s "$EV/prelaunch-ps.txt" ]; then
+        fact prelaunchAgentObserved true
+        log "restricted restore-agent process recorded: $(tr '\n' ' ' < "$EV/prelaunch-ps.txt")"
+    else
+        fact prelaunchAgentObserved false
+    fi
+    grep -E "$DATA_DIR/databases" "$EV/prelaunch-files.txt" \
+        && fail "a databases/ entry was delivered before the first launch" || true
+    timeout 60 "$ADB" shell "tail -200 '$EV/logcat.txt'" 2>/dev/null > /dev/null 2>&1 || true
+    cp "$EV/logcat.txt" "$EV/prelaunch-logcat.txt" 2>/dev/null || true
+    timeout 60 "$ADB" shell am force-stop "$PKG"
+
+    # --- controlled normal cold launch -> adoption + restore worker observables ---
+    timeout 60 "$ADB" shell am start -n "$PKG/.MainActivity" | tee "$EV/launch-restored.txt"
+    log "waiting for the adopted restore to finish (liveness poll, <=240s)..."
+    restored_done=""
+    for _ in $(seq 1 120); do
+        answer="$(shadow_query "SELECT CASE WHEN (SELECT COUNT(*) FROM import_session \
+            WHERE optionsJson LIKE '%\"fromAndroidBackup\":true%' AND state='CANCELLED')>0 \
+            THEN 'CANCELLED' WHEN (SELECT COUNT(*) FROM import_session \
+            WHERE optionsJson LIKE '%\"fromAndroidBackup\":true%' AND state='DONE' \
+            AND finishedAt IS NOT NULL)>0 THEN 'DONE' ELSE 'WAIT' END")"
+        case "$answer" in
+            *DONE*) restored_done=1; break ;;
+            *CANCELLED*) fail "the adopted restore session cancelled" ;;
+        esac
+        sleep 2
+    done
+    [ -n "$restored_done" ] || fail "the adopted restore never reached DONE in 240s"
+    selector restoreAdoptionObserved
+
+    # --- terminal capture: force-stop, then a coherent read-only pull ---
+    timeout 60 "$ADB" shell am force-stop "$PKG"
+    sleep 3   # quiesce journal writers; acceptance is the pull, not this pause
+    PULL_POST="$EV/pulls/post"
+    mkdir -p "$PULL_POST"
+    timeout 60 "$ADB" shell "find '$DATA_DIR' -type f | sort" \
+        | tr -d '\r' > "$EV/postlaunch-files.txt" || true
+    pull_tree "$DATA_DIR/files" "$PULL_POST/files"
+    pull_tree "$DATA_DIR/databases" "$PULL_POST/databases"
+    pull_tree "$DATA_DIR/shared_prefs" "$PULL_POST/shared_prefs"
+    pull_tree "$DATA_DIR/cache" "$PULL_POST/cache"
+    pull_tree "$DATA_DIR/no_backup" "$PULL_POST/no_backup"
+    timeout 60 "$ADB" shell dumpsys notification > "$PULL_POST/notifications.txt" 2>&1 || true
+    python3 scripts/ci/check-first-launch-restore-results.py --bmgr-pull \
+        "$EV" | tee "$EV/bmgr-pull.txt" || fail "the final quiescent capture failed validation"
+    selector restoredLibraryVerified
     out dumpsys-after.txt "$ADB" shell dumpsys backup
     timeout 60 "$ADB" shell bmgr list sets > "$EV/sets.txt" 2>&1 || true
 
@@ -465,9 +700,19 @@ main() {
             || fail "unexpected file arrived on the empty leg"
         sleep 2
     done
-    timeout 60 "$ADB" shell pm path "$RUNNER_PKG" | grep -q . \
-        || timeout 60 "$ADB" install -t --user 0 "$TESTAPK" | tee "$EV/install-test-3.txt"
-    instrument empty firstLaunchWithoutTransportDataStaysEmpty -e bmgrNonce "$NONCE"
+    timeout 60 "$ADB" shell am start -n "$PKG/.MainActivity" | tee "$EV/launch-empty.txt"
+    for _ in $(seq 1 30); do
+        timeout 30 "$ADB" shell test -f "$DATA_DIR/databases/neutrodyne.db" 2>/dev/null && break
+        sleep 2
+    done
+    timeout 30 "$ADB" shell test -f "$DATA_DIR/databases/neutrodyne.db" \
+        || fail "the empty-leg launch never opened the database"
+    timeout 60 "$ADB" shell am force-stop "$PKG"
+    sleep 3
+    PULL_EMPTY="$EV/pulls/empty"
+    mkdir -p "$PULL_EMPTY"
+    pull_tree "$DATA_DIR/files" "$PULL_EMPTY/files"
+    pull_tree "$DATA_DIR/databases" "$PULL_EMPTY/databases"
     selector emptyLegExcluded
     log "api$API leg complete"
 }

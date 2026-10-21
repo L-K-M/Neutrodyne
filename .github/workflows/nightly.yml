@@ -404,12 +404,15 @@ jobs:
           if-no-files-found: error
 
   # M3 AC6's positive `bmgr` local-transport check (owner matrix 2026-10-20: API 31/36;
-  # legacy API 28/29 negative capability rows belong to the sibling probe owner). Each leg
-  # drives the real published release APK through scripts/ci/bmgr-check.sh: receiver-
-  # published snapshot -> LocalTransport backup -> pm uninstall -> identical reinstall ->
-  # install-time restore -> production first-launch restore, plus the encryption-off and
-  # empty-dataset controls. check-first-launch-restore-results.py --bmgr is the strict
-  # aggregate; report-nightly.sh only runs after that verdict.
+  # legacy API 28/29 negative capability rows belong to the sibling probe owner). The
+  # black-box release harness (owner decision 2026-10-21): each leg drives the untouched
+  # published release APK through scripts/ci/bmgr-check.sh — the self-instrumenting
+  # :tools:bmgrdriver APK seeds via the production import UI in its own process, the host
+  # triggers SnapshotNowReceiver, backs up through LocalTransport, uninstalls/reinstalls,
+  # gates the pre-launch restore window, then pulls the quiescent state and validates it
+  # with check-first-launch-restore-results.py --bmgr-pull, plus the encryption-off and
+  # empty-dataset controls. --bmgr is the strict aggregate; report-nightly.sh only runs
+  # after that verdict.
   bmgr:
     runs-on: ubuntu-24.04
     timeout-minutes: 80
@@ -447,12 +450,14 @@ jobs:
         run: scripts/ci/install-android-sdk.sh
       # Every APK the legs install is built before the first emulator boots — compiling
       # beside a starved emulator lost system_server's providers mid-run (see api37-16k).
-      - name: Build the release APKs before the emulators boot
+      # No target test APK: the release build stays instrument-free; the self-contained
+      # driver APK owns its own package and instrumentation.
+      - name: Build the release and driver APKs before the emulators boot
         timeout-minutes: 30
         run: |
-          ./gradlew --max-workers=2 -PtestBuildType=release :app:assembleRelease :app:assembleReleaseAndroidTest
-          test -f app/build/outputs/apk/androidTest/release/app-release-androidTest.apk || { echo "::error::releaseAndroidTest APK missing"; exit 1; }
+          ./gradlew --max-workers=2 :app:assembleRelease :tools:bmgrdriver:assembleAndroidDeviceTest
           test -n "$(find app/build/outputs/apk/release -name 'app-*-release.apk' -print -quit)" || { echo "::error::release APK missing"; exit 1; }
+          test -n "$(find tools/bmgrdriver/build/outputs -name '*.apk' -print -quit)" || { echo "::error::driver APK missing"; exit 1; }
       - name: bmgr on api31
         id: api31
         continue-on-error: true # api36's evidence is required even when this leg fails
