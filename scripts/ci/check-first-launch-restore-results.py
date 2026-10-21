@@ -366,22 +366,19 @@ def check_prelaunch(device, directory):
         raise ValueError(f"{device}: prelaunch process evidence shows app init")
 
 
-def check_restored_db(device, directory, exp):
-    """Terminal proof over the coherent pulled DB — fixture content, session
-    lifecycle, queue/session anchors and the WorkSpec ledger."""
-    post = directory / "pulls/post"
-    db = open_db(device, post / "databases/neutrodyne.db")
-    fixture = exp["fixture"]
-    podcasts = {p["key"]: p for p in fixture["podcasts"]}
-    episodes = fixture["episodes"]
-
-    # Session ledger: seed+flip manual MERGEs plus exactly one adopted restore.
+def check_source_db(device, directory):
+    """The pre-uninstall ledger: exactly the two manual seed/flip imports. They
+    die with the source install — a fresh reinstall can never carry them."""
+    src = directory / "pulls/source"
+    db = open_db(device, src / "databases/neutrodyne.db")
     sessions = db.execute(
         "SELECT id, sourceFormat, state, finishedAt, payloadPath, optionsJson "
         "FROM import_session ORDER BY id").fetchall()
-    if len(sessions) != 3:
-        raise ValueError(f"{device}: expected 3 import_session rows, got {len(sessions)}")
-    for row in sessions[:2]:
+    db.close()
+    if len(sessions) != 2:
+        raise ValueError(
+            f"{device}: expected 2 source import_session rows, got {len(sessions)}")
+    for row in sessions:
         opts = json.loads(row[5])
         if row[1] != "NEUTRODYNE_BACKUP" or row[2] != "DONE" or row[3] is None \
                 or opts.get("restoreMode") != "MERGE" \
@@ -396,7 +393,27 @@ def check_restored_db(device, directory, exp):
     flip_opts = json.loads(sessions[1][5])
     if flip_opts.get("restoreCategories") != ["SETTINGS"]:
         raise ValueError(f"{device}: flip session categories mismatch")
-    adopted = sessions[2]
+
+
+def check_restored_db(device, directory, exp):
+    """Terminal proof over the coherent pulled DB — fixture content, session
+    lifecycle, queue/session anchors and the WorkSpec ledger."""
+    post = directory / "pulls/post"
+    db = open_db(device, post / "databases/neutrodyne.db")
+    fixture = exp["fixture"]
+    podcasts = {p["key"]: p for p in fixture["podcasts"]}
+    episodes = fixture["episodes"]
+
+    # Session ledger: exactly one row — the adopted Android-backup restore.
+    # The manual seed/flip sessions lived in the uninstalled source DB
+    # (pulls/source); a forged extra row here is evidence tampering.
+    sessions = db.execute(
+        "SELECT id, sourceFormat, state, finishedAt, payloadPath, optionsJson "
+        "FROM import_session ORDER BY id").fetchall()
+    if len(sessions) != 1:
+        raise ValueError(
+            f"{device}: expected 1 adopted import_session row, got {len(sessions)}")
+    adopted = sessions[0]
     adopted_opts = json.loads(adopted[5])
     if adopted[1] != "NEUTRODYNE_BACKUP" or adopted[2] != "DONE" \
             or adopted[3] is None or not adopted_opts.get("fromAndroidBackup") \
@@ -515,7 +532,9 @@ def check_pull(device, directory, exp, run):
     nonce = run["nonce"]
     post = directory / "pulls/post"
     pre = directory / "pulls/pre"
+    source = directory / "pulls/source"
     for path in (pre / SNAPSHOT_REL, pre / PORTABLE_REL, pre / DEVICE_PB_REL,
+                 source / "databases/neutrodyne.db",
                  post / PORTABLE_REL, post / "databases/neutrodyne.db",
                  post / "databases/androidx.work.workdb"):
         if not path.is_file() or path.stat().st_size == 0:
@@ -542,9 +561,13 @@ def check_pull(device, directory, exp, run):
             or dev_pb.get("backup.last_snapshot_level") != lvl \
             or bts != exp["snapshotBytes"]:
         raise ValueError(f"{device}: device PB snapshot status != receiver line")
-    if not dev_pb.get("backup.auto_snapshot_enabled"):
-        raise ValueError(f"{device}: device PB auto-snapshot flag unset")
+    # Only file=SettingsFile.DEVICE keys may live in the device PB (05's
+    # BackupSettingKeys) — a portable key here is evidence of the wrong file.
+    if {"backup.auto_snapshot_enabled", "backup.opml_layout"} & set(dev_pb):
+        raise ValueError(f"{device}: device PB carries portable keys")
     portable_pre = pb_preferences((pre / PORTABLE_REL).read_bytes())
+    if not portable_pre.get("backup.auto_snapshot_enabled"):
+        raise ValueError(f"{device}: portable PB auto-snapshot flag unset")
     if portable_pre.get(exp["portableKey"]) != exp["portableAfter"] \
             or "backup.installation_id" in portable_pre:
         raise ValueError(f"{device}: prebackup portable PB not the flipped value")
@@ -559,28 +582,41 @@ def check_pull(device, directory, exp, run):
             raise ValueError(f"{device}: canary {rel} absent from the prebackup tree")
 
     check_prelaunch(device, directory)
+    check_source_db(device, directory)
     check_restored_db(device, directory, exp)
 
     # Post-restore file domains: retired/replaced snapshot + restored PB only.
     portable_post = pb_preferences((post / PORTABLE_REL).read_bytes())
     if portable_post.get(exp["portableKey"]) != exp["portableAfter"] \
-            or "backup.installation_id" in portable_post:
+            or "backup.installation_id" in portable_post \
+            or not portable_post.get("backup.auto_snapshot_enabled"):
         raise ValueError(f"{device}: post-restore portable PB != FLAT/clean")
     backup_dir = post / "files/backup"
     retired = sorted(p.name for p in backup_dir.glob("restored-*.zip")) \
         if backup_dir.is_dir() else []
     replaced = backup_dir / "auto-snapshot.zip"
+    if retired:
+        # A retired blob is the transported bytes moved aside, verbatim.
+        retired_path = backup_dir / retired[0]
+        if len(retired) != 1 \
+                or sha256_hex(retired_path.read_bytes()) != exp["snapshotSha256"]:
+            raise ValueError(f"{device}: retired snapshot mismatch {retired}")
     if replaced.is_file():
-        validate_snapshot_zip(device, replaced.read_bytes(), exp)
+        # A legitimate replacement is the NEW install's debounce product: the
+        # post-restore device installationId and the current FLAT settings —
+        # FirstLaunchRestoreChecks.assertReplacementSnapshot's contract.
         replaced_pb = pb_preferences((post / DEVICE_PB_REL).read_bytes()) \
             if (post / DEVICE_PB_REL).is_file() else {}
+        new_id = replaced_pb.get("backup.installation_id")
+        if not new_id or new_id == exp["installationId"]:
+            raise ValueError(
+                f"{device}: post-restore device PB installationId unusable")
+        validate_snapshot_zip(device, replaced.read_bytes(), exp,
+                              installation_id=new_id,
+                              portable_value=exp["portableAfter"])
         if sha256_hex(replaced.read_bytes()) == exp["snapshotSha256"]:
             raise ValueError(f"{device}: replacement snapshot is the old one")
-    elif retired:
-        retired_path = backup_dir / retired[0]
-        if len(retired) != 1 or sha256_hex(retired_path.read_bytes()) != exp["snapshotSha256"]:
-            raise ValueError(f"{device}: retired snapshot mismatch {retired}")
-    else:
+    elif not retired:
         raise ValueError(f"{device}: restored snapshot neither retired nor replaced")
     post_files = pull_listing(directory / "postlaunch-files.txt")
     canary_hits = [p for p in post_files if f"bmgr-canary-{nonce}" in p]
@@ -602,8 +638,13 @@ def check_pull(device, directory, exp, run):
         raise ValueError(f"{device}: empty leg delivered files {delivered}")
 
 
-def validate_snapshot_zip(device, data, exp):
-    """The same contract `FirstLaunchRestoreChecks.assertReplacementSnapshot` enforces."""
+def validate_snapshot_zip(device, data, exp, installation_id=None,
+                          portable_value=None):
+    """The structural snapshot contract. The transported/retired input carries
+    the source install's id and the pre-snapshot value; a legitimate
+    replacement carries the new install's id and the current value."""
+    want_id = exp["installationId"] if installation_id is None else installation_id
+    want_value = exp["portableInSnapshot"] if portable_value is None else portable_value
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as error:
@@ -626,7 +667,7 @@ def validate_snapshot_zip(device, data, exp):
         raise ValueError(f"{device}: snapshot manifest version mismatch")
     if manifest.get("kind") != "AUTO_SNAPSHOT":
         raise ValueError(f"{device}: transported snapshot is not an AUTO_SNAPSHOT")
-    if manifest.get("installationId") != exp["installationId"]:
+    if manifest.get("installationId") != want_id:
         raise ValueError(f"{device}: snapshot installationId != expectation")
     declared = {e["name"]: e for e in manifest.get("entries", [])}
     if len(declared) != len(manifest.get("entries", [])) or not set(declared) <= set(names):
@@ -639,8 +680,8 @@ def validate_snapshot_zip(device, data, exp):
             raise ValueError(f"{device}: snapshot entry {name} fails its declared hash/size")
     settings = json.loads(zf.read("settings.json").decode("utf-8"))
     values = {v.get("key"): v.get("value") for v in settings.get("values", [])}
-    if values.get(exp["portableKey"]) != exp["portableInSnapshot"]:
-        raise ValueError(f"{device}: snapshot settings must carry the pre-snapshot value")
+    if values.get(exp["portableKey"]) != want_value:
+        raise ValueError(f"{device}: snapshot settings value mismatch")
 
 
 def check_transport_tar(tar_path, exp, device="tar"):
@@ -807,10 +848,22 @@ def check_bmgr(root):
 
 
 def run_bmgr_pull(directory):
+    """The pre-cleanup pull gate binds the closed facts, never run.json — the
+    final run record is written only by cleanup(), so nothing in-progress can
+    stand in for it."""
     directory = Path(directory)
-    run = json.loads((directory / "run.json").read_text())
+    facts = {}
+    for line in (directory / "facts.txt").read_text().splitlines():
+        key, _, value = line.partition("=")
+        facts[key] = value
+    nonce = facts.get("nonce", "")
+    if not NONCE.fullmatch(nonce):
+        raise ValueError(f"bmgr-pull: facts.txt nonce {nonce!r} invalid")
     exp = json.loads((directory / "expectation.json").read_text())
-    check_pull(run.get("device", "pull"), directory, exp, run)
+    if exp.get("nonce") != nonce:
+        raise ValueError("bmgr-pull: expectation nonce != facts nonce")
+    run = {"nonce": nonce, "device": facts.get("device") or "pull"}
+    check_pull(run["device"], directory, exp, run)
     print("bmgr-pull: PASS")
 
 

@@ -81,7 +81,7 @@ if f.is_file():
 selectors = {}
 s = ev / "selectors.txt"
 if s.is_file():
-    for line in f.read_text().splitlines():
+    for line in s.read_text().splitlines():
         k, _, v = line.partition("=")
         selectors[k] = v
 run = {
@@ -610,6 +610,10 @@ PY
     python3 scripts/ci/check-first-launch-restore-results.py --bmgr-tar \
         "$EV/transport.tar" "$EV/expectation.json" | tee "$EV/bmgr-tar.txt"
     selector positivePayloadVerified
+
+    # --- source-side ledger pull: the manual seed/flip import sessions live only
+    #     in the pre-uninstall DB; the reinstalled app starts with an empty ledger ---
+    pull_tree "$DATA_DIR/databases" "$EV/pulls/source/databases"
 
     # --- real lifecycle: uninstall, verify absence, identical reinstall, restore ---
     timeout 60 "$ADB" shell pm uninstall --user 0 "$PKG" | tee "$EV/uninstall.txt"

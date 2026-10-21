@@ -228,6 +228,11 @@ NONCE = "run-1700000000-42"
 PKG = "ch.lkmc.neutrodyne"
 DRV_PKG = "ch.lkmc.neutrodyne.tools.bmgrdriver"
 DRV_RUNNER = "ch.lkmc.neutrodyne.tools.bmgrdriver.BmgrDriverRunner"
+SELECTOR_NAMES = (
+    "apkNonDebuggable", "apkSignatureStable", "driverInstrumentationAvailable",
+    "expectationCaptured", "unencryptedTransportExcluded", "positivePayloadVerified",
+    "restoreAdoptionObserved", "restoredLibraryVerified", "emptyLegExcluded",
+)
 
 
 def bmgr_fixture():
@@ -277,7 +282,7 @@ def bmgr_fixture():
     }
 
 
-def bmgr_snapshot_zip(fixture, installation_id="install-abc"):
+def bmgr_snapshot_zip(fixture, installation_id="install-abc", settings_value="GROUPED"):
     payloads = {
         "library.json": json.dumps(
             {"podcasts": fixture["podcasts"], "groups": fixture["groups"]}).encode(),
@@ -285,7 +290,7 @@ def bmgr_snapshot_zip(fixture, installation_id="install-abc"):
         "queue.json": b'{"upNext":[]}',
         "settings.json": json.dumps(
             {"values": [{"key": "backup.opml_layout", "type": "Choice",
-                         "value": "GROUPED"}]}).encode(),
+                         "value": settings_value}]}).encode(),
     }
     manifest = {
         "format": "neutrodyne-backup", "formatVersion": 1, "minReaderVersion": 1,
@@ -351,8 +356,8 @@ def driver_status(phase, nonce, api):
     }
 
 
-def build_restored_db(path, fixture, adopted_id=3, group_uuids=None):
-    """The pulled target DB — tables/rows the quiescent check reads."""
+def _build_db(path, fixture, session_rows, group_uuids=None):
+    """Shared schema + seeded library for the pulled source/restored DBs."""
     Path(path).unlink(missing_ok=True)
     import sqlite3
     uuids = group_uuids or ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -413,7 +418,15 @@ def build_restored_db(path, fixture, adopted_id=3, group_uuids=None):
     context_id = gid["Boredom"] if session.get("contextType") == "GROUP" else None
     con.execute("INSERT INTO play_session VALUES(?,?,?,?)",
                 (0, current, session.get("contextType"), context_id))
-    sessions = [
+    con.executemany("INSERT INTO import_session VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    session_rows)
+    con.commit()
+    con.close()
+
+
+def manual_session_rows():
+    """The source-side ledger: seed + flip manual MERGE imports, ids 1 and 2."""
+    return [
         (1, 100, 200, "seed.zip", "NEUTRODYNE_BACKUP", "DONE", 0, "import/1.bin",
          json.dumps({"restoreMode": "MERGE",
                      "restoreCategories": ["HISTORY", "UP_NEXT", "SETTINGS"],
@@ -421,15 +434,25 @@ def build_restored_db(path, fixture, adopted_id=3, group_uuids=None):
         (2, 300, 400, "flip.zip", "NEUTRODYNE_BACKUP", "DONE", 0, "import/2.bin",
          json.dumps({"restoreMode": "MERGE", "restoreCategories": ["SETTINGS"],
                      "fromAndroidBackup": False}), None),
-        (adopted_id, 500, 600, "auto-snapshot.zip", "NEUTRODYNE_BACKUP", "DONE",
-         0, f"import/{adopted_id}.bin",
-         json.dumps({"restoreMode": "MERGE",
-                     "restoreCategories": ["HISTORY", "UP_NEXT"],
-                     "fromAndroidBackup": True}), None),
     ]
-    con.executemany("INSERT INTO import_session VALUES(?,?,?,?,?,?,?,?,?,?)", sessions)
-    con.commit()
-    con.close()
+
+
+def adopted_session_row(adopted_id):
+    return (adopted_id, 500, 600, "auto-snapshot.zip", "NEUTRODYNE_BACKUP", "DONE",
+            0, f"import/{adopted_id}.bin",
+            json.dumps({"restoreMode": "MERGE",
+                        "restoreCategories": ["HISTORY", "UP_NEXT"],
+                        "fromAndroidBackup": True}), None)
+
+
+def build_source_db(path, fixture, group_uuids=None):
+    """The pre-uninstall pull: seeded library + the two manual import rows."""
+    _build_db(path, fixture, manual_session_rows(), group_uuids)
+
+
+def build_restored_db(path, fixture, adopted_id=1, group_uuids=None):
+    """The pulled post-restore DB — exactly one row, the adopted restore."""
+    _build_db(path, fixture, [adopted_session_row(adopted_id)], group_uuids)
 
 
 def build_empty_db(path):
@@ -464,10 +487,11 @@ def build_workdb(path, adopted_id):
 
 
 def write_pulls(directory, exp, fixture, snapshot_zip, portable_pb, device_pb):
-    """The full pulls/ tree: pre payload pair, post quiescent capture, empty leg."""
+    """The full pulls/ tree: pre payload pair, source ledger, post capture, empty leg."""
     pre = directory / "pulls/pre"
     post = directory / "pulls/post"
     empty = directory / "pulls/empty"
+    source = directory / "pulls/source"
     for rel, blob in (
         ("files/backup/auto-snapshot.zip", snapshot_zip),
         ("files/datastore/settings.preferences_pb", portable_pb),
@@ -489,10 +513,12 @@ def write_pulls(directory, exp, fixture, snapshot_zip, portable_pb, device_pb):
     (post / "files/datastore/device_settings.preferences_pb").write_bytes(
         pb_blob(**{"backup.installation_id": ("s", "install-new")}))
     (post / "cache/import").mkdir(parents=True, exist_ok=True)
-    (post / "cache/import/3.bin").write_bytes(snapshot_zip)
+    (post / "cache/import/1.bin").write_bytes(snapshot_zip)
     (post / "databases").mkdir(parents=True, exist_ok=True)
     build_restored_db(post / "databases/neutrodyne.db", fixture)
-    build_workdb(post / "databases/androidx.work.workdb", 3)
+    build_workdb(post / "databases/androidx.work.workdb", 1)
+    (source / "databases").mkdir(parents=True, exist_ok=True)
+    build_source_db(source / "databases/neutrodyne.db", fixture)
     (post / "notifications.txt").write_text("")
     (empty / "databases").mkdir(parents=True, exist_ok=True)
     build_empty_db(empty / "databases/neutrodyne.db")
@@ -520,9 +546,10 @@ class BmgrEvidenceTest(unittest.TestCase):
             "backup.installation_id": ("s", "install-abc"),
             "backup.last_snapshot_at": ("i", snap_at),
             "backup.last_snapshot_bytes": ("i", len(snapshot_zip)),
-            "backup.last_snapshot_level": ("i", snap_level),
+            "backup.last_snapshot_level": ("i", snap_level)})
+        portable_pb = pb_blob(**{
+            "backup.opml_layout": ("s", "FLAT"),
             "backup.auto_snapshot_enabled": ("b", True)})
-        portable_pb = pb_blob(**{"backup.opml_layout": ("s", "FLAT")})
         exp = {
             "v": 2, "nonce": NONCE, "package": PKG, "api": api,
             "installationId": "install-abc",
@@ -552,14 +579,16 @@ class BmgrEvidenceTest(unittest.TestCase):
             "cleanupStatus": "ok", "avd": f"bmgr-api{api}",
             "prelaunchAgentObserved": True,
             "tarDevicePath": f"/data/data/com.android.localtransport/files/1/_full/{PKG}",
-            "selectors": {name: "pass" for name in (
-                "apkNonDebuggable", "apkSignatureStable", "driverInstrumentationAvailable",
-                "expectationCaptured", "unencryptedTransportExcluded",
-                "positivePayloadVerified", "restoreAdoptionObserved",
-                "restoredLibraryVerified", "emptyLegExcluded")},
+            "selectors": {name: "pass" for name in SELECTOR_NAMES},
         }
         sidecar = {"v": 1, "nonce": NONCE, "api": api, "seedSha256": exp["seedSha256"],
                    "seedBytes": 7, "fixture": fixture}
+        # The pre-cleanup inputs the emitter turns into run.json at leg end.
+        (directory / "facts.txt").write_text(
+            f"device={device}\napi={api}\nnonce={NONCE}\n"
+            + "".join(f"selector.{name}=pass\n" for name in SELECTOR_NAMES))
+        (directory / "selectors.txt").write_text(
+            "".join(f"{name}=pass\n" for name in SELECTOR_NAMES))
         (directory / "run.json").write_text(json.dumps(run))
         (directory / "expectation.json").write_text(json.dumps(exp))
         (directory / "seed.expected.json").write_text(json.dumps(sidecar))
@@ -817,6 +846,162 @@ class BmgrEvidenceTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("successful runner completion", result.stderr)
 
+    # -- F1: --bmgr-pull runs before cleanup writes run.json --------------------
+
+    def pull_check(self, directory):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "--bmgr-pull", str(directory)],
+            capture_output=True, text=True, timeout=60)
+
+    def test_pull_gate_accepts_a_precleanup_leg(self):
+        """facts.txt/selectors.txt but no run.json — the real pre-cleanup shape."""
+        directory = self.build_leg("api31", 31)
+        (directory / "run.json").unlink()
+        result = self.pull_check(directory)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("bmgr-pull: PASS", result.stdout)
+
+    def test_pull_gate_rejects_a_foreign_facts_nonce(self):
+        directory = self.build_leg("api31", 31)
+        (directory / "run.json").unlink()
+        path = directory / "facts.txt"
+        path.write_text(path.read_text().replace(NONCE, "run-9999999999-42"))
+        result = self.pull_check(directory)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("nonce", result.stderr)
+
+    # -- F3: the post-restore ledger holds exactly one adopted row --------------
+
+    def test_rejects_a_forged_extra_session_row(self):
+        def mutate(directory, run, exp, logs, statuses):
+            import sqlite3
+            con = sqlite3.connect(
+                directory / "pulls/post/databases/neutrodyne.db")
+            con.execute("INSERT INTO import_session VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        (9, 1, 2, "forged.zip", "NEUTRODYNE_BACKUP", "DONE", 0,
+                         "import/9.bin",
+                         json.dumps({"restoreMode": "MERGE",
+                                     "restoreCategories": ["SETTINGS"],
+                                     "fromAndroidBackup": False}), None))
+            con.commit()
+            con.close()
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("import_session", result.stderr)
+
+    def test_rejects_a_missing_source_ledger(self):
+        def mutate(directory, run, exp, logs, statuses):
+            (directory / "pulls/source/databases/neutrodyne.db").unlink()
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("source", result.stderr)
+
+    def test_rejects_a_malformed_source_session(self):
+        def mutate(directory, run, exp, logs, statuses):
+            import sqlite3
+            con = sqlite3.connect(
+                directory / "pulls/source/databases/neutrodyne.db")
+            con.execute("UPDATE import_session SET state='PENDING' WHERE id=2")
+            con.commit()
+            con.close()
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("manual session", result.stderr)
+
+    # -- F4: backup.auto_snapshot_enabled is a portable key ----------------------
+
+    @staticmethod
+    def rebind_pbs(directory, run, exp, portable_pb, device_pb):
+        """Re-seal mutated PBs: pulled files, TAR, expectation and run hashes."""
+        (directory / "pulls/pre/files/datastore/settings.preferences_pb") \
+            .write_bytes(portable_pb)
+        (directory / "pulls/pre/files/datastore/device_settings.preferences_pb") \
+            .write_bytes(device_pb)
+        (directory / "pulls/post/files/datastore/settings.preferences_pb") \
+            .write_bytes(portable_pb)
+        snapshot_zip = (
+            directory / "pulls/pre/files/backup/auto-snapshot.zip").read_bytes()
+        tar = bmgr_tar(exp["package"], snapshot_zip, portable_pb)
+        (directory / "transport.tar").write_bytes(tar)
+        run["tarSha256"] = _sha(tar)
+        exp["portableSha256"] = _sha(portable_pb)
+        exp["portableBytes"] = len(portable_pb)
+        (directory / "expectation.json").write_text(json.dumps(exp))
+
+    def test_rejects_a_missing_portable_flag(self):
+        def mutate(directory, run, exp, logs, statuses):
+            match = re.match(r"ok at=(\d+) bytes=(\d+) level=(\d+)",
+                             exp["receiverLine"])
+            device_pb = pb_blob(**{
+                "backup.installation_id": ("s", exp["installationId"]),
+                "backup.last_snapshot_at": ("i", int(match[1])),
+                "backup.last_snapshot_bytes": ("i", int(match[2])),
+                "backup.last_snapshot_level": ("i", int(match[3]))})
+            self.rebind_pbs(directory, run, exp,
+                            pb_blob(**{"backup.opml_layout": ("s", "FLAT")}),
+                            device_pb)
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("auto-snapshot flag", result.stderr)
+
+    def test_rejects_the_flag_in_the_device_pb(self):
+        def mutate(directory, run, exp, logs, statuses):
+            match = re.match(r"ok at=(\d+) bytes=(\d+) level=(\d+)",
+                             exp["receiverLine"])
+            device_pb = pb_blob(**{
+                "backup.installation_id": ("s", exp["installationId"]),
+                "backup.last_snapshot_at": ("i", int(match[1])),
+                "backup.last_snapshot_bytes": ("i", int(match[2])),
+                "backup.last_snapshot_level": ("i", int(match[3])),
+                "backup.auto_snapshot_enabled": ("b", True)})
+            self.rebind_pbs(directory, run, exp,
+                            pb_blob(**{"backup.opml_layout": ("s", "FLAT")}),
+                            device_pb)
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("portable keys", result.stderr)
+
+    # -- F5: a legitimate replacement belongs to the NEW installation ----------
+
+    def test_accepts_a_new_replacement_snapshot(self):
+        def mutate(directory, run, exp, logs, statuses):
+            # retired AND a fresh replacement may coexist post-restore.
+            (directory / "pulls/post/files/backup/auto-snapshot.zip").write_bytes(
+                bmgr_snapshot_zip(bmgr_fixture(), installation_id="install-new",
+                                  settings_value="FLAT"))
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_rejects_the_transported_zip_as_replacement(self):
+        def mutate(directory, run, exp, logs, statuses):
+            backup_dir = directory / "pulls/post/files/backup"
+            (backup_dir / "restored-1700000001234.zip").unlink()
+            (backup_dir / "auto-snapshot.zip").write_bytes(
+                (directory / "pulls/pre/files/backup/auto-snapshot.zip")
+                .read_bytes())
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("installationId", result.stderr)
+
+    def test_rejects_a_source_identity_replacement(self):
+        def mutate(directory, run, exp, logs, statuses):
+            backup_dir = directory / "pulls/post/files/backup"
+            (backup_dir / "restored-1700000001234.zip").unlink()
+            (backup_dir / "auto-snapshot.zip").write_bytes(
+                bmgr_snapshot_zip(bmgr_fixture(), installation_id="install-abc",
+                                  settings_value="FLAT"))
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("installationId", result.stderr)
+
 
 SCRIPT_SH = REPO / "scripts/ci/bmgr-check.sh"
 MUTATING_PREFIXES = (
@@ -1003,6 +1188,34 @@ class BmgrHostScriptTest(unittest.TestCase):
         for a in inits:
             self.assertEqual(["shell", "bmgr", "init",
                               "com.android.localtransport/.LocalTransport"], a)
+
+    def test_finish_run_json_reads_selectors_not_facts(self):
+        """F2: the real emitter must map selectors.txt, not facts.txt — distinct
+        inputs expose a cross-read immediately."""
+        ev = self.root / "emitter-ev"
+        ev.mkdir()
+        (ev / "facts.txt").write_text(
+            f"device=api31\napi=31\nnonce={NONCE}\ncleanupStatus=ok\n"
+            + "".join(f"selector.{n}=pass\n" for n in SELECTOR_NAMES))
+        (ev / "selectors.txt").write_text(
+            "".join(f"{n}=pass\n" for n in SELECTOR_NAMES))
+        driver = self.root / "emit.sh"
+        driver.write_text(textwrap.dedent(f"""\
+            set -uo pipefail
+            export BMGR_CHECK_LIB_ONLY=1
+            ADB={self.adb}
+            EV={ev}
+            source {self.script}
+            finish_run_json
+            """))
+        result = subprocess.run(["bash", str(driver)],
+                                env={**os.environ, "ADB_CALLS": str(self.calls)},
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, result.returncode, result.stderr)
+        run = json.loads((ev / "run.json").read_text())
+        self.assertEqual({n: "pass" for n in SELECTOR_NAMES}, run["selectors"])
+        self.assertEqual("api31", run["device"])
+        self.assertEqual(NONCE, run["nonce"])
 
 
 if __name__ == "__main__":
