@@ -38,7 +38,11 @@ class DriverSelfTest {
             )
         }
         val manifest =
-            BackupCodec().decodeManifest(seed.inputStream().source().buffer())
+            ZipFile(seed).use { zip ->
+                zip.getInputStream(zip.getEntry("manifest.json")).use { input ->
+                    BackupCodec().decodeManifest(input.source().buffer())
+                }
+            }
         assertEquals(BackupCodec.FORMAT, manifest.format)
         assertEquals("install-seed-$nonce", manifest.installationId)
         assertEquals(content.podcasts.size, manifest.counts.podcasts)

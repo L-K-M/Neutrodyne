@@ -225,7 +225,8 @@ tool() {  # build-tools binary: PATH first, then the newest SDK build-tools dir
 # --- black-box helpers ---------------------------------------------------------
 
 run_driver() {  # <phase> <method>: armed driver call; the raw stream is kept verbatim
-    local phase="$1" method="$2" log_file="$EV/instrument-$phase.log"
+    local phase="$1" method="$2"
+    local log_file="$EV/instrument-$phase.log"
     log "driver $phase: $DRIVER_CLASS#$method"
     timeout 600 "$ADB" shell am instrument -w -r \
         -e bmgrPhase "$phase" -e bmgrNonce "$NONCE" \

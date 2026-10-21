@@ -1074,6 +1074,12 @@ class BmgrHostScriptTest(unittest.TestCase):
             "    done()\n"
             "if args[:3] == ['shell', 'bmgr', 'init']:\n"
             "    done(os.environ.get('FAKE_INIT', 'Initialization result: 0') + '\\n')\n"
+            "if args[:3] == ['shell', 'am', 'instrument']:\n"
+            "    pairs = {args[i+1]: args[i+2] for i, a in enumerate(args) if a == '-e'}\n"
+            "    done(f\"INSTRUMENTATION_STATUS: bmgrDriver={pairs['bmgrPhase']}:{pairs['bmgrNonce']}:ok\\n\"\n"
+            "         'INSTRUMENTATION_CODE: -1\\n')\n"
+            "if args[:2] == ['exec-out', 'cat']:\n"
+            "    done('{\\\"v\\\":1,\\\"result\\\":\\\"ok\\\"}\\n')\n"
             "done()\n")
         self.adb.chmod(0o755)
         # A scratch repo keeps the APK gate deterministic: no app/build/ exists there.
@@ -1216,6 +1222,49 @@ class BmgrHostScriptTest(unittest.TestCase):
         self.assertEqual({n: "pass" for n in SELECTOR_NAMES}, run["selectors"])
         self.assertEqual("api31", run["device"])
         self.assertEqual(NONCE, run["nonce"])
+
+    def test_run_driver_arms_and_captures_each_phase(self):
+        """Real run_driver through the lib seam: nounset-proof locals, armed
+        phase/method/nonce args, raw stream + status capture per phase."""
+        ev = self.root / "driver-ev"
+        ev.mkdir()
+        driver = self.root / "drv.sh"
+        driver.write_text(textwrap.dedent(f"""\
+            set -uo pipefail
+            export BMGR_CHECK_LIB_ONLY=1
+            source {self.script}
+            ADB={self.adb}
+            EV={ev}
+            NONCE={NONCE}
+            DRIVER_PKG={DRV_PKG}.test
+            DRIVER_DATA_DIR=/data/data/$DRIVER_PKG
+            run_driver seed seedImport
+            run_driver flip settingsFlip
+            run_driver encrypted encryptedImportRejected
+            echo DRV-OK
+            """))
+        result = subprocess.run(["bash", str(driver)],
+                                env={**os.environ, "ADB_CALLS": str(self.calls)},
+                                capture_output=True, text=True, timeout=30)
+        self.assertIn("DRV-OK", result.stdout, result.stderr + result.stdout)
+        observed = ([json.loads(l) for l in self.calls.read_text().splitlines()]
+                    if self.calls.exists() else [])
+        instruments = [a for a in observed
+                       if a[:3] == ["shell", "am", "instrument"]]
+        self.assertEqual(3, len(instruments))
+        for call, phase, method in zip(
+                instruments, ("seed", "flip", "encrypted"),
+                ("seedImport", "settingsFlip", "encryptedImportRejected")):
+            pairs = {call[i+1]: call[i+2] for i, a in enumerate(call) if a == "-e"}
+            self.assertEqual(phase, pairs["bmgrPhase"])
+            self.assertEqual(NONCE, pairs["bmgrNonce"])
+            self.assertEqual(
+                "ch.lkmc.neutrodyne.tools.bmgrdriver.BmgrDriverTest#" + method,
+                pairs["class"])
+            self.assertIn(f"bmgrDriver={phase}:{NONCE}:ok",
+                          (ev / f"instrument-{phase}.log").read_text())
+            self.assertGreater(
+                (ev / f"driver-status-{phase}.json").stat().st_size, 0)
 
 
 if __name__ == "__main__":
