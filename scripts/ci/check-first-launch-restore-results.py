@@ -346,24 +346,87 @@ def pull_listing(path):
             if line.strip()]
 
 
-def check_prelaunch(device, directory):
-    """The pre-launch gate listing: only the delivered payload pair plus dirs."""
-    listing = pull_listing(directory / "prelaunch-files.txt")
+# Framework roots AOSP's FullBackup.BackupScheme constructs around a default-agent
+# restore (database/shared-prefs/cache/no_backup bootstrap); empty dirs only.
+PRELAUNCH_FRAMEWORK_DIRS = {"cache", "code_cache", "databases",
+                            "no_backup", "shared_prefs"}
+PRELAUNCH_PAYLOAD_FILES = {
+    "files/backup/auto-snapshot.zip",
+    "files/datastore/settings.preferences_pb",
+}
+PRELAUNCH_PARENT_DIRS = {"files", "files/backup", "files/datastore"}
+PRELAUNCH_LINKS = {"lib"}
+PRELAUNCH_TAG = "bmgr-prelaunch"
+AGENT_REASON = "backup {android/FullBackupAgent}"
+
+
+def check_prelaunch(device, directory, nonce):
+    """Pre-launch gate: typed path evidence (only the payload pair + proven empty
+    framework dirs) and a nonce-marked logcat window whose only tolerated target
+    process start is the restricted default backup agent."""
     data = f"/data/data/{BMGR_TARGET}"
-    if not listing or any(not p.startswith(f"{data}/") for p in listing):
-        raise ValueError(f"{device}: prelaunch listing malformed")
-    allowed = {
-        f"{data}/files", f"{data}/files/backup", f"{data}/files/backup/auto-snapshot.zip",
-        f"{data}/files/datastore", f"{data}/files/datastore/settings.preferences_pb",
-        f"{data}/lib",
-    }
-    extra = set(listing) - allowed
-    if extra:
-        raise ValueError(f"{device}: pre-launch entries outside the payload pair: "
-                         f"{sorted(extra)}")
-    ps = (directory / "prelaunch-ps.txt").read_text(errors="replace")
-    if "NeutrodyneApplication" in ps or "FATAL EXCEPTION" in ps:
-        raise ValueError(f"{device}: prelaunch process evidence shows app init")
+    rel_of = {"f": set(), "d": set(), "l": set()}
+    for line in pull_listing(directory / "prelaunch-files.txt"):
+        t, _, p = line.partition(" ")
+        if t not in ("d", "f", "l") or not p.startswith(f"{data}/"):
+            raise ValueError(f"{device}: prelaunch listing malformed: {line!r}")
+        rel_of[t].add(p[len(data) + 1:])
+    if rel_of["f"] != PRELAUNCH_PAYLOAD_FILES:
+        raise ValueError(
+            f"{device}: prelaunch files != payload pair: {sorted(rel_of['f'])}")
+    extra = rel_of["d"] - PRELAUNCH_PARENT_DIRS - PRELAUNCH_FRAMEWORK_DIRS
+    if extra or rel_of["l"] - PRELAUNCH_LINKS:
+        raise ValueError(f"{device}: prelaunch unexpected dirs/links: "
+                         f"{sorted(extra | (rel_of['l'] - PRELAUNCH_LINKS))}")
+    # Empty-dir proof is structural: a descendant would be its own entry.
+
+    lines = pull_listing(directory / "prelaunch-logcat.txt")
+    marker = re.compile(
+        rf"{PRELAUNCH_TAG}: (begin|end) (run-\d+-\d+) {re.escape(BMGR_TARGET)}")
+    begin = end = None
+    for i, line in enumerate(lines):
+        if (m := marker.search(line)):
+            if m.group(2) != nonce:
+                raise ValueError(
+                    f"{device}: prelaunch marker nonce != run nonce")
+            if m.group(1) == "begin":
+                begin = i if begin is None else begin
+            else:
+                end = i
+    if begin is None or end is None or end <= begin:
+        raise ValueError(f"{device}: prelaunch logcat window markers missing")
+
+    pkg = re.escape(BMGR_TARGET)
+    start = re.compile(rf"Start proc (\d+):({pkg}(?::\S+)?)/\S+ for (\S.*)$")
+    backup_pids = set()
+    saw_restore = False
+    for line in lines[begin + 1:end]:
+        if f"restoreAtInstall pkg={BMGR_TARGET}" in line:
+            saw_restore = True
+        if (found := start.search(line)):
+            if found.group(3) != AGENT_REASON:
+                raise ValueError(
+                    f"{device}: normal process start inside prelaunch window: "
+                    f"{found.group(2)} for {found.group(3)}")
+            backup_pids.add(found.group(1))
+        if f"cmp={BMGR_TARGET}/" in line or f"cmp={BMGR_TARGET}:" in line:
+            raise ValueError(f"{device}: activity/component start in window")
+    if not (saw_restore and backup_pids):
+        raise ValueError(
+            f"{device}: no default-agent restore provenance in window")
+
+    for line in pull_listing(directory / "prelaunch-ps.txt"):
+        fields = line.split()
+        if "NeutrodyneApplication" in line or "FATAL EXCEPTION" in line:
+            raise ValueError(
+                f"{device}: prelaunch process evidence shows app init")
+        if fields and (fields[-1] == BMGR_TARGET
+                       or fields[-1].startswith(f"{BMGR_TARGET}:")):
+            pid = fields[1] if len(fields) > 1 and fields[1].isdigit() else None
+            if pid not in backup_pids:
+                raise ValueError(
+                    f"{device}: live target process without backup provenance: "
+                    f"{line}")
 
 
 def check_source_db(device, directory):
@@ -581,7 +644,7 @@ def check_pull(device, directory, exp, run):
         if want not in prebackup:
             raise ValueError(f"{device}: canary {rel} absent from the prebackup tree")
 
-    check_prelaunch(device, directory)
+    check_prelaunch(device, directory, exp["nonce"])
     check_source_db(device, directory)
     check_restored_db(device, directory, exp)
 

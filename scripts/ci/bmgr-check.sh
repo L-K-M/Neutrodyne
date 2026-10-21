@@ -394,7 +394,25 @@ main() {
     LOGCAT_PID=$!
 
     # --- original backup state: raw secure values captured before any change ---
-    out transports-before.txt "$ADB" shell bmgr list transports
+    # LocalTransport registers asynchronously (run7 api36: BOUND_AND_CONNECTING
+    # + empty list): bounded wait before any mutable original; attempts kept.
+    wait_s="${BMGR_TRANSPORT_WAIT_S:-90}"
+    tries=$(( (wait_s + 1) / 2 )); [ "$tries" -ge 1 ] || tries=1
+    : > "$EV/transport-wait.txt"
+    ready=""
+    for _ in $(seq 1 "$tries"); do
+        timeout 30 "$ADB" shell bmgr list transports \
+            > "$EV/transport-wait-last.txt" 2>&1 || true
+        cat "$EV/transport-wait-last.txt" >> "$EV/transport-wait.txt"
+        echo "---" >> "$EV/transport-wait.txt"
+        if grep -q 'com\.android\.localtransport/\.LocalTransport' \
+                "$EV/transport-wait-last.txt"; then
+            ready=1; break
+        fi
+        sleep 2
+    done
+    [ -n "$ready" ] || fail "local transport did not register within ${wait_s}s"
+    cp "$EV/transport-wait-last.txt" "$EV/transports-before.txt"
     TRANSPORT="$(grep -o 'com\.android\.localtransport/\.LocalTransport' "$EV/transports-before.txt" | head -1)"
     [ -n "$TRANSPORT" ] || fail "local transport not in: $(cat "$EV/transports-before.txt")"
     ORIG_TRANSPORT="$(selected_transport "$EV/transports-before.txt")"
@@ -626,6 +644,9 @@ PY
     [ -z "$(timeout 60 "$ADB" shell pm path "$PKG" | tr -d '\r')" ] || fail "package still installed"
     timeout 60 "$ADB" shell ls "$DATA_DIR" > /dev/null 2>&1 \
         && fail "app data survived pm uninstall" || log "app data gone"
+    # Host-owned markers bound to the nonce delimit the install/restore window.
+    timeout 30 "$ADB" shell log -p i -t bmgr-prelaunch "begin $NONCE $PKG" \
+        || fail "could not write the prelaunch begin marker"
     timeout 300 "$ADB" install --user 0 "$APK" | tee "$EV/install-restore.txt"
     [ "$(sha256sum "$APK" | cut -d' ' -f1)" = "$(grep '^apkSha256=' "$EV/facts.txt" | cut -d= -f2)" ] \
         || fail "reinstalled APK differs"
@@ -646,7 +667,14 @@ PY
 
     # --- pre-launch gate: the restricted default-agent window is recorded, and the
     #     only tolerated process evidence; no normal bind may precede our launch ---
-    timeout 60 "$ADB" shell "find '$DATA_DIR' -mindepth 1 | sort" \
+    # Typed path evidence (d/f/l/?): payload pair + provably-empty framework
+    # dirs only; '?' or any descendant fails closed in the checker.
+    timeout 60 "$ADB" shell \
+        "find '$DATA_DIR' -mindepth 1 | sort | while read -r p; do" \
+        " if [ -L \"\$p\" ]; then echo \"l \$p\";" \
+        " elif [ -d \"\$p\" ]; then echo \"d \$p\";" \
+        " elif [ -f \"\$p\" ]; then echo \"f \$p\";" \
+        " else echo \"? \$p\"; fi; done" \
         | tr -d '\r' > "$EV/prelaunch-files.txt" || true
     timeout 30 "$ADB" shell "ps -A 2>/dev/null | grep '$PKG'" \
         | tr -d '\r' > "$EV/prelaunch-ps.txt" || true
@@ -656,11 +684,11 @@ PY
     else
         fact prelaunchAgentObserved false
     fi
-    grep -E "$DATA_DIR/databases" "$EV/prelaunch-files.txt" \
-        && fail "a databases/ entry was delivered before the first launch" || true
-    timeout 60 "$ADB" shell "tail -200 '$EV/logcat.txt'" 2>/dev/null > /dev/null 2>&1 || true
-    cp "$EV/logcat.txt" "$EV/prelaunch-logcat.txt" 2>/dev/null || true
     timeout 60 "$ADB" shell am force-stop "$PKG"
+    timeout 30 "$ADB" shell log -p i -t bmgr-prelaunch "end $NONCE $PKG" \
+        || fail "could not write the prelaunch end marker"
+    timeout 60 "$ADB" logcat -d -v threadtime > "$EV/prelaunch-logcat.txt" \
+        2>/dev/null || fail "could not dump the prelaunch logcat window"
 
     # --- controlled normal cold launch -> adoption + restore worker observables ---
     timeout 60 "$ADB" shell am start -n "$PKG/.MainActivity" | tee "$EV/launch-restored.txt"

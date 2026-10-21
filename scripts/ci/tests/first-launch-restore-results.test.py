@@ -228,6 +228,7 @@ NONCE = "run-1700000000-42"
 PKG = "ch.lkmc.neutrodyne"
 DRV_PKG = "ch.lkmc.neutrodyne.tools.bmgrdriver"
 DRV_RUNNER = "ch.lkmc.neutrodyne.tools.bmgrdriver.BmgrDriverRunner"
+TAG = "bmgr-prelaunch"
 SELECTOR_NAMES = (
     "apkNonDebuggable", "apkSignatureStable", "driverInstrumentationAvailable",
     "expectationCaptured", "unencryptedTransportExcluded", "positivePayloadVerified",
@@ -597,14 +598,29 @@ class BmgrEvidenceTest(unittest.TestCase):
             f"instrumentation:{DRV_PKG}/{DRV_RUNNER} (target={DRV_PKG})\n")
         data = f"/data/data/{PKG}"
         (directory / "prelaunch-files.txt").write_text("\n".join([
-            f"{data}/files", f"{data}/files/backup",
-            f"{data}/files/backup/auto-snapshot.zip",
-            f"{data}/files/datastore",
-            f"{data}/files/datastore/settings.preferences_pb",
-            f"{data}/lib"]) + "\n")
+            f"d {data}/cache", f"d {data}/databases",
+            f"d {data}/files", f"d {data}/files/backup",
+            f"f {data}/files/backup/auto-snapshot.zip",
+            f"d {data}/files/datastore",
+            f"f {data}/files/datastore/settings.preferences_pb",
+            f"d {data}/no_backup", f"d {data}/shared_prefs",
+            f"l {data}/lib"]) + "\n")
         (directory / "prelaunch-ps.txt").write_text(
             "u0_a123  4455 1 0 0 ch.lkmc.neutrodyne\n")
-        (directory / "prelaunch-logcat.txt").write_text("")
+        # Markers delimit the window; only the restricted agent may start inside.
+        (directory / "prelaunch-logcat.txt").write_text("\n".join([
+            "10-21 15:53:40.0  I ActivityManager: unrelated line",
+            f"10-21 15:53:44.9  I {TAG}: begin {NONCE} {PKG}",
+            "10-21 15:53:45.0  V BackupManagerService: [UserID:0]"
+            f" restoreAtInstall pkg={PKG} token=3 restoreSet=1",
+            "10-21 15:53:45.1  I ActivityManager: Start proc 4455:"
+            f"{PKG}/u0a123 for backup {{android/FullBackupAgent}}",
+            "10-21 15:53:45.2  I ActivityManager: Process "
+            f"{PKG} (pid 4455) has died: bkup TRNB",
+            "10-21 15:53:45.3  I BackupManagerService: Restore complete.",
+            f"10-21 15:53:45.4  I {TAG}: end {NONCE} {PKG}",
+            f"10-21 15:53:46.0  I ActivityTaskManager: START u0 "
+            f"{{flg=0x10000000 cmp={PKG}/.MainActivity}} from uid 0"]) + "\n")
         write_pulls(directory, exp, fixture, snapshot_zip, portable_pb, device_pb)
         for label in ("encoff-pre", "encoff", "positive", "empty"):
             (directory / f"init-{label}.txt").write_text(
@@ -820,14 +836,70 @@ class BmgrEvidenceTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("canary", result.stderr)
 
-    def test_rejects_a_prelaunch_extra_file(self):
-        def mutate(directory, run, exp, logs, statuses):
-            with (directory / "prelaunch-files.txt").open("a") as out:
-                out.write(f"/data/data/{PKG}/databases/neutrodyne.db\n")
-        self.build(mutate={"api31": mutate})
+    def _rejects_prelaunch(self, mutate, needle, device="api31"):
+        self.build(mutate={device: mutate})
         result = self.check()
         self.assertNotEqual(0, result.returncode)
-        self.assertIn("pre-launch", result.stderr)
+        self.assertIn(needle, result.stderr)
+
+    def test_rejects_prelaunch_path_violations(self):
+        """DB file, framework-dir descendant, or special entry -> fail."""
+        for entry, needle in (
+                (f"f /data/data/{PKG}/databases/neutrodyne.db", "payload pair"),
+                (f"d /data/data/{PKG}/databases/wal", "unexpected dirs/links"),
+                (f"? /data/data/{PKG}/sock", "malformed")):
+            with self.subTest(entry=entry):
+                def mutate(directory, run, exp, logs, statuses):
+                    with (directory / "prelaunch-files.txt").open("a") as out:
+                        out.write(entry + "\n")
+                self._rejects_prelaunch(mutate, needle)
+
+    @staticmethod
+    def _inject_window_line(directory, line):
+        log = directory / "prelaunch-logcat.txt"
+        lines = log.read_text().splitlines()
+        end = next(i for i, l in enumerate(lines) if f"{TAG}: end" in l)
+        lines.insert(end, line)
+        log.write_text("\n".join(lines) + "\n")
+
+    def test_rejects_prelaunch_normal_process_starts(self):
+        """A top-activity or child-process bind inside the window fails."""
+        for proc in (f"{PKG}/u0a123 for top-activity {{{PKG}/.MainActivity}}",
+                     f"{PKG}:restore/u0a123 for added application {PKG}"):
+            with self.subTest(proc=proc):
+                def mutate(directory, run, exp, logs, statuses):
+                    self._inject_window_line(directory,
+                        "10-21 15:53:45.3  I ActivityManager:"
+                        f" Start proc 4460:{proc}")
+                self._rejects_prelaunch(mutate, "normal process start")
+
+    def test_rejects_prelaunch_window_marker_gaps(self):
+        """Missing markers or a foreign nonce fail the window coverage."""
+        def no_markers(directory, run, exp, logs, statuses):
+            (directory / "prelaunch-logcat.txt").write_text(
+                "10-21 15:53:45.0  I BackupManagerService: Restore complete.\n")
+        def wrong_nonce(directory, run, exp, logs, statuses):
+            log = directory / "prelaunch-logcat.txt"
+            log.write_text(log.read_text().replace(
+                f"begin {NONCE}", "begin run-9999999999-99999"))
+        self._rejects_prelaunch(no_markers, "window markers missing")
+        self._rejects_prelaunch(wrong_nonce, "marker nonce")
+
+    def test_rejects_prelaunch_without_agent_provenance(self):
+        """Payloads present but no observed default-agent start -> fail."""
+        def mutate(directory, run, exp, logs, statuses):
+            log = directory / "prelaunch-logcat.txt"
+            log.write_text(log.read_text().replace(
+                "10-21 15:53:45.1  I ActivityManager: Start proc 4455:"
+                f"{PKG}/u0a123 for backup {{android/FullBackupAgent}}\n", ""))
+            (directory / "prelaunch-ps.txt").write_text("")
+        self._rejects_prelaunch(mutate, "restore provenance")
+
+    def test_rejects_a_live_pid_without_backup_origin(self):
+        def mutate(directory, run, exp, logs, statuses):
+            (directory / "prelaunch-ps.txt").write_text(
+                f"u0_a123  9999 1 0 0 {PKG}\n")
+        self._rejects_prelaunch(mutate, "without backup provenance")
 
     def test_rejects_an_unretired_snapshot(self):
         def mutate(directory, run, exp, logs, statuses):
@@ -1065,6 +1137,10 @@ class BmgrHostScriptTest(unittest.TestCase):
             "if args[:3] == ['shell', 'bmgr', 'enabled']:\n"
             "    done('Backup Manager currently ' + ('enabled' if cached('enable', False) else 'disabled') + '\\n')\n"
             "if args[:3] == ['shell', 'bmgr', 'list'] and args[3:] == ['transports']:\n"
+            "    prior = sum(1 for a in state\n"
+            "                if a[:4] == ['shell', 'bmgr', 'list', 'transports'])\n"
+            "    if prior < int(os.environ.get('FAKE_TRANSPORT_DELAY', '0')):\n"
+            "        done('No transports available\\n')\n"
             "    if any(a[:3] == ['shell', 'bmgr', 'transport'] for a in state):\n"
             "        done('    com.example.stub/.OtherTransport\\n'\n"
             "             '  * com.android.localtransport/.LocalTransport\\n')\n"
@@ -1223,6 +1299,27 @@ class BmgrHostScriptTest(unittest.TestCase):
         self.assertEqual({n: "pass" for n in SELECTOR_NAMES}, run["selectors"])
         self.assertEqual("api31", run["device"])
         self.assertEqual(NONCE, run["nonce"])
+
+    def test_transport_registration_wait(self):
+        """Delayed LocalTransport registration (run7 api36): bounded wait with
+        every raw attempt retained, then mutable originals are captured."""
+        result, observed = self.run_script(
+            FAKE_TRANSPORT_DELAY="2", BMGR_TRANSPORT_WAIT_S="10")
+        self.assertNotIn("did not register", result.stderr + result.stdout)
+        wait = (self.evidence / "transport-wait.txt").read_text()
+        self.assertEqual(2, wait.count("No transports available"))
+        self.assertIn(("shell", "bmgr", "transport",
+                       "com.android.localtransport/.LocalTransport"),
+                      [tuple(a) for a in observed])
+
+    def test_transport_never_ready_fails_closed(self):
+        result, observed = self.run_script(
+            FAKE_TRANSPORT_DELAY="99", BMGR_TRANSPORT_WAIT_S="4")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("did not register", result.stderr + result.stdout)
+        self.assertIn("No transports available",
+                      (self.evidence / "transport-wait.txt").read_text())
+        self.assertEqual([], self.mutating(observed))
 
     def test_run_driver_arms_and_captures_each_phase(self):
         """Real run_driver through the lib seam: nounset-proof locals, armed
