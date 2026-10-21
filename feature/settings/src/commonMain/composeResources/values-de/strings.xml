@@ -39,6 +39,37 @@
         <item quantity="one">%1$d Bibliothek</item>
         <item quantity="other">%1$d Bibliotheken</item>
     </plurals>
+    <string name="settings_playback">Wiedergabe</string>
+    <string name="settings_playback_summary_on">%1$s×, Stille überspringen ein</string>
+    <string name="settings_playback_summary_off">%1$s×, Stille überspringen aus</string>
+    <string name="playback_default_speed">Standardgeschwindigkeit</string>
+    <string name="playback_speed_value">%1$s×</string>
+    <string name="playback_skip_silence">Stille überspringen</string>
+    <string name="playback_speed_presets">Tempo-Voreinstellungen</string>
+    <string name="playback_presets_label">Geschwindigkeiten, durch Kommas getrennt</string>
+    <string name="playback_presets_invalid">2–8 Geschwindigkeiten von 0.5 bis 3.0 in Schritten von 0.05 eingeben</string>
+    <string name="playback_skip_back">Zurückspulen</string>
+    <string name="playback_skip_forward">Vorspulen</string>
+    <plurals name="playback_seconds">
+        <item quantity="one">%1$d Sekunde</item>
+        <item quantity="other">%1$d Sekunden</item>
+    </plurals>
+    <string name="playback_pause_for_navigation">Bei Navigationsansagen pausieren</string>
+    <string name="playback_stream_on_metered">Streaming über mobile Daten</string>
+    <string name="playback_metered_allow">Immer</string>
+    <string name="playback_metered_ask">Jedes Mal fragen</string>
+    <string name="playback_metered_never">Nie</string>
+    <string name="playback_storage">Speicher</string>
+    <string name="playback_stream_cache">Streaming-Cache-Größe</string>
+    <string name="playback_cache_mb">%1$d MB</string>
+    <string name="playback_cache_used">%1$s MB belegt</string>
+    <string name="playback_clear_cache">Streaming-Cache leeren</string>
+    <string name="playback_clear_cache_confirm">Die zwischengespeicherten Audiodaten löschen? Downloads und die gerade wiedergegebene Episode sind nicht betroffen.</string>
+    <string name="playback_clear">Leeren</string>
+    <string name="playback_cache_cleared">Streaming-Cache geleert</string>
+    <string name="playback_cache_read_failed">Die Cache-Auslastung konnte nicht gelesen werden</string>
+    <string name="playback_cache_clear_failed">Der Streaming-Cache konnte nicht geleert werden</string>
+
     <string name="settings_save_failed">Die Einstellung konnte nicht gespeichert werden</string>
     <string name="appearance_gestures">Gesten</string>
     <string name="appearance_feeds_row_swipe">Folgen in Feeds wischen</string>

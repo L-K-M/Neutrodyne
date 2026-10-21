@@ -44,7 +44,7 @@ class FakeSettingsRepository : SettingsRepository {
         value: T,
     ): Outcome<Unit, SettingsError> {
         loggedCalls += "set(${key.name})"
-        if (rejectsValue(key, value)) {
+        if (!AllSettingKeys.acceptsValue(key, value)) {
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
         }
 
@@ -81,10 +81,4 @@ class FakeSettingsRepository : SettingsRepository {
     @Suppress("UNCHECKED_CAST")
     private fun <T : Any> Map<SettingsFile, Map<String, Any>>.storedValue(key: SettingKey<T>): T =
         this[key.file]?.get(key.name) as? T ?: key.default
-
-    /** A `Choice` outside its declared values is the one value a key itself forbids. */
-    private fun rejectsValue(
-        key: SettingKey<*>,
-        value: Any,
-    ): Boolean = key is SettingKey.Choice<*> && key.values.none { it == value }
 }
