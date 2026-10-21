@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first slice is a local candidate (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first slice (P1) is merged through #222; the second slice (P2, queue/context/lookup plus shared playback rules) is under review in #224 (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,21 +141,44 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, first slice a local candidate
+### M4 playback, P1 merged and P2 under review
 
-M4 plan row P1 is a local candidate on `impl/m4-p1-persistence`, assembled from
-the frozen source record `453ea570`. It carries the widened playback
-API/model/domain contracts, the recording fakes, `PlayedRule` /
-`StartPositionRule` / `PositionSaver`, the durable `SessionWriter` /
-`PositionWriter` / `PlayedWrites` / `QueueKeyWrites` stores with their Room DAO
-additions, the `LocalMediaIndex` and external-only YouTube contracts, and one
-truthful unavailable playback binding per shell (both stores exposed as Metro
-`Provider<T>` roots, resolved only after `awaitOpen()`). No schema change.
-Playback really is unavailable on both platforms — nothing plays; the queue/
-context/lookup implementations, Media3 adapters, the playback service, settings
-and player UI remain in their own M4 slices. Physical-device, native, transport
-(`bmgr`), audible and release evidence is not produced by this work and remains
-open with the rest of M4's acceptance.
+M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
+(widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
+the durable `SessionWriter` / `PositionWriter` / `PlayedWrites` / `QueueKeyWrites`
+stores, `LocalMediaIndex` / external-only YouTube contracts, and one truthful
+unavailable playback binding per shell).
+
+M4 plan row P2 is under review in [#224](https://github.com/L-K-M/Neutrodyne/pull/224)
+on `impl/m4-p2-queue-context`, assembled
+from the same frozen source record `453ea570` onto reviewed main `7dfe0dc2`
+(P1's merge). It adds the durable `QueueRepositoryImpl` (fractional `orderKey`
+Up next plus `undoRemoval` capturing ordered `QueueRemoval`s in the removal
+transaction), `PlayContextResolverImpl` (strict-keyset context tails,
+identity-filtered current), `PlaybackMediaLookupImpl` and the shared
+`EpisodeRows` projection; mark-played reuse through `PlayedWrites` in the
+episode/feed repositories and `ImportFetchRunner`; `EpisodeLiveStateSourceImpl`
+now merging persisted rows with `PlaybackStateSource`'s `NowPlaying`/position
+ticks; and the remaining `:playback:core` rules — `PlaybackContracts`
+(`VirtualQueue`, `WindowOp`, `StartOutcome`), `PlayStarter`,
+`PlaybackEligibility`, `PlaybackHistory`, `QueueWindowPlanner`,
+`RecoveryBudget`, `WindowDiff` — with `PlaybackFixtures` and their `commonTest`
+suites. All five durable playback ports are Metro `Provider<T>` roots in both
+shell graphs, resolved and identity-checked only after `awaitOpen()`; exactly
+one unavailable controller/state/maintenance binding remains per shell. No
+schema change. Playback still is unavailable on both platforms — nothing
+plays; the Media3 service adapters, settings, artwork and player UI remain in
+their own M4 slices. Physical-device, native, transport (`bmgr`), audible and
+release evidence is not produced by this work and remains open with the rest
+of M4's acceptance.
+
+Local verification has 4,674 test records with zero failures/errors and three
+existing environment skips. In the final aggregate, seven test tasks executed
+2,919 records; six reused 1,755 same-input focused results. The original report's
+4,679 total was a prose arithmetic error. Independent source and XML review
+found no important issue. The initial desktop run lacked libGL: its raw failure
+log remains, but the failed XML was overwritten by the green rerun. Current-head
+CI, labelled API26/API36 instrumentation and formal review remain pending.
 
 Main `96224e00` evidence update: the full and seeded device runs on that head
 passed — the full run's first attempt failed before any test for an unavailable

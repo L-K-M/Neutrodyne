@@ -323,7 +323,7 @@ Call records may be typed values rather than strings. Session/queue reads are
 published explicitly by tests, avoiding a second implementation of the durable playback stores' SQL rules.
 Chapter, download-controller and sync fakes stay in their listed milestones.
 
-Rule: an interface added to `:core:domain`, `:*:api` or `:sync:api` by any document gets its `Fake<Name>` in the same PR. Fakes are backed by `MutableStateFlow`, expose test-only mutators (`emit…`, `failNext: <ErrorType>?`) and a call log (`calls: List<String>`), and never sleep.
+Rule: an interface added to `:core:domain`, `:*:api` or `:sync:api` by any document gets its `Fake<Name>` in the same PR. Fakes are backed by `MutableStateFlow`, expose test-only mutators (`emit…`, `failNext: <ErrorType>?`) and a call log (`calls`, string names or typed call records), and never sleep.
 
 **Not in `:core:testing`** (rule 9 forbids the dependencies, or the helper is one platform's):
 

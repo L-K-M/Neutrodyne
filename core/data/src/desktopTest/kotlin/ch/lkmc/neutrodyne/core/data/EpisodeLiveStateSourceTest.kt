@@ -10,19 +10,25 @@ import ch.lkmc.neutrodyne.core.data.repo.EpisodeLiveStateSourceImpl
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SqliteDriverBindings
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.playback.api.NowPlaying
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
+import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
+import ch.lkmc.neutrodyne.playback.api.StreamKind
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -48,7 +54,8 @@ class EpisodeLiveStateSourceTest {
     private fun source(
         db: NeutrodyneDatabase,
         scope: TestScope,
-    ) = EpisodeLiveStateSourceImpl(db, StandardTestDispatcher(scope.testScheduler))
+        playback: FakePlaybackStateSource? = FakePlaybackStateSource(),
+    ) = EpisodeLiveStateSourceImpl(db, StandardTestDispatcher(scope.testScheduler), playback)
 
     /** Every persisted field lands, and the documented precedence applies (08 merge rules). */
     @Test
@@ -321,6 +328,287 @@ class EpisodeLiveStateSourceTest {
                 db.close()
             }
         }
+
+    /**
+     * The now-playing row takes the player's position and duration and reports `isNowPlaying`/
+     * `isPlaying`; every other row keeps reading `episode_position` (08 merge rules).
+     */
+    @Test
+    fun nowPlayingRowFollowsThePlayerWhileOthersReadTheDatabase() =
+        runTest(timeout = 30.seconds) {
+            val playback = FakePlaybackStateSource()
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val current = insertEpisode(db, podcast, "g:current")
+                val other = insertEpisode(db, podcast, "g:other")
+                db.positionDao().upsert(positionEntity(current, positionMs = 12_000, durationMs = 90_000))
+                db.positionDao().upsert(positionEntity(other, positionMs = 3_000, durationMs = 40_000))
+                playback.nowPlaying.value =
+                    nowPlaying(
+                        current,
+                        podcast,
+                        isPlaying = true,
+                        position = snapshot(current, positionMs = 5_000, durationMs = 60_000),
+                    )
+
+                val map = source(db, this, playback).observe(flowOf(setOf(current, other))).first()
+
+                assertEquals(
+                    RowLive(positionMs = 5_000, durationMs = 60_000, isNowPlaying = true, isPlaying = true),
+                    map.getValue(current),
+                )
+                assertEquals(RowLive(positionMs = 3_000, durationMs = 40_000), map.getValue(other))
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A tick for the current item wins over the `NowPlaying` snapshot (08 positionMs rule). */
+    @Test
+    fun matchingTickWinsOverTheNowPlayingSnapshot() =
+        runTest(timeout = 30.seconds) {
+            val playback = FakePlaybackStateSource()
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val episode = insertEpisode(db, podcast, "g:tick")
+                playback.nowPlaying.value =
+                    nowPlaying(
+                        episode,
+                        podcast,
+                        isPlaying = true,
+                        position = snapshot(episode, positionMs = 5_000, durationMs = 60_000),
+                    )
+                val emissions = Channel<Map<Long, RowLive>>(Channel.UNLIMITED)
+                val job =
+                    backgroundScope.launch {
+                        source(db, this@runTest, playback)
+                            .observe(MutableStateFlow(setOf(episode)))
+                            .collect { emissions.send(it) }
+                    }
+                try {
+                    testScheduler.runCurrent()
+                    assertEquals(5_000L, emissions.receive().getValue(episode).positionMs)
+
+                    playback.positionTicks.tryEmit(
+                        snapshot(episode, positionMs = 5_800, durationMs = 61_000),
+                    )
+                    testScheduler.runCurrent()
+                    assertEquals(
+                        RowLive(positionMs = 5_800, durationMs = 61_000, isNowPlaying = true, isPlaying = true),
+                        emissions.receive().getValue(episode),
+                    )
+
+                    // An identical tick merges to the same map — no re-emission.
+                    playback.positionTicks.tryEmit(
+                        snapshot(episode, positionMs = 5_800, durationMs = 61_000),
+                    )
+                    testScheduler.runCurrent()
+                    assertTrue(emissions.tryReceive().isFailure)
+                } finally {
+                    job.cancel()
+                }
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * A tick can still belong to the previous item right after a transition: it is ignored for the
+     * new current row (the `NowPlaying` snapshot fills in) and for every non-current row.
+     */
+    @Test
+    fun noncurrentTicksAreIgnored() =
+        runTest(timeout = 30.seconds) {
+            val playback = FakePlaybackStateSource()
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val previous = insertEpisode(db, podcast, "g:previous")
+                val current = insertEpisode(db, podcast, "g:current")
+                db.positionDao().upsert(positionEntity(previous, positionMs = 2_000, durationMs = 30_000))
+                db.positionDao().upsert(positionEntity(current, positionMs = 7_000, durationMs = 80_000))
+                playback.nowPlaying.value =
+                    nowPlaying(
+                        current,
+                        podcast,
+                        isPlaying = false,
+                        position = snapshot(current, positionMs = 9_000, durationMs = 80_000),
+                    )
+
+                val emissions = Channel<Map<Long, RowLive>>(Channel.UNLIMITED)
+                val job =
+                    backgroundScope.launch {
+                        source(db, this@runTest, playback)
+                            .observe(MutableStateFlow(setOf(previous, current)))
+                            .collect { emissions.send(it) }
+                    }
+                try {
+                    testScheduler.runCurrent()
+                    val map = emissions.receive()
+
+                    // A late tick for `previous` changes nothing: `current` falls back to the
+                    // snapshot, `previous` keeps the DB row and the merged map is unchanged.
+                    playback.positionTicks.tryEmit(
+                        snapshot(previous, positionMs = 99_000, durationMs = 99_000),
+                    )
+                    testScheduler.runCurrent()
+                    assertTrue(emissions.tryReceive().isFailure, "noncurrent ticks merge to no change")
+                    assertEquals(RowLive(positionMs = 2_000, durationMs = 30_000), map.getValue(previous))
+                    assertEquals(
+                        RowLive(positionMs = 9_000, durationMs = 80_000, isNowPlaying = true),
+                        map.getValue(current),
+                    )
+                } finally {
+                    job.cancel()
+                }
+            } finally {
+                db.close()
+            }
+        }
+
+    /** `isPlaying` mirrors `NowPlaying.isPlaying` — a paused current still owns the row. */
+    @Test
+    fun pausedNowPlayingReportsNotPlaying() =
+        runTest(timeout = 30.seconds) {
+            val playback = FakePlaybackStateSource()
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val episode = insertEpisode(db, podcast, "g:paused")
+                playback.nowPlaying.value =
+                    nowPlaying(
+                        episode,
+                        podcast,
+                        isPlaying = false,
+                        position = snapshot(episode, positionMs = 4_000, durationMs = null),
+                    )
+
+                val map = source(db, this, playback).observe(flowOf(setOf(episode))).first()
+
+                assertEquals(
+                    RowLive(positionMs = 4_000, durationMs = null, isNowPlaying = true, isPlaying = false),
+                    map.getValue(episode),
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The overlay covers the visible window only: a current episode off-screen gets no entry. */
+    @Test
+    fun nowPlayingOutsideTheVisibleSetProducesNoEntry() =
+        runTest(timeout = 30.seconds) {
+            val playback = FakePlaybackStateSource()
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val offScreen = insertEpisode(db, podcast, "g:offscreen")
+                val onScreen = insertEpisode(db, podcast, "g:onscreen")
+                db.positionDao().upsert(positionEntity(onScreen, positionMs = 1_000))
+                playback.nowPlaying.value =
+                    nowPlaying(offScreen, podcast, isPlaying = true, position = snapshot(offScreen, 500))
+
+                val map = source(db, this, playback).observe(flowOf(setOf(onScreen))).first()
+
+                assertEquals(mapOf(onScreen to RowLive(positionMs = 1_000)), map)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** `nowPlaying = null` removes the overlay and the row reverts to the persisted position. */
+    @Test
+    fun clearingNowPlayingRevertsTheRowToTheDatabase() =
+        runTest(timeout = 30.seconds) {
+            val playback = FakePlaybackStateSource()
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val episode = insertEpisode(db, podcast, "g:revert")
+                db.positionDao().upsert(positionEntity(episode, positionMs = 2_500, durationMs = 50_000))
+                playback.nowPlaying.value =
+                    nowPlaying(episode, podcast, isPlaying = true, position = snapshot(episode, 9_000, 60_000))
+                val emissions = Channel<Map<Long, RowLive>>(Channel.UNLIMITED)
+                val job =
+                    backgroundScope.launch {
+                        source(db, this@runTest, playback)
+                            .observe(MutableStateFlow(setOf(episode)))
+                            .collect { emissions.send(it) }
+                    }
+                try {
+                    testScheduler.runCurrent()
+                    assertEquals(9_000L, emissions.receive().getValue(episode).positionMs)
+
+                    playback.nowPlaying.value = null
+                    testScheduler.runCurrent()
+                    assertEquals(
+                        RowLive(positionMs = 2_500, durationMs = 50_000),
+                        emissions.receive().getValue(episode),
+                    )
+                } finally {
+                    job.cancel()
+                }
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The M2 setup: no `PlaybackStateSource` bound, persisted rows still merge (08). */
+    @Test
+    fun absentPlaybackBindingStillMergesPersistedRows() =
+        runTest(timeout = 30.seconds) {
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val episode = insertEpisode(db, podcast, "g:no-binding")
+                db.positionDao().upsert(positionEntity(episode, positionMs = 1_500, durationMs = 30_000))
+
+                val map = source(db, this, playback = null).observe(flowOf(setOf(episode))).first()
+
+                assertEquals(mapOf(episode to RowLive(positionMs = 1_500, durationMs = 30_000)), map)
+            } finally {
+                db.close()
+            }
+        }
+
+    private fun nowPlaying(
+        episodeId: Long,
+        podcastId: Long,
+        isPlaying: Boolean,
+        position: PositionSnapshot,
+    ) = NowPlaying(
+        episodeId = episodeId,
+        podcastId = podcastId,
+        title = "Episode",
+        podcastTitle = "Podcast",
+        artwork = ArtworkRef("k", null, 0),
+        sourceType = SourceType.RSS,
+        isVideo = false,
+        phase = PlayerPhase.READY,
+        isPlaying = isPlaying,
+        playWhenReady = isPlaying,
+        position = position,
+        hasNext = false,
+        stream = StreamKind.STREAM,
+        issue = null,
+        context = null,
+    )
+
+    private fun snapshot(
+        episodeId: Long,
+        positionMs: Long,
+        durationMs: Long? = null,
+    ) = PositionSnapshot(
+        episodeId = episodeId,
+        positionMs = positionMs,
+        bufferedMs = positionMs,
+        durationMs = durationMs,
+        speed = 1f,
+        advancing = false,
+        sampledAtElapsedMs = 0,
+    )
 
     private suspend fun insertEpisode(
         db: NeutrodyneDatabase,

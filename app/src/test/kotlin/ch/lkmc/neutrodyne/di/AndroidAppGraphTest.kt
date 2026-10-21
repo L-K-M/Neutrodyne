@@ -57,6 +57,32 @@ class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
 
     @Test
+    fun durablePlaybackPortsResolveToSingleProductionBindings() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                val bindings =
+                    listOf(
+                        graph.queueRepository() to "QueueRepositoryImpl",
+                        graph.playContextResolver() to "PlayContextResolverImpl",
+                        graph.playSessionStore() to "SessionWriter",
+                        graph.positionStore() to "PositionWriter",
+                        graph.playbackMediaLookup() to "PlaybackMediaLookupImpl",
+                    )
+                for ((binding, expectedName) in bindings) {
+                    assertThat(binding::class.simpleName).isEqualTo(expectedName)
+                }
+                assertThat(graph.queueRepository()).isSameInstanceAs(graph.queueRepository())
+                assertThat(graph.playContextResolver()).isSameInstanceAs(graph.playContextResolver())
+                assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
+                assertThat(graph.positionStore()).isSameInstanceAs(graph.positionStore())
+                assertThat(graph.playbackMediaLookup()).isSameInstanceAs(graph.playbackMediaLookup())
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
+
+    @Test
     fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
         runBlocking {
             assertThat(graph.playbackController).isSameInstanceAs(graph.playbackController)
@@ -84,6 +110,12 @@ class AndroidAppGraphTest {
             graph.youtubeStreamResolver.invalidate("id")
             graph.youtubeStreamResolver.invalidateAll()
             assertThat(graph.initializers).isNotEmpty()
+            // Taking providers must not resolve their database-backed dependencies.
+            assertThat(graph.queueRepository).isNotNull()
+            assertThat(graph.playContextResolver).isNotNull()
+            assertThat(graph.playSessionStore).isNotNull()
+            assertThat(graph.positionStore).isNotNull()
+            assertThat(graph.playbackMediaLookup).isNotNull()
             assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
         }
 

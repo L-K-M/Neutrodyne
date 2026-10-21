@@ -1208,6 +1208,11 @@ flowchart LR
 
 #### M4: Playback core
 
+**Implementation note (2026-10-18, M4).** Bring only the standard Media3
+`MediaButtonReceiver` declaration into M4 (the playback service) for cold
+media-key starts.
+Boot-card resumption and hardware `SKIP` mapping remain M5.
+
 - **Goal:** stream any RSS episode with a reliable background player, a database-owned queue and a cover-first player UI.
 - **Deliverables:**
   - `:playback:impl`: `NeutrodynePlaybackService` (`MediaLibraryService`, minimal browse tree), `PlayerFactory` (speech audio attributes, focus, noisy, wake modes, Sonic speed, skip silence), `EpisodeResolver` (local branch via `LocalMediaIndex` returns nothing until M6; YouTube branch returns an error until M9), `SimpleCache` 500 MB, `QueueProjector` (K = 20), `PositionTracker` (D41), mark-played rule, effective speed/skip-silence applier, notification buttons (skip back/forward in slots 2–3, speed and next in overflow), `onForegroundServiceStartNotAllowedException` → "Tap to resume" notification on channel `alerts`, `ResumptionProvider` with `isForPlayback = true` (every play on an empty player), `PlayerConnection` and `PlaybackController` implementation; the `YouTubeStreamResolver` contract with `ExternalOnlyYouTubeStreamResolver` bound in `:app`'s `YouTubeBindingsModule`.
@@ -1245,7 +1250,7 @@ flowchart LR
   - Sleep timer (duration with 10 s fade, end of episode) via `nd.SLEEP_SET` / `nd.SLEEP_EXTEND`.
   - Chapters: Podcasting 2.0 JSON (fetched and cached in `chapter`), PSC (from ingestion), ID3 `CHAP` and MP4/M4B chapters from Media3 track metadata; chapter list in the full player; `nd.CHAPTER_NEXT/PREV`.
   - Show-notes timestamps seek the player.
-  - Playback resumption: `MediaButtonReceiver`, `onPlaybackResumption` with `isForPlayback = false` (boot card with local artwork and no network).
+  - Playback resumption: `onPlaybackResumption` with `isForPlayback = false` (boot card with local artwork and no network).
   - Hardware next/previous setting, smart-resume rewind, measured-duration write-back to `episode_state`.
   - Android Auto / AAOS browse tree (root → Up next, Groups → group feeds, Downloads, Podcasts) with completion and download extras; basic Assistant search.
   - Video enclosures play audio-only (video track disabled) with a video badge.

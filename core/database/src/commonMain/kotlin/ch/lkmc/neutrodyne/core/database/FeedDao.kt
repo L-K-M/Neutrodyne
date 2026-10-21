@@ -70,8 +70,10 @@ interface FeedDao {
 
     /**
      * One-shot context tail/start rows (02 Play context) built by [FeedQueryBuilder.contextTail]:
-     * up to `k` eligible episodes strictly after the anchor. The current item is not excluded in
-     * SQL, callers fetch `k + 1` and drop it (06 Queue and play context).
+     * up to `k` eligible episodes strictly after the anchor. The keyset predicate is strict, so a
+     * stored anchor never matches its own row; a row whose `sortDate` changed after capture can
+     * resurface, so callers fetch `k + 1` and identity-filter the current item (06 Queue and play
+     * context).
      */
     @RawQuery
     suspend fun contextTail(query: RoomRawQuery): List<ContextItem>
@@ -233,9 +235,10 @@ object FeedQueryBuilder {
      * "Playing a group"): unplayed, `AVAILABLE`, [VISIBLE], queue-free episodes ordered by
      * `(sortDate, id)` in [spec]'s order, `LIMIT ?` = [k]. Both anchor fields must be null or
      * non-null together. A null pair reads from the beginning of the order; a stored pair
-     * keysets strictly after it even when the anchor row was deleted. The current item is *not*
-     * excluded: callers fetch `k + 1` and drop it (06). `EXTERNAL` contexts have no tail and are
-     * rejected.
+     * keysets strictly after it even when the anchor row was deleted. The keyset is strict, so a
+     * stored anchor never matches its own row; a row whose `sortDate` changed after capture can
+     * resurface, so callers fetch `k + 1` and identity-filter the current item (06). `EXTERNAL`
+     * contexts have no tail and are rejected.
      *
      * [boundBySubscription] adds 05's `e.sortDate >= p.subscribedAt` start bound, meaningful only
      * for `GROUP` contexts (the first `startItem` attempt of an oldest-first group) and ignored

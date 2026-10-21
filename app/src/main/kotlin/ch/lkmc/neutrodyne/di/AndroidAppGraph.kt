@@ -18,8 +18,11 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
+import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -60,8 +63,11 @@ interface AndroidAppGraph {
     val youtubeStreamResolver: YouTubeStreamResolver
 
     /** Resolve database-backed playback ports only after the database open gate. */
+    val queueRepository: Provider<QueueRepository>
+    val playContextResolver: Provider<PlayContextResolver>
     val playSessionStore: Provider<PlaySessionStore>
     val positionStore: Provider<PositionStore>
+    val playbackMediaLookup: Provider<PlaybackMediaLookup>
 
     val workerFactory: WorkerFactory
 
