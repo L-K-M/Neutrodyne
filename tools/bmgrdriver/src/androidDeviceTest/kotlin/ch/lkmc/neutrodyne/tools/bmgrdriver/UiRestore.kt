@@ -8,6 +8,7 @@ import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import java.io.File
 import java.util.regex.Pattern
@@ -70,20 +71,14 @@ internal object UiRestore {
         }
     }
 
-    /**
-     * The category row is one merged `toggleable(Role.Checkbox)` semantics node carrying the
-     * label text and the checked state; [want] drives click-or-leave so both orders of the
-     * default-check matrix work.
-     */
+    /** The text child has no checked state; read and click its checkable parent row. */
     fun setCategory(
         label: String,
         want: Boolean,
     ) {
         val deadline = System.currentTimeMillis() + WAIT_SHORT
         while (true) {
-            val node =
-                device.wait(Until.findObject(By.text(label)), WAIT_CLICK)
-                    ?: throw IllegalStateException("category row '$label' never resolved")
+            val node = checkableRow(label)
             if (node.isChecked == want) return
             node.click()
             check(System.currentTimeMillis() < deadline) {
@@ -94,11 +89,15 @@ internal object UiRestore {
     }
 
     fun selectMerge() {
-        val node =
-            device.wait(Until.findObject(By.text(MODE_MERGE)), WAIT_CLICK)
-                ?: throw IllegalStateException("mode row '$MODE_MERGE' never resolved")
-        if (!node.isSelected) node.click()
+        val node = checkableRow(MODE_MERGE)
+        if (!node.isChecked) node.click()
     }
+
+    private fun checkableRow(label: String): UiObject2 =
+        device.wait(
+            Until.findObject(By.pkg(BmgrArming.TARGET_PACKAGE).checkable(true).hasChild(By.text(label))),
+            WAIT_CLICK,
+        ) ?: throw IllegalStateException("checkable row '$label' never resolved")
 
     /** Click the Restore action and wait until the request is accepted (button gone). */
     fun requestRestore() {

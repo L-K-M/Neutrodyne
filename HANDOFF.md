@@ -244,6 +244,10 @@ noncanonical feed keys and invalid sync UUIDs. Those identities and a duplicated
 instrumentation-status prefix are corrected. Unarmed driver tests now check the
 encoded library and status value; actual final-head device proof remains open.
 
+The retained API31/36 hierarchies show that checkbox/radio state belongs to the
+checkable parent, not its text child. The driver now targets that parent; the
+next real run must verify the complete journey without relaxing its checks.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:
