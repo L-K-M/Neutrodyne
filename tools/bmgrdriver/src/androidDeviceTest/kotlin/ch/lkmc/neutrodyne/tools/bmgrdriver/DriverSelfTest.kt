@@ -61,4 +61,57 @@ class DriverSelfTest {
             // A platform reader may refuse encryption while opening the directory or entry.
         }
     }
+
+    /**
+     * The armed-phase stream marker carries only `phase:nonce:result` — `sendStatus`'s
+     * `bmgrDriver` Bundle key supplies the prefix, so a value-side `bmgrDriver=` would
+     * double-prefix every status and the host matcher could never see `ok`.
+     */
+    @Test
+    fun statusTokenIsValueOnly() {
+        assertEquals("seed:n-1:ok", phaseStatusToken("seed", "n-1", "ok"))
+        assertEquals("flip:n-1:error:x", phaseStatusToken("flip", "n-1", "error:x"))
+    }
+
+    /**
+     * The seed library must satisfy the production staging contract the restore surface
+     * enforces (BackupStager.validate): every feed key already in `forIdentity` form and
+     * every non-null syncId/group uuid a canonical UUID — otherwise the archive is refused
+     * before the Merge row ever appears.
+     */
+    @Test
+    fun fixturePassesStagerIdentityContract() {
+        val content = SeedFixture.content("selftest-contract")
+        for (p in content.podcasts) {
+            assertEquals(
+                p.key,
+                ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+                    .forIdentity("https://${p.key}"),
+            )
+            assertEquals(
+                p.syncId,
+                java.util.UUID
+                    .fromString(p.syncId)
+                    .toString(),
+            )
+            assertEquals(
+                p.feedUrl,
+                ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+                    .splitUserInfo(p.feedUrl)
+                    .first,
+            )
+            assertTrue(
+                ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+                    .forIdentity(p.feedUrl) != null,
+            )
+        }
+        for (g in content.groups) {
+            assertEquals(
+                g.uuid,
+                java.util.UUID
+                    .fromString(g.uuid)
+                    .toString(),
+            )
+        }
+    }
 }

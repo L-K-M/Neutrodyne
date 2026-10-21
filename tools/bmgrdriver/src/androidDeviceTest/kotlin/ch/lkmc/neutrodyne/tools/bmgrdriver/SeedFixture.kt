@@ -129,22 +129,24 @@ internal object SeedFixture {
     fun content(nonce: String): FixtureContent {
         val day = 86_400_000L
         val base = 1_700_000_000_000L
+        val feedUrlA = "https://alpha.example.test/$nonce/feed.xml"
+        val feedUrlB = "https://beta.example.test/$nonce/feed.xml"
         val podcastA =
             FixturePodcast(
-                key = "feed-$nonce-a",
-                feedUrl = "https://alpha.example.test/$nonce/feed.xml",
+                key = UrlNormalizer.forIdentity(feedUrlA)!!,
+                feedUrl = feedUrlA,
                 title = "Alpha Cast $nonce",
                 link = "https://alpha.example.test/$nonce",
-                syncId = "sync-$nonce-a",
+                syncId = uuid("sync-$nonce-a"),
                 subscribedAt = base,
             )
         val podcastB =
             FixturePodcast(
-                key = "feed-$nonce-b",
-                feedUrl = "https://beta.example.test/$nonce/feed.xml",
+                key = UrlNormalizer.forIdentity(feedUrlB)!!,
+                feedUrl = feedUrlB,
                 title = "Beta Show $nonce",
                 link = "https://beta.example.test/$nonce",
-                syncId = "sync-$nonce-b",
+                syncId = uuid("sync-$nonce-b"),
                 subscribedAt = base + 1_000,
             )
         val groupA =
@@ -407,6 +409,9 @@ internal object SeedFixture {
 
     /** A ZIP with `manifest.json`'s encrypted flag set — the sniffer/restore must refuse it. */
     fun encryptedBlob(dest: File): File = EncryptedBlob.write(dest)
+
+    /** Deterministic nonce-bound canonical UUID — the restore stager only accepts that form. */
+    private fun uuid(seed: String): String = UUID.nameUUIDFromBytes(seed.toByteArray()).toString()
 
     fun sha256(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256")

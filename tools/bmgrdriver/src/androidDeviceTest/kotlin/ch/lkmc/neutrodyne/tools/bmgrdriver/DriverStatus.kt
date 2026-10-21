@@ -66,9 +66,12 @@ internal class StatusRecorder(
     }
 }
 
-/** Instrumentation stream marker — the host checker requires it in the instrument log. */
+/**
+ * Instrumentation stream marker — the host checker requires it in the instrument log. Value
+ * only: `sendStatus` carries it under the `bmgrDriver` Bundle key, which supplies the prefix.
+ */
 internal fun phaseStatusToken(
     phase: String,
     nonce: String,
     result: String,
-) = "bmgrDriver=$phase:$nonce:$result"
+) = "$phase:$nonce:$result"
