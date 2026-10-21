@@ -18,6 +18,13 @@ import androidx.test.runner.AndroidJUnitRunner
  * `callApplicationOnCreate` on every supported API level), the seeded snapshot is produced by the
  * real backup writer, and `super.callApplicationOnCreate` then performs the genuine cold-start the
  * test asserts on — no production hook, receiver or flag is involved.
+ *
+ * `bmgrPhase` (armed through [bmgrArmedMethod]) is the M3 AC6 transport gate instead: the verify
+ * leg must observe the app-private tree exactly as install-time restore delivered it — the two
+ * payload files present with their expected hashes, the database family and device DataStore
+ * absent so the band-100 opener is still pending, and every exclusion canary missing — all before
+ * `super` runs the real production cold-start. The empty leg proves a pristine tree. Neither leg
+ * constructs a graph, seeds, restores, or deletes anything here.
  */
 class NeutrodyneTestRunner : AndroidJUnitRunner() {
     override fun onCreate(arguments: Bundle) {
@@ -45,8 +52,24 @@ class NeutrodyneTestRunner : AndroidJUnitRunner() {
     }
 
     override fun callApplicationOnCreate(app: Application) {
-        if (FirstLaunchRestoreSeed.isRequested(InstrumentationRegistry.getArguments())) {
-            FirstLaunchRestoreSeed.run(app as NeutrodyneApplication)
+        val arguments = InstrumentationRegistry.getArguments()
+        when (bmgrArmedMethod(arguments, Build.VERSION.SDK_INT)) {
+            BmgrTransportPhases.METHODS[BmgrTransportPhases.VERIFY] -> {
+                BmgrTransportExpectation.verifyRestoredBeforeLaunch(
+                    BmgrTransportExpectation.Roots(app),
+                    BmgrTransportExpectation.requireExpected(arguments),
+                )
+            }
+
+            BmgrTransportPhases.METHODS[BmgrTransportPhases.EMPTY] -> {
+                BmgrTransportExpectation.verifyNothingRestored(BmgrTransportExpectation.Roots(app))
+            }
+
+            else -> {
+                if (FirstLaunchRestoreSeed.isRequested(arguments)) {
+                    FirstLaunchRestoreSeed.run(app as NeutrodyneApplication)
+                }
+            }
         }
         super.callApplicationOnCreate(app)
     }
