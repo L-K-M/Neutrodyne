@@ -62,27 +62,25 @@ class DriverSelfTest {
         }
     }
 
-    /**
-     * The armed-phase stream marker carries only `phase:nonce:result` — `sendStatus`'s
-     * `bmgrDriver` Bundle key supplies the prefix, so a value-side `bmgrDriver=` would
-     * double-prefix every status and the host matcher could never see `ok`.
-     */
+    /** The Bundle key supplies the prefix; its value contains only phase, nonce and result. */
     @Test
     fun statusTokenIsValueOnly() {
         assertEquals("seed:n-1:ok", phaseStatusToken("seed", "n-1", "ok"))
         assertEquals("flip:n-1:error:x", phaseStatusToken("flip", "n-1", "error:x"))
     }
 
-    /**
-     * The seed library must satisfy the production staging contract the restore surface
-     * enforces (BackupStager.validate): every feed key already in `forIdentity` form and
-     * every non-null syncId/group uuid a canonical UUID — otherwise the archive is refused
-     * before the Merge row ever appears.
-     */
+    /** Validate serialized fixture identities before they can strand the published restore UI. */
     @Test
     fun fixturePassesStagerIdentityContract() {
-        val content = SeedFixture.content("selftest-contract")
-        for (p in content.podcasts) {
+        val file = java.io.File(SeedVault.dir(context), "selftest-contract.zip")
+        val (_, seed) = SeedFixture.seedZip("selftest-contract", file)
+        val library =
+            ZipFile(seed).use { zip ->
+                zip.getInputStream(zip.getEntry(BackupCodec.ENTRY_LIBRARY)).use { input ->
+                    BackupCodec().decodeLibrary(input.source().buffer())
+                }
+            }
+        for (p in library.podcasts) {
             assertEquals(
                 p.key,
                 ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
@@ -91,7 +89,7 @@ class DriverSelfTest {
             assertEquals(
                 p.syncId,
                 java.util.UUID
-                    .fromString(p.syncId)
+                    .fromString(requireNotNull(p.syncId))
                     .toString(),
             )
             assertEquals(
@@ -105,7 +103,7 @@ class DriverSelfTest {
                     .forIdentity(p.feedUrl) != null,
             )
         }
-        for (g in content.groups) {
+        for (g in library.groups) {
             assertEquals(
                 g.uuid,
                 java.util.UUID

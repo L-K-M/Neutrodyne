@@ -204,6 +204,11 @@ the encrypted-input assertion now also accepts refusal while opening the ZIP,
 as API31's platform source requires. Original failures remain retained. The
 47-case host suite passes; final-head CI and actual restore proof remain required.
 
+The next run on `22266282` reached the restore surface but its fixture had
+noncanonical feed keys and invalid sync UUIDs. Those identities and a duplicated
+instrumentation-status prefix are corrected. Unarmed driver tests now check the
+encoded library and status value; actual final-head device proof remains open.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:
