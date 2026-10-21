@@ -101,6 +101,7 @@ jobs:
           scripts/ci/tests/install-android-sdk.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
+          python3 scripts/ci/tests/bmgr-api29-probe.test.py
 
   unit:
     runs-on: ubuntu-24.04
