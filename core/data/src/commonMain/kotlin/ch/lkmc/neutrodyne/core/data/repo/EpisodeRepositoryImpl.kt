@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.repo
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.data.playback.markEpisodesPlayed
 import ch.lkmc.neutrodyne.core.database.DescriptionFormat
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.database.EpisodeDetailRow
@@ -82,10 +83,10 @@ internal class EpisodeRepositoryImpl(
     ) {
         val now = clock.now()
         db.withWriteTransaction {
-            for (chunk in episodeIds.chunked(BIND_CHUNK)) {
-                if (played) {
-                    markPlayedChunk(chunk, now)
-                } else {
+            if (played) {
+                db.markEpisodesPlayed(episodeIds, now)
+            } else {
+                for (chunk in episodeIds.distinct().chunked(BIND_CHUNK)) {
                     db.episodeStateDao().markUnplayed(chunk, now)
                     db.positionDao().reset(chunk, now)
                 }
@@ -123,7 +124,7 @@ internal class EpisodeRepositoryImpl(
 
             val ids = feed.unplayedIds(FeedQueryBuilder.unplayedIds(source, sortDateBefore))
             val now = clock.now()
-            for (chunk in ids.chunked(BIND_CHUNK)) markPlayedChunk(chunk, now)
+            db.markEpisodesPlayed(ids, now)
             MarkFeedPlayedResult.Played(ids.size)
         }
 
@@ -136,17 +137,6 @@ internal class EpisodeRepositoryImpl(
             db.episodeStateDao().ensure(EpisodeStateEntity(episodeId = episodeId, updatedAt = now))
             db.episodeStateDao().setFavorite(episodeId, favorite, now)
         }
-    }
-
-    /** 02's mark-played chain for one ≤ 500-id chunk, inside the caller's transaction. */
-    private suspend fun markPlayedChunk(
-        ids: List<Long>,
-        now: Long,
-    ) {
-        db.episodeStateDao().ensureAll(ids, now)
-        db.episodeStateDao().markPlayed(ids, now)
-        db.positionDao().reset(ids, now)
-        db.queueDao().removeEpisodes(ids)
     }
 
     /** Decode → sanitise → model, then remember under the LRU cap. */

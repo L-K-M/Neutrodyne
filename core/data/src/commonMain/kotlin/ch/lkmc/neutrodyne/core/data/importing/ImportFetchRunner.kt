@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.data.playback.markEpisodesPlayed
 import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
@@ -466,12 +467,7 @@ internal class ImportFetchRunner(
         val ids = db.episodeDao().playedExceptNewestIds(podcastId)
         if (ids.isEmpty()) return
         val now = clock.now()
-        for (chunk in ids.chunked(BIND_CHUNK)) {
-            db.episodeStateDao().ensureAll(chunk, now)
-            db.episodeStateDao().markPlayed(chunk, now)
-            db.positionDao().reset(chunk, now)
-            db.queueDao().removeEpisodes(chunk)
-        }
+        db.markEpisodesPlayed(ids, now)
     }
 
     /** Attempt exhaustion (05 §7): every still-`QUEUED` item ends `FETCH_FAILED("NOT_ATTEMPTED")`. */
@@ -541,9 +537,6 @@ internal class ImportFetchRunner(
 
         /** `errorDetail` of items the lane never fetched (exhaustion, a lost podcast row). */
         const val DETAIL_NOT_ATTEMPTED = "NOT_ATTEMPTED"
-
-        /** 02 Transactions and threading: `IN (:ids)` lists are chunked at 500 bound variables. */
-        const val BIND_CHUNK = 500
 
         val QUEUED_ONLY = listOf(ImportItemStatus.QUEUED)
     }

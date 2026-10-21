@@ -2083,7 +2083,7 @@ The set is closed (N7). It holds **no install permission**: the update check onl
 
     <service android:name="ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService" android:exported="true"
              android:foregroundServiceType="mediaPlayback" />   <!-- :playback:impl (M4); intent filters: 06 -->
-    <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true" />   <!-- :playback:impl (M5); MEDIA_BUTTON filter: 06 -->
+    <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true" />   <!-- :playback:impl (M4); MEDIA_BUTTON filter: 06 -->
     <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />  <!-- :playback:impl (M5); plain meta-data, no GMS code -->
 
     <service android:name="ch.lkmc.neutrodyne.download.impl.ManualDownloadJobService" android:exported="false"
@@ -2652,7 +2652,7 @@ Fixtures: none beyond inline tables; `FakeNetworkMonitor` and `TestClock` in `:c
 | [M2](../PLAN.md#m2-groups-and-group-feeds) | Channel initializers for `new_episodes` and `grp_new_episodes` (10) and per-group channel sync (140); router `SelectFeed`; both YouTube binding containers provide `StaticYouTubeCapabilitiesSource(NOT_YET_AVAILABLE)` |
 | [M3](../PLAN.md#m3-import-export-and-backup) | `ExternalImportActivity` and `FileProvider` manifest entries; the desktop's `OPEN_FILE` route inputs through `DesktopOpenHandler` (11); final backup rule XML (05); restore-check initializer (110); `backup-auto-snapshot` scheduling; `import_backup` channel |
 | [M4](../PLAN.md#m4-playback-core) | `:playback:core` in use by `:playback:impl`; playback service, permissions and `ArtworkProvider` manifest entries; MEDIA client; `kotlinx-coroutines-guava`, `lifecycle-process`, `kotlinx-serialization-json` in `:playback:impl`; `playback`/`alerts` channels; `:playback:impl` lint config for `@UnstableApi`; both YouTube binding containers bind `YouTubeStreamResolver` → `ExternalOnlyYouTubeStreamResolver` |
-| [M5](../PLAN.md#m5-playback-features-and-system-surfaces) | `MediaButtonReceiver`, Auto meta-data and `automotive_app_desc.xml`; `media3-inspector` |
+| [M5](../PLAN.md#m5-playback-features-and-system-surfaces) | Auto meta-data and `automotive_app_desc.xml`; `media3-inspector` (the standard `MediaButtonReceiver` declaration moved to M4) |
 | [M6](../PLAN.md#m6-downloads) | **M6a:** UIDT service, `SystemForegroundService` override, `DownloadActionReceiver`, `RUN_USER_INITIATED_JOBS`/`FOREGROUND_SERVICE_DATA_SYNC`/`RECEIVE_BOOT_COMPLETED`; DOWNLOAD client under the Ktor transfer core; `download-reconcile` and `download-cleanup` initializers; the desktop download lanes (07, 11); `hasFragileUserData` confirmed; `permissions.txt` updated. **M6b:** `include(":benchmark")` (`com.android.test` + `androidx.baselineprofile` producer) for 09's out-of-process system tests |
 | [M7](../PLAN.md#m7-discovery) | API client in use; exported VIEW/SEND filters complete (03); `PODCASTINDEX_*` plumbing via `BuildInfo` on both apps |
 | [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) | Both YouTube binding containers bind `NoOpYouTubeEnricher`, `UnsupportedYouTubeChannelSearch`, `NoExtractorChannelLookup` (every APK and desktop image in external mode until M9a/MD3) |

@@ -9,13 +9,11 @@ import androidx.paging.map
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
-import ch.lkmc.neutrodyne.core.database.EpisodeRowProjection
 import ch.lkmc.neutrodyne.core.database.FeedQueryBuilder
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.groupCountsWindowStart
-import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -274,7 +272,7 @@ internal class FeedRepositoryImpl(
     ): Flow<PagingData<EpisodeRow>> =
         Pager(PAGING_CONFIG) {
             db.feedDao().page(FeedQueryBuilder.page(source, filters, order))
-        }.flow.map { data -> data.map(::toRow) }
+        }.flow.map { data -> data.map { it.toEpisodeRow() } }
 
     override suspend fun setFeedOrder(
         source: FeedSource,
@@ -294,34 +292,6 @@ internal class FeedRepositoryImpl(
             }
         }
     }
-
-    private fun toRow(p: EpisodeRowProjection): EpisodeRow =
-        EpisodeRow(
-            id = p.id,
-            podcastId = p.podcastId,
-            title = p.title,
-            podcastTitle = p.podcastTitle,
-            sortDate = p.sortDate,
-            pubDate = p.pubDate,
-            durationMs = p.durationMs,
-            isVideo = p.isVideo,
-            isShort = p.isShort,
-            availability = p.availability,
-            episodeType = p.episodeType,
-            episodeDisplay = p.episodeDisplay,
-            sourceType = p.sourceType,
-            externalMediaId = p.externalMediaId,
-            isNew = p.isNew,
-            firstSeenAt = p.firstSeenAt,
-            artwork = ArtworkRef(p.artworkKey, p.artworkUrl, p.artworkVersion),
-            artworkAvgArgb = p.artworkAvgArgb,
-            podcastArtwork = ArtworkRef(p.podcastArtworkKey, p.podcastArtworkUrl, p.podcastArtworkVersion),
-            podcastArtworkAvgArgb = p.podcastArtworkAvgArgb,
-            playedAt = p.playedAt,
-            startedAt = p.startedAt,
-            isFavorite = p.isFavorite,
-            downloadState = p.downloadState,
-        )
 
     private companion object {
         /** 08 Paging hand-off: page size and prefetch distance share one value. */
