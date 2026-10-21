@@ -34,7 +34,7 @@ class FakeScopedSettingsTest {
             fake.seedPodcast(1)
             fake.seedGroup(2, "uuid", "news")
             fake.updatePodcast(1) { SettingOverrides(0, true) }
-            assertEquals(SettingOverrides(null, true), fake.observePodcast(1).first()?.effective)
+            assertEquals(SettingOverrides(null, true, 1f, false), fake.observePodcast(1).first()?.effective)
             fake.updateGroup(2) { SettingOverrides(60, false) }
             val before = fake.observeGroup(2).first()
             assertEquals(
@@ -45,7 +45,7 @@ class FakeScopedSettingsTest {
             )
             assertEquals(before, fake.observeGroup(2).first())
             fake.updatePodcast(1) { SettingOverrides() }
-            assertEquals(SettingOverrides(240, false), fake.observePodcast(1).first()?.effective)
+            assertEquals(SettingOverrides(240, false, 1f, false), fake.observePodcast(1).first()?.effective)
             fake.removePodcast(1)
             fake.removeGroup(2)
             assertNull(fake.observePodcast(1).first())

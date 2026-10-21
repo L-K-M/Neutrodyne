@@ -12,11 +12,20 @@ import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.PlaybackScopeWrite.APPLIED
+import ch.lkmc.neutrodyne.core.model.PlaybackScopeWrite.MISSING_PODCAST
+import ch.lkmc.neutrodyne.core.model.PlaybackScopeWrite.NO_CONTEXT_GROUP
+import ch.lkmc.neutrodyne.core.model.PlaybackSettingChange.SkipSilence
+import ch.lkmc.neutrodyne.core.model.PlaybackSettingChange.Speed
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.model.SettingScope.GLOBAL
+import ch.lkmc.neutrodyne.core.model.SettingScope.GROUP
+import ch.lkmc.neutrodyne.core.model.SettingScope.PODCAST
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
@@ -96,8 +105,8 @@ class ScopeSettingsRepositoryTest {
                 )
             dao.upsertPodcast(PodcastSettingsEntity(podcast, original))
             dao.upsertGroup(PodcastGroupSettingsEntity(group, original))
-            repo.updatePodcast(podcast) { SettingOverrides(60, true) }
-            repo.updateGroup(group) { SettingOverrides(720, false) }
+            repo.updatePodcast(podcast) { it.copy(refreshIntervalMinutes = 60, notifyNewEpisodes = true) }
+            repo.updateGroup(group) { it.copy(refreshIntervalMinutes = 720, notifyNewEpisodes = false) }
             assertEquals(
                 original.copy(refreshIntervalMinutes = 60, notifyNewEpisodes = true),
                 dao.forPodcast(podcast)?.o,
@@ -106,8 +115,8 @@ class ScopeSettingsRepositoryTest {
                 original.copy(refreshIntervalMinutes = 720, notifyNewEpisodes = false),
                 dao.forGroup(group)?.o,
             )
-            repo.updatePodcast(podcast) { SettingOverrides() }
-            repo.updateGroup(group) { SettingOverrides() }
+            repo.updatePodcast(podcast) { it.copy(refreshIntervalMinutes = null, notifyNewEpisodes = null) }
+            repo.updateGroup(group) { it.copy(refreshIntervalMinutes = null, notifyNewEpisodes = null) }
             assertEquals(original, dao.forPodcast(podcast)?.o)
             assertEquals(original, dao.forGroup(group)?.o)
         }
@@ -204,17 +213,24 @@ class ScopeSettingsRepositoryTest {
             repo.observeGroup(group).test {
                 val inherited = assertNotNull(awaitItem())
                 assertEquals(SettingOverrides(), inherited.own)
-                assertEquals(SettingOverrides(240, false), inherited.effective)
+                assertEquals(SettingOverrides(240, false, 1f, false), inherited.effective)
                 assertTrue(inherited.sources.values.all { it == SettingSource.AppDefault })
                 settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 480)
                 assertEquals(480, awaitItem()?.effective?.refreshIntervalMinutes)
                 repo.updateGroup(group) { SettingOverrides(0, true) }
                 val own = assertNotNull(awaitItem())
                 assertEquals(SettingOverrides(0, true), own.own)
-                assertEquals(SettingOverrides(null, true), own.effective)
-                assertTrue(own.sources.values.all { it == SettingSource.Group(identity.uuid, identity.name) })
+                assertEquals(SettingOverrides(null, true, 1f, false), own.effective)
+                assertEquals(
+                    SettingSource.Group(identity.uuid, identity.name),
+                    own.sources[SettingField.REFRESH_INTERVAL_MINUTES],
+                )
+                assertEquals(
+                    SettingSource.Group(identity.uuid, identity.name),
+                    own.sources[SettingField.NOTIFY_NEW_EPISODES],
+                )
                 repo.updateGroup(group) { SettingOverrides() }
-                assertEquals(SettingOverrides(480, false), awaitItem()?.effective)
+                assertEquals(SettingOverrides(480, false, 1f, false), awaitItem()?.effective)
             }
         }
 
@@ -224,7 +240,7 @@ class ScopeSettingsRepositoryTest {
             val group = group()
             repo.updateGroup(group) { SettingOverrides(60, true) }
             repo.observePodcast(podcast).test {
-                assertEquals(SettingOverrides(240, false), awaitItem()?.effective)
+                assertEquals(SettingOverrides(240, false, 1f, false), awaitItem()?.effective)
                 settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, true)
                 assertEquals(true, awaitItem()?.effective?.notifyNewEpisodes)
                 db.groupDao().insertMember(memberEntity(group, podcast, "a"))
@@ -350,7 +366,216 @@ class ScopeSettingsRepositoryTest {
         assertTrue(key in AllSettingKeys.list)
     }
 
+    @Test fun playbackWritesValidateAndPreserveReservedColumns() =
+        runTest {
+            val podcast = podcast()
+            val group = group()
+            val reserved = ScopeOverrides(boostDb = 2f, autoDownload = true, introSkipMs = 42)
+            dao.upsertPodcast(PodcastSettingsEntity(podcast, reserved))
+            dao.upsertGroup(PodcastGroupSettingsEntity(group, reserved))
+            for (speed in listOf(0.5f, 1f, 1.05f, 2.95f, 3f, null)) {
+                assertEquals(
+                    Outcome.Success(Unit),
+                    repo.updatePodcast(podcast) { it.copy(playbackSpeed = speed, skipSilence = false) },
+                )
+                assertEquals(
+                    Outcome.Success(Unit),
+                    repo.updateGroup(group) { it.copy(playbackSpeed = speed, skipSilence = true) },
+                )
+                assertEquals(reserved.copy(playbackSpeed = speed, skipSilence = false), dao.forPodcast(podcast)?.o)
+                assertEquals(reserved.copy(playbackSpeed = speed, skipSilence = true), dao.forGroup(group)?.o)
+            }
+            for (speed in listOf(0.49f, 3.01f, 1.01f, Float.NaN, Float.POSITIVE_INFINITY)) {
+                val before = dao.forPodcast(podcast)
+                val failure = Outcome.Failure(SettingsError.OutOfRange("playbackSpeed"))
+                assertEquals(failure, repo.updatePodcast(podcast) { it.copy(playbackSpeed = speed) })
+                assertEquals(failure, repo.updateGroup(group) { it.copy(playbackSpeed = speed) })
+                assertEquals(before, dao.forPodcast(podcast))
+            }
+            assertTrue(refresh.calls.isEmpty())
+        }
+
+    @Test fun anInvalidLegacySpeedDoesNotBlockUnrelatedEdits() =
+        runTest {
+            val podcast = podcast()
+            val group = group()
+            val old = ScopeOverrides(playbackSpeed = 1.21f, refreshIntervalMinutes = 60, boostDb = 2f)
+            dao.upsertPodcast(PodcastSettingsEntity(podcast, old))
+            dao.upsertGroup(PodcastGroupSettingsEntity(group, old))
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.updatePodcast(podcast) {
+                    assertNull(it.playbackSpeed)
+                    it.copy(notifyNewEpisodes = true)
+                },
+            )
+            assertEquals(Outcome.Success(Unit), repo.updateGroup(group) { it.copy(notifyNewEpisodes = true) })
+            val healed = old.copy(playbackSpeed = null, notifyNewEpisodes = true)
+            assertEquals(healed, dao.forPodcast(podcast)?.o)
+            assertEquals(healed, dao.forGroup(group)?.o)
+            assertTrue(refresh.calls.isEmpty())
+        }
+
+    @Test fun playerScopeWritesClearOnlyTheEditedFieldOnTheCurrentMemberChain() =
+        runTest {
+            val podcast = podcast()
+            val otherPodcast = podcast()
+            val group = group()
+            val unrelatedGroup = group("Other")
+            db.groupDao().insertMember(memberEntity(group, podcast, "a"))
+            db.groupDao().insertMember(memberEntity(unrelatedGroup, podcast, "a"))
+            val original =
+                ScopeOverrides(
+                    playbackSpeed = 2f,
+                    skipSilence = true,
+                    refreshIntervalMinutes = 60,
+                    boostDb = 3f,
+                )
+            for (id in listOf(podcast, otherPodcast)) dao.upsertPodcast(PodcastSettingsEntity(id, original))
+            for (id in listOf(group, unrelatedGroup)) dao.upsertGroup(PodcastGroupSettingsEntity(id, original))
+            assertEquals(
+                Outcome.Success(APPLIED),
+                repo.writePlayback(
+                    podcast,
+                    group,
+                    GROUP,
+                    Speed(1.5f),
+                ),
+            )
+            assertEquals(original.copy(playbackSpeed = null), dao.forPodcast(podcast)?.o)
+            assertEquals(original.copy(playbackSpeed = 1.5f), dao.forGroup(group)?.o)
+            assertEquals(
+                Outcome.Success(APPLIED),
+                repo.writePlayback(
+                    podcast,
+                    group,
+                    GLOBAL,
+                    SkipSilence(false),
+                ),
+            )
+            assertEquals(original.copy(playbackSpeed = null, skipSilence = null), dao.forPodcast(podcast)?.o)
+            assertEquals(original.copy(playbackSpeed = 1.5f, skipSilence = null), dao.forGroup(group)?.o)
+            assertEquals(false, settings.get(PlaybackSettingKeys.SKIP_SILENCE))
+            assertEquals(original, dao.forGroup(unrelatedGroup)?.o)
+            assertEquals(original, dao.forPodcast(otherPodcast)?.o)
+            assertTrue(refresh.calls.isEmpty())
+        }
+
+    @Test fun nonmemberAndDeletedGroupCannotBeWrittenOrClearedByPlayer() =
+        runTest {
+            val podcast = podcast()
+            val group = group()
+            repo.updatePodcast(podcast) { it.copy(playbackSpeed = 2f) }
+            repo.updateGroup(group) { it.copy(playbackSpeed = 1.5f) }
+            assertEquals(
+                Outcome.Success(NO_CONTEXT_GROUP),
+                repo.writePlayback(
+                    podcast,
+                    group,
+                    GROUP,
+                    Speed(1.1f),
+                ),
+            )
+            assertEquals(2f, dao.forPodcast(podcast)?.o?.playbackSpeed)
+            repo.writePlayback(
+                podcast,
+                group,
+                GLOBAL,
+                Speed(1.1f),
+            )
+            assertEquals(1.5f, dao.forGroup(group)?.o?.playbackSpeed)
+            assertNull(dao.forPodcast(podcast))
+            db.groupDao().insertMember(memberEntity(group, podcast, "a"))
+            db.useWriterConnection { it.execSql("DELETE FROM podcast_group WHERE id = $group") }
+            assertEquals(
+                Outcome.Success(NO_CONTEXT_GROUP),
+                repo.writePlayback(
+                    podcast,
+                    group,
+                    GROUP,
+                    Speed(1.1f),
+                ),
+            )
+            assertEquals(
+                Outcome.Success(MISSING_PODCAST),
+                repo.writePlayback(
+                    -1,
+                    group,
+                    PODCAST,
+                    Speed(1.1f),
+                ),
+            )
+        }
+
+    @Test fun playerWriteRollsBackClearsOnSqlAndGlobalStoreFailures() =
+        runTest {
+            val podcast = podcast()
+            val group = group()
+            db.groupDao().insertMember(memberEntity(group, podcast, "a"))
+            val original = ScopeOverrides(playbackSpeed = 2f, skipSilence = true)
+            dao.upsertPodcast(PodcastSettingsEntity(podcast, original))
+            dao.upsertGroup(PodcastGroupSettingsEntity(group, original))
+            settings.failNextSet = SettingsError.WriteFailed
+            assertEquals(
+                Outcome.Failure(SettingsError.WriteFailed),
+                repo.writePlayback(
+                    podcast,
+                    group,
+                    GLOBAL,
+                    Speed(1.1f),
+                ),
+            )
+            assertEquals(original, dao.forPodcast(podcast)?.o)
+            assertEquals(original, dao.forGroup(group)?.o)
+            assertEquals(1f, settings.get(PlaybackSettingKeys.SPEED))
+            // Fail after the podcast clear, proving the group failure rolls the chain back.
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER fail_playback BEFORE UPDATE ON podcast_group_settings" +
+                        " BEGIN SELECT RAISE(ABORT, 'fault'); END",
+                )
+            }
+            assertEquals(
+                Outcome.Failure(SettingsError.WriteFailed),
+                repo.writePlayback(
+                    podcast,
+                    group,
+                    GROUP,
+                    Speed(1.1f),
+                ),
+            )
+            assertEquals(original, dao.forPodcast(podcast)?.o)
+            assertEquals(original, dao.forGroup(group)?.o)
+            assertEquals(
+                Outcome.Failure(SettingsError.WriteFailed),
+                repo.writePlayback(
+                    podcast,
+                    group,
+                    GLOBAL,
+                    Speed(1.1f),
+                ),
+            )
+            assertEquals(1f, settings.get(PlaybackSettingKeys.SPEED))
+        }
+
+    @Test fun settingsViewsExposePlaybackAndMemberHintsWithoutContextInheritance() =
+        runTest {
+            val podcast = podcast()
+            val group = group()
+            db.groupDao().insertMember(memberEntity(group, podcast, "a"))
+            repo.updateGroup(group) { it.copy(playbackSpeed = 1.5f, skipSilence = true) }
+            val podcastView = assertNotNull(repo.observePodcast(podcast).first())
+            assertEquals(1f, podcastView.effective.playbackSpeed)
+            assertEquals(SettingSource.AppDefault, podcastView.sources[SettingField.PLAYBACK_SPEED])
+            assertEquals(listOf(group), podcastView.groupHints.map { it.groupId })
+            assertEquals(1.5f, podcastView.groupHints.single().speed)
+            val groupView = assertNotNull(repo.observeGroup(group).first())
+            assertEquals(1.5f, groupView.effective.playbackSpeed)
+            assertTrue(groupView.sources[SettingField.PLAYBACK_SPEED] is SettingSource.Group)
+        }
+
     private suspend fun podcast(): Long = db.podcastDao().insertPodcast(podcastEntity())
 
-    private suspend fun group(): Long = db.groupDao().insert(groupEntity(orderKey = "a"))
+    private suspend fun group(name: String = "Group"): Long =
+        db.groupDao().insert(groupEntity(name = name, orderKey = "a"))
 }

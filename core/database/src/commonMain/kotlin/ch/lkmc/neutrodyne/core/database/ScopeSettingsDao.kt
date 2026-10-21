@@ -13,8 +13,10 @@ import kotlinx.coroutines.flow.flowOf
 private const val PODCAST_SCOPES = """
     SELECT p.id AS podcastId,
         ps.refreshIntervalMinutes AS podcastRefresh, ps.notifyNewEpisodes AS podcastNotify,
-        g.uuid AS groupUuid, g.name AS groupName,
-        gs.refreshIntervalMinutes AS groupRefresh, gs.notifyNewEpisodes AS groupNotify
+        ps.playbackSpeed AS podcastSpeed, ps.skipSilence AS podcastSkipSilence,
+        g.id AS groupId, g.uuid AS groupUuid, g.name AS groupName,
+        gs.refreshIntervalMinutes AS groupRefresh, gs.notifyNewEpisodes AS groupNotify,
+        gs.playbackSpeed AS groupSpeed, gs.skipSilence AS groupSkipSilence
     FROM podcast p
     LEFT JOIN podcast_settings ps ON ps.podcastId = p.id
     LEFT JOIN podcast_group_member m ON m.podcastId = p.id
@@ -74,7 +76,8 @@ abstract class ScopeSettingsDao {
 
     @Query(
         """
-        SELECT g.uuid AS uuid, g.name AS name,
+        SELECT g.id AS groupId, g.uuid AS uuid, g.name AS name,
+            gs.playbackSpeed AS playbackSpeed, gs.skipSilence AS skipSilence,
             gs.refreshIntervalMinutes AS refreshIntervalMinutes, gs.notifyNewEpisodes AS notifyNewEpisodes
         FROM podcast_group g LEFT JOIN podcast_group_settings gs ON gs.groupId = g.id
         WHERE g.id = :groupId
@@ -84,7 +87,8 @@ abstract class ScopeSettingsDao {
 
     /** Channel reconciliation includes empty groups and groups without an override row. */
     @Query(
-        "SELECT g.uuid, g.name, gs.refreshIntervalMinutes, gs.notifyNewEpisodes" +
+        "SELECT g.id AS groupId, g.uuid, g.name, gs.refreshIntervalMinutes, gs.notifyNewEpisodes," +
+            " gs.playbackSpeed, gs.skipSilence" +
             " FROM podcast_group g LEFT JOIN podcast_group_settings gs ON gs.groupId = g.id",
     )
     abstract suspend fun groupScopes(): List<GroupScopeRow>
@@ -103,6 +107,11 @@ data class PodcastScopeRow(
     val groupName: String?,
     val groupRefresh: Int?,
     val groupNotify: Boolean?,
+    val groupId: Long?,
+    val podcastSpeed: Float?,
+    val podcastSkipSilence: Boolean?,
+    val groupSpeed: Float?,
+    val groupSkipSilence: Boolean?,
 )
 
 data class GroupScopeRow(
@@ -110,4 +119,7 @@ data class GroupScopeRow(
     val name: String,
     val refreshIntervalMinutes: Int?,
     val notifyNewEpisodes: Boolean?,
+    val playbackSpeed: Float? = null,
+    val skipSilence: Boolean? = null,
+    val groupId: Long = 0,
 )

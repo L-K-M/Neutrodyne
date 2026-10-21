@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first slice (P1) is merged through #222; the second slice (P2, queue/context/lookup plus shared playback rules) is under review in #224 (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first two slices (P1, P2) are merged through #222 and #224; the third slice (P3, scoped playback settings) is assembled locally and awaits review (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,7 +141,7 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, P1 merged and P2 under review
+### M4 playback, P1 and P2 merged, P3 assembled locally
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
@@ -149,10 +149,10 @@ the durable `SessionWriter` / `PositionWriter` / `PlayedWrites` / `QueueKeyWrite
 stores, `LocalMediaIndex` / external-only YouTube contracts, and one truthful
 unavailable playback binding per shell).
 
-M4 plan row P2 is under review in [#224](https://github.com/L-K-M/Neutrodyne/pull/224)
-on `impl/m4-p2-queue-context`, assembled
-from the same frozen source record `453ea570` onto reviewed main `7dfe0dc2`
-(P1's merge). It adds the durable `QueueRepositoryImpl` (fractional `orderKey`
+M4 plan row P2 is merged through [#224](https://github.com/L-K-M/Neutrodyne/pull/224)
+as `ff415871` (2026-10-21 00:30:15 UTC), reviewed at exact full-tree equality
+with all six CI jobs and one completed formal round; independent triage found
+nothing important. It adds the durable `QueueRepositoryImpl` (fractional `orderKey`
 Up next plus `undoRemoval` capturing ordered `QueueRemoval`s in the removal
 transaction), `PlayContextResolverImpl` (strict-keyset context tails,
 identity-filtered current), `PlaybackMediaLookupImpl` and the shared
@@ -167,18 +167,47 @@ suites. All five durable playback ports are Metro `Provider<T>` roots in both
 shell graphs, resolved and identity-checked only after `awaitOpen()`; exactly
 one unavailable controller/state/maintenance binding remains per shell. No
 schema change. Playback still is unavailable on both platforms — nothing
-plays; the Media3 service adapters, settings, artwork and player UI remain in
+plays; the Media3 service adapters, artwork and player UI remain in
 their own M4 slices. Physical-device, native, transport (`bmgr`), audible and
 release evidence is not produced by this work and remains open with the rest
 of M4's acceptance.
 
-Local verification has 4,674 test records with zero failures/errors and three
+M4 plan row P3 is assembled on `impl/m4-p3-scoped-settings`, net-hunked from the
+same frozen source record `453ea570` (`599b393b` scoped settings,
+`aed7bc5e` settings UI) onto reviewed main `ff415871` (P2's merge). It adds the
+eight `playback.*` portable keys and the `PlaybackSettingKeys` registry
+(speed/preset/skip-interval/cache validation), `AllSettingKeys.acceptsValue`,
+scoped `playbackSpeed`/`skipSilence` on podcast/group rows with attributed
+`EffectiveSettingsResolver.playback`/`observePlayback` resolution, membership
+checks and per-field more-specific clears in
+`ScopeSettingsRepositoryImpl.writePlayback`, centralized DataStore/restore
+registry validation (invalid legacy speeds read as inherit), updated fake
+contracts, `EffectivePlaybackSettings` in `:playback:core`, and the Settings ›
+Playback page: `PlaybackPage`, `PlaybackSettingsViewModel` (on
+`SettingsRepository` + `PlaybackMaintenance`, no DB/file access), enabled-state
+support in `SettingsChrome`, EN/DE strings and `MINI_PLAYER_SKIP` in
+`AppearanceSettingKeys` (the Appearance row itself is P8). `SettingsHomeRoute`
+activation stays P6 and is disabled in the page tests. `:feature:settings` gains
+the permitted `:playback:api` edge. No schema change; M2 refresh/notification
+merge and default rules are untouched.
+
+Local verification: focused KMP desktop tests plus one aggregate across
+model/datastore/database/data/testing/playback-core/settings/groups/podcast,
+`:core:{data,database}` Android host tests, and both shell graph suites —
+4,557 test records, zero failures/errors, three pre-existing environment skips
+(DPAPI Windows-only, two headless native-menu). Doc validators report 0 problems
+and 0/78 invalid diagrams. Formal review, current-head CI, instrumentation and
+native/device legs remain pending in the parent's lanes; receipts under
+`build/review-m4-p3-assembly/` and `.nd-context/m4-p3-assembly-report.md`.
+
+P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
 2,919 records; six reused 1,755 same-input focused results. The original report's
 4,679 total was a prose arithmetic error. Independent source and XML review
 found no important issue. The initial desktop run lacked libGL: its raw failure
-log remains, but the failed XML was overwritten by the green rerun. Current-head
-CI, labelled API26/API36 instrumentation and formal review remain pending.
+log remains, but the failed XML was overwritten by the green rerun. P2's
+current-head CI, labelled API26/API36 instrumentation and formal review are
+closed by the #224 merge record above.
 
 Main `96224e00` evidence update: the full and seeded device runs on that head
 passed — the full run's first attempt failed before any test for an unavailable

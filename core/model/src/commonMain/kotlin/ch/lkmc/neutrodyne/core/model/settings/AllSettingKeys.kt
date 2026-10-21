@@ -19,9 +19,37 @@ object AllSettingKeys {
         AppearanceSettingKeys.ALL +
             FeedsSettingKeys.ALL +
             GroupsSettingKeys.ALL +
+            PlaybackSettingKeys.ALL +
             BackupSettingKeys.ALL +
             DesktopSettingKeys.ALL
+
+    /**
+     * The shared write-side validation (05 Rules 4): [value]'s stored type must match the
+     * key's [SettingKey] subclass, a `Choice` must be one of its declared values, and a key
+     * with declared ranges or formats; 06's playback settings; must satisfy them.
+     * Repositories answer a rejection with `SettingsError.OutOfRange`; backup restores and
+     * sync applies skip the value instead.
+     */
+    fun acceptsValue(
+        key: SettingKey<*>,
+        value: Any,
+    ): Boolean = acceptsStoredType(key, value) && PlaybackSettingKeys.acceptsRange(key, value)
 }
+
+/** The stored-type half of [AllSettingKeys.acceptsValue]; one branch per [SettingKey] subclass. */
+private fun acceptsStoredType(
+    key: SettingKey<*>,
+    value: Any,
+): Boolean =
+    when (key) {
+        is SettingKey.Bool -> value is Boolean
+        is SettingKey.Int32 -> value is Int
+        is SettingKey.Int64 -> value is Long
+        is SettingKey.Float32 -> value is Float
+        is SettingKey.Text -> value is String
+        is SettingKey.TextSet -> value is Set<*> && value.all { it is String }
+        is SettingKey.Choice<*> -> key.values.any { it == value }
+    }
 
 /** First segment of a key name — one per settings area plus the local/sync prefixes (01). */
 internal val KEY_AREAS: Set<String> =
