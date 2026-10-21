@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.model.NetworkPolicy
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.feeds.backup.CredentialV1
 import ch.lkmc.neutrodyne.feeds.backup.GroupV1
 import ch.lkmc.neutrodyne.feeds.backup.LibraryV1
@@ -872,7 +873,7 @@ private fun mergeOverrides(
 /** `OverridesV1` → `ScopeOverrides`; enum columns travel by name (05), unknown names read as null. */
 private fun OverridesV1.toScopeOverrides(): ScopeOverrides =
     ScopeOverrides(
-        playbackSpeed = playbackSpeed,
+        playbackSpeed = playbackSpeed?.takeIf(PlaybackSettingKeys::isValidSpeed),
         skipSilence = skipSilence,
         boostDb = boostDb,
         introSkipMs = introSkipMs,

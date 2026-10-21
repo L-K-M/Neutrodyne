@@ -1005,6 +1005,21 @@ When the player reports a duration for the current item (Android: `onPlaybackSta
 
 ## Per-scope playback settings
 
+**Implementation note (2026-10-18, M4).** The playback settings implementation supplies the platform-free
+`EffectivePlaybackSettings`: `prepareWindow` resolves distinct podcast IDs for
+one context before prepare or transition, and `cached` requires the matching
+context ID. The adapter owns a `followCurrent` collection job, cancels and joins
+it before changing the followed item, and publishes the class's attributed
+`effectivePlayback` flow through `PlaybackStateSource`. A null podcast clears
+that flow. `setSpeed`, `setSkipSilence`, `writeScope` and `cycleSpeed` return
+explicit durable-write outcomes. Sources retain M2's `PodcastOverride` and
+`Group(uuid, name)` types. Trusted external speed changes belong to the adapter
+and do not write these settings; preparing the next transition restores the
+resolved preference. `observePreferences` supplies live skip increments,
+navigation policy, metered policy, cache limit and presets to the adapter.
+The eight M4 keys are registered in the portable backup whitelist with the
+classifications below; M5 keys and settings UI remain in their own work items.
+
 Serves R2.7, R4.8. Delivered in M4 (speed, skip silence), M12 (boost, intro/outro). Honours [D20](../PLAN.md#3-key-decisions), [D45](../PLAN.md#3-key-decisions), [D65](../PLAN.md#3-key-decisions), [D84](../PLAN.md#3-key-decisions).
 
 05's `EffectiveSettingsResolver` decides values and attribution ([05 Effective settings resolution](05-groups-opml-backup.md#effective-settings-resolution)); 06 supplies the inputs and applies the result. Inputs, caching and scope writes are `EffectivePlaybackSettings` (`:playback:core`, both platforms); applying the values is the adapter's (`EffectivePlaybackApplier` below; the desktop's `setSpeed`/`setSkipSilence`, [11 DesktopPlaybackController](11-desktop.md#desktopplaybackcontroller)). With sync linked, the podcast and group overrides `playbackSpeed` and `skipSilence` sync, and so do the global `playback.speed` and `playback.skip_silence` while "Sync playback settings" is on ([10 What syncs](10-sync.md#what-syncs), [PO-37](../PLAN.md#48-further-product-owner-decisions)); a synced change reaches the playing item through the same `observePlayback(…)` emission as a local edit (an applied value, not a seek or a stop, so R7.5 holds).

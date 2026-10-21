@@ -74,6 +74,9 @@ public object AppearanceSettingKeys {
     /** Empty means All; otherwise Ungrouped or a group UUID (08 Library). */
     val LIBRARY_GROUP_FILTER = SettingKey.Text("ui.library_group_filter", "", SettingsFile.DEVICE)
 
+    /** Mini player › optional forward-skip control (08 Player sheet, M4). */
+    public val MINI_PLAYER_SKIP = SettingKey.Bool("appearance.mini_player_skip", true)
+
     public val ALL: List<SettingKey<*>> =
         listOf(
             THEME,
@@ -86,5 +89,6 @@ public object AppearanceSettingKeys {
             FEEDS_SELECTED_SOURCE,
             LIBRARY_GROUP_FILTER,
             LIBRARY_SEGMENT,
+            MINI_PLAYER_SKIP,
         )
 }

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
+import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import kotlinx.collections.immutable.toPersistentSet
 
@@ -33,9 +34,21 @@ internal object SettingPreferences {
             is SettingKey.Choice<*> -> stringPreferencesKey(key.name)
         }
 
-    /** Reads [key] from [preferences]; any surprise (absent, wrong type, unknown name) yields the default. */
-    @Suppress("UNCHECKED_CAST")
+    /**
+     * Reads [key] from [preferences]; any surprise (absent, wrong type, unknown name, or a
+     * value the shared validation rejects; a corrupted or foreign file, say) yields the
+     * default, so a hostile entry can never reach callers.
+     */
     fun <T : Any> read(
+        preferences: Preferences,
+        key: SettingKey<T>,
+    ): T {
+        val value = readStored(preferences, key)
+        return if (AllSettingKeys.acceptsValue(key, value)) value else key.default
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T : Any> readStored(
         preferences: Preferences,
         key: SettingKey<T>,
     ): T =
@@ -118,14 +131,12 @@ internal object SettingPreferences {
         preferences -= preferenceKeyOf(key)
     }
 
-    /** Rejects what the key itself forbids: a `Choice` value outside its declared values. */
+    /** Rejects what the shared registry validation forbids: stored type, `Choice` membership, ranges. */
     fun validate(
         key: SettingKey<*>,
         value: Any,
     ) {
-        if (key is SettingKey.Choice<*>) {
-            require(value in key.values) { "'${key.name}' does not allow value '$value'" }
-        }
+        require(AllSettingKeys.acceptsValue(key, value)) { "'${key.name}' does not allow value '$value'" }
     }
 
     /** `preferences[prefKey]` with every failure (missing or wrong-typed entry) mapped to [default]. */

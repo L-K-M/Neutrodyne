@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.room3.useWriterConnection
 import app.cash.turbine.test
 import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.data.settings.ScopeSettingsRepositoryImpl
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -281,6 +283,55 @@ class EffectiveSettingsResolverTest {
                 dao.upsertPodcast(PodcastSettingsEntity(id, ScopeOverrides(notifyNewEpisodes = false)))
                 assertEquals(Effective(false, SettingSource.PodcastOverride), awaitItem()[id])
             }
+        }
+
+    @Test fun playbackUsesOnlyMemberContextGroupAndEachFieldResolvesIndependently() =
+        runTest {
+            val member = podcast()
+            val outsider = podcast()
+            val (news, newsSource) = group(member, "news", 60, true)
+            val (tech, techSource) = group(member, "tech", 120, false)
+            scopes.updateGroup(news) { it.copy(playbackSpeed = 1.5f, skipSilence = true) }
+            scopes.updateGroup(tech) { it.copy(playbackSpeed = 2f, skipSilence = false) }
+            settings.set(PlaybackSettingKeys.SPEED, 1.1f)
+            assertEquals(Effective(1.5f, newsSource), resolver.playback(member, news).speed)
+            assertEquals(Effective(2f, techSource), resolver.playback(member, tech).speed)
+            assertEquals(Effective(1.1f, SettingSource.AppDefault), resolver.playback(member, null).speed)
+            // An Up next item's podcast can be outside the session's group.
+            assertEquals(Effective(1.1f, SettingSource.AppDefault), resolver.playback(outsider, news).speed)
+            assertEquals(Effective(false, SettingSource.AppDefault), resolver.playback(outsider, news).skipSilence)
+            scopes.updatePodcast(member) { it.copy(playbackSpeed = 1.8f) }
+            assertEquals(Effective(1.8f, SettingSource.PodcastOverride), resolver.playback(member, news).speed)
+            assertEquals(Effective(true, newsSource), resolver.playback(member, news).skipSilence)
+            assertEquals(Effective(60, newsSource), resolver.refreshIntervals()[member])
+            assertEquals(Effective(true, newsSource), resolver.notifications(listOf(member))[member])
+        }
+
+    @Test fun playbackObservationTracksMembershipRenameOverridesGlobalsAndDeletedContext() =
+        runTest {
+            val id = podcast()
+            val (group, source) = group(id, "news", null, null)
+            scopes.updateGroup(group) { it.copy(playbackSpeed = 1.5f, skipSilence = true) }
+            resolver.observePlayback(id, group).test {
+                assertEquals(Effective(1.5f, source), awaitItem().speed)
+                db.groupDao().rename(group, "renamed", "renamed", 10)
+                assertEquals(Effective(1.5f, source.copy(name = "renamed")), awaitItem().speed)
+                scopes.updatePodcast(id) { it.copy(playbackSpeed = 2f) }
+                assertEquals(Effective(2f, SettingSource.PodcastOverride), awaitItem().speed)
+                scopes.updatePodcast(id) { it.copy(playbackSpeed = null) }
+                assertEquals(1.5f, awaitItem().speed.value)
+                db.useWriterConnection { it.execSql("DELETE FROM podcast_group_member WHERE groupId = $group") }
+                assertEquals(Effective(1f, SettingSource.AppDefault), awaitItem().speed)
+                db.groupDao().insertMember(memberEntity(group, id, "a"))
+                assertEquals(1.5f, awaitItem().speed.value)
+                db.useWriterConnection { it.execSql("DELETE FROM podcast_group WHERE id = $group") }
+                assertEquals(Effective(1f, SettingSource.AppDefault), awaitItem().speed)
+                settings.set(PlaybackSettingKeys.SPEED, 1.2f)
+                assertEquals(Effective(1.2f, SettingSource.AppDefault), awaitItem().speed)
+                settings.set(PlaybackSettingKeys.SKIP_SILENCE, true)
+                assertEquals(Effective(true, SettingSource.AppDefault), awaitItem().skipSilence)
+            }
+            assertEquals(resolver.playback(-1, group), resolver.observePlayback(-1, group).first())
         }
 
     private suspend fun podcast(): Long = db.podcastDao().insertPodcast(podcastEntity())

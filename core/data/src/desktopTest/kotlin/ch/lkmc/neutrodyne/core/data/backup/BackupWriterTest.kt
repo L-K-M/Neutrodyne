@@ -26,7 +26,9 @@ import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
+import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -56,6 +58,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okio.ByteString.Companion.toByteString
 import okio.FileMetadata
@@ -297,12 +300,24 @@ class BackupWriterTest {
     // --- Settings whitelist (05 Settings whitelist) --------------------------------------------
 
     @Test
-    fun settingsJsonCarriesOnlyPortableKeys() =
+    fun portablePlaybackSettingsRoundTripWithoutDeviceKeys() =
         runTest {
             seedPodcast()
+            settings.set(PlaybackSettingKeys.SPEED, 1.8f)
+            settings.set(PlaybackSettingKeys.SKIP_SILENCE, true)
+            settings.set(PlaybackSettingKeys.SPEED_PRESETS, "2.0,0.75,1.25")
+            settings.set(PlaybackSettingKeys.SKIP_BACK_MS, 45_000L)
+            settings.set(PlaybackSettingKeys.SKIP_FORWARD_MS, 90_000L)
+            settings.set(PlaybackSettingKeys.PAUSE_FOR_NAVIGATION, false)
+            settings.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.ASK)
+            settings.set(PlaybackSettingKeys.STREAM_CACHE_MB, 1_000)
+            val expected = settings.observePortableSnapshot().first()
             assertIs<Outcome.Success<*>>(newWriter().write(BackupKind.MANUAL, target(), includeCredentials = false))
             reader(target()).use { reader ->
                 val values = reader.settings().values
+                val restored = FakeSettingsRepository()
+                assertIs<Outcome.Success<*>>(RestoreSettingsMerge(restored).apply(reader.settings()))
+                assertEquals(expected, restored.observePortableSnapshot().first())
                 // Exactly the portable registry, nothing else — installation_id is DEVICE.
                 assertEquals(portableKeys().toSet(), values.map { it.key }.toSet())
                 assertEquals(portableKeys().size, values.size)
