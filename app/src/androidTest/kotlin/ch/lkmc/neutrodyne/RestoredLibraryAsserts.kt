@@ -14,13 +14,13 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * The post-restore assertions shared by `FirstLaunchRestoreDeviceTest` (in-process seed) and
- * `BmgrTransportDeviceTest` (real uninstall/reinstall): the `backup-restore` wait contract,
- * the logical fixture comparison, and the snapshot end-state rule.
+ * The post-restore assertions for `FirstLaunchRestoreDeviceTest` (in-process seed): the
+ * `backup-restore` wait contract, the logical fixture comparison, and the snapshot
+ * end-state rule. (The black-box bmgr transport harness no longer runs in this process —
+ * `scripts/ci/bmgr-check.sh` + `:tools:bmgrdriver` own that proof.)
  *
  * Random fixture identities arrive as explicit maps — the seeded run passes the in-process
- * `Fixture` values, the transport leg the `bmgrExpected` ones the host carried across the
- * uninstall — so neither side depends on a marker file or test memory surviving.
+ * `Fixture` values — so the assertions never depend on a marker file or test memory surviving.
  */
 internal object RestoredLibraryAsserts {
     /** 05's work table — the unique-work name, spelled out so no internal constant is needed. */
