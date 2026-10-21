@@ -172,7 +172,8 @@ their own M4 slices. Physical-device, native, transport (`bmgr`), audible and
 release evidence is not produced by this work and remains open with the rest
 of M4's acceptance.
 
-M4 plan row P3 is assembled on `impl/m4-p3-scoped-settings`, net-hunked from the
+M4 plan row P3 is assembled in draft [#225](https://github.com/L-K-M/Neutrodyne/pull/225)
+on `impl/m4-p3-scoped-settings`, net-hunked from the
 same frozen source record `453ea570` (`599b393b` scoped settings,
 `aed7bc5e` settings UI) onto reviewed main `ff415871` (P2's merge). It adds the
 eight `playback.*` portable keys and the `PlaybackSettingKeys` registry
@@ -187,18 +188,23 @@ Playback page: `PlaybackPage`, `PlaybackSettingsViewModel` (on
 `SettingsRepository` + `PlaybackMaintenance`, no DB/file access), enabled-state
 support in `SettingsChrome`, EN/DE strings and `MINI_PLAYER_SKIP` in
 `AppearanceSettingKeys` (the Appearance row itself is P8). `SettingsHomeRoute`
-activation stays P6 and is disabled in the page tests. `:feature:settings` gains
+activation stays P6; this slice tests the page components directly. `:feature:settings` gains
 the permitted `:playback:api` edge. No schema change; M2 refresh/notification
 merge and default rules are untouched.
 
-Local verification: focused KMP desktop tests plus one aggregate across
+Independent review of source `74225d28` and its connected callers found no
+confirmed important issue. Parent verification ran one complete aggregate across
 model/datastore/database/data/testing/playback-core/settings/groups/podcast,
 `:core:{data,database}` Android host tests, and both shell graph suites —
-4,557 test records, zero failures/errors, three pre-existing environment skips
-(DPAPI Windows-only, two headless native-menu). Doc validators report 0 problems
-and 0/78 invalid diagrams. Formal review, current-head CI, instrumentation and
-native/device legs remain pending in the parent's lanes; receipts under
-`build/review-m4-p3-assembly/` and `.nd-context/m4-p3-assembly-report.md`.
+4,709 test records, zero failures/errors, three pre-existing environment skips
+(DPAPI Windows-only, two headless native-menu). The database desktop task executed
+152 records; 12 tasks reused 4,557 same-input records. The earlier 4,557 count
+omitted that database suite and is not added again. Source hashes, selected XML
+snapshots and task states are retained. The initial pre-split home-route test's
+failed XML was not retained; no bug-regression claim depends on it. Doc validators
+report 0 problems and 0/78 invalid diagrams. Formal review, current-head CI,
+labelled instrumentation and native/device legs remain pending; receipts are
+under `build/review-m4-p3-{assembly,parent}/` and the ignored assembly/review notes.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
