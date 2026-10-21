@@ -55,6 +55,11 @@ internal object UiRestore {
         return uri
     }
 
+    /** Preserve the accessible node state before the host removes a failed driver. */
+    fun captureFailure(phase: String) {
+        device.dumpWindowHierarchy(File(SeedVault.dir(context), "ui-$phase.xml"))
+    }
+
     /** Wait for the restore preview (top bar title + Merge radio row). */
     fun awaitPreview() {
         check(device.wait(Until.hasObject(By.text(TITLE)), WAIT_LONG)) {

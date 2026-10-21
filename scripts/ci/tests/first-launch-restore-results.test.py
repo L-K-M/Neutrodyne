@@ -1076,7 +1076,8 @@ class BmgrHostScriptTest(unittest.TestCase):
             "    done(os.environ.get('FAKE_INIT', 'Initialization result: 0') + '\\n')\n"
             "if args[:3] == ['shell', 'am', 'instrument']:\n"
             "    pairs = {args[i+1]: args[i+2] for i, a in enumerate(args) if a == '-e'}\n"
-            "    done(f\"INSTRUMENTATION_STATUS: bmgrDriver={pairs['bmgrPhase']}:{pairs['bmgrNonce']}:ok\\n\"\n"
+            "    result = os.environ.get('FAKE_DRIVER_RESULT', 'ok')\n"
+            "    done(f\"INSTRUMENTATION_STATUS: bmgrDriver={pairs['bmgrPhase']}:{pairs['bmgrNonce']}:{result}\\n\"\n"
             "         'INSTRUMENTATION_CODE: -1\\n')\n"
             "if args[:2] == ['exec-out', 'cat']:\n"
             "    done('{\\\"v\\\":1,\\\"result\\\":\\\"ok\\\"}\\n')\n"
@@ -1265,6 +1266,28 @@ class BmgrHostScriptTest(unittest.TestCase):
                           (ev / f"instrument-{phase}.log").read_text())
             self.assertGreater(
                 (ev / f"driver-status-{phase}.json").stat().st_size, 0)
+
+    def test_failed_driver_keeps_status_before_rejecting_marker(self):
+        ev = self.root / "failed-driver"
+        ev.mkdir()
+        invocation = textwrap.dedent(f"""\
+            set -uo pipefail
+            export BMGR_CHECK_LIB_ONLY=1
+            source {self.script}
+            ADB={self.adb}
+            EV={ev}
+            NONCE={NONCE}
+            DRIVER_PKG={DRV_PKG}.test
+            DRIVER_DATA_DIR=/data/data/$DRIVER_PKG
+            run_driver seed seedImport
+            """)
+        result = subprocess.run(
+            ["bash", "-c", invocation], capture_output=True, text=True, timeout=30,
+            env={**os.environ, "ADB_CALLS": str(self.calls), "FAKE_DRIVER_RESULT": "error:checkbox"})
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("did not report ok", result.stderr)
+        self.assertTrue((ev / "driver-status-seed.json").is_file())
+        self.assertGreater((ev / "driver-status-seed.json").stat().st_size, 0)
 
 
 if __name__ == "__main__":

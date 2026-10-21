@@ -232,14 +232,19 @@ run_driver() {  # <phase> <method>: armed driver call; the raw stream is kept ve
         -e bmgrPhase "$phase" -e bmgrNonce "$NONCE" \
         -e class "$DRIVER_CLASS#$method" \
         "$DRIVER_PKG/$DRIVER_RUNNER" 2>&1 | tee "$log_file" || true
-    grep -q "^INSTRUMENTATION_CODE: -1" "$log_file" \
-        || fail "driver $phase instrumentation did not complete"
-    grep -q "INSTRUMENTATION_STATUS: bmgrDriver=$phase:$NONCE:ok" "$log_file" \
-        || fail "driver $phase did not report ok for nonce $NONCE"
+    # Keep failure evidence before marker rejection triggers uninstall cleanup.
+    local hierarchy_exit=0
+    timeout 30 "$ADB" exec-out cat "$DRIVER_DATA_DIR/files/bmgr/ui-$phase.xml" \
+        > "$EV/ui-$phase.xml" 2> "$EV/ui-$phase.err" || hierarchy_exit=$?
+    printf '%s\n' "$hierarchy_exit" > "$EV/ui-$phase.exit"
     timeout 30 "$ADB" exec-out cat \
         "$DRIVER_DATA_DIR/files/bmgr/bmgr-status-$phase.json" > "$EV/driver-status-$phase.json" \
         2>/dev/null || fail "driver $phase left no status record"
     [ -s "$EV/driver-status-$phase.json" ] || fail "driver $phase status record empty"
+    grep -q "^INSTRUMENTATION_CODE: -1" "$log_file" \
+        || fail "driver $phase instrumentation did not complete"
+    grep -q "INSTRUMENTATION_STATUS: bmgrDriver=$phase:$NONCE:ok" "$log_file" \
+        || fail "driver $phase did not report ok for nonce $NONCE"
 }
 
 shadow_query() {  # <sql>: torn sequential copy of the live DB — LIVENESS HINT ONLY

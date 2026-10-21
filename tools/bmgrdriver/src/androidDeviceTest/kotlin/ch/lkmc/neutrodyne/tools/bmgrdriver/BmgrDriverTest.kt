@@ -105,6 +105,11 @@ class BmgrDriverTest {
         result: String,
         failure: Throwable? = null,
     ) {
+        if (failure != null) {
+            runCatching { UiRestore.captureFailure(phase) }
+                .onFailure { recorder.step("ui-capture-error", it.toString()) }
+        }
+
         recorder.write(SeedVault.dir(context), result)
         InstrumentationRegistry.getInstrumentation().sendStatus(
             0,
