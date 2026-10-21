@@ -188,6 +188,15 @@ runner accelerator, and the failed-job-only retry recovered
 actual-main device results, not scheduled/tagged, native, physical, provider or
 `bmgr` acceptance.
 
+**2026-10-21 M3 transport follow-up ([#223](https://github.com/L-K-M/Neutrodyne/pull/223)).**
+The positive API31/API36 candidate now uses a separate self-instrumenting driver
+APK and host-side evidence checks; no test classes enter the published app's
+process. The original debug logical-restore gate is restored verbatim. Five
+harness defects found in independent review have production-grounded regression
+tests and a completed fix review; local native runs are not claimed. Current
+source builds, exact-SHA hosted transport evidence, CI and formal review remain
+parent gates. The published app's code, R8, signing and backup rules are intact.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:
