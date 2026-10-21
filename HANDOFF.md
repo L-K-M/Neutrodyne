@@ -197,6 +197,13 @@ tests and a completed fix review; local native runs are not claimed. Current
 source builds, exact-SHA hosted transport evidence, CI and formal review remain
 parent gates. The published app's code, R8, signing and backup rules are intact.
 
+The first black-box run on `eb79f8f9` failed both API31/36 legs before seeding:
+the host expanded an unset phase variable. Its ordinary CI also exposed a driver
+self-test decoding ZIP bytes as JSON on API26/36. Both are corrected locally;
+the encrypted-input assertion now also accepts refusal while opening the ZIP,
+as API31's platform source requires. Original failures remain retained. The
+47-case host suite passes; final-head CI and actual restore proof remain required.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:

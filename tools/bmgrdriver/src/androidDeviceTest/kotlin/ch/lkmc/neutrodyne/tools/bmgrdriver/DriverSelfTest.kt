@@ -39,7 +39,7 @@ class DriverSelfTest {
         }
         val manifest =
             ZipFile(seed).use { zip ->
-                zip.getInputStream(zip.getEntry("manifest.json")).use { input ->
+                zip.getInputStream(zip.getEntry(BackupCodec.ENTRY_MANIFEST)).use { input ->
                     BackupCodec().decodeManifest(input.source().buffer())
                 }
             }
@@ -51,14 +51,14 @@ class DriverSelfTest {
         assertTrue(uri.toString().startsWith("content://${SeedVault.AUTHORITY}/"))
 
         val blob = SeedFixture.encryptedBlob(java.io.File(SeedVault.dir(context), "selftest-encrypted.zip"))
-        ZipFile(blob).use { zip ->
-            val entry = zip.getEntry("manifest.json")
-            try {
+        try {
+            ZipFile(blob).use { zip ->
+                val entry = zip.getEntry(BackupCodec.ENTRY_MANIFEST)
                 zip.getInputStream(entry).use { it.readBytes() }
-                throw AssertionError("encrypted entry inflated without error")
-            } catch (expected: java.util.zip.ZipException) {
-                // the production reader refuses it the same way
             }
+            throw AssertionError("encrypted ZIP read without error")
+        } catch (expected: java.util.zip.ZipException) {
+            // A platform reader may refuse encryption while opening the directory or entry.
         }
     }
 }

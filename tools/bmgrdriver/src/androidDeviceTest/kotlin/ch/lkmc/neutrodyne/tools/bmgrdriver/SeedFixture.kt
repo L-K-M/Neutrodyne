@@ -458,8 +458,8 @@ internal object SeedZipWriter {
 
 /**
  * A minimal ZIP whose `manifest.json` entry carries the encrypted flag (general purpose bit
- * 0x0001). `java.util.zip` can read its directory but refuses to inflate the entry, so the
- * production sniffer reports it as unreadable/unsupported — the negative leg's input.
+ * 0x0001). Platform readers reject its directory or entry; the production sniffer must
+ * report it as unreadable/unsupported. This is the negative leg's input.
  */
 internal object EncryptedBlob {
     fun write(out: File): File {
