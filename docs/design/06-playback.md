@@ -337,6 +337,14 @@ Both adapters feed the core in the same order, which is what makes the two playe
 4. **Database emissions** (virtual queue, capabilities, media lookup): `QueueWindowPlanner` diffs; the adapter applies the `WindowOp`s.
 5. **Teardown** (Android `onDestroy`, desktop quit, `Suspending`, device loss): `PositionSaver.flush()`, written on the application scope with `NonCancellable`.
 
+The M4 platform binding handoff is explicit: the playback service replaces the Android controller/state/cache
+maintenance providers in `AndroidPlaybackBindings`, retaining its null local index
+until M6. The streaming cache supplies the real cache maintenance implementation for the service to bind.
+The artwork pipeline contributes `ArtworkProviderGraph`; the playback service contributes `PlaybackServiceInjector`
+through Metro's library injector interfaces (01 DI rule 1), without competing
+edits to `AndroidAppGraph`. Workers use the existing `WorkerCreator` map and
+`Provider<T>` for database users, with `awaitOpen()` before dereference on IO.
+
 ### Sync interplay
 
 Serves R7.4, R7.5, R8.5 (cross-device resume), N1, N2. Delivered in MS2 (port, remote mark-played, pickup) and MS3 (pull before play, adoption; PLAN MS3 AC2 and AC3). Honours [D92](../PLAN.md#3-key-decisions), [D93](../PLAN.md#3-key-decisions), [D43](../PLAN.md#3-key-decisions). Capture, push scheduling and the conflict rules are 10's ([10 Episode-state rules](10-sync.md#episode-state-rules), [10 Now playing and handoff](10-sync.md#now-playing-and-handoff), [10 Scheduling on Android](10-sync.md#scheduling-on-android), [10 Scheduling on the desktop](10-sync.md#scheduling-on-the-desktop)); this is what the players do. Without a server every hook is inert: `PrePlaySync` returns at once, nothing calls `onRemoteMarkedPlayed`, no session is adopted ([R7.1](../PLAN.md#21-functional-requirements)).

@@ -26,6 +26,8 @@ public class ArtworkRefMapper(
     ): Any? {
         // Monogram rasters are system-surface files; in-app rows paint live (08).
         if (data.key.startsWith(MONOGRAM_PREFIX)) return null
+        // Add podcast previews use the URL as their key until subscription assigns a stored key.
+        if (!ArtworkKeys.VALID.matches(data.key)) return data.url
         val pinned = store.pinnedPath(data.key)
         return if (pinned != null && !pinned.name.endsWith(FALLBACK_SUFFIX)) pinned else data.url
     }
