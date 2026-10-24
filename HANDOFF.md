@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-24.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first four slices (P1–P4) are merged through #222, #224, #225 and #228; the fifth slice (P5, RSS sources/player construction and the Media3 projection/tracking/settings/recovery adapters) is assembled locally and awaits review (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-24.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first four slices (P1–P4) are merged through #222, #224, #225 and #228; P5's RSS sources/player construction and Media3 adapters are in draft #230 pending CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,7 +141,7 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, P1–P4 merged, P5 assembled locally
+### M4 playback, P1–P4 merged, P5 draft
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
@@ -242,7 +242,7 @@ Independent source review found no important issue. A parent regression exposed
 neutral PNG bytes reported as JPEG; MIME and display-name metadata now match the
 image. The unused playback `lifecycle-process` dependency is omitted.
 
-M4 plan row P5 is assembled on `impl/m4-p5-sources-adapters`, net-hunked from
+M4 plan row P5 is draft #230 on `impl/m4-p5-sources-adapters`, net-hunked from
 the same frozen source record `453ea570` (`27a317ad` sources/factories,
 `563cf609` Media3 adapters, `f418ee50` MediaItemFactory constants/URI
 corrections) onto merged main `c9ecfe11` (P4's merge). It adds
@@ -254,7 +254,7 @@ fingerprint cache key, local hint, completion extras, pinned-artwork URI),
 fatal RSS error classes, one original-URL retry), `PlayerFactory` +
 `BoostLimiterProcessor` (speech audio chain, Sonic + silence skipping, no
 offload, local/network wake modes, live seek/skip prefs), and the four
-player-thread adapters — `QueueProjector` (window diff apply, outgoing-pin
+player-thread adapters: `QueueProjector` (window diff apply, outgoing-pin
 release, foreign-generation load-paused, external set/add write brackets with
 2 s timeout), `PositionTracker` (outgoing capture before arrival, 5 s tick,
 teardown `NonCancellable`), `EffectivePlaybackApplier` (effective speed/skip
@@ -267,11 +267,13 @@ receiver, manifest activation or production graph binding lands: nothing
 constructs these classes outside tests, and the truthful unavailable
 controller/state/maintenance binding stays the only one per shell. No schema
 change; `lifecycle-process`, `coroutines-guava` and `coroutines-android`
-remain out — no P5 consumer imports them. Local verification and limitations
-are recorded in `.nd-context/m4-p5-assembly-report.md` with receipts under
-`build/review-m4-p5-assembly/`; service/UI/device acceptance, labelled
-instrumentation and native legs remain pending — not inherited from the
-prototype's later-slice results.
+remain out; no P5 consumer imports them. Parent XML accounting verifies a
+1,971-record aggregate with zero failures/errors and three existing environment
+skips: 1,897 records executed and 74 reused. The postcommit aggregate reuses all
+1,971, rather than adding another execution. Independent connected-source review
+found no important defect. Current-head CI, labelled instrumentation and formal
+review remain required; service/UI/device/native acceptance is not inherited
+from the prototype's later-slice results.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
