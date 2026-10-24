@@ -280,6 +280,15 @@ quiescent validation (`scripts/ci/bmgr-check.sh`, the checker, the nightly
 `bmgr` job, the positive-lifecycle docs) stay in #223 and are NOT accepted here.
 M3 acceptance 6's `bmgr` leg and P4's review state are unchanged.
 
+Driver review R1 found that the original encrypted-flag blob also had malformed
+ZIP bookkeeping, so its rejection did not isolate encryption handling. The
+negative now starts from the real codec's valid backup and changes only entry
+encryption flags. The unarmed pipeline test clears those flags, decodes the
+manifest and streams every entry with CRC checks. The UI category helper clicks
+once and waits for the requested checked state rather than re-toggling on a late
+accessibility update. These test-only corrections change the initial extraction;
+fresh CI/review and #223's actual armed journeys remain required.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:

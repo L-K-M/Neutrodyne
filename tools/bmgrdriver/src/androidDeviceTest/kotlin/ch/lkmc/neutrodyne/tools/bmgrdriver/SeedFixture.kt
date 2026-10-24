@@ -25,6 +25,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
@@ -33,7 +35,7 @@ import java.util.zip.ZipOutputStream
 
 // Builds the bmgr fixtures in the *driver's* process with the real `:feeds` codec — the seed
 // library (two feeds, two groups, four episodes, Up next, play session, GROUPED settings), the
-// settings-only FLAT flip archive, and the hand-crafted encrypted blob. SeedZipWriter is the
+// settings-only FLAT flip archive, and its encrypted-flag negative. SeedZipWriter is the
 // bounded `java.util.zip` writer the corrected plan prescribes when `:feeds:jvm` is not on the
 // Android device-test classpath; it is used for fixture input only and never in the target.
 
@@ -462,71 +464,33 @@ internal object SeedZipWriter {
 }
 
 /**
- * A minimal ZIP whose `manifest.json` entry carries the encrypted flag (general purpose bit
- * 0x0001). Platform readers reject its directory or entry; the production sniffer must
- * report it as unreadable/unsupported. This is the negative leg's input.
+ * A real codec fixture with general-purpose bit 0x0001 set on every entry. Only the
+ * encryption flags change: ignoring those flags would expose a valid restore preview,
+ * not let another malformed-ZIP or malformed-manifest rejection satisfy the negative.
  */
 internal object EncryptedBlob {
     fun write(out: File): File {
-        val name = "manifest.json".toByteArray(Charsets.UTF_8)
-        val payload = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
-        val bytes = java.io.ByteArrayOutputStream()
-
-        fun le16(v: Int) = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
-
-        fun le32(v: Long) =
-            byteArrayOf(
-                (v and 0xFF).toByte(),
-                ((v shr 8) and 0xFF).toByte(),
-                ((v shr 16) and 0xFF).toByte(),
-                ((v shr 24) and 0xFF).toByte(),
-            )
-
-        // Local file header — bit 0 of the flags word marks the entry encrypted.
-        bytes.write(le32(0x04034B50))
-        bytes.write(le16(20)) // version needed
-        bytes.write(le16(0x0001)) // flags: encrypted
-        bytes.write(le16(0)) // method: stored
-        bytes.write(le16(0))
-        bytes.write(le16(0))
-        bytes.write(le32(0)) // crc (unused — entry never inflates)
-        bytes.write(le32(payload.size.toLong()))
-        bytes.write(le32(payload.size.toLong()))
-        bytes.write(le16(name.size))
-        bytes.write(le16(0))
-        bytes.write(name)
-        bytes.write(payload)
-
-        val centralOffset = bytes.size()
-        bytes.write(le32(0x02014B50))
-        bytes.write(le16(20)) // version made by
-        bytes.write(le16(20)) // version needed
-        bytes.write(le16(0x0001))
-        bytes.write(le16(0))
-        bytes.write(le16(0))
-        bytes.write(le16(0))
-        bytes.write(le32(0))
-        bytes.write(le32(payload.size.toLong()))
-        bytes.write(le32(payload.size.toLong()))
-        bytes.write(le16(name.size))
-        bytes.write(le16(0))
-        bytes.write(le16(0))
-        bytes.write(le16(0))
-        bytes.write(le16(0))
-        bytes.write(le32(0))
-        bytes.write(le32(0)) // local header offset
-        bytes.write(name)
-
-        bytes.write(le32(0x06054B50))
-        bytes.write(le16(0))
-        bytes.write(le16(0))
-        bytes.write(le16(1))
-        bytes.write(le16(1))
-        bytes.write(le32((bytes.size() - centralOffset).toLong()))
-        bytes.write(le32(centralOffset.toLong()))
-        bytes.write(le16(0))
-
-        FileOutputStream(out).use { it.write(bytes.toByteArray()) }
+        SeedFixture.seedZip("encrypted", out)
+        val bytes = out.readBytes()
+        val headers = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val end = bytes.size - 22
+        check(headers.getInt(end) == 0x06054B50)
+        var central = headers.getInt(end + 16)
+        check(headers.getInt(end + 12) == end - central)
+        // The bounded fixture writer emits a small, comment-free, non-ZIP64 archive.
+        repeat(headers.getShort(end + 10).toInt() and 0xFFFF) {
+            check(headers.getInt(central) == 0x02014B50)
+            val local = headers.getInt(central + 42)
+            check(headers.getInt(local) == 0x04034B50)
+            for (offset in listOf(central + 8, local + 6)) {
+                headers.putShort(offset, (headers.getShort(offset).toInt() or 1).toShort())
+            }
+            central += 46 + (headers.getShort(central + 28).toInt() and 0xFFFF) +
+                (headers.getShort(central + 30).toInt() and 0xFFFF) +
+                (headers.getShort(central + 32).toInt() and 0xFFFF)
+        }
+        check(central == end)
+        FileOutputStream(out).use { it.write(bytes) }
         return out
     }
 }

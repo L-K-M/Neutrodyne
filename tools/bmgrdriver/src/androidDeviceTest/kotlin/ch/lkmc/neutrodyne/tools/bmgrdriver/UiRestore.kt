@@ -76,16 +76,21 @@ internal object UiRestore {
         label: String,
         want: Boolean,
     ) {
-        val deadline = System.currentTimeMillis() + WAIT_SHORT
-        while (true) {
-            val node = checkableRow(label)
-            if (node.isChecked == want) return
-            node.click()
-            check(System.currentTimeMillis() < deadline) {
-                "category row '$label' never reached checked=$want"
-            }
-            Thread.sleep(300)
-        }
+        val node = checkableRow(label)
+        if (node.isChecked == want) return
+        node.click()
+        check(
+            device.wait(
+                Until.hasObject(
+                    By
+                        .pkg(BmgrArming.TARGET_PACKAGE)
+                        .checkable(true)
+                        .checked(want)
+                        .hasChild(By.text(label)),
+                ),
+                WAIT_SHORT,
+            ),
+        ) { "category row '$label' never reached checked=$want" }
     }
 
     fun selectMerge() {
