@@ -363,7 +363,8 @@ AGENT_REASON = "backup {android/FullBackupAgent}"
 def check_prelaunch(device, directory, nonce):
     """Require a stopped restore window with complete paths and default-agent provenance."""
     for name in ("prelaunch-files", "prelaunch-ps", "prelaunch-logcat"):
-        if (directory / f"{name}.exit").read_text().strip() != "0":
+        if (directory / f"{name}.exit").read_text().strip() != "0" \
+                or not (directory / f"{name}.txt").read_text().strip():
             raise ValueError(f"{device}: prelaunch capture failed: {name}")
     data = f"/data/data/{BMGR_TARGET}"
     rel_of = {"f": set(), "d": set(), "l": set()}

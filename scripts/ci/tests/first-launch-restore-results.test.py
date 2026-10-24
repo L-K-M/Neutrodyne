@@ -606,7 +606,7 @@ class BmgrEvidenceTest(unittest.TestCase):
             f"f {data}/files/datastore/settings.preferences_pb",
             f"d {data}/no_backup", f"d {data}/shared_prefs",
             f"l {data}/lib", f"complete {NONCE}"]) + "\n")
-        (directory / "prelaunch-ps.txt").write_text("")
+        (directory / "prelaunch-ps.txt").write_text("USER PID NAME\nroot 1 init\n")
         for name in ("prelaunch-files", "prelaunch-ps", "prelaunch-logcat"):
             (directory / f"{name}.exit").write_text("0\n")
         # Markers delimit the window; only the restricted agent may start inside.
@@ -866,10 +866,11 @@ class BmgrEvidenceTest(unittest.TestCase):
 
     def test_prelaunch_requires_complete_captures(self):
         for name in ("prelaunch-files", "prelaunch-ps", "prelaunch-logcat"):
-            with self.subTest(capture=name):
-                def mutate(directory, *unused):
-                    (directory / f"{name}.exit").write_text("1\n")
-                self._rejects_prelaunch(mutate, "capture")
+            for suffix, value in (("exit", "1"), ("txt", "")):
+                with self.subTest(capture=f"{name}.{suffix}"):
+                    def mutate(directory, *unused):
+                        (directory / f"{name}.{suffix}").write_text(value)
+                    self._rejects_prelaunch(mutate, "prelaunch")
 
     def test_prelaunch_rejects_ambiguous_provenance(self):
         changes = (
