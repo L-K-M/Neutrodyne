@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-24.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first three slices are merged through #222, #224 and #225; P4's offline artwork/cache slice is under review in #228. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-24.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first four slices are merged through #222, #224, #225 and #228; P5's sources/adapters slice is in progress. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,7 +141,7 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, P1 and P2 merged, P3 assembled locally
+### M4 playback, P1–P3 merged, P4 assembled locally
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
@@ -172,8 +172,8 @@ their own M4 slices. Physical-device, native, transport (`bmgr`), audible and
 release evidence is not produced by this work and remains open with the rest
 of M4's acceptance.
 
-M4 plan row P3 is assembled in draft [#225](https://github.com/L-K-M/Neutrodyne/pull/225)
-on `impl/m4-p3-scoped-settings`, net-hunked from the
+M4 plan row P3 is merged through [#225](https://github.com/L-K-M/Neutrodyne/pull/225);
+it was assembled on `impl/m4-p3-scoped-settings`, net-hunked from the
 same frozen source record `453ea570` (`599b393b` scoped settings,
 `aed7bc5e` settings UI) onto reviewed main `ff415871` (P2's merge). It adds the
 eight `playback.*` portable keys and the `PlaybackSettingKeys` registry
@@ -205,6 +205,42 @@ failed XML was not retained; no bug-regression claim depends on it. Doc validato
 report 0 problems and 0/78 invalid diagrams. Formal review, current-head CI,
 labelled instrumentation and native/device legs remain pending; receipts are
 under `build/review-m4-p3-{assembly,parent}/` and the ignored assembly/review notes.
+
+M4 plan row P4 is assembled on `impl/m4-p4-artwork-cache`, net-hunked from the
+same frozen source record `453ea570` (`dd84b337` core artwork/provider,
+`27a317ad` source index/resolver/cache/prefs subset, `85c93bb0` final prefs
+context, `f418ee50` resolver/index URI corrections) onto reviewed main
+`f1c6e9ff` (P3's merge). It adds the common `ArtworkSyncRunner` /
+`ArtworkSyncScheduler` / `ArtworkCodec` / `TinyImageInterceptor`, the Android
+codec, monogram renderer, WorkManager worker/scheduler and the exported
+read-only `ArtworkProvider` (`${applicationId}.artwork`) with a generated
+neutral fallback and no network path; the desktop work scheduler; safe-key
+`ArtworkRefMapper`/`DefaultArtworkStore` updates; the `ArtworkDao` additions
+(`syncCandidates`, `fallbackFor`, `observe`, transactional `applyBatch`,
+`garbage`, `delete`, `recountPins`, `ARTWORK_REFERENCE_COUNT`); and in
+`:playback:impl` `EnclosureFingerprint`, `EpisodeSourceIndex` (bounded
+awaited-open fallback), `EpisodeResolver` (canonical
+`neutrodyne://episode/<id>` URIs, RSS-only remote pins, YouTube/other sources
+unsupported), the lazy bounded `StreamingCache` (no index or directory until
+first need; refcounted trimming, resize and clear preserving active pins),
+and `PlaybackPrefs` gated on the first durable settings snapshot with its
+order-300 `PlaybackPrefsInitializer`. `StreamingCache` implements
+`PlaybackMaintenance` but is not bound yet — the unavailable stubs stay the
+single truthful maintenance binding per shell until P6. Required Media3
+catalog aliases and `playback:impl` dependencies travel with it; the Android graph tests assert the
+provider's deferred access and the initializer band, and the manifest test
+pins the provider's exported read-only contract. No schema change; playback
+still is unavailable on both platforms, and the service/receiver/player,
+routes, Appearance row and P5+ factories/adapters remain in their own M4
+slices. Local verification and limitations are recorded in
+`.nd-context/m4-p4-assembly-report.md` with receipts under
+`build/review-m4-p4-assembly/`; formal review, current-head CI, labelled
+instrumentation and native/device legs remain pending.
+
+Independent source review found no important issue. A parent regression exposed
+neutral PNG bytes reported as JPEG; MIME and display-name metadata now match the
+image. The unused playback `lifecycle-process` dependency is omitted. Parent
+final checks, matching-head CI and formal PR review remain publication gates.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
