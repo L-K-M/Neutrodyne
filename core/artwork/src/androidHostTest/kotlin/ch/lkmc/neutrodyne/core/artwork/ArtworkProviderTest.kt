@@ -159,6 +159,22 @@ class ArtworkProviderTest {
             assertEquals(0, fixture.enqueues)
         }
 
+    @Test fun neutralMetadataMatchesTheReturnedImage() =
+        runBlocking {
+            fixture.open()
+            val options = BitmapFactory.Options()
+            ParcelFileDescriptor.AutoCloseInputStream(provider.openFile(uri(), "r")).use { stream ->
+                assertNotNull(BitmapFactory.decodeStream(stream, null, options)).recycle()
+            }
+            assertEquals("image/png", options.outMimeType)
+            assertEquals(options.outMimeType, provider.getType(uri()))
+            provider.query(uri(), arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)!!.use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("$key.png", cursor.getString(0))
+            }
+            assertEquals(0, fixture.enqueues)
+        }
+
     @Test fun providerAndRunnerSameKeyPublishOneConsistentFile() =
         runBlocking {
             fixture.open()

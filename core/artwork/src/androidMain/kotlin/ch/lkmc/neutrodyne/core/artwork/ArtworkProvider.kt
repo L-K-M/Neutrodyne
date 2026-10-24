@@ -47,7 +47,7 @@ public class ArtworkProvider : ContentProvider() {
 
     override fun getType(uri: Uri): String {
         val key = validKey(uri) ?: return "image/jpeg"
-        return metadata(key)?.mime ?: "image/jpeg"
+        return metadata(key)?.mime ?: PLACEHOLDER_MIME
     }
 
     override fun query(
@@ -67,7 +67,7 @@ public class ArtworkProvider : ContentProvider() {
             addRow(
                 columns.map { column ->
                     when (column) {
-                        OpenableColumns.DISPLAY_NAME -> metadata?.name ?: "$key.jpg"
+                        OpenableColumns.DISPLAY_NAME -> metadata?.name ?: "$key.png"
                         else -> metadata?.size ?: 0L
                     }
                 },
@@ -143,6 +143,7 @@ public class ArtworkProvider : ContentProvider() {
     ): Bundle = throw UnsupportedOperationException("Read-only")
 
     private companion object {
+        const val PLACEHOLDER_MIME = "image/png"
         val PLACEHOLDER_LOCK = Any()
         const val PLACEHOLDER_SIDE = 512
         const val NEUTRAL_BACKGROUND = 0xff45494c.toInt()

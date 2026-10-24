@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first three slices (P1, P2, P3) are merged through #222, #224 and #225; the fourth slice (P4, offline artwork and the enclosure cache/resolver/prefs) is assembled locally and awaits review (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-24.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first three slices (P1, P2, P3) are merged through #222, #224 and #225; the fourth slice (P4, offline artwork and the enclosure cache/resolver/prefs) is assembled locally and awaits review (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -227,8 +227,7 @@ and `PlaybackPrefs` gated on the first durable settings snapshot with its
 order-300 `PlaybackPrefsInitializer`. `StreamingCache` implements
 `PlaybackMaintenance` but is not bound yet — the unavailable stubs stay the
 single truthful maintenance binding per shell until P6. Required Media3
-catalog aliases and `playback:impl` dependencies (including
-`lifecycle-process`) travel with it; the Android graph tests assert the
+catalog aliases and `playback:impl` dependencies travel with it; the Android graph tests assert the
 provider's deferred access and the initializer band, and the manifest test
 pins the provider's exported read-only contract. No schema change; playback
 still is unavailable on both platforms, and the service/receiver/player,
@@ -237,6 +236,11 @@ slices. Local verification and limitations are recorded in
 `.nd-context/m4-p4-assembly-report.md` with receipts under
 `build/review-m4-p4-assembly/`; formal review, current-head CI, labelled
 instrumentation and native/device legs remain pending.
+
+Independent source review found no important issue. A parent regression exposed
+neutral PNG bytes reported as JPEG; MIME and display-name metadata now match the
+image. The unused playback `lifecycle-process` dependency is omitted. Parent
+final checks, matching-head CI and formal PR review remain publication gates.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed

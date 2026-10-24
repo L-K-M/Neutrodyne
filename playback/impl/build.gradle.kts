@@ -20,7 +20,6 @@ dependencies {
     implementation(libs.androidx.media3.datasource)
     implementation(libs.androidx.media3.database)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.process)
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.androidx.sqlite.framework)
