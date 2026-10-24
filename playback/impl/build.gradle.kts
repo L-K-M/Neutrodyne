@@ -16,4 +16,11 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:artwork"))
     implementation(project(":core:network:okhttp"))
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.datasource)
+    implementation(libs.androidx.media3.database)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.kotlinx.coroutines.core)
+
+    testImplementation(libs.androidx.sqlite.framework)
 }

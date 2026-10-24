@@ -91,6 +91,13 @@
       android:exported="true"
       android:permission="android.permission.DUMP" />
 
+    <!-- System UI and Auto read public covers; ArtworkProvider rejects every write. -->
+    <provider
+      android:name="ch.lkmc.neutrodyne.core.artwork.ArtworkProvider"
+      android:authorities="${applicationId}.artwork"
+      android:exported="true"
+      tools:ignore="ExportedContentProvider" />
+
     <!-- Export share-sheet URIs (05 Destinations); the paths resource exposes only <cache>/export/. -->
     <provider
       android:name="androidx.core.content.FileProvider"
