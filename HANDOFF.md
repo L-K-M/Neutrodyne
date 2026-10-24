@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first two slices (P1, P2) are merged through #222 and #224; the third slice (P3, scoped playback settings) is assembled locally and awaits review (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-24.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first two slices (P1, P2) are merged through #222 and #224; the third slice (P3, scoped playback settings) is assembled locally and awaits review (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -222,6 +222,27 @@ runner accelerator, and the failed-job-only retry recovered
 `~/nd-wt/reviews/evidence/main-96224-{full,seeded}/EVIDENCE.md`. These are
 actual-main device results, not scheduled/tagged, native, physical, provider or
 `bmgr` acceptance.
+
+### M3 bmgr driver tooling (2026-10-24)
+
+`:tools:bmgrdriver` is extracted byte-identically from the #223 black-box source
+`f89643fc` onto main `f1c6e9ff` under the run8 split decision
+(`~/nd-wt/reviews/m3-bmgr-run8-scope-decision.md`; #223 sat 40 bytes under its
+225k hard cap and still needs real-image fixes plus regressions). It is a
+self-instrumenting device-test APK in its own package/process that depends only
+on `:feeds` — never on `:app` — and changes no production manifest, rules, R8,
+signing, ID or schema input. Unarmed, its runner excludes the armed class before
+discovery, so the labelled `ci`/`nightly` GMD groups run only `DriverSelfTest`'s
+three codec/identity/wire cases on API 26/36. Armed with the host-pinned
+`bmgrPhase` + exact `class#method` triple on API 31/36, its seed/flip/encrypted
+phases drive the published release `ExternalImportActivity` over UiAutomator.
+Run8's armed UI phases passed on API 31/36, but overall run 40128601596 FAILED
+(API 31 host `pull_tree` stdin capture bug; API 36 initialization discrepancy,
+assigned read-only separately) — retained evidence, not a pass and not
+current-head native proof. The host transport, uninstall/reinstall and final
+quiescent validation (`scripts/ci/bmgr-check.sh`, the checker, the nightly
+`bmgr` job, the positive-lifecycle docs) stay in #223 and are NOT accepted here.
+M3 acceptance 6's `bmgr` leg and P4's review state are unchanged.
 
 ## 1. What this repository is
 
