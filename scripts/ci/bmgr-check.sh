@@ -1,35 +1,15 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Unlicense
 #
-# bmgr-check.sh <api> <evidence-dir>
-#
-# The M3 AC6 positive local-transport gate — the black-box release harness
-# (owner decision 2026-10-21): one full host-driven cycle on a rooted `default`
-# x86_64 emulator of the given API (31 or 36) against the *untouched* published
-# release APK — no debuggable target, no -t/-r on it, no test class loaded in
-# the target process:
-#
-#   install -> real launch -> driver `seed` UI import -> SnapshotNowReceiver
-#   -> driver `flip` settings-only import -> driver `encrypted` rejection
-#   -> host root canaries + payload pull -> expectation record
-#   -> encryption-off control -> encryption-on backup -> real TAR verification
-#   -> pm uninstall -> identical-APK reinstall -> install-time transport restore
-#   -> pre-launch gate (restricted default agent permitted and recorded, never a
-#      normal bind) -> force-stop -> normal launch -> adoption/worker observables
-#   -> force-stop -> coherent read-only pull -> strict host validation
-#   -> empty-transport control leg
-#
-# The driver (`:tools:bmgrdriver`, self-instrumenting, own package/process) only
-# acts and records; the host owns every assertion. The script never repairs the
-# positive leg: no `bmgr restore`, no `pm clear`, no file copies into restored
-# domains, no manual worker invocation, no sleep-as-proof — every wait is a
-# bounded poll for a real observable. On any failure the trap still writes every
-# collected artifact. `check-first-launch-restore-results.py --bmgr` is the
-# strict aggregate over both legs' evidence.
-#
-# Safety: the script only mutates the named disposable emulator the CI job
-# created (BMGR_DISPOSABLE_API<api>=1 + BMGR_EXPECT_AVD under GITHUB_ACTIONS),
-# and the trap reverts only the changes this invocation owns.
+# bmgr-check.sh <31|36> <evidence-dir>: M3 AC6, 05 Testing with bmgr.
+# A separate driver imports through the published UI; the host verifies the
+# TAR, install-time delivery, stopped prelaunch provenance, automatic cold-launch
+# restore, quiescent captures and empty-dataset control. The release APK is untouched.
+# No target instrumentation, manual restore/worker, pm clear, root-seeded DB/PB/
+# snapshot or fake encryption. Wait only for bounded real observables.
+# Require the workflow's named rooted disposable x86_64 AVD under GitHub Actions;
+# cleanup restores only owned settings and retains failed evidence. The strict
+# check-first-launch-restore-results.py --bmgr aggregate must pass both images.
 
 set -euo pipefail
 
@@ -48,6 +28,9 @@ TRANSPORT_DIR="/data/data/com.android.localtransport/files"
 PARAMS_ON="is_encrypted=true,is_device_transfer=false,fake_encryption_flag=false"
 PARAMS_OFF="is_encrypted=false,is_device_transfer=false,fake_encryption_flag=false"
 NONCE="run-$(date +%s)-$RANDOM"
+TRANSPORT_WAIT_LIMIT_S=90
+TRANSPORT_QUERY_S=5
+TRANSPORT_POLL_S=2
 
 # Ownership ledger. A flag arms before its mutating call so even a failed
 # mutation is reverted; unarmed flags mean the trap must not touch that state.
@@ -65,6 +48,12 @@ selector() { echo "$1=pass" >> "$EV/selectors.txt"; fact "selector.$1" pass; }
 out() {  # bounded device capture
     local file="$1"; shift
     timeout 120 "$@" > "$EV/$file" 2>&1 || log "capture $file failed ($?)"
+}
+prelaunch_capture() {
+    local name="$1" rc=0; shift
+    timeout 60 "$@" > "$EV/$name.txt" 2> "$EV/$name.err" || rc=$?
+    printf '%s\n' "$rc" > "$EV/$name.exit"
+    [ "$rc" -eq 0 ] || fail "prelaunch capture $name failed: $rc"
 }
 
 finish_run_json() {
@@ -369,6 +358,9 @@ main() {
         || fail "set $DISPOSABLE=1 to acknowledge a disposable emulator"
     [ -n "${BMGR_EXPECT_AVD:-}" ] \
         || fail "BMGR_EXPECT_AVD must name the workflow-created AVD"
+    wait_s="${BMGR_TRANSPORT_WAIT_S:-$TRANSPORT_WAIT_LIMIT_S}"
+    [[ "$wait_s" =~ ^[1-9][0-9]?$ ]] && [ "$wait_s" -le "$TRANSPORT_WAIT_LIMIT_S" ] \
+        || fail "transport wait must be 1..${TRANSPORT_WAIT_LIMIT_S} seconds"
 
     # --- device: the named disposable qemu emulator the job booted ---
     timeout 660 "$ADB" wait-for-device
@@ -389,30 +381,36 @@ main() {
     fact abi "$("$ADB" shell getprop ro.product.cpu.abi | tr -d '\r')"
     fact fingerprint "$("$ADB" shell getprop ro.build.fingerprint | tr -d '\r')"
     grep -q '^abi=x86_64$' "$EV/facts.txt" || fail "the transport leg needs an x86_64 emulator"
-    out dumpsys-before.txt "$ADB" shell dumpsys backup
     "$ADB" logcat -v threadtime > "$EV/logcat.txt" 2>/dev/null &
     LOGCAT_PID=$!
 
     # --- original backup state: raw secure values captured before any change ---
     # LocalTransport registers asynchronously (run7 api36: BOUND_AND_CONNECTING
     # + empty list): bounded wait before any mutable original; attempts kept.
-    wait_s="${BMGR_TRANSPORT_WAIT_S:-90}"
-    tries=$(( (wait_s + 1) / 2 )); [ "$tries" -ge 1 ] || tries=1
+    deadline=$((SECONDS + wait_s)); attempt=0
     : > "$EV/transport-wait.txt"
     ready=""
-    for _ in $(seq 1 "$tries"); do
-        timeout 30 "$ADB" shell bmgr list transports \
-            > "$EV/transport-wait-last.txt" 2>&1 || true
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        remaining=$((deadline - SECONDS)); query_s=$TRANSPORT_QUERY_S
+        [ "$remaining" -ge "$query_s" ] || query_s=$remaining
+        attempt=$((attempt + 1)); rc=0
+        timeout "$query_s" "$ADB" shell bmgr list transports \
+            > "$EV/transport-wait-last.txt" 2>&1 || rc=$?
+        printf 'attempt %s exit %s\n' "$attempt" "$rc" >> "$EV/transport-wait.txt"
         cat "$EV/transport-wait-last.txt" >> "$EV/transport-wait.txt"
-        echo "---" >> "$EV/transport-wait.txt"
-        if grep -q 'com\.android\.localtransport/\.LocalTransport' \
-                "$EV/transport-wait-last.txt"; then
+        if [ "$rc" -eq 0 ] && [ "$SECONDS" -lt "$deadline" ] && \
+                tr -d '\r' < "$EV/transport-wait-last.txt" \
+                | grep -Eq '^[[:space:]*]*com\.android\.localtransport/\.LocalTransport$'; then
             ready=1; break
         fi
-        sleep 2
+        remaining=$((deadline - SECONDS)); [ "$remaining" -gt 0 ] || break
+        pause=$TRANSPORT_POLL_S
+        [ "$remaining" -ge "$pause" ] || pause=$remaining
+        sleep "$pause"
     done
     [ -n "$ready" ] || fail "local transport did not register within ${wait_s}s"
     cp "$EV/transport-wait-last.txt" "$EV/transports-before.txt"
+    out dumpsys-before.txt "$ADB" shell dumpsys backup
     TRANSPORT="$(grep -o 'com\.android\.localtransport/\.LocalTransport' "$EV/transports-before.txt" | head -1)"
     [ -n "$TRANSPORT" ] || fail "local transport not in: $(cat "$EV/transports-before.txt")"
     ORIG_TRANSPORT="$(selected_transport "$EV/transports-before.txt")"
@@ -667,28 +665,19 @@ PY
 
     # --- pre-launch gate: the restricted default-agent window is recorded, and the
     #     only tolerated process evidence; no normal bind may precede our launch ---
-    # Typed path evidence (d/f/l/?): payload pair + provably-empty framework
-    # dirs only; '?' or any descendant fails closed in the checker.
-    timeout 60 "$ADB" shell \
-        "find '$DATA_DIR' -mindepth 1 | sort | while read -r p; do" \
+    timeout 60 "$ADB" shell am force-stop "$PKG"
+    prelaunch_capture prelaunch-files "$ADB" shell \
+        "set -e; set -o pipefail; find '$DATA_DIR' -mindepth 1 | sort | while IFS= read -r p; do" \
         " if [ -L \"\$p\" ]; then echo \"l \$p\";" \
         " elif [ -d \"\$p\" ]; then echo \"d \$p\";" \
         " elif [ -f \"\$p\" ]; then echo \"f \$p\";" \
-        " else echo \"? \$p\"; fi; done" \
-        | tr -d '\r' > "$EV/prelaunch-files.txt" || true
-    timeout 30 "$ADB" shell "ps -A 2>/dev/null | grep '$PKG'" \
-        | tr -d '\r' > "$EV/prelaunch-ps.txt" || true
-    if [ -s "$EV/prelaunch-ps.txt" ]; then
-        fact prelaunchAgentObserved true
-        log "restricted restore-agent process recorded: $(tr '\n' ' ' < "$EV/prelaunch-ps.txt")"
-    else
-        fact prelaunchAgentObserved false
-    fi
-    timeout 60 "$ADB" shell am force-stop "$PKG"
+        " else echo \"? \$p\"; fi; done; printf '%s\\n' 'complete $NONCE'"
+    prelaunch_capture prelaunch-ps "$ADB" shell ps -A
     timeout 30 "$ADB" shell log -p i -t bmgr-prelaunch "end $NONCE $PKG" \
         || fail "could not write the prelaunch end marker"
-    timeout 60 "$ADB" logcat -d -v threadtime > "$EV/prelaunch-logcat.txt" \
-        2>/dev/null || fail "could not dump the prelaunch logcat window"
+    prelaunch_capture prelaunch-logcat "$ADB" logcat -d -v threadtime
+    python3 scripts/ci/check-first-launch-restore-results.py --bmgr-prelaunch \
+        "$EV" "api$API" "$NONCE" || fail "prelaunch provenance failed"
 
     # --- controlled normal cold launch -> adoption + restore worker observables ---
     timeout 60 "$ADB" shell am start -n "$PKG/.MainActivity" | tee "$EV/launch-restored.txt"

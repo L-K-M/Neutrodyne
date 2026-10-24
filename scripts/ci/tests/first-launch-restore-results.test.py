@@ -15,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import textwrap
+import time
 import unittest
 import zipfile
 
@@ -604,9 +605,10 @@ class BmgrEvidenceTest(unittest.TestCase):
             f"d {data}/files/datastore",
             f"f {data}/files/datastore/settings.preferences_pb",
             f"d {data}/no_backup", f"d {data}/shared_prefs",
-            f"l {data}/lib"]) + "\n")
-        (directory / "prelaunch-ps.txt").write_text(
-            "u0_a123  4455 1 0 0 ch.lkmc.neutrodyne\n")
+            f"l {data}/lib", f"complete {NONCE}"]) + "\n")
+        (directory / "prelaunch-ps.txt").write_text("")
+        for name in ("prelaunch-files", "prelaunch-ps", "prelaunch-logcat"):
+            (directory / f"{name}.exit").write_text("0\n")
         # Markers delimit the window; only the restricted agent may start inside.
         (directory / "prelaunch-logcat.txt").write_text("\n".join([
             "10-21 15:53:40.0  I ActivityManager: unrelated line",
@@ -847,59 +849,55 @@ class BmgrEvidenceTest(unittest.TestCase):
         for entry, needle in (
                 (f"f /data/data/{PKG}/databases/neutrodyne.db", "payload pair"),
                 (f"d /data/data/{PKG}/databases/wal", "unexpected dirs/links"),
+                (f"f /data/data/{PKG}/files/backup/auto-snapshot.zip", "malformed"),
                 (f"? /data/data/{PKG}/sock", "malformed")):
             with self.subTest(entry=entry):
                 def mutate(directory, run, exp, logs, statuses):
-                    with (directory / "prelaunch-files.txt").open("a") as out:
-                        out.write(entry + "\n")
+                    path = directory / "prelaunch-files.txt"
+                    path.write_text(path.read_text().replace(
+                        f"complete {NONCE}", entry + f"\ncomplete {NONCE}"))
                 self._rejects_prelaunch(mutate, needle)
-
-    @staticmethod
-    def _inject_window_line(directory, line):
-        log = directory / "prelaunch-logcat.txt"
-        lines = log.read_text().splitlines()
-        end = next(i for i, l in enumerate(lines) if f"{TAG}: end" in l)
-        lines.insert(end, line)
-        log.write_text("\n".join(lines) + "\n")
-
-    def test_rejects_prelaunch_normal_process_starts(self):
-        """A top-activity or child-process bind inside the window fails."""
-        for proc in (f"{PKG}/u0a123 for top-activity {{{PKG}/.MainActivity}}",
-                     f"{PKG}:restore/u0a123 for added application {PKG}"):
-            with self.subTest(proc=proc):
-                def mutate(directory, run, exp, logs, statuses):
-                    self._inject_window_line(directory,
-                        "10-21 15:53:45.3  I ActivityManager:"
-                        f" Start proc 4460:{proc}")
-                self._rejects_prelaunch(mutate, "normal process start")
-
-    def test_rejects_prelaunch_window_marker_gaps(self):
-        """Missing markers or a foreign nonce fail the window coverage."""
-        def no_markers(directory, run, exp, logs, statuses):
-            (directory / "prelaunch-logcat.txt").write_text(
-                "10-21 15:53:45.0  I BackupManagerService: Restore complete.\n")
-        def wrong_nonce(directory, run, exp, logs, statuses):
-            log = directory / "prelaunch-logcat.txt"
-            log.write_text(log.read_text().replace(
-                f"begin {NONCE}", "begin run-9999999999-99999"))
-        self._rejects_prelaunch(no_markers, "window markers missing")
-        self._rejects_prelaunch(wrong_nonce, "marker nonce")
-
-    def test_rejects_prelaunch_without_agent_provenance(self):
-        """Payloads present but no observed default-agent start -> fail."""
-        def mutate(directory, run, exp, logs, statuses):
-            log = directory / "prelaunch-logcat.txt"
-            log.write_text(log.read_text().replace(
-                "10-21 15:53:45.1  I ActivityManager: Start proc 4455:"
-                f"{PKG}/u0a123 for backup {{android/FullBackupAgent}}\n", ""))
-            (directory / "prelaunch-ps.txt").write_text("")
-        self._rejects_prelaunch(mutate, "restore provenance")
 
     def test_rejects_a_live_pid_without_backup_origin(self):
         def mutate(directory, run, exp, logs, statuses):
             (directory / "prelaunch-ps.txt").write_text(
                 f"u0_a123  9999 1 0 0 {PKG}\n")
-        self._rejects_prelaunch(mutate, "without backup provenance")
+        self._rejects_prelaunch(mutate, "after force-stop")
+
+    def test_prelaunch_requires_complete_captures(self):
+        for name in ("prelaunch-files", "prelaunch-ps", "prelaunch-logcat"):
+            with self.subTest(capture=name):
+                def mutate(directory, *unused):
+                    (directory / f"{name}.exit").write_text("1\n")
+                self._rejects_prelaunch(mutate, "capture")
+
+    def test_prelaunch_rejects_ambiguous_provenance(self):
+        changes = (
+            (f"{PKG}/u0a123 for backup", f"{PKG}:child/u0a123 for backup", "normal process"),
+            (f"for backup {{android/FullBackupAgent}}", f"for top-activity {{{PKG}/.MainActivity}}", "normal process"),
+            (f"{PKG}/u0a123 for backup", f"{PKG}:restore/u0a123 for added application", "normal process"),
+            ("Start proc 4455:", "Unobserved proc 4455:", "provenance"),
+            (f"restoreAtInstall pkg={PKG} ", f"restoreAtInstall pkg={PKG}2 ", "provenance"),
+            (f"{TAG}:", "other-tag:", "markers"),
+            (f"begin {NONCE}", "begin run-9999999999-99999", "markers"),
+            (f"begin {NONCE} {PKG}", f"begin {NONCE} {PKG}2", "markers"),
+            (f"end {NONCE} {PKG}", f"end {NONCE} {PKG}\nI {TAG}: end {NONCE} {PKG}", "markers"),
+        )
+        for old, new, needle in changes:
+            with self.subTest(change=new):
+                def mutate(directory, *unused):
+                    path = directory / "prelaunch-logcat.txt"
+                    path.write_text(path.read_text().replace(old, new))
+                self._rejects_prelaunch(mutate, needle)
+
+    def test_prelaunch_ignores_old_windows(self):
+        def mutate(directory, *unused):
+            path = directory / "prelaunch-logcat.txt"
+            path.write_text(f"I {TAG}: begin run-1-1 {PKG}\n" + path.read_text()
+                            + f"I {TAG}: end run-1-1 {PKG}\n")
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_rejects_an_unretired_snapshot(self):
         def mutate(directory, run, exp, logs, statuses):
@@ -1096,7 +1094,7 @@ class BmgrHostScriptTest(unittest.TestCase):
         self.adb = self.root / "adb"
         self.adb.write_text(
             f"#!{sys.executable}\n"
-            "import json, os, sys\n"
+            "import json, os, sys, time\n"
             "args = sys.argv[1:]\n"
             "calls = os.environ['ADB_CALLS']\n"
             "state = [json.loads(l) for l in open(calls)] if os.path.exists(calls) else []\n"
@@ -1139,7 +1137,11 @@ class BmgrHostScriptTest(unittest.TestCase):
             "if args[:3] == ['shell', 'bmgr', 'list'] and args[3:] == ['transports']:\n"
             "    prior = sum(1 for a in state\n"
             "                if a[:4] == ['shell', 'bmgr', 'list', 'transports'])\n"
+            "    if prior == 0:\n"
+            "        time.sleep(float(os.environ.get('FAKE_TRANSPORT_QUERY_DELAY', '0')))\n"
             "    if prior < int(os.environ.get('FAKE_TRANSPORT_DELAY', '0')):\n"
+            "        if prior == 1:\n"
+            "            done('No transports available\\n  * com.android.localtransport/.LocalTransport\\n', 1)\n"
             "        done('No transports available\\n')\n"
             "    if any(a[:3] == ['shell', 'bmgr', 'transport'] for a in state):\n"
             "        done('    com.example.stub/.OtherTransport\\n'\n"
@@ -1308,6 +1310,9 @@ class BmgrHostScriptTest(unittest.TestCase):
         self.assertNotIn("did not register", result.stderr + result.stdout)
         wait = (self.evidence / "transport-wait.txt").read_text()
         self.assertEqual(2, wait.count("No transports available"))
+        before_mutation = observed[:observed.index(["shell", "bmgr", "enable", "true"])]
+        self.assertEqual(3, sum(call[:4] == ["shell", "bmgr", "list", "transports"]
+                                for call in before_mutation))
         self.assertIn(("shell", "bmgr", "transport",
                        "com.android.localtransport/.LocalTransport"),
                       [tuple(a) for a in observed])
@@ -1319,6 +1324,16 @@ class BmgrHostScriptTest(unittest.TestCase):
         self.assertIn("did not register", result.stderr + result.stdout)
         self.assertIn("No transports available",
                       (self.evidence / "transport-wait.txt").read_text())
+        self.assertEqual([], self.mutating(observed))
+
+    def test_transport_wait_budget_is_wall_time(self):
+        started = time.monotonic()
+        result, observed = self.run_script(FAKE_TRANSPORT_DELAY="99",
+            FAKE_TRANSPORT_QUERY_DELAY="2", BMGR_TRANSPORT_WAIT_S="1")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("did not register", result.stderr + result.stdout)
+        # Includes the existing two-second adbd restart plus cleanup captures.
+        self.assertLess(time.monotonic() - started, 5)
         self.assertEqual([], self.mutating(observed))
 
     def test_run_driver_arms_and_captures_each_phase(self):

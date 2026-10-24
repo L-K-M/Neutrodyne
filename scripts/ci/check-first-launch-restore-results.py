@@ -361,56 +361,55 @@ AGENT_REASON = "backup {android/FullBackupAgent}"
 
 
 def check_prelaunch(device, directory, nonce):
-    """Pre-launch gate: typed path evidence (only the payload pair + proven empty
-    framework dirs) and a nonce-marked logcat window whose only tolerated target
-    process start is the restricted default backup agent."""
+    """Require a stopped restore window with complete paths and default-agent provenance."""
+    for name in ("prelaunch-files", "prelaunch-ps", "prelaunch-logcat"):
+        if (directory / f"{name}.exit").read_text().strip() != "0":
+            raise ValueError(f"{device}: prelaunch capture failed: {name}")
     data = f"/data/data/{BMGR_TARGET}"
     rel_of = {"f": set(), "d": set(), "l": set()}
-    for line in pull_listing(directory / "prelaunch-files.txt"):
+    listing = (directory / "prelaunch-files.txt").read_text().splitlines()
+    if not listing or listing[-1] != f"complete {nonce}":
+        raise ValueError(f"{device}: prelaunch capture incomplete")
+    seen = set()
+    for line in listing[:-1]:
         t, _, p = line.partition(" ")
-        if t not in ("d", "f", "l") or not p.startswith(f"{data}/"):
+        if t not in rel_of or not p.startswith(f"{data}/") or p in seen:
             raise ValueError(f"{device}: prelaunch listing malformed: {line!r}")
+        seen.add(p)
         rel_of[t].add(p[len(data) + 1:])
     if rel_of["f"] != PRELAUNCH_PAYLOAD_FILES:
         raise ValueError(
             f"{device}: prelaunch files != payload pair: {sorted(rel_of['f'])}")
     extra = rel_of["d"] - PRELAUNCH_PARENT_DIRS - PRELAUNCH_FRAMEWORK_DIRS
-    if extra or rel_of["l"] - PRELAUNCH_LINKS:
+    if extra or rel_of["l"] - PRELAUNCH_LINKS or not PRELAUNCH_PARENT_DIRS <= rel_of["d"]:
         raise ValueError(f"{device}: prelaunch unexpected dirs/links: "
                          f"{sorted(extra | (rel_of['l'] - PRELAUNCH_LINKS))}")
     # Empty-dir proof is structural: a descendant would be its own entry.
 
     lines = pull_listing(directory / "prelaunch-logcat.txt")
-    marker = re.compile(
-        rf"{PRELAUNCH_TAG}: (begin|end) (run-\d+-\d+) {re.escape(BMGR_TARGET)}")
-    begin = end = None
-    for i, line in enumerate(lines):
-        if (m := marker.search(line)):
-            if m.group(2) != nonce:
-                raise ValueError(
-                    f"{device}: prelaunch marker nonce != run nonce")
-            if m.group(1) == "begin":
-                begin = i if begin is None else begin
-            else:
-                end = i
-    if begin is None or end is None or end <= begin:
+    marker = re.compile(rf"\b{PRELAUNCH_TAG}: (begin|end) {re.escape(nonce)} {re.escape(BMGR_TARGET)}$")
+    bounds = [(i, match.group(1)) for i, line in enumerate(lines) if (match := marker.search(line))]
+    if [kind for _, kind in bounds] != ["begin", "end"]:
         raise ValueError(f"{device}: prelaunch logcat window markers missing")
+    begin, end = (index for index, _ in bounds)
 
     pkg = re.escape(BMGR_TARGET)
     start = re.compile(rf"Start proc (\d+):({pkg}(?::\S+)?)/\S+ for (\S.*)$")
     backup_pids = set()
     saw_restore = False
     for line in lines[begin + 1:end]:
-        if f"restoreAtInstall pkg={BMGR_TARGET}" in line:
+        if re.search(rf"restoreAtInstall pkg={pkg}(?:\s|$)", line):
             saw_restore = True
         if (found := start.search(line)):
-            if found.group(3) != AGENT_REASON:
+            if found.group(2) != BMGR_TARGET or found.group(3) != AGENT_REASON:
                 raise ValueError(
                     f"{device}: normal process start inside prelaunch window: "
                     f"{found.group(2)} for {found.group(3)}")
             backup_pids.add(found.group(1))
         if f"cmp={BMGR_TARGET}/" in line or f"cmp={BMGR_TARGET}:" in line:
             raise ValueError(f"{device}: activity/component start in window")
+        if f"{PRELAUNCH_TAG}:" in line:
+            raise ValueError(f"{device}: unexpected prelaunch window markers")
     if not (saw_restore and backup_pids):
         raise ValueError(
             f"{device}: no default-agent restore provenance in window")
@@ -420,13 +419,8 @@ def check_prelaunch(device, directory, nonce):
         if "NeutrodyneApplication" in line or "FATAL EXCEPTION" in line:
             raise ValueError(
                 f"{device}: prelaunch process evidence shows app init")
-        if fields and (fields[-1] == BMGR_TARGET
-                       or fields[-1].startswith(f"{BMGR_TARGET}:")):
-            pid = fields[1] if len(fields) > 1 and fields[1].isdigit() else None
-            if pid not in backup_pids:
-                raise ValueError(
-                    f"{device}: live target process without backup provenance: "
-                    f"{line}")
+        if fields and (fields[-1] == BMGR_TARGET or fields[-1].startswith(f"{BMGR_TARGET}:")):
+            raise ValueError(f"{device}: live target process after force-stop: {line}")
 
 
 def check_source_db(device, directory):
@@ -943,7 +937,9 @@ def main():
     parser.add_argument("--bmgr-pb", nargs=2, metavar=("PB_FILE", "KEY"),
                         help="print one decoded preferences_pb value (or nothing)")
     parser.add_argument("--bmgr-pull", metavar="EVIDENCE_DIR", type=Path,
-                        help="validate one leg's quiescent pull capture")
+                         help="validate one leg's quiescent pull capture")
+    parser.add_argument("--bmgr-prelaunch", nargs=3, metavar=("EVIDENCE_DIR", "DEVICE", "NONCE"),
+                        help="validate the stopped install/restore window before normal launch")
     args = parser.parse_args()
     try:
         if args.bmgr is not None:
@@ -956,6 +952,10 @@ def main():
             run_bmgr_pb(*args.bmgr_pb)
         elif args.bmgr_pull is not None:
             run_bmgr_pull(args.bmgr_pull)
+        elif args.bmgr_prelaunch is not None:
+            directory, device, nonce = args.bmgr_prelaunch
+            check_prelaunch(device, Path(directory), nonce)
+            print("bmgr-prelaunch: PASS restricted default-agent window")
         else:
             if args.results is None:
                 parser.error(
