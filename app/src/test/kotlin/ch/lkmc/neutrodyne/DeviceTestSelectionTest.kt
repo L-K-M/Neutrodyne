@@ -20,34 +20,90 @@ class DeviceTestSelectionTest {
     fun unseededOreoSelectsExactlyTheSupportedCases() {
         for (sdk in listOf(26, 27)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(','))
-                .containsExactly(RESTORE, RELABEL, YTX)
+                .containsExactly(RESTORE, BMGR, RELABEL, YTX)
         }
     }
 
     @Test
     fun modernDevicesKeepLocaleAndPythonAcceptanceChecks() {
         for (sdk in listOf(33, 34, 36)) {
-            assertThat(select(sdk = sdk).getString("notClass")).isEqualTo(RESTORE)
+            assertThat(select(sdk = sdk).getString("notClass")).isEqualTo("$RESTORE,$BMGR")
         }
     }
 
     @Test
     fun supportedOreoAbiKeepsPythonCheck() {
         assertThat(select(sdk = 26, abi = "arm64-v8a").getString("notClass")?.split(','))
-            .containsExactly(RESTORE, RELABEL)
+            .containsExactly(RESTORE, BMGR, RELABEL)
     }
 
     @Test
     fun pieKeepsPythonCheck() {
         assertThat(select(sdk = 28).getString("notClass")?.split(','))
-            .containsExactly(RESTORE, RELABEL)
+            .containsExactly(RESTORE, BMGR, RELABEL)
+    }
+
+    @Test
+    fun unarmedBmgrTransportClassIsAlwaysExcluded() {
+        for (sdk in listOf(26, 31, 36)) {
+            assertThat(select(sdk = sdk).getString("notClass")?.split(',')).contains(BMGR)
+            assertThat(select(sdk = sdk, seeded = true).getString("notClass")?.split(',')).contains(BMGR)
+        }
+    }
+
+    @Test
+    fun armedBmgrPhaseSelectsExactlyItsPinnedMethod() {
+        for (sdk in listOf(31, 36)) {
+            val arguments = armed(phase = "verify", method = "firstLaunchRestoresTransportedSnapshot")
+            selectSupportedDeviceTests(arguments, sdk, "x86_64", listOf("en-US"), false)
+            assertThat(arguments.getString("notClass").orEmpty().split(',')).doesNotContain(BMGR)
+            assertThat(bmgrArmedMethod(arguments, sdk)).isEqualTo("firstLaunchRestoresTransportedSnapshot")
+        }
+    }
+
+    @Test
+    fun bmgrPhaseOutsideItsApisStaysExcluded() {
+        for (sdk in listOf(26, 30, 32, 35)) {
+            val arguments = armed(phase = "verify", method = "firstLaunchRestoresTransportedSnapshot")
+            selectSupportedDeviceTests(arguments, sdk, "x86_64", listOf("en-US"), false)
+            assertThat(arguments.getString("notClass")?.split(',')).contains(BMGR)
+            assertThat(bmgrArmedMethod(arguments, sdk)).isNull()
+        }
+    }
+
+    @Test
+    fun bmgrPhaseWithAMismatchedSelectorDoesNotArm() {
+        // phase and method disagree: the runner must not arm anything on a partial match.
+        val wrongMethod = armed(phase = "verify", method = "prepareLocalTransportBackup")
+        assertThat(bmgrArmedMethod(wrongMethod, 31)).isNull()
+        // A whole-class run (no `#method`) never arms — bulk scopes cannot opt the phase in.
+        val wholeClass =
+            Bundle().apply {
+                putString("bmgrPhase", "verify")
+                putString("class", BMGR)
+            }
+        assertThat(bmgrArmedMethod(wholeClass, 36)).isNull()
+        // A comma-joined class list never arms either.
+        val listed =
+            Bundle().apply {
+                putString("bmgrPhase", "verify")
+                putString("class", "other.Foo,$BMGR#firstLaunchRestoresTransportedSnapshot")
+            }
+        assertThat(bmgrArmedMethod(listed, 36)).isNull()
+        // An unknown phase name never arms.
+        val unknown =
+            Bundle().apply {
+                putString("bmgrPhase", "nonsense")
+                putString("class", "$BMGR#firstLaunchRestoresTransportedSnapshot")
+            }
+        assertThat(bmgrArmedMethod(unknown, 36)).isNull()
     }
 
     @Test
     fun shippedGermanKeepsRelabelCheckOnOreo() {
         val arguments = Bundle()
         selectSupportedDeviceTests(arguments, 26, "arm64-v8a", listOf("en-US", "de-DE"), false)
-        assertThat(arguments.getString("notClass")).isEqualTo(RESTORE)
+        assertThat(arguments.getString("notClass")).isEqualTo("$RESTORE,$BMGR")
     }
 
     @Test
@@ -98,8 +154,18 @@ class DeviceTestSelectionTest {
         seeded: Boolean = false,
     ): Bundle = Bundle().also { selectSupportedDeviceTests(it, sdk, abi, listOf("en-US"), seeded) }
 
+    private fun armed(
+        phase: String,
+        method: String,
+    ): Bundle =
+        Bundle().apply {
+            putString("bmgrPhase", phase)
+            putString("class", "$BMGR#$method")
+        }
+
     private companion object {
         const val RESTORE = "ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest"
+        const val BMGR = "ch.lkmc.neutrodyne.BmgrTransportDeviceTest"
         const val RELABEL = "ch.lkmc.neutrodyne.PerAppLanguageTest#perAppLanguageRelabelsTheDestinations"
         const val YTX = "ch.lkmc.neutrodyne.YtxReleaseSmokeTest"
     }

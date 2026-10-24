@@ -2,15 +2,21 @@
 # SPDX-License-Identifier: Unlicense
 """Exercise the XML selector and its nightly gate with isolated GMD fixtures."""
 
+import base64
+import hashlib
+import io
+import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import textwrap
 import unittest
+import zipfile
 
 
 REPO = Path(__file__).resolve().parents[3]
@@ -169,6 +175,289 @@ class RestoreResultsTest(unittest.TestCase):
             path = self.write_report(device)
         path.with_name("TEST-aggregate.xml").write_text(path.read_text())
         self.assert_rejected("api36:")
+
+
+BMGR_CLASS = "ch.lkmc.neutrodyne.BmgrTransportDeviceTest"
+BMGR_METHODS = {
+    "prepare": "prepareLocalTransportBackup",
+    "verify": "firstLaunchRestoresTransportedSnapshot",
+    "empty": "firstLaunchWithoutTransportDataStaysEmpty",
+}
+
+
+def _sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def bmgr_expectation(api, snapshot_zip=None):
+    exp = {
+        "v": 1, "nonce": "run-1700000000-42", "package": "ch.lkmc.neutrodyne",
+        "api": api, "installationId": "install-abc",
+        "snapshotSha256": "", "snapshotBytes": 0,
+        "portableSha256": _sha(b"portable-pb"), "portableBytes": 11,
+        "portableKey": "backup.opml_layout",
+        "portableInSnapshot": "GROUPED", "portableAfter": "FLAT",
+        "syncIds": {"k1": "s1"}, "groupUuids": {"G": "u1"},
+        "canaries": [{"where": "files", "rel": "downloads/x", "sha256": _sha(b"c"), "bytes": 1}],
+        "receiverLine": "ok at=1 bytes=2 level=3", "preparedAt": 1,
+    }
+    if snapshot_zip is not None:
+        exp["snapshotSha256"], exp["snapshotBytes"] = _sha(snapshot_zip), len(snapshot_zip)
+    return exp
+
+
+def bmgr_snapshot_zip(exp):
+    payloads = {
+        "library.json": b'{"podcasts":[],"groups":[]}',
+        "episodes.jsonl": b"",
+        "queue.json": b'{"upNext":[]}',
+        "settings.json": json.dumps(
+            {"values": [{"key": "backup.opml_layout", "type": "CHOICE",
+                         "value": exp["portableInSnapshot"]}]}).encode(),
+    }
+    manifest = {
+        "format": "neutrodyne-backup", "formatVersion": 1, "minReaderVersion": 1,
+        "kind": "AUTO_SNAPSHOT", "installationId": exp["installationId"],
+        "entries": [{"name": n, "bytes": len(b), "sha256": _sha(b), "records": 1}
+                    for n, b in payloads.items()],
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+        for name, data in payloads.items():
+            zf.writestr(name, data)
+    return buffer.getvalue()
+
+
+def bmgr_tar(exp, snapshot_zip):
+    pkg = exp["package"]
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for name, data in (
+            (f"apps/{pkg}/_manifest", b"<manifest />"),
+            (f"apps/{pkg}/f/backup/auto-snapshot.zip", snapshot_zip),
+            (f"apps/{pkg}/f/datastore/settings.preferences_pb", b"portable-pb"),
+        ):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def bmgr_instrument_log(phase, b64=None, fail_code=0, other=None):
+    method = BMGR_METHODS[phase]
+    body = (
+        f"INSTRUMENTATION_STATUS: class={BMGR_CLASS}\n"
+        f"INSTRUMENTATION_STATUS: test={method}\n"
+        f"INSTRUMENTATION_STATUS: numtests=1\n"
+        f"INSTRUMENTATION_STATUS_CODE: 1\n"
+    )
+    if b64 is not None:
+        body += (f"INSTRUMENTATION_STATUS: bmgrExpected={b64}\n"
+                 "INSTRUMENTATION_STATUS_CODE: 2\n")
+    body += (
+        f"INSTRUMENTATION_STATUS: class={BMGR_CLASS}\n"
+        f"INSTRUMENTATION_STATUS: test={method}\n"
+        f"INSTRUMENTATION_STATUS_CODE: {fail_code}\n"
+        f"{other or ''}"
+        "INSTRUMENTATION_RESULT: stream=\nTest results ran to completion.\nOK (1 test)\n"
+        "INSTRUMENTATION_CODE: -1\n"
+    )
+    return body
+
+
+class BmgrEvidenceTest(unittest.TestCase):
+    """`--bmgr` strict-mode fixtures — built entirely with the stdlib, offline."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def build_leg(self, device, api, mutate=None):
+        directory = self.root / device
+        directory.mkdir(parents=True, exist_ok=True)
+        exp = bmgr_expectation(api)
+        snapshot_zip = bmgr_snapshot_zip(exp)
+        exp["snapshotSha256"], exp["snapshotBytes"] = _sha(snapshot_zip), len(snapshot_zip)
+        tar = bmgr_tar(exp, snapshot_zip)
+        b64 = base64.urlsafe_b64encode(
+            json.dumps(exp).encode()).decode().rstrip("=")
+        run = {
+            "schema": "bmgr-evidence/v1", "device": device, "api": api,
+            "fingerprint": "google/sdk/fp", "abi": "x86_64", "nonce": exp["nonce"],
+            "sourceSha": "abc", "apkSha256": "a" * 64, "testApkSha256": "b" * 64,
+            "certSha256": "c" * 64, "transport": "com.android.localtransport/.LocalTransport",
+            "tarSha256": _sha(tar), "unencryptedDiagnosis": "encoff:PackageXwithresult:Skipped",
+            "selectors": {name: "pass" for name in (
+                "apkNonDebuggable", "apkSignatureStable", "testInstrumentationAvailable",
+                "expectationCaptured", "unencryptedTransportExcluded",
+                "positivePayloadVerified", "restoredFilesMatched", "emptyLegExcluded")},
+        }
+        (directory / "run.json").write_text(json.dumps(run))
+        (directory / "expectation.json").write_text(json.dumps(exp))
+        (directory / "transport.tar").write_bytes(tar)
+        (directory / "backupnow-positive.log").write_text(
+            f"Package {exp['package']} with result: Success\n"
+            "Backup finished with result: Success\n")
+        (directory / "backupnow-encoff.log").write_text("Package X with result: Skipped\n")
+        (directory / "restored-files.txt").write_text(
+            f"{exp['snapshotSha256']}  files/backup/auto-snapshot.zip\n"
+            f"{exp['portableSha256']}  files/datastore/settings.preferences_pb\n"
+            f"/data/user/0/{exp['package']}/files/backup/auto-snapshot.zip\n"
+            f"/data/user/0/{exp['package']}/files/datastore/settings.preferences_pb\n")
+        logs = {
+            "prepare": bmgr_instrument_log("prepare", b64=b64),
+            "verify": bmgr_instrument_log("verify"),
+            "empty": bmgr_instrument_log("empty"),
+        }
+        if mutate:
+            mutate(directory, run, exp, logs)
+        for phase, text in logs.items():
+            (directory / f"instrument-{phase}.log").write_text(text)
+        return directory
+
+    def build(self, devices=("api31", "api36"), mutate=None):
+        apis = {"api31": 31, "api36": 36}
+        for device in devices:
+            self.build_leg(device, apis[device], mutate.get(device) if mutate else None)
+
+    def check(self):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "--bmgr", str(self.root)],
+            capture_output=True, text=True, timeout=30)
+
+    def test_accepts_a_complete_two_leg_run(self):
+        self.build()
+        result = self.check()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("bmgr: PASS api31 + api36", result.stdout)
+
+    def test_rejects_a_missing_leg(self):
+        self.build(("api31",))
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("api36:", result.stderr)
+
+    def test_rejects_a_skipped_or_failed_method(self):
+        def mutate(directory, run, exp, logs):
+            logs["verify"] = bmgr_instrument_log("verify", fail_code=-3)
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("instrument evidence mismatch", result.stderr)
+
+    def test_rejects_an_unexpected_method(self):
+        def mutate(directory, run, exp, logs):
+            logs["empty"] = logs["empty"].replace(
+                "firstLaunchWithoutTransportDataStaysEmpty", "prepareLocalTransportBackup")
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("instrument evidence mismatch", result.stderr)
+
+    def test_rejects_a_missing_expectation_status(self):
+        def mutate(directory, run, exp, logs):
+            logs["prepare"] = bmgr_instrument_log("prepare")
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("bmgrExpected", result.stderr)
+
+    def test_rejects_a_mismatched_emitted_expectation(self):
+        def mutate(directory, run, exp, logs):
+            other = dict(exp, installationId="foreign")
+            b64 = base64.urlsafe_b64encode(json.dumps(other).encode()).decode().rstrip("=")
+            logs["prepare"] = bmgr_instrument_log("prepare", b64=b64)
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("bmgrExpected != expectation.json", result.stderr)
+
+    def test_rejects_a_tampered_tar_payload(self):
+        def mutate(directory, run, exp, logs):
+            tampered = exp["package"]
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w") as tar:
+                for name, data in (
+                    (f"apps/{tampered}/_manifest", b"<manifest />"),
+                    (f"apps/{tampered}/f/backup/auto-snapshot.zip", b"not the zip"),
+                    (f"apps/{tampered}/f/datastore/settings.preferences_pb", b"portable-pb"),
+                ):
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    tar.addfile(info, io.BytesIO(data))
+            data = buffer.getvalue()
+            (directory / "transport.tar").write_bytes(data)
+            run["tarSha256"] = _sha(data)
+            (directory / "run.json").write_text(json.dumps(run))
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("expected hash/size", result.stderr)
+
+    def test_rejects_an_extra_tar_member(self):
+        def mutate(directory, run, exp, logs):
+            pkg = exp["package"]
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w") as tar:
+                with tarfile.open(directory / "transport.tar") as src:
+                    for member in src:
+                        tar.addfile(member, io.BytesIO(src.extractfile(member).read()))
+                info = tarfile.TarInfo(f"apps/{pkg}/d/neutrodyne.db")
+                info.size = 4
+                tar.addfile(info, io.BytesIO(b"db!!"))
+            (directory / "transport.tar").write_bytes(buffer.getvalue())
+            run["tarSha256"] = _sha(buffer.getvalue())
+            (directory / "run.json").write_text(json.dumps(run))
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("TAR members", result.stderr)
+
+    def test_rejects_a_nonce_mismatch(self):
+        def mutate(directory, run, exp, logs):
+            run["nonce"] = "other-nonce-1"
+            (directory / "run.json").write_text(json.dumps(run))
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("nonce/api mismatch", result.stderr)
+
+    def test_rejects_an_unpassed_selector(self):
+        def mutate(directory, run, exp, logs):
+            run["selectors"]["unencryptedTransportExcluded"] = "fail"
+            (directory / "run.json").write_text(json.dumps(run))
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("unencryptedTransportExcluded", result.stderr)
+
+    def test_rejects_divergent_apks_across_legs(self):
+        def mutate(directory, run, exp, logs):
+            run["apkSha256"] = "d" * 64
+            (directory / "run.json").write_text(json.dumps(run))
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("apkSha256 differs", result.stderr)
+
+    def test_rejects_restored_extra_files(self):
+        def mutate(directory, run, exp, logs):
+            with (directory / "restored-files.txt").open("a") as f:
+                f.write(f"/data/user/0/{exp['package']}/files/downloads/bmgr-canary-x\n")
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("extra files/", result.stderr)
+
+    def test_rejects_a_missing_runner_code(self):
+        def mutate(directory, run, exp, logs):
+            logs["empty"] = logs["empty"].replace("INSTRUMENTATION_CODE: -1", "")
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("successful runner completion", result.stderr)
 
 
 if __name__ == "__main__":
