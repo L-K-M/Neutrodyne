@@ -92,6 +92,8 @@ internal class QueueProjector(
         val media: Map<Long, PlaybackMediaInfo>,
         val groupId: Long?,
         val readRevision: Long? = null,
+        // Identity only: a collected emission can supersede a refresh without a bracket.
+        val readEmission: Input? = null,
     )
 
     private data class ExternalApply(
@@ -267,9 +269,9 @@ internal class QueueProjector(
         mutex.withLock {
             val live = player ?: return@withLock
             val before = input.readRevision ?: revision
-            if (before != revision) {
-                // The durable read spanned a newer own write; re-read rather
-                // than plan or apply content captured before that write.
+            if (before != revision || (input.readRevision != null && input.readEmission !== latest)) {
+                // A newer own write or collected emission superseded the read.
+                // Re-read durable state; never replay the captured emission's content.
                 if (latest != null) refresh()
                 return@withLock
             }
@@ -532,8 +534,9 @@ internal class QueueProjector(
     private fun refresh() {
         launchWrite {
             val before = revision
+            val emission = latest
             val snapshot = withContext(io) { sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE) }
-            project(input(snapshot).copy(readRevision = before))
+            project(input(snapshot).copy(readRevision = before, readEmission = emission))
         }
     }
 

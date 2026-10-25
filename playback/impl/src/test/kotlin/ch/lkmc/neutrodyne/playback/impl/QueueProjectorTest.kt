@@ -796,4 +796,47 @@ class QueueProjectorTest {
                 f.close()
             }
         }
+
+    @Test fun unbracketedEmissionCannotBeOverwrittenByAnOlderRefresh() =
+        runTest {
+            lateinit var gate: GatedLookup
+            val f = AdapterFixture(this, mediaLookup = { real -> GatedLookup(real).also { gate = it } })
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(ids.take(2), 65_000)
+                awaitAdapter { f.player.ids() == ids.take(2) }
+                val generation = f.sessions.virtualQueue(20).generation
+                val reached = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                gate.barrier = {
+                    reached.complete(Unit)
+                    release.await()
+                }
+                val second = f.player.getMediaItemAt(1)
+                f.player.removeMediaItem(1)
+                f.player.addMediaItem(1, second)
+                awaitAdapter("refresh never reached the input barrier") { reached.isCompleted }
+                // A background writer has no player-thread own-write bracket.
+                f.queue.addLast(ids.takeLast(1))
+                awaitAdapter { f.player.ids() == ids && f.index[ids[2]] != null }
+                assertEquals(generation, f.sessions.virtualQueue(20).generation)
+                release.complete(Unit)
+                var dropped = false
+                var stable = 0
+                var iter = 0
+                while (iter++ < 2_000 && stable < 40) {
+                    runCurrent()
+                    shadowOf(Looper.getMainLooper()).idle()
+                    if (f.player.ids() != ids || f.index[ids[2]] == null) dropped = true
+                    stable = if (f.player.ids() == ids && f.index[ids[2]] != null) stable + 1 else 0
+                    Thread.sleep(2)
+                }
+                assertFalse("an older refresh overwrote the newer collected emission", dropped)
+                assertEquals(ids, f.player.ids())
+                assertNotNull(f.index[ids[2]])
+            } finally {
+                f.close()
+            }
+        }
 }
