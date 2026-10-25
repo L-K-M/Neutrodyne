@@ -402,8 +402,8 @@ and a fresh exact-head native aggregate must verify the correction.
 The corrected `ab2347c1` head passed all six CI jobs, named API26/36 app/driver
 cases, and the full API31/36 local-transport workflow with strict aggregate,
 empty controls and cleanup. Two formal rounds resolved the parser admission
-blocker; only a test-message precision nit remains deferred. Earlier failed
-attempts above stay failed. This closes the declared PO-50 stock-emulator gate,
+blocker; R1 minor diagnostics and R2's test-message precision nit are deferred.
+Earlier failed attempts above stay failed. This closes the PO-50 stock-emulator gate,
 not physical/device-to-device, scheduled/tagged release or other open acceptance.
 
 ## 1. What this repository is
