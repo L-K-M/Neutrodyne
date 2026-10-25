@@ -276,6 +276,8 @@ def _pb_fields(buf):
             value, pos = _varint(buf, pos)
         elif wire == 1:
             value = buf[pos:pos + 8]
+            if len(value) != 8:
+                raise ValueError("truncated 64-bit field")
             pos += 8
         elif wire == 2:
             length, pos = _varint(buf, pos)
@@ -285,6 +287,8 @@ def _pb_fields(buf):
             pos += length
         elif wire == 5:
             value = buf[pos:pos + 4]
+            if len(value) != 4:
+                raise ValueError("truncated 32-bit field")
             pos += 4
         else:
             raise ValueError(f"unsupported wire type {wire}")
@@ -316,8 +320,12 @@ def pb_preferences(data):
                     else:
                         raise ValueError(
                             f"unsupported Value field {vfield}/{vwire}")
+            else:
+                raise ValueError(f"unsupported map-entry field {efield}/{ewire}")
         if key is None:
             raise ValueError("map entry without a key")
+        if value is None:
+            raise ValueError(f"map entry {key!r} without a value")
         prefs[key] = value
     return prefs
 
@@ -634,7 +642,7 @@ def check_pull(device, directory, exp, run):
     if {"backup.auto_snapshot_enabled", "backup.opml_layout"} & set(dev_pb):
         raise ValueError(f"{device}: device PB carries portable keys")
     portable_pre = pb_preferences((pre / PORTABLE_REL).read_bytes())
-    if not portable_pre.get("backup.auto_snapshot_enabled"):
+    if portable_pre.get("backup.auto_snapshot_enabled") is not True:
         raise ValueError(f"{device}: portable PB auto-snapshot flag unset")
     if portable_pre.get(exp["portableKey"]) != exp["portableAfter"] \
             or "backup.installation_id" in portable_pre:
@@ -657,7 +665,7 @@ def check_pull(device, directory, exp, run):
     portable_post = pb_preferences((post / PORTABLE_REL).read_bytes())
     if portable_post.get(exp["portableKey"]) != exp["portableAfter"] \
             or "backup.installation_id" in portable_post \
-            or not portable_post.get("backup.auto_snapshot_enabled"):
+            or portable_post.get("backup.auto_snapshot_enabled") is not True:
         raise ValueError(f"{device}: post-restore portable PB != FLAT/clean")
     backup_dir = post / "files/backup"
     retired = sorted(p.name for p in backup_dir.glob("restored-*.zip")) \

@@ -865,6 +865,43 @@ class BmgrEvidenceTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("missing pulled evidence", result.stderr)
 
+    def test_rejects_malformed_portable_preference_entries(self):
+        value = _pb_field(2, 2, _pb_field(1, 0, _vint(1)))
+        for name, suffix in (
+                ("short64", b"\x49\x00"), ("short32", b"\x4d\x00"),
+                ("unknown", value + _pb_field(9, 0, _vint(1))),
+                ("missing-value", b""), ("empty-value", _pb_field(2, 2, b""))):
+            with self.subTest(entry=name):
+                def mutate(directory, *unused):
+                    path = directory / "pulls/post/files/datastore/settings.preferences_pb"
+                    entry = _pb_field(1, 2, b"unexpected") + suffix
+                    path.write_bytes(path.read_bytes() + _pb_field(1, 2, entry))
+                self.build(mutate={"api31": mutate})
+                result = self.check()
+                self.assertNotEqual(0, result.returncode, result.stdout)
+                self.assertIn("first-launch-restore:", result.stderr)
+
+    def test_accepts_falsy_portable_preference_values(self):
+        def mutate(directory, *unused):
+            path = directory / "pulls/post/files/datastore/settings.preferences_pb"
+            path.write_bytes(path.read_bytes() + pb_blob(**{
+                "extra.bool": ("b", False), "extra.zero": ("i", 0),
+                "extra.empty": ("s", "")}))
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_rejects_a_nonboolean_portable_snapshot_flag(self):
+        for value in (("s", "true"), ("i", 1)):
+            with self.subTest(value=value):
+                def mutate(directory, *unused):
+                    path = directory / "pulls/post/files/datastore/settings.preferences_pb"
+                    path.write_bytes(pb_blob(**{"backup.opml_layout": ("s", "FLAT"),
+                                               "backup.auto_snapshot_enabled": value}))
+                self.build(mutate={"api31": mutate})
+                result = self.check()
+                self.assertNotEqual(0, result.returncode, result.stdout)
+
     def test_rejects_a_wrong_restored_state(self):
         def mutate(directory, run, exp, logs, statuses):
             import sqlite3
