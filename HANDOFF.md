@@ -352,6 +352,13 @@ both are mandatory in the final aggregate. Regression coverage preserves
 rejection of missing or populated empty-control evidence. A fresh full run
 remains required.
 
+Both images then completed the positive and empty phases, but the final
+aggregate rejected driver metadata because its Kotlin serializer omits the
+declared `v = 1` default. The decoder now honors that wire contract while
+rejecting explicit unknown/malformed versions and retaining identity/content
+bindings. Original captures remain failed; complete copied-capture replay
+and a fresh exact-head native aggregate must verify the correction.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:

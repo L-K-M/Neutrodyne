@@ -211,13 +211,19 @@ def check_instrument_log(device, phase, nonce, text):
         raise ValueError(f"{device}: {phase} marker is not the armed nonce")
 
 
+def driver_v1(record):
+    # The driver's Kotlin serializers omit the declared v=1 default.
+    version = record.get("v", 1)
+    return type(version) is int and version == 1
+
+
 def check_driver_status(device, phase, nonce, api, driver_pkg, path):
     """The durable per-phase record — a foreign, stale or unknown status fails."""
     try:
         status = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"{device}: {phase} status record unreadable") from error
-    if status.get("v") != 1 or status.get("phase") != phase \
+    if not driver_v1(status) or status.get("phase") != phase \
             or status.get("nonce") != nonce or status.get("api") != api \
             or status.get("driverPackage") != driver_pkg \
             or status.get("targetPackage") != BMGR_TARGET \
@@ -834,9 +840,10 @@ def check_bmgr_device(root, device, api):
 
     # The driver-owned sidecar binds the fixture to the expectation verbatim.
     sidecar = json.loads((directory / "seed.expected.json").read_text())
-    if sidecar.get("v") != 1 or sidecar.get("nonce") != nonce \
+    if not driver_v1(sidecar) or sidecar.get("nonce") != nonce \
             or sidecar.get("api") != api \
             or sidecar.get("seedSha256") != exp["seedSha256"] \
+            or sidecar.get("seedBytes") != exp["seedBytes"] \
             or sidecar.get("fixture") != exp["fixture"]:
         raise ValueError(f"{device}: sidecar/expectation fixture binding broken")
     if {p["key"]: p["syncId"] for p in exp["fixture"]["podcasts"]} != exp["syncIds"] \

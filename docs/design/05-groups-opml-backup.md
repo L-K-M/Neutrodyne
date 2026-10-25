@@ -2023,6 +2023,8 @@ Canary inventories cover both the internal app tree and its external files tree,
 
 The positive restore capture is validated before the later empty-dataset control starts. Each phase validates its own capture; the final aggregate requires both. Missing or nonempty empty-control evidence still fails, without making the earlier positive phase depend on future files.
 
+Driver metadata uses the Kotlin serializers' declared `v = 1` default, which is normally omitted on the wire. The checker accepts omission or the explicit integer `1`, rejects other versions/types, and still requires matching nonce, API, seed hash/size, fixture and per-phase identity/results.
+
 ```bash
 pkg=ch.lkmc.neutrodyne                     # the published release build; a local debug build is ch.lkmc.neutrodyne.debug
 adb shell bmgr enable true

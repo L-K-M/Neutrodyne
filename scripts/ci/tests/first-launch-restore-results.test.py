@@ -350,7 +350,7 @@ def driver_status(phase, nonce, api):
         "encrypted": ["built", "launched", "rejected"],
     }[phase]
     return {
-        "v": 1, "phase": phase, "nonce": nonce, "api": api,
+        "phase": phase, "nonce": nonce, "api": api,
         "driverPackage": DRV_PKG, "targetPackage": PKG,
         "startedAt": 1_700_000_000_000,
         "steps": [{"name": s, "at": 1_700_000_000_000} for s in steps],
@@ -591,7 +591,7 @@ class BmgrEvidenceTest(unittest.TestCase):
             "tarDevicePath": f"/data/data/com.android.localtransport/files/1/_full/{PKG}",
             "selectors": {name: "pass" for name in SELECTOR_NAMES},
         }
-        sidecar = {"v": 1, "nonce": NONCE, "api": api, "seedSha256": exp["seedSha256"],
+        sidecar = {"nonce": NONCE, "api": api, "seedSha256": exp["seedSha256"],
                    "seedBytes": 7, "fixture": fixture}
         # The pre-cleanup inputs the emitter turns into run.json at leg end.
         (directory / "facts.txt").write_text(
@@ -812,6 +812,46 @@ class BmgrEvidenceTest(unittest.TestCase):
             sidecar = json.loads((directory / "seed.expected.json").read_text())
             sidecar["fixture"]["podcasts"][0]["syncId"] = "forged"
             (directory / "seed.expected.json").write_text(json.dumps(sidecar))
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("sidecar", result.stderr)
+
+    def test_driver_records_also_accept_explicit_version_one(self):
+        def mutate(directory, run, exp, logs, statuses):
+            path = directory / "seed.expected.json"
+            record = json.loads(path.read_text())
+            record["v"] = 1
+            path.write_text(json.dumps(record))
+            for status in statuses.values():
+                status["v"] = 1
+        self.build(mutate={"api31": mutate, "api36": mutate})
+        result = self.check()
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_driver_records_reject_unknown_or_malformed_versions(self):
+        for name in ("seed.expected.json", "driver-status-seed.json"):
+            for value in (2, None, True, "1", 1.0):
+                with self.subTest(record=name, version=value):
+                    def mutate(directory, run, exp, logs, statuses):
+                        if name == "driver-status-seed.json":
+                            statuses["seed"]["v"] = value
+                        else:
+                            path = directory / name
+                            record = json.loads(path.read_text())
+                            record["v"] = value
+                            path.write_text(json.dumps(record))
+                    self.build(mutate={"api31": mutate})
+                    result = self.check()
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("sidecar" if name == "seed.expected.json" else "status identity", result.stderr)
+
+    def test_driver_sidecar_seed_size_is_bound(self):
+        def mutate(directory, *unused):
+            path = directory / "seed.expected.json"
+            record = json.loads(path.read_text())
+            record["seedBytes"] += 1
+            path.write_text(json.dumps(record))
         self.build(mutate={"api31": mutate})
         result = self.check()
         self.assertNotEqual(0, result.returncode)
