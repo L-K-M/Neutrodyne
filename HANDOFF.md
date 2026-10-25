@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first four slices (P1–P4) are merged through #222, #224, #225 and #228; P5's RSS sources/player construction and Media3 adapters are in draft #230 pending CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first four slices are merged through #222, #224, #225 and #228; P5's sources and Media3 adapters are in draft #230 pending latest-main CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -271,13 +271,15 @@ receiver, manifest activation or production graph binding lands: nothing
 constructs these classes outside tests, and the truthful unavailable
 controller/state/maintenance binding stays the only one per shell. No schema
 change; `lifecycle-process`, `coroutines-guava` and `coroutines-android`
-remain out; no P5 consumer imports them. Parent XML accounting verifies a
-1,971-record aggregate with zero failures/errors and three existing environment
-skips: 1,897 records executed and 74 reused. The postcommit aggregate reuses all
-1,971, rather than adding another execution. Independent connected-source review
-found no important defect. Current-head CI, labelled instrumentation and formal
-review remain required; service/UI/device/native acceptance is not inherited
-from the prototype's later-slice results.
+remain out; no P5 consumer imports them. The current affected aggregate has
+1,977 records, zero failures/errors and three existing environment skips.
+The test-readiness correction executes 80 playback records and reuses 1,897
+same-input records; its 25-test projector class also passes on one CPU. Room
+metadata echo is required before arming refresh barriers, and all four semantic
+counterexamples still fail against the pre-fence baseline. The `5fd58109` CI
+and named API26/36 app/driver cases pass. This latest-main integration still
+requires matching-head CI and its own formal review. Service/UI/device/native
+acceptance is not inherited from the prototype's later-slice results.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
@@ -295,6 +297,31 @@ runner accelerator, and the failed-job-only retry recovered
 `~/nd-wt/reviews/evidence/main-96224-{full,seeded}/EVIDENCE.md`. These are
 actual-main device results, not scheduled/tagged, native, physical, provider or
 `bmgr` acceptance.
+
+**2026-10-21 M3 transport follow-up ([#223](https://github.com/L-K-M/Neutrodyne/pull/223)).**
+The positive API31/API36 candidate now uses a separate self-instrumenting driver
+APK and host-side evidence checks; no test classes enter the published app's
+process. The original debug logical-restore gate is restored verbatim. Five
+harness defects found in independent review have production-grounded regression
+tests and a completed fix review; local native runs are not claimed. Current
+source builds, exact-SHA hosted transport evidence, CI and formal review remain
+parent gates. The published app's code, R8, signing and backup rules are intact.
+
+The first black-box run on `eb79f8f9` failed both API31/36 legs before seeding:
+the host expanded an unset phase variable. Its ordinary CI also exposed a driver
+self-test decoding ZIP bytes as JSON on API26/36. Both are corrected locally;
+the encrypted-input assertion now also accepts refusal while opening the ZIP,
+as API31's platform source requires. Original failures remain retained. The
+47-case host suite passes; final-head CI and actual restore proof remain required.
+
+The next run on `22266282` reached the restore surface but its fixture had
+noncanonical feed keys and invalid sync UUIDs. Those identities and a duplicated
+instrumentation-status prefix are corrected. Unarmed driver tests now check the
+encoded library and status value; actual final-head device proof remains open.
+
+The retained API31/36 hierarchies show that checkbox/radio state belongs to the
+checkable parent, not its text child. The driver now targets that parent; the
+next real run must verify the complete journey without relaxing its checks.
 
 ### M3 bmgr driver tooling (2026-10-24)
 
@@ -325,6 +352,59 @@ manifest and streams every entry with CRC checks. The UI category helper clicks
 once and waits for the requested checked state rather than re-toggling on a late
 accessibility update. These test-only corrections change the initial extraction;
 fresh CI/review and #223's actual armed journeys remain required.
+
+As of 2026-10-25, #229 is merged as `8cb9a602` after two completed reviews and all six
+current CI jobs, including the stronger paired-control test on API26/36. #223
+normally merges this reviewed component. Run8's two host corrections are now in
+this head: `pull_tree` reads the (now nonhidden `<dir>-listing.txt`) listing on
+fd3 so `adb` children can no longer drain the cursor on fd0 — the run8 API 31
+defect that pulled only the first canary — and `bmgr_init` retries only the
+observed rc0/`Initialization result: -1000` shape (the AOSP `InitObserver`
+publish-before-store race, `.nd-context/m3-bmgr-api36-init-rca.md`) at most 3
+bounded attempts with every attempt receipt kept; anything else still fails
+closed. The old encrypted UI refusal
+does not isolate encryption handling; complete new-head positive31/36 lifecycle
+proof remains open and required — this correction is not native acceptance.
+No failed original capture is repaired or relabelled.
+
+The next exact-head run on `5f826e24` reached TAR verification, install-time
+delivery, cold launch and adopted-session completion on both API31/36. Final
+validation stopped at a verifier path assumption: WorkManager's ledger is in
+`no_backup/androidx.work.workdb`, not the app database directory. Both captures
+contain it and copied diagnostic queries show the adopted tagged WorkSpec is
+`SUCCEEDED`. The checker and fixture now use the pinned runtime's real path,
+with a nonterminal-row negative test. Empty-dataset control never ran in that
+failed attempt; a complete fresh lifecycle remains required.
+
+That next run exposed an internal-only canary inventory, omitting the planted
+external canary. Both listing call sites now capture both domains and reject
+command failures. Copied downstream diagnostics also caught a false oracle:
+the fixture requested a played item in Up next, which the documented restore
+rule correctly skips. The checker now requires the exact unplayed order and
+rejects both played entries and missing unplayed entries. Original failed
+captures stay unchanged; a complete new lifecycle/empty control is still open.
+
+The following run reached the end of positive validation on both images but
+could not start the empty control: its earlier pull check incorrectly required
+that future empty database. Positive and empty checks are now phase-specific;
+both are mandatory in the final aggregate. Regression coverage preserves
+rejection of missing or populated empty-control evidence. A fresh full run
+remains required.
+
+Both images then completed the positive and empty phases, but the final
+aggregate rejected driver metadata because its Kotlin serializer omits the
+declared `v = 1` default. The decoder now honors that wire contract while
+rejecting explicit unknown/malformed versions and retaining identity/content
+bindings. Original captures remain failed; complete copied-capture replay
+and a fresh exact-head native aggregate must verify the correction.
+
+**Current M3 transport acceptance (2026-10-25):** #223 is merged as `1501048a`.
+The corrected `ab2347c1` head passed all six CI jobs, named API26/36 app/driver
+cases, and the full API31/36 local-transport workflow with strict aggregate,
+empty controls and cleanup. Two formal rounds resolved the parser admission
+blocker; only a test-message precision nit remains deferred. Earlier failed
+attempts above stay failed. This closes the declared PO-50 stock-emulator gate,
+not physical/device-to-device, scheduled/tagged release or other open acceptance.
 
 ## 1. What this repository is
 
