@@ -193,7 +193,7 @@ backup_flag() {  # <receipt> <prefix>: require exactly one effective service-sta
 bmgr_init() {  # <label>: init only our transport and require its real result
     # Run8 api36: AOSP InitObserver publishes done before storing result, so a
     # successful on-device init can print the default -1000 (publish-before-store
-    # race; see .nd-context/m3-bmgr-api36-init-rca.md). A bounded retry is allowed
+    # race; see 05's Testing with bmgr). A bounded retry is allowed
     # ONLY for that exact observed shape: rc0 + a single explicit
     # `Initialization result: -1000` line. Anything else — command failure,
     # timeout, missing/duplicate/mixed/unknown result lines — fails closed
@@ -202,6 +202,7 @@ bmgr_init() {  # <label>: init only our transport and require its real result
     # a negative value plus Pending-init 0 is never accepted as success.
     local label="$1" attempts=0 result_lines value
     local max="${BMGR_INIT_MAX_ATTEMPTS:-3}"
+    # The window admits retries; an in-flight command retains its 60s timeout.
     local deadline=$((SECONDS + ${BMGR_INIT_WHOLE_BUDGET_S:-200}))
     local ledger="$EV/init-$label-attempts.txt"
     : > "$ledger"
@@ -214,7 +215,7 @@ bmgr_init() {  # <label>: init only our transport and require its real result
         if [ "$rc" -ne 0 ]; then
             fail "bmgr init $TRANSPORT ($label) failed rc=$rc: $(tr -d '\r' < "$file" | tr '\n' ' ')"
         fi
-        result_lines=$(tr -d '\r' < "$file" | grep -c '^Initialization result: ' || true)
+        result_lines=$(tr -d '\r' < "$file" | grep -c 'Initialization result:' || true)
         value=$(tr -d '\r' < "$file" | sed -n 's/^Initialization result: //p' | head -1)
         case "$result_lines:$value" in
             1:0) return ;;

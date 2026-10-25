@@ -1163,6 +1163,10 @@ class BmgrHostScriptTest(unittest.TestCase):
             "        done('Initializing transports: [t]\\n')\n"
             "    if shape == 'mixed':\n"
             "        done('Initialization result: -1000\\nInitialization result: 0\\n')\n"
+            "    if shape == 'mixed-tight':\n"
+            "        done('Initialization result: 0\\nInitialization result:-1000\\n')\n"
+            "    if shape == 'mixed-leading':\n"
+            "        done('Initialization result: 0\\n Initialization result: -1000\\n')\n"
             "    done('Initializing transports: [com.a/.B]\\n'\n"
             "         'Initialization result: ' + shape + '\\n')\n"
             "if args[:3] == ['shell', 'am', 'instrument']:\n"
@@ -1410,7 +1414,8 @@ class BmgrHostScriptTest(unittest.TestCase):
         retried bounded; only a later explicit result 0 succeeds."""
         for seq, ok in (("-1000,0", True), ("0", True),
                         ("-1000,-1000,-1000,0", False),
-                        ("missing", False), ("mixed", False), ("-2000,0", False)):
+                        ("missing", False), ("mixed", False), ("mixed-tight", False),
+                        ("mixed-leading", False), ("-2000,0", False)):
             with self.subTest(seq=seq):
                 ev = self.root / f"init-{seq.replace(',', '_')}"
                 ev.mkdir()
@@ -1426,7 +1431,8 @@ class BmgrHostScriptTest(unittest.TestCase):
                 self.assertEqual(ok, "INIT-OK" in result.stdout,
                                  f"seq={seq}: {result.stdout + result.stderr}")
                 expected = {"-1000,0": 2, "0": 1, "-1000,-1000,-1000,0": 3,
-                            "missing": 1, "mixed": 1, "-2000,0": 1}[seq]
+                            "missing": 1, "mixed": 1, "mixed-tight": 1,
+                            "mixed-leading": 1, "-2000,0": 1}[seq]
                 self.assertEqual(expected, len(attempts))
                 self.assertLessEqual(len(attempts), 3)
                 self.assertTrue((ev / "init-leg.txt").is_file())
