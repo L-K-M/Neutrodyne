@@ -2021,6 +2021,8 @@ The final scheduling ledger is `no_backup/androidx.work.workdb`, the pinned Work
 
 Canary inventories cover both the internal app tree and its external files tree, with failed listing commands rejected. The restored queue must contain exactly the fixture's unplayed refs in order: the [Up next merge rule](#merge-and-replace-rules) skips played refs, including a played ref present in the seed archive. Both a missing unplayed entry and a retained played entry fail the gate.
 
+The positive restore capture is validated before the later empty-dataset control starts. Each phase validates its own capture; the final aggregate requires both. Missing or nonempty empty-control evidence still fails, without making the earlier positive phase depend on future files.
+
 ```bash
 pkg=ch.lkmc.neutrodyne                     # the published release build; a local debug build is ch.lkmc.neutrodyne.debug
 adb shell bmgr enable true

@@ -345,6 +345,13 @@ rule correctly skips. The checker now requires the exact unplayed order and
 rejects both played entries and missing unplayed entries. Original failed
 captures stay unchanged; a complete new lifecycle/empty control is still open.
 
+The following run reached the end of positive validation on both images but
+could not start the empty control: its earlier pull check incorrectly required
+that future empty database. Positive and empty checks are now phase-specific;
+both are mandatory in the final aggregate. Regression coverage preserves
+rejection of missing or populated empty-control evidence. A fresh full run
+remains required.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:

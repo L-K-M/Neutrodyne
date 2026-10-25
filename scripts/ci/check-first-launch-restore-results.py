@@ -17,8 +17,9 @@ Two modes:
   `preferences_pb` value (a closed wire-format reader; nothing is skipped).
 - `--bmgr-pull EVIDENCE_DIR`: validates one leg's post-restore quiescent
   capture — pulled payload pair, preferences_pb contents, pre-launch gate,
-  restored database content and the empty leg. `bmgr-check.sh` runs it right
-  after the pull and the `--bmgr` aggregate re-runs it verbatim.
+  restored database content. `bmgr-check.sh` runs it before the empty control.
+- `--bmgr-empty EVIDENCE_DIR`: validates the subsequent empty-dataset capture.
+  The `--bmgr` aggregate requires both phase checks verbatim.
 """
 
 import argparse
@@ -684,7 +685,9 @@ def check_pull(device, directory, exp, run):
     if canary_hits:
         raise ValueError(f"{device}: canary leaked post-restore {canary_hits}")
 
-    # Empty leg: opened, and verifiably still a fresh install.
+
+def check_empty(device, directory):
+    """The later empty-control phase must be opened and still a fresh install."""
     empty = directory / "pulls/empty"
     empty_db = open_db(device, empty / "databases/neutrodyne.db")
     for table in ("podcast", "episode", "podcast_group", "queue_entry",
@@ -891,6 +894,7 @@ def check_bmgr_device(root, device, api):
     # The whole quiescent capture again — the aggregate re-proves what the
     # script already validated, so no host-side short-circuit is possible.
     check_pull(device, directory, exp, run)
+    check_empty(device, directory)
     print(f"{device}: PASS bmgr black-box lifecycle "
           f"(seed/snapshot/flip/encrypted -> backup -> install-restore -> pulls)")
 
@@ -941,7 +945,9 @@ def main():
     parser.add_argument("--bmgr-pb", nargs=2, metavar=("PB_FILE", "KEY"),
                         help="print one decoded preferences_pb value (or nothing)")
     parser.add_argument("--bmgr-pull", metavar="EVIDENCE_DIR", type=Path,
-                         help="validate one leg's quiescent pull capture")
+                         help="validate the positive restore capture before the empty control")
+    parser.add_argument("--bmgr-empty", metavar="EVIDENCE_DIR", type=Path,
+                        help="validate the subsequent empty-dataset capture")
     parser.add_argument("--bmgr-prelaunch", nargs=3, metavar=("EVIDENCE_DIR", "DEVICE", "NONCE"),
                         help="validate the stopped install/restore window before normal launch")
     args = parser.parse_args()
@@ -956,6 +962,9 @@ def main():
             run_bmgr_pb(*args.bmgr_pb)
         elif args.bmgr_pull is not None:
             run_bmgr_pull(args.bmgr_pull)
+        elif args.bmgr_empty is not None:
+            check_empty(args.bmgr_empty.name, args.bmgr_empty)
+            print("bmgr-empty: PASS")
         elif args.bmgr_prelaunch is not None:
             directory, device, nonce = args.bmgr_prelaunch
             check_prelaunch(device, Path(directory), nonce)

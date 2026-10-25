@@ -996,6 +996,57 @@ class BmgrEvidenceTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("bmgr-pull: PASS", result.stdout)
 
+    def test_positive_pull_precedes_the_empty_control(self):
+        import shutil
+        directory = self.build_leg("api31", 31)
+        (directory / "run.json").unlink()
+        shutil.rmtree(directory / "pulls/empty")
+        (directory / "init-empty.txt").unlink()
+        result = self.pull_check(directory)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("bmgr-pull: PASS", result.stdout)
+
+    def test_empty_control_cli_requires_an_empty_capture(self):
+        import sqlite3
+        directory = self.build_leg("api31", 31)
+
+        def check():
+            return subprocess.run(
+                [sys.executable, str(SCRIPT), "--bmgr-empty", str(directory)],
+                capture_output=True, text=True, timeout=60)
+
+        result = check()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("bmgr-empty: PASS", result.stdout)
+        path = directory / "pulls/empty/databases/neutrodyne.db"
+        con = sqlite3.connect(path)
+        con.execute("INSERT INTO podcast VALUES(1)")
+        con.commit()
+        con.close()
+        result = check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("empty-leg podcast", result.stderr)
+        path.unlink()
+        result = check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("missing or empty", result.stderr)
+
+    def test_aggregate_still_requires_the_empty_control(self):
+        import sqlite3
+        self.build()
+        path = self.root / "api31/pulls/empty/databases/neutrodyne.db"
+        con = sqlite3.connect(path)
+        con.execute("INSERT INTO podcast VALUES(1)")
+        con.commit()
+        con.close()
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("empty-leg podcast", result.stderr)
+        path.unlink()
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("missing or empty", result.stderr)
+
     def test_pull_gate_rejects_a_foreign_facts_nonce(self):
         directory = self.build_leg("api31", 31)
         (directory / "run.json").unlink()

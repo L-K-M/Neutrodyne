@@ -782,6 +782,8 @@ PY
     mkdir -p "$PULL_EMPTY"
     pull_tree "$DATA_DIR/files" "$PULL_EMPTY/files"
     pull_tree "$DATA_DIR/databases" "$PULL_EMPTY/databases"
+    python3 scripts/ci/check-first-launch-restore-results.py --bmgr-empty \
+        "$EV" | tee "$EV/bmgr-empty.txt" || fail "the empty-dataset capture failed validation"
     selector emptyLegExcluded
     log "api$API leg complete"
 }
