@@ -342,6 +342,13 @@ passed focused ordinary and one-CPU probes with its original inputs, 128 MiB
 heap, ratio threshold and timeout; only diagnostic output was added. Current-head
 CI and native/release acceptance are still required.
 
+CI40210591443 at `c0f5b826` passed five jobs and both images' notification controls;
+the artwork worker now succeeds on-device. Its remaining failures exposed a
+protected-broadcast rejection of shell UID 2000, a stopped activity needing an
+explicit foreground launch, and an unproven background-denial premise. The next
+fixture uses a system-authorized sender, target-owned diagnostic cache and a
+cold background service binding; current-head native proof is still required.
+
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
 2,919 records; six reused 1,755 same-input focused results. The original report's

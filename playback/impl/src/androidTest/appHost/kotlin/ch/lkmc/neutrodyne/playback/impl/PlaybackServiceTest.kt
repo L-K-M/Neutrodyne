@@ -67,7 +67,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Compiled into the app test APK, explicitly hosted by NeutrodyneApplication and its real graph.
- * Only the enclosure server is synthetic. No fake player, store, session or service is injected.
+ * The enclosure server and platform-event inputs are controlled. Player/store/session/service are real.
  */
 @RunWith(AndroidJUnit4::class)
 class PlaybackServiceTest {
@@ -225,10 +225,13 @@ class PlaybackServiceTest {
             phase("focus/await-resume")
             awaitAudio()
             phase("noisy/send")
-            logEvidence("noisy-sender", shell("id").text)
+            // Stock emulator root supplies the system privilege required by this protected event.
+            val sender = shell("su 0 id -u")
+            check(sender.exitCode == 0 && sender.text.trim() == "0") { "System sender is unavailable: ${sender.text}" }
+            logEvidence("noisy-sender", "uid=${sender.text.trim()}")
             val sent =
                 shell(
-                    "am broadcast -a android.media.AUDIO_BECOMING_NOISY -p ${app.packageName}",
+                    "su 0 am broadcast -a android.media.AUDIO_BECOMING_NOISY -p ${app.packageName}",
                 )
             logEvidence("noisy-command", "exit=${sent.exitCode}\n${sent.text}")
             check(sent.exitCode == 0) { "Noisy broadcast was not admitted: ${sent.text}" }
@@ -264,7 +267,9 @@ class PlaybackServiceTest {
             await { !serviceDump().contains("isForeground=true") }
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
             await { !serviceDump().contains("ServiceRecord{") }
-            scenario?.moveToState(Lifecycle.State.RESUMED)
+            phase("recreation/foreground")
+            scenario?.close()
+            scenario = ActivityScenario.launch(MainActivity::class.java)
             val restored = withContext(Dispatchers.Main) { connect() }
             await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 } }
             withContext(Dispatchers.Main) {
@@ -280,10 +285,14 @@ class PlaybackServiceTest {
             phase("background/start")
             seed()
             graph.queueRepository().addLast(ids)
-            start()
-            val external = withContext(Dispatchers.Main) { connect() }
-            withContext(Dispatchers.Main) { graph.playbackController.pause() }
+            // Do not grant a foreground playback start before probing the background request.
             backgroundHost()
+            phase("background/stop-visible-host-service")
+            app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
+            await { !serviceDump().contains("ServiceRecord{") }
+            phase("background/cold-bind")
+            val external = withContext(Dispatchers.Main) { connect() }
+            withContext(Dispatchers.Main) { assertFalse(external.playWhenReady) }
             phase("background/await-demotion")
             await { !serviceDump().contains("isForeground=true") }
             // Observe the real background state before testing an ordinary controller request.
@@ -571,7 +580,7 @@ class PlaybackServiceTest {
         }
         record("state", ::stateSnapshot)
         record("hierarchy") {
-            val path = File(instrumentation.context.cacheDir, "playback-window.xml")
+            val path = File(app.cacheDir, "playback-window.xml")
             try {
                 device.dumpWindowHierarchy(path)
                 path.readText()
