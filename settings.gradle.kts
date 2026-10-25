@@ -106,4 +106,7 @@ include(
     ":feature:settings",
     ":feature:sync",
 )
+// The black-box bmgr driver (05 Testing with bmgr): a self-instrumenting device-test APK in
+// its own package/process; never an :app edge and never on the target's classpath.
+include(":tools:bmgrdriver")
 // M6b: include(":benchmark")   v1.x: include(":feature:widgets")
