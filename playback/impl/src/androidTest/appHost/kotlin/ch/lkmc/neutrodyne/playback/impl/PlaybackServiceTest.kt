@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.Manifest
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.ComponentName
@@ -16,6 +17,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
+import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -24,6 +26,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import ch.lkmc.neutrodyne.MainActivity
@@ -81,6 +84,7 @@ class PlaybackServiceTest {
     private val notifications get() = app.getSystemService(NotificationManager::class.java)
     private var ids = emptyList<Long>()
     private var cover: File? = null
+    private var phase = "setup"
     private val observation = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     @Before fun startHost() =
@@ -122,7 +126,8 @@ class PlaybackServiceTest {
         }
 
     @Test fun queueFirstStartSeekAndTransitionSave() =
-        runBlocking {
+        runCase {
+            phase("queue/start")
             seed()
             graph.queueRepository().addLast(ids)
             start()
@@ -160,7 +165,8 @@ class PlaybackServiceTest {
 
     @Test @ReleaseSmoke
     fun notificationTransportAndLocalArtwork() =
-        runBlocking {
+        runCase {
+            phase("notification/start")
             seed()
             graph.queueRepository().addLast(ids)
             start()
@@ -191,7 +197,8 @@ class PlaybackServiceTest {
         }
 
     @Test fun focusLossAndNoisyPause() =
-        runBlocking {
+        runCase {
+            phase("focus/start")
             seed()
             graph.queueRepository().addLast(ids)
             start()
@@ -206,18 +213,26 @@ class PlaybackServiceTest {
                     ).setOnAudioFocusChangeListener({}, android.os.Handler(android.os.Looper.getMainLooper()))
                     .build()
             focus = request
+            phase("focus/request")
             assertEquals(AudioManager.AUDIOFOCUS_REQUEST_GRANTED, audio.requestAudioFocus(request))
+            phase("focus/await-pause")
             await {
                 graph.playbackStateSource.nowPlaying.value
                     ?.isPlaying == false
             }
             audio.abandonAudioFocusRequest(request)
             focus = null
+            phase("focus/await-resume")
             awaitAudio()
-            // Send the platform broadcast from the shell UID, as a headset route change would.
-            device.executeShellCommand(
-                "am broadcast -a android.media.AUDIO_BECOMING_NOISY -p ${app.packageName}",
-            )
+            phase("noisy/send")
+            logEvidence("noisy-sender", shell("id").text)
+            val sent =
+                shell(
+                    "am broadcast -a android.media.AUDIO_BECOMING_NOISY -p ${app.packageName}",
+                )
+            logEvidence("noisy-command", "exit=${sent.exitCode}\n${sent.text}")
+            check(sent.exitCode == 0) { "Noisy broadcast was not admitted: ${sent.text}" }
+            phase("noisy/await-pause")
             await {
                 graph.playbackStateSource.nowPlaying.value
                     ?.playWhenReady == false
@@ -225,7 +240,8 @@ class PlaybackServiceTest {
         }
 
     @Test fun serviceRecreationLoadsPausedAtSavedPosition() =
-        runBlocking {
+        runCase {
+            phase("recreation/start")
             seed()
             graph.queueRepository().addLast(ids)
             start()
@@ -236,7 +252,7 @@ class PlaybackServiceTest {
                 controller?.release()
                 controller = null
             }
-            scenario?.moveToState(Lifecycle.State.CREATED)
+            backgroundHost()
             await {
                 val saved =
                     graph.databaseOpener
@@ -260,30 +276,42 @@ class PlaybackServiceTest {
     @Test
     @SdkSuppress(minSdkVersion = 31)
     fun deniedBackgroundStartOffersWorkingResume() =
-        runBlocking {
+        runCase {
+            phase("background/start")
             seed()
             graph.queueRepository().addLast(ids)
             start()
             val external = withContext(Dispatchers.Main) { connect() }
             withContext(Dispatchers.Main) { graph.playbackController.pause() }
-            scenario?.moveToState(Lifecycle.State.CREATED)
+            backgroundHost()
+            phase("background/await-demotion")
             await { !serviceDump().contains("isForeground=true") }
-            // No media key or PendingIntent: a bound controller's play has no user-start exemption.
+            // Observe the real background state before testing an ordinary controller request.
+            phase("background/settle")
             delay(BACKGROUND_SETTLE_MS)
+            logEvidence("background-before-play", stateSnapshot())
+            logEvidence(
+                "background-service-before-play",
+                shell("dumpsys -t 5 activity services ${app.packageName}/$SERVICE_CLASS").text,
+            )
+            phase("background/play")
             withContext(Dispatchers.Main) { external.play() }
+            phase("background/await-recovery-notification")
             awaitNotification(RESUME_NOTIFICATION)
             assertFalse(
                 graph.playbackStateSource.nowPlaying.value
                     ?.isPlaying == true,
             )
             tapNotification("Resume")
+            phase("background/await-resumed-audio")
             awaitAudio()
         }
 
     @Test @Nightly
     @SdkSuppress(minSdkVersion = 37)
     fun hardeningUiNotificationAndColdMediaKeyStarts() =
-        runBlocking {
+        runCase {
+            phase("hardening/start")
             device.executeShellCommand("cmd audio set-enable-hardening throw")
             hardening = true
             device.executeShellCommand("logcat -c")
@@ -291,7 +319,7 @@ class PlaybackServiceTest {
             graph.queueRepository().addLast(ids)
             start()
             withContext(Dispatchers.Main) { graph.playbackController.pause() }
-            scenario?.moveToState(Lifecycle.State.CREATED)
+            backgroundHost()
             tapNotification("Play")
             awaitAudio()
             withContext(Dispatchers.Main) { graph.playbackController.pause() }
@@ -316,12 +344,13 @@ class PlaybackServiceTest {
     @Nightly
     @SdkSuppress(minSdkVersion = 34, maxSdkVersion = 34)
     fun screenOffStreamsForThirtyMinutesAndAdvances() =
-        runBlocking {
+        runCase {
+            phase("screen-off/start")
             seed(repeats = LONG_STREAM_REPEATS)
             graph.queueRepository().addLast(ids)
             start()
             val pid = Process.myPid()
-            scenario?.moveToState(Lifecycle.State.CREATED)
+            backgroundHost()
             device.sleep()
             val started = SystemClock.elapsedRealtime()
             var advanced = false
@@ -469,13 +498,127 @@ class PlaybackServiceTest {
         return notifications.activeNotifications.single { it.id == id }.notification
     }
 
+    private suspend fun backgroundHost() {
+        val host = checkNotNull(scenario)
+        check(device.pressHome()) { "The full-image launcher could not be opened" }
+        await { host.state == Lifecycle.State.CREATED }
+        logEvidence("background-state", stateSnapshot())
+    }
+
     private fun tapNotification(label: String) {
-        device.openNotification()
-        val action =
-            device.wait(Until.findObject(By.descContains(label)), WAIT_MS)
-                ?: device.wait(Until.findObject(By.text(label)), WAIT_MS)
-        checkNotNull(action) { "Notification action $label is missing" }.click()
-        device.pressBack()
+        phase("notification/action-$label")
+        check(device.openNotification()) { "Notification shade could not be opened" }
+        // Keep the former two-locator budget, but never reuse an invalidated accessibility node.
+        val deadline = SystemClock.elapsedRealtime() + 2 * WAIT_MS
+        var staleAttempts = 0
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0) break
+            val action =
+                device.wait(Until.findObject(By.descContains(label)), minOf(1_000L, remaining))
+                    ?: device.findObject(By.text(label))
+                    ?: continue
+            try {
+                action.click()
+                device.pressBack()
+                return
+            } catch (stale: StaleObjectException) {
+                if (++staleAttempts == 3) throw stale
+            }
+        }
+        error("Notification action $label is missing")
+    }
+
+    private fun runCase(block: suspend () -> Unit) =
+        runBlocking<Unit> {
+            try {
+                phase("image/ready")
+                val probe = shell("printf ND_STDERR_PROBE >&2; exit 7")
+                check(probe.exitCode == 7 && probe.text.contains("ND_STDERR_PROBE"))
+                val systemUi = shell("pm path com.android.systemui")
+                check(systemUi.exitCode == 0 && systemUi.text.lineSequence().any { it.startsWith("package:") }) {
+                    "Playback framework tests require a full image with SystemUI: ${systemUi.text}"
+                }
+                block()
+            } catch (failure: Throwable) {
+                runCatching { captureFailure() }.onFailure { failure.addSuppressed(it) }
+                throw failure
+            }
+        }
+
+    private fun phase(value: String) {
+        phase = value
+        Log.i(
+            "PlaybackEvidence",
+            "phase=$value elapsed=${SystemClock.elapsedRealtime()} fingerprint=${Build.FINGERPRINT}",
+        )
+    }
+
+    private fun stateSnapshot(): String {
+        val process = ActivityManager.RunningAppProcessInfo()
+        ActivityManager.getMyMemoryState(process)
+        val current = graph.playbackStateSource.nowPlaying.value
+        return "phase=$phase uid=${Process.myUid()} pid=${Process.myPid()} importance=${process.importance} " +
+            "playWhenReady=${current?.playWhenReady} isPlaying=${current?.isPlaying} issue=${current?.issue}"
+    }
+
+    private fun captureFailure() {
+        fun record(
+            name: String,
+            value: () -> String,
+        ) {
+            logEvidence(name, runCatching(value).getOrElse { "Capture failed: $it" })
+        }
+        record("state", ::stateSnapshot)
+        record("hierarchy") {
+            val path = File(instrumentation.context.cacheDir, "playback-window.xml")
+            try {
+                device.dumpWindowHierarchy(path)
+                path.readText()
+            } finally {
+                path.delete()
+            }
+        }
+        record("notification") { shell("dumpsys -t 5 notification").text }
+        record("service") { shell("dumpsys -t 5 activity services ${app.packageName}/$SERVICE_CLASS").text }
+        record("uid") { shell("cmd activity get-uid-state ${Process.myUid()}").text }
+        record("processes") { shell("dumpsys -t 5 activity processes").text }
+    }
+
+    private fun logEvidence(
+        name: String,
+        value: String,
+    ) {
+        val chunks = value.chunked(1_000)
+        chunks.forEachIndexed { index, chunk -> Log.i("PlaybackEvidence", "$name[$index/${chunks.size}] $chunk") }
+        Log.i("PlaybackEvidence", "$name complete chars=${value.length}")
+    }
+
+    private data class ShellResult(
+        val text: String,
+        val exitCode: Int,
+    )
+
+    private fun shell(command: String): ShellResult {
+        val marker = "ND_PLAYBACK_SHELL_EXIT="
+        val script = "($command) 2>&1; result=\$?; printf '\\n$marker%d\\n' \"\$result\""
+        // A file avoids command-argument tokenization differences across the supported APIs.
+        val file = File.createTempFile("playback-shell-", ".sh", checkNotNull(app.externalCacheDir))
+        try {
+            file.writeText(script)
+            val output = device.executeShellCommand("sh ${file.absolutePath}")
+            val exit =
+                output
+                    .lineSequence()
+                    .lastOrNull { it.startsWith(marker) }
+                    ?.removePrefix(marker)
+                    ?.trim()
+                    ?.toIntOrNull()
+                    ?: error("Shell command returned no exit evidence: $command\n$output")
+            return ShellResult(output.substringBeforeLast("\n$marker"), exit)
+        } finally {
+            file.delete()
+        }
     }
 
     private companion object {

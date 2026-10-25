@@ -4,8 +4,10 @@ package ch.lkmc.neutrodyne.di
 import android.app.Application
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import androidx.work.testing.TestListenableWorkerBuilder
 import ch.lkmc.neutrodyne.SnapshotNowReceiver
 import ch.lkmc.neutrodyne.core.artwork.ArtworkProviderGraph
+import ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
@@ -137,6 +139,15 @@ class AndroidAppGraphTest {
         assertThat(artwork.artworkProviderAccess()).isNotNull()
         assertThat(graph.workerFactory).isNotNull()
         assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
+    fun artworkWorkerFactoryCreatesTheWorkerBeforeDatabaseOpen() {
+        TestListenableWorkerBuilder<ArtworkSyncWorker>(RuntimeEnvironment.getApplication())
+            .setWorkerFactory(graph.workerFactory)
+            .build()
+
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
     }
 
     @Test

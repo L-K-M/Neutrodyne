@@ -311,7 +311,7 @@ found that notification/session-activity content taps targeted the exported
 launcher, so the internal player deep link was discarded. The shared
 PendingIntent now targets the protected `InternalMainActivity` alias. The
 existing notifier regression failed on the old target and passes after the fix
-(two focused cases). Parent verification covers 2,088 records with zero
+(two focused cases). Initial parent verification at `69ac9f6d` covered 2,088 records with zero
 failures/errors and three existing environment skips: 422 executed (120
 playback, 151 app, 142 data Android-host and nine database Android-host), 1,666
 same-input records reused. Debug/test/release and standalone-driver assemblies,
@@ -325,6 +325,22 @@ labelled API26/36 CI, the nightly API26/33/34/36 legs including the real
 >=1800 s screen-off case, API37/16 KiB hardening, optimized release smoke and
 the physical headset/call/focus/silence/artwork/Auto/TalkBack checks remain
 parent gates with the rest of M4's acceptance.
+
+The first hosted P6 run, CI40190590760 at `69ac9f6d`, failed the unchanged OPML
+dense-input ratio guard and five framework cases. Original logs/XML are retained.
+Follow-up reproduced the artwork worker's construction failure through the real
+app graph: its internal binding container was not discovered across modules.
+The contribution is now public, and the new creation regression passes while
+database opening remains pending. The framework suite now uses stock full AOSP
+images for SystemUI and Home; its cache key includes the device convention.
+Notification clicks reacquire stale nodes within the original overall budget.
+Phase, hierarchy, UID/service and checked shell-exit diagnostics retain the
+remaining noisy-event and background-start questions for the next hosted run.
+The expanded local aggregate has 2,196 records, zero failures/errors and three
+existing environment skips (2,082 executed, 114 reused). The OPML guard also
+passed focused ordinary and one-CPU probes with its original inputs, 128 MiB
+heap, ratio threshold and timeout; only diagnostic output was added. Current-head
+CI and native/release acceptance are still required.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed

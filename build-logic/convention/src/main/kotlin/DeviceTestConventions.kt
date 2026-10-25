@@ -21,14 +21,14 @@ private const val API_36 = "api36"
 private const val PIXEL_2 = "Pixel 2"
 private const val PIXEL_6 = "Pixel 6"
 private const val IMAGE_AOSP = "aosp"
-private const val IMAGE_ATD = "aosp-atd"
 
+// Playback framework cases exercise notification and recovery UI, which ATD images omit.
 private val MANAGED_DEVICES =
     listOf(
         ManagedDevice(API_26, PIXEL_2, 26, IMAGE_AOSP),
-        ManagedDevice("api33", PIXEL_6, 33, IMAGE_ATD),
-        ManagedDevice("api34", PIXEL_6, 34, IMAGE_ATD),
-        ManagedDevice(API_36, PIXEL_6, 36, IMAGE_ATD),
+        ManagedDevice("api33", PIXEL_6, 33, IMAGE_AOSP),
+        ManagedDevice("api34", PIXEL_6, 34, IMAGE_AOSP),
+        ManagedDevice(API_36, PIXEL_6, 36, IMAGE_AOSP),
     )
 
 private data class ManagedDevice(

@@ -245,6 +245,7 @@ class OpmlHostileInputTest {
         val baseline = timedSalvage("a".repeat(AMP_RUN))
         val dense = timedSalvage("&".repeat(AMP_RUN) + ";")
 
+        println("ampDense baseline=$baseline dense=$dense ratio=${dense / baseline}")
         assertTrue(dense < baseline * AMP_DENSE_MAX_RATIO, "dense $dense vs baseline $baseline")
     }
 

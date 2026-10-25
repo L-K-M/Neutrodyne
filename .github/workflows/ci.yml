@@ -217,7 +217,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.android/avd/gradle-managed
-          key: gmd-ci-${{ hashFiles('**/build.gradle.kts', 'gradle/libs.versions.toml') }}
+          key: gmd-ci-${{ hashFiles('**/build.gradle.kts', 'gradle/libs.versions.toml', 'build-logic/convention/src/main/kotlin/DeviceTestConventions.kt') }}
       # The runner image no longer ships the emulator package; GMD needs it to boot devices
       - name: Install the Android emulator
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
