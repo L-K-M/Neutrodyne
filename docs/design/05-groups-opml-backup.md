@@ -2017,6 +2017,8 @@ M3 acceptance 6. Scripted as `scripts/ci/bmgr-check.sh` in 09's nightly `bmgr` j
 
 The initialization retry window controls admission of another attempt; a command already in flight retains its 60 s timeout. There are at most three attempts, and every result mention is counted so a malformed or prefixed extra result cannot hide beside a valid success line. A completed explicit success remains valid even if the retry window has elapsed.
 
+The final scheduling ledger is `no_backup/androidx.work.workdb`, the pinned WorkManager runtime's normal no-backup path. It is created after the controlled normal launch, not transported from the source installation. The adopted session must still have exactly one tagged `SUCCEEDED` WorkSpec in this captured ledger; neither a missing database nor a nonterminal row passes.
+
 ```bash
 pkg=ch.lkmc.neutrodyne                     # the published release build; a local debug build is ch.lkmc.neutrodyne.debug
 adb shell bmgr enable true

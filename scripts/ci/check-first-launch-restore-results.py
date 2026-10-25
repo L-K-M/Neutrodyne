@@ -328,6 +328,8 @@ UUID4 = re.compile(
 SNAPSHOT_REL = "files/backup/auto-snapshot.zip"
 PORTABLE_REL = "files/datastore/settings.preferences_pb"
 DEVICE_PB_REL = "files/datastore/device_settings.preferences_pb"
+# WorkManager's pinned runtime creates its new scheduling ledger outside backup.
+WORK_DB_REL = "no_backup/androidx.work.workdb"
 
 
 def open_db(device, path):
@@ -571,7 +573,7 @@ def check_restored_db(device, directory, exp):
 
     # WorkSpec ledger: the adopted restore's tagged spec must be terminal-done.
     try:
-        workdb = open_db(device, post / "databases/androidx.work.workdb")
+        workdb = open_db(device, post / WORK_DB_REL)
         specs = workdb.execute(
             "SELECT w.id, w.state FROM workspec w JOIN worktag t ON w.id=t.work_spec_id "
             "WHERE t.tag=?", (f"restore-session-{adopted[0]}",)).fetchall()
@@ -594,7 +596,7 @@ def check_pull(device, directory, exp, run):
     for path in (pre / SNAPSHOT_REL, pre / PORTABLE_REL, pre / DEVICE_PB_REL,
                  source / "databases/neutrodyne.db",
                  post / PORTABLE_REL, post / "databases/neutrodyne.db",
-                 post / "databases/androidx.work.workdb"):
+                 post / WORK_DB_REL):
         if not path.is_file() or path.stat().st_size == 0:
             raise ValueError(f"{device}: missing pulled evidence {path}")
 

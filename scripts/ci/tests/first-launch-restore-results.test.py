@@ -518,7 +518,8 @@ def write_pulls(directory, exp, fixture, snapshot_zip, portable_pb, device_pb):
     (post / "cache/import/1.bin").write_bytes(snapshot_zip)
     (post / "databases").mkdir(parents=True, exist_ok=True)
     build_restored_db(post / "databases/neutrodyne.db", fixture)
-    build_workdb(post / "databases/androidx.work.workdb", 1)
+    (post / "no_backup").mkdir(parents=True, exist_ok=True)
+    build_workdb(post / "no_backup/androidx.work.workdb", 1)
     (source / "databases").mkdir(parents=True, exist_ok=True)
     build_source_db(source / "databases/neutrodyne.db", fixture)
     (post / "notifications.txt").write_text("")
@@ -843,6 +844,19 @@ class BmgrEvidenceTest(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(0, result.returncode)
         self.assertIn(needle, result.stderr)
+
+    def test_rejects_a_nonterminal_adopted_work_spec(self):
+        def mutate(directory, *unused):
+            import sqlite3
+            path = directory / "pulls/post/no_backup/androidx.work.workdb"
+            db = sqlite3.connect(path)
+            db.execute("UPDATE workspec SET state=1")
+            db.commit()
+            db.close()
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("not SUCCEEDED", result.stderr)
 
     def test_rejects_prelaunch_path_violations(self):
         """DB file, framework-dir descendant, or special entry -> fail."""

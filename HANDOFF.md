@@ -328,6 +328,15 @@ does not isolate encryption handling; complete new-head positive31/36 lifecycle
 proof remains open and required — this correction is not native acceptance.
 No failed original capture is repaired or relabelled.
 
+The next exact-head run on `5f826e24` reached TAR verification, install-time
+delivery, cold launch and adopted-session completion on both API31/36. Final
+validation stopped at a verifier path assumption: WorkManager's ledger is in
+`no_backup/androidx.work.workdb`, not the app database directory. Both captures
+contain it and copied diagnostic queries show the adopted tagged WorkSpec is
+`SUCCEEDED`. The checker and fixture now use the pinned runtime's real path,
+with a nonterminal-row negative test. Empty-dataset control never ran in that
+failed attempt; a complete fresh lifecycle remains required.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:
