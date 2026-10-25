@@ -316,10 +316,17 @@ fresh CI/review and #223's actual armed journeys remain required.
 
 As of 2026-10-25, #229 is merged as `8cb9a602` after two completed reviews and all six
 current CI jobs, including the stronger paired-control test on API26/36. #223
-normally merges this reviewed component before correcting run8's host pull-loop
-stdin consumption and initialization-result race. The old encrypted UI refusal
+normally merges this reviewed component. Run8's two host corrections are now in
+this head: `pull_tree` reads the (now nonhidden `<dir>-listing.txt`) listing on
+fd3 so `adb` children can no longer drain the cursor on fd0 — the run8 API 31
+defect that pulled only the first canary — and `bmgr_init` retries only the
+observed rc0/`Initialization result: -1000` shape (the AOSP `InitObserver`
+publish-before-store race, `.nd-context/m3-bmgr-api36-init-rca.md`) at most 3
+bounded attempts with every attempt receipt kept; anything else still fails
+closed. The old encrypted UI refusal
 does not isolate encryption handling; complete new-head positive31/36 lifecycle
-proof remains open. No failed original capture is repaired or relabelled.
+proof remains open and required — this correction is not native acceptance.
+No failed original capture is repaired or relabelled.
 
 ## 1. What this repository is
 

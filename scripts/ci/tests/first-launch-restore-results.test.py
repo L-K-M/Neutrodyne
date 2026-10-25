@@ -525,7 +525,7 @@ def write_pulls(directory, exp, fixture, snapshot_zip, portable_pb, device_pb):
     (empty / "databases").mkdir(parents=True, exist_ok=True)
     build_empty_db(empty / "databases/neutrodyne.db")
     (empty / "files").mkdir(parents=True, exist_ok=True)
-    (empty / "files/.listing").write_text("")
+    (empty / "files-listing.txt").write_text("")
     (directory / "postlaunch-files.txt").write_text(
         f"/data/data/{PKG}/files/backup/restored-1700000001234.zip\n")
 
@@ -1152,7 +1152,19 @@ class BmgrHostScriptTest(unittest.TestCase):
             "if args[:3] == ['shell', 'pm', 'path'] or args[:3] == ['shell', 'pm', 'list']:\n"
             "    done()\n"
             "if args[:3] == ['shell', 'bmgr', 'init']:\n"
-            "    done(os.environ.get('FAKE_INIT', 'Initialization result: 0') + '\\n')\n"
+            "    if os.environ.get('FAKE_INIT'):\n"
+            "        done(os.environ['FAKE_INIT'] + '\\n')\n"
+            "    if os.environ.get('FAKE_INIT_FAIL'):\n"
+            "        done('error: transport unavailable\\n', 1)\n"
+            "    prior = sum(1 for a in state if a[:3] == ['shell', 'bmgr', 'init'])\n"
+            "    seq = os.environ.get('FAKE_INIT_SEQ', '0').split(',')\n"
+            "    shape = seq[min(prior, len(seq) - 1)]\n"
+            "    if shape == 'missing':\n"
+            "        done('Initializing transports: [t]\\n')\n"
+            "    if shape == 'mixed':\n"
+            "        done('Initialization result: -1000\\nInitialization result: 0\\n')\n"
+            "    done('Initializing transports: [com.a/.B]\\n'\n"
+            "         'Initialization result: ' + shape + '\\n')\n"
             "if args[:3] == ['shell', 'am', 'instrument']:\n"
             "    pairs = {args[i+1]: args[i+2] for i, a in enumerate(args) if a == '-e'}\n"
             "    result = os.environ.get('FAKE_DRIVER_RESULT', 'ok')\n"
@@ -1379,6 +1391,98 @@ class BmgrHostScriptTest(unittest.TestCase):
                           (ev / f"instrument-{phase}.log").read_text())
             self.assertGreater(
                 (ev / f"driver-status-{phase}.json").stat().st_size, 0)
+
+    def _lib_driver(self, body, extra_env=None):
+        driver = self.root / f"drv{len(list(self.root.glob('drv*.sh')))}.sh"
+        driver.write_text(textwrap.dedent(f"""\
+            set -uo pipefail
+            export BMGR_CHECK_LIB_ONLY=1
+            exec 0</dev/null
+            source {self.script}
+            {body}
+            """))
+        env = {**os.environ, "ADB_CALLS": str(self.calls), **(extra_env or {})}
+        return subprocess.run(["bash", str(driver)], env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def test_bmgr_init_retries_only_the_observed_race_shape(self):
+        """Run8 api36 InitObserver race: a single explicit -1000 on rc0 may be
+        retried bounded; only a later explicit result 0 succeeds."""
+        for seq, ok in (("-1000,0", True), ("0", True),
+                        ("-1000,-1000,-1000,0", False),
+                        ("missing", False), ("mixed", False), ("-2000,0", False)):
+            with self.subTest(seq=seq):
+                ev = self.root / f"init-{seq.replace(',', '_')}"
+                ev.mkdir()
+                result = self._lib_driver(
+                    f"ADB={self.adb}\nEV={ev}\nTRANSPORT=com.a/.B\n"
+                    "bmgr_init leg\necho INIT-OK\n",
+                    extra_env={"FAKE_INIT_SEQ": seq})
+                calls = self.calls.read_text().splitlines() \
+                    if self.calls.exists() else []
+                self.calls.write_text("")
+                attempts = [json.loads(a) for a in calls
+                            if json.loads(a)[:3] == ["shell", "bmgr", "init"]]
+                self.assertEqual(ok, "INIT-OK" in result.stdout,
+                                 f"seq={seq}: {result.stdout + result.stderr}")
+                expected = {"-1000,0": 2, "0": 1, "-1000,-1000,-1000,0": 3,
+                            "missing": 1, "mixed": 1, "-2000,0": 1}[seq]
+                self.assertEqual(expected, len(attempts))
+                self.assertLessEqual(len(attempts), 3)
+                self.assertTrue((ev / "init-leg.txt").is_file())
+                for n in range(1, len(attempts) + 1):
+                    self.assertTrue((ev / f"init-leg-attempt{n}.txt").is_file())
+                ledger = (ev / "init-leg-attempts.txt").read_text()
+                self.assertEqual(len(attempts), ledger.count("attempt "))
+
+    def test_bmgr_init_command_failure_never_retries(self):
+        ev = self.root / "init-fail"
+        ev.mkdir()
+        result = self._lib_driver(
+            f"ADB={self.adb}\nEV={ev}\nTRANSPORT=com.a/.B\nbmgr_init leg\necho INIT-OK\n",
+            extra_env={"FAKE_INIT_FAIL": "1"})
+        self.assertNotIn("INIT-OK", result.stdout)
+        inits = [a for a in self.calls.read_text().splitlines()
+                 if json.loads(a)[:3] == ["shell", "bmgr", "init"]]
+        self.calls.write_text("")
+        self.assertEqual(1, len(inits))
+
+    def test_pull_tree_keeps_listing_off_child_stdin(self):
+        """Run8 canary loss: adb children inherited the .listing read cursor on
+        fd0 and drained the remaining entries. Real pull_tree via the lib seam
+        against an adb double that deliberately consumes stdin on every call."""
+        drain = self.root / "adb-drain"
+        drain.write_text(
+            f"#!{sys.executable}\n"
+            "import os, sys\n"
+            "args = sys.argv[1:]\n"
+            "sys.stdin.read()  # the real adb client consumes our stdin\n"
+            "files = os.environ['FAKE_PULL_LIST'].split('\\n')\n"
+            "if args[:1] == ['shell'] and args[1].startswith('find '):\n"
+            "    sys.stdout.write('\\n'.join(files) + '\\n'); sys.exit(0)\n"
+            "if args[:3] == ['shell', 'test', '-d'] or args[:3] == ['shell', 'test', '-L']:\n"
+            "    sys.exit(1)\n"
+            "if args[:2] == ['exec-out', 'cat']:\n"
+            "    sys.stdout.write('content-of-' + args[2].rsplit('/', 1)[-1] + '\\n'); sys.exit(0)\n"
+            "sys.exit(0)\n")
+        drain.chmod(0o755)
+        ev = self.root / "pull-ev"
+        remote = f"/data/data/{PKG}/databases"
+        result = self._lib_driver(
+            f"ADB={drain}\nEV={ev}\n"
+            f"pull_tree {remote} {ev}/pulls/databases\n"
+            "echo PULL-OK\n",
+            extra_env={"FAKE_PULL_LIST":
+                       f"{remote}/canary.db\n{remote}/neutrodyne.db"})
+        self.assertIn("PULL-OK", result.stdout,
+                      result.stdout + result.stderr)
+        for name in ("canary.db", "neutrodyne.db"):
+            pulled = ev / "pulls/databases" / name
+            self.assertTrue(pulled.is_file(), f"missing {name}")
+            self.assertEqual(f"content-of-{name}\n", pulled.read_text())
+        listing = ev / "pulls/databases-listing.txt"
+        self.assertTrue(listing.is_file())
+        self.assertIn("neutrodyne.db", listing.read_text())
 
     def test_failed_driver_keeps_status_before_rejecting_marker(self):
         ev = self.root / "failed-driver"

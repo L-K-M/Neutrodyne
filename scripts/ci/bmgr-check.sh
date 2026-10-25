@@ -191,12 +191,40 @@ backup_flag() {  # <receipt> <prefix>: require exactly one effective service-sta
 }
 
 bmgr_init() {  # <label>: init only our transport and require its real result
-    local label="$1" file="$EV/init-$1.txt" rc=0
-    timeout 60 "$ADB" shell bmgr init "$TRANSPORT" > "$file" 2>&1 || rc=$?
-    [ "$rc" -eq 0 ] \
-        || fail "bmgr init $TRANSPORT ($label) failed rc=$rc: $(tr -d '\r' < "$file" | tr '\n' ' ')"
-    tr -d '\r' < "$file" | grep -q '^Initialization result: 0$' \
-        || fail "bmgr init $TRANSPORT ($label) gave no success: $(tr -d '\r' < "$file" | tr '\n' ' ')"
+    # Run8 api36: AOSP InitObserver publishes done before storing result, so a
+    # successful on-device init can print the default -1000 (publish-before-store
+    # race; see .nd-context/m3-bmgr-api36-init-rca.md). A bounded retry is allowed
+    # ONLY for that exact observed shape: rc0 + a single explicit
+    # `Initialization result: -1000` line. Anything else — command failure,
+    # timeout, missing/duplicate/mixed/unknown result lines — fails closed
+    # immediately, as does exhaustion. Transport parameters are never touched
+    # between attempts. Final acceptance still requires an explicit result 0;
+    # a negative value plus Pending-init 0 is never accepted as success.
+    local label="$1" attempts=0 result_lines value
+    local max="${BMGR_INIT_MAX_ATTEMPTS:-3}"
+    local deadline=$((SECONDS + ${BMGR_INIT_WHOLE_BUDGET_S:-200}))
+    local ledger="$EV/init-$label-attempts.txt"
+    : > "$ledger"
+    while :; do
+        attempts=$((attempts + 1))
+        local file="$EV/init-$label-attempt$attempts.txt" rc=0
+        timeout 60 "$ADB" shell bmgr init "$TRANSPORT" > "$file" 2>&1 || rc=$?
+        printf 'attempt %d rc=%d\n' "$attempts" "$rc" >> "$ledger"
+        cp "$file" "$EV/init-$label.txt"   # canonical receipt = final attempt
+        if [ "$rc" -ne 0 ]; then
+            fail "bmgr init $TRANSPORT ($label) failed rc=$rc: $(tr -d '\r' < "$file" | tr '\n' ' ')"
+        fi
+        result_lines=$(tr -d '\r' < "$file" | grep -c '^Initialization result: ' || true)
+        value=$(tr -d '\r' < "$file" | sed -n 's/^Initialization result: //p' | head -1)
+        case "$result_lines:$value" in
+            1:0) return ;;
+            1:-1000)
+                if [ "$attempts" -ge "$max" ] || [ "$SECONDS" -ge "$deadline" ]; then
+                    fail "bmgr init $TRANSPORT ($label) still prints -1000 after $attempts bounded attempts"
+                fi ;;
+            *) fail "bmgr init $TRANSPORT ($label) ambiguous init output ($result_lines result lines): $(tr -d '\r' < "$file" | tr '\n' ' ')" ;;
+        esac
+    done
 }
 
 find_payload() {  # every _full/$PKG file under the transport store, whatever the token dir
@@ -271,10 +299,14 @@ wait_import_terminal() {  # <expected DONE count> <seconds>: bounded poll, liven
 
 pull_tree() {  # <remote dir> <local dir>: recursive read-only pull (root exec-out)
     local remote="$1" local_dir="$2"
+    # The listing is nonhidden sibling evidence (run8's hidden .listing was
+    # dropped by artifact upload); fd3 keeps the read cursor away from adb
+    # children, which drain fd0 and used to eat the remaining entries.
+    local listing="${local_dir%/}-listing.txt"
     mkdir -p "$local_dir"
     timeout 60 "$ADB" shell "find '$remote' -mindepth 1 2>/dev/null | sort" \
-        | tr -d '\r' > "$local_dir/.listing" || true
-    while IFS= read -r dev_path; do
+        | tr -d '\r' > "$listing" || true
+    while IFS= read -r dev_path <&3; do
         [ -n "$dev_path" ] || continue
         local rel="${dev_path#$remote/}"
         if timeout 30 "$ADB" shell test -d "$dev_path" 2>/dev/null; then
@@ -287,7 +319,7 @@ pull_tree() {  # <remote dir> <local dir>: recursive read-only pull (root exec-o
             timeout 60 "$ADB" exec-out cat "$dev_path" > "$local_dir/$rel" 2>/dev/null \
                 || log "pull miss: $dev_path"
         fi
-    done < "$local_dir/.listing"
+    done 3< "$listing"
 }
 
 snapshot_now() {  # the DUMP-protected production receiver; bounded pending retries

@@ -690,7 +690,7 @@ def check_pull(device, directory, exp, run):
         if count != 0:
             raise ValueError(f"{device}: empty-leg {table} has {count} rows")
     empty_db.close()
-    empty_listing = pull_listing(empty / "files/.listing")
+    empty_listing = pull_listing(empty / "files-listing.txt")
     delivered = [p for p in empty_listing if "/backup/" in p or "restored" in p]
     if delivered:
         raise ValueError(f"{device}: empty leg delivered files {delivered}")
