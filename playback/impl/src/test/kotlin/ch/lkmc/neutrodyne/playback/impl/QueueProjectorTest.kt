@@ -21,6 +21,8 @@ import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.playback.core.PlayerWindow
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -493,7 +495,7 @@ class QueueProjectorTest {
             var attempts = 0
             var refuseTransition = true
             val f =
-                AdapterFixture(this) { real ->
+                AdapterFixture(this, sessionStore = { real ->
                     object : PlaySessionStore by real {
                         override suspend fun onTransition(
                             departure: Departure?,
@@ -506,7 +508,7 @@ class QueueProjectorTest {
                             return real.onTransition(departure, arrivedEpisodeId, arrivedOrigin, now)
                         }
                     }
-                }
+                })
             try {
                 val ids = f.seed(3)
                 f.attach()
@@ -638,6 +640,158 @@ class QueueProjectorTest {
                 }
                 assertFalse("player replayed a mid-sequence durable order", reverted)
                 assertEquals(expected, f.player.ids())
+            } finally {
+                f.close()
+            }
+        }
+
+    /**
+     * A bracket that commits and applies while a refresh resolves its read's
+     * media/session input must not be reverted when the read resumes.
+     */
+    @Test fun externalAddApplyCannotBeRevertedByDelayedRefreshRead() =
+        runTest {
+            lateinit var gate: GatedLookup
+            val f =
+                AdapterFixture(
+                    this,
+                    mediaLookup = { real -> GatedLookup(real).also { gate = it } },
+                )
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(ids.take(2), 65_000)
+                awaitAdapter { f.player.ids() == ids.take(2) }
+                val reached = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                gate.barrier = {
+                    reached.complete(Unit)
+                    release.await()
+                }
+                // Trigger a durable refresh without leaving the player diverged
+                // from the pending external apply: remove and re-add the same item.
+                val second = f.player.getMediaItemAt(1)
+                f.player.removeMediaItem(1)
+                f.player.addMediaItem(1, second)
+                awaitAdapter("refresh job never reached the media lookup") { reached.isCompleted }
+                f.projector.beginOwnWrite()
+                f.queue.addLast(ids.takeLast(1))
+                val window = f.projector.prepareExternalEdit(f.sessions.virtualQueue(20))
+                f.player.addMediaItems(window.takeLast(1))
+                awaitAdapter { f.player.ids() == ids }
+                assertNotNull(f.index[ids[2]])
+                release.complete(Unit)
+                var dropped = false
+                var stable = 0
+                var iter = 0
+                while (iter++ < 2_000 && stable < 40) {
+                    runCurrent()
+                    shadowOf(Looper.getMainLooper()).idle()
+                    if (f.player.ids() != ids || f.index[ids[2]] == null) dropped = true
+                    stable = if (f.player.ids() == ids && f.index[ids[2]] != null) stable + 1 else 0
+                    Thread.sleep(2)
+                }
+                assertFalse("a read suspended inside a newer own write reverted it", dropped)
+                assertEquals(ids, f.player.ids())
+                assertNotNull(f.index[ids[2]])
+            } finally {
+                f.close()
+            }
+        }
+
+    /**
+     * A bracket that bumps the revision without committing must not silently drop
+     * a pending reconciliation: the deferred refresh re-arms and converges without
+     * relying on any later database emission to heal it.
+     */
+    @Test fun noCommitBracketDuringDurableReadKeepsReconcile() =
+        runTest {
+            lateinit var gate: GatedSessions
+            val f =
+                AdapterFixture(
+                    this,
+                    sessionStore = { real -> GatedSessions(real).also { gate = it } },
+                )
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(ids.take(2), 1_000)
+                awaitAdapter { f.player.ids() == ids.take(2) }
+                val reached = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                gate.barrier = {
+                    reached.complete(Unit)
+                    release.await()
+                }
+                f.player.removeMediaItem(1)
+                awaitAdapter("refresh job never reached the durable read") { reached.isCompleted }
+                f.projector.beginOwnWrite()
+                f.projector.endOwnWrite(null)
+                release.complete(Unit)
+                awaitAdapter("pending reconciliation was lost across a no-commit bracket") {
+                    f.player.ids() == ids.take(2)
+                }
+            } finally {
+                f.close()
+            }
+        }
+
+    /**
+     * The revision fence holds through the plan mutex wait: a refresh queued
+     * behind another job while a bracket removes an item discards its
+     * pre-bracket read instead of re-applying it.
+     */
+    @Test fun refreshReadWaitingOnMutexAcrossBracketIsDiscarded() =
+        runTest {
+            lateinit var lookupGate: GatedLookup
+            lateinit var sessionGate: GatedSessions
+            val f =
+                AdapterFixture(
+                    this,
+                    sessionStore = { real -> GatedSessions(real).also { sessionGate = it } },
+                    mediaLookup = { real -> GatedLookup(real).also { lookupGate = it } },
+                )
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(ids, 1_000)
+                awaitAdapter { f.player.ids() == ids }
+                val holderAtGate = CompletableDeferred<Unit>()
+                val holderRelease = CompletableDeferred<Unit>()
+                lookupGate.barrier = {
+                    holderAtGate.complete(Unit)
+                    holderRelease.await()
+                }
+                val holder = async { f.projector.prepareExternalEdit(f.sessions.virtualQueue(20)) }
+                awaitAdapter("mutex holder never reached the lookup gate") { holderAtGate.isCompleted }
+                val readAtGate = CompletableDeferred<Unit>()
+                val readRelease = CompletableDeferred<Unit>()
+                sessionGate.barrier = {
+                    readAtGate.complete(Unit)
+                    readRelease.await()
+                }
+                f.player.removeMediaItem(1)
+                awaitAdapter("refresh job never reached the durable read") { readAtGate.isCompleted }
+                readRelease.complete(Unit)
+                repeat(20) {
+                    runCurrent()
+                    shadowOf(Looper.getMainLooper()).idle()
+                    Thread.sleep(2)
+                }
+                f.projector.beginOwnWrite()
+                f.queue.remove(listOf(ids[2]))
+                f.projector.endOwnWrite(f.sessions.virtualQueue(20).generation)
+                val opsBefore = f.player.calls.size
+                holderRelease.complete(Unit)
+                holder.await()
+                awaitAdapter("durable state never reconciled") { f.player.ids() == ids.take(2) }
+                val postOps = f.player.calls.drop(opsBefore)
+                val add = postOps.indexOf("add")
+                val remove = postOps.indexOf("remove")
+                assertFalse(
+                    "a read that waited on the plan mutex across a bracket was applied",
+                    add != -1 && (remove == -1 || add < remove),
+                )
             } finally {
                 f.close()
             }

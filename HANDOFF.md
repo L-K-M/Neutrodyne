@@ -257,7 +257,9 @@ offload, local/network wake modes, live seek/skip prefs), and the four
 player-thread adapters: `QueueProjector` (window diff apply, outgoing-pin
 release, foreign-generation load-paused, external set/add write brackets with
 2 s timeout, bracket-close refresh re-reading the durable queue rather than
-replaying a stashed snapshot), `PositionTracker` (outgoing capture before arrival, 5 s tick,
+replaying a stashed snapshot, the pre-read `revision` re-checked inside the
+serialized apply so a bracket spanning the read, input or mutex wait discards
+and re-arms), `PositionTracker` (outgoing capture before arrival, 5 s tick,
 teardown `NonCancellable`), `EffectivePlaybackApplier` (effective speed/skip
 silence before prepare, temporary-speed retention on metadata updates), and
 `ErrorRecovery` (classified skips vs bounded reprepare/reconnect inside the

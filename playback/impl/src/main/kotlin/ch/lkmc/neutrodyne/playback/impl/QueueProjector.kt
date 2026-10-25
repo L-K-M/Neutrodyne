@@ -91,6 +91,7 @@ internal class QueueProjector(
         val queue: VirtualQueue,
         val media: Map<Long, PlaybackMediaInfo>,
         val groupId: Long?,
+        val readRevision: Long? = null,
     )
 
     private data class ExternalApply(
@@ -265,6 +266,13 @@ internal class QueueProjector(
     private suspend fun project(input: Input) =
         mutex.withLock {
             val live = player ?: return@withLock
+            val before = input.readRevision ?: revision
+            if (before != revision) {
+                // The durable read spanned a newer own write; re-read rather
+                // than plan or apply content captured before that write.
+                if (latest != null) refresh()
+                return@withLock
+            }
             var snapshot = input.queue
             var media = input.media
             failedArrival?.let { failed ->
@@ -284,7 +292,6 @@ internal class QueueProjector(
             }
             // Unsubscribe can invalidate media before the coherent empty-session emission.
             if (snapshot.current?.episodeId?.let { it !in media } == true) return@withLock
-            val before = revision
             val beforeIds = live.mediaIds()
             val beforeIndex = live.currentMediaItemIndex.coerceAtLeast(0)
             val window = playerWindow(live)
@@ -517,14 +524,16 @@ internal class QueueProjector(
     /**
      * Re-project the freshest durable queue. A skipped emission is only a signal:
      * its captured snapshot can be older than the write that just closed, so it is
-     * never replayed. If another own-write bracket suspends inside the read, this
-     * job's snapshot may predate it; that bracket's own close reconciles instead.
+     * never replayed. The revision captured before the read is carried into the
+     * project's serialized fence, so a bracket spanning the read, the input
+     * resolution or the mutex wait discards and re-arms instead of applying or
+     * dropping the reconciliation.
      */
     private fun refresh() {
         launchWrite {
             val before = revision
             val snapshot = withContext(io) { sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE) }
-            if (before == revision) project(input(snapshot))
+            project(input(snapshot).copy(readRevision = before))
         }
     }
 

@@ -20,9 +20,12 @@ import ch.lkmc.neutrodyne.core.artwork.PinReason
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
+import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex
 import ch.lkmc.neutrodyne.core.testing.FakeScopeSettingsRepository
@@ -54,10 +57,46 @@ import org.junit.Assert.fail
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
+/** One-shot suspension barrier on [virtualQueue] AFTER the durable read, so the
+ * captured snapshot stays pinned to its own instant while the suspension spans
+ * a later write. Pass-through once consumed. */
+internal class GatedSessions(
+    private val delegate: PlaySessionStore,
+) : PlaySessionStore by delegate {
+    var barrier: (suspend () -> Unit)? = null
+
+    override suspend fun virtualQueue(k: Int): VirtualQueue {
+        val snapshot = delegate.virtualQueue(k)
+        barrier?.let {
+            barrier = null
+            it()
+        }
+        return snapshot
+    }
+}
+
+/** Same one-shot barrier for the media reads a refresh performs after the queue read. */
+internal class GatedLookup(
+    private val delegate: PlaybackMediaLookup,
+) : PlaybackMediaLookup {
+    var barrier: (suspend () -> Unit)? = null
+
+    override suspend fun get(episodeId: Long): PlaybackMediaInfo? {
+        barrier?.let {
+            barrier = null
+            it()
+        }
+        return delegate.get(episodeId)
+    }
+
+    override fun observe(episodeIds: Set<Long>) = delegate.observe(episodeIds)
+}
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal class AdapterFixture(
     val scope: TestScope,
     sessionStore: (PlaySessionStore) -> PlaySessionStore = { it },
+    mediaLookup: (PlaybackMediaLookup) -> PlaybackMediaLookup = { it },
 ) {
     val serviceJob = SupervisorJob(scope.backgroundScope.coroutineContext[Job])
     val playerScope = CoroutineScope(scope.backgroundScope.coroutineContext + serviceJob)
@@ -75,7 +114,7 @@ internal class AdapterFixture(
     val sessions = sessionStore(PlaybackTestStores.sessions(db, ProtocolOrderKeys, caps))
     val positions = PlaybackTestStores.positions(db)
     val queue = PlaybackTestStores.queue(db, sessions, ProtocolOrderKeys, clock, caps)
-    val lookup = PlaybackTestStores.media(db)
+    val lookup = mediaLookup(PlaybackTestStores.media(db))
     val sources = AdapterSources()
     val exo = TestExoPlayerBuilder(app).setClock(fakeClock).setMediaSourceFactory(sources).build()
     val player = RecordingPlayer(exo)
@@ -219,6 +258,19 @@ internal class RecordingPlayer(
     ) {
         calls += "metadata"
         super.replaceMediaItem(index, mediaItem)
+    }
+
+    override fun addMediaItem(
+        index: Int,
+        mediaItem: MediaItem,
+    ) {
+        calls += "add"
+        super.addMediaItem(index, mediaItem)
+    }
+
+    override fun removeMediaItem(index: Int) {
+        calls += "remove"
+        super.removeMediaItem(index)
     }
 
     override fun prepare() {
