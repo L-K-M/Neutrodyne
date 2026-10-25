@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -662,6 +663,7 @@ class QueueProjectorTest {
                 f.attach()
                 f.start(ids.take(2), 65_000)
                 awaitAdapter { f.player.ids() == ids.take(2) }
+                awaitProjectionReady(f, ids[0])
                 val reached = CompletableDeferred<Unit>()
                 val release = CompletableDeferred<Unit>()
                 gate.barrier = {
@@ -717,6 +719,7 @@ class QueueProjectorTest {
                 f.attach()
                 f.start(ids.take(2), 1_000)
                 awaitAdapter { f.player.ids() == ids.take(2) }
+                awaitProjectionReady(f, ids[0])
                 val reached = CompletableDeferred<Unit>()
                 val release = CompletableDeferred<Unit>()
                 gate.barrier = {
@@ -756,6 +759,7 @@ class QueueProjectorTest {
                 f.attach()
                 f.start(ids, 1_000)
                 awaitAdapter { f.player.ids() == ids }
+                awaitProjectionReady(f, ids[0])
                 val holderAtGate = CompletableDeferred<Unit>()
                 val holderRelease = CompletableDeferred<Unit>()
                 lookupGate.barrier = {
@@ -806,6 +810,7 @@ class QueueProjectorTest {
                 f.attach()
                 f.start(ids.take(2), 65_000)
                 awaitAdapter { f.player.ids() == ids.take(2) }
+                awaitProjectionReady(f, ids[0])
                 val generation = f.sessions.virtualQueue(20).generation
                 val reached = CompletableDeferred<Unit>()
                 val release = CompletableDeferred<Unit>()
@@ -839,4 +844,19 @@ class QueueProjectorTest {
                 f.close()
             }
         }
+
+    private suspend fun TestScope.awaitProjectionReady(
+        fixture: AdapterFixture,
+        currentId: Long,
+    ) {
+        // Synchronous applyStart is not evidence that the Room collector has emitted.
+        val title = "Projection ready"
+        fixture.db.podcastDao().setCustomTitle(fixture.lookup.get(currentId)!!.podcastId, title)
+        awaitAdapter("The Room projection never reached the player") {
+            fixture.player.currentMediaItem
+                ?.mediaMetadata
+                ?.albumTitle
+                ?.toString() == title
+        }
+    }
 }
