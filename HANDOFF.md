@@ -242,7 +242,7 @@ Independent source review found no important issue. A parent regression exposed
 neutral PNG bytes reported as JPEG; MIME and display-name metadata now match the
 image. The unused playback `lifecycle-process` dependency is omitted.
 
-M4 plan row P5 is draft #230 on `impl/m4-p5-sources-adapters`, net-hunked from
+M4 plan row P5 merged through [#230](https://github.com/L-K-M/Neutrodyne/pull/230), net-hunked from
 the same frozen source record `453ea570` (`27a317ad` sources/factories,
 `563cf609` Media3 adapters, `f418ee50` MediaItemFactory constants/URI
 corrections) onto merged main `c9ecfe11` (P4's merge). It adds
@@ -266,20 +266,23 @@ silence before prepare, temporary-speed retention on metadata updates), and
 `ErrorRecovery` (classified skips vs bounded reprepare/reconnect inside the
 foreground window). The adapter harness runs Media3 test players against the
 real Room stores via the test-only Java bridge, plus MockWebServer HTTP tests
-and three synthetic MP3 fixtures with their generator script. No service,
-receiver, manifest activation or production graph binding lands: nothing
-constructs these classes outside tests, and the truthful unavailable
-controller/state/maintenance binding stays the only one per shell. No schema
-change; `lifecycle-process`, `coroutines-guava` and `coroutines-android`
-remain out; no P5 consumer imports them. The current affected aggregate has
+and three synthetic MP3 fixtures with their generator script. P5 introduced no
+service, receiver, manifest activation or production graph binding: that boundary
+kept the truthful unavailable controller/state/maintenance binding per shell.
+It made no schema change and omitted `lifecycle-process`, `coroutines-guava` and
+`coroutines-android`; no P5 consumer imports them. Its affected aggregate had
 1,977 records, zero failures/errors and three existing environment skips.
 The test-readiness correction executes 80 playback records and reuses 1,897
 same-input records; its 25-test projector class also passes on one CPU. Room
 metadata echo is required before arming refresh barriers, and all four semantic
 counterexamples still fail against the pre-fence baseline. The `5fd58109` CI
-and named API26/36 app/driver cases pass. This latest-main integration still
-requires matching-head CI and its own formal review. Service/UI/device/native
-acceptance is not inherited from the prototype's later-slice results.
+and named API26/36 app/driver cases passed. The later `5bd60eee` integration
+passed all six CI40174233128 jobs and the original named API26/36 cases. Full
+formal40175399577, independent source triage and parent checks left no important
+finding in delivered feedback; optional minors were deferred under the first
+minor-only stopping rule, with the truncated INFO tail recorded as unknown.
+The squash merge `9cf58b7b` exactly matches the reviewed complete tree. P5 does
+not inherit service/UI/device/native acceptance from the prototype.
 
 M4 plan row P6 was assembled locally on `impl/m4-p6-android-service`, net-hunked
 from the same frozen source record `453ea570` (`85c93bb0` Android
@@ -302,16 +305,21 @@ manifest/permission additions, and the app-hosted `PlaybackServiceTest` with
 `nightly`/`api37` and `release` legs. The Playback settings row/route now
 activates against the real maintenance binding; P7 queue UI, P8 full
 player/root composition and the Appearance mini-player control stay out; the
-desktop binding stays truthfully unavailable. Local host checks pass:
-`:playback:impl` 120 unit tests (session/player, resumption, controller, hub,
-connection, gate, tree, notifier, commands), `:app` 151 (graph bindings +
-service-injection pending-open + two process observers), settings desktopTest
-35 incl. the restored home-row navigation test, core domain/testing/data and
-playback core/api aggregates green; debug/test/release APKs, lint, dependency/
-manifest/schema/brand/banned-API guards and the three published-APK checks
-pass; doc validators 0/14 and 0/78. Receipts: `build/review-m4-p6-assembly/`,
-report `.nd-context/m4-p6-assembly-report.md`. No schema change; no
-device/native/runtime evidence is produced by this assembly — exact-SHA
+desktop binding stays truthfully unavailable. Independent review at `8590b615`
+found that notification/session-activity content taps targeted the exported
+launcher, so the internal player deep link was discarded. The shared
+PendingIntent now targets the protected `InternalMainActivity` alias. The
+existing notifier regression failed on the old target and passes after the fix
+(two focused cases). Parent verification covers 2,088 records with zero
+failures/errors and three existing environment skips: 422 executed (120
+playback, 151 app, 142 data Android-host and nine database Android-host), 1,666
+same-input records reused. Debug/test/release and standalone-driver assemblies,
+required release lint, module/dependency/licence/manifest/brand/banned-API guards,
+direct schema/input equality and all three published-APK checks pass. Receipts
+are under `build/review-m4-p6-parent-f1/` and
+`build/review-m4-p6-parent-final/`; original author receipts/report are retained
+separately. Doc validators report 0/14 and 0/78. No device/native/runtime
+evidence is produced by these host gates: exact-SHA
 labelled API26/36 CI, the nightly API26/33/34/36 legs including the real
 >=1800 s screen-off case, API37/16 KiB hardening, optimized release smoke and
 the physical headset/call/focus/silence/artwork/Auto/TalkBack checks remain

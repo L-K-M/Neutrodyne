@@ -40,7 +40,7 @@ class TapToResumeNotifierTest {
         assertEquals(NeutrodynePlaybackService::class.java.name, action.component?.className)
         val open = shadowOf(notification.contentIntent).savedIntent
         assertEquals("neutrodyne://open/player", open.data.toString())
-        assertEquals("ch.lkmc.neutrodyne.MainActivity", open.component?.className)
+        assertEquals("ch.lkmc.neutrodyne.InternalMainActivity", open.component?.className)
         notifier.cancel()
         assertNull(shadowOf(manager).getNotification(PlaybackChannels.NOTIF_ID_TAP_TO_RESUME))
     }

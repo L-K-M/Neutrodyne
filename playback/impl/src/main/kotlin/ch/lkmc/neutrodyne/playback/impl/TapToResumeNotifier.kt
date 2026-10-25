@@ -57,7 +57,7 @@ internal class TapToResumeNotifier(
                 application,
                 0,
                 Intent(Intent.ACTION_VIEW, "neutrodyne://open/player".toUri())
-                    .setClassName(application.packageName, "ch.lkmc.neutrodyne.MainActivity")
+                    .setClassName(application.packageName, "ch.lkmc.neutrodyne.InternalMainActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
