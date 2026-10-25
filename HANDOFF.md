@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first four slices are merged through #222, #224, #225 and #228; P5 is draft #230 pending CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first four slices are merged through #222, #224, #225 and #228; P5's sources and Media3 adapters are in draft #230 pending latest-main CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,7 +141,7 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, P1–P3 merged, P4 assembled locally
+### M4 playback, P1–P4 merged, P5 draft
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
@@ -206,7 +206,8 @@ report 0 problems and 0/78 invalid diagrams. Formal review, current-head CI,
 labelled instrumentation and native/device legs remain pending; receipts are
 under `build/review-m4-p3-{assembly,parent}/` and the ignored assembly/review notes.
 
-M4 plan row P4 is assembled on `impl/m4-p4-artwork-cache`, net-hunked from the
+M4 plan row P4 is merged through [#228](https://github.com/L-K-M/Neutrodyne/pull/228)
+as `c9ecfe11`; it was assembled on `impl/m4-p4-artwork-cache`, net-hunked from the
 same frozen source record `453ea570` (`dd84b337` core artwork/provider,
 `27a317ad` source index/resolver/cache/prefs subset, `85c93bb0` final prefs
 context, `f418ee50` resolver/index URI corrections) onto reviewed main
@@ -234,13 +235,51 @@ still is unavailable on both platforms, and the service/receiver/player,
 routes, Appearance row and P5+ factories/adapters remain in their own M4
 slices. Local verification and limitations are recorded in
 `.nd-context/m4-p4-assembly-report.md` with receipts under
-`build/review-m4-p4-assembly/`; formal review, current-head CI, labelled
-instrumentation and native/device legs remain pending.
+`build/review-m4-p4-assembly/`; labelled instrumentation and native/device legs
+remain open with the rest of M4's acceptance.
 
 Independent source review found no important issue. A parent regression exposed
 neutral PNG bytes reported as JPEG; MIME and display-name metadata now match the
-image. The unused playback `lifecycle-process` dependency is omitted. Parent
-final checks, matching-head CI and formal PR review remain publication gates.
+image. The unused playback `lifecycle-process` dependency is omitted.
+
+M4 plan row P5 is draft #230 on `impl/m4-p5-sources-adapters`, net-hunked from
+the same frozen source record `453ea570` (`27a317ad` sources/factories,
+`563cf609` Media3 adapters, `f418ee50` MediaItemFactory constants/URI
+corrections) onto merged main `c9ecfe11` (P4's merge). It adds
+`GuardedHttpDataSource` (auth/range/content-change guards, stale signed-final
+retry, requested-URI reporting so no signed URL reaches cache metadata),
+`MediaItemFactory` (canonical `neutrodyne://episode/<id>` items, enclosure
+fingerprint cache key, local hint, completion extras, pinned-artwork URI),
+`NdMediaSourceFactory` + `NdLoadErrorHandlingPolicy` (local/remote extractors,
+fatal RSS error classes, one original-URL retry), `PlayerFactory` +
+`BoostLimiterProcessor` (speech audio chain, Sonic + silence skipping, no
+offload, local/network wake modes, live seek/skip prefs), and the four
+player-thread adapters: `QueueProjector` (window diff apply, outgoing-pin
+release, foreign-generation load-paused, external set/add write brackets with
+2 s timeout, bracket-close refresh re-reading the durable queue rather than
+replaying a stashed snapshot, the pre-read `revision` re-checked inside the
+serialized apply so a bracket spanning the read, input or mutex wait discards
+and re-arms, with collected-emission identity also fencing unbracketed writers),
+`PositionTracker` (outgoing capture before arrival, 5 s tick,
+teardown `NonCancellable`), `EffectivePlaybackApplier` (effective speed/skip
+silence before prepare, temporary-speed retention on metadata updates), and
+`ErrorRecovery` (classified skips vs bounded reprepare/reconnect inside the
+foreground window). The adapter harness runs Media3 test players against the
+real Room stores via the test-only Java bridge, plus MockWebServer HTTP tests
+and three synthetic MP3 fixtures with their generator script. No service,
+receiver, manifest activation or production graph binding lands: nothing
+constructs these classes outside tests, and the truthful unavailable
+controller/state/maintenance binding stays the only one per shell. No schema
+change; `lifecycle-process`, `coroutines-guava` and `coroutines-android`
+remain out; no P5 consumer imports them. The current affected aggregate has
+1,977 records, zero failures/errors and three existing environment skips.
+The test-readiness correction executes 80 playback records and reuses 1,897
+same-input records; its 25-test projector class also passes on one CPU. Room
+metadata echo is required before arming refresh barriers, and all four semantic
+counterexamples still fail against the pre-fence baseline. The `5fd58109` CI
+and named API26/36 app/driver cases pass. This latest-main integration still
+requires matching-head CI and its own formal review. Service/UI/device/native
+acceptance is not inherited from the prototype's later-slice results.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
@@ -358,6 +397,14 @@ declared `v = 1` default. The decoder now honors that wire contract while
 rejecting explicit unknown/malformed versions and retaining identity/content
 bindings. Original captures remain failed; complete copied-capture replay
 and a fresh exact-head native aggregate must verify the correction.
+
+**Current M3 transport acceptance (2026-10-25):** #223 is merged as `1501048a`.
+The corrected `ab2347c1` head passed all six CI jobs, named API26/36 app/driver
+cases, and the full API31/36 local-transport workflow with strict aggregate,
+empty controls and cleanup. Two formal rounds resolved the parser admission
+blocker; R1 minor diagnostics and R2's test-message precision nit are deferred.
+Earlier failed attempts above stay failed. This closes the PO-50 stock-emulator gate,
+not physical/device-to-device, scheduled/tagged release or other open acceptance.
 
 ## 1. What this repository is
 
