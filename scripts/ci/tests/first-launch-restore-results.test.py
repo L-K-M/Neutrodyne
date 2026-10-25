@@ -404,7 +404,10 @@ def _build_db(path, fixture, session_rows, group_uuids=None):
         if e.get("pos") is not None:
             con.execute("INSERT INTO episode_position VALUES(?,?,?)",
                         (i, e["pos"], e.get("posSrc", "STREAM")))
+    unplayed = {e["k"] for e in fixture["episodes"] if e.get("pl") is None}
     for i, ref in enumerate(fixture["queue"], start=1):
+        if ref["k"] not in unplayed:
+            continue
         con.execute("INSERT INTO queue_entry VALUES(?,?,?,?)",
                     (i, ep_to_id[ref["k"]], f"{i}", 0))
     gid = {}
@@ -502,12 +505,13 @@ def write_pulls(directory, exp, fixture, snapshot_zip, portable_pb, device_pb):
         target = pre / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(blob)
-    (pre / "prebackup-files.txt").write_text("\n".join(
-        f"/data/data/{PKG}/{rel}" for rel in (
-            exp["canaries"]
-            + ["files/backup/auto-snapshot.zip",
-               "files/datastore/settings.preferences_pb",
-               "files/datastore/device_settings.preferences_pb"])) + "\n")
+    listed = [f"/sdcard/Android/data/{PKG}/{rel[len('external/'):]}"
+              if rel.startswith("external/") else f"/data/data/{PKG}/{rel}"
+              for rel in exp["canaries"]]
+    listed += [f"/data/data/{PKG}/{rel}" for rel in (
+        "files/backup/auto-snapshot.zip", "files/datastore/settings.preferences_pb",
+        "files/datastore/device_settings.preferences_pb")]
+    (pre / "prebackup-files.txt").write_text("\n".join(listed) + "\n")
     (post / "files/backup").mkdir(parents=True, exist_ok=True)
     (post / "files/backup/restored-1700000001234.zip").write_bytes(snapshot_zip)
     (post / "files/datastore").mkdir(parents=True, exist_ok=True)
@@ -564,7 +568,10 @@ class BmgrEvidenceTest(unittest.TestCase):
             "syncIds": {p["key"]: p["syncId"] for p in fixture["podcasts"]},
             "groupUuids": {g["name"]: g["uuid"] for g in fixture["groups"]},
             "fixture": fixture,
-            "canaries": ["databases/bmgr-canary-%s.db" % NONCE],
+            "canaries": [f"databases/bmgr-canary-{NONCE}.db"] + [
+                f"{domain}/bmgr-canary-{NONCE}.dat" for domain in (
+                    "files/downloads", "files/artwork", "files/other", "cache",
+                    "no_backup", "external/files")],
             "receiverLine": f"ok at={snap_at} bytes={len(snapshot_zip)} level={snap_level}",
             "preparedAt": 1,
         }
@@ -838,6 +845,49 @@ class BmgrEvidenceTest(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(0, result.returncode)
         self.assertIn("canary", result.stderr)
+
+    def test_rejects_an_external_canary_leak(self):
+        def mutate(directory, *unused):
+            with (directory / "postlaunch-files.txt").open("a") as out:
+                out.write(f"/sdcard/Android/data/{PKG}/files/bmgr-canary-{NONCE}.dat\n")
+        self.build(mutate={"api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("canary leaked", result.stderr)
+
+    def test_rejects_an_external_canary_missing_from_prebackup(self):
+        def mutate(directory, *unused):
+            path = directory / "pulls/pre/prebackup-files.txt"
+            path.write_text("\n".join(line for line in path.read_text().splitlines()
+                                      if not line.startswith("/sdcard/")) + "\n")
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("absent from the prebackup tree", result.stderr)
+
+    def test_rejects_a_played_episode_left_in_up_next(self):
+        def mutate(directory, *unused):
+            import sqlite3
+            con = sqlite3.connect(directory / "pulls/post/databases/neutrodyne.db")
+            con.execute("INSERT INTO queue_entry VALUES(2,4,'2',0)")
+            con.commit()
+            con.close()
+        self.build(mutate={"api31": mutate, "api36": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("queue order", result.stderr)
+
+    def test_rejects_a_missing_unplayed_up_next_entry(self):
+        def mutate(directory, *unused):
+            import sqlite3
+            con = sqlite3.connect(directory / "pulls/post/databases/neutrodyne.db")
+            con.execute("DELETE FROM queue_entry")
+            con.commit()
+            con.close()
+        self.build(mutate={"api31": mutate})
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("queue order", result.stderr)
 
     def _rejects_prelaunch(self, mutate, needle, device="api31"):
         self.build(mutate={device: mutate})
@@ -1503,6 +1553,84 @@ class BmgrHostScriptTest(unittest.TestCase):
         listing = ev / "pulls/databases-listing.txt"
         self.assertTrue(listing.is_file())
         self.assertIn("neutrodyne.db", listing.read_text())
+
+    def _canary_listing(self, phase, failure="", external=True):
+        """Execute the actual pre/post capture call site against a local shell device."""
+        home = self.root / f"listing-{len(list(self.root.glob('listing-*')))}"
+        home.mkdir()
+        internal, parent = home / "internal", home / "external"
+        internal.mkdir()
+        parent.mkdir()
+        for rel in ("files/backup/auto-snapshot.zip", "files/datastore/settings.preferences_pb",
+                    "files/datastore/device_settings.preferences_pb"):
+            path = internal / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"capture fixture")
+        if external:
+            path = parent / PKG / f"files/bmgr-canary-{NONCE}.dat"
+            path.parent.mkdir(parents=True)
+            path.write_text("external canary")
+        double = home / "adb"
+        double.write_text(textwrap.dedent(f"""\
+            #!{sys.executable}
+            import os, subprocess, sys
+            args = sys.argv[1:]
+            data, parent = os.environ['LIST_DATA'], os.environ['LIST_PARENT']
+            def local(value):
+                return value.replace('/data/data/{PKG}', data).replace('/sdcard/Android/data', parent)
+            if args[:2] == ['exec-out', 'cat']:
+                sys.stdout.buffer.write(open(local(args[2]), 'rb').read()); sys.exit(0)
+            assert len(args) == 2 and args[0] == 'shell', args
+            command = local(args[1])
+            # Preserve real shell/find behavior; inject a failed command after partial output.
+            failing = os.environ.get('LIST_FAILURE', '')
+            marker = data if failing == 'internal' else parent
+            if failing and marker in command and ('find ' in command or failing == 'parent'):
+                print('partial capture'); sys.exit(1)
+            result = subprocess.run(['bash', '-c', command], capture_output=True)
+            sys.stdout.buffer.write(result.stdout.replace(data.encode(), b'/data/data/{PKG}')
+                                   .replace(parent.encode(), b'/sdcard/Android/data'))
+            sys.stderr.buffer.write(result.stderr)
+            sys.exit(result.returncode)
+            """))
+        double.chmod(0o755)
+        text = self.script.read_text()
+        if phase == "pre":
+            start = text.index('    write_canaries > "$EV/canaries.txt"')
+            end = text.index('    python3 - "$EV" "$PULL_PRE"', start)
+            listing = home / "ev/pulls/pre/prebackup-files.txt"
+        else:
+            start = text.index('    PULL_POST="$EV/pulls/post"')
+            end = text.index('    pull_tree "$DATA_DIR/files"', start)
+            listing = home / "ev/postlaunch-files.txt"
+        ev = home / "ev"
+        ev.mkdir()
+        result = self._lib_driver(
+            f"ADB={double}\nEV={ev}\nNONCE={NONCE}\n" + text[start:end],
+            {"LIST_DATA": str(internal), "LIST_PARENT": str(parent), "LIST_FAILURE": failure})
+        return result, listing
+
+    def test_prebackup_listing_includes_the_external_canary(self):
+        result, listing = self._canary_listing("pre")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        paths = listing.read_text().splitlines()
+        self.assertIn(f"/sdcard/Android/data/{PKG}/files/bmgr-canary-{NONCE}.dat", paths)
+        self.assertIn(f"/data/data/{PKG}/databases/bmgr-canary-{NONCE}.db", paths)
+
+    def test_postlaunch_listing_observes_external_leaks_or_an_absent_app_directory(self):
+        for external in (True, False):
+            with self.subTest(external=external):
+                result, listing = self._canary_listing("post", external=external)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(external, f"/sdcard/Android/data/{PKG}/files/"
+                                 f"bmgr-canary-{NONCE}.dat" in listing.read_text().splitlines())
+
+    def test_canary_listing_command_errors_fail_closed(self):
+        for phase in ("pre", "post"):
+            for failure in ("internal", "external", "parent"):
+                with self.subTest(phase=phase, failure=failure):
+                    result, _ = self._canary_listing(phase, failure)
+                    self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_failed_driver_keeps_status_before_rejecting_marker(self):
         ev = self.root / "failed-driver"

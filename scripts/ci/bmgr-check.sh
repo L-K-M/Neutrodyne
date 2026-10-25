@@ -362,6 +362,17 @@ write_canaries() {  # root writes into excluded domains only — never DB/PB/sna
     printf '%s\n' "${canaries[@]}"
 }
 
+list_app_files() {  # <output>: include external canaries; failed capture is not absence
+    local output="$1" rc=0 external="/sdcard/Android/data/$PKG"
+    timeout 60 "$ADB" shell \
+        "set -e; ls -A '/sdcard/Android/data' >/dev/null; find '$DATA_DIR' -type f; \
+         if [ -d '$external' ]; then find '$external' -type f; \
+         else [ ! -e '$external' ]; fi" > "$output.raw" 2> "$output.err" || rc=$?
+    printf '%s\n' "$rc" > "$output.exit"
+    [ "$rc" -eq 0 ] || fail "file listing failed: $output (exit $rc)"
+    tr -d '\r' < "$output.raw" | sort > "$output" || fail "file listing normalization failed"
+}
+
 pb_key() {  # <local pb> <key>: value or empty — the checker's own wire parser
     python3 scripts/ci/check-first-launch-restore-results.py \
         --bmgr-pb "$1" "$2" 2>/dev/null || true
@@ -568,8 +579,7 @@ main() {
             || fail "prebackup pull miss: $rel"
         [ -s "$PULL_PRE/$rel" ] || fail "prebackup pull empty: $rel"
     done
-    timeout 60 "$ADB" shell "find '$DATA_DIR' -type f | sort" \
-        | tr -d '\r' > "$PULL_PRE/prebackup-files.txt" || true
+    list_app_files "$PULL_PRE/prebackup-files.txt"
     python3 - "$EV" "$PULL_PRE" <<'PY' || fail "expectation assembly failed"
 import json, sys
 from pathlib import Path
@@ -736,8 +746,7 @@ PY
     sleep 3   # quiesce journal writers; acceptance is the pull, not this pause
     PULL_POST="$EV/pulls/post"
     mkdir -p "$PULL_POST"
-    timeout 60 "$ADB" shell "find '$DATA_DIR' -type f | sort" \
-        | tr -d '\r' > "$EV/postlaunch-files.txt" || true
+    list_app_files "$EV/postlaunch-files.txt"
     pull_tree "$DATA_DIR/files" "$PULL_POST/files"
     pull_tree "$DATA_DIR/databases" "$PULL_POST/databases"
     pull_tree "$DATA_DIR/shared_prefs" "$PULL_POST/shared_prefs"

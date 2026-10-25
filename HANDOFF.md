@@ -337,6 +337,14 @@ contain it and copied diagnostic queries show the adopted tagged WorkSpec is
 with a nonterminal-row negative test. Empty-dataset control never ran in that
 failed attempt; a complete fresh lifecycle remains required.
 
+That next run exposed an internal-only canary inventory, omitting the planted
+external canary. Both listing call sites now capture both domains and reject
+command failures. Copied downstream diagnostics also caught a false oracle:
+the fixture requested a played item in Up next, which the documented restore
+rule correctly skips. The checker now requires the exact unplayed order and
+rejects both played entries and missing unplayed entries. Original failed
+captures stay unchanged; a complete new lifecycle/empty control is still open.
+
 ## 1. What this repository is
 
 Neutrodyne is an open-source podcast player in development. The sources of truth are:

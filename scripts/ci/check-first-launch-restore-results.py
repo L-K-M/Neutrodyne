@@ -550,12 +550,13 @@ def check_restored_db(device, directory, exp):
                 or position[1] != spec.get("posSrc", "STREAM"):
             raise ValueError(f"{device}: episode {spec['k']} position {position}")
 
-    # Queue: exactly the fixture refs, in order.
+    # A restore into the empty install skips already-played refs (05 Up next).
     queue_ids = [r[0] for r in db.execute(
         "SELECT episodeId FROM queue_entry ORDER BY orderKey")]
     inv = {v: k for k, v in id_by_key.items()}
     queue_order = [inv.get(i) for i in queue_ids]
-    if queue_order != [r["k"] for r in fixture["queue"]]:
+    expected_queue = [r["k"] for r in fixture["queue"] if want[r["k"]].get("pl") is None]
+    if queue_order != expected_queue:
         raise ValueError(f"{device}: queue order {queue_order} != fixture")
     play = db.execute(
         "SELECT currentEpisodeId, contextType, contextId FROM play_session WHERE id=0"

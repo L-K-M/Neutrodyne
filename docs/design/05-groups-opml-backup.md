@@ -2019,6 +2019,8 @@ The initialization retry window controls admission of another attempt; a command
 
 The final scheduling ledger is `no_backup/androidx.work.workdb`, the pinned WorkManager runtime's normal no-backup path. It is created after the controlled normal launch, not transported from the source installation. The adopted session must still have exactly one tagged `SUCCEEDED` WorkSpec in this captured ledger; neither a missing database nor a nonterminal row passes.
 
+Canary inventories cover both the internal app tree and its external files tree, with failed listing commands rejected. The restored queue must contain exactly the fixture's unplayed refs in order: the [Up next merge rule](#merge-and-replace-rules) skips played refs, including a played ref present in the seed archive. Both a missing unplayed entry and a retained played entry fail the gate.
+
 ```bash
 pkg=ch.lkmc.neutrodyne                     # the published release build; a local debug build is ch.lkmc.neutrodyne.debug
 adb shell bmgr enable true
