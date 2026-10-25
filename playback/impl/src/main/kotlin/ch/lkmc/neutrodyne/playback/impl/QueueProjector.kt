@@ -150,8 +150,7 @@ internal class QueueProjector(
     fun endOwnWrite(generation: Long?) {
         if (generation != null) knownGeneration = maxOf(knownGeneration, generation)
         revision++
-        val stashed = planner.endOwnWrite(generation)
-        if (stashed != null) refresh(stashed)
+        if (planner.endOwnWrite(generation) != null) refresh()
     }
 
     /** Use inside the command's begin/end bracket. Preparing does not grant autoplay. */
@@ -216,8 +215,8 @@ internal class QueueProjector(
         val pending = external
         if (pending != null && player?.mediaIds() == pending.mediaIds) {
             launchWrite { if (external === pending) finishExternalApply(matched = true) }
-        } else if (!applying && pending == null) {
-            latest?.let { refresh(it.queue) }
+        } else if (!applying && pending == null && latest != null) {
+            refresh()
         }
     }
 
@@ -248,7 +247,7 @@ internal class QueueProjector(
             planner.appliedOwnGeneration(pending.generation)
         }
         endOwnWrite(if (matched) pending.generation else null)
-        if (!matched) latest?.let { refresh(it.queue) }
+        if (!matched && latest != null) refresh()
     }
 
     private suspend fun input(snapshot: VirtualQueue): Input {
@@ -298,7 +297,7 @@ internal class QueueProjector(
                 live.mediaIds() != beforeIds ||
                 live.currentMediaItemIndex.coerceAtLeast(0) != beforeIndex
             ) {
-                latest?.let { refresh(it.queue) }
+                if (latest != null) refresh()
                 return@withLock
             }
             index.putAll(plan.entries.mapNotNull { it.media })
@@ -515,8 +514,18 @@ internal class QueueProjector(
         return null
     }
 
-    private fun refresh(snapshot: VirtualQueue) {
-        launchWrite { project(input(snapshot)) }
+    /**
+     * Re-project the freshest durable queue. A skipped emission is only a signal:
+     * its captured snapshot can be older than the write that just closed, so it is
+     * never replayed. If another own-write bracket suspends inside the read, this
+     * job's snapshot may predate it; that bracket's own close reconciles instead.
+     */
+    private fun refresh() {
+        launchWrite {
+            val before = revision
+            val snapshot = withContext(io) { sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE) }
+            if (before == revision) project(input(snapshot))
+        }
     }
 
     private fun launchWrite(block: suspend () -> Unit) {

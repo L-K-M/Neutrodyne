@@ -914,7 +914,7 @@ sequenceDiagram
   PJ->>X: diff empty or tail top-up only
 ```
 
-**Generation guard** (`QueueWindowPlanner`). `appliedGeneration` and `ownWritesInFlight` live on the player thread (main). A snapshot is applied only if `ownWritesInFlight == 0` and `snapshot.generation ≥ appliedGeneration`; otherwise it is stashed (latest wins) and re-evaluated when the write completes. UI edits of `queue_entry` and sync's Up next edits do not bump the generation, so they never look stale. A higher generation that arrives while no own write is in flight was written elsewhere (05's restores and group delete, 10's `SessionAdopter`) and is foreign (last edge case below).
+**Generation guard** (`QueueWindowPlanner`). `appliedGeneration` and `ownWritesInFlight` live on the player thread (main). A snapshot is applied only if `ownWritesInFlight == 0` and `snapshot.generation ≥ appliedGeneration`; otherwise it is stashed (latest wins). The stash is a signal only: when the write completes the adapter re-reads the durable queue and projects that, never the stashed snapshot, whose content can be older than the write's own commit. UI edits of `queue_entry` and sync's Up next edits do not bump the generation, so they never look stale. A higher generation that arrives while no own write is in flight was written elsewhere (05's restores and group delete, 10's `SessionAdopter`) and is foreign (last edge case below).
 
 **Diff (`WindowDiff`, `:playback:core`, pure Kotlin; the steps are its `WindowOp`s as the Android adapter executes them).** `have` = player `mediaId`s, `want` = window `mediaId`s.
 

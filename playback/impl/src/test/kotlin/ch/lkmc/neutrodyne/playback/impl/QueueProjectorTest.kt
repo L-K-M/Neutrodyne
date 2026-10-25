@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.app.Application
+import android.os.Looper
 import androidx.media3.common.Player
 import androidx.media3.datasource.DataSpec
 import androidx.room3.withWriteTransaction
@@ -18,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
+import ch.lkmc.neutrodyne.playback.core.PlayerWindow
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceTimeBy
@@ -31,6 +33,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.IOException
 
@@ -545,6 +548,96 @@ class QueueProjectorTest {
                         .episodeId,
                 )
                 assertEquals(3, attempts)
+            } finally {
+                f.close()
+            }
+        }
+
+    /**
+     * A snapshot planned last inside the bracket can be older than the bracket's own
+     * committed apply (the delayed-emission ordering a loaded executor produces).
+     * Closing the write must never replay that older content: the externally added
+     * item stays in the player and in the source index through the whole drain.
+     */
+    @Test fun externalAddNeverReplaysPreAddSnapshot() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(ids.take(2), 65_000)
+                awaitAdapter { f.player.ids() == ids.take(2) }
+                val preAdd = f.sessions.virtualQueue(20)
+                f.projector.beginOwnWrite()
+                f.queue.addLast(ids.takeLast(1))
+                val window = f.projector.prepareExternalEdit(f.sessions.virtualQueue(20))
+                repeat(40) {
+                    runCurrent()
+                    shadowOf(Looper.getMainLooper()).idle()
+                    Thread.sleep(3)
+                }
+                assertNull(f.planner.plan(preAdd, emptyMap(), PlayerWindow()))
+                f.player.addMediaItems(window.takeLast(1))
+                var droppedIndex = false
+                var droppedPlayer = false
+                var stable = 0
+                var iter = 0
+                while (iter++ < 2_000 && stable < 40) {
+                    runCurrent()
+                    shadowOf(Looper.getMainLooper()).idle()
+                    if (f.index[ids[2]] == null) droppedIndex = true
+                    if (f.player.ids() != ids) droppedPlayer = true
+                    stable =
+                        if (f.player.ids() == ids && f.index[ids[2]] != null) stable + 1 else 0
+                    Thread.sleep(2)
+                }
+                assertFalse("index dropped the externally added source", droppedIndex)
+                assertFalse("player dropped the externally added item", droppedPlayer)
+                assertEquals(ids, f.player.ids())
+                assertNotNull(f.index[ids[2]])
+            } finally {
+                f.close()
+            }
+        }
+
+    /**
+     * Same stale-stash shape for batched durable edits: a snapshot read between two
+     * moves is planned last in the bracket. Closing the write must project the
+     * newest durable order, never revert the player to the older mid-sequence one.
+     */
+    @Test fun batchedMovesNeverReplayMidSequenceSnapshot() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                val ids = f.seed(6)
+                f.attach()
+                f.start(ids, 1_000)
+                awaitAdapter { f.player.ids() == ids }
+                f.projector.beginOwnWrite()
+                f.queue.move(ids[3], 0)
+                val mid = f.sessions.virtualQueue(20)
+                f.queue.move(ids[4], 0)
+                repeat(40) {
+                    runCurrent()
+                    shadowOf(Looper.getMainLooper()).idle()
+                    Thread.sleep(3)
+                }
+                assertNull(f.planner.plan(mid, emptyMap(), PlayerWindow()))
+                f.projector.endOwnWrite(f.sessions.virtualQueue(20).generation)
+                val midIds = listOf(ids[0], ids[3], ids[1], ids[2], ids[4], ids[5])
+                val expected = listOf(ids[0], ids[4], ids[3], ids[1], ids[2], ids[5])
+                var reverted = false
+                var stable = 0
+                var iter = 0
+                while (iter++ < 2_000 && stable < 40) {
+                    runCurrent()
+                    shadowOf(Looper.getMainLooper()).idle()
+                    if (f.player.ids() == midIds) reverted = true
+                    stable = if (f.player.ids() == expected) stable + 1 else 0
+                    Thread.sleep(2)
+                }
+                assertFalse("player replayed a mid-sequence durable order", reverted)
+                assertEquals(expected, f.player.ids())
             } finally {
                 f.close()
             }
