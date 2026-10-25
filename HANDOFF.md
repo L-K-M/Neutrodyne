@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-20.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first two slices (P1, P2) are merged through #222 and #224; the third slice (P3, scoped playback settings) is assembled locally and awaits review (see the M4 note under §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). The M3 source is merged through #218; its remaining acceptance evidence is listed below. M4's first four slices are merged through #222, #224, #225 and #228; P5 is draft #230 pending CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,7 +141,7 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, P1 and P2 merged, P3 assembled locally
+### M4 playback, P1–P3 merged, P4 assembled locally
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
@@ -172,8 +172,8 @@ their own M4 slices. Physical-device, native, transport (`bmgr`), audible and
 release evidence is not produced by this work and remains open with the rest
 of M4's acceptance.
 
-M4 plan row P3 is assembled in draft [#225](https://github.com/L-K-M/Neutrodyne/pull/225)
-on `impl/m4-p3-scoped-settings`, net-hunked from the
+M4 plan row P3 is merged through [#225](https://github.com/L-K-M/Neutrodyne/pull/225);
+it was assembled on `impl/m4-p3-scoped-settings`, net-hunked from the
 same frozen source record `453ea570` (`599b393b` scoped settings,
 `aed7bc5e` settings UI) onto reviewed main `ff415871` (P2's merge). It adds the
 eight `playback.*` portable keys and the `PlaybackSettingKeys` registry
@@ -205,6 +205,42 @@ failed XML was not retained; no bug-regression claim depends on it. Doc validato
 report 0 problems and 0/78 invalid diagrams. Formal review, current-head CI,
 labelled instrumentation and native/device legs remain pending; receipts are
 under `build/review-m4-p3-{assembly,parent}/` and the ignored assembly/review notes.
+
+M4 plan row P4 is assembled on `impl/m4-p4-artwork-cache`, net-hunked from the
+same frozen source record `453ea570` (`dd84b337` core artwork/provider,
+`27a317ad` source index/resolver/cache/prefs subset, `85c93bb0` final prefs
+context, `f418ee50` resolver/index URI corrections) onto reviewed main
+`f1c6e9ff` (P3's merge). It adds the common `ArtworkSyncRunner` /
+`ArtworkSyncScheduler` / `ArtworkCodec` / `TinyImageInterceptor`, the Android
+codec, monogram renderer, WorkManager worker/scheduler and the exported
+read-only `ArtworkProvider` (`${applicationId}.artwork`) with a generated
+neutral fallback and no network path; the desktop work scheduler; safe-key
+`ArtworkRefMapper`/`DefaultArtworkStore` updates; the `ArtworkDao` additions
+(`syncCandidates`, `fallbackFor`, `observe`, transactional `applyBatch`,
+`garbage`, `delete`, `recountPins`, `ARTWORK_REFERENCE_COUNT`); and in
+`:playback:impl` `EnclosureFingerprint`, `EpisodeSourceIndex` (bounded
+awaited-open fallback), `EpisodeResolver` (canonical
+`neutrodyne://episode/<id>` URIs, RSS-only remote pins, YouTube/other sources
+unsupported), the lazy bounded `StreamingCache` (no index or directory until
+first need; refcounted trimming, resize and clear preserving active pins),
+and `PlaybackPrefs` gated on the first durable settings snapshot with its
+order-300 `PlaybackPrefsInitializer`. `StreamingCache` implements
+`PlaybackMaintenance` but is not bound yet — the unavailable stubs stay the
+single truthful maintenance binding per shell until P6. Required Media3
+catalog aliases and `playback:impl` dependencies travel with it; the Android graph tests assert the
+provider's deferred access and the initializer band, and the manifest test
+pins the provider's exported read-only contract. No schema change; playback
+still is unavailable on both platforms, and the service/receiver/player,
+routes, Appearance row and P5+ factories/adapters remain in their own M4
+slices. Local verification and limitations are recorded in
+`.nd-context/m4-p4-assembly-report.md` with receipts under
+`build/review-m4-p4-assembly/`; formal review, current-head CI, labelled
+instrumentation and native/device legs remain pending.
+
+Independent source review found no important issue. A parent regression exposed
+neutral PNG bytes reported as JPEG; MIME and display-name metadata now match the
+image. The unused playback `lifecycle-process` dependency is omitted. Parent
+final checks, matching-head CI and formal PR review remain publication gates.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed
@@ -247,6 +283,43 @@ encoded library and status value; actual final-head device proof remains open.
 The retained API31/36 hierarchies show that checkbox/radio state belongs to the
 checkable parent, not its text child. The driver now targets that parent; the
 next real run must verify the complete journey without relaxing its checks.
+
+### M3 bmgr driver tooling (2026-10-24)
+
+PR #229 extracts `:tools:bmgrdriver` byte-identically from the #223 black-box
+source `f89643fc`, based on main `f1c6e9ff`. This keeps #223 within
+its 225k hard cap while leaving room for real-image fixes and regressions. It is a
+self-instrumenting device-test APK in its own package/process that depends only
+on `:feeds`, has no `:app` dependency and changes no production manifest, rules, R8,
+signing, ID or schema input. Unarmed, its runner excludes the armed class before
+discovery, so the labelled `ci`/`nightly` GMD groups run only `DriverSelfTest`'s
+three codec/identity/wire cases on API 26/36. Armed with the host-pinned
+`bmgrPhase` + exact `class#method` triple on API 31/36, its seed/flip/encrypted
+phases drive the published release `ExternalImportActivity` over UiAutomator.
+Run8's armed UI phases passed on API 31/36, but overall run 40128601596 FAILED
+(API 31 host `pull_tree` stdin capture bug; an API 36 initialization-result
+discrepancy explained by an AOSP `bmgr` observer-result race)
+with retained evidence, not a pass and not
+current-head native proof. The host transport, uninstall/reinstall and final
+quiescent validation (`scripts/ci/bmgr-check.sh`, the checker, the nightly
+`bmgr` job, the positive-lifecycle docs) stay in #223 and are NOT accepted here.
+M3 acceptance 6's `bmgr` leg and P4's review state are unchanged.
+
+Driver review R1 found that the original encrypted-flag blob also had malformed
+ZIP bookkeeping, so its rejection did not isolate encryption handling. The
+negative now starts from the real codec's valid backup and changes only entry
+encryption flags. The unarmed pipeline test clears those flags, decodes the
+manifest and streams every entry with CRC checks. The UI category helper clicks
+once and waits for the requested checked state rather than re-toggling on a late
+accessibility update. These test-only corrections change the initial extraction;
+fresh CI/review and #223's actual armed journeys remain required.
+
+As of 2026-10-25, #229 is merged as `8cb9a602` after two completed reviews and all six
+current CI jobs, including the stronger paired-control test on API26/36. #223
+normally merges this reviewed component before correcting run8's host pull-loop
+stdin consumption and initialization-result race. The old encrypted UI refusal
+does not isolate encryption handling; complete new-head positive31/36 lifecycle
+proof remains open. No failed original capture is repaired or relabelled.
 
 ## 1. What this repository is
 

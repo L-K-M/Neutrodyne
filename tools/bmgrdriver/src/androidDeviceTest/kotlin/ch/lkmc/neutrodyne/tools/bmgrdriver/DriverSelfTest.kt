@@ -11,7 +11,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
 
 /**
  * The always-selected device-test lane (unarmed): exercises the driver's own fixture pipeline
@@ -59,6 +63,44 @@ class DriverSelfTest {
             throw AssertionError("encrypted ZIP read without error")
         } catch (expected: java.util.zip.ZipException) {
             // A platform reader may refuse encryption while opening the directory or entry.
+        }
+        assertReadableControl(blob)
+    }
+
+    /** A flag-only negative must become a valid backup when the encryption bits are cleared. */
+    private fun assertReadableControl(blob: File) {
+        val bytes = blob.readBytes()
+        val headers = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val end = bytes.size - 22
+        var central = headers.getInt(end + 16)
+        assertEquals(end - central, headers.getInt(end + 12))
+        repeat(headers.getShort(end + 10).toInt() and 0xFFFF) {
+            assertEquals(0x02014B50, headers.getInt(central))
+            val local = headers.getInt(central + 42)
+            assertEquals(0x04034B50, headers.getInt(local))
+            for (offset in listOf(central + 8, local + 6)) {
+                val flags = headers.getShort(offset).toInt()
+                assertEquals(1, flags and 1)
+                headers.putShort(offset, (flags and 1.inv()).toShort())
+            }
+            central += 46 + (headers.getShort(central + 28).toInt() and 0xFFFF) +
+                (headers.getShort(central + 30).toInt() and 0xFFFF) +
+                (headers.getShort(central + 32).toInt() and 0xFFFF)
+        }
+        val control = File(blob.parentFile, "selftest-plain-control.zip").apply { writeBytes(bytes) }
+        ZipFile(control).use { zip ->
+            assertEquals(5, zip.size())
+            zip.getInputStream(zip.getEntry(BackupCodec.ENTRY_MANIFEST)).use { input ->
+                assertEquals(BackupCodec.FORMAT, BackupCodec().decodeManifest(input.source().buffer()).format)
+            }
+        }
+        ZipInputStream(control.inputStream()).use { input ->
+            var entries = 0
+            while (input.nextEntry != null) {
+                input.readBytes()
+                entries++
+            }
+            assertEquals(5, entries)
         }
     }
 

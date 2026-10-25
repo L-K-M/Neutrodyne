@@ -2224,6 +2224,17 @@ Serves R5.2, R5.3, R5.4, R5.8, N6, N5. Delivered in M1 (Coil loader, `ArtworkRef
 
 ### Overview
 
+**Implementation note (2026-10-18, M4):** M4 delivers the common runner and
+Android codec, worker, provider and monogram rasters. The desktop continues
+to use Coil for in-app covers and fake-tests the common rules; its real Skia
+codec, artwork lane and OS-session rasters remain MD1. Group raster
+production and colour extraction remain M10. At the M4 contracts stage, the M3 base had no
+subscription/import/restore `pin` callers. To keep M4 artwork ownership in
+`:core:artwork`, the Android order-300 initializer observes committed changes
+to podcast, episode, download and group source tables and debounces requests
+through the same scheduler. Explicit `pin`/`unpin` remain supported hints;
+artwork-table writes themselves do not trigger this observer.
+
 ```mermaid
 flowchart LR
   subgraph SRC["Sources"]
@@ -2289,6 +2300,13 @@ interface ArtworkStore {
 
 ### ArtworkSyncWorker
 
+**Implementation note (2026-10-18, M4):** A failed refresh stays eligible after
+its backoff even while the old pinned file remains usable. On failure,
+`fetchedAt` dates the failed attempt, so monthly freshness alone must not
+suppress the retry. The common runner owns the eight-minute soft deadline
+and immediate continuation; the Android host awaits database opening before
+calling it, without a second overlapping timer that could enqueue twice.
+
 The loop is common code, `ArtworkSyncRunner.runOnce(deadline: Duration?)` in `:core:artwork`, hosted per platform. **Android:** unique work `artwork-sync` (one-time, `NetworkType.CONNECTED` + storage not low, `APPEND_OR_REPLACE`, tag `artwork`; `ArtworkSyncWorker` in `androidMain`, created by 01's `MetroWorkerFactory`) runs it with an 8-min deadline. **Desktop:** `DesktopArtworkLane` (lane `artwork` of 11's `DesktopJobRunner`, `desktopMain`) runs it with no deadline whenever the scheduler flagged work, the network is connected and the tick reaches the lane; a lane run yields after each batch so other lanes are not starved ([11 Lanes](11-desktop.md#lanes)). `ArtworkSyncScheduler.request()` (common) debounces calls for 2 s on `@ApplicationScope` and enqueues one request (Android) or sets the lane's flag (desktop), so 300 `pin` calls during an import produce one or two runs; `enqueueNow()` skips the debounce (used for the worker's own continuation, which must not be lost if the process dies within the debounce window).
 
 ```
@@ -2297,7 +2315,7 @@ runOnce(deadline):                             // Android: elapsedRealtime + 8 m
                                                // (artworkUrl, imageUrl, display title, feedKey) and its artwork row
   wanted = candidates.map { it to descriptorFor(it) }
            .filter { (c, d) -> c.row == null || c.row.localPath == null || c.row.url != d
-                               || c.row.fetchedAt < now - 30 d }          // monthly refresh of fetched art
+                               || c.row.fetchedAt < now - 30 d || c.row.lastError != null }          // monthly refresh of fetched art
            .filterNot { backoffActive(it.row?.lastError, it.row?.fetchedAt) }
            .sortedWith(nowPlaying podcast first, SUBSCRIPTION by latestEpisodeAt desc, DOWNLOAD, MONOGRAM, MOSAIC)
   for batch in wanted.chunked(8):
@@ -2345,14 +2363,25 @@ data class ArtworkColors(val key: String, val version: Int, val seedArgb: Int?, 
 
 ### ArtworkProvider
 
+**Implementation note (2026-10-18, M4):** Provider fallback publication and
+runner batch commits share the store's file lock. The provider records its
+fallback row on IO before returning the open file descriptor, instead of
+launching an asynchronous row write that could overwrite a later fetch.
+It re-reads the current row under that lock and preserves retry metadata.
+The runner opens four producers outside the lock, then re-reads rows when
+committing each batch of eight. Garbage collection holds the same lock and
+a writer transaction while rechecking references. The neutral placeholder
+is drawn from fixed Canvas geometry and cached as a PNG, without an Android
+resource or database dependency.
+
 **Android only** (`:core:artwork` `androidMain`; the desktop has no content URIs and its OS sessions read the pinned files directly, falling back to no artwork when a file is missing, [11 OS-integration failure modes](11-desktop.md#os-integration-failure-modes)). `ch.lkmc.neutrodyne.core.artwork.ArtworkProvider`, authority `${applicationId}.artwork`, exported, read-only (manifest: [01 Application element and components](01-foundation.md#application-element-and-components)). Contract for 06 and v1.x widgets:
 
 | Call | Behaviour |
 |---|---|
 | `openFile(uri, mode)` | `mode != "r"` → `SecurityException`; key = last path segment, must match `ArtworkKeys.VALID` else `FileNotFoundException`; `pinnedFile(key)` → `ParcelFileDescriptor.open(file, MODE_READ_ONLY)`; missing → fallback below. Never touches the network |
 | Fallback | `ArtworkDao.fallbackFor(key)` (02: display title and `feedKey` of the podcast that uses the key directly or through an episode), after `DatabaseOpener.awaitOpen()`, inside `runBlocking(withTimeout(2 s))` (binder thread, allowed by 01); render the podcast's monogram raster synchronously (≈ 10 ms) and write it under the **requested** key, which 02's [Artwork references](02-data-model.md#artwork-references) reference, so garbage collection keeps it: an `m-` key gets its normal `{key}.png`; a `u-` key whose fetch failed or was `TOO_SMALL` gets `{key}.fallback.png` with descriptor `nd:monogram:v1:{initials}:{hue}` and its `lastError`/`fetchedAt` untouched, so the worker's backoff is unchanged and its next successful fetch (the descriptor differs from the URL) writes `{key}.jpg`/`.png` and deletes the fallback file. The row is recorded in `@ApplicationScope`, then the file is served. `ArtworkRefMapper` ignores index entries ending in `.fallback.png`, so in-app Coil keeps trying the URL. Unknown key, `g-` key not rendered yet, or timeout → `nd-placeholder.png` (a neutral raster rendered once from a vector) |
-| `getType` | `image/jpeg` or `image/png` from the index; default `image/jpeg` |
-| `query` | for a valid key: one row with `OpenableColumns.DISPLAY_NAME` (`{key}.jpg`) and `SIZE`; otherwise null. No listing of keys |
+| `getType` | `image/jpeg` or `image/png` from the index; a valid key without metadata reports `image/png` for the neutral placeholder |
+| `query` | for a valid key: one row with `OpenableColumns.DISPLAY_NAME` (the stored filename, or `{key}.png` for the neutral placeholder) and `SIZE` (0 when unknown); otherwise null. No listing of keys |
 | `insert`, `update`, `delete`, `call` | `UnsupportedOperationException` |
 
 `onCreate` returns true without touching the graph; dependencies come lazily from 01's `ArtworkProviderGraph` (a contributed Metro graph interface looked up through `GraphHolder` in `openFile`/`query`, [01 Components and scopes](01-foundation.md#components-and-scopes)). The `?v=` query is ignored by the provider; it only busts System UI and launcher caches. Artwork is public data and keys are SHA-1 hashes, so an exported read-only provider without a permission is acceptable (System UI, Auto and launchers need to read it); it cannot write, list or traverse paths.
@@ -2866,7 +2895,7 @@ Shared screens are written once against `:core:testing` fakes and run as `runCom
 | `SpeedSheetTest` | scope options per context; `setSpeed` on release with the chosen scope; group option disabled outside a group context; attribution text | M4 |
 | `UpNextScreenTest` | drag-and-drop calls `move` once on drop; Move up/down actions call `move`; swipe remove with undo (M4 acceptance 14); "Stop after Up next"; empty-state chips | M4 |
 | `ShowNotesTest` | every block type; timestamp beyond duration is plain; tap timestamp → `seekTo` for the current episode, `playEpisodeAt` otherwise; images per `feeds.show_notes_images` and metered state | M1, M5 |
-| `ArtworkSyncRunnerTest` (MockWebServer, real Coil loader; Robolectric with `AndroidArtworkCodec` and the desktop JVM with `SkiaArtworkCodec`) | 3000 px JPEG → ≤ 1024 px JPEG q88; PNG with alpha kept; version + 1 per byte change, unchanged bytes keep the version; 404 → `lastError` + backoff; 100 px image → not pinned; monogram descriptor change re-renders; 8 rows per transaction; deadline → continuation; GC removes unreferenced keys | M4 |
+| `ArtworkSyncRunnerTest` (MockWebServer, real Coil loader; M4 Robolectric with `AndroidArtworkCodec`; MD1 desktop JVM with `SkiaArtworkCodec`) | 3000 px JPEG → ≤ 1024 px JPEG q88; PNG with alpha kept; version + 1 per byte change, unchanged bytes keep the version; 404 → `lastError` + backoff; 100 px image → not pinned; monogram descriptor change re-renders; 8 rows per transaction; deadline → continuation; GC removes unreferenced keys | M4 (Android), MD1 (Skia) |
 | `ColorExtractionTest` | colourful → seed; monochrome → null (M10 acceptance 4); near-white in dark mode → container tone ≤ 40 after `ArtworkSchemeCache`; transparent logo → average of opaque pixels | M10 |
 | `ArtworkProviderTest` (Android) | `r` ok, `w` → `SecurityException`; invalid key → `FileNotFoundException`; missing file → monogram served (an `m-` key as `{key}.png`, a failed `u-` key as `{key}.fallback.png` under the requested key, which a garbage pass keeps); MockWebServer records zero requests | M4 |
 | `YouTubeThumbnailInterceptorTest` (MockWebServer) | maxres 404 → hq720 → mq; width ≤ 320 → mq only; pinned ref → no rewrite; all variants failing → hqdefault cropped to 480 × 270 | M8 |

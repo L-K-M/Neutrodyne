@@ -41,6 +41,20 @@ class ArtworkRefMapperTest {
         assertThat(ArtworkRefMapper(store).map(ref(key), options)).isNull()
     }
 
+    @Test
+    fun `invalid stored keys bypass the pinned index`() {
+        val store = FakeArtworkStore(mapOf("../cover" to "/outside.jpg"))
+        assertThat(ArtworkRefMapper(store).map(ref("../cover"), options))
+            .isEqualTo("https://img.example/../cover.jpg")
+    }
+
+    @Test
+    fun `preview url keys remain fetchable before subscription`() {
+        val url = "https://img.example/preview.jpg"
+        val preview = ArtworkRef(key = url, url = url, version = 0)
+        assertThat(ArtworkRefMapper(FakeArtworkStore(emptyMap())).map(preview, options)).isEqualTo(url)
+    }
+
     private fun ref(key: String) = ArtworkRef(key = key, url = "https://img.example/$key.jpg", version = 2)
 
     private class FakeArtworkStore(
