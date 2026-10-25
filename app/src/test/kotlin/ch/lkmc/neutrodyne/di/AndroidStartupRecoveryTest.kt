@@ -82,7 +82,8 @@ class AndroidStartupRecoveryTest {
             }
             pumpUntil { initializers.isCompleted }
             assertIs<DatabaseOpenState.Opened>(graph.databaseOpener.openState.value)
-            assertEquals(1 to 1, periodicWork().size to (lifecycle.observerCount - observersBefore))
+            // Refresh and the lazy player connection each install one process observer.
+            assertEquals(1 to 2, periodicWork().size to (lifecycle.observerCount - observersBefore))
             val work = periodicWork().single()
 
             // The gate and concurrent open callers only reopen the gate, never rerun bands.
@@ -92,7 +93,7 @@ class AndroidStartupRecoveryTest {
             }
             pumpFor(100)
             assertEquals(work.id, periodicWork().single().id)
-            assertEquals(observersBefore + 1, lifecycle.observerCount)
+            assertEquals(observersBefore + 2, lifecycle.observerCount)
             assertEquals(
                 POST_OPEN_INITIALIZERS.map { it to graph.databaseOpener.openState.value },
                 postOpenRuns,

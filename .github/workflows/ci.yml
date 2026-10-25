@@ -102,6 +102,7 @@ jobs:
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
+          python3 scripts/ci/tests/assert-playback-tests.test.py
 
   unit:
     runs-on: ubuntu-24.04
@@ -228,6 +229,8 @@ jobs:
       - name: GMD ci group (debug)
         timeout-minutes: 45
         run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest ciGroupAndroidDeviceTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+      - name: Require playback cases on both CI devices
+        run: python3 scripts/ci/assert-playback-tests.py ci app/build/outputs/androidTest-results --device api26 --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # Always upload, not only on failure: instrumented-device proofs on reviewable PRs are
         # verified from the per-device result XML, which only exists if success uploads too.

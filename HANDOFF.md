@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first four slices are merged through #222, #224, #225 and #228; P5's sources and Media3 adapters are in draft #230 pending latest-main CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle slice is assembled locally on `impl/m4-p6-android-service` pending parent publication, current-head CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,7 +141,7 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, P1–P4 merged, P5 draft
+### M4 playback, P1–P5 merged, P6 assembled locally
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
@@ -280,6 +280,42 @@ counterexamples still fail against the pre-fence baseline. The `5fd58109` CI
 and named API26/36 app/driver cases pass. This latest-main integration still
 requires matching-head CI and its own formal review. Service/UI/device/native
 acceptance is not inherited from the prototype's later-slice results.
+
+M4 plan row P6 was assembled locally on `impl/m4-p6-android-service`, net-hunked
+from the same frozen source record `453ea570` (`85c93bb0` Android
+service/session/controller/lifecycle, `f418ee50` service/session fixes,
+`c29dabc3` device-evidence gates, and only the `aed7bc5e` Playback
+settings-route activation) onto fresh main `9cf58b7b` (post-P5 merge). It
+replaces the truthful-unavailable `AndroidPlaybackStub` with the real
+`PlaybackControllerImpl`/`PlaybackStateHub`/`StreamingCache` bindings and
+`AndroidLocalMediaBindings` (the approved empty `LocalMediaIndex`), adds
+`NeutrodynePlaybackService` (MediaLibraryService + one ExoPlayer +
+MediaLibrarySession), `PlaybackServiceAccess` (deferred `Provider` ports behind
+`DatabaseOpener.awaitOpen()`), `SessionPlayer` (deferred listener ordering
+after tracker/projector/applier), `SessionCallback`, `MediaLibraryTree`,
+`MediaButtons`, `CustomCommands`, `MeteredStreamingGate`,
+`EndOfItemPauseArbiter`, `ResumptionProvider`, `TapToResumeNotifier`,
+`PlaybackChannels`, `PlayerConnection` (order-300 process observer), the
+`PlaybackBeforeUnsubscribe` seam + fake + `UnsubscribeUseCase` pause hook, the
+manifest/permission additions, and the app-hosted `PlaybackServiceTest` with
+`assert-playback-tests.py` selection/enforcement gates on the CI `ci`, nightly
+`nightly`/`api37` and `release` legs. The Playback settings row/route now
+activates against the real maintenance binding; P7 queue UI, P8 full
+player/root composition and the Appearance mini-player control stay out; the
+desktop binding stays truthfully unavailable. Local host checks pass:
+`:playback:impl` 120 unit tests (session/player, resumption, controller, hub,
+connection, gate, tree, notifier, commands), `:app` 151 (graph bindings +
+service-injection pending-open + two process observers), settings desktopTest
+35 incl. the restored home-row navigation test, core domain/testing/data and
+playback core/api aggregates green; debug/test/release APKs, lint, dependency/
+manifest/schema/brand/banned-API guards and the three published-APK checks
+pass; doc validators 0/14 and 0/78. Receipts: `build/review-m4-p6-assembly/`,
+report `.nd-context/m4-p6-assembly-report.md`. No schema change; no
+device/native/runtime evidence is produced by this assembly — exact-SHA
+labelled API26/36 CI, the nightly API26/33/34/36 legs including the real
+>=1800 s screen-off case, API37/16 KiB hardening, optimized release smoke and
+the physical headset/call/focus/silence/artwork/Auto/TalkBack checks remain
+parent gates with the rest of M4's acceptance.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed

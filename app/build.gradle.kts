@@ -57,6 +57,9 @@ android {
             buildConfigField("String", "ACRA_MAILTO", "\"\"") // ACRA off in debug builds (D62)
         }
     }
+    // Playback framework tests need the real Application graph, manifest and release resources.
+    sourceSets["androidTest"].kotlin.srcDir("../playback/impl/src/androidTest/appHost/kotlin")
+    sourceSets["androidTest"].assets.srcDir("../playback/impl/src/test/resources")
     // Corpus leg c (03 Testing): the shared fixture/golden tree reaches the device through the
     // test APK's assets under `feeds/`; the production APK's source sets stay untouched.
     sourceSets["androidTest"].assets.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
@@ -147,6 +150,12 @@ dependencies {
     debugImplementation(libs.cmp.material3)
     debugImplementation(libs.lifecycle.viewmodel.compose)
 
+    androidTestImplementation(libs.androidx.media3.common)
+    androidTestImplementation(libs.androidx.media3.session)
+    androidTestImplementation(libs.kotlinx.coroutines.guava)
+    androidTestImplementation(platform(libs.okhttp.bom))
+    androidTestImplementation(libs.okhttp.mockwebserver3)
+    androidTestImplementation(libs.androidx.test.uiautomator)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4.accessibility)
     androidTestImplementation(libs.androidx.test.espresso.core)
@@ -171,6 +180,7 @@ dependencies {
     testImplementation(libs.androidx.test.runner)
     // Startup recovery verifies the real periodic work against WorkManager's host backend.
     testImplementation(libs.androidx.work.testing)
+    testImplementation(libs.androidx.media3.session)
     testImplementation(project(":feeds:jvm"))
     testImplementation(libs.kotlinx.serialization.json)
 }
