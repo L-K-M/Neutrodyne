@@ -247,6 +247,7 @@ internal class AndroidServiceBridge(
                     } else {
                         projector.applyStart(outcome)
                     }
+                    boundaryPaused = false
                     serviceIssue = null
                     PlayResult.Started
                 }

@@ -149,6 +149,42 @@ class ResumptionTest {
     }
 
     @Test
+    fun aCommittedStartClearsTheBoundaryPauseOfThePreviousTimeline() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            h.seedCurrent()
+            h.local.files[1] = "file:///synthetic-one.mp3"
+            h.lookup.items.value += 2L to media(id = 2)
+            h.lookup.items.value += 3L to media(id = 3)
+            h.local.files[3] = "file:///synthetic-three.mp3"
+            h.publish(h.store.queue.copy(upNext = listOf(QueueItem(2, QueueOrigin.UP_NEXT))))
+            h.network.setStatus(
+                FakeNetworkMonitor.ONLINE
+                    .copy(isMetered = true),
+            )
+            h.run {
+                h.settings.set(
+                    PlaybackSettingKeys.STREAM_ON_METERED,
+                    StreamOnMetered.ASK,
+                )
+            }
+            val player = h.playerFactory.create()
+            val bridge = AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {})
+            bridge.attach()
+            try {
+                pumpUntil { player.mediaItemCount == 2 }
+                bridge.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+                // Episode 3 is downloaded; the stale pause must not gate it on the old next item.
+                assertEquals(PlayResult.Started, h.run { bridge.start(StartRequest.Episode(3), StartOrigin.UI) })
+                pumpUntil { player.episodeIdOrNull() == 3L }
+                assertTrue(h.run { bridge.beforePlay(StartOrigin.UI) })
+            } finally {
+                bridge.detach()
+                player.release()
+            }
+        }
+    }
+
+    @Test
     fun stopStillStopsPlaybackAndTheServiceWhenThePositionSaveFails() {
         LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
             h.seedCurrent()
