@@ -9,6 +9,27 @@ import org.gradle.kotlin.dsl.register
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
+/**
+ * Licence-file glob excludes for the fat JAR's repacked dependency jars, in every spelling upstream
+ * artifacts use: META-INF names upper- and lowercase, lowercase META-INF licence directories, and
+ * jar-root files. [ThirdPartyNoticesTask] keeps each jar's real copy instead.
+ */
+internal val FAT_JAR_LICENCE_EXCLUDES =
+    arrayOf(
+        "META-INF/LICENSE*",
+        "META-INF/NOTICE*",
+        "META-INF/COPYING*",
+        "META-INF/license*",
+        "META-INF/notice*",
+        "META-INF/copying*",
+        "META-INF/license/**",
+        "META-INF/notice/**",
+        "META-INF/copying/**",
+        "LICENSE*",
+        "NOTICE*",
+        "COPYING*",
+    )
+
 /** The sync server `:sync:server`: Kotlin/JVM 21, `application`, one fat JAR, no Metro (01, 10 Deployment). */
 class ServerApplicationConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) =
@@ -45,7 +66,7 @@ class ServerApplicationConventionPlugin : Plugin<Project> {
                     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/INDEX.LIST")
                     // Same-named licence files would collide (first one wins); the notices task
                     // keeps every jar's copy under META-INF/licenses/<group>/<artifact>/.
-                    exclude("META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/COPYING*")
+                    exclude(*FAT_JAR_LICENCE_EXCLUDES)
                 }
                 from(notices)
             }
