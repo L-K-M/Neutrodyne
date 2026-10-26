@@ -639,6 +639,8 @@ def fetch_coordinate(group: str, artifact: str, version: str, sources: list[str]
             except urllib.error.HTTPError as error:
                 if error.code == 404:
                     continue
+                if error.code == 429 or error.code >= 500:
+                    continue  # mirror flaking — the next --fetch-from may still have it
                 raise InputError(f"{base}: {rel}/{name}: HTTP {error.code}") from error
             except urllib.error.URLError as error:
                 raise InputError(f"{base}: {rel}/{name}: {error.reason}") from error
