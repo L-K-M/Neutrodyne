@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Unlicense
 """Fixture checks for fetch_coordinate: mirror fall-through and the fetch cache."""
+from contextlib import redirect_stderr, redirect_stdout
+from http import HTTPStatus
 import importlib.util
 import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -28,16 +31,17 @@ class FetchCoordinateTest(unittest.TestCase):
         self.requests = []
 
     def fetch(self, payloads, dest):
-        """Run fetch_coordinate with a fake urlopen; payloads maps url -> bytes
-        or an int HTTP status to fail with (unlisted urls answer 404)."""
+        """Map URLs to bytes, responses or errors; unlisted URLs answer 404."""
         def opener(url, timeout=None):
             self.requests.append(url)
             result = payloads.get(url)
             if result is None:
-                raise urllib.error.HTTPError(url, 404, "missing", {}, None)
+                raise urllib.error.HTTPError(url, HTTPStatus.NOT_FOUND, "missing", {}, None)
             if isinstance(result, int):
                 raise urllib.error.HTTPError(url, result, "error", {}, None)
-            return io.BytesIO(result)
+            if isinstance(result, Exception):
+                raise result
+            return io.BytesIO(result) if isinstance(result, bytes) else result
         with mock.patch.object(android_notices.urllib.request, "urlopen", opener):
             android_notices.fetch_coordinate("org.example", ARTIFACT, VERSION, MIRRORS, dest)
 
@@ -57,6 +61,73 @@ class FetchCoordinateTest(unittest.TestCase):
                 payloads[self.url("m2", f"{ARTIFACT}-{VERSION}.aar")] = b"aar"
                 self.fetch(payloads, dest)
                 self.assertTrue(dest.joinpath(REL, f"{ARTIFACT}-{VERSION}.aar").is_file())
+
+    def test_network_failure_tries_the_next_mirror(self):
+        failures = (urllib.error.URLError("unreachable"), TimeoutError("connect timed out"),
+                    ConnectionResetError("connection reset"))
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                dest = self.dest_for(type(failure).__name__)
+                payloads = {self.url("m1", name): failure for name in NAMES}
+                payloads[self.url("m2", f"{ARTIFACT}-{VERSION}.jar")] = b"jar"
+                self.fetch(payloads, dest)
+                self.assertTrue(dest.joinpath(REL, f"{ARTIFACT}-{VERSION}.jar").is_file())
+
+    def test_read_timeout_tries_the_next_mirror(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.side_effect = TimeoutError("read timed out")
+        dest = self.dest_for("read-timeout")
+        self.fetch(
+            {
+                self.url("m1", f"{ARTIFACT}-{VERSION}.jar"): response,
+                self.url("m2", f"{ARTIFACT}-{VERSION}.jar"): b"jar",
+            },
+            dest,
+        )
+        self.assertEqual(b"jar", dest.joinpath(REL, f"{ARTIFACT}-{VERSION}.jar").read_bytes())
+
+    def test_exhausted_runtime_mirrors_raise(self):
+        failures = (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.SERVICE_UNAVAILABLE,
+                    urllib.error.URLError("unreachable"), TimeoutError("timed out"))
+        for index, failure in enumerate(failures):
+            with self.subTest(failure=failure):
+                dest = self.dest_for(f"exhausted-{index}")
+                payloads = {self.url(base, f"{ARTIFACT}-{VERSION}.jar"): failure
+                            for base in MIRRORS}
+                with self.assertRaises(android_notices.InputError):
+                    self.fetch(payloads, dest)
+
+    def test_metadata_only_skip_requires_conclusive_mirror_responses(self):
+        # KMP roots can declare packaging=pom while code lives behind redirects.
+        # A mirror outage must not turn their missing runtime files into a clean scan.
+        repo = self.root / "repo"
+        pom = repo / REL / f"{ARTIFACT}-{VERSION}.pom"
+        pom.parent.mkdir(parents=True)
+        pom.write_text("<project><packaging>pom</packaging></project>")
+        definitions = self.root / "definitions.json"
+        definitions.write_text(json.dumps({
+            "libraries": [{"uniqueId": "org.example:lib", "artifactVersion": VERSION,
+                           "name": ARTIFACT, "licenses": []}],
+            "licenses": {},
+        }))
+        for status in (HTTPStatus.NOT_FOUND, HTTPStatus.TOO_MANY_REQUESTS,
+                       HTTPStatus.SERVICE_UNAVAILABLE):
+            with self.subTest(status=status):
+                def unavailable(url, timeout=None):
+                    raise urllib.error.HTTPError(url, status, "error", {}, None)
+
+                errors = io.StringIO()
+                with mock.patch.object(android_notices.urllib.request, "urlopen", unavailable), \
+                        redirect_stdout(io.StringIO()), redirect_stderr(errors):
+                    result = android_notices.main([
+                        "scan", str(definitions), "--quiet",
+                        "--gradle-home", str(self.root / "empty-gradle"),
+                        "--maven-repo", str(repo), "--fetch-from", "m1",
+                    ])
+                self.assertEqual(0 if status == HTTPStatus.NOT_FOUND else 2, result)
+                if status != HTTPStatus.NOT_FOUND:
+                    self.assertIn("org.example:lib:1.0", errors.getvalue())
 
     def test_other_http_errors_still_raise(self):
         dest = self.dest_for("forbidden")

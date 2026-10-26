@@ -40,6 +40,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import zipfile
+from http import HTTPStatus
 from pathlib import Path
 
 try:
@@ -625,6 +626,7 @@ def fetch_coordinate(group: str, artifact: str, version: str, sources: list[str]
     CI Gradle caches (e.g. setup-gradle) may restore the dependency metadata
     without the jars and aars the build no longer needed to download."""
     rel = "/".join([*group.split("."), artifact, version])
+    last_failure = None
     for base in sources:
         for name in (f"{artifact}-{version}.module", f"{artifact}-{version}.pom",
                      f"{artifact}-{version}.aar", f"{artifact}-{version}.jar"):
@@ -635,18 +637,23 @@ def fetch_coordinate(group: str, artifact: str, version: str, sources: list[str]
                 with urllib.request.urlopen(f"{base.rstrip('/')}/{rel}/{name}", timeout=60) as response:
                     data = response.read()
             except urllib.error.HTTPError as error:
-                if error.code == 404:
+                if error.code == HTTPStatus.NOT_FOUND:
                     continue
-                if error.code == 429 or error.code >= 500:
-                    continue  # mirror flaking — the next --fetch-from may still have it
+                if error.code == HTTPStatus.TOO_MANY_REQUESTS or error.code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+                    last_failure = f"{base}: {rel}/{name}: HTTP {error.code}"
+                    continue
                 raise InputError(f"{base}: {rel}/{name}: HTTP {error.code}") from error
-            except urllib.error.URLError as error:
-                raise InputError(f"{base}: {rel}/{name}: {error.reason}") from error
+            except OSError as error:
+                last_failure = f"{base}: {rel}/{name}: {error}"
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
         if any(dest.joinpath(rel, f"{artifact}-{version}.{ext}").is_file()
                for ext in ("aar", "jar")):
             return
+    # Failed requests cannot prove a KMP root has no runtime code behind its POM.
+    if last_failure is not None:
+        raise InputError(f"{group}:{artifact}:{version}: no mirror served a runtime file; {last_failure}")
 
 
 def resolve_files(group: str, artifact: str, version: str, cache: Path, repos: list[Path]) -> tuple[list[Path], bool]:

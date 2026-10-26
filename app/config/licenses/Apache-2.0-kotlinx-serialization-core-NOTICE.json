@@ -4,5 +4,5 @@
   "spdxId": "Apache-2.0",
   "name": "kotlinx.serialization NOTICE",
   "url": "https://github.com/Kotlin/kotlinx.serialization/blob/v1.11.0/license/NOTICE.txt",
-  "content": "NOTICE file of kotlinx.serialization:\n\n=========================================================================\n   ==  NOTICE file corresponding to the section 4 d of                    ==\n   ==  the Apache License, Version 2.0,                                   ==\n   ==  in this case for the kotlinx.serialization library.                 ==\n   =========================================================================\n\n   kotlinx.serialization library.\n   Copyright 2017-2019 JetBrains s.r.o and respective authors and developers\n"
+  "content": "NOTICE file of kotlinx.serialization:\n\n=========================================================================\n   ==  NOTICE file corresponding to the section 4 d of                    ==\n   ==  the Apache License, Version 2.0,                                   ==\n   ==  in this case for the kotlix.serialization library.                 ==\n   =========================================================================\n\n   kotlinx.serialization library.\n   Copyright 2017-2019 JetBrains s.r.o and respective authors and developers\n"
 }
