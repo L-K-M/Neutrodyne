@@ -272,10 +272,8 @@ class PlaybackServiceTest {
             scenario = ActivityScenario.launch(MainActivity::class.java)
             val restored = withContext(Dispatchers.Main) { connect() }
             await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 } }
-            withContext(Dispatchers.Main) {
-                assertFalse(restored.playWhenReady)
-                assertTrue(restored.currentPosition >= 9_000)
-            }
+            withContext(Dispatchers.Main) { assertFalse(restored.playWhenReady) }
+            await { withContext(Dispatchers.Main) { restored.currentPosition >= 9_000 } }
         }
 
     // deniedBackgroundStartOffersWorkingResume moved to the external bgstart lane: an
@@ -287,8 +285,8 @@ class PlaybackServiceTest {
     fun hardeningUiNotificationAndColdMediaKeyStarts() =
         runCase {
             phase("hardening/start")
-            device.executeShellCommand("cmd audio set-enable-hardening throw")
             hardening = true
+            device.executeShellCommand("cmd audio set-enable-hardening throw")
             device.executeShellCommand("logcat -c")
             seed()
             graph.queueRepository().addLast(ids)
@@ -328,7 +326,6 @@ class PlaybackServiceTest {
             backgroundHost()
             device.sleep()
             val started = SystemClock.elapsedRealtime()
-            var advanced = false
             while (SystemClock.elapsedRealtime() - started < THIRTY_MINUTES_MS) {
                 delay(15_000)
                 assertFalse(device.isScreenOn)
@@ -342,14 +339,14 @@ class PlaybackServiceTest {
                     "elapsed=${SystemClock.elapsedRealtime() - started} pid=$pid " +
                         "episode=${nowId()} position=${snapshotPosition()} foreground=true",
                 )
-                advanced = advanced || nowId() == ids[1]
                 assertEquals(
                     StreamKind.STREAM,
                     graph.playbackStateSource.nowPlaying.value
                         ?.stream,
                 )
             }
-            assertTrue("the first real HTTP stream must automatically advance to the second", advanced)
+            // The last 15s poll can fire just before the transition; judge the settled state.
+            await { nowId() == ids[1] }
             assertTrue(server.requestCount >= 2)
         }
 
@@ -366,7 +363,7 @@ class PlaybackServiceTest {
                         request.headers["Range"]
                             ?.substringAfter("bytes=")
                             ?.substringBefore('-')
-                            ?.toInt() ?: 0
+                            ?.toIntOrNull() ?: 0
                     if (offset >= body.size) return MockResponse(code = 416)
                     return MockResponse
                         .Builder()
@@ -469,8 +466,15 @@ class PlaybackServiceTest {
         }
 
     private suspend fun awaitNotification(id: Int): Notification {
-        await { notifications.activeNotifications.any { it.id == id } }
-        return notifications.activeNotifications.single { it.id == id }.notification
+        var notification: Notification? = null
+        await {
+            notification =
+                notifications.activeNotifications
+                    .firstOrNull { it.id == id }
+                    ?.notification
+            notification != null
+        }
+        return checkNotNull(notification)
     }
 
     private suspend fun backgroundHost() {
