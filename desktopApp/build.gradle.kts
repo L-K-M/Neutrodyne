@@ -28,6 +28,36 @@ aboutLibraries {
     }
 }
 
+// 01 embedded-native inventory: each runtime JAR that ships native libraries needs the notice
+// entries of the third-party code those libraries link (config/libraries, tag bundled). Every
+// desktop runner resolves its own Skiko runtime JAR; CI's static job checks the Linux one.
+tasks.register<CheckEmbeddedNativesTask>("checkEmbeddedNatives") {
+    dependsOn("exportLibraryDefinitions")
+    definitions.set(layout.buildDirectory.file("generated/aboutLibraries/aboutlibraries.json"))
+    wireExternalArtifacts(artifactFiles, coordinatesByFileName)
+    // libskiko-<os>-<arch>: Skia m150 and the libraries its build links (Skiko 0.150.1)
+    rules.put(
+        "org.jetbrains.skiko:skiko-awt-runtime-*",
+        listOf(
+            "neutrodyne:skia",
+            "neutrodyne:skiko-freetype",
+            "neutrodyne:skiko-libpng",
+            "neutrodyne:skiko-libjpeg-turbo",
+            "neutrodyne:skiko-harfbuzz",
+            "neutrodyne:skiko-icu",
+            "neutrodyne:skiko-libwebp",
+            "neutrodyne:skiko-expat",
+            "neutrodyne:skiko-zlib",
+            "neutrodyne:skiko-wuffs",
+            "neutrodyne:skiko-vulkan-memory-allocator",
+        ),
+    )
+    // libjnidispatch links libffi statically
+    rules.put("net.java.dev.jna:jna", listOf("neutrodyne:jna-libffi"))
+    // the JNI library compiles in SQLite (public domain), covered by the AndroidX entry
+    rules.put("androidx.sqlite:sqlite-bundled*", listOf("androidx.sqlite:sqlite-bundled"))
+}
+
 val youtubeEngine =
     providers
         .gradleProperty("neutrodyne.youtubeEngine")

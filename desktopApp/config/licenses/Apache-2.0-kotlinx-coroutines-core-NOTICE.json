@@ -1,0 +1,8 @@
+{
+  "_comment": "kotlinx.coroutines 1.11.0 license/NOTICE.txt (Apache-2.0 4(d)); the published jars omit it",
+  "hash": "Apache-2.0-kotlinx-coroutines-core-NOTICE",
+  "spdxId": "Apache-2.0",
+  "name": "kotlinx.coroutines NOTICE",
+  "url": "https://github.com/Kotlin/kotlinx.coroutines/blob/1.11.0/license/NOTICE.txt",
+  "content": "NOTICE file of kotlinx.coroutines:\n\n=========================================================================\n==  NOTICE file corresponding to the section 4 d of                    ==\n==  the Apache License, Version 2.0,                                   ==\n==  in this case for the kotlinx.coroutines library.                   ==\n=========================================================================\n\nkotlinx.coroutines library.\nCopyright 2016-2025 JetBrains s.r.o and contributors\n"
+}

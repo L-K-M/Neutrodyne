@@ -1,0 +1,13 @@
+{
+  "_comment": "libpng LICENSE at d5515b5b (Skia DEPS at 1f14f1166a847cb0e148f981600bf1e3e6ca6e46)",
+  "uniqueId": "neutrodyne:skiko-libpng",
+  "licenses": [
+    "libpng-2.0-skiko-libpng"
+  ],
+  "name": "libpng (in Skiko)",
+  "artifactVersion": "1.6.56",
+  "website": "https://skia.googlesource.com/third_party/libpng/+/d5515b5b8be3901aac04e5bd8bd5c89f287bcd33",
+  "description": "Statically linked into Skiko's native library (libskiko-<os>-<arch> in org.jetbrains.skiko:skiko-awt-runtime-*, Skiko 0.150.1) by its Skia build m150-1f14f1166a.",
+  "developers": [],
+  "tag": "bundled"
+}

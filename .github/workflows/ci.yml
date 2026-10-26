@@ -91,6 +91,7 @@ jobs:
           checkBannedApis checkBrandAssets :youtube:ytdlp:checkPythonLicences
           :youtube:ytdlp-desktop:checkPythonLicences
           :youtube:ytdlp:verifyBundledYtDlp :youtube:ytdlp-desktop:verifyBundledYtDlp
+          :desktopApp:checkEmbeddedNatives
           --continue
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh

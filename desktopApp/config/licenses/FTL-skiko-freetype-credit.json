@@ -1,0 +1,8 @@
+{
+  "_comment": "The FTL's credit line, with the year of FreeType 2.14.2 (include/freetype/freetype.h: 1996-2026)",
+  "hash": "FTL-skiko-freetype-credit",
+  "spdxId": "FTL",
+  "name": "FreeType credit",
+  "url": "https://freetype.org/license.html",
+  "content": "Portions of this software are copyright © 2026 The FreeType Project (www.freetype.org). All rights reserved.\n"
+}

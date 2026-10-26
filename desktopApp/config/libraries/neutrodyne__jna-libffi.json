@@ -1,0 +1,13 @@
+{
+  "_comment": "java-native-access/jna tag 5.19.1, native/libffi/LICENSE",
+  "uniqueId": "neutrodyne:jna-libffi",
+  "licenses": [
+    "MIT-jna-libffi"
+  ],
+  "name": "libffi (in JNA)",
+  "artifactVersion": "5.19.1",
+  "website": "https://github.com/java-native-access/jna/tree/5.19.1/native/libffi",
+  "description": "Statically linked into JNA's libjnidispatch, the native part of net.java.dev.jna:jna 5.19.1.",
+  "developers": [],
+  "tag": "bundled"
+}

@@ -1,0 +1,13 @@
+{
+  "_comment": "libwebp COPYING at 845d5476 (Skia DEPS at 1f14f1166a847cb0e148f981600bf1e3e6ca6e46)",
+  "uniqueId": "neutrodyne:skiko-libwebp",
+  "licenses": [
+    "BSD-3-Clause-skiko-libwebp"
+  ],
+  "name": "libwebp (in Skiko)",
+  "artifactVersion": "1.4.0+845d5476",
+  "website": "https://chromium.googlesource.com/webm/libwebp/+/845d5476a866141ba35ac133f856fa62f0b7445f",
+  "description": "Statically linked into Skiko's native library (libskiko-<os>-<arch> in org.jetbrains.skiko:skiko-awt-runtime-*, Skiko 0.150.1) by its Skia build m150-1f14f1166a.",
+  "developers": [],
+  "tag": "bundled"
+}

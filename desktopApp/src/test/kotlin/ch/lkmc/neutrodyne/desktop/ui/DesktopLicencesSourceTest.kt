@@ -33,4 +33,62 @@ class DesktopLicencesSourceTest {
             assertThat(licence.licenseContent).contains("CLASSPATH EXCEPTION, Version 2.0")
             assertThat(licence.licenseContent).contains("GCC RUNTIME LIBRARY EXCEPTION")
         }
+
+    /**
+     * Every desktop entry resolves to licence text, MIT/BSD-style families carry the component's
+     * own text with its copyright line instead of only the SPDX template, and bundled entries (the
+     * libraries Skiko and JNA link statically) carry a version (01 AboutLibraries).
+     */
+    @Test
+    fun `every library carries its own licence texts`() =
+        runBlocking<Unit> {
+            val libs = DesktopLicencesSource().load()!!
+
+            val withoutText =
+                libs.libraries.flatMap { lib ->
+                    if (lib.licenses.isEmpty()) {
+                        listOf("${lib.uniqueId} -> no licence")
+                    } else {
+                        lib.licenses
+                            .filter {
+                                it.licenseContent.isNullOrBlank()
+                            }.map { "${lib.uniqueId} -> ${it.hash}" }
+                    }
+                }
+            assertThat(withoutText).isEmpty()
+
+            val templateOnly =
+                libs.libraries.flatMap { lib ->
+                    lib.licenses
+                        .groupBy { it.spdxId ?: it.hash }
+                        .filter { (family, texts) ->
+                            family in COPYRIGHT_FAMILIES &&
+                                texts.all { text -> PLACEHOLDERS.any { text.licenseContent.orEmpty().contains(it) } }
+                        }.keys
+                        .map { "${lib.uniqueId} -> $it" }
+                }
+            assertThat(templateOnly).isEmpty()
+
+            val bundledWithoutVersion =
+                libs.libraries.filter { it.tag == "bundled" && it.artifactVersion.isNullOrBlank() }.map { it.uniqueId }
+            assertThat(bundledWithoutVersion).isEmpty()
+            assertThat(libs.libraries.map { it.uniqueId }).containsAtLeast("neutrodyne:skia", "neutrodyne:jna-libffi")
+        }
+
+    private companion object {
+        /** Licences whose binary redistribution needs the component's own copyright notice. */
+        val COPYRIGHT_FAMILIES =
+            setOf(
+                "MIT",
+                "MIT-Modern-Variant",
+                "ISC",
+                "BSD-2-Clause",
+                "BSD-3-Clause",
+                "IJG",
+                "libpng-2.0",
+                "FTL",
+                "Unicode-3.0",
+            )
+        val PLACEHOLDERS = listOf("<copyright holders>", "<year>", "<owner>")
+    }
 }

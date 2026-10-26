@@ -1,0 +1,13 @@
+{
+  "_comment": "Chromium zlib LICENSE at 646b7f56 (Skia DEPS at 1f14f1166a847cb0e148f981600bf1e3e6ca6e46)",
+  "uniqueId": "neutrodyne:skiko-zlib",
+  "licenses": [
+    "Zlib-skiko-zlib"
+  ],
+  "name": "zlib (in Skiko)",
+  "artifactVersion": "1.3.0.1-motley",
+  "website": "https://chromium.googlesource.com/chromium/src/third_party/zlib/+/646b7f569718921d7d4b5b8e22572ff6c76f2596",
+  "description": "Statically linked into Skiko's native library (libskiko-<os>-<arch> in org.jetbrains.skiko:skiko-awt-runtime-*, Skiko 0.150.1) by its Skia build m150-1f14f1166a.",
+  "developers": [],
+  "tag": "bundled"
+}

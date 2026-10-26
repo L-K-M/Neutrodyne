@@ -1,0 +1,7 @@
+{
+  "_comment": "jna-platform 5.19.1: same dual licence as jna (LGPL-2.1-or-later OR Apache-2.0, used under Apache-2.0); the LGPL text is jna's META-INF/LGPL2.1",
+  "uniqueId": "net.java.dev.jna:jna-platform",
+  "licenses": [
+    "LGPL-2.1-or-later"
+  ]
+}

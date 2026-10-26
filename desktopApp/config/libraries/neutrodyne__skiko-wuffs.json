@@ -1,0 +1,13 @@
+{
+  "_comment": "Wuffs at e3f919cc (Skia DEPS at 1f14f1166a847cb0e148f981600bf1e3e6ca6e46); its LICENSE is the plain Apache-2.0 text",
+  "uniqueId": "neutrodyne:skiko-wuffs",
+  "licenses": [
+    "Apache-2.0"
+  ],
+  "name": "Wuffs (in Skiko)",
+  "artifactVersion": "e3f919cc",
+  "website": "https://skia.googlesource.com/external/github.com/google/wuffs-mirror-release-c/+/e3f919ccfe3ef542cfc983a82146070258fb57f8",
+  "description": "Statically linked into Skiko's native library (libskiko-<os>-<arch> in org.jetbrains.skiko:skiko-awt-runtime-*, Skiko 0.150.1) by its Skia build m150-1f14f1166a.",
+  "developers": [],
+  "tag": "bundled"
+}
