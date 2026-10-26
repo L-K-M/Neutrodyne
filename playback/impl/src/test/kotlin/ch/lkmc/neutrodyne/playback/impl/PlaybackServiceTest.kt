@@ -14,6 +14,7 @@ import androidx.media3.session.SessionToken
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CompletableDeferred
@@ -199,6 +200,53 @@ class PlaybackServiceTest {
                 }
                 runBlocking { dismissed.await() }
                 assertNull(h.store.queue.current)
+            } finally {
+                connection.controller?.release()
+                service.destroy()
+            }
+        }
+    }
+
+    @Test fun nonPositiveAndNonFiniteSpeedsAreRejectedBeforeReachingTheService() {
+        LifecycleHarness(app()).use { h ->
+            install(h)
+            val component = ComponentName(app(), NeutrodynePlaybackService::class.java)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            // Robolectric binds without resolving the component; hand the shadow the real binder.
+            shadowOf(app()).setComponentNameAndServiceForBindService(
+                component,
+                service.get().onBind(Intent("androidx.media3.session.MediaSessionService")),
+            )
+            val owner =
+                object : LifecycleOwner {
+                    override val lifecycle = LifecycleRegistry(this)
+                }
+            owner.lifecycle.currentState = Lifecycle.State.STARTED
+            val connection =
+                PlayerConnection(owner.lifecycle) {
+                    MediaController
+                        .Builder(app(), SessionToken(app(), component))
+                        .buildAsync()
+                }
+            val controller =
+                PlaybackControllerImpl(
+                    connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider { h.sessions },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
+            try {
+                assertNotNull(h.run { connection.awaitController() })
+                // With nothing playing the connected service could only answer NOTHING_PLAYING;
+                // FAILED proves the value was rejected before the session command was dispatched.
+                assertEquals(ScopeWriteResult.FAILED, h.run { controller.setSpeed(0f, SettingScope.GLOBAL) })
+                assertEquals(ScopeWriteResult.FAILED, h.run { controller.setSpeed(-1f, SettingScope.GLOBAL) })
+                assertEquals(ScopeWriteResult.FAILED, h.run { controller.setSpeed(Float.NaN, SettingScope.GLOBAL) })
             } finally {
                 connection.controller?.release()
                 service.destroy()

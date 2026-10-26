@@ -115,7 +115,7 @@ internal class PlaybackControllerImpl(
         speed: Float,
         scope: SettingScope,
     ): ScopeWriteResult {
-        if (!speed.isFinite()) return ScopeWriteResult.FAILED
+        if (!speed.isFinite() || speed <= 0f) return ScopeWriteResult.FAILED
         return scopeCommand(
             CustomCommands.SPEED_SET_SCOPE,
             Bundle().apply {
