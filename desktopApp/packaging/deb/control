@@ -18,4 +18,4 @@ X-Comment: Neutrodyne's DEB control file (11 Linux DEB, RPM and tar.gz).
  names (>= bullseye, or bookworm's libasound2t64 alternative) cover the sonames
  the JARs' natives and the JVM need; the maintainer scripts install the frozen
  desktop entry.
-X-Spdx-License-Identifier: Unlicense
+X-Spdx-License-Identifier: Unlicense AND Apache-2.0 AND MIT AND MIT-Modern-Variant AND BSD-3-Clause AND FTL AND libpng-2.0 AND IJG AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND GPL-2.0-only WITH Classpath-exception-2.0

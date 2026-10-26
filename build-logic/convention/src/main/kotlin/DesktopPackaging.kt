@@ -58,6 +58,17 @@ internal enum class DesktopPackagingTarget(
             }
 }
 
+/**
+ * The package-level licence metadata (DEB/RPM `--license-file`, MSI/DMG licence page, RPM
+ * `License:`): the package bundles the OpenJDK runtime and third-party libraries besides our
+ * Unlicense code, so the file lists them and the SPDX expression covers them. Extend both when
+ * FFmpeg (LGPL-2.1-or-later) or the python-build-standalone stack joins the image.
+ */
+internal const val DESKTOP_PACKAGE_LICENSE_FILE = "packaging/LICENSE-PACKAGE.txt"
+internal const val DESKTOP_PACKAGE_LICENSE =
+    "Unlicense AND Apache-2.0 AND MIT AND MIT-Modern-Variant AND BSD-3-Clause AND FTL AND libpng-2.0 AND IJG " +
+        "AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND GPL-2.0-only WITH Classpath-exception-2.0"
+
 /** `neutrodyne-<size>.png`, the committed hicolor source names (desktopApp/icons/png). */
 private val HICOLOR_ICON_NAME = Regex("neutrodyne-(\\d+)\\.png")
 
@@ -461,7 +472,7 @@ internal fun Project.registerDesktopPackagingTasks(
     // Values the task actions and argument providers need, captured as plain types up front so
     // the configuration cache can serialize the tasks (no Project/layout/providers inside).
     val installKindProperty = providers.gradleProperty("neutrodyne.installKind")
-    val licenseFile = rootProject.file("LICENSE")
+    val licenseFile = file(DESKTOP_PACKAGE_LICENSE_FILE)
     val debResourceDir = file("packaging/deb")
     val rpmResourceDir = file("packaging/rpm")
     val debDest =
@@ -571,7 +582,7 @@ internal fun Project.registerDesktopPackagingTasks(
                     "--linux-app-category",
                     "AudioVideo",
                     "--linux-rpm-license-type",
-                    "Unlicense",
+                    DESKTOP_PACKAGE_LICENSE,
                     "--resource-dir",
                     rpmResourceDir.absolutePath,
                     "--dest",
