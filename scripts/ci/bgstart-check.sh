@@ -5,14 +5,16 @@
 # A self-instrumented driver first restores a durable paused session through the
 # published release app's own import UI (phase bgseed). The host then force-stops
 # the target and the driver's bgstart leg — on an UNINSTRUMENTED release APK —
-# background-starts the playback service, taps the SystemUI media card's Play
-# button (a trusted STATUS_BAR_SERVICE controller), observes the genuine
-# ForegroundServiceStartNotAllowedException surfaces (service stays non-foreground,
-# mAllowStart_noBinding=DENIED, no temp allowlist, no BFSL self record, uid at or
-# below SERVICE, recovery notification 4001), then taps the real notification
-# "Resume" action and proves playback resumed (foreground 4000, APC audio for the
-# target uid, position advance >200 ms). The driver never binds the target as a
-# media controller; every wait is bounded and every saved dump is re-verified by
+# BINDS the playback service from a plain non-instrumented `:bgactor` process (the
+# external equivalent of MediaController.connect()), proves the uid sits at or
+# below SERVICE non-foreground for a continuous >=15s settle, taps the SystemUI
+# media card's Play button (a trusted STATUS_BAR_SERVICE controller), observes the
+# genuine ForegroundServiceStartNotAllowedException surfaces (service stays
+# non-foreground, DENIED verdicts on every allow record, no temp allowlist, no
+# BFSL self record, uid at or below SERVICE, recovery notification 4001), then
+# taps the real notification "Resume" action and proves playback resumed
+# (foreground 4000, APC audio for the target uid, position advance >200 ms).
+# Every wait is bounded and every saved dump is re-verified by
 # check-first-launch-restore-results.py --bgstart for both images.
 #
 # Require the workflow's named rooted disposable x86_64 AVD under GitHub Actions;
@@ -145,6 +147,9 @@ run_driver() {  # <phase> <method>: armed driver call; the raw stream is kept ve
         "$DRIVER_DATA_DIR/files/bmgr/bmgr-status-$phase.json" > "$EV/driver-status-$phase.json" \
         2>/dev/null || fail "driver $phase left no status record"
     [ -s "$EV/driver-status-$phase.json" ] || fail "driver $phase status record empty"
+    # A failed bgstart leg still leaves every captured stage dump in the vault —
+    # pull all of it before the marker greps can abort the leg.
+    if [ "$phase" = "bgstart" ]; then pull_bg_evidence; fi
     grep -q "^INSTRUMENTATION_CODE: -1" "$log_file" \
         || fail "driver $phase instrumentation did not complete"
     grep -q "INSTRUMENTATION_STATUS: bmgrDriver=$phase:$NONCE:ok" "$log_file" \
@@ -312,8 +317,11 @@ main() {
         timeout 60 "$ADB" shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
     fi
 
+    # `pm list packages -U` substring-matches the filter — the driver package
+    # `ch.lkmc.neutrodyne.tools.bmgrdriver.test` also matches `ch.lkmc.neutrodyne` —
+    # and row order is not stable; anchor the exact package line.
     APP_UID="$(timeout 60 "$ADB" shell cmd package list packages -U "$PKG" \
-        | tr -d '\r' | sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' | head -1)"
+        | tr -d '\r' | sed -n "s/^package:$PKG uid:\([0-9][0-9]*\).*/\1/p" | head -1)"
     [ -n "$APP_UID" ] || fail "target uid not resolvable"
     fact appUid "$APP_UID"
 
@@ -349,13 +357,17 @@ main() {
     run_driver bgstart deniedBackgroundStartOffersWorkingResume
     pull_bg_evidence
     for name in \
-        bgstart-uid-state-before.txt bgstart-uid-state-denied.txt bgstart-uid-state-resumed.txt \
-        bgstart-services-before.txt bgstart-services-denied.txt bgstart-services-resumed.txt \
-        bgstart-processes-before.txt bgstart-processes-denied.txt bgstart-processes-resumed.txt \
+        bgstart-uid-state-before.txt bgstart-uid-state-card.txt \
+        bgstart-uid-state-denied.txt bgstart-uid-state-resumed.txt \
+        bgstart-services-before.txt bgstart-services-card.txt \
+        bgstart-services-denied.txt bgstart-services-resumed.txt \
+        bgstart-processes-before.txt bgstart-processes-card.txt \
+        bgstart-processes-denied.txt bgstart-processes-resumed.txt \
         bgstart-notification-denied.txt bgstart-notification-resumed.txt \
+        bgstart-media-session-card.txt \
         bgstart-media-session-denied.txt bgstart-media-session-resumed.txt \
         bgstart-audio-denied.txt bgstart-audio-resumed.txt \
-        bgstart-positions.txt; do
+        bgstart-settle.txt bgstart-positions.txt; do
         [ -s "$EV/$name" ] || fail "driver evidence missing or empty: $name"
     done
     selector bgstartCompleted

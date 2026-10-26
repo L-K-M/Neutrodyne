@@ -952,10 +952,11 @@ BGSTART_SELECTORS = (
 )
 BGSTART_STEPS = {
     "bgseed": {"built", "launched", "preview", "revoked", "categories", "requested"},
-    "bgstart": {"sidecar", "served", "service-started", "guarded",
-                "play-tapped", "denied", "resume-tapped", "resumed"},
+    "bgstart": {"sidecar", "served", "actor", "bound", "settled", "guarded",
+                "card", "play-tapped", "denied", "resume-tapped", "resumed"},
 }
 BGSTART_PROCSTATE_SERVICE = 10
+BGSTART_SETTLE_MS = 15_000
 BGSTART_RESUME_ID = 4001
 BGSTART_PLAYBACK_ID = 4000
 BGSTART_RESUME_CHANNEL = "alerts"
@@ -973,6 +974,7 @@ BGSTART_UIDSTATE_BELOW_BFGS = {
 ALLOW_INFO_RE = re.compile(r"infoAllowStartForeground=\[((?:[^\[\]]|\[[^\]]*\])*)\]")
 ALLOW_FIELD_RE = re.compile(r"([a-zA-Z]+)\s*:\s*([^;]*)")
 IS_BIND_RE = re.compile(r"isBindService\s*:\s*(true|false)")
+BIND_FROM_RE = re.compile(r"bindFromPackage\s*:\s*([^\s:;]+)")
 TEMP_IN_RECORD_RE = re.compile(r"tempAllowListReason\s*:\s*(<null>|[^;\]]+)")
 TEMP_ALLOW_RE = re.compile(r"tempAllowListReason\s*[:=]\s*([^;\]\s]+)")
 UID_STATE_RE = re.compile(r"^\s*(-?\d+)\s*\(", re.M)
@@ -987,10 +989,22 @@ def allow_infos(text):
                   for m in ALLOW_FIELD_RE.finditer(body)}
         is_bind = IS_BIND_RE.search(body)
         temp = TEMP_IN_RECORD_RE.search(body)
+        bind_from = BIND_FROM_RE.search(body)
         fields["isBindService"] = is_bind.group(1) if is_bind else None
         fields["tempAllowListReason"] = temp.group(1) if temp else None
+        fields["bindFromPackage"] = bind_from.group(1) if bind_from else None
         records.append(fields)
     return records
+
+
+def self_attempt(info, app_uid):
+    """A non-bind attempt by the target — a genuine FGS start request. When the
+    record carries `isBindService` it alone decides; sparse records (api31)
+    fall back to the calling uid."""
+    is_bind = info.get("isBindService")
+    if is_bind is not None:
+        return is_bind == "false"
+    return info.get("callingUid") == str(app_uid)
 
 
 def uid_state(text):
@@ -1051,9 +1065,7 @@ def bgstart_text(directory, name):
 def check_self_records(device, stage, services, app_uid):
     """No record tied to the target's own attempt may carry an FGS grant surface."""
     for info in allow_infos(services):
-        self_record = info.get("isBindService") == "false" \
-            or info.get("callingUid") == str(app_uid)
-        if not self_record:
+        if not self_attempt(info, app_uid):
             continue
         if "BFSL" in (info.get("uidBFSL") or ""):
             raise ValueError(
@@ -1069,7 +1081,44 @@ def check_self_records(device, stage, services, app_uid):
                 f"{info['tempAllowListReason']!r} != <null>")
 
 
-def check_bgstart_denial(device, directory, app_uid):
+def check_no_grants(device, stage, services):
+    """Every allow record — self or binding — must show a DENIED verdict and no
+    capability propagated through a binding (`bindFromPackage`). A non-DENIED
+    code means that evaluation would have been allowed."""
+    for info in allow_infos(services):
+        if info.get("code") not in (None, "DENIED"):
+            raise ValueError(
+                f"{device}: {stage} allow record grants FGS: {info}")
+        bind_from = info.get("bindFromPackage")
+        if bind_from not in (None, "null", "<null>"):
+            raise ValueError(
+                f"{device}: {stage} binding grants FGS from "
+                f"{bind_from}: {info}")
+
+
+def check_not_foreground(device, stage, services):
+    """`ServiceRecord.dump` only prints `isForeground=` when the service is
+    foreground or a stale foregroundId survives — for a bound service its
+    absence is the non-foreground proof; `isForeground=true` is the violation."""
+    if "ServiceRecord{" not in services:
+        raise ValueError(f"{device}: {stage} dump has no ServiceRecord")
+    if "app=ProcessRecord{" not in services:
+        raise ValueError(
+            f"{device}: {stage} ServiceRecord has no live process (app=null)")
+    if "isForeground=true" in services:
+        raise ValueError(f"{device}: {stage} service is isForeground=true")
+
+
+def check_allow_fields(device, stage, services, api):
+    """`mAllowStart_*` verdicts print only on newer ServiceRecord dumps; where
+    the format emits them (API 36) both fields must read DENIED."""
+    if api >= 36:
+        for field in ("mAllowStart_noBinding", "mAllowStart_byBindings"):
+            if f"{field}=DENIED" not in services:
+                raise ValueError(f"{device}: {stage} {field} not DENIED")
+
+
+def check_bgstart_denial(device, directory, app_uid, api):
     """The denied stage: genuine FSSNAE surfaces, nothing allowed, session paused."""
     uid_text = bgstart_text(directory, "bgstart-uid-state-denied.txt")
     state = uid_state(uid_text)
@@ -1077,10 +1126,8 @@ def check_bgstart_denial(device, directory, app_uid):
         raise ValueError(f"{device}: denied uid-state {state!r} above SERVICE")
     services = bgstart_text(directory, "bgstart-services-denied.txt")
     processes = bgstart_text(directory, "bgstart-processes-denied.txt")
-    if "isForeground=false" not in services or "isForeground=true" in services:
-        raise ValueError(f"{device}: denied service not isForeground=false")
-    if "mAllowStart_noBinding=DENIED" not in services:
-        raise ValueError(f"{device}: denied dump lacks mAllowStart_noBinding=DENIED")
+    check_not_foreground(device, "denied", services)
+    check_allow_fields(device, "denied", services, api)
     temp_values = TEMP_ALLOW_RE.findall(services + processes)
     if not temp_values:
         raise ValueError(
@@ -1088,6 +1135,13 @@ def check_bgstart_denial(device, directory, app_uid):
     if any(v not in ("<null>", "null") for v in temp_values):
         raise ValueError(f"{device}: temp allowlist granted: {temp_values}")
     check_self_records(device, "denied", services, app_uid)
+    check_no_grants(device, "denied", services)
+    # The denial must be a real evaluation: at least one of the target's own
+    # startForeground attempts recorded a DENIED verdict.
+    if not any(self_attempt(info, app_uid) and info.get("code") == "DENIED"
+               for info in allow_infos(services)):
+        raise ValueError(
+            f"{device}: no DENIED self attempt recorded under denial")
     notification = bgstart_text(directory, "bgstart-notification-denied.txt")
     if not has_notification(notification, BMGR_TARGET, BGSTART_RESUME_ID,
                             BGSTART_RESUME_CHANNEL):
@@ -1103,24 +1157,57 @@ def check_bgstart_denial(device, directory, app_uid):
         raise ValueError(f"{device}: denied session state {sample['state']} != PAUSED")
 
 
-def check_bgstart_before(device, directory):
-    """The pre-tap stage: a plain background service with no allow source."""
-    uid_text = bgstart_text(directory, "bgstart-uid-state-before.txt")
+def check_bgstart_guarded(device, directory, stage, api):
+    """A guarded stage (before/card): bound, live, demoted, nothing granting FGS."""
+    uid_text = bgstart_text(directory, f"bgstart-uid-state-{stage}.txt")
     state = uid_state(uid_text)
     if state is None or state < BGSTART_PROCSTATE_SERVICE:
-        raise ValueError(f"{device}: pre-tap uid-state {state!r} above SERVICE")
-    services = bgstart_text(directory, "bgstart-services-before.txt")
-    if "ServiceRecord{" not in services:
-        raise ValueError(f"{device}: pre-tap dump has no ServiceRecord")
-    if "isForeground=false" not in services or "isForeground=true" in services:
-        raise ValueError(f"{device}: pre-tap service not isForeground=false")
-    for field in ("mAllowStart_noBinding", "mAllowStart_byBindings"):
-        if f"{field}=DENIED" not in services:
-            raise ValueError(f"{device}: pre-tap {field} not DENIED")
+        raise ValueError(f"{device}: {stage} uid-state {state!r} above SERVICE")
+    services = bgstart_text(directory, f"bgstart-services-{stage}.txt")
+    check_not_foreground(device, stage, services)
+    check_allow_fields(device, stage, services, api)
+    check_no_grants(device, stage, services)
+    return services
+
+
+def check_bgstart_before(device, directory, api, app_uid):
+    """The pre-tap stage: a plain background service with no allow source."""
+    services = check_bgstart_guarded(device, directory, "before", api)
+    check_self_records(device, "before", services, app_uid)
     cold = bgstart_text(directory, "uid-state-cold.txt")
     cold_state = uid_state(cold)
     if cold_state is None or cold_state < BGSTART_PROCSTATE_SERVICE:
         raise ValueError(f"{device}: cold uid-state {cold_state!r} above SERVICE")
+
+
+def check_bgstart_card(device, directory, api, app_uid):
+    """The card stage — the decisive probe: once the SystemUI card rendered (and
+    bound, if it binds), the target must still be demoted with no FGS grant."""
+    services = check_bgstart_guarded(device, directory, "card", api)
+    check_self_records(device, "card", services, app_uid)
+
+
+def check_bgstart_settle(device, directory):
+    """The >=15s continuous demoted-and-settled window the driver sampled.
+    Samples before the window (the uid still settling after the bind) are
+    legitimate; the longest run of demoted samples must span >=15s."""
+    settle = bgstart_text(directory, "bgstart-settle.txt")
+    rows = [(int(t), int(s), fg) for t, s, fg in
+            re.findall(r"^t=(\d+) state=(-?\d+) fg=(\S+)\s*$", settle, re.M)]
+    if len(rows) < 2:
+        raise ValueError(f"{device}: settle window has {len(rows)} samples")
+    best = 0
+    run_start = None
+    for t, state, fg in rows:
+        if state < BGSTART_PROCSTATE_SERVICE or fg == "true":
+            run_start = None
+            continue
+        if run_start is None:
+            run_start = t
+        best = max(best, t - run_start)
+    if best < BGSTART_SETTLE_MS:
+        raise ValueError(
+            f"{device}: demoted settle window {best}ms < {BGSTART_SETTLE_MS}ms")
 
 
 def check_bgstart_resumed(device, directory, app_uid):
@@ -1232,8 +1319,10 @@ def check_bgstart_device(root, device, api):
         check_driver_status(device, phase, nonce, api, run["driverPackage"],
                             status_path, BGSTART_STEPS[phase])
 
-    check_bgstart_before(device, directory)
-    check_bgstart_denial(device, directory, app_uid)
+    check_bgstart_settle(device, directory)
+    check_bgstart_before(device, directory, api, app_uid)
+    check_bgstart_card(device, directory, api, app_uid)
+    check_bgstart_denial(device, directory, app_uid, api)
     check_bgstart_resumed(device, directory, app_uid)
     print(f"{device}: PASS bgstart external gate "
           f"(denied background start -> SystemUI Resume -> playback)")

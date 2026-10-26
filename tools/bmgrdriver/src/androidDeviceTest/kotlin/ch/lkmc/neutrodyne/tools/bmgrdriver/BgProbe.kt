@@ -23,9 +23,11 @@ internal class BgProbe(
         val label: String,
         val uidState: Int?,
         val serviceRecord: Boolean,
+        val serviceRunning: Boolean,
         val isForeground: Boolean?,
         val noBinding: String?,
         val byBindings: String?,
+        val bindingClients: List<String>,
         val infos: List<BgStartSurface.AllowInfo>,
         val tempAllowObserved: Boolean,
         val tempAllowViolation: Boolean,
@@ -50,11 +52,37 @@ internal class BgProbe(
                         "uidState ${info.uidState} above BFGS in $info"
                     }
 
+                    info.granted -> {
+                        "allow code ${info.code} in $info"
+                    }
+
                     else -> {
                         null
                     }
                 }
             }
+
+        /** Any record — self or binding — whose verdict grants an FGS start. */
+        fun grantViolations(): List<String> =
+            infos.mapNotNull { info ->
+                when {
+                    info.bindingGrant != null -> {
+                        "bindFromPackage ${info.bindingGrant} grants FGS in $info"
+                    }
+
+                    info.granted -> {
+                        "allow code ${info.code} in $info"
+                    }
+
+                    else -> {
+                        null
+                    }
+                }
+            }
+
+        /** Self-attempt records that prove a real evaluation ended in DENIED. */
+        fun deniedAttempts(appUid: Int): List<BgStartSurface.AllowInfo> =
+            infos.filter { it.selfAttempt(appUid) && it.code == "DENIED" }
     }
 
     fun shell(command: String): String = device.executeShellCommand(command)
@@ -96,17 +124,72 @@ internal class BgProbe(
     }
 
     fun appUid(): Int =
-        BgStartSurface.parseAppUid(shell("cmd package list packages -U ${BmgrArming.TARGET_PACKAGE}"))
-            ?: error("target uid did not parse from the package listing")
+        BgStartSurface.parseAppUid(
+            shell("cmd package list packages -U ${BmgrArming.TARGET_PACKAGE}"),
+            BmgrArming.TARGET_PACKAGE,
+        ) ?: error("target uid did not parse from the package listing")
 
     fun uidState(uid: Int): Int? = BgStartSurface.parseUidState(shell("cmd activity get-uid-state $uid"))
 
     fun servicesDump(): String = shell("dumpsys -t 20 activity services ${BgStartSurface.SERVICE_COMPONENT}")
 
-    /** A bare background start: shell `am` must never produce a foreground service. */
-    fun startTargetService() {
-        val out = shell("am startservice -n ${BgStartSurface.SERVICE_COMPONENT}")
-        check("Error" !in out && "Exception" !in out) { "am startservice failed: $out" }
+    /**
+     * The external cold start is a BIND, not a start: the actor activity (in the
+     * driver's own package but a separate `:bgactor` process) spawns a plain holder
+     * service that binds the target's exported media-library action, mirroring the
+     * in-app `MediaController.connect()`. A bind never auto-promotes the service to
+     * foreground the way `am startservice` did.
+     */
+    fun startActor(driverPackage: String) {
+        val out =
+            shell(
+                "am start -n $driverPackage/" +
+                    "ch.lkmc.neutrodyne.tools.bmgrdriver.BgActorActivity",
+            )
+        check("Error" !in out && "Exception" !in out) { "actor activity failed: $out" }
+    }
+
+    fun stopActor(driverPackage: String) {
+        shell("am stopservice -n $driverPackage/ch.lkmc.neutrodyne.tools.bmgrdriver.BgActorService")
+    }
+
+    /**
+     * The committee-mandated settle: the target uid must stay at or below SERVICE and the
+     * service non-foreground for [settleMs] continuously, inside a [budgetMs] window.
+     * Every sample is written to `bgstart-settle.txt` for the strict checker; a breach
+     * restarts the window, an exhausted budget fails loudly with the samples on disk.
+     */
+    fun awaitDemotedSettled(
+        uid: Int,
+        settleMs: Long = BgStartSurface.SETTLE_MS,
+        budgetMs: Long = WAIT_MS * 4,
+    ) {
+        val started = SystemClock.elapsedRealtime()
+        val deadline = started + budgetMs
+        val rows = mutableListOf<String>()
+        var demotedSince: Long? = null
+        try {
+            while (true) {
+                val elapsed = SystemClock.elapsedRealtime() - started
+                val state = uidState(uid)
+                val fg = "isForeground=true" in servicesDump()
+                rows += "t=$elapsed state=${state ?: -1} fg=$fg"
+                val demoted = state != null && state >= BgStartSurface.PROCSTATE_SERVICE && !fg
+                if (!demoted) {
+                    demotedSince = null
+                } else if (demotedSince == null) {
+                    demotedSince = SystemClock.elapsedRealtime()
+                } else if (SystemClock.elapsedRealtime() - demotedSince >= settleMs) {
+                    return
+                }
+                check(SystemClock.elapsedRealtime() < deadline) {
+                    "target uid never settled at/below SERVICE non-foreground for ${settleMs}ms"
+                }
+                Thread.sleep(1_000)
+            }
+        } finally {
+            write("bgstart-settle.txt", rows.joinToString("\n", postfix = "\n"))
+        }
     }
 
     /**
@@ -128,19 +211,24 @@ internal class BgProbe(
         val mediaSession = shell("dumpsys -t 20 media_session")
         val audio =
             shell("dumpsys -t 20 audio | grep -E 'AudioPlaybackConfiguration|uid:|state:'")
+        val lru =
+            shell("dumpsys -t 20 activity lru | grep -B3 -A6 '${BmgrArming.TARGET_PACKAGE}'")
         write("bgstart-uid-state-$label.txt", uidText)
         write("bgstart-services-$label.txt", services)
         write("bgstart-processes-$label.txt", processes)
         write("bgstart-notification-$label.txt", notification)
         write("bgstart-media-session-$label.txt", mediaSession)
         write("bgstart-audio-$label.txt", audio)
+        write("bgstart-lru-$label.txt", lru)
         return Stage(
             label = label,
             uidState = BgStartSurface.parseUidState(uidText),
             serviceRecord = BgStartSurface.serviceRecordPresent(services),
+            serviceRunning = BgStartSurface.serviceRunning(services),
             isForeground = BgStartSurface.isForegroundValue(services),
             noBinding = BgStartSurface.noBindingVerdict(services),
             byBindings = BgStartSurface.byBindingsVerdict(services),
+            bindingClients = BgStartSurface.bindingClients(services),
             infos = BgStartSurface.allowInfos(services),
             tempAllowObserved =
                 BgStartSurface.tempAllowListObserved(services) ||

@@ -25,8 +25,74 @@ class BgStartSurfaceTest {
 
     @Test
     fun parsesAppUid() {
-        assertEquals(10150, BgStartSurface.parseAppUid("package:ch.lkmc.neutrodyne uid:10150"))
-        assertNull(BgStartSurface.parseAppUid("package:ch.lkmc.neutrodyne"))
+        assertEquals(
+            10150,
+            BgStartSurface.parseAppUid(
+                "package:ch.lkmc.neutrodyne uid:10150",
+                "ch.lkmc.neutrodyne",
+            ),
+        )
+        assertNull(
+            BgStartSurface.parseAppUid(
+                "package:ch.lkmc.neutrodyne",
+                "ch.lkmc.neutrodyne",
+            ),
+        )
+    }
+
+    @Test
+    fun parsesAppUidAnchorsTheExactPackage() {
+        // `pm list packages -U` substring-matches: the driver package also matches
+        // `ch.lkmc.neutrodyne`, and either line can come first (R1 picked the driver).
+        val listing =
+            """
+            package:ch.lkmc.neutrodyne.tools.bmgrdriver.test uid:10151
+            package:ch.lkmc.neutrodyne uid:10150
+            """.trimIndent()
+        assertEquals(10150, BgStartSurface.parseAppUid(listing, "ch.lkmc.neutrodyne"))
+        assertEquals(
+            10151,
+            BgStartSurface.parseAppUid(
+                listing,
+                "ch.lkmc.neutrodyne.tools.bmgrdriver.test",
+            ),
+        )
+        val reversed = listing.lines().reversed().joinToString("\n")
+        assertEquals(10150, BgStartSurface.parseAppUid(reversed, "ch.lkmc.neutrodyne"))
+    }
+
+    @Test
+    fun distinguishesLiveFromPhantomServiceRecords() {
+        val live =
+            """
+            ServiceRecord{u0 abc u0a150 ch.lkmc.neutrodyne/.NeutrodynePlaybackService}
+              app=ProcessRecord{abc123 5123:ch.lkmc.neutrodyne/u0a150}
+            """.trimIndent()
+        assertTrue(BgStartSurface.serviceRecordPresent(live))
+        assertTrue(BgStartSurface.serviceRunning(live))
+        // A denied background start leaves a phantom record: app=null, no process.
+        val phantom = live.replace("app=ProcessRecord{abc123 5123:ch.lkmc.neutrodyne/u0a150}", "app=null")
+        assertTrue(BgStartSurface.serviceRecordPresent(phantom))
+        assertFalse(BgStartSurface.serviceRunning(phantom))
+    }
+
+    @Test
+    fun parsesBindingClients() {
+        val dump =
+            """
+            ServiceRecord{u0 abc u0a150 ch.lkmc.neutrodyne/.NeutrodynePlaybackService}
+              app=ProcessRecord{abc123 5123:ch.lkmc.neutrodyne/u0a150}
+              * Client AppBindRecord{aaa111 ProcessRecord{bbb222 5123:ch.lkmc.neutrodyne.tools.bmgrdriver.test:bgactor/u0a151}}
+              * Client AppBindRecord{ccc333 ProcessRecord{ddd444 6001:com.android.systemui/u0a124}}
+            """.trimIndent()
+        assertEquals(
+            listOf(
+                "ch.lkmc.neutrodyne.tools.bmgrdriver.test:bgactor/u0a151",
+                "com.android.systemui/u0a124",
+            ),
+            BgStartSurface.bindingClients(dump),
+        )
+        assertEquals(emptyList<String>(), BgStartSurface.bindingClients("no bindings"))
     }
 
     @Test
@@ -67,8 +133,26 @@ class BgStartSurfaceTest {
         val systemUi = infos[1]
         assertTrue(systemUi.hasBfslCapability)
         assertFalse(systemUi.selfAttempt(10150))
+        assertEquals("com.android.systemui", systemUi.bindingGrant)
+        assertTrue(systemUi.granted) // PROC_STATE_PERSISTENT is an allow code
+        assertNull(self.bindingGrant)
+        assertFalse(self.granted)
         assertTrue("SVC" in BgStartSurface.UIDSTATE_BELOW_BFGS)
         assertTrue("PER" !in BgStartSurface.UIDSTATE_BELOW_BFGS)
+    }
+
+    @Test
+    fun selfAttemptRespectsIsBindServiceOverUid() {
+        val dump =
+            """
+            infoAllowStartForeground=[callingPackage: ch.lkmc.neutrodyne; callingUid: 10150; code:DENIED; bindFromPackage:null: isBindService:true]
+            infoAllowStartForeground=[callingPackage: ch.lkmc.neutrodyne; callingUid: 10150; code:DENIED]
+            """.trimIndent()
+        val infos = BgStartSurface.allowInfos(dump)
+        // A bind record from the target's own uid is not a startForeground attempt.
+        assertFalse(infos[0].selfAttempt(10150))
+        // Sparse records without isBindService fall back to the calling uid.
+        assertTrue(infos[1].selfAttempt(10150))
     }
 
     @Test

@@ -20,10 +20,11 @@ import java.net.ServerSocket
 /**
  * The armed bgstart driver phases (M4 P6b): `bgseed` restores a durable paused session
  * through the real production import UI, then `bgstart` drives the UNINSTRUMENTED target
- * from outside — a background `am startservice`, the SystemUI media card's Play button
- * (a trusted STATUS_BAR_SERVICE controller) and the real notification "Resume" tap.
- * The driver never binds the target as a controller; it only observes UI, HTTP and
- * framework dumps. The strict aggregate re-verifies every saved `bgstart-*.txt` file.
+ * from outside — a bind-only external cold start (the `:bgactor` actor binds the exported
+ * media-library action, never a `startService`), a verified demoted-and-settled window,
+ * the SystemUI media card's Play button (a trusted STATUS_BAR_SERVICE controller) and
+ * the real notification "Resume" tap. The strict aggregate re-verifies every saved
+ * `bgstart-*.txt` file.
  */
 @RunWith(AndroidJUnit4::class)
 class BgStartTest {
@@ -111,22 +112,42 @@ class BgStartTest {
             recorder.step("served", "bytes=${body.size}")
             device.wakeUp()
             probe.shell("wm dismiss-keyguard")
-            uid = probe.appUid()
-            val cold = probe.uidState(uid!!)
+            val appUid = probe.appUid()
+            uid = appUid
+            val cold = probe.uidState(appUid)
             check(cold == null || cold >= BgStartSurface.PROCSTATE_SERVICE) {
                 "target uid $cold above the service threshold before the attempt"
             }
-            probe.startTargetService()
-            recorder.step("service-started")
-            probe.await("service record") {
-                BgStartSurface.serviceRecordPresent(probe.servicesDump())
+            probe.startActor(context.packageName)
+            recorder.step("actor")
+            probe.await("bound live service record") {
+                val dump = probe.servicesDump()
+                BgStartSurface.serviceRecordPresent(dump) && BgStartSurface.serviceRunning(dump)
             }
+            probe.await("restored media session") {
+                BgStartSurface.mediaSessionPlayback(
+                    probe.shell("dumpsys -t 20 media_session"),
+                    BmgrArming.TARGET_PACKAGE,
+                ) != null
+            }
+            recorder.step("bound")
+            probe.awaitDemotedSettled(appUid)
+            recorder.step("settled")
             val before = probe.capture("before", uid)
-            requireGuarded(before, uid!!)
+            requireGuarded(before, appUid)
             recorder.step("guarded", "uidState=${before.uidState}")
             check(probe.openShade()) { "the SystemUI shade never opened" }
             probe.dumpHierarchy("shade")
             val play = probe.awaitCardPlay(BgProbe.WAIT_MS)
+            // The decisive BFSL probe: after the card renders (and binds, if it binds),
+            // the target must still sit demoted with no FGS grant on any record.
+            val card = probe.capture("card", uid)
+            requireGuarded(card, appUid)
+            check(card.grantViolations().isEmpty()) {
+                "a binding granted FGS capability once the card rendered: " +
+                    "${card.grantViolations()} — no genuine denial is reachable"
+            }
+            recorder.step("card", "uidState=${card.uidState} clients=${card.bindingClients}")
             if (play == null) {
                 // No trusted trigger exists on this image; the fallback is out of scope
                 // until this absence is proven — fail with the hierarchy as evidence.
@@ -145,7 +166,7 @@ class BgStartTest {
                 },
             ) { "recovery notification 4001 never posted after the Play tap" }
             val denied = probe.capture("denied", uid)
-            requireDenied(denied, uid!!)
+            requireDenied(denied, appUid)
             probe.captureLogcat()
             recorder.step("denied", "uidState=${denied.uidState}")
             check(probe.openShade()) { "the shade could not be reopened for Resume" }
@@ -170,24 +191,32 @@ class BgStartTest {
             probe.dumpHierarchy("fail")
             finishDriverPhase(context, "bgstart", nonce, recorder, "error:${t.javaClass.simpleName}:${t.message}", t)
         } finally {
+            runCatching { probe.stopActor(context.packageName) }
             server?.close()
         }
     }
 
-    /** Pre-tap gate: the target must be a plain background service with nothing granting FGS. */
+    /**
+     * Pre-tap gate: a bound, live, non-foreground service with nothing granting FGS.
+     * A bound service's dump carries no `isForeground=` line (ServiceRecord.dump prints
+     * it only when foreground or a stale foregroundId survives), so "non-foreground" is
+     * proven by the record existing while `isForeground=true` is absent. The
+     * `mAllowStart_*` fields print only on newer dumps; when present they must be DENIED.
+     */
     private fun requireGuarded(
         stage: BgProbe.Stage,
         uid: Int,
     ) {
-        check(stage.serviceRecord) { "no ServiceRecord for the started service" }
-        check(stage.uidState != null && stage.uidState!! >= BgStartSurface.PROCSTATE_SERVICE) {
+        check(stage.serviceRecord) { "no ServiceRecord for the bound service" }
+        check(stage.serviceRunning) { "ServiceRecord has no live process (app=null phantom)" }
+        check(stage.uidState != null && stage.uidState >= BgStartSurface.PROCSTATE_SERVICE) {
             "target uid ${stage.uidState} above the service threshold before the tap"
         }
-        check(stage.isForeground == false) { "service already foreground before the tap" }
-        check(stage.noBinding == "DENIED") {
+        check(stage.isForeground != true) { "service already foreground before the tap" }
+        check(stage.noBinding == null || stage.noBinding == "DENIED") {
             "mAllowStart_noBinding=${stage.noBinding} before the tap — an allow source exists"
         }
-        check(stage.byBindings == "DENIED") {
+        check(stage.byBindings == null || stage.byBindings == "DENIED") {
             "mAllowStart_byBindings=${stage.byBindings} before the tap — a binding elevated the target"
         }
         check(!stage.tempAllowViolation) { "temp allowlist present before the tap" }
@@ -201,12 +230,21 @@ class BgStartTest {
         stage: BgProbe.Stage,
         uid: Int,
     ) {
-        check(stage.uidState != null && stage.uidState!! >= BgStartSurface.PROCSTATE_SERVICE) {
+        check(stage.uidState != null && stage.uidState >= BgStartSurface.PROCSTATE_SERVICE) {
             "target uid ${stage.uidState} elevated after the tap"
         }
-        check(stage.isForeground == false) { "service became foreground despite the denial" }
-        check(stage.noBinding == "DENIED") {
+        check(stage.isForeground != true) { "service became foreground despite the denial" }
+        check(stage.noBinding == null || stage.noBinding == "DENIED") {
             "mAllowStart_noBinding=${stage.noBinding} after the tap"
+        }
+        check(stage.byBindings == null || stage.byBindings == "DENIED") {
+            "mAllowStart_byBindings=${stage.byBindings} after the tap"
+        }
+        check(stage.deniedAttempts(uid).isNotEmpty()) {
+            "no startForeground evaluation recorded a DENIED verdict for the target"
+        }
+        check(stage.grantViolations().isEmpty()) {
+            "a record grants an FGS start despite the denial: ${stage.grantViolations()}"
         }
         check(stage.tempAllowObserved) {
             "tempAllowListReason absent from all dumps — cannot prove no allowlist"
@@ -218,7 +256,7 @@ class BgStartTest {
         check(stage.notification4001) { "recovery notification 4001 absent from the denied stage" }
         check(!stage.apcStarted) { "audio is active for the target uid despite the denial" }
         check(stage.playback != null) { "media_session has no PlaybackState for the target" }
-        check(stage.playback!!.paused) { "session state ${stage.playback!!.state} is not paused" }
+        check(stage.playback.paused) { "session state ${stage.playback.state} is not paused" }
     }
 
     /** Post-resume: real playback — foreground service, 4000 up, 4001 gone, audio started. */

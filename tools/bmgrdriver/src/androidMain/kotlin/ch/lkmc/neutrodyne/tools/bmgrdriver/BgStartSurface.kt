@@ -19,8 +19,12 @@ internal object BgStartSurface {
     const val SERVICE_CLASS = "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService"
     const val SERVICE_COMPONENT = "ch.lkmc.neutrodyne/$SERVICE_CLASS"
     const val SYSTEMUI_PACKAGE = "com.android.systemui"
+
+    /** The exported action a real external controller binds — never `am startservice`. */
+    const val BIND_ACTION = "androidx.media3.session.MediaLibraryService"
     const val PROCSTATE_SERVICE = 10
     const val POSITION_ADVANCE_MS = 200L
+    const val SETTLE_MS = 15_000L
 
     /**
      * Process-state names that are numerically below (worse than) BFGS(5). A record whose
@@ -47,10 +51,12 @@ internal object BgStartSurface {
         )
 
     private val UID_STATE = Regex("""^\s*(-?\d+)\s*\(""", RegexOption.MULTILINE)
-    private val APP_UID = Regex("""uid[:=]\s*(\d+)""")
     private val IS_FOREGROUND = Regex("""isForeground=(true|false)""")
+    private val SERVICE_RUNNING = Regex("""app=ProcessRecord\{""")
     private val NO_BINDING = Regex("""mAllowStart_noBinding=(\S+)""")
     private val BY_BINDINGS = Regex("""mAllowStart_byBindings=(\S+)""")
+    private val BINDING_CLIENT =
+        Regex("""\* Client AppBindRecord\{[0-9a-f]+ ProcessRecord\{[0-9a-f]+ \d+:(\S+)/u0a(\d+)\}""")
 
     // The record body itself carries one-level brackets (`uidBFSL: [BFSL]`); match the
     // balanced outer pair so the record never truncates at the first inner `]`.
@@ -59,8 +65,9 @@ internal object BgStartSurface {
     private val FIELD = Regex("""([a-zA-Z]+)\s*:\s*([^;]*)""")
 
     // The dump tail `bindFromPackage:<pkg>: isBindService:<bool>` is not `;`-separated,
-    // so isBindService and tempAllowListReason get dedicated ungreedy readers.
+    // so isBindService, bindFromPackage and tempAllowListReason get dedicated readers.
     private val IS_BIND = Regex("""isBindService\s*:\s*(true|false)""")
+    private val BIND_FROM = Regex("""bindFromPackage\s*:\s*([^\s:;]+)""")
     private val TEMP_IN_RECORD = Regex("""tempAllowListReason\s*:\s*(<null>|[^;\]]+)""")
     private val SERVICE_RECORD = Regex("""ServiceRecord\{""")
     private val PLAYBACK_LINE = Regex("""PlaybackState\s*\{[^\n]*""")
@@ -77,9 +84,17 @@ internal object BgStartSurface {
             ?.get(1)
             ?.toIntOrNull()
 
-    /** `pm list packages -U` prints `package:<pkg> uid:<int>`; also accepts `uid=`. */
-    fun parseAppUid(text: String): Int? =
-        APP_UID
+    /**
+     * `pm list packages -U <filter>` prints `package:<pkg> uid:<int>` per matching package;
+     * the filter is a substring match, so `ch.lkmc.neutrodyne` also lists the driver
+     * package and the emitted order is not stable across API levels. Only the line for
+     * `pkg` itself counts.
+     */
+    fun parseAppUid(
+        text: String,
+        pkg: String,
+    ): Int? =
+        Regex("""^package:${Regex.escape(pkg)}\s+uid[:=]\s*(\d+)""", RegexOption.MULTILINE)
             .find(text)
             ?.groupValues
             ?.get(1)
@@ -94,6 +109,19 @@ internal object BgStartSurface {
 
     fun serviceRecordPresent(text: String): Boolean = SERVICE_RECORD.containsMatchIn(text)
 
+    /**
+     * `app=ProcessRecord{...}` marks a live host process; `app=null` is a dead record (a
+     * denied `am startservice` leaves exactly that phantom).
+     */
+    fun serviceRunning(text: String): Boolean = SERVICE_RUNNING.containsMatchIn(text)
+
+    /** `pid:procName/u0aN` tokens of every bound client in a ServiceRecord's Bindings. */
+    fun bindingClients(text: String): List<String> =
+        BINDING_CLIENT
+            .findAll(text)
+            .map { "${it.groupValues[1]}/u0a${it.groupValues[2]}" }
+            .toList()
+
     fun noBindingVerdict(text: String): String? = NO_BINDING.find(text)?.groupValues?.get(1)
 
     fun byBindingsVerdict(text: String): String? = BY_BINDINGS.find(text)?.groupValues?.get(1)
@@ -106,12 +134,24 @@ internal object BgStartSurface {
         val uidBfsl: String?,
         val code: String?,
         val tempAllowListReason: String?,
+        val bindFromPackage: String?,
         val isBindService: Boolean?,
     ) {
-        /** A non-bind attempt from the target itself (a genuine FGS start request). */
-        fun selfAttempt(appUid: Int): Boolean = isBindService == false || callingUid == appUid
+        /**
+         * A non-bind attempt by the target — a genuine FGS start request. When the
+         * record carries `isBindService` it alone decides; sparse records (API 31
+         * dumps may omit the field) fall back to the calling uid.
+         */
+        fun selfAttempt(appUid: Int): Boolean = isBindService?.let { !it } ?: (callingUid == appUid)
 
         val hasBfslCapability: Boolean get() = uidBfsl?.contains("BFSL") == true
+
+        /** Any verdict other than DENIED means the evaluated attempt would be allowed. */
+        val granted: Boolean get() = code != null && code != "DENIED"
+
+        /** The package whose binding propagated FGS capability; `null`/`"null"` = none. */
+        val bindingGrant: String?
+            get() = bindFromPackage?.takeIf { it.isNotBlank() && it != "null" && it != "<null>" }
 
         val tempAllowListed: Boolean
             get() =
@@ -135,6 +175,8 @@ internal object BgStartSurface {
                     code = fields["code"],
                     tempAllowListReason =
                         TEMP_IN_RECORD.find(match.groupValues[1])?.groupValues?.get(1),
+                    bindFromPackage =
+                        BIND_FROM.find(match.groupValues[1])?.groupValues?.get(1),
                     isBindService =
                         IS_BIND
                             .find(match.groupValues[1])
