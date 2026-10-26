@@ -82,6 +82,11 @@ abstract class ThirdPartyNoticesTask : DefaultTask() {
                     .asSequence()
                     .filter { !it.isDirectory && EMBEDDED_LICENCE_FILE.matches(it.name) }
                     .forEach { entry ->
+                        // The entry name comes from a third-party jar: it must not climb out of
+                        // the output directory.
+                        if (entry.name.split('/').any { it == ".." }) {
+                            throw GradleException("${jar.name}: licence entry '${entry.name}' leaves META-INF")
+                        }
                         val target =
                             File(out, "META-INF/licenses/$group/$artifact/${entry.name.removePrefix("META-INF/")}")
                         target.parentFile.mkdirs()
