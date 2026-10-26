@@ -94,6 +94,21 @@ jobs:
           --continue
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
+      # The DEB/RPM/MSI licence metadata describes the whole package, which bundles
+      # the OpenJDK runtime and third-party libraries, not only our Unlicense code:
+      # jpackage's licence file, the RPM License: expression and the DEB control field.
+      - name: Desktop package licence metadata
+        run: |
+          grep -q 'Classpath Exception' desktopApp/packaging/LICENSE-PACKAGE.txt
+          grep -q 'This is free and unencumbered software' desktopApp/packaging/LICENSE-PACKAGE.txt
+          grep -q '^X-Spdx-License-Identifier: Unlicense AND .*GPL-2.0-only WITH Classpath-exception-2.0' desktopApp/packaging/deb/control
+          grep -q '"packaging/LICENSE-PACKAGE.txt"' build-logic/convention/src/main/kotlin/DesktopPackaging.kt
+          grep -q '"Unlicense AND Apache-2.0 AND ' build-logic/convention/src/main/kotlin/DesktopPackaging.kt
+          grep -q 'GPL-2.0-only WITH Classpath-exception-2.0"$' build-logic/convention/src/main/kotlin/DesktopPackaging.kt
+          if grep -n 'rootProject.file("LICENSE")\|rpmLicenseType = "Unlicense"\|^ *"Unlicense",$' build-logic/convention/src/main/kotlin/Desktop*.kt; then
+            echo "::error::desktop packaging still labels the whole package with the Unlicense alone"
+            exit 1
+          fi
       # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
       # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
       - name: CI script fixture tests
