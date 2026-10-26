@@ -115,7 +115,10 @@ jobs:
   # and `sources` (openjdk-{jdk}-temurin-sources.tar.gz + RUNTIME-SOURCES.md;
   # MD1b ffmpeg sources; MD3 PBS sources; WiX sources with each MSI).
   # TODO (MS1): `server-jar`, `server-image` (matrix, push-by-digest),
-  # `server-image-manifest`, and `image-tags` after publish.
+  # `server-image-manifest`, and `image-tags` after publish. `server-jar` runs
+  # ci.yml's "Third-party notices in the server JAR" checks on the JAR it
+  # uploads; the image copies META-INF/Third-Party-Notices.txt to
+  # /usr/share/doc/neutrodyne-server/ and checks it there.
 
   publish:
     needs: [verify-tag, android]

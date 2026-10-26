@@ -185,6 +185,23 @@ jobs:
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
         run: scripts/ci/check-apk.sh --published app/build/outputs/apk/release/*-release.apk
+      # The server JAR carries its third-party notices (generateThirdPartyNotices): the
+      # rendered list with the slf4j copyright and the Apache text, each dependency's own
+      # licence files, and no embedded NOTICE or licence file left out (scan reads the
+      # Gradle cache of this build).
+      - name: Third-party notices in the server JAR
+        run: |
+          jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
+          notices="$RUNNER_TEMP/server-notices.txt"
+          unzip -p "$jar" META-INF/Third-Party-Notices.txt > "$notices"
+          test -s "$notices"
+          grep -q 'Apache License' "$notices"
+          grep -q 'QOS.ch' "$notices"
+          grep -q 'kotlinx.coroutines library' "$notices"
+          unzip -l "$jar" > "$RUNNER_TEMP/server-jar.lst"
+          grep -q 'META-INF/licenses/org.slf4j/slf4j-api/LICENSE.txt' "$RUNNER_TEMP/server-jar.lst"
+          python3 -I scripts/ci/android_notices.py check sync/server/build/generated/aboutLibraries/aboutlibraries.json --quiet
+          python3 -I scripts/ci/android_notices.py scan sync/server/build/generated/aboutLibraries/aboutlibraries.json --quiet
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-apks # test artifacts only — never offered to users (risk P10)
