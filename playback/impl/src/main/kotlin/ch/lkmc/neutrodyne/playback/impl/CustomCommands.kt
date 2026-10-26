@@ -91,7 +91,10 @@ internal object CustomCommands {
             } else {
                 null
             }
-        if (args.getString("mode") == "RESUME") return StartRequest.Resume
+        args.getString("mode")?.let {
+            require(it == "RESUME") { "Unsupported play mode: $it" }
+            return StartRequest.Resume
+        }
         val type = args.getString("contextType") ?: return StartRequest.Episode(requireNotNull(episode), position)
         val source =
             when (type) {
@@ -104,6 +107,7 @@ internal object CustomCommands {
         val order = FeedOrder.valueOf(args.getString("order") ?: FeedOrder.NEWEST_FIRST.name)
         val media = MediaFilter.valueOf(args.getString("mediaFilter") ?: MediaFilter.ALL.name)
         val min = if (args.containsKey("minSortDate")) args.getLong("minSortDate").also { require(it >= 0) } else null
+        require(args.containsKey("filterFlags")) { "filterFlags missing" }
         val filters = FeedFilters.fromFlags(args.getInt("filterFlags"), media).copy(minSortDate = min)
         return StartRequest.Feed(source, filters, order, episode, position)
     }

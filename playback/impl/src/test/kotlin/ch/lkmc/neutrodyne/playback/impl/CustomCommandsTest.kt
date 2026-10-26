@@ -75,6 +75,13 @@ class CustomCommandsTest {
                 putLong("startPositionMs", -1)
             }
         assertFailsWith<IllegalArgumentException> { CustomCommands.decode(negativePosition) }
+        val unknownMode = Bundle().apply { putString("mode", "SKIP") }
+        assertFailsWith<IllegalArgumentException> { CustomCommands.decode(unknownMode) }
+        val feedWithoutFilters =
+            CustomCommands
+                .encode(StartRequest.Feed(FeedSource.All, FeedFilters(), FeedOrder.NEWEST_FIRST))
+                .apply { remove("filterFlags") }
+        assertFailsWith<IllegalArgumentException> { CustomCommands.decode(feedWithoutFilters) }
         val invalidIds =
             listOf(
                 "https://evil.test/file",
