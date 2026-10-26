@@ -57,14 +57,29 @@ class MeteredStreamingGateTest {
         assertEquals(PlayResult.NeedsMeteredConsent(1), gate.check(1, false, StartOrigin.UI))
     }
 
-    @Test fun externalAskGrantsButExternalNeverBlocksEvenAfterGrant() {
+    @Test fun externalAskAllowsOnceWithoutGrantingOrDismissingConsent() {
         policy(StreamOnMetered.ASK)
+        assertEquals(PlayResult.NeedsMeteredConsent(2), gate.check(2, false, StartOrigin.UI))
         assertNull(gate.check(1, false, StartOrigin.EXTERNAL))
-        assertNull(gate.check(2, false, StartOrigin.UI))
+        // The open prompt survives the external start and no standing grant was created.
+        assertEquals(PlayResult.NeedsMeteredConsent(2), gate.pendingConsent.value)
+        assertTrue(gate.blockBeforeNext(false))
+        assertEquals(PlayResult.NeedsMeteredConsent(1), gate.check(1, false, StartOrigin.UI))
         policy(StreamOnMetered.NEVER)
-        gate.grant()
         assertEquals(PlayResult.MeteredBlocked, gate.check(2, false, StartOrigin.EXTERNAL))
         assertTrue(gate.blockBeforeNext(false))
+    }
+
+    @Test fun pendingConsentClearsOnlyOnGrantOrExplicitClear() {
+        policy(StreamOnMetered.ASK)
+        assertEquals(PlayResult.NeedsMeteredConsent(1), gate.check(1, false, StartOrigin.UI))
+        assertNull(gate.check(2, false, StartOrigin.EXTERNAL))
+        assertEquals(PlayResult.NeedsMeteredConsent(1), gate.pendingConsent.value)
+        gate.clearPending()
+        assertNull(gate.pendingConsent.value)
+        assertEquals(PlayResult.NeedsMeteredConsent(3), gate.check(3, false, StartOrigin.UI))
+        gate.grant()
+        assertNull(gate.pendingConsent.value)
     }
 
     @Test fun downloadsPlayOfflineAndNeverGrantConsentForTheNextStream() {

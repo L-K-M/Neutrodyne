@@ -15,7 +15,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/** Process-only consent. Downloaded items never consume a mobile-data grant. */
+/**
+ * Process-only consent. Downloaded items never consume a mobile-data grant.
+ * Under [StreamOnMetered.ASK] an [StartOrigin.EXTERNAL] start (media button, Android Auto)
+ * is allowed for that item only: it creates no standing grant and leaves an open
+ * [pendingConsent] prompt untouched. [grant] and [clearPending] are the explicit
+ * standing-consent and prompt-management operations.
+ */
 @SingleIn(AppScope::class)
 @Inject
 internal class MeteredStreamingGate(
@@ -48,7 +54,6 @@ internal class MeteredStreamingGate(
         local: Boolean,
         origin: StartOrigin,
     ): PlayResult? {
-        pending.value = null
         if (local) return null
         val status = network.status.value
         if (!status.isConnected) return PlayResult.Offline
@@ -66,8 +71,13 @@ internal class MeteredStreamingGate(
             }
 
             StreamOnMetered.ASK -> {
-                if (origin == StartOrigin.EXTERNAL) granted = true
-                if (granted) null else PlayResult.NeedsMeteredConsent(episodeId).also { pending.value = it }
+                // External surfaces can't show a prompt: allow this start only. Don't set a
+                // standing grant and don't clobber a prompt the user may be looking at.
+                when {
+                    origin == StartOrigin.EXTERNAL -> null
+                    granted -> null
+                    else -> PlayResult.NeedsMeteredConsent(episodeId).also { pending.value = it }
+                }
             }
         }
     }
