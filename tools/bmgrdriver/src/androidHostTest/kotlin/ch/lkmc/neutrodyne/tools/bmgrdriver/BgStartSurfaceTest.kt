@@ -6,11 +6,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
- * Host-side coverage for the bgstart lane's pure dump parsers and fixture audio — the
+ * Host-side coverage for the bgstart lane's pure dump parsers — the
  * same surfaces the device run and the strict aggregate checker assert on real evidence.
  */
 class BgStartSurfaceTest {
@@ -135,10 +133,36 @@ class BgStartSurfaceTest {
         assertFalse(systemUi.selfAttempt(10150))
         assertEquals("com.android.systemui", systemUi.bindingGrant)
         assertTrue(systemUi.granted) // PROC_STATE_PERSISTENT is an allow code
+        assertEquals("0", systemUi.startForegroundCount)
         assertNull(self.bindingGrant)
         assertFalse(self.granted)
         assertTrue("SVC" in BgStartSurface.UIDSTATE_BELOW_BFGS)
         assertTrue("PER" !in BgStartSurface.UIDSTATE_BELOW_BFGS)
+    }
+
+    @Test
+    fun parsesTheTrustedBindGrantStamp() {
+        // The api31 record is sparse (no uidBFSL/isBindService); api36 carries both.
+        val records =
+            listOf(
+                "infoAllowStartForeground=[callingPackage: ch.lkmc.neutrodyne.tools.bgtrigger; " +
+                    "callingUid: 10108; uidState: BFGS; intent: Intent { act=a }; " +
+                    "code:PROC_STATE_BFGS; tempAllowListReason:<null>; targetSdkVersion:37; " +
+                    "callerTargetSdkVersion:30; startForegroundCount:0; bindFromPackage:null]",
+                "infoAllowStartForeground=[callingPackage: ch.lkmc.neutrodyne.tools.bgtrigger; " +
+                    "callingUid: 10153; uidState: BFGS; uidBFSL: [BFSL]; intent: Intent { act=a }; " +
+                    "code:PROC_STATE_BFGS; tempAllowListReason:<null>; allowWiu:-1; " +
+                    "targetSdkVersion:37; callerTargetSdkVersion:30; startForegroundCount:0; " +
+                    "bindFromPackage:null: isBindService:true]",
+            )
+        for (record in records) {
+            val info = BgStartSurface.allowInfos(record).single()
+            assertEquals("ch.lkmc.neutrodyne.tools.bgtrigger", info.callingPackage)
+            assertEquals("BFGS", info.uidState)
+            assertEquals("PROC_STATE_BFGS", info.code)
+            assertEquals("0", info.startForegroundCount)
+            assertTrue(info.granted)
+        }
     }
 
     @Test
@@ -167,32 +191,6 @@ class BgStartSurfaceTest {
     }
 
     @Test
-    fun matchesNotificationRecords() {
-        val dump =
-            """
-            NotificationRecord(0x01: pkg=com.android.systemui user=UserHandle{0} id=33 tag=x key=s: Notification(channel=DEVELOPER pri=0))
-            NotificationRecord(0x02: pkg=ch.lkmc.neutrodyne user=UserHandle{0} id=4001 tag=null key=t: Notification(channel=alerts contentView=headsUp pri=2))
-            """.trimIndent()
-        assertTrue(BgStartSurface.hasNotification(dump, "ch.lkmc.neutrodyne", 4001, "alerts"))
-        assertTrue(BgStartSurface.hasNotificationId(dump, "ch.lkmc.neutrodyne", 4001))
-        assertFalse(BgStartSurface.hasNotification(dump, "ch.lkmc.neutrodyne", 4000, "playback"))
-        assertFalse(BgStartSurface.hasNotificationId(dump, "ch.lkmc.neutrodyne", 4000))
-    }
-
-    @Test
-    fun matchesAudioPlaybackConfigurations() {
-        val dump =
-            """
-            AudioPlaybackConfiguration items:
-              - piid:391 uid:10150 state:started attr:{Content type: CONTENT_TYPE_SPEECH Usage: USAGE_MEDIA}
-              - piid:392 uid:1000 state:stopped attr:{Usage: USAGE_MEDIA}
-            """.trimIndent()
-        assertTrue(BgStartSurface.apcStarted(dump, 10150))
-        assertFalse(BgStartSurface.apcStarted(dump, 1000))
-        assertFalse(BgStartSurface.apcStarted(dump, 10151))
-    }
-
-    @Test
     fun projectsLivePlaybackPosition() {
         val dump =
             """
@@ -207,25 +205,10 @@ class BgStartSurfaceTest {
         assertEquals(9_000L, sample.updatedElapsed)
         assertTrue(sample.playing)
         assertFalse(sample.paused)
-        assertEquals(751_500L, sample.livePosition(10_500))
         val paused =
             dump.replace("state=PLAYING(3)", "state=PAUSED(2)").replace("speed=1.0", "speed=0.0")
         val pausedSample = BgStartSurface.mediaSessionPlayback(paused, "ch.lkmc.neutrodyne")!!
         assertTrue(pausedSample.paused)
-        assertEquals(750_000L, pausedSample.livePosition(11_000))
         assertNull(BgStartSurface.mediaSessionPlayback("unrelated", "ch.lkmc.neutrodyne"))
-    }
-
-    @Test
-    fun fixtureAudioIsWellFormedWav() {
-        val wav = FixtureAudio.pcm(3)
-        assertEquals(44 + 3 * FixtureAudio.BYTES_PER_SECOND, wav.size)
-        assertEquals("RIFF", wav.decodeToString(0, 4))
-        assertEquals("WAVE", wav.decodeToString(8, 12))
-        val header = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN)
-        assertEquals(36 + 3 * FixtureAudio.BYTES_PER_SECOND, header.getInt(4))
-        assertEquals(FixtureAudio.SAMPLE_RATE, header.getInt(24))
-        assertEquals(3 * FixtureAudio.BYTES_PER_SECOND, header.getInt(40))
-        assertTrue(wav.sliceArray(44 until wav.size).any { it != 0.toByte() })
     }
 }

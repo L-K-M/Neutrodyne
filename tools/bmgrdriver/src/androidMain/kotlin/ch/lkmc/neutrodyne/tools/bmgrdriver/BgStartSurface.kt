@@ -7,18 +7,12 @@ package ch.lkmc.neutrodyne.tools.bmgrdriver
  * the strict aggregate checker on the pulled evidence files.
  *
  * The formats are AOSP dumpsys text: `cmd activity get-uid-state`, `dumpsys activity
- * services <component>` (`mAllowStart_*`, `infoAllowStartForeground`, `isForeground`),
- * `dumpsys notification` (`NotificationRecord` header lines), `dumpsys audio`
- * (`AudioPlaybackConfiguration` items) and `dumpsys media_session` (`PlaybackState`).
+ * services <component>` (`mAllowStart_*`, `infoAllowStartForeground`, `isForeground`)
+ * and `dumpsys media_session` (`PlaybackState`).
  */
 internal object BgStartSurface {
-    const val PLAYBACK_NOTIFICATION = 4000
-    const val RESUME_NOTIFICATION = 4001
-    const val PLAYBACK_CHANNEL = "playback"
-    const val RESUME_CHANNEL = "alerts"
     const val SERVICE_CLASS = "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService"
     const val SERVICE_COMPONENT = "ch.lkmc.neutrodyne/$SERVICE_CLASS"
-    const val SYSTEMUI_PACKAGE = "com.android.systemui"
 
     /** The exported action a real external controller binds — never `am startservice`. */
     const val BIND_ACTION = "androidx.media3.session.MediaLibraryService"
@@ -32,26 +26,27 @@ internal object BgStartSurface {
     const val ACTOR_PROVIDER = "ch.lkmc.neutrodyne.tools.bgactor.provider"
 
     /**
-     * The standalone `:tools:bgtrigger` APK — a third uid that earns genuine
-     * trusted-controller status through an enabled NotificationListenerService
-     * (`isTrustedForMediaControl`), then drives prepare/play through a native
-     * Media3 MediaController connect — the same bind+commands surface a real
-     * companion app uses. The connect's own bind makes the package visible to
-     * the target (r13: the framework relay's play() was omitted because the
-     * invisible package failed the target-side trust check); whether that
-     * BFGS-state caller's bind stamps a granting record is the measurement.
+     * The standalone `:tools:bgtrigger` APK — a third uid measured twice through
+     * its `status` provider method, which performs a native Media3
+     * MediaController connect to the target's exported MediaLibraryService and
+     * reports the granted command set. Before its NotificationListenerService
+     * is enabled the connect is untrusted (a real bind that makes the package
+     * visible, but a command set without COMMAND_PLAY_PAUSE); after enablement
+     * (`isTrustedForMediaControl` — the same membership a real companion app
+     * carries) the connect is trusted, and its own bind is what stamps the
+     * `code:PROC_STATE_BFGS`/`startForegroundCount:0` grant — the
+     * impossibility row.
      */
     const val TRIGGER_PACKAGE = "ch.lkmc.neutrodyne.tools.bgtrigger"
     const val TRIGGER_PROVIDER = "ch.lkmc.neutrodyne.tools.bgtrigger.provider"
     const val TRIGGER_LISTENER = "$TRIGGER_PACKAGE/.BgTriggerListenerService"
     const val PROCSTATE_SERVICE = 10
-    const val POSITION_ADVANCE_MS = 200L
     const val SETTLE_MS = 15_000L
 
     /**
      * Process-state names that are numerically below (worse than) BFGS(5). A record whose
      * uidState is any of these cannot have started a foreground service from procstate
-     * alone; PER/PERU/TOP/BTOP/FGS/BFGS would falsify the denial.
+     * alone; PER/PERU/TOP/BTOP/FGS/BFGS would falsify a claimed denial.
      */
     val UIDSTATE_BELOW_BFGS =
         setOf(
@@ -158,6 +153,7 @@ internal object BgStartSurface {
         val tempAllowListReason: String?,
         val bindFromPackage: String?,
         val isBindService: Boolean?,
+        val startForegroundCount: String?,
     ) {
         /**
          * A non-bind attempt by the target — a genuine FGS start request. When the
@@ -205,13 +201,15 @@ internal object BgStartSurface {
                             ?.groupValues
                             ?.get(1)
                             ?.toBooleanStrictOrNull(),
+                    startForegroundCount = fields["startForegroundCount"],
                 )
             }.toList()
 
     /**
      * `tempAllowListReason` appears in both `activity services` records and
      * `activity processes`/`lru` process blocks; any non-null value anywhere means the
-     * framework granted a temporary allowlist, which would falsify the denial.
+     * framework granted a temporary allowlist — an exemption that would falsify
+     * the untrusted row's non-exemptness.
      */
     fun tempAllowListViolation(text: String): Boolean =
         TEMP_ALLOW.findAll(text).any {
@@ -220,40 +218,6 @@ internal object BgStartSurface {
         }
 
     fun tempAllowListObserved(text: String): Boolean = TEMP_ALLOW.containsMatchIn(text)
-
-    /**
-     * A `dumpsys notification` NotificationRecord header carries pkg, id and channel on
-     * one line, e.g. `NotificationRecord(0x..: pkg=ch.lkmc.neutrodyne .. id=4001 ..
-     * Notification(channel=alerts ..`.
-     */
-    fun hasNotification(
-        text: String,
-        pkg: String,
-        id: Int,
-        channel: String,
-    ): Boolean =
-        text.lineSequence().any {
-            it.contains("pkg=$pkg") && it.contains("id=$id") && it.contains("channel=$channel")
-        }
-
-    fun hasNotificationId(
-        text: String,
-        pkg: String,
-        id: Int,
-    ): Boolean = text.lineSequence().any { it.contains("pkg=$pkg") && it.contains("id=$id") }
-
-    /**
-     * `dumpsys audio` AudioPlaybackConfiguration items are lines like
-     * `- piid:123 uid:10150 state:started ...`; require state and uid on the same line.
-     */
-    fun apcStarted(
-        text: String,
-        uid: Int,
-    ): Boolean =
-        text.lineSequence().any { line ->
-            line.contains("state:started") &&
-                Regex("""uid[:=]\s*$uid\b""").containsMatchIn(line)
-        }
 
     /** A `dumpsys media_session` PlaybackState sample for one session block. */
     data class PlaybackSample(
@@ -264,12 +228,6 @@ internal object BgStartSurface {
     ) {
         val playing: Boolean get() = state == 3
         val paused: Boolean get() = state == 2
-
-        /** Position projected to `elapsedNow` using the snapshot's speed+anchor. */
-        fun livePosition(elapsedNow: Long): Long? =
-            position?.let { pos ->
-                updatedElapsed?.let { pos + ((speed ?: 0f) * (elapsedNow - it)).toLong() } ?: pos
-            }
     }
 
     /**

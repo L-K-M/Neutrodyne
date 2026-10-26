@@ -7,14 +7,15 @@ plugins {
 
 // The M4 P6b bgstart trigger: a standalone APK in its own package and uid —
 // deliberately outside the self-instrumenting :tools:bmgrdriver (TOP all leg).
-// An enabled NotificationListenerService makes this uid trusted for media
-// control; a native Media3 MediaController connect both binds the target's
-// exported MediaLibraryService (bound clients are visible to the bound app —
-// the r13 framework-relay play() was omitted because the package was invisible:
-// "Package ... doesn't exist" -> untrusted -> COMMAND_PLAY_PAUSE unavailable)
-// and carries the real prepare/play commands. Whether a trusted BFGS-state
-// caller's connect stamps a granting allow record is precisely what the
-// card-stage evidence measures.
+// Its `status` provider method performs a native Media3 MediaController connect
+// to the target's exported MediaLibraryService (bound clients are visible to
+// the bound app — the r13 framework-relay play() was omitted because the
+// package was invisible: "Package ... doesn't exist" -> untrusted ->
+// COMMAND_PLAY_PAUSE unavailable) and reports the granted command set. The
+// driver measures it twice: untrusted (no enabled listener -> a real bind with
+// no player commands) and trusted (enabled NotificationListenerService -> the
+// bind itself stamps the PROC_STATE_BFGS/startForegroundCount:0 grant — the
+// impossibility row).
 // Java only: no Kotlin.
 android {
     namespace = "ch.lkmc.neutrodyne.tools.bgtrigger"

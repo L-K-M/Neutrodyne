@@ -276,9 +276,10 @@ class PlaybackServiceTest {
             await { withContext(Dispatchers.Main) { restored.currentPosition >= 9_000 } }
         }
 
-    // deniedBackgroundStartOffersWorkingResume moved to the external bgstart lane: an
-    // active instrumentation grants the target PROCESS_CAPABILITY_BFSL (OomAdjuster),
-    // so a genuine foreground-start denial is unreachable inside an instrumented target.
+    // The external background-start case moved to the external bgstart lane as
+    // externalBackgroundStartDenialIsUnreachable: an active instrumentation
+    // grants the target PROCESS_CAPABILITY_BFSL (OomAdjuster), so a genuine
+    // foreground-start denial is unreachable inside an instrumented target.
 
     @Test @Nightly
     @SdkSuppress(minSdkVersion = 37)

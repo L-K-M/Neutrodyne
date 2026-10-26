@@ -130,18 +130,6 @@ class DriverSelfTest {
         assertEquals("audio/mpeg", plain.episodes[1].ty)
     }
 
-    /** The loopback body is a well-formed RIFF/WAVE long enough to cover the seeded position. */
-    @Test
-    fun fixtureAudioIsWellFormedWav() {
-        val wav = FixtureAudio.pcm(FixtureAudio.STREAM_SECONDS)
-        assertEquals(44 + FixtureAudio.STREAM_SECONDS * FixtureAudio.BYTES_PER_SECOND, wav.size)
-        assertEquals("RIFF", wav.decodeToString(0, 4))
-        assertEquals("WAVE", wav.decodeToString(8, 12))
-        val dataSize = ByteBuffer.wrap(wav, 40, 4).order(ByteOrder.LITTLE_ENDIAN).int
-        assertEquals(FixtureAudio.STREAM_SECONDS * FixtureAudio.BYTES_PER_SECOND, dataSize)
-        assertTrue(FixtureAudio.STREAM_SECONDS * 1_000L > 750_000L)
-    }
-
     /** Validate serialized fixture identities before they can strand the published restore UI. */
     @Test
     fun fixturePassesStagerIdentityContract() {

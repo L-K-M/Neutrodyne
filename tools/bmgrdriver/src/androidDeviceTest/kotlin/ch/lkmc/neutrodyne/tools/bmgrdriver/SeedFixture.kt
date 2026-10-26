@@ -130,8 +130,8 @@ internal object SeedFixture {
     /**
      * Seed content with every id nonce-bound so cross-run reuse is impossible.
      * `enclosureBase` (the bgstart lane's `http://127.0.0.1:<port>`) rewrites the
-     * restored session's current episode to a driver-served loopback enclosure, so the
-     * resume leg decodes real media the run fully controls.
+     * restored session's current episode to a loopback enclosure the sidecar records,
+     * so the seeded session points at a driver-owned address rather than a fixture URL.
      */
     fun content(
         nonce: String,

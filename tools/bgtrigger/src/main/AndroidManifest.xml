@@ -30,8 +30,8 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
-        <!-- Exported so the rooted shell `content call` can drive
-             status/prepare/play — and each call is a synchronous binder
+        <!-- Exported so the rooted shell `content call` can drive the status
+             measurement — and each call is a synchronous binder
              transaction, the platform's own thaw for a cached-app-frozen
              process (the api36 freezer ices this package like every other). -->
         <provider

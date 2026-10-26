@@ -20,9 +20,10 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The bgstart leg's trusted-command endpoint: `content call` methods that drive
- * the target's restored media session through a native Media3 MediaController —
- * exactly the surface a real companion app (Wear, a car head unit) uses.
+ * The bgstart lane's trust-measurement endpoint: `content call` methods that
+ * connect the target's restored media session through a native Media3
+ * MediaController — exactly the surface a real companion app (Wear, a car head
+ * unit) uses — and report what that connect was granted.
  *
  * Why a Media3 connect and not the framework MediaSessionRecord relay: the r13
  * evidence showed the relay reaches MediaSessionLegacyStub inside the target,
@@ -35,17 +36,14 @@ import java.util.concurrent.TimeUnit;
  * MediaController connect IS a bindService to the target's exported
  * MediaLibraryService: bound clients are visible to the bound app, so the
  * package resolves and the enabled notification listener then passes the NLS
- * branch of the trust check. The stamped allow record on this bind — a
- * BFGS-state caller — is exactly what the card-stage evidence measures.
+ * branch of the trust check. The allow record stamped by that bind — a
+ * BFGS-state caller — is the lane's trusted-row measurement.
  *
- * Methods (shell `content call --uri content://...provider --method X`):
- *   status  — "trusted=1 sessions=N target=0|1": the connect landed AND the
- *             session granted commands (untrusted controllers connect with an
- *             empty command set — "Controller isn't allowed to call command").
- *   prepare — controller.prepare(): surfaces the durable restored queue as a
- *             PAUSED PlaybackState so SystemUI can render the media card.
- *   play    — controller.play(): the external trusted play that must produce
- *             the genuine FSSNAE denial on a demoted target.
+ * Method (shell `content call --uri content://...provider --method X`):
+ *   status  — "trusted=0|1 sessions=N target=0|1": whether the connect landed
+ *             (a real bind exists) AND whether the session granted commands
+ *             (untrusted controllers connect with an empty command set — no
+ *             COMMAND_PLAY_PAUSE, so they can never command playback).
  */
 public final class BgTriggerProvider extends ContentProvider {
     private static final String TAG = "BgTrigger";
@@ -70,12 +68,6 @@ public final class BgTriggerProvider extends ContentProvider {
             switch (method) {
                 case "status":
                     status(out);
-                    break;
-                case "prepare":
-                    command(out, true);
-                    break;
-                case "play":
-                    command(out, false);
                     break;
                 default:
                     out.putString("result", "error=unknown-method");
@@ -174,35 +166,6 @@ public final class BgTriggerProvider extends ContentProvider {
             "trusted=" + (c != null ? 1 : 0)
                 + " sessions=" + (connectLanded ? 1 : 0)
                 + " target=" + (connectLanded ? 1 : 0));
-    }
-
-    private void command(Bundle out, boolean prepare) {
-        MediaController c = controller();
-        if (c == null) {
-            Log.e(TAG, "BGTRIGGER-FAIL command while unconnected or untrusted");
-            out.putString("result", "trusted=0");
-            return;
-        }
-        try {
-            if (prepare) {
-                int items = onApplicationLooper(() -> {
-                    c.prepare();
-                    return c.getMediaItemCount();
-                });
-                Log.i(TAG, "BGTRIGGER-CMD prepare issued items=" + items);
-                out.putString("result", "prepared=1");
-            } else {
-                onApplicationLooper(() -> {
-                    c.play();
-                    return null;
-                });
-                Log.i(TAG, "BGTRIGGER-CMD play issued");
-                out.putString("result", "played=1");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "BGTRIGGER-FAIL command " + e);
-            out.putString("result", "error=" + e.getClass().getSimpleName() + ":" + e.getMessage());
-        }
     }
 
     @Override

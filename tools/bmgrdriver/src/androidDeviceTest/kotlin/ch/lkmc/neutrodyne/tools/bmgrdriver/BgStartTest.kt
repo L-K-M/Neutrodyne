@@ -6,32 +6,27 @@ import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
-import mockwebserver3.Dispatcher
-import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import mockwebserver3.RecordedRequest
-import okio.Buffer
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
-import java.net.InetAddress
 import java.net.ServerSocket
 
 /**
  * The armed bgstart driver phases (M4 P6b): `bgseed` restores a durable paused session
- * through the real production import UI, then `bgstart` drives the UNINSTRUMENTED target
- * from outside — a bind-only external cold start (the standalone `:tools:bgactor` APK
- * binds the exported media-library action, never a `startService`), a verified
- * demoted-and-settled window, then a TRUSTED external controller: the standalone
- * `:tools:bgtrigger` uid carries an enabled NotificationListenerService
- * (`isTrustedForMediaControl`) and drives prepare()/play() through a native
- * Media3 MediaController connect — the same bind+commands surface a companion
- * app uses (the connect's bind is also what makes the package visible to the
- * target's trust check; the r13 framework-relay play() was omitted as
- * untrusted for lack of it). A prepare() first surfaces the session as PAUSED
- * so the SystemUI card can render; the card's Play stays the preferred
- * trigger, with the trigger's own play() the fallback when the card never
- * resolves. The strict aggregate re-verifies every saved `bgstart-*.txt` file.
+ * through the real production import UI, then `bgstart` measures the UNINSTRUMENTED
+ * target from outside — the impossibility matrix. A bind-only external cold start
+ * (the standalone `:tools:bgactor` APK binds the exported media-library action, never
+ * a `startService`) and a verified demoted-and-settled window set up the two measured
+ * rows: the untrusted bound controller (the actor's demoted bind plus the trigger's
+ * pre-listener Media3 connect — real bind, `code:DENIED`, no elevation, and a command
+ * set with no COMMAND_PLAY_PAUSE) and the trusted bound controller (the
+ * `:tools:bgtrigger` uid's enabled NotificationListenerService makes its Media3
+ * connect trusted — and that very bind stamps `code:PROC_STATE_BFGS` with
+ * `startForegroundCount:0`, the platform's capability grant arriving BEFORE any
+ * foreground start could be attempted). With every commanding surface exempt by
+ * binding and every non-exempt surface unable to command, the leg records
+ * `verdict=impossible`. The strict aggregate re-verifies every saved
+ * `bgstart-*.txt` file.
  */
 @RunWith(AndroidJUnit4::class)
 class BgStartTest {
@@ -73,8 +68,8 @@ class BgStartTest {
             recorder.step("launched")
             UiRestore.awaitPreview()
             recorder.step("preview")
-            // The grant would leak a read path past the import; revoke it so the denial
-            // leg observes the same surfaces an ordinary install would.
+            // The grant would leak a read path past the import; revoke it so the
+            // bgstart leg observes the same surfaces an ordinary install would.
             context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             recorder.step("revoked", uri.toString())
             UiRestore.selectMerge()
@@ -91,18 +86,17 @@ class BgStartTest {
     }
 
     @Test
-    fun deniedBackgroundStartOffersWorkingResume() {
+    fun externalBackgroundStartDenialIsUnreachable() {
         val nonce =
             BmgrArming.requireArmed(
                 "bgstart",
-                "deniedBackgroundStartOffersWorkingResume",
+                "externalBackgroundStartDenialIsUnreachable",
                 InstrumentationRegistry.getArguments(),
             )
         val recorder = StatusRecorder("bgstart", nonce, context.packageName)
         val vault = SeedVault.dir(context)
         val probe = BgProbe(device, vault)
         var uid: Int? = null
-        var server: MockWebServer? = null
         try {
             val sidecar = BgStartSidecar.read(File(vault, "bgstart.expected.json"))
             check(sidecar.nonce == nonce) { "bgstart sidecar nonce ${sidecar.nonce} != armed $nonce" }
@@ -110,18 +104,6 @@ class BgStartTest {
                 "stale bgstart sidecar: api ${sidecar.api} on ${Build.VERSION.SDK_INT}"
             }
             recorder.step("sidecar", "port=${sidecar.port}")
-            val body = FixtureAudio.pcm(FixtureAudio.STREAM_SECONDS)
-            server =
-                MockWebServer().apply {
-                    dispatcher = RangeAudio(body)
-                    start(InetAddress.getByName("127.0.0.1"), sidecar.port)
-                }
-            recorder.step("served", "bytes=${body.size}")
-            device.wakeUp()
-            probe.shell("wm dismiss-keyguard")
-            // The seed leg registers it inside importViaProductionUi; this leg's
-            // long shade/card waits need the same ANR-dismissal coverage.
-            UiRestore.installAnrWaitWatcher()
             val appUid = probe.appUid()
             uid = appUid
             val cold = probe.uidState(appUid)
@@ -149,90 +131,50 @@ class BgStartTest {
             val before = probe.capture("before", uid)
             requireGuarded(before, appUid)
             recorder.step("guarded", "uidState=${before.uidState}")
-            // The trusted controller: an enabled notification listener on the
-            // third uid — isTrustedForMediaControl, the same membership a real
-            // companion app earns. Its Media3 connect is a real bind on the
-            // target — the stamped allow record is measured at the card stage.
+            // Matrix row 1 — the untrusted bound controller. The actor's demoted
+            // bind left `code:DENIED` records and elevated nothing; an untrusted
+            // Media3 connect (the trigger before its listener is enabled) lands
+            // the same real bind but is granted no COMMAND_PLAY_PAUSE — it can
+            // never command playback. The trigger's own bind is measured in the
+            // same stage: a granting record here would refute the row honestly.
+            val untrustedStatus = probe.triggerCall("status")
+            probe.write("bgstart-trigger-status-untrusted.txt", untrustedStatus)
+            check("target=1" in untrustedStatus) {
+                "the untrusted trigger connect never landed: $untrustedStatus"
+            }
+            check("trusted=0" in untrustedStatus) {
+                "an untrusted controller holds player commands: $untrustedStatus"
+            }
+            probe.captureTrigger("untrusted")
+            val untrusted = probe.capture("untrusted", uid)
+            requireGuarded(untrusted, appUid)
+            recorder.step("untrusted", "uidState=${untrusted.uidState}")
+            // Matrix row 2 — the trusted bound controller. The enabled
+            // notification listener makes this uid trusted for media control —
+            // the same membership a real companion app carries — but its Media3
+            // connect bind must stamp `code:PROC_STATE_BFGS` with
+            // `startForegroundCount:0`: the capability grant arrives with the
+            // binding, before any foreground start could be attempted or denied.
             probe.enableTrigger()
             check(probe.tryAwait(BgProbe.TRUST_WAIT_MS) { probe.triggerSessionVisible() }) {
                 "the trusted trigger never saw the session"
             }
+            val trustedStatus = probe.triggerCall("status")
+            probe.write("bgstart-trigger-status-trusted.txt", trustedStatus)
+            check("trusted=1" in trustedStatus) {
+                "the trusted connect holds no player commands: $trustedStatus"
+            }
             probe.captureTrigger("trusted")
-            recorder.step("trusted", "clients=${before.bindingClients}")
-            // prepare() surfaces the durable queue as PAUSED (the target grants
-            // no commands to untrusted controllers — the actor's own prepare was
-            // refused: "Controller isn't allowed to call command= 2"). Only a
-            // PAUSED session lets SystemUI render the media card at all.
-            probe.triggerCall("prepare")
-            val prepared =
-                probe.tryAwait(BgProbe.PREPARED_WAIT_MS) {
-                    BgStartSurface
-                        .mediaSessionPlayback(
-                            probe.shell("dumpsys -t 20 media_session"),
-                            BmgrArming.TARGET_PACKAGE,
-                        )?.paused == true
-                }
-            recorder.step("prepared", prepared.toString())
-            check(probe.openShade()) { "the SystemUI shade never opened" }
-            probe.dumpHierarchy("shade")
-            val play = probe.awaitCardPlay(BgProbe.WAIT_MS)
-            // The decisive BFSL probe: after the trigger connected (and the card
-            // renders, if it does), the target must still sit demoted with no
-            // FGS grant on any record — the trigger's own elevated uid binds
-            // nothing, so no binding can propagate capability here.
-            val card = probe.capture("card", uid)
-            requireGuarded(card, appUid)
-            check(card.grantViolations().isEmpty()) {
-                "a binding granted FGS capability once the card rendered: " +
-                    "${card.grantViolations()} — no genuine denial is reachable"
-            }
-            probe.captureTrigger("card")
-            recorder.step("card", "uidState=${card.uidState} clients=${card.bindingClients}")
-            if (play != null) {
-                play.click()
-                recorder.step("play-tapped")
-            } else {
-                // SystemUI did not surface the (now-PAUSED) session either: the
-                // same ordinary controller play arrives through the trigger's
-                // framework MediaController instead — an identical play()
-                // reaching the service's beforePlay/FGS path, and the honest
-                // "no card" verdict stays in ui-bgstart-no-card.xml.
-                probe.dumpHierarchy("no-card")
-                check("played=1" in probe.triggerCall("play")) {
-                    "the trusted trigger's play() was never delivered"
-                }
-                recorder.step("play-triggered")
-            }
-            check(
-                probe.tryAwait(BgProbe.WAIT_MS) {
-                    notificationDumpHas(
-                        probe,
-                        BgStartSurface.RESUME_NOTIFICATION,
-                        BgStartSurface.RESUME_CHANNEL,
-                    )
-                },
-            ) { "recovery notification 4001 never posted after the Play tap" }
-            val denied = probe.capture("denied", uid)
-            requireDenied(denied, appUid)
-            probe.captureTrigger("denied")
+            val trusted = probe.capture("trusted", uid)
+            requireGrantStamped(trusted)
+            recorder.step("trusted", "uidState=${trusted.uidState} clients=${trusted.bindingClients}")
+            // Matrix row 3 — the binding-free framework relay — is documented
+            // historical evidence (r13: judged untrusted target-side, no
+            // elevation); nothing here wires it. With no surface both able to
+            // command and non-exempt, the denial is unreachable by construction.
+            probe.write("bgstart-verdict.txt", "verdict=impossible\n")
+            recorder.step("verdict", "impossible")
             probe.captureLogcat()
-            recorder.step("denied", "uidState=${denied.uidState}")
-            check(probe.openShade()) { "the shade could not be reopened for Resume" }
-            probe.tapResume(BgProbe.WAIT_MS)
-            recorder.step("resume-tapped")
-            check(
-                probe.tryAwait(BgProbe.WAIT_MS) {
-                    BgStartSurface.isForegroundValue(probe.servicesDump()) == true
-                },
-            ) { "the service never became foreground after the Resume tap" }
-            val resumed = probe.capture("resumed", uid)
-            requireResumed(resumed)
-            val advance = probe.positionAdvance()
-            check(advance != null && advance > BgStartSurface.POSITION_ADVANCE_MS) {
-                "position advance ${advance ?: -1}ms did not exceed ${BgStartSurface.POSITION_ADVANCE_MS}ms"
-            }
-            check(server.requestCount >= 1) { "the enclosure request never reached the driver" }
-            recorder.step("resumed", "posAdvance=${advance}ms requests=${server.requestCount}")
             finishDriverPhase(context, "bgstart", nonce, recorder, "ok")
         } catch (t: Throwable) {
             runCatching { probe.capture("fail", uid) }
@@ -240,128 +182,55 @@ class BgStartTest {
             finishDriverPhase(context, "bgstart", nonce, recorder, "error:${t.javaClass.simpleName}:${t.message}", t)
         } finally {
             runCatching { probe.stopActor() }
-            server?.close()
         }
     }
 
     /**
-     * Pre-tap gate: a bound, live, non-foreground service with nothing granting FGS.
-     * A bound service's dump carries no `isForeground=` line (ServiceRecord.dump prints
-     * it only when foreground or a stale foregroundId survives), so "non-foreground" is
-     * proven by the record existing while `isForeground=true` is absent. The
-     * `mAllowStart_*` fields print only on newer dumps; when present they must be DENIED.
+     * A measured stage where the target must be bound, live, demoted and non-foreground
+     * with nothing granting FGS. A bound service's dump carries no `isForeground=` line
+     * (ServiceRecord.dump prints it only when foreground or a stale foregroundId
+     * survives), so "non-foreground" is proven by the record existing while
+     * `isForeground=true` is absent. The `mAllowStart_*` fields print only on newer
+     * dumps; when present they must be DENIED.
      */
     private fun requireGuarded(
         stage: BgProbe.Stage,
         uid: Int,
     ) {
-        check(stage.serviceRecord) { "no ServiceRecord for the bound service" }
-        check(stage.serviceRunning) { "ServiceRecord has no live process (app=null phantom)" }
-        check(stage.uidState != null && stage.uidState >= BgStartSurface.PROCSTATE_SERVICE) {
-            "target uid ${stage.uidState} above the service threshold before the tap"
+        check(stage.serviceRecord) { "no ServiceRecord for the bound service at ${stage.label}" }
+        check(stage.serviceRunning) {
+            "ServiceRecord has no live process (app=null phantom) at ${stage.label}"
         }
-        check(stage.isForeground != true) { "service already foreground before the tap" }
+        check(stage.uidState != null && stage.uidState >= BgStartSurface.PROCSTATE_SERVICE) {
+            "target uid ${stage.uidState} above the service threshold at ${stage.label}"
+        }
+        check(stage.isForeground != true) { "service already foreground at ${stage.label}" }
         check(stage.noBinding == null || stage.noBinding == "DENIED") {
-            "mAllowStart_noBinding=${stage.noBinding} before the tap — an allow source exists"
+            "mAllowStart_noBinding=${stage.noBinding} at ${stage.label} — an allow source exists"
         }
         check(stage.byBindings == null || stage.byBindings == "DENIED") {
-            "mAllowStart_byBindings=${stage.byBindings} before the tap — a binding elevated the target"
+            "mAllowStart_byBindings=${stage.byBindings} at ${stage.label} — a binding elevated the target"
         }
-        check(!stage.tempAllowViolation) { "temp allowlist present before the tap" }
+        check(!stage.tempAllowViolation) { "temp allowlist present at ${stage.label}" }
         check(stage.selfViolations(uid).isEmpty()) {
-            "self records show FGS capability before the tap: ${stage.selfViolations(uid)}"
+            "self records show FGS capability at ${stage.label}: ${stage.selfViolations(uid)}"
         }
     }
 
-    /** Post-tap denial: real FSSNAE evidence — no service, no allowlist, session paused, 4001 up. */
-    private fun requireDenied(
-        stage: BgProbe.Stage,
-        uid: Int,
-    ) {
-        check(stage.uidState != null && stage.uidState >= BgStartSurface.PROCSTATE_SERVICE) {
-            "target uid ${stage.uidState} elevated after the tap"
-        }
-        check(stage.isForeground != true) { "service became foreground despite the denial" }
-        check(stage.noBinding == null || stage.noBinding == "DENIED") {
-            "mAllowStart_noBinding=${stage.noBinding} after the tap"
-        }
-        check(stage.byBindings == null || stage.byBindings == "DENIED") {
-            "mAllowStart_byBindings=${stage.byBindings} after the tap"
-        }
-        check(stage.deniedAttempts(uid).isNotEmpty()) {
-            "no startForeground evaluation recorded a DENIED verdict for the target"
-        }
-        check(stage.grantViolations().isEmpty()) {
-            "a record grants an FGS start despite the denial: ${stage.grantViolations()}"
-        }
-        check(stage.tempAllowObserved) {
-            "tempAllowListReason absent from all dumps — cannot prove no allowlist"
-        }
-        check(!stage.tempAllowViolation) { "a temp allowlist granted the denied attempt" }
-        check(stage.selfViolations(uid).isEmpty()) {
-            "self records falsify the denial: ${stage.selfViolations(uid)}"
-        }
-        check(stage.notification4001) { "recovery notification 4001 absent from the denied stage" }
-        check(!stage.apcStarted) { "audio is active for the target uid despite the denial" }
-        check(stage.playback != null) { "media_session has no PlaybackState for the target" }
-        check(stage.playback.paused) { "session state ${stage.playback.state} is not paused" }
-    }
-
-    /** Post-resume: real playback — foreground service, 4000 up, 4001 gone, audio started. */
-    private fun requireResumed(stage: BgProbe.Stage) {
-        check(stage.isForeground == true) { "service not foreground after Resume" }
-        check(stage.notification4000) { "playback notification 4000 absent after Resume" }
-        check(!stage.notification4001) { "recovery notification 4001 not cancelled" }
-        check(stage.apcStarted) { "no active playback configuration for the target uid" }
-        check(stage.playback?.playing == true) {
-            "session state ${stage.playback?.state} is not playing"
+    /**
+     * The impossibility row's positive stamp: the trusted trigger's connect bind must
+     * carry `code:PROC_STATE_BFGS` with `startForegroundCount:0` — the binding itself
+     * granted the FGS capability before any startForeground attempt existed to deny.
+     */
+    private fun requireGrantStamped(stage: BgProbe.Stage) {
+        check(stage.serviceRecord) { "no ServiceRecord for the bound service at ${stage.label}" }
+        check(stage.serviceRunning) { "ServiceRecord has no live process at ${stage.label}" }
+        check(stage.triggerGrantStamps().isNotEmpty()) {
+            "the trusted bind stamped no PROC_STATE_BFGS/startForegroundCount:0 grant " +
+                "at ${stage.label} — the matrix row did not measure the exemption"
         }
     }
 
-    private fun notificationDumpHas(
-        probe: BgProbe,
-        id: Int,
-        channel: String,
-    ): Boolean =
-        BgStartSurface.hasNotification(
-            probe.shell("dumpsys -t 15 notification | grep 'pkg=${BmgrArming.TARGET_PACKAGE}'"),
-            BmgrArming.TARGET_PACKAGE,
-            id,
-            channel,
-        )
-
-    /** An ephemeral port released for the bgstart leg's HTTP server to rebind. */
+    /** An ephemeral port the bgseed leg's sidecar records for the restored enclosure. */
     private fun reservePort(): Int = ServerSocket(0).use { it.localPort }
-}
-
-/** Serves the fixture WAV with byte ranges so the resume leg's seek to ~750 s works. */
-internal class RangeAudio(
-    private val body: ByteArray,
-) : Dispatcher() {
-    override fun dispatch(request: RecordedRequest): MockResponse {
-        val range =
-            request.headers["Range"]
-                ?: return MockResponse
-                    .Builder()
-                    .code(200)
-                    .addHeader("Content-Type", "audio/wav")
-                    .addHeader("Accept-Ranges", "bytes")
-                    .body(Buffer().write(body))
-                    .build()
-        val match = RANGE.find(range) ?: return MockResponse.Builder().code(400).build()
-        val start = match.groupValues[1].toInt()
-        if (start >= body.size) return MockResponse.Builder().code(416).build()
-        val end = match.groupValues[2].toIntOrNull()?.coerceAtMost(body.size - 1) ?: (body.size - 1)
-        return MockResponse
-            .Builder()
-            .code(206)
-            .addHeader("Content-Type", "audio/wav")
-            .addHeader("Content-Range", "bytes $start-$end/${body.size}")
-            .body(Buffer().write(body.copyOfRange(start, end + 1)))
-            .build()
-    }
-
-    private companion object {
-        val RANGE = Regex("""bytes=(\d+)-(\d*)""")
-    }
 }

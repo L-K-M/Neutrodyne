@@ -21,8 +21,9 @@ SOAK_DEVICES = {"api34"}
 
 def verify(root, profile, devices):
     for device in devices:
-        # deniedBackgroundStartOffersWorkingResume runs in the external bgstart lane;
-        # its aggregate asserts the case there (an instrumented target cannot deny it).
+        # externalBackgroundStartDenialIsUnreachable runs in the external bgstart
+        # lane; its aggregate asserts the case there (an instrumented target
+        # cannot measure a denial).
         expected = {"notificationTransportAndLocalArtwork"} if profile == "release" else set(SHORT)
         if profile == "nightly" and device in SOAK_DEVICES:
             expected.add(LONG)

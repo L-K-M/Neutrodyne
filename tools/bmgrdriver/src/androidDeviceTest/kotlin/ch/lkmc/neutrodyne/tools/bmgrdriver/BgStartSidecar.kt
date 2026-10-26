@@ -7,9 +7,9 @@ import java.io.File
 
 /**
  * The bgseed -> bgstart handoff record in the driver's `files/bmgr/` vault: nonce and API
- * bind the leg, `port`/`enclosureUrl` name the loopback enclosure the restored session's
- * current episode must stream from the driver's own HTTP server. The host checker
- * validates the whole record so a stale or foreign sidecar fails closed.
+ * bind the leg, `port`/`enclosureUrl` name the loopback address the restored session's
+ * current episode was rewritten to. The host checker validates the whole record so a
+ * stale or foreign sidecar fails closed.
  */
 @Serializable
 internal data class BgStartSidecar(

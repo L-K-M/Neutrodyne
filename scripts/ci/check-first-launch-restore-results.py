@@ -20,10 +20,11 @@ Two modes:
   restored database content. `bmgr-check.sh` runs it before the empty control.
 - `--bmgr-empty EVIDENCE_DIR`: validates the subsequent empty-dataset capture.
   The `--bmgr` aggregate requires both phase checks verbatim.
-- `--bgstart ROOT`: the M4 P6b external background-start gate — strict
-  verification of the `scripts/ci/bgstart-check.sh` evidence tree (one
-  `apiNN/` directory per leg): denial and resume dumpsys captures, the
-  instrument/status/marker wire, sidecar binding and selectors.
+- `--bgstart ROOT`: the M4 P6b external background-start impossibility gate —
+  strict verification of the `scripts/ci/bgstart-check.sh` evidence tree (one
+  `apiNN/` directory per leg): the measured bind-stage dumpsys captures, the
+  instrument/status/marker wire, the verdict record, sidecar binding and
+  selectors.
 """
 
 import argparse
@@ -935,36 +936,38 @@ def check_bmgr(root):
 
 
 # ---- M4 P6b bgstart external gate ---------------------------------------------
-# The denial+resume case cannot live inside the instrumented app APK (active
-# instrumentation grants PROCESS_CAPABILITY_BFSL), so this aggregate re-verifies
-# the external lane's saved dumpsys/notification/audio/session captures.
+# A genuine external background-FGS-start denial is unreachable on api31/api36:
+# every real media-control surface either cannot command playback (untrusted
+# Media3 controllers connect with a command set that lacks COMMAND_PLAY_PAUSE)
+# or is exempted by its own bind (a trusted caller's Media3 connect stamps
+# `code:PROC_STATE_BFGS` with `startForegroundCount:0` — the capability grant
+# precedes any startForeground attempt). This aggregate re-verifies the lane's
+# measured matrix — the demoted settle, the untrusted row, the trusted row and
+# exactly one `verdict=impossible` record; a run claiming a denial is a
+# fabrication and fails closed. (The case cannot live inside the instrumented
+# app APK: active instrumentation grants PROCESS_CAPABILITY_BFSL.)
 
 BGSTART_DEVICES = {"api31": 31, "api36": 36}
 BGSTART_CLASS = "ch.lkmc.neutrodyne.tools.bmgrdriver.BgStartTest"
 BGSTART_METHODS = {
     "bgseed": "seedPausedSession",
-    "bgstart": "deniedBackgroundStartOffersWorkingResume",
+    "bgstart": "externalBackgroundStartDenialIsUnreachable",
 }
 BGSTART_LOGS = {phase: f"instrument-{phase}.log" for phase in BGSTART_METHODS}
 BGSTART_SELECTORS = (
     "apkNonDebuggable", "driverInstrumentationAvailable", "seedImportDone",
     "durableQueueSeeded", "targetColdBelowBfgs", "bgstartCompleted",
 )
-BGSTART_STEPS = {
-    "bgseed": {"built", "launched", "preview", "revoked", "categories", "requested"},
-    "bgstart": {"sidecar", "served", "actor", "bound", "settled", "guarded",
-                "trusted", "card", "denied", "resume-tapped", "resumed"},
+# The armed protocol order — an extra, missing or reordered step fails closed.
+BGSTART_STEP_ORDER = {
+    "bgseed": ["built", "launched", "preview", "revoked", "categories", "requested"],
+    "bgstart": ["sidecar", "actor", "bound", "settled", "guarded",
+                "untrusted", "trusted", "verdict"],
 }
-# The trigger fires exactly one of two surfaces: the SystemUI card's Play when
-# the card renders, else the trusted trigger's own framework-path play().
-BGSTART_PLAY_STEPS = {"play-tapped", "play-triggered"}
 BGSTART_PROCSTATE_SERVICE = 10
 BGSTART_SETTLE_MS = 15_000
-BGSTART_RESUME_ID = 4001
-BGSTART_PLAYBACK_ID = 4000
-BGSTART_RESUME_CHANNEL = "alerts"
-BGSTART_PLAYBACK_CHANNEL = "playback"
-BGSTART_POSITION_ADVANCE_MS = 200
+BGSTART_TRIGGER_PACKAGE = "ch.lkmc.neutrodyne.tools.bgtrigger"
+BGSTART_TRIGGER_LISTENER = "BgTriggerListenerService"
 # uidState names numerically worse than BFGS(5): an attempt made from any of these
 # cannot have been allowed by the uid's own process state.
 BGSTART_UIDSTATE_BELOW_BFGS = {
@@ -1013,49 +1016,6 @@ def self_attempt(info, app_uid):
 def uid_state(text):
     match = UID_STATE_RE.search(text)
     return int(match.group(1)) if match else None
-
-
-def has_notification(text, pkg, nid, channel):
-    return any(f"pkg={pkg}" in line and f"id={nid}" in line
-               and f"channel={channel}" in line
-               for line in text.splitlines())
-
-
-def has_notification_id(text, pkg, nid):
-    return any(f"pkg={pkg}" in line and f"id={nid}" in line
-               for line in text.splitlines())
-
-
-def apc_started(text, uid):
-    uid_token = re.compile(rf"uid[:=]\s*{uid}\b")
-    return any("state:started" in line and uid_token.search(line)
-               for line in text.splitlines())
-
-
-def playback_sample(text, pkg):
-    """The PlaybackState nearest the session block naming `pkg`, or None."""
-    lines = text.splitlines()
-    pkg_lines = [i for i, line in enumerate(lines) if pkg in line]
-    if not pkg_lines:
-        return None
-    candidates = [i for i, line in enumerate(lines) if "PlaybackState" in line]
-    if not candidates:
-        return None
-    index = min(candidates,
-                key=lambda i: min(abs(i - p) for p in pkg_lines))
-    if min(abs(index - p) for p in pkg_lines) > 80:
-        return None
-    line = lines[index]
-    state = re.search(r"state=(?:[A-Z_]+\()?(-?\d+)\)?", line)
-    position = re.search(r"(?<!buffered )position=(-?\d+)", line)
-    speed = re.search(r"speed=(-?[\d.]+)", line)
-    updated = re.search(r"updated=(-?\d+)", line)
-    return {
-        "state": int(state.group(1)) if state else None,
-        "position": int(position.group(1)) if position else None,
-        "speed": float(speed.group(1)) if speed else None,
-        "updated": int(updated.group(1)) if updated else None,
-    }
 
 
 def bgstart_text(directory, name):
@@ -1121,47 +1081,8 @@ def check_allow_fields(device, stage, services, api):
                 raise ValueError(f"{device}: {stage} {field} not DENIED")
 
 
-def check_bgstart_denial(device, directory, app_uid, api):
-    """The denied stage: genuine FSSNAE surfaces, nothing allowed, session paused."""
-    uid_text = bgstart_text(directory, "bgstart-uid-state-denied.txt")
-    state = uid_state(uid_text)
-    if state is None or state < BGSTART_PROCSTATE_SERVICE:
-        raise ValueError(f"{device}: denied uid-state {state!r} above SERVICE")
-    services = bgstart_text(directory, "bgstart-services-denied.txt")
-    processes = bgstart_text(directory, "bgstart-processes-denied.txt")
-    check_not_foreground(device, "denied", services)
-    check_allow_fields(device, "denied", services, api)
-    temp_values = TEMP_ALLOW_RE.findall(services + processes)
-    if not temp_values:
-        raise ValueError(
-            f"{device}: no tempAllowListReason surface to prove no allowlist")
-    if any(v not in ("<null>", "null") for v in temp_values):
-        raise ValueError(f"{device}: temp allowlist granted: {temp_values}")
-    check_self_records(device, "denied", services, app_uid)
-    check_no_grants(device, "denied", services)
-    # The denial must be a real evaluation: at least one of the target's own
-    # startForeground attempts recorded a DENIED verdict.
-    if not any(self_attempt(info, app_uid) and info.get("code") == "DENIED"
-               for info in allow_infos(services)):
-        raise ValueError(
-            f"{device}: no DENIED self attempt recorded under denial")
-    notification = bgstart_text(directory, "bgstart-notification-denied.txt")
-    if not has_notification(notification, BMGR_TARGET, BGSTART_RESUME_ID,
-                            BGSTART_RESUME_CHANNEL):
-        raise ValueError(f"{device}: recovery notification 4001 absent")
-    audio = bgstart_text(directory, "bgstart-audio-denied.txt")
-    if apc_started(audio, app_uid):
-        raise ValueError(f"{device}: audio active for uid {app_uid} under denial")
-    sample = playback_sample(
-        bgstart_text(directory, "bgstart-media-session-denied.txt"), BMGR_TARGET)
-    if sample is None:
-        raise ValueError(f"{device}: no PlaybackState for the target session")
-    if sample["state"] != 2:
-        raise ValueError(f"{device}: denied session state {sample['state']} != PAUSED")
-
-
 def check_bgstart_guarded(device, directory, stage, api):
-    """A guarded stage (before/card): bound, live, demoted, nothing granting FGS."""
+    """A guarded stage (before/untrusted): bound, live, demoted, nothing granting FGS."""
     uid_text = bgstart_text(directory, f"bgstart-uid-state-{stage}.txt")
     state = uid_state(uid_text)
     if state is None or state < BGSTART_PROCSTATE_SERVICE:
@@ -1174,7 +1095,7 @@ def check_bgstart_guarded(device, directory, stage, api):
 
 
 def check_bgstart_before(device, directory, api, app_uid):
-    """The pre-tap stage: a plain background service with no allow source."""
+    """The guarded stage: a plain background service with no allow source."""
     services = check_bgstart_guarded(device, directory, "before", api)
     check_self_records(device, "before", services, app_uid)
     cold = bgstart_text(directory, "uid-state-cold.txt")
@@ -1183,11 +1104,78 @@ def check_bgstart_before(device, directory, api, app_uid):
         raise ValueError(f"{device}: cold uid-state {cold_state!r} above SERVICE")
 
 
-def check_bgstart_card(device, directory, api, app_uid):
-    """The card stage — the decisive probe: once the SystemUI card rendered (and
-    bound, if it binds), the target must still be demoted with no FGS grant."""
-    services = check_bgstart_guarded(device, directory, "card", api)
-    check_self_records(device, "card", services, app_uid)
+def check_bgstart_untrusted(device, directory, api, app_uid):
+    """Matrix row 1 — the untrusted bound controller: real binds exist (the
+    actor's demoted bind and the trigger's pre-listener Media3 connect), the
+    target stays demoted with no allowlist and no granting record, and the
+    untrusted controller's command set carries no COMMAND_PLAY_PAUSE — it can
+    never command playback."""
+    services = check_bgstart_guarded(device, directory, "untrusted", api)
+    check_self_records(device, "untrusted", services, app_uid)
+    processes = bgstart_text(directory, "bgstart-processes-untrusted.txt")
+    temp_values = TEMP_ALLOW_RE.findall(services + processes)
+    if not temp_values:
+        raise ValueError(
+            f"{device}: no tempAllowListReason surface to prove no allowlist")
+    if any(v not in ("<null>", "null") for v in temp_values):
+        raise ValueError(f"{device}: temp allowlist granted: {temp_values}")
+    status = bgstart_text(directory, "bgstart-trigger-status-untrusted.txt")
+    if "target=1" not in status:
+        raise ValueError(
+            f"{device}: the untrusted trigger connect never landed: {status!r}")
+    if "trusted=0" not in status:
+        raise ValueError(
+            f"{device}: an untrusted controller holds player commands: {status!r}")
+    trigger = bgstart_text(directory, "bgstart-trigger-untrusted.txt")
+    if "enabledListeners=" not in trigger:
+        raise ValueError(
+            f"{device}: untrusted-stage trigger evidence lacks listener surface")
+    if BGSTART_TRIGGER_LISTENER in trigger:
+        raise ValueError(
+            f"{device}: the trigger listener was already enabled at the "
+            f"untrusted stage — the row is polluted")
+
+
+def check_bgstart_trusted(device, directory):
+    """Matrix row 2 — the impossibility stamp: the trusted (enabled
+    notification-listener) controller's Media3 connect must leave an allow
+    record attributing the FGS capability grant to the bind itself —
+    `code:PROC_STATE_BFGS` with `startForegroundCount:0` — so the exemption
+    precedes any startForeground attempt a denial could ever fire on."""
+    bgstart_text(directory, "bgstart-uid-state-trusted.txt")
+    services = bgstart_text(directory, "bgstart-services-trusted.txt")
+    if "ServiceRecord{" not in services or "app=ProcessRecord{" not in services:
+        raise ValueError(f"{device}: trusted dump has no live ServiceRecord")
+    grants = [
+        info for info in allow_infos(services)
+        if info.get("callingPackage") == BGSTART_TRIGGER_PACKAGE
+        and info.get("code") == "PROC_STATE_BFGS"
+        and info.get("startForegroundCount") == "0"
+    ]
+    if not grants:
+        raise ValueError(
+            f"{device}: the trusted bind stamped no PROC_STATE_BFGS/"
+            f"startForegroundCount:0 grant for {BGSTART_TRIGGER_PACKAGE}")
+    status = bgstart_text(directory, "bgstart-trigger-status-trusted.txt")
+    if "trusted=1" not in status or "target=1" not in status:
+        raise ValueError(
+            f"{device}: the trusted connect held no commands or never landed: "
+            f"{status!r}")
+    trigger = bgstart_text(directory, "bgstart-trigger-trusted.txt")
+    if "enabledListeners=" not in trigger \
+            or BGSTART_TRIGGER_LISTENER not in trigger:
+        raise ValueError(
+            f"{device}: trusted-stage trigger evidence lacks listener membership")
+
+
+def check_bgstart_verdict(device, directory):
+    """Exactly one verdict record per leg, and it must be `impossible` — a run
+    claiming a denial is fabricated evidence and fails closed."""
+    text = bgstart_text(directory, "bgstart-verdict.txt")
+    verdicts = re.findall(r"^verdict=(\S+)\s*$", text, re.M)
+    if verdicts != ["impossible"]:
+        raise ValueError(
+            f"{device}: verdict records {verdicts!r} != ['impossible']")
 
 
 def check_bgstart_settle(device, directory):
@@ -1211,46 +1199,6 @@ def check_bgstart_settle(device, directory):
     if best < BGSTART_SETTLE_MS:
         raise ValueError(
             f"{device}: demoted settle window {best}ms < {BGSTART_SETTLE_MS}ms")
-
-
-def check_bgstart_resumed(device, directory, app_uid):
-    """The resumed stage: real playback — foreground 4000, audio, position, 4001 gone."""
-    services = bgstart_text(directory, "bgstart-services-resumed.txt")
-    if "isForeground=true" not in services:
-        raise ValueError(f"{device}: resumed service not isForeground=true")
-    notification = bgstart_text(directory, "bgstart-notification-resumed.txt")
-    if not has_notification(notification, BMGR_TARGET, BGSTART_PLAYBACK_ID,
-                            BGSTART_PLAYBACK_CHANNEL):
-        raise ValueError(f"{device}: playback notification 4000 absent")
-    if has_notification_id(notification, BMGR_TARGET, BGSTART_RESUME_ID):
-        raise ValueError(f"{device}: recovery notification 4001 not cancelled")
-    audio = bgstart_text(directory, "bgstart-audio-resumed.txt")
-    if not apc_started(audio, app_uid):
-        raise ValueError(f"{device}: no active playback for uid {app_uid}")
-    sample = playback_sample(
-        bgstart_text(directory, "bgstart-media-session-resumed.txt"), BMGR_TARGET)
-    if sample is None or sample["state"] != 3:
-        raise ValueError(f"{device}: resumed session not PLAYING")
-    positions = bgstart_text(directory, "bgstart-positions.txt")
-    lives = []
-    for match in re.finditer(
-            r"^sample=\d+ elapsed=(\d+) state=(\S+) position=(\S+) "
-            r"speed=(\S+) updated=(\S+) live=(\S+)$", positions, re.M):
-        elapsed, state, position, speed, updated, live = match.groups()
-        if state != "3":
-            raise ValueError(f"{device}: position sample not PLAYING: {match[0]}")
-        missing = ("None", "null")
-        if position in missing or speed in missing:
-            raise ValueError(f"{device}: unparseable position sample")
-        position, speed = int(position), float(speed)
-        computed = position + speed * (int(elapsed) - int(updated)) \
-            if updated not in missing else position
-        if live not in missing and abs(int(live) - computed) > 1:
-            raise ValueError(f"{device}: recorded live != computed position")
-        lives.append(computed)
-    if len(lives) != 2 or lives[1] - lives[0] <= BGSTART_POSITION_ADVANCE_MS:
-        raise ValueError(
-            f"{device}: position advance {lives} <= {BGSTART_POSITION_ADVANCE_MS}ms")
 
 
 def check_bgstart_device(root, device, api):
@@ -1322,38 +1270,26 @@ def check_bgstart_device(root, device, api):
         if not status_path.is_file():
             raise ValueError(f"{device}: missing driver-status-{phase}.json")
         check_driver_status(device, phase, nonce, api, run["driverPackage"],
-                            status_path, BGSTART_STEPS[phase])
-
-    # Exactly one trigger surface may have fired — never both, never neither.
-    status = json.loads((directory / "driver-status-bgstart.json").read_text())
-    fired = {s.get("name") for s in status.get("steps", [])} & BGSTART_PLAY_STEPS
-    if len(fired) != 1:
-        raise ValueError(
-            f"{device}: expected exactly one play step, got {sorted(fired)}")
-
-    # The trigger's own proof: real notification-listener trust and a real
-    # command set on its Media3 connect, plus per-stage
-    # uid/listener dumps (the "does listener membership elevate" record).
-    bgstart_text(directory, "bgstart-listener.txt")
-    trigger_status = bgstart_text(directory, "bgstart-trigger-status.txt")
-    if "trusted=1" not in trigger_status or "target=1" not in trigger_status:
-        raise ValueError(
-            f"{device}: trigger was not a trusted controller seeing the "
-            f"session: {trigger_status.strip()!r}")
-    for stage in ("card", "denied"):
-        evidence = bgstart_text(directory, f"bgstart-trigger-{stage}.txt")
-        if "enabledListeners=" not in evidence \
-                or "BgTriggerListenerService" not in evidence:
+                            status_path, set(BGSTART_STEP_ORDER[phase]))
+        status = json.loads(status_path.read_text())
+        names = [s.get("name") for s in status.get("steps", [])]
+        if names != BGSTART_STEP_ORDER[phase]:
             raise ValueError(
-                f"{device}: {stage} trigger evidence lacks listener membership")
+                f"{device}: {phase} steps {names} != "
+                f"{BGSTART_STEP_ORDER[phase]}")
+
+    # The listener-enablement log plus the per-stage trigger uid/listener dumps.
+    bgstart_text(directory, "bgstart-listener.txt")
+    bgstart_text(directory, "bgstart-trigger-status.txt")
 
     check_bgstart_settle(device, directory)
     check_bgstart_before(device, directory, api, app_uid)
-    check_bgstart_card(device, directory, api, app_uid)
-    check_bgstart_denial(device, directory, app_uid, api)
-    check_bgstart_resumed(device, directory, app_uid)
+    check_bgstart_untrusted(device, directory, api, app_uid)
+    check_bgstart_trusted(device, directory)
+    check_bgstart_verdict(device, directory)
     print(f"{device}: PASS bgstart external gate "
-          f"(denied background start -> SystemUI Resume -> playback)")
+          f"(unreachable denial: untrusted bind read-only, trusted bind "
+          f"stamped PROC_STATE_BFGS)")
 
 
 def check_bgstart(root):

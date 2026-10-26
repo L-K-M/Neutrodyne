@@ -33,7 +33,7 @@ import android.util.Log;
  * exemption (REASON_ACTIVITY_STARTER — a ~10 s grace from the last activity
  * launch/finish in the caller uid, the same window bg-activity-start uses).
  * A bind inside that window stamps code:ACTIVITY_STARTER on the binding's
- * allow record, which the card-stage probe correctly reads as a granting
+ * allow record, which the guarded-stage probe correctly reads as a granting
  * capability. The record is sticky, so the bind must also wait out the
  * grace before it is created.
  */

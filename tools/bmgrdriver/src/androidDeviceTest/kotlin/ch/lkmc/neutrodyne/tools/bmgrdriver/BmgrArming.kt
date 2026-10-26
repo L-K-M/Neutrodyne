@@ -32,7 +32,7 @@ internal object BmgrArming {
             "flip" to Phase(BmgrDriverTest::class.java.name, "settingsFlip"),
             "encrypted" to Phase(BmgrDriverTest::class.java.name, "encryptedImportRejected"),
             "bgseed" to Phase(BgStartTest::class.java.name, "seedPausedSession"),
-            "bgstart" to Phase(BgStartTest::class.java.name, "deniedBackgroundStartOffersWorkingResume"),
+            "bgstart" to Phase(BgStartTest::class.java.name, "externalBackgroundStartDenialIsUnreachable"),
         )
 
     val TEST_CLASSES: List<String> get() = PHASES.values.map { it.testClass }.distinct()

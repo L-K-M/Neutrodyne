@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Unlicense
 #
-# bgstart-check.sh <31|36> <evidence-dir>: M4 P6b external background-start gate.
-# A self-instrumented driver first restores a durable paused session through the
-# published release app's own import UI (phase bgseed). The host then kills the
-# target process (a stopped package would be invisible to the actor's
-# resolveService) and the driver's bgstart leg — on an UNINSTRUMENTED release
-# APK —
-# BINDS the playback service from the standalone `:tools:bgactor` APK (a separate
-# demoted uid — the external equivalent of MediaController.connect()), proves the
-# uid sits at or below SERVICE non-foreground for a continuous >=15s settle, then
-# arms the standalone `:tools:bgtrigger` uid with real trusted-controller status
-# (an enabled NotificationListenerService) and drives prepare/play through a
-# native Media3 MediaController connect — the bind a real companion app makes,
-# measured by the stamped allow records — issues
-# a trusted prepare() so the session reports PAUSED and the SystemUI card can
-# render, taps the card Play when it resolves else the trigger's own play(),
-# observes the genuine ForegroundServiceStartNotAllowedException surfaces (service stays
-# non-foreground, DENIED verdicts on every allow record, no temp allowlist, no
-# BFSL self record, uid at or below SERVICE, recovery notification 4001), then
-# taps the real notification "Resume" action and proves playback resumed
-# (foreground 4000, APC audio for the target uid, position advance >200 ms).
-# Every wait is bounded and every saved dump is re-verified by
+# bgstart-check.sh <31|36> <evidence-dir>: M4 P6b external background-start
+# IMPOSSIBILITY gate. A self-instrumented driver first restores a durable paused
+# session through the published release app's own import UI (phase bgseed). The
+# host then kills the target process (a stopped package would be invisible to
+# the actor's resolveService) and the driver's bgstart leg — on an
+# UNINSTRUMENTED release APK — measures the two real binding surfaces:
+#
+#   1. the untrusted bound controller: the standalone `:tools:bgactor` APK (a
+#      separate demoted uid) BINDS the playback service, the target uid sits at
+#      or below SERVICE non-foreground for a continuous >=15s settle, the allow
+#      records read `code:DENIED`, and the `:tools:bgtrigger` package's
+#      pre-listener Media3 connect lands a real bind whose command set has no
+#      COMMAND_PLAY_PAUSE — an untrusted controller can never command playback;
+#   2. the trusted bound controller: the same trigger uid enabled as a
+#      NotificationListenerService — the same membership a real companion app
+#      carries — connects through a native Media3 MediaController, and the
+#      driver asserts that bind stamped `code:PROC_STATE_BFGS` with
+#      `startForegroundCount:0` (the binding itself granted the FGS capability
+#      before any startForeground attempt existed to deny).
+#
+# With every commanding surface exempt by binding and every non-exempt surface
+# unable to command, a genuine external background-FGS-start denial is
+# unreachable; the leg records `verdict=impossible` (the binding-free framework
+# relay is r13's documented historical row: untrusted target-side, no
+# elevation). Every wait is bounded and every saved dump is re-verified by
 # check-first-launch-restore-results.py --bgstart for both images.
 #
 # Require the workflow's named rooted disposable x86_64 AVD under GitHub Actions;
@@ -242,7 +246,7 @@ require_below_bfgs() {  # <stage>: the target uid must be SERVICE(10) or worse
     num="$(printf '%s' "$state" | sed -n 's/^ *\(-\?[0-9][0-9]*\).*/\1/p' | head -1)"
     [ -n "$num" ] || fail "get-uid-state unparsable at $stage: $state"
     [ "$num" -ge "$PROCSTATE_SERVICE" ] \
-        || fail "target uid state $num above SERVICE at $stage — FGS denial unreachable"
+        || fail "target uid state $num above SERVICE at $stage — leg precondition broken"
 }
 
 main() {
@@ -356,7 +360,7 @@ main() {
     selector driverInstrumentationAvailable
     log "driver component: $DRIVER_PKG/$DRIVER_RUNNER"
 
-    # The recovery/playback notifications are the leg's observable surface.
+    # The seeded session posts through the app's own notification flow.
     if [ "$SDK" -ge 33 ]; then
         timeout 60 "$ADB" shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
     fi
@@ -402,23 +406,22 @@ main() {
     require_below_bfgs cold
     selector targetColdBelowBfgs
 
-    # --- bgstart: the external denial + resume leg, fully evidence-captured ---
-    run_driver bgstart deniedBackgroundStartOffersWorkingResume
+    # --- bgstart: the impossibility-matrix leg, fully evidence-captured ---
+    run_driver bgstart externalBackgroundStartDenialIsUnreachable
     pull_bg_evidence
     for name in \
-        bgstart-uid-state-before.txt bgstart-uid-state-card.txt \
-        bgstart-uid-state-denied.txt bgstart-uid-state-resumed.txt \
-        bgstart-services-before.txt bgstart-services-card.txt \
-        bgstart-services-denied.txt bgstart-services-resumed.txt \
-        bgstart-processes-before.txt bgstart-processes-card.txt \
-        bgstart-processes-denied.txt bgstart-processes-resumed.txt \
-        bgstart-notification-denied.txt bgstart-notification-resumed.txt \
-        bgstart-media-session-card.txt \
-        bgstart-media-session-denied.txt bgstart-media-session-resumed.txt \
-        bgstart-audio-denied.txt bgstart-audio-resumed.txt \
-        bgstart-settle.txt bgstart-positions.txt \
+        bgstart-uid-state-before.txt bgstart-uid-state-untrusted.txt \
+        bgstart-uid-state-trusted.txt \
+        bgstart-services-before.txt bgstart-services-untrusted.txt \
+        bgstart-services-trusted.txt \
+        bgstart-processes-before.txt bgstart-processes-untrusted.txt \
+        bgstart-processes-trusted.txt \
+        bgstart-media-session-before.txt bgstart-media-session-untrusted.txt \
+        bgstart-media-session-trusted.txt \
+        bgstart-settle.txt bgstart-verdict.txt \
         bgstart-listener.txt bgstart-trigger-status.txt \
-        bgstart-trigger-card.txt bgstart-trigger-denied.txt; do
+        bgstart-trigger-untrusted.txt bgstart-trigger-trusted.txt \
+        bgstart-trigger-status-untrusted.txt bgstart-trigger-status-trusted.txt; do
         [ -s "$EV/$name" ] || fail "driver evidence missing or empty: $name"
     done
     selector bgstartCompleted

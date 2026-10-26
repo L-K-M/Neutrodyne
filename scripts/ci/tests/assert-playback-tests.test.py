@@ -30,7 +30,8 @@ class PlaybackEvidenceTest(unittest.TestCase):
 
     def test_each_device_needs_its_own_cases(self):
         # The app-APK set never contains the routed background case; the
-        # external bgstart lane asserts deniedBackgroundStartOffersWorkingResume.
+        # external bgstart lane asserts
+        # externalBackgroundStartDenialIsUnreachable.
         self.report("api26", gate.SHORT)
         self.report("api36", gate.SHORT)
         gate.verify(self.root, "ci", ["api26", "api36"])

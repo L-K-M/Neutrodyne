@@ -2,17 +2,14 @@
 package ch.lkmc.neutrodyne.tools.bmgrdriver
 
 import android.os.SystemClock
-import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.UiObject2
-import androidx.test.uiautomator.Until
 import java.io.File
 
 /**
- * dumpsys + UiAutomator glue for the external bgstart denial leg (M4 P6b). Every assertion
- * is re-verified by the strict aggregate checker on the captured `bgstart-*.txt` files —
- * this class only surfaces framework state, performs the two real UI taps (media-card Play,
- * notification Resume) and saves evidence. Bounded waits only; a missing surface fails.
+ * dumpsys + UiAutomator glue for the external bgstart impossibility leg (M4 P6b). Every
+ * assertion is re-verified by the strict aggregate checker on the captured
+ * `bgstart-*.txt` files — this class only surfaces framework state and saves evidence.
+ * Bounded waits only; a missing surface fails.
  */
 internal class BgProbe(
     private val device: UiDevice,
@@ -31,10 +28,6 @@ internal class BgProbe(
         val infos: List<BgStartSurface.AllowInfo>,
         val tempAllowObserved: Boolean,
         val tempAllowViolation: Boolean,
-        val notification4001: Boolean,
-        val notification4000: Boolean,
-        val apcStarted: Boolean,
-        val playback: BgStartSurface.PlaybackSample?,
     ) {
         /** Reasons a record tied to the target's own attempt would falsify the denial. */
         fun selfViolations(appUid: Int): List<String> =
@@ -80,9 +73,18 @@ internal class BgProbe(
                 }
             }
 
-        /** Self-attempt records that prove a real evaluation ended in DENIED. */
-        fun deniedAttempts(appUid: Int): List<BgStartSurface.AllowInfo> =
-            infos.filter { it.selfAttempt(appUid) && it.code == "DENIED" }
+        /**
+         * The impossibility stamp: a record where the trusted trigger's own bind
+         * carries the FGS capability grant — `code:PROC_STATE_BFGS` with
+         * `startForegroundCount:0` means the binding itself, before any
+         * startForeground call, already exempted the target.
+         */
+        fun triggerGrantStamps(): List<BgStartSurface.AllowInfo> =
+            infos.filter {
+                it.callingPackage == BgStartSurface.TRIGGER_PACKAGE &&
+                    it.code == "PROC_STATE_BFGS" &&
+                    it.startForegroundCount == "0"
+            }
     }
 
     fun shell(command: String): String = device.executeShellCommand(command)
@@ -165,9 +167,10 @@ internal class BgProbe(
 
     /**
      * A synchronous binder transaction into the trigger's exported provider —
-     * the same thaw mechanism as [pokeActor] — carrying the trusted-command
-     * vocabulary (`status`/`prepare`/`play`). The provider answers via its
-     * returned Bundle, printed by `content` as `result=<k=v>`.
+     * the same thaw mechanism as [pokeActor] — carrying the `status` probe that
+     * performs the provider-side Media3 connect and reports the granted command
+     * set. The provider answers via its returned Bundle, printed by `content`
+     * as `result=<k=v>`.
      */
     fun triggerCall(method: String): String =
         shell("content call --uri content://${BgStartSurface.TRIGGER_PROVIDER} --method $method")
@@ -324,22 +327,6 @@ internal class BgProbe(
             tempAllowViolation =
                 BgStartSurface.tempAllowListViolation(services) ||
                     BgStartSurface.tempAllowListViolation(processes),
-            notification4001 =
-                BgStartSurface.hasNotification(
-                    notification,
-                    BmgrArming.TARGET_PACKAGE,
-                    BgStartSurface.RESUME_NOTIFICATION,
-                    BgStartSurface.RESUME_CHANNEL,
-                ),
-            notification4000 =
-                BgStartSurface.hasNotification(
-                    notification,
-                    BmgrArming.TARGET_PACKAGE,
-                    BgStartSurface.PLAYBACK_NOTIFICATION,
-                    BgStartSurface.PLAYBACK_CHANNEL,
-                ),
-            apcStarted = uid?.let { BgStartSurface.apcStarted(audio, it) } == true,
-            playback = BgStartSurface.mediaSessionPlayback(mediaSession, BmgrArming.TARGET_PACKAGE),
         )
     }
 
@@ -354,71 +341,6 @@ internal class BgProbe(
         )
     }
 
-    /** Notification shade: notification panel first, quick settings as the API31 fallback. */
-    fun openShade(): Boolean = device.openNotification() || device.openQuickSettings()
-
-    /**
-     * The SystemUI media-controls Play button on the paused restored session. Scoped to
-     * `com.android.systemui` so a notification's own transport buttons can never stand in;
-     * a null return means no trusted trigger exists and the lane must fail.
-     */
-    fun awaitCardPlay(timeoutMs: Long): UiObject2? {
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        while (SystemClock.elapsedRealtime() < deadline) {
-            pokeActor()
-            val play =
-                device.findObject(By.pkg(BgStartSurface.SYSTEMUI_PACKAGE).descContains("Play"))
-                    ?: device.findObject(By.pkg(BgStartSurface.SYSTEMUI_PACKAGE).text("Play"))
-            if (play != null) return play
-            Thread.sleep(400)
-        }
-        return null
-    }
-
-    /** The target's recovery-notification "Resume" action — a real tap, never the PendingIntent. */
-    fun tapResume(timeoutMs: Long) {
-        val node =
-            device.wait(Until.findObject(By.text("Resume")), timeoutMs)
-                ?: device.wait(Until.findObject(By.descContains("Resume")), 5_000)
-                ?: error("the notification Resume action never resolved")
-        node.click()
-        device.pressBack()
-    }
-
-    /**
-     * Two media-session dumps ~1.5 s apart, written to `bgstart-positions.txt` with the
-     * speed-projected live position of each, so the checker can recompute the advance.
-     */
-    fun positionAdvance(): Long? {
-        val elapsed1 = SystemClock.elapsedRealtime()
-        val dump1 = shell("dumpsys -t 20 media_session")
-        val sample1 = BgStartSurface.mediaSessionPlayback(dump1, BmgrArming.TARGET_PACKAGE)
-        Thread.sleep(1_500)
-        val elapsed2 = SystemClock.elapsedRealtime()
-        val dump2 = shell("dumpsys -t 20 media_session")
-        val sample2 = BgStartSurface.mediaSessionPlayback(dump2, BmgrArming.TARGET_PACKAGE)
-        val live1 = sample1?.livePosition(elapsed1)
-        val live2 = sample2?.livePosition(elapsed2)
-        write("bgstart-media-session-pos2.txt", dump2)
-        write(
-            "bgstart-positions.txt",
-            buildString {
-                appendLine(
-                    "sample=1 elapsed=$elapsed1 state=${sample1?.state} " +
-                        "position=${sample1?.position} speed=${sample1?.speed} " +
-                        "updated=${sample1?.updatedElapsed} live=$live1",
-                )
-                appendLine(
-                    "sample=2 elapsed=$elapsed2 state=${sample2?.state} " +
-                        "position=${sample2?.position} speed=${sample2?.speed} " +
-                        "updated=${sample2?.updatedElapsed} live=$live2",
-                )
-                appendLine("delta=${if (live1 != null && live2 != null) live2 - live1 else -1}")
-            },
-        )
-        return if (live1 != null && live2 != null) live2 - live1 else null
-    }
-
     companion object {
         const val WAIT_MS = 30_000L
 
@@ -428,13 +350,6 @@ internal class BgProbe(
          * under this on a fresh image.
          */
         const val TRUST_WAIT_MS = 20_000L
-
-        /**
-         * The prepare→PAUSED probe. If the trusted prepare ever lands, the
-         * session republishes PAUSED well inside this window; a miss only means
-         * the card probe below will honestly report no card again.
-         */
-        const val PREPARED_WAIT_MS = 20_000L
 
         /**
          * The bound stage's budget. The actor deliberately waits out the ~10 s

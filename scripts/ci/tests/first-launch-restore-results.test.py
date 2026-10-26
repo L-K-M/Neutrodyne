@@ -1787,18 +1787,20 @@ class BmgrHostScriptTest(unittest.TestCase):
 
 BG_CLASS = "ch.lkmc.neutrodyne.tools.bmgrdriver.BgStartTest"
 BG_METHODS = {"bgseed": "seedPausedSession",
-              "bgstart": "deniedBackgroundStartOffersWorkingResume"}
+              "bgstart": "externalBackgroundStartDenialIsUnreachable"}
 BG_STEPS = {
     "bgseed": ["built", "launched", "preview", "revoked", "categories", "requested"],
-    "bgstart": ["sidecar", "served", "actor", "bound", "settled", "guarded",
-                "trusted", "prepared", "card", "play-tapped", "denied",
-                "resume-tapped", "resumed"],
+    "bgstart": ["sidecar", "actor", "bound", "settled", "guarded",
+                "untrusted", "trusted", "verdict"],
 }
 BG_SELECTORS = (
     "apkNonDebuggable", "driverInstrumentationAvailable", "seedImportDone",
     "durableQueueSeeded", "targetColdBelowBfgs", "bgstartCompleted",
 )
 BG_UID = 10150
+BG_TRIGGER_PKG = "ch.lkmc.neutrodyne.tools.bgtrigger"
+BG_TRIGGER_UID = 10152
+BG_LISTENER = "ch.lkmc.neutrodyne.tools.bgtrigger/.BgTriggerListenerService"
 
 
 def bg_instrument_log(phase, nonce, fail_code=0):
@@ -1828,31 +1830,67 @@ def bg_driver_status(phase, nonce, api):
     }
 
 
-def bg_services(stage, api):
-    """A ServiceRecord dump for the bound playback service: a live process
-    attached, no `isForeground=` line until the service runs foreground (the
-    dump only prints it then), the api36 `mAllowStart_*` verdicts that api31
-    dumps never emit, and the denial attempt's own record with no grant."""
-    resumed = stage == "resumed"
-    foreground = "    isForeground=true foregroundId=4000 foregroundNoti=x\n" \
-        if resumed else ""
-    allows = ("    mAllowStart_noBinding=DENIED\n"
-              "    mAllowStart_byBindings=DENIED\n") if api >= 36 else ""
-    info = (
-        "infoAllowStartForeground=[callingPackage: ch.lkmc.neutrodyne; "
+def bg_self_denied_record():
+    """The target's own earlier attempt, judged DENIED with no grant surface."""
+    return (
+        "    infoAllowStartForeground=[callingPackage: ch.lkmc.neutrodyne; "
         f"callingUid: {BG_UID}; uidState: SVC ; uidBFSL: []; "
         "intent: Intent { cmp=ch.lkmc.neutrodyne/.NeutrodynePlaybackService }; "
         "code:DENIED; tempAllowListReason:<null>; allowWiu:0; "
         "targetSdkVersion:36; callerTargetSdkVersion:0; startForegroundCount:0; "
-        "bindFromPackage:null: isBindService:false]"
+        "bindFromPackage:null: isBindService:false]\n"
     )
+
+
+def bg_bind_denied_record(package, uid):
+    """An external bind evaluation judged DENIED — the untrusted-row record."""
+    return (
+        f"    infoAllowStartForeground=[callingPackage: {package}; "
+        f"callingUid: {uid}; uidState: SVC ; uidBFSL: []; "
+        "intent: Intent { cmp=ch.lkmc.neutrodyne/.NeutrodynePlaybackService }; "
+        "code:DENIED; tempAllowListReason:<null>; allowWiu:0; "
+        "targetSdkVersion:30; callerTargetSdkVersion:30; "
+        "startForegroundCount:0; "
+        "bindFromPackage:null: isBindService:true]\n"
+    )
+
+
+def bg_trigger_grant_record():
+    """The impossibility stamp: the trusted trigger's own bind carried the FGS
+    capability — code:PROC_STATE_BFGS with startForegroundCount:0 means the
+    exemption existed before any startForeground attempt."""
+    return (
+        f"    infoAllowStartForeground=[callingPackage: {BG_TRIGGER_PKG}; "
+        f"callingUid: {BG_TRIGGER_UID}; uidState: BFGS ; uidBFSL: []; "
+        "intent: Intent { cmp=ch.lkmc.neutrodyne/.NeutrodynePlaybackService }; "
+        "code:PROC_STATE_BFGS; tempAllowListReason:<null>; allowWiu:0; "
+        "targetSdkVersion:30; callerTargetSdkVersion:30; "
+        "startForegroundCount:0; "
+        "bindFromPackage:null: isBindService:true]\n"
+    )
+
+
+def bg_services(stage, api):
+    """A ServiceRecord dump for the bound playback service at each measured
+    stage: a live process attached, no `isForeground=` line for a bound
+    service, the api36 `mAllowStart_*` verdicts that api31 dumps never emit.
+    before/untrusted carry DENIED records only; trusted adds the trigger's
+    PROC_STATE_BFGS binding grant — the impossibility stamp."""
+    allows = ("    mAllowStart_noBinding=DENIED\n"
+              "    mAllowStart_byBindings=DENIED\n") if api >= 36 else ""
+    infos = bg_self_denied_record()
+    if stage == "untrusted":
+        infos += bg_bind_denied_record(
+            "ch.lkmc.neutrodyne.tools.bgactor", 10151)
+        infos += bg_bind_denied_record(BG_TRIGGER_PKG, BG_TRIGGER_UID)
+    if stage == "trusted":
+        infos += bg_trigger_grant_record()
     return f"""ACTIVITY MANAGER SERVICES (dumpsys activity services)
   ServiceRecord{{u0 4f7a123 u0a{BG_UID} ch.lkmc.neutrodyne/.NeutrodynePlaybackService}}
     intent={{cmp=ch.lkmc.neutrodyne/ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService}}
     packageName=ch.lkmc.neutrodyne
     app=ProcessRecord{{abc123 5123:ch.lkmc.neutrodyne/u0a{BG_UID % 1000}}}
-{foreground}{allows}    {info}
-"""
+{allows}{infos}"""
 
 
 def bg_processes():
@@ -1863,22 +1901,6 @@ def bg_processes():
 """
 
 
-def bg_notification(records):
-    return "\n".join(records) + "\n"
-
-
-def bg_notif(nid, channel):
-    return (f"NotificationRecord(0x{nid:04x}: pkg={PKG} user=UserHandle{{0}} "
-            f"id={nid} tag=null key=t: Notification(channel={channel} pri=0))")
-
-
-def bg_audio(started):
-    state = "started" if started else "stopped"
-    return ("AudioPlaybackConfiguration items:\n"
-            f"  - piid:391 uid:{BG_UID} state:{state} "
-            "attr:{Content type: CONTENT_TYPE_SPEECH Usage: USAGE_MEDIA}\n")
-
-
 def bg_media_session(state, speed):
     return (f"Media sessions (1):\n"
             f"  {PKG}/ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService (userId=0)\n"
@@ -1886,13 +1908,15 @@ def bg_media_session(state, speed):
             f"buffered position=760000, speed={speed}, updated=9000, actions=12345}}\n")
 
 
-BG_POSITIONS = (
-    "sample=1 elapsed=10500 state=3 position=750000 speed=1.0 updated=9000 live=751500\n"
-    "sample=2 elapsed=12000 state=3 position=750000 speed=1.0 updated=9000 live=753000\n"
-    "delta=1500\n"
-)
-
 BG_SETTLE = "".join(f"t={t} state=10 fg=false\n" for t in range(0, 16000, 1000))
+
+BG_LISTENERS_OFF = "enabledListeners=com.example.other/.Listener\n"
+BG_LISTENERS_ON = BG_LISTENERS_OFF.replace(
+    "enabledListeners=", f"enabledListeners={BG_LISTENER}:")
+
+
+def bg_trigger_evidence(listeners):
+    return (f"uid={BG_TRIGGER_UID}\nuidState=10 (SERVICE)\n{listeners}")
 
 
 def bg_sidecar(nonce, api):
@@ -1942,38 +1966,31 @@ class BgstartEvidenceTest(unittest.TestCase):
             "bgstart.expected.json": json.dumps(bg_sidecar(NONCE, api)),
             "uid-state-cold.txt": "20 (NONEXISTENT)\n",
             "bgstart-uid-state-before.txt": "10 (SERVICE)\n",
-            "bgstart-uid-state-card.txt": "10 (SERVICE)\n",
-            "bgstart-uid-state-denied.txt": "10 (SERVICE)\n",
-            "bgstart-uid-state-resumed.txt": "4 (FOREGROUND_SERVICE)\n",
+            "bgstart-uid-state-untrusted.txt": "10 (SERVICE)\n",
+            "bgstart-uid-state-trusted.txt": "5 (BFGS)\n",
             "bgstart-services-before.txt": bg_services("before", api),
-            "bgstart-services-card.txt": bg_services("card", api),
-            "bgstart-services-denied.txt": bg_services("denied", api),
-            "bgstart-services-resumed.txt": bg_services("resumed", api),
+            "bgstart-services-untrusted.txt": bg_services("untrusted", api),
+            "bgstart-services-trusted.txt": bg_services("trusted", api),
             "bgstart-processes-before.txt": bg_processes(),
-            "bgstart-processes-card.txt": bg_processes(),
-            "bgstart-processes-denied.txt": bg_processes(),
-            "bgstart-processes-resumed.txt": bg_processes(),
-            "bgstart-notification-denied.txt": bg_notification([bg_notif(4001, "alerts")]),
-            "bgstart-notification-resumed.txt":
-                bg_notification([bg_notif(4000, "playback")]),
-            "bgstart-media-session-card.txt": bg_media_session("PAUSED(2)", "0.0"),
-            "bgstart-media-session-denied.txt": bg_media_session("PAUSED(2)", "0.0"),
+            "bgstart-processes-untrusted.txt": bg_processes(),
+            "bgstart-processes-trusted.txt": bg_processes(),
+            "bgstart-media-session-before.txt": bg_media_session("PAUSED(2)", "0.0"),
+            "bgstart-media-session-untrusted.txt":
+                bg_media_session("PAUSED(2)", "0.0"),
+            "bgstart-media-session-trusted.txt":
+                bg_media_session("PAUSED(2)", "0.0"),
             "bgstart-settle.txt": BG_SETTLE,
-            "bgstart-media-session-resumed.txt": bg_media_session("PLAYING(3)", "1.0"),
-            "bgstart-audio-denied.txt": bg_audio(False),
-            "bgstart-audio-resumed.txt": bg_audio(True),
-            "bgstart-positions.txt": BG_POSITIONS,
+            "bgstart-verdict.txt": "verdict=impossible\n",
             "bgstart-fssnae-logcat.txt": "",
-            "ui-bgstart-shade.xml": "<hierarchy />",
             "bgstart-listener.txt": "allow_listener ->\n",
             "bgstart-trigger-status.txt":
-                "Bundle[{result=trusted=1 sessions=2 target=1}]\n",
-            "bgstart-trigger-card.txt":
-                "uid=10152\nuidState=4 (BOUND_FOREGROUND_SERVICE)\n"
-                "enabledListeners=ch.lkmc.neutrodyne.tools.bgtrigger/.BgTriggerListenerService\n",
-            "bgstart-trigger-denied.txt":
-                "uid=10152\nuidState=4 (BOUND_FOREGROUND_SERVICE)\n"
-                "enabledListeners=ch.lkmc.neutrodyne.tools.bgtrigger/.BgTriggerListenerService\n",
+                "Bundle[{result=trusted=1 sessions=1 target=1}]\n",
+            "bgstart-trigger-status-untrusted.txt":
+                "Bundle[{result=trusted=0 sessions=1 target=1}]\n",
+            "bgstart-trigger-status-trusted.txt":
+                "Bundle[{result=trusted=1 sessions=1 target=1}]\n",
+            "bgstart-trigger-untrusted.txt": bg_trigger_evidence(BG_LISTENERS_OFF),
+            "bgstart-trigger-trusted.txt": bg_trigger_evidence(BG_LISTENERS_ON),
         }
         logs = {p: bg_instrument_log(p, NONCE) for p in BG_METHODS}
         statuses = {p: bg_driver_status(p, NONCE, api) for p in BG_METHODS}
@@ -2041,10 +2058,15 @@ class BgstartEvidenceTest(unittest.TestCase):
                 f"instrumentation:{DRV_PKG}/{DRV_RUNNER} (target={PKG})\n")
         self.assert_rejected({"api36": mutate}, "self-targeting")
 
-    def test_rejects_a_foreground_service_under_denial(self):
+    def test_rejects_legacy_denial_steps(self):
+        """A status record claiming the retired denial/resume protocol is a
+        fabricated run — the armed order is exact."""
         def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-services-denied.txt"] = bg_services("resumed", 31)
-        self.assert_rejected({"api31": mutate}, "isForeground=true")
+            statuses["bgstart"]["steps"] = [
+                {"name": s, "at": 1_700_000_000_000}
+                for s in ("sidecar", "actor", "bound", "settled", "guarded",
+                          "card", "denied", "resume-tapped", "resumed")]
+        self.assert_rejected({"api31": mutate}, "steps")
 
     def test_rejects_a_phantom_service_record(self):
         def mutate(directory, run, texts, logs, statuses):
@@ -2054,31 +2076,148 @@ class BgstartEvidenceTest(unittest.TestCase):
                     "app=null"))
         self.assert_rejected({"api31": mutate}, "no live process")
 
-    def test_rejects_a_card_stage_elevation(self):
+    def test_rejects_a_missing_untrusted_row(self):
         def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-uid-state-card.txt"] = "4 (FOREGROUND_SERVICE)\n"
-        self.assert_rejected({"api36": mutate}, "card uid-state")
+            texts["bgstart-services-untrusted.txt"] = ""
+        self.assert_rejected({"api36": mutate}, "missing or empty")
 
-    def test_rejects_a_card_binding_grant(self):
+    def test_rejects_a_missing_trusted_row(self):
         def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-services-card.txt"] = (
-                texts["bgstart-services-card.txt"].replace(
-                    "bindFromPackage:null", "bindFromPackage:com.android.systemui"))
+            texts["bgstart-services-trusted.txt"] = ""
+        self.assert_rejected({"api31": mutate}, "missing or empty")
+
+    def test_rejects_a_missing_verdict(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-verdict.txt"] = ""
+        self.assert_rejected({"api36": mutate}, "missing or empty")
+
+    def test_rejects_a_fabricated_denial(self):
+        """A run claiming the denial happened is fabrication — the only legal
+        verdict is impossible."""
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-verdict.txt"] = "verdict=denied\n"
+        self.assert_rejected({"api31": mutate}, "verdict records")
+
+    def test_rejects_a_duplicate_verdict(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-verdict.txt"] = \
+                "verdict=impossible\nverdict=impossible\n"
+        self.assert_rejected({"api36": mutate}, "verdict records")
+
+    def test_rejects_an_unstamped_trusted_bind(self):
+        """The trusted row must carry the PROC_STATE_BFGS/startForegroundCount:0
+        stamp — a DENIED record there refutes nothing and proves nothing."""
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-trusted.txt"] = (
+                texts["bgstart-services-trusted.txt"].replace(
+                    "code:PROC_STATE_BFGS", "code:DENIED"))
+        self.assert_rejected({"api36": mutate}, "stamped no PROC_STATE_BFGS")
+
+    def test_rejects_a_late_grant_stamp(self):
+        """startForegroundCount>0 means the grant followed a startForeground
+        attempt — not the binding-side exemption the verdict rests on."""
+        def mutate(directory, run, texts, logs, statuses):
+            record = bg_trigger_grant_record().replace(
+                "startForegroundCount:0", "startForegroundCount:1")
+            texts["bgstart-services-trusted.txt"] = (
+                texts["bgstart-services-trusted.txt"].replace(
+                    bg_trigger_grant_record(), record))
+        self.assert_rejected({"api31": mutate}, "stamped no PROC_STATE_BFGS")
+
+    def test_rejects_a_grant_from_the_wrong_caller(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-trusted.txt"] = (
+                texts["bgstart-services-trusted.txt"].replace(
+                    f"callingPackage: {BG_TRIGGER_PKG}",
+                    "callingPackage: com.android.systemui"))
+        self.assert_rejected({"api31": mutate}, "stamped no PROC_STATE_BFGS")
+
+    def test_rejects_an_untrusted_stage_elevation(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-uid-state-untrusted.txt"] = \
+                "4 (FOREGROUND_SERVICE)\n"
+        self.assert_rejected({"api36": mutate}, "untrusted uid-state")
+
+    def test_rejects_an_untrusted_stage_binding_grant(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-untrusted.txt"] = (
+                texts["bgstart-services-untrusted.txt"].replace(
+                    "bindFromPackage:null",
+                    "bindFromPackage:com.android.systemui", 1))
         self.assert_rejected({"api31": mutate}, "binding grants FGS")
 
-    def test_rejects_an_allow_code(self):
+    def test_rejects_an_untrusted_stage_allow_code(self):
         def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-services-denied.txt"] = (
-                texts["bgstart-services-denied.txt"].replace(
-                    "code:DENIED", "code:SYSTEM_UID"))
+            texts["bgstart-services-untrusted.txt"] = (
+                texts["bgstart-services-untrusted.txt"].replace(
+                    "code:DENIED", "code:SYSTEM_UID", 1))
         self.assert_rejected({"api36": mutate}, "grants FGS")
 
-    def test_rejects_a_denial_with_no_self_attempt(self):
+    def test_rejects_commands_on_the_untrusted_connect(self):
         def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-services-denied.txt"] = (
-                texts["bgstart-services-denied.txt"].replace(
-                    "isBindService:false", "isBindService:true"))
-        self.assert_rejected({"api36": mutate}, "no DENIED self attempt")
+            texts["bgstart-trigger-status-untrusted.txt"] = \
+                "Bundle[{result=trusted=1 sessions=1 target=1}]\n"
+        self.assert_rejected({"api31": mutate},
+                             "untrusted controller holds player commands")
+
+    def test_rejects_an_unlanded_untrusted_connect(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-trigger-status-untrusted.txt"] = \
+                "Bundle[{result=trusted=0 sessions=0 target=0}]\n"
+        self.assert_rejected({"api36": mutate},
+                             "untrusted trigger connect never landed")
+
+    def test_rejects_a_listener_at_the_untrusted_stage(self):
+        """Listener membership at the untrusted stage means the read-only
+        command measurement was taken under trust — the row is polluted."""
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-trigger-untrusted.txt"] = \
+                bg_trigger_evidence(BG_LISTENERS_ON)
+        self.assert_rejected({"api31": mutate}, "already enabled")
+
+    def test_rejects_a_trusted_row_without_listener(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-trigger-trusted.txt"] = \
+                bg_trigger_evidence(BG_LISTENERS_OFF)
+        self.assert_rejected({"api36": mutate}, "listener membership")
+
+    def test_rejects_an_uncommanded_trusted_connect(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-trigger-status-trusted.txt"] = \
+                "Bundle[{result=trusted=0 sessions=1 target=1}]\n"
+        self.assert_rejected({"api31": mutate},
+                             "trusted connect held no commands")
+
+    def test_rejects_a_bfsl_self_record(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-untrusted.txt"] = (
+                texts["bgstart-services-untrusted.txt"].replace(
+                    "uidBFSL: []", "uidBFSL: [BFSL]", 1))
+        self.assert_rejected({"api36": mutate}, "[BFSL]")
+
+    def test_rejects_an_elevated_uid_state(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-untrusted.txt"] = (
+                texts["bgstart-services-untrusted.txt"].replace(
+                    "uidState: SVC", "uidState: FGS", 1))
+        self.assert_rejected({"api31": mutate}, "above BFGS")
+
+    def test_rejects_a_temp_allowlist(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-processes-untrusted.txt"] = (
+                texts["bgstart-processes-untrusted.txt"].replace(
+                    "tempAllowListReason=<null>",
+                    "tempAllowListReason=EXEMPTED"))
+        self.assert_rejected({"api36": mutate}, "temp allowlist")
+
+    def test_rejects_a_foreground_service(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-untrusted.txt"] = (
+                texts["bgstart-services-untrusted.txt"].replace(
+                    "packageName=ch.lkmc.neutrodyne",
+                    "packageName=ch.lkmc.neutrodyne\n"
+                    "    isForeground=true foregroundId=4000"))
+        self.assert_rejected({"api31": mutate}, "isForeground=true")
 
     def test_rejects_a_short_settle(self):
         def mutate(directory, run, texts, logs, statuses):
@@ -2110,65 +2249,6 @@ class BgstartEvidenceTest(unittest.TestCase):
         self.build(mutate={"api31": mutate})
         result = self.check()
         self.assertEqual(0, result.returncode, result.stderr)
-
-    def test_rejects_a_bfsl_self_record(self):
-        def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-services-denied.txt"] = (
-                texts["bgstart-services-denied.txt"].replace(
-                    "uidBFSL: []", "uidBFSL: [BFSL]"))
-        self.assert_rejected({"api36": mutate}, "[BFSL]")
-
-    def test_rejects_an_elevated_uid_state(self):
-        def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-services-denied.txt"] = (
-                texts["bgstart-services-denied.txt"].replace(
-                    "uidState: SVC", "uidState: FGS"))
-        self.assert_rejected({"api31": mutate}, "above BFGS")
-
-    def test_rejects_a_temp_allowlist(self):
-        def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-services-denied.txt"] = (
-                texts["bgstart-services-denied.txt"].replace(
-                    "tempAllowListReason:<null>", "tempAllowListReason:EXEMPTED"))
-        self.assert_rejected({"api36": mutate}, "temp allowlist")
-
-    def test_rejects_a_missing_recovery_notification(self):
-        def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-notification-denied.txt"] = bg_notification(
-                [bg_notif(9999, "alerts")])
-        self.assert_rejected({"api31": mutate}, "4001")
-
-    def test_rejects_active_audio_under_denial(self):
-        def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-audio-denied.txt"] = bg_audio(True)
-        self.assert_rejected({"api36": mutate}, "audio active")
-
-    def test_rejects_a_missing_resume_surface(self):
-        for name, replacement, diagnostic in (
-                ("bgstart-notification-resumed.txt",
-                 bg_notification([bg_notif(4000, "other")]), "4000"),
-                ("bgstart-audio-resumed.txt", bg_audio(False), "active playback"),
-                ("bgstart-services-resumed.txt",
-                 bg_services("denied", 31), "isForeground=true")):
-            with self.subTest(evidence=name):
-                def mutate(directory, run, texts, logs, statuses,
-                           n=name, r=replacement):
-                    texts[n] = r
-                self.assert_rejected({"api31": mutate}, diagnostic)
-
-    def test_rejects_an_uncancelled_recovery_notification(self):
-        def mutate(directory, run, texts, logs, statuses):
-            texts["bgstart-notification-resumed.txt"] = bg_notification(
-                [bg_notif(4000, "playback"), bg_notif(4001, "alerts")])
-        self.assert_rejected({"api36": mutate}, "not cancelled")
-
-    def test_rejects_an_unmoving_position(self):
-        def mutate(directory, run, texts, logs, statuses):
-            # Keep live consistent with the sample fields; the delta shrinks to 100ms.
-            texts["bgstart-positions.txt"] = BG_POSITIONS.replace(
-                "elapsed=12000", "elapsed=10600").replace(
-                "live=753000", "live=751600")
-        self.assert_rejected({"api31": mutate}, "position advance")
 
     def test_rejects_a_stale_sidecar(self):
         def mutate(directory, run, texts, logs, statuses):
