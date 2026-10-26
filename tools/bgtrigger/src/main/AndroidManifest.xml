@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: Unlicense -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- SessionToken resolution reads the target's ServiceInfo; without
+         these entries API 30+ package visibility hides the target and
+         MediaController.connect throws Failed to resolve SessionToken. -->
+    <queries>
+        <package android:name="ch.lkmc.neutrodyne" />
+        <intent>
+            <action android:name="androidx.media3.session.MediaLibraryService" />
+        </intent>
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+    </queries>
     <application android:label="bgtrigger" android:allowBackup="false">
         <!-- The trusted-controller surface: once enabled in
              enabled_notification_listeners (shell: `cmd notification
