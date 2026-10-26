@@ -51,6 +51,7 @@ public final class BgTriggerProvider extends ContentProvider {
     private static final long CONNECT_TIMEOUT_MS = 20_000;
 
     private volatile MediaController controller;
+    private volatile boolean connectLanded;
 
     @Override
     public boolean onCreate() {
@@ -83,13 +84,27 @@ public final class BgTriggerProvider extends ContentProvider {
         return out;
     }
 
-    /** Lazily connects; the connect's own bind makes this package visible to
-     * the target, after which listener membership grants real commands. */
+    private static boolean hasCommands(MediaController c) {
+        return c.getAvailableCommands().contains(Player.COMMAND_PLAY_PAUSE);
+    }
+
+    /**
+     * Lazily connects; the connect's own bind makes this package visible to
+     * the target, after which listener membership grants real commands. A
+     * connected controller's command set is stamped once at connect and never
+     * renegotiated — a controller that landed before the listener service
+     * bound stays untrusted forever (the r14 "the trusted trigger never saw
+     * the session" leg), so a commandless controller is released and the next
+     * call re-evaluates trust from scratch.
+     */
     private MediaController controller() {
-        MediaController c = controller;
-        if (c != null) return c;
         synchronized (this) {
-            if (controller != null) return controller;
+            MediaController c = controller;
+            if (c != null && hasCommands(c)) return c;
+            if (c != null) {
+                c.release();
+                controller = null;
+            }
             Context context = getContext();
             SessionToken token =
                 new SessionToken(
@@ -97,35 +112,35 @@ public final class BgTriggerProvider extends ContentProvider {
             try {
                 ListenableFuture<MediaController> future =
                     new MediaController.Builder(context, token).buildAsync();
-                controller = future.get(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                c = future.get(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             } catch (Exception e) {
-                throw new IllegalStateException("controller connect failed", e);
+                Log.e(TAG, "BGTRIGGER-FAIL connect " + e);
+                connectLanded = false;
+                return null;
             }
-            return controller;
+            connectLanded = true;
+            if (!hasCommands(c)) {
+                c.release();
+                return null;
+            }
+            controller = c;
+            return c;
         }
     }
 
     private void status(Bundle out) {
-        MediaController c;
-        try {
-            c = controller();
-        } catch (RuntimeException e) {
-            out.putString("result", "trusted=0");
-            return;
-        }
-        boolean trusted =
-            c.getAvailableCommands().contains(Player.COMMAND_PLAY_PAUSE);
+        MediaController c = controller();
         out.putString(
             "result",
-            "trusted=" + (trusted ? 1 : 0) + " sessions=1 target=1");
+            "trusted=" + (c != null ? 1 : 0)
+                + " sessions=" + (connectLanded ? 1 : 0)
+                + " target=" + (connectLanded ? 1 : 0));
     }
 
     private void command(Bundle out, boolean prepare) {
-        MediaController c;
-        try {
-            c = controller();
-        } catch (RuntimeException e) {
-            Log.e(TAG, "BGTRIGGER-FAIL command while unconnected");
+        MediaController c = controller();
+        if (c == null) {
+            Log.e(TAG, "BGTRIGGER-FAIL command while unconnected or untrusted");
             out.putString("result", "trusted=0");
             return;
         }
