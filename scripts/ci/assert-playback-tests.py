@@ -14,16 +14,15 @@ SHORT = {
     "focusLossAndNoisyPause",
     "serviceRecreationLoadsPausedAtSavedPosition",
 }
-BACKGROUND = "deniedBackgroundStartOffersWorkingResume"
 LONG = "screenOffStreamsForThirtyMinutesAndAdvances"
 HARDENING = "hardeningUiNotificationAndColdMediaKeyStarts"
 
 
 def verify(root, profile, devices):
     for device in devices:
+        # deniedBackgroundStartOffersWorkingResume runs in the external bgstart lane;
+        # its aggregate asserts the case there (an instrumented target cannot deny it).
         expected = {"notificationTransportAndLocalArtwork"} if profile == "release" else set(SHORT)
-        if profile != "release" and device != "api26":
-            expected.add(BACKGROUND)
         if profile == "nightly" and device == "api34":
             expected.add(LONG)
         if profile == "api37":

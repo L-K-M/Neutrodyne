@@ -278,43 +278,9 @@ class PlaybackServiceTest {
             }
         }
 
-    @Test
-    @SdkSuppress(minSdkVersion = 31)
-    fun deniedBackgroundStartOffersWorkingResume() =
-        runCase {
-            phase("background/start")
-            seed()
-            graph.queueRepository().addLast(ids)
-            // Do not grant a foreground playback start before probing the background request.
-            backgroundHost()
-            phase("background/stop-visible-host-service")
-            app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
-            await { !serviceDump().contains("ServiceRecord{") }
-            phase("background/cold-bind")
-            val external = withContext(Dispatchers.Main) { connect() }
-            withContext(Dispatchers.Main) { assertFalse(external.playWhenReady) }
-            phase("background/await-demotion")
-            await { !serviceDump().contains("isForeground=true") }
-            // Observe the real background state before testing an ordinary controller request.
-            phase("background/settle")
-            delay(BACKGROUND_SETTLE_MS)
-            logEvidence("background-before-play", stateSnapshot())
-            logEvidence(
-                "background-service-before-play",
-                shell("dumpsys -t 5 activity services ${app.packageName}/$SERVICE_CLASS").text,
-            )
-            phase("background/play")
-            withContext(Dispatchers.Main) { external.play() }
-            phase("background/await-recovery-notification")
-            awaitNotification(RESUME_NOTIFICATION)
-            assertFalse(
-                graph.playbackStateSource.nowPlaying.value
-                    ?.isPlaying == true,
-            )
-            tapNotification("Resume")
-            phase("background/await-resumed-audio")
-            awaitAudio()
-        }
+    // deniedBackgroundStartOffersWorkingResume moved to the external bgstart lane: an
+    // active instrumentation grants the target PROCESS_CAPABILITY_BFSL (OomAdjuster),
+    // so a genuine foreground-start denial is unreachable inside an instrumented target.
 
     @Test @Nightly
     @SdkSuppress(minSdkVersion = 37)
@@ -634,10 +600,8 @@ class PlaybackServiceTest {
         const val COVER_SIDE = 256
         const val SERVICE_CLASS = "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService"
         const val PLAYBACK_NOTIFICATION = 4000
-        const val RESUME_NOTIFICATION = 4001
         const val SHORT_STREAM_REPEATS = 60
         const val LONG_STREAM_REPEATS = 480
-        const val BACKGROUND_SETTLE_MS = 15_000L
         const val WAIT_MS = 30_000L
         const val THIRTY_MINUTES_MS = 30 * 60 * 1_000L
     }
