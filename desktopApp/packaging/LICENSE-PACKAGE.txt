@@ -28,7 +28,7 @@ Settings > Licences in the app. Source code:
 https://github.com/L-K-M/Neutrodyne
 
 Portions of this software are copyright (c) 2026 The FreeType Project
-(www.freetype.org). All rights reserved.
+(https://freetype.org). All rights reserved.
 This software is based in part on the work of the Independent JPEG
 Group.
 

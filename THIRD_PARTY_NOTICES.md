@@ -31,7 +31,7 @@ licence used as Apache-2.0). No bundled component beyond what `licensee*` report
   - Skiko 0.150.1's native library (`org.jetbrains.skiko:skiko-awt-runtime-<os>-<arch>`) links
     Skia m150-1f14f1166a (BSD-3-Clause) and, at the commits Skia's `DEPS` pins: FreeType 2.14.2
     (FTL, Linux only; "Portions of this software are copyright © 2026 The FreeType Project
-    (www.freetype.org). All rights reserved."), libpng 1.6.56 (libpng-2.0), libjpeg-turbo 3.1.0
+    (https://freetype.org). All rights reserved."), libpng 1.6.56 (libpng-2.0), libjpeg-turbo 3.1.0
     (IJG, BSD-3-Clause and Zlib; "This software is based in part on the work of the Independent
     JPEG Group."), HarfBuzz 13.1.0 (MIT-Modern-Variant), ICU 74 (Unicode-3.0), libwebp
     (BSD-3-Clause), Expat 2.7.4 (MIT), zlib 1.3.0.1 (Zlib), Wuffs (Apache-2.0) and, on Linux,
