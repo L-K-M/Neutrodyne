@@ -111,6 +111,37 @@ class DriverSelfTest {
         assertEquals("flip:n-1:error:x", phaseStatusToken("flip", "n-1", "error:x"))
     }
 
+    /**
+     * The bgstart leg's loopback rewrite only touches the session.current episode and
+     * leaves the unarmed fixture byte-identical to the bmgr lane's expectations.
+     */
+    @Test
+    fun fixtureEnclosureRewriteIsScopedToSessionCurrent() {
+        val base = "http://127.0.0.1:47123"
+        val armed = SeedFixture.content("selftest-enc", base)
+        val plain = SeedFixture.content("selftest-enc")
+        val current = armed.episodes[1]
+        assertEquals("$base/ep2.mp3", current.u)
+        assertEquals("audio/wav", current.ty)
+        assertEquals(armed.session!!.current!!.k, current.k)
+        val other = armed.episodes.filterNot { it == current }
+        assertEquals(plain.episodes.filterNot { it == plain.episodes[1] }, other)
+        assertEquals("https://alpha.example.test/selftest-enc/ep2.mp3", plain.episodes[1].u)
+        assertEquals("audio/mpeg", plain.episodes[1].ty)
+    }
+
+    /** The loopback body is a well-formed RIFF/WAVE long enough to cover the seeded position. */
+    @Test
+    fun fixtureAudioIsWellFormedWav() {
+        val wav = FixtureAudio.pcm(FixtureAudio.STREAM_SECONDS)
+        assertEquals(44 + FixtureAudio.STREAM_SECONDS * FixtureAudio.BYTES_PER_SECOND, wav.size)
+        assertEquals("RIFF", wav.decodeToString(0, 4))
+        assertEquals("WAVE", wav.decodeToString(8, 12))
+        val dataSize = ByteBuffer.wrap(wav, 40, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        assertEquals(FixtureAudio.STREAM_SECONDS * FixtureAudio.BYTES_PER_SECOND, dataSize)
+        assertTrue(FixtureAudio.STREAM_SECONDS * 1_000L > 750_000L)
+    }
+
     /** Validate serialized fixture identities before they can strand the published restore UI. */
     @Test
     fun fixturePassesStagerIdentityContract() {

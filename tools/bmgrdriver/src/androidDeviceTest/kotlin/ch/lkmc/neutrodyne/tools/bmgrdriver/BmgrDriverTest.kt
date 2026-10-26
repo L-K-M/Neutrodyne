@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.tools.bmgrdriver
 
 import android.os.Build
-import android.os.Bundle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Test
@@ -104,17 +103,5 @@ class BmgrDriverTest {
         recorder: StatusRecorder,
         result: String,
         failure: Throwable? = null,
-    ) {
-        if (failure != null) {
-            runCatching { UiRestore.captureFailure(phase) }
-                .onFailure { recorder.step("ui-capture-error", it.toString()) }
-        }
-
-        recorder.write(SeedVault.dir(context), result)
-        InstrumentationRegistry.getInstrumentation().sendStatus(
-            0,
-            Bundle().apply { putString("bmgrDriver", phaseStatusToken(phase, nonce, result)) },
-        )
-        failure?.let { throw it }
-    }
+    ) = finishDriverPhase(context, phase, nonce, recorder, result, failure)
 }

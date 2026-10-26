@@ -5,35 +5,46 @@ import android.os.Build
 import android.os.Bundle
 
 /**
- * Arms one driver phase — a bmgr leg only runs when the host pins `bmgrPhase=<name>`, the
+ * Arms one driver phase — a lane leg only runs when the host pins `bmgrPhase=<name>`, the
  * exact `class#method` selector and a disposable API 31/36 lane (05 Testing with bmgr;
- * owner decision 2026-10-21). Without the full triple [BmgrDriverRunner] excludes the test
- * class before discovery, so the module's ordinary `ciGroupAndroidDeviceTest` /
- * `nightlyGroupAndroidDeviceTest` runs only see [DriverSelfTest] and the driver can never
- * seed, click or bind the target inside normal CI.
+ * owner decision 2026-10-21, extended by M4 P6b for the external bgstart legs). Without
+ * the full triple [BmgrDriverRunner] excludes every armed test class before discovery, so
+ * the module's ordinary `ciGroupAndroidDeviceTest` / `nightlyGroupAndroidDeviceTest` runs
+ * only see [DriverSelfTest] and the driver can never seed, click or bind the target
+ * inside normal CI.
  */
 internal object BmgrArming {
     const val ARG_PHASE = "bmgrPhase"
     const val ARG_NONCE = "bmgrNonce"
     const val TARGET_PACKAGE = "ch.lkmc.neutrodyne"
 
-    val TEST_CLASS: String = BmgrDriverTest::class.java.name
+    /** One armable phase: the class it lives in and the method the host must pin. */
+    data class Phase(
+        val testClass: String,
+        val method: String,
+    ) {
+        val selector get() = "$testClass#$method"
+    }
 
-    val PHASE_METHODS: Map<String, String> =
+    val PHASES: Map<String, Phase> =
         mapOf(
-            "seed" to "seedImport",
-            "flip" to "settingsFlip",
-            "encrypted" to "encryptedImportRejected",
+            "seed" to Phase(BmgrDriverTest::class.java.name, "seedImport"),
+            "flip" to Phase(BmgrDriverTest::class.java.name, "settingsFlip"),
+            "encrypted" to Phase(BmgrDriverTest::class.java.name, "encryptedImportRejected"),
+            "bgseed" to Phase(BgStartTest::class.java.name, "seedPausedSession"),
+            "bgstart" to Phase(BgStartTest::class.java.name, "deniedBackgroundStartOffersWorkingResume"),
         )
+
+    val TEST_CLASSES: List<String> get() = PHASES.values.map { it.testClass }.distinct()
 
     private val APIS = setOf(31, 36)
 
     /** Full triple check used by the runner before discovery. */
     fun isArmed(arguments: Bundle): Boolean {
         val phase = arguments.getString(ARG_PHASE) ?: return false
-        val method = PHASE_METHODS[phase] ?: return false
+        val armed = PHASES[phase] ?: return false
         if (Build.VERSION.SDK_INT !in APIS) return false
-        return arguments.getString("class") == "$TEST_CLASS#$method"
+        return arguments.getString("class") == armed.selector
     }
 
     /**
@@ -45,12 +56,13 @@ internal object BmgrArming {
         method: String,
         arguments: Bundle,
     ): String {
-        check(PHASE_METHODS[phase] == method) { "unknown bmgr driver phase/method $phase/$method" }
+        val armed = PHASES[phase]
+        check(armed != null && armed.method == method) { "unknown bmgr driver phase/method $phase/$method" }
         check(Build.VERSION.SDK_INT in APIS) {
             "bmgr driver phase arms only on API 31/36, not ${Build.VERSION.SDK_INT}"
         }
         check(arguments.getString(ARG_PHASE) == phase) { "bmgrPhase argument missing for $phase" }
-        check(arguments.getString("class") == "$TEST_CLASS#$method") {
+        check(arguments.getString("class") == armed.selector) {
             "class#method selector not pinned to $method"
         }
         val nonce = arguments.getString(ARG_NONCE)

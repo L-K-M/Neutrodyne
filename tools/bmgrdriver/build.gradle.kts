@@ -19,6 +19,8 @@ kotlin {
             // The FileProvider paths file travels inside the driver library's own AAR.
             androidResources { enable = true }
             withDeviceTest { }
+            // Host tests cover the bgstart lane's pure dump parsers and fixture audio.
+            withHostTest { }
             // The self-instrumenting runner: without the full arming triple it drops the
             // driver class before discovery, so ordinary GMD runs only see DriverSelfTest.
             compilations.configureEach {
@@ -38,6 +40,12 @@ kotlin {
             implementation(libs.androidx.test.ext.junit)
             implementation(libs.androidx.test.uiautomator)
             implementation(libs.androidx.core.ktx)
+            // The bgstart leg's loopback enclosure server for the resumed playback.
+            implementation(project.dependencies.platform(libs.okhttp.bom))
+            implementation(libs.okhttp.mockwebserver3)
+        }
+        findByName("androidHostTest")?.dependencies {
+            implementation(libs.junit4)
         }
     }
 }
