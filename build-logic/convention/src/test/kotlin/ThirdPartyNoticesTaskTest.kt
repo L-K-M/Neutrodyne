@@ -43,6 +43,14 @@ class ThirdPartyNoticesTaskTest {
         assertFalse(File(tmp.root, "out/escaped/NOTICE").exists(), "the crafted entry was written")
     }
 
+    @Test
+    fun `a licence entry that climbs out with backslashes fails the task`() {
+        // Inert on Linux and macOS, but java.io.File on Windows splits on backslashes.
+        val crafted = jar("META-INF/LICENSE\\..\\..\\..\\..\\..\\escaped/NOTICE" to "written outside")
+
+        assertThrows<GradleException> { generate(crafted) }
+    }
+
     private fun jar(vararg entries: Pair<String, String>): File =
         File(tmp.root, "lib-1.0.jar").apply {
             ZipOutputStream(outputStream()).use { zip ->
