@@ -28,6 +28,26 @@ cp -a "$OUT/android/." "$OUT/merged/"
 
 git apply --directory="$OUT/merged" patches/*.patch
 
+# Apache-2.0 4(b): every file a patch touches states that we changed it. The note replaces the
+# blank line under upstream's copyright line, so line numbers and the compiled classes stay as
+# they were; a different header fails here instead of shifting lines.
+python3 - "$OUT/merged" <<'PY'
+import pathlib, sys
+merged = pathlib.Path(sys.argv[1])
+touched = {}
+for patch in sorted(pathlib.Path('patches').glob('*.patch')):
+    for line in patch.read_text().splitlines():
+        if line.startswith('+++ b/'):
+            touched.setdefault(line[len('+++ b/'):], []).append(patch.name[:4])
+for rel, ids in sorted(touched.items()):
+    path = merged / rel
+    lines = path.read_text().split('\n')
+    if len(lines) < 3 or not lines[1].startswith(' * Copyright ') or lines[2] != ' *':
+        sys.exit(f'{rel}: unexpected licence header, cannot add the change notice')
+    lines[2] = f' * Modified by Neutrodyne: third_party/room3/patches/{", ".join(ids)} (see the README there).'
+    path.write_text('\n'.join(lines))
+PY
+
 # AGP's KMP flat-source convention maps <set>/kotlin to javac's <set>/java, while
 # upstream ships .java files beside .kt in each source-set root. Re-stage every
 # set as <set>/kotlin + <set>/java so withJava() compiles the androidMain Binder

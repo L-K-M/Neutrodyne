@@ -1,0 +1,7 @@
+{
+  "_comment": "kotlinx-io 0.9.1 NOTICE (Apache-2.0 4(d)); the published jars omit it",
+  "uniqueId": "org.jetbrains.kotlinx:kotlinx-io-core",
+  "licenses": [
+    "Apache-2.0-kotlinx-io-core-NOTICE"
+  ]
+}

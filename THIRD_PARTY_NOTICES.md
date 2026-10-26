@@ -25,6 +25,22 @@ licence used as Apache-2.0). No bundled component beyond what `licensee*` report
   Its Licences entry is `app/config/libraries/okhttp-public-suffix-list.json` (and the same file
   under `app/config/engine/libraries/` and `desktopApp/config/libraries/`).
 
+- **Native code inside Gradle dependencies (desktop)**, which the POMs do not describe; each has a
+  manual entry in `desktopApp/config/libraries/` with its upstream licence text, and
+  `:desktopApp:checkEmbeddedNatives` fails on a runtime JAR with native libraries but no entries:
+  - Skiko 0.150.1's native library (`org.jetbrains.skiko:skiko-awt-runtime-<os>-<arch>`) links
+    Skia m150-1f14f1166a (BSD-3-Clause) and, at the commits Skia's `DEPS` pins: FreeType 2.14.2
+    (FTL, Linux only; "Portions of this software are copyright © 2026 The FreeType Project
+    (https://freetype.org). All rights reserved."), libpng 1.6.56 (libpng-2.0), libjpeg-turbo 3.1.0
+    (IJG, BSD-3-Clause and Zlib; "This software is based in part on the work of the Independent
+    JPEG Group."), HarfBuzz 13.1.0 (MIT-Modern-Variant), ICU 74 (Unicode-3.0), libwebp
+    (BSD-3-Clause), Expat 2.7.4 (MIT), zlib 1.3.0.1 (Zlib), Wuffs (Apache-2.0) and, on Linux,
+    the Vulkan Memory Allocator (MIT). Skiko's own NOTICE (Apache-2.0) rides on its entry.
+  - JNA 5.19.1's `libjnidispatch` links libffi (MIT). JNA itself is dual-licensed
+    (LGPL-2.1-or-later or Apache-2.0) and used under Apache-2.0.
+  - `sqlite-bundled`'s JNI library compiles in SQLite (public domain).
+- **XmlPull API inside kxml2** (desktop) — public domain, next to kxml2's own MIT-style licence.
+
 ## Python components (Android, `youtube/ytdlp/python-components.lock`)
 
 The `:app` APKs bundle the Chaquopy-hosted CPython engine stack; each entry has a manual
@@ -114,6 +130,15 @@ C++/WinRT headers under `playback/native/src/`.
   (`desktopApp/wix.lock`, PO-48's named case).
 - **jpackage launcher** — GPL-2.0 with the Classpath Exception, part of the bundled OpenJDK
   runtime above (`wixhelper.dll` in the MSI likewise).
+
+## Modified third-party code
+
+- **Room runtime 3.0.3** (`androidx.room3:room3-runtime-rebuild`, in the APKs and the desktop
+  builds) — Apache-2.0 — © The Android Open Source Project. Rebuilt from Google's published
+  sources jars with Neutrodyne's patches `0001`-`0003` (connection-pool acquisition, connection
+  hand-off, index inspection; [`third_party/room3`](third_party/room3/README.md)). Each patched
+  file carries a "Modified by Neutrodyne" line under its copyright header, and the published POM,
+  which the Licences screens show, names the artifact "Room-Runtime (modified by Neutrodyne)".
 
 ## Copied or ported code
 

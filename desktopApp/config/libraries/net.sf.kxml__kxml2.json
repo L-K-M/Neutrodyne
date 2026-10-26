@@ -1,0 +1,8 @@
+{
+  "_comment": "kXML2 licence (the POM's 'BSD style' licence for org.kxml2, keyed by the hash the plugin gives it); kxml2 2.3.0 is untagged upstream, text from the earliest tag v2.4.0; XmlPull API dedication (the POM's 'Public Domain' licence for org.xmlpull.v1, keyed by the hash the plugin gives it)",
+  "uniqueId": "net.sf.kxml:kxml2",
+  "licenses": [
+    "5309f354a24aab8784aea0d124177696",
+    "dd92b2e83789846e31395ad6527ef2cd"
+  ]
+}

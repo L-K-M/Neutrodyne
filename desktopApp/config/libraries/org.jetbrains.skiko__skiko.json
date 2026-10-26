@@ -1,0 +1,7 @@
+{
+  "_comment": "Skiko 0.150.1 NOTICE (Apache-2.0 4(d)); the published jars omit it",
+  "uniqueId": "org.jetbrains.skiko:skiko",
+  "licenses": [
+    "Apache-2.0-skiko-NOTICE"
+  ]
+}

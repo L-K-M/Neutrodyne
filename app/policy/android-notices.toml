@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Unlicense
+#
+# Overrides for scripts/ci/android_notices.py, which check-apk.sh runs on every built APK
+# (section 7): every native library and engine asset must be claimed by the notice entries
+# it needs in the AboutLibraries definitions (app/config/libraries, app/config/engine/libraries),
+# and every waiver says why. Claims that match nothing in one APK (an ABI split, the emergency
+# build) are notes, not errors.
+
+# Engine and data files besides the built-in watch list (*.so, fonts, models, web assets, audio).
+watch = ["assets/chaquopy/*.imy", "assets/chaquopy/cacert.pem", "assets/PublicSuffixDatabase.list"]
+
+[[claim]]
+paths = ["lib/*/libandroidx.graphics.path.so"]
+requires = ["androidx.graphics:graphics-path"]
+reason = "Native part of the AndroidX graphics-path AAR (Apache-2.0)"
+
+[[claim]]
+paths = ["lib/*/libdatastore_shared_counter.so"]
+requires = ["androidx.datastore:datastore-core"]
+reason = "Native part of the AndroidX datastore-core AAR (Apache-2.0)"
+
+[[claim]]
+paths = ["lib/*/libsqliteJni.so"]
+requires = ["androidx.sqlite:sqlite-bundled"]
+reason = "AndroidX sqlite-bundled: its JNI library with SQLite compiled in (SQLite is public domain)"
+
+[[claim]]
+paths = ["assets/PublicSuffixDatabase.list"]
+requires = ["neutrodyne:okhttp-public-suffix-list"]
+reason = "Mozilla's Public Suffix List compiled into okhttp-android (MPL-2.0 data, unmodified)"
+
+[[claim]]
+paths = [
+    "lib/*/libpython3.*.so",
+    "assets/chaquopy/stdlib-*.imy",
+    "assets/chaquopy/bootstrap-native/*/*.cpython-*.so",
+]
+requires = [
+    "neutrodyne:cpython",
+    "neutrodyne:libffi",
+    "neutrodyne:expat",
+    "neutrodyne:zstd",
+    "neutrodyne:xz",
+    "neutrodyne:bzip2",
+    "neutrodyne:zlib",
+    "neutrodyne:mimalloc",
+    "neutrodyne:hacl-star",
+    "neutrodyne:mpdecimal",
+    "neutrodyne:unicode-ucd",
+]
+reason = "CPython 3.14 runtime and standard library from com.chaquo.python:target with the libraries it links (youtube/ytdlp/python-components.lock)"
+
+[[claim]]
+paths = [
+    "lib/*/libcrypto_python.so",
+    "lib/*/libssl_python.so",
+    "lib/*/libcrypto_chaquopy.so",
+    "lib/*/libssl_chaquopy.so",
+]
+requires = ["neutrodyne:openssl"]
+reason = "OpenSSL built into the CPython target artifact"
+
+[[claim]]
+paths = ["lib/*/libsqlite3_python.so", "lib/*/libsqlite3_chaquopy.so"]
+requires = ["neutrodyne:sqlite"]
+reason = "SQLite built into the CPython target artifact"
+
+[[claim]]
+paths = ["lib/*/libchaquopy_java.so", "assets/chaquopy/bootstrap-native/*/java/chaquopy.so"]
+requires = ["neutrodyne:chaquopy", "neutrodyne:llvm-libcxx"]
+reason = "Chaquopy's JNI bridge, with LLVM libc++ statically linked (third_party/chaquopy-maven)"
+
+[[claim]]
+paths = ["assets/chaquopy/bootstrap.imy"]
+requires = [
+    "neutrodyne:chaquopy",
+    "neutrodyne:pyelftools",
+    "neutrodyne:construct",
+    "neutrodyne:setuptools",
+    "neutrodyne:importlib-resources",
+    "neutrodyne:jaraco-context",
+    "neutrodyne:jaraco-functools",
+    "neutrodyne:jaraco-text",
+    "neutrodyne:zipp",
+    "neutrodyne:more-itertools",
+    "neutrodyne:packaging",
+    "neutrodyne:platformdirs",
+    "neutrodyne:typing-extensions",
+]
+reason = "Chaquopy's bootstrap archive and the Python packages vendored in it (THIRD_PARTY_NOTICES.md)"
+
+[[claim]]
+paths = ["assets/chaquopy/app.imy"]
+requires = ["neutrodyne:neutrodyne-ytx"]
+reason = "The app's Python code: our neutrodyne_ytx shim (M9a adds yt-dlp, which needs its own entry then)"
+
+[[claim]]
+paths = ["assets/chaquopy/requirements-*.imy"]
+requires = ["neutrodyne:chaquopy"]
+reason = "Chaquopy's pip-requirements archives, empty while the lock's pip list is empty; a package added to the lock needs its own entry here (checkPythonLicences)"
+
+[[claim]]
+paths = ["assets/chaquopy/cacert.pem"]
+requires = ["neutrodyne:certifi-cacert"]
+reason = "certifi's CA bundle, unmodified MPL-2.0 data"
+
+# JetBrains Compose Multiplatform root modules publish no Android artifact of their own: their
+# Android variant is available-at the androidx.* artifact, which the definitions list and scan
+# checks separately. Gradle may keep only the parsed metadata of such a root module, so scan
+# cannot always follow the redirect from the cache.
+[[waive]]
+id = "org.jetbrains.compose.*"
+check = "missing-artifact"
+reason = "Compose Multiplatform root modules redirect to the androidx.* artifacts listed separately"
+
+[[waive]]
+id = "org.jetbrains.androidx.*"
+check = "missing-artifact"
+reason = "JetBrains AndroidX KMP root modules redirect to the androidx.* artifacts listed separately"
+
+[[waive]]
+id = "neutrodyne:setuptools"
+check = "copyright"
+reason = "setuptools' upstream licence file has no copyright line; it ships verbatim (THIRD_PARTY_NOTICES.md)"

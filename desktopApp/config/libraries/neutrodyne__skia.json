@@ -1,0 +1,13 @@
+{
+  "_comment": "JetBrains/skia 1f14f1166a847cb0e148f981600bf1e3e6ca6e46 LICENSE (the m150-1f14f1166a release Skiko 0.150.1 pins in skiko/gradle.properties)",
+  "uniqueId": "neutrodyne:skia",
+  "licenses": [
+    "BSD-3-Clause-skia"
+  ],
+  "name": "Skia (in Skiko)",
+  "artifactVersion": "m150-1f14f1166a",
+  "website": "https://github.com/JetBrains/skia/tree/1f14f1166a847cb0e148f981600bf1e3e6ca6e46",
+  "description": "Google's 2D graphics library, built by JetBrains at m150-1f14f1166a and statically linked into Skiko's native library (libskiko-<os>-<arch> in org.jetbrains.skiko:skiko-awt-runtime-*, Skiko 0.150.1).",
+  "developers": [],
+  "tag": "bundled"
+}

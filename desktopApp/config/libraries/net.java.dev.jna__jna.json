@@ -1,0 +1,7 @@
+{
+  "_comment": "jna 5.19.1 jar, META-INF/LGPL2.1: JNA is dual-licensed LGPL-2.1-or-later OR Apache-2.0 and used under Apache-2.0; the POM names both",
+  "uniqueId": "net.java.dev.jna:jna",
+  "licenses": [
+    "LGPL-2.1-or-later"
+  ]
+}

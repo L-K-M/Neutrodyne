@@ -1,0 +1,8 @@
+{
+  "_comment": "Skiko 0.150.1 NOTICE (Apache-2.0 4(d)); the published jars omit it",
+  "hash": "Apache-2.0-skiko-NOTICE",
+  "spdxId": "Apache-2.0",
+  "name": "Skiko NOTICE",
+  "url": "https://github.com/JetBrains/skiko/blob/v0.150.1/NOTICE",
+  "content": "NOTICE file of Skiko:\n\nThis project contains code adapted from \"The Android Open Source Project\" licensed under the Apache License, Version 2.0 (the \"License\"):\n\nhttps://android.googlesource.com/platform/frameworks/base\n"
+}

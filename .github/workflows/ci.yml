@@ -91,9 +91,25 @@ jobs:
           checkBannedApis checkBrandAssets :youtube:ytdlp:checkPythonLicences
           :youtube:ytdlp-desktop:checkPythonLicences
           :youtube:ytdlp:verifyBundledYtDlp :youtube:ytdlp-desktop:verifyBundledYtDlp
+          :desktopApp:checkEmbeddedNatives
           --continue
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
+      # The DEB/RPM/MSI licence metadata describes the whole package, which bundles
+      # the OpenJDK runtime and third-party libraries, not only our Unlicense code:
+      # jpackage's licence file, the RPM License: expression and the DEB control field.
+      - name: Desktop package licence metadata
+        run: |
+          grep -q 'Classpath Exception' desktopApp/packaging/LICENSE-PACKAGE.txt
+          grep -q 'This is free and unencumbered software' desktopApp/packaging/LICENSE-PACKAGE.txt
+          grep -q '^X-Spdx-License-Identifier: Unlicense AND .*GPL-2.0-only WITH Classpath-exception-2.0' desktopApp/packaging/deb/control
+          grep -q '"packaging/LICENSE-PACKAGE.txt"' build-logic/convention/src/main/kotlin/DesktopPackaging.kt
+          grep -q '"Unlicense AND Apache-2.0 AND ' build-logic/convention/src/main/kotlin/DesktopPackaging.kt
+          grep -q 'GPL-2.0-only WITH Classpath-exception-2.0"$' build-logic/convention/src/main/kotlin/DesktopPackaging.kt
+          if grep -n 'rootProject.file("LICENSE")\|rpmLicenseType = "Unlicense"\|^ *"Unlicense",$' build-logic/convention/src/main/kotlin/Desktop*.kt; then
+            echo "::error::desktop packaging still labels the whole package with the Unlicense alone"
+            exit 1
+          fi
       # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
       # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
       - name: CI script fixture tests
@@ -171,6 +187,36 @@ jobs:
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
         run: scripts/ci/check-apk.sh --published app/build/outputs/apk/release/*-release.apk
+      # The debug APKs are uploaded too (debug-apks), so they get check-apk.sh's section 7
+      # notices checks; its other sections are for release builds and reject debug code.
+      - name: Third-party notices in the debug APKs
+        run: |
+          for apk in app/build/outputs/apk/debug/*-debug.apk; do
+            python3 -I scripts/ci/android_notices.py check "$apk" --config app/policy/android-notices.toml --quiet
+            python3 -I scripts/ci/android_notices.py scan "$apk" --config app/policy/android-notices.toml --quiet \
+              --maven-repo third_party/room3-maven --maven-repo third_party/chaquopy-maven \
+              --fetch-from https://dl.google.com/dl/android/maven2 \
+              --fetch-from https://repo.maven.apache.org/maven2
+          done
+      # The server JAR carries its third-party notices (generateThirdPartyNotices): the
+      # rendered list with the slf4j copyright and the Apache text, each dependency's own
+      # licence files, and no embedded NOTICE or licence file left out (scan reads the
+      # Gradle cache of this build and downloads what the cache lacks).
+      - name: Third-party notices in the server JAR
+        run: |
+          jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
+          notices="$RUNNER_TEMP/server-notices.txt"
+          unzip -p "$jar" META-INF/Third-Party-Notices.txt > "$notices"
+          test -s "$notices"
+          grep -q 'Apache License' "$notices"
+          grep -q 'QOS.ch' "$notices"
+          grep -q 'kotlinx.coroutines library' "$notices"
+          unzip -l "$jar" > "$RUNNER_TEMP/server-jar.lst"
+          grep -q 'META-INF/licenses/org.slf4j/slf4j-api/LICENSE.txt' "$RUNNER_TEMP/server-jar.lst"
+          python3 -I scripts/ci/android_notices.py check sync/server/build/generated/aboutLibraries/aboutlibraries.json --quiet
+          python3 -I scripts/ci/android_notices.py scan sync/server/build/generated/aboutLibraries/aboutlibraries.json --quiet \
+            --fetch-from https://dl.google.com/dl/android/maven2 \
+            --fetch-from https://repo.maven.apache.org/maven2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-apks # test artifacts only — never offered to users (risk P10)

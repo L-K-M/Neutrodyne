@@ -1,0 +1,7 @@
+{
+  "_comment": "slf4j-api 2.0.20 jar, META-INF/LICENSE.txt",
+  "uniqueId": "org.slf4j:slf4j-api",
+  "licenses": [
+    "MIT-slf4j-api"
+  ]
+}

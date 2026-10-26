@@ -1,0 +1,8 @@
+{
+  "_comment": "XmlPull API dedication (the POM's 'Public Domain' licence for org.xmlpull.v1, keyed by the hash the plugin gives it)",
+  "hash": "dd92b2e83789846e31395ad6527ef2cd",
+  "spdxId": "LicenseRef-XmlPull-Public-Domain",
+  "name": "LicenseRef-XmlPull-Public-Domain (XmlPull API)",
+  "url": "https://github.com/aslom/xmlpull-api-v1/blob/master/LICENSE.txt",
+  "content": "XMLPULL API IS FREE\n-------------------\n\nAll of the XMLPULL API source code, compiled code, and documentation \ncontained in this distribution *except* for tests (see separate LICENSE_TESTS.txt)\nare in the Public Domain.\n\nXMLPULL API comes with NO WARRANTY or guarantee of fitness for any purpose.\n\nInitial authors:\n\n  Stefan Haustein\n  Aleksander Slominski\n\n2001-12-12\n"
+}

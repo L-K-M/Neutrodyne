@@ -1,0 +1,13 @@
+{
+  "_comment": "Chromium ICU LICENSE at 364118a1 (Skia DEPS at 1f14f1166a847cb0e148f981600bf1e3e6ca6e46)",
+  "uniqueId": "neutrodyne:skiko-icu",
+  "licenses": [
+    "Unicode-3.0-skiko-icu"
+  ],
+  "name": "ICU (in Skiko)",
+  "artifactVersion": "74-2",
+  "website": "https://chromium.googlesource.com/chromium/deps/icu/+/364118a1d9da24bb5b770ac3d762ac144d6da5a4",
+  "description": "Statically linked into Skiko's native library (libskiko-<os>-<arch> in org.jetbrains.skiko:skiko-awt-runtime-*, Skiko 0.150.1) by its Skia build m150-1f14f1166a, with its data. The licence covers ICU and the third-party data and code it incorporates.",
+  "developers": [],
+  "tag": "bundled"
+}

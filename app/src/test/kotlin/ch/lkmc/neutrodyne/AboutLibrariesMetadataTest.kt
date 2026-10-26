@@ -155,6 +155,34 @@ class AboutLibrariesMetadataTest {
         }
     }
 
+    /**
+     * MIT- and BSD-style licences require each component's own copyright notice in binary
+     * redistribution, so the shared SPDX templates (`<year> <copyright holders>`) alone are never
+     * enough. The plugin keeps a discovered dependency's template key and merges the
+     * component-specific text from config/libraries next to it, so every licence family of every
+     * library, discovered or bundled, needs at least one text without template placeholders.
+     */
+    @Test
+    fun everyLicenceFamilyCarriesAComponentText() {
+        val libs = Libs.Builder().withJson(generatedJson().readText()).build()
+
+        val templateOnly =
+            libs.libraries.flatMap { lib ->
+                libs
+                    .licensesOf(lib)
+                    .groupBy { it.spdxId ?: it.hash }
+                    .filterValues { texts ->
+                        texts.all { text -> PLACEHOLDER_MARKERS.any { text.licenseContent.orEmpty().contains(it) } }
+                    }.keys
+                    .map { family -> "${lib.uniqueId} -> $family" }
+            }
+        assertTrue(
+            "licence families with only an SPDX template text (add the component's own licence " +
+                "text to both config roots): ${templateOnly.joinToString()}",
+            templateOnly.isEmpty(),
+        )
+    }
+
     private fun Libs.licensesOf(lib: Library): List<License> {
         val byHash = licenses.associateBy { it.hash }
         return lib.licenses.map { byHash[it.hash] ?: it }

@@ -1,0 +1,8 @@
+{
+  "_comment": "kotlinx-io 0.9.1 NOTICE (Apache-2.0 4(d)); the published jars omit it",
+  "hash": "Apache-2.0-kotlinx-io-core-NOTICE",
+  "spdxId": "Apache-2.0",
+  "name": "kotlinx-io NOTICE",
+  "url": "https://github.com/Kotlin/kotlinx-io/blob/0.9.1/NOTICE",
+  "content": "NOTICE file of kotlinx-io:\n\n=========================================================================\n   ==  NOTICE file corresponding to the section 4 d of                    ==\n   ==  the Apache License, Version 2.0,                                   ==\n   ==  in this case for the kotlinx-io library.                            ==\n   =========================================================================\n\n   kotlinx-io library.\n   Copyright 2017-2023 JetBrains s.r.o and respective authors and developers\n"
+}

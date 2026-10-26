@@ -249,7 +249,7 @@ private fun configureNativeDistributions(
         packageVersion = projectVersion
         description = DESKTOP_DESCRIPTION
         vendor = DESKTOP_VENDOR
-        licenseFile.set(project.rootProject.file("LICENSE"))
+        licenseFile.set(project.file(DESKTOP_PACKAGE_LICENSE_FILE))
         // MSI and DMG go through Compose's packageMsi/packageDmg (WiX download, Info.plist, WixUI);
         // DEB and RPM are our own jpackage runs with resource overrides (11 nativeDistributions
         // configuration records why, 2026-10-06). ZIP, mac-zip and tar.gz are archive tasks.
@@ -302,7 +302,7 @@ private fun configureNativeDistributions(
             appCategory = "AudioVideo"
             menuGroup = "AudioVideo"
             debMaintainer = DESKTOP_DEB_MAINTAINER
-            rpmLicenseType = "Unlicense"
+            rpmLicenseType = DESKTOP_PACKAGE_LICENSE
             installationPath = LINUX_INSTALL_PARENT
             // no iconFile, shortcut or fileAssociation: our own desktop entry (11 Links and files
             // from the OS), installed by the DEB maintainer scripts

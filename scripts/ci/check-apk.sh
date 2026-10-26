@@ -8,9 +8,11 @@
 # in the nightly `no-engine-build` (--no-engine, M9a) and in `api37-16k`
 # (--alignment-only). Inputs besides the APKs: app/policy/locales.txt,
 # youtube/ytdlp/python-components.lock, gradle.properties (version and
-# neutrodyne.youtubeEngine) and the expected certificate from public-cert-sha256.sh.
+# neutrodyne.youtubeEngine), the expected certificate from public-cert-sha256.sh, and for
+# section 7 app/policy/android-notices.toml plus the Gradle cache of the build that made the APKs
+# (artifacts the cache lacks are downloaded from Google Maven and Maven Central).
 #
-#   default mode      sections 1-3, 5, 6a: size/set, 16 KB, content, locales, hygiene
+#   default mode      sections 1-3, 5, 6a, 7: size/set, 16 KB, content, locales, hygiene, notices
 #   --published       adds section 4 (manifest facts of a published build) and the
 #                     signer check of section 6
 #   --no-engine       the --published checks plus the no-engine content rules; also
@@ -27,6 +29,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." >/dev/null 2>&1 && pwd -P)"
 LOCALES_FILE="$REPO_ROOT/app/policy/locales.txt"
 PYLOCK="$REPO_ROOT/youtube/ytdlp/python-components.lock"
 GRADLE_PROPERTIES="$REPO_ROOT/gradle.properties"
+NOTICES_CONFIG="$REPO_ROOT/app/policy/android-notices.toml"
 
 PUBLISHED_ABIS=(arm64-v8a x86_64 armeabi-v7a) # 01 Build variants and ABIs, D77: never a universal APK
 
@@ -445,6 +448,37 @@ PYEOF
     fi
 }
 
+# notices_report <apk> <apkname>: section 7, third-party notices (01 AboutLibraries and the
+# Licences screen). `check` finds the AboutLibraries definitions inside the APK (R8 resource
+# shortening renames res/raw/aboutlibraries.json), requires each MIT/BSD-style component's own
+# licence text instead of an SPDX template, and requires a notice entry for every native library
+# and engine asset (claims in android-notices.toml). `scan` opens every resolved artifact in the
+# Gradle cache and the vendored Maven repositories and fails on an embedded NOTICE or MIT/BSD
+# licence file that the shipped notices do not reproduce, so it runs in the job that built the APK.
+# CI caches may restore dependency metadata without the jars and aars, so scan downloads missing
+# ones from the build's remote repositories (settings.gradle.kts: Google Maven, Maven Central).
+notices_report() {
+    local apk="$1" apkname="$2" mode out line reported
+    for mode in check scan; do
+        local args=("$mode" "$apk" --config "$NOTICES_CONFIG" --quiet)
+        if [ "$mode" = scan ]; then
+            args+=(--maven-repo "$REPO_ROOT/third_party/room3-maven" --maven-repo "$REPO_ROOT/third_party/chaquopy-maven")
+            args+=(--fetch-from https://dl.google.com/dl/android/maven2 --fetch-from https://repo.maven.apache.org/maven2)
+        fi
+        if out="$(python3 -I "$SCRIPT_DIR/android_notices.py" "${args[@]}" 2>&1)"; then
+            info "$apkname: third-party notices $mode OK"
+            continue
+        fi
+        reported=0
+        while IFS= read -r line; do
+            case "$line" in
+                error:*) fail "$apkname: notices $mode: ${line#error: }"; reported=1 ;;
+            esac
+        done <<< "$out"
+        [ "$reported" -eq 1 ] || fail "$apkname: notices $mode failed: $out"
+    done
+}
+
 # --- run ----------------------------------------------------------------------
 
 size_budget() {
@@ -562,6 +596,9 @@ PYEOF
     # section 5: locale config
     [ -f "$LOCALES_FILE" ] || { fail "$apkname: $LOCALES_FILE missing (09-owned locale list)"; }
     [ -f "$LOCALES_FILE" ] && locale_report "$apk" "$apkname"
+
+    # section 7: third-party notices inside the APK
+    notices_report "$apk" "$apkname"
 
     # sections 4 and 6: published-build facts and signer
     if [ "$MODE" = published ] || [ "$MODE" = no-engine ]; then

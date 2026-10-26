@@ -68,6 +68,12 @@ module path).
     (see `docs/PLAN.md` §4): WiX code (MS-RL) embedded in MSI installers,
     and python-build-standalone's MPL-2.0 patches.
   - YouTube extraction uses yt-dlp (Unlicense), never NewPipe Extractor.
+  - Every artifact ships the notices of what it bundles. The AboutLibraries roots
+    (`app/config`, `app/config/engine`, `desktopApp/config`, `sync/server/config`) hold each
+    component's own licence text, never only an SPDX template, and every NOTICE. A new
+    dependency, native library or bundled asset needs its entries in every root that ships it;
+    `check-apk.sh` (section 7), `:desktopApp:checkEmbeddedNatives`, the server JAR's
+    `generateThirdPartyNotices` and the CI notices steps fail on gaps.
 - **Brand:** the app icon source is `media-sources/icon.png` (a vacuum-tube
   "N", amber on navy).
 
