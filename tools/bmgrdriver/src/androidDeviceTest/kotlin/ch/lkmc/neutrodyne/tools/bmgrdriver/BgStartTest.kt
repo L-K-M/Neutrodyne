@@ -121,6 +121,9 @@ class BgStartTest {
             probe.startActor()
             recorder.step("actor")
             probe.await("bound live service record", timeoutMs = BgProbe.BOUND_WAIT_MS) {
+                // The api36 freezer ices the actor inside its grace wait; a sync
+                // binder poke is the platform's own thaw so the poll keeps running.
+                probe.pokeActor()
                 val dump = probe.servicesDump()
                 BgStartSurface.serviceRecordPresent(dump) && BgStartSurface.serviceRunning(dump)
             }

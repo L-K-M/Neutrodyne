@@ -26,5 +26,14 @@
         <service
             android:name="ch.lkmc.neutrodyne.tools.bgactor.BgActorService"
             android:exported="true" />
+        <!-- Inert ContentProvider whose call() exists only so the driver can
+             push a synchronous binder transaction into this process: a sync
+             binder thaws a cached-app-frozen process (observed as
+             "sync unfroze" in logcat), which the api36 freezer needs while the
+             service is still waiting out the demotion gate. -->
+        <provider
+            android:name="ch.lkmc.neutrodyne.tools.bgactor.BgActorProvider"
+            android:authorities="ch.lkmc.neutrodyne.tools.bgactor.provider"
+            android:exported="true" />
     </application>
 </manifest>

@@ -104,6 +104,7 @@ internal class BgProbe(
     ) {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (true) {
+            pokeActor()
             if (condition()) return
             check(SystemClock.elapsedRealtime() < deadline) { "timed out waiting for $description" }
             Thread.sleep(periodMs)
@@ -117,6 +118,7 @@ internal class BgProbe(
     ): Boolean {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
+            pokeActor()
             if (condition()) return true
             Thread.sleep(periodMs)
         }
@@ -153,6 +155,22 @@ internal class BgProbe(
     }
 
     /**
+     * A synchronous binder transaction into the actor process through its inert
+     * exported provider. The cached-app freezer ices the actor ~10 s in (api36
+     * froze it inside the activity-starter grace wait both rounds), which stops
+     * its demotion poll entirely — an incoming sync binder is the platform's
+     * own thaw path ("sync unfroze" in logcat), so poking here lets the gate's
+     * deadline-elapsed check and the demoted bind actually run.
+     */
+    fun pokeActor() {
+        runCatching {
+            shell(
+                "content call --uri content://${BgStartSurface.ACTOR_PROVIDER} --method wake",
+            )
+        }
+    }
+
+    /**
      * The committee-mandated settle: the target uid must stay at or below SERVICE and the
      * service non-foreground for [settleMs] continuously, inside a [budgetMs] window.
      * Every sample is written to `bgstart-settle.txt` for the strict checker; a breach
@@ -170,6 +188,7 @@ internal class BgProbe(
         try {
             while (true) {
                 val elapsed = SystemClock.elapsedRealtime() - started
+                pokeActor()
                 val state = uidState(uid)
                 val fg = "isForeground=true" in servicesDump()
                 rows += "t=$elapsed state=${state ?: -1} fg=$fg"
@@ -276,6 +295,7 @@ internal class BgProbe(
     fun awaitCardPlay(timeoutMs: Long): UiObject2? {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
+            pokeActor()
             val play =
                 device.findObject(By.pkg(BgStartSurface.SYSTEMUI_PACKAGE).descContains("Play"))
                     ?: device.findObject(By.pkg(BgStartSurface.SYSTEMUI_PACKAGE).text("Play"))
@@ -335,10 +355,11 @@ internal class BgProbe(
         /**
          * The bound stage's budget. The actor deliberately waits out the ~10 s
          * activity-starter FGS grace before binding (a bind inside it stamps
-         * code:ACTIVITY_STARTER on the binding record), and a cold target
-         * process spawn can add several more seconds on a loaded emulator —
-         * r7 api36 missed the record by ~0.1 s on the default 30 s budget.
+         * code:ACTIVITY_STARTER on the binding record), and on api36 the
+         * demotion gate itself can take ~60 s (r8 reached IMPORTANCE_SERVICE only
+         * at the deadline) plus the cold target process spawn — a pacing bound,
+         * not a semantic guard.
          */
-        const val BOUND_WAIT_MS = 60_000L
+        const val BOUND_WAIT_MS = 120_000L
     }
 }

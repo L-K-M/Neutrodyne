@@ -4,9 +4,12 @@ package ch.lkmc.neutrodyne.tools.bgactor;
 import android.app.ActivityManager;
 import android.app.Service;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
+import android.media.browse.MediaBrowser;
+import android.media.session.MediaController;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -45,7 +48,9 @@ public final class BgActorService extends Service {
     // > the ~10 s activity-starter grace, counted from service start (the
     // bootstrap activity launches and finishes ~0.3 s before this service).
     private static final long MIN_BIND_AGE_MS = 15_000;
-    private static final long BIND_DEADLINE_MS = 60_000;
+    // The demotion gate itself can be slow — r8 api36 reached IMPORTANCE_SERVICE
+    // only near the 60 s mark — so the deadline must out-wait the gate.
+    private static final long BIND_DEADLINE_MS = 90_000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ServiceConnection connection =
@@ -68,6 +73,8 @@ public final class BgActorService extends Service {
 
     private boolean bound;
     private boolean selfBound;
+    private MediaBrowser browser;
+    private MediaController controller;
     private long startedAt;
 
     @Override
@@ -94,12 +101,17 @@ public final class BgActorService extends Service {
         }
         boolean accepted;
         try {
+            // The application context owns the binding, so the ServiceRecord's
+            // client link survives this service's own teardown (a started
+            // background service is idle-stopped at ~60 s while the leg still
+            // needs the binding to exist).
             accepted =
-                bindService(
-                    new Intent(BIND_ACTION)
-                        .setComponent(new ComponentName(TARGET_PACKAGE, TARGET_SERVICE)),
-                    connection,
-                    BIND_AUTO_CREATE);
+                getApplicationContext()
+                    .bindService(
+                        new Intent(BIND_ACTION)
+                            .setComponent(new ComponentName(TARGET_PACKAGE, TARGET_SERVICE)),
+                        connection,
+                        BIND_AUTO_CREATE);
         } catch (RuntimeException e) {
             failBind("bindService threw " + e, importance, elapsed);
             return;
@@ -109,6 +121,7 @@ public final class BgActorService extends Service {
             return;
         }
         bound = true;
+        prepareAsExternalController();
         // A started, unbound background service is explicitly stopped when its
         // app has been idle ~60 s ("Stopping service due to app idle"), which
         // would drop the target binding mid-leg. A service with a client is
@@ -122,6 +135,45 @@ public final class BgActorService extends Service {
                 BIND_AUTO_CREATE);
         if (!selfBound) {
             Log.e(TAG, "BGACTOR-FAIL self-bind returned false");
+        }
+    }
+
+    /**
+     * A cold bind restores the durable paused session into the player WITHOUT
+     * preparing it (the production LOAD_PAUSED path deliberately stays lazy), so
+     * the session reports PlaybackState NONE and SystemUI renders no media card.
+     * A real external controller (Wear, a car) calls prepare() after connecting
+     * to surface that resumable state — a plain player command, no playback and
+     * no FGS attempt. The legacy browser surface is the same one SystemUI's own
+     * resumption uses, and keeps this APK free of a Media3 dependency.
+     */
+    private void prepareAsExternalController() {
+        Context app = getApplicationContext();
+        try {
+            browser =
+                new MediaBrowser(
+                    app,
+                    new ComponentName(TARGET_PACKAGE, TARGET_SERVICE),
+                    new MediaBrowser.ConnectionCallback() {
+                        @Override
+                        public void onConnected() {
+                            try {
+                                controller = new MediaController(app, browser.getSessionToken());
+                                controller.getTransportControls().prepare();
+                            } catch (RuntimeException e) {
+                                Log.e(TAG, "BGACTOR-PREP prepare threw " + e);
+                            }
+                        }
+
+                        @Override
+                        public void onConnectionFailed() {
+                            Log.e(TAG, "BGACTOR-PREP MediaBrowser connection refused");
+                        }
+                    },
+                    null);
+            browser.connect();
+        } catch (RuntimeException e) {
+            Log.e(TAG, "BGACTOR-PREP connect threw " + e);
         }
     }
 
@@ -171,9 +223,14 @@ public final class BgActorService extends Service {
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (browser != null) {
+            browser.disconnect();
+            browser = null;
+            controller = null;
+        }
         if (bound) {
             bound = false;
-            unbindService(connection);
+            getApplicationContext().unbindService(connection);
         }
         if (selfBound) {
             selfBound = false;

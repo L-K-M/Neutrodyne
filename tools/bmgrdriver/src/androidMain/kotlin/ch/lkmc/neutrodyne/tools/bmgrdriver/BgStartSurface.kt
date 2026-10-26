@@ -29,6 +29,7 @@ internal object BgStartSurface {
      */
     const val ACTOR_COMPONENT = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorActivity"
     const val ACTOR_SERVICE = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorService"
+    const val ACTOR_PROVIDER = "ch.lkmc.neutrodyne.tools.bgactor.provider"
     const val PROCSTATE_SERVICE = 10
     const val POSITION_ADVANCE_MS = 200L
     const val SETTLE_MS = 15_000L
