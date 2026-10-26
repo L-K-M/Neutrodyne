@@ -149,6 +149,36 @@ class ResumptionTest {
     }
 
     @Test
+    fun stopStillStopsPlaybackAndTheServiceWhenThePositionSaveFails() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            h.seedCurrent()
+            val player = h.playerFactory.create()
+            var stopped = false
+            val bridge =
+                AndroidServiceBridge(
+                    player,
+                    h.run { h.access.open() },
+                    h.access,
+                    h.scope,
+                    { true },
+                    { stopped = true },
+                )
+            bridge.attach()
+            try {
+                pumpUntil { player.mediaItemCount == 1 }
+                h.positions.failure = IllegalStateException("position write down")
+                assertFailsWith<IllegalStateException> { h.run { bridge.stop() } }
+                assertEquals(Player.STATE_IDLE, player.playbackState)
+                assertTrue(stopped)
+            } finally {
+                h.positions.failure = null
+                bridge.detach()
+                player.release()
+            }
+        }
+    }
+
+    @Test
     fun externalResumeSelectsFirstPlayableAndChecksMeteredPolicy() {
         LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
             h.lookup.items.value =

@@ -420,9 +420,12 @@ internal class AndroidServiceBridge(
     override suspend fun stop() =
         commands.withLock {
             player.pause()
-            flush()
-            player.stop()
-            stopService()
+            try {
+                flush()
+            } finally {
+                player.stop()
+                stopService()
+            }
         }
 
     override suspend fun dismiss() =
