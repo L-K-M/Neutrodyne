@@ -189,10 +189,10 @@ internal class PlaybackControllerImpl(
             gate.clearPending()
             if (connection.controller != null) {
                 val result = command(CustomCommands.DISMISS)
-                check(
-                    result?.resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS,
-                ) { "Playback dismissal failed" }
-                return@withContext
+                if (result?.resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS) {
+                    return@withContext
+                }
+                // Fall through to the bridge: a timeout or failed command must not crash the caller.
             }
             val bridge = hub.bridge
             if (bridge != null) {

@@ -1,17 +1,27 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.impl
 
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
+import android.os.Looper
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionToken
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Test
@@ -19,7 +29,9 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -132,6 +144,63 @@ class PlaybackServiceTest {
                 assertNull(h.store.queue.current)
                 assertEquals(0, player.mediaItemCount)
             } finally {
+                service.destroy()
+            }
+        }
+    }
+
+    @Test fun dismissWithoutACommandAnswerDegradesToTheDurableFallback() {
+        // The service's open() hangs on the gated settings read, so the connected controller's
+        // DISMISS command is never answered; the caller must still clear persisted state.
+        val settingsRead = CompletableDeferred<Unit>()
+        LifecycleHarness(app(), settingsReadGate = settingsRead).use { h ->
+            h.seedCurrent()
+            install(h)
+            val component = ComponentName(app(), NeutrodynePlaybackService::class.java)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            // Robolectric binds without resolving the component; hand the shadow the real binder.
+            shadowOf(app()).setComponentNameAndServiceForBindService(
+                component,
+                service.get().onBind(Intent("androidx.media3.session.MediaSessionService")),
+            )
+            val owner =
+                object : LifecycleOwner {
+                    override val lifecycle = LifecycleRegistry(this)
+                }
+            owner.lifecycle.currentState = Lifecycle.State.STARTED
+            val connection =
+                PlayerConnection(owner.lifecycle) {
+                    MediaController
+                        .Builder(app(), SessionToken(app(), component))
+                        .buildAsync()
+                }
+            val controller =
+                PlaybackControllerImpl(
+                    connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider { h.sessions },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
+            try {
+                assertNotNull(h.run { connection.awaitController() })
+                val dismissed = h.scope.async { controller.dismiss() }
+                // idle() never advances the paused looper clock the command timeout is posted on.
+                val looper = shadowOf(Looper.getMainLooper())
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
+                while (!dismissed.isCompleted) {
+                    check(System.nanoTime() < deadline) { "Playback test timed out" }
+                    looper.idleFor(1, TimeUnit.SECONDS)
+                    Thread.sleep(5)
+                }
+                runBlocking { dismissed.await() }
+                assertNull(h.store.queue.current)
+            } finally {
+                connection.controller?.release()
                 service.destroy()
             }
         }
