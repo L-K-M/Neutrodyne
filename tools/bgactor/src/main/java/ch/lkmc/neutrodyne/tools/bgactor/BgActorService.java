@@ -14,6 +14,7 @@ import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
+import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -52,6 +53,9 @@ public final class BgActorService extends Service {
     // The demotion gate itself can be slow — r8 api36 reached IMPORTANCE_SERVICE
     // only near the 60 s mark — so the deadline must out-wait the gate.
     private static final long BIND_DEADLINE_MS = 90_000;
+    // Loud-diagnostic window after the controller connects: the restored
+    // queue must surface on the player well inside the leg's card wait.
+    private static final long PREPARE_DEADLINE_MS = 45_000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ServiceConnection connection =
@@ -76,6 +80,7 @@ public final class BgActorService extends Service {
     private boolean selfBound;
     private ListenableFuture<MediaController> controllerFuture;
     private MediaController controller;
+    private boolean prepareIssued;
     private long startedAt;
 
     @Override
@@ -145,7 +150,10 @@ public final class BgActorService extends Service {
      * the session reports PlaybackState NONE and SystemUI renders no media card.
      * A real external controller (Wear, a car) calls prepare() after connecting
      * to surface that resumable state — a plain player command on the native
-     * Media3 controller surface, no playback and no FGS attempt.
+     * Media3 controller surface, no playback and no FGS attempt. The prepare
+     * must wait for the restored queue to land on the player: r10 issued it
+     * ~100 ms after the cold process spawned, before the durable restore
+     * applied, so it no-oped on an empty player and the session stayed NONE.
      */
     private void prepareAsExternalController() {
         Context app = getApplicationContext();
@@ -159,8 +167,16 @@ public final class BgActorService extends Service {
                 () -> {
                     try {
                         controller = controllerFuture.get();
-                        controller.prepare();
-                        Log.i(TAG, "BGACTOR-PREP prepare issued");
+                        controller.addListener(
+                            new Player.Listener() {
+                                @Override
+                                public void onEvents(Player player, Player.Events events) {
+                                    maybePrepare();
+                                }
+                            });
+                        maybePrepare();
+                        handler.postDelayed(
+                            this::checkPrepareDeadline, PREPARE_DEADLINE_MS);
                     } catch (Exception e) {
                         Log.e(TAG, "BGACTOR-PREP controller failed " + e);
                     }
@@ -168,6 +184,27 @@ public final class BgActorService extends Service {
                 handler::post);
         } catch (RuntimeException e) {
             Log.e(TAG, "BGACTOR-PREP connect threw " + e);
+        }
+    }
+
+    private void maybePrepare() {
+        MediaController c = controller;
+        if (c == null || prepareIssued || c.getMediaItemCount() == 0) {
+            return;
+        }
+        prepareIssued = true;
+        c.prepare();
+        Log.i(TAG, "BGACTOR-PREP prepare issued items=" + c.getMediaItemCount());
+    }
+
+    private void checkPrepareDeadline() {
+        MediaController c = controller;
+        if (!prepareIssued) {
+            Log.e(
+                TAG,
+                "BGACTOR-PREP no restored queue items="
+                    + (c == null ? -1 : c.getMediaItemCount())
+                    + " state=" + (c == null ? -1 : c.getPlaybackState()));
         }
     }
 
