@@ -551,7 +551,7 @@ jobs:
   # untrusted Media3 controllers cannot play cross-app). Each leg drives the untouched
   # published release APK through scripts/ci/bgstart-check.sh: the self-instrumenting
   # :tools:bmgrdriver APK seeds a durable paused session via the production import UI
-  # (phase bgseed), the host force-stops the target and the bgstart leg then BINDS the
+  # (phase bgseed), the host kills the target process and the bgstart leg then BINDS the
   # playback service from the standalone `:tools:bgactor` APK (a demoted, separate
   # uid — the driver never binds the target), taps the SystemUI media card's Play
   # button (a trusted STATUS_BAR_SERVICE controller), proves the real
