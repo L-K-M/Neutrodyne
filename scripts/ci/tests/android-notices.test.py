@@ -129,6 +129,42 @@ class FetchCoordinateTest(unittest.TestCase):
                 if status != HTTPStatus.NOT_FOUND:
                     self.assertIn("org.example:lib:1.0", errors.getvalue())
 
+    def test_recovered_metadata_failure_does_not_abort(self):
+        module = b'{"variants": []}'
+        module_name = f"{ARTIFACT}-{VERSION}.module"
+        for index, failure in enumerate((HTTPStatus.TOO_MANY_REQUESTS,
+                                         HTTPStatus.SERVICE_UNAVAILABLE,
+                                         urllib.error.URLError("unreachable"))):
+            with self.subTest(failure=failure):
+                dest = self.dest_for(f"recovered-{index}")
+                self.fetch(
+                    {
+                        self.url("m1", module_name): failure,
+                        self.url("m2", module_name): module,
+                    },
+                    dest,
+                )
+                self.assertEqual(module, dest.joinpath(REL, module_name).read_bytes())
+
+    def test_another_repository_404_does_not_resolve_an_outage(self):
+        # A Maven Central 404 cannot resolve an outage for a Google-only artifact.
+        with self.assertRaisesRegex(android_notices.InputError, "m1"):
+            self.fetch(
+                {self.url("m1", f"{ARTIFACT}-{VERSION}.jar"): HTTPStatus.SERVICE_UNAVAILABLE},
+                self.dest_for("unresolved"),
+            )
+
+    def test_recovering_one_file_does_not_clear_other_failures(self):
+        with self.assertRaisesRegex(android_notices.InputError, f"{ARTIFACT}-{VERSION}.pom"):
+            self.fetch(
+                {
+                    self.url("m1", f"{ARTIFACT}-{VERSION}.module"): HTTPStatus.SERVICE_UNAVAILABLE,
+                    self.url("m2", f"{ARTIFACT}-{VERSION}.module"): b'{"variants": []}',
+                    self.url("m1", f"{ARTIFACT}-{VERSION}.pom"): HTTPStatus.TOO_MANY_REQUESTS,
+                },
+                self.dest_for("partially-recovered"),
+            )
+
     def test_other_http_errors_still_raise(self):
         dest = self.dest_for("forbidden")
         with self.assertRaises(android_notices.InputError):

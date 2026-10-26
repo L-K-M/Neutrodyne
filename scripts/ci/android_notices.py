@@ -626,7 +626,7 @@ def fetch_coordinate(group: str, artifact: str, version: str, sources: list[str]
     CI Gradle caches (e.g. setup-gradle) may restore the dependency metadata
     without the jars and aars the build no longer needed to download."""
     rel = "/".join([*group.split("."), artifact, version])
-    last_failure = None
+    failures: dict[str, str] = {}
     for base in sources:
         for name in (f"{artifact}-{version}.module", f"{artifact}-{version}.pom",
                      f"{artifact}-{version}.aar", f"{artifact}-{version}.jar"):
@@ -638,22 +638,25 @@ def fetch_coordinate(group: str, artifact: str, version: str, sources: list[str]
                     data = response.read()
             except urllib.error.HTTPError as error:
                 if error.code == HTTPStatus.NOT_FOUND:
+                    # A different repository's 404 cannot resolve another's outage.
                     continue
                 if error.code == HTTPStatus.TOO_MANY_REQUESTS or error.code >= HTTPStatus.INTERNAL_SERVER_ERROR:
-                    last_failure = f"{base}: {rel}/{name}: HTTP {error.code}"
+                    failures[name] = f"{base}: {rel}/{name}: HTTP {error.code}"
                     continue
                 raise InputError(f"{base}: {rel}/{name}: HTTP {error.code}") from error
             except OSError as error:
-                last_failure = f"{base}: {rel}/{name}: {error}"
+                failures[name] = f"{base}: {rel}/{name}: {error}"
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+            failures.pop(name, None)
         if any(dest.joinpath(rel, f"{artifact}-{version}.{ext}").is_file()
                for ext in ("aar", "jar")):
             return
     # Failed requests cannot prove a KMP root has no runtime code behind its POM.
-    if last_failure is not None:
-        raise InputError(f"{group}:{artifact}:{version}: no mirror served a runtime file; {last_failure}")
+    if failures:
+        raise InputError(f"{group}:{artifact}:{version}: unresolved artifact requests; "
+                         + "; ".join(failures.values()))
 
 
 def resolve_files(group: str, artifact: str, version: str, cache: Path, repos: list[Path]) -> tuple[list[Path], bool]:
