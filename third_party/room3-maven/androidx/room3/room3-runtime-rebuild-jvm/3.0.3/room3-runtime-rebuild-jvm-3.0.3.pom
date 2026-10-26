@@ -9,8 +9,8 @@
   <groupId>androidx.room3</groupId>
   <artifactId>room3-runtime-rebuild-jvm</artifactId>
   <version>3.0.3</version>
-  <name>Room-Runtime</name>
-  <description>Android Room-Runtime</description>
+  <name>Room-Runtime (modified by Neutrodyne)</name>
+  <description>Android Room-Runtime 3.0.3, modified by Neutrodyne: third_party/room3/patches/0001-0003 change connection-pool acquisition, connection hand-off and index inspection</description>
   <url>https://developer.android.com/jetpack/androidx/releases/room3#3.0.3</url>
   <inceptionYear>2017</inceptionYear>
   <organization>

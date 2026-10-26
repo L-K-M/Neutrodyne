@@ -66,7 +66,10 @@ Gradle plugin, schema and data behaviour are upstream 3.0.3, unchanged.
 shared source sets are identical, merges them, applies the patch, restages each source set
 as `<set>/kotlin` + `<set>/java` (AGP-KMP derives the javac flat-source dir from the kotlin
 srcDir's parent — upstream ships `.java` Binder stubs beside `.kt` files) and stages the
-`META-INF/.../LICENSE.txt` notice that upstream embeds in its artifacts.
+`META-INF/.../LICENSE.txt` notice that upstream embeds in its artifacts. Apache-2.0 4(b): it
+also replaces the blank line under each patched file's copyright line with a "Modified by
+Neutrodyne" note naming the patches (line numbers and compiled classes stay unchanged), and the
+POMs name the artifact "Room-Runtime (modified by Neutrodyne)", which the Licences screens show.
 
 ## Rebuild
 

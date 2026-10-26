@@ -135,8 +135,13 @@ publishing {
     }
     publications.withType<MavenPublication>().configureEach {
         pom {
-            name.set("Room-Runtime")
-            description.set("Android Room-Runtime")
+            // Apache-2.0 4(b): the rebuilt runtime is modified, and the Licences screens show this
+            // name and description (prepare-sources.sh marks each patched file too).
+            name.set("Room-Runtime (modified by Neutrodyne)")
+            description.set(
+                "Android Room-Runtime 3.0.3, modified by Neutrodyne: third_party/room3/patches/0001-0003 " +
+                    "change connection-pool acquisition, connection hand-off and index inspection",
+            )
             url.set("https://developer.android.com/jetpack/androidx/releases/room3#3.0.3")
             inceptionYear.set("2017")
             organization {

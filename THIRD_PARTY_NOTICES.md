@@ -115,6 +115,15 @@ C++/WinRT headers under `playback/native/src/`.
 - **jpackage launcher** — GPL-2.0 with the Classpath Exception, part of the bundled OpenJDK
   runtime above (`wixhelper.dll` in the MSI likewise).
 
+## Modified third-party code
+
+- **Room runtime 3.0.3** (`androidx.room3:room3-runtime-rebuild`, in the APKs and the desktop
+  builds) — Apache-2.0 — © The Android Open Source Project. Rebuilt from Google's published
+  sources jars with Neutrodyne's patches `0001`-`0003` (connection-pool acquisition, connection
+  hand-off, index inspection; [`third_party/room3`](third_party/room3/README.md)). Each patched
+  file carries a "Modified by Neutrodyne" line under its copyright header, and the published POM,
+  which the Licences screens show, names the artifact "Room-Runtime (modified by Neutrodyne)".
+
 ## Copied or ported code
 
 None yet. Files copied or ported under the contribution rule (permissive or Unlicense sources only)
