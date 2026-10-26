@@ -1,0 +1,8 @@
+{
+  "_comment": "ACRA 5.14.2 NOTICE (Apache-2.0 4(d)); the published artifacts omit it",
+  "hash": "Apache-2.0-acra-core-NOTICE",
+  "spdxId": "Apache-2.0",
+  "name": "ACRA NOTICE",
+  "url": "https://github.com/ACRA/acra/blob/acra-5.14.2/NOTICE",
+  "content": "NOTICE file of ACRA:\n\nApplication Crash Reporting for Android\nCopyright (c) 2013 Kevin Gaudin\nhttp://acra.ch\n\nThis product is licensed under the terms of the Apache Software License 2.0. See the LICENSE file for the full license text.\n"
+}

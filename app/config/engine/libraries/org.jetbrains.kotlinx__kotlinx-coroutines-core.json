@@ -1,0 +1,7 @@
+{
+  "_comment": "kotlinx.coroutines 1.11.0 license/NOTICE.txt (Apache-2.0 4(d)); the published jars omit it",
+  "uniqueId": "org.jetbrains.kotlinx:kotlinx-coroutines-core",
+  "licenses": [
+    "Apache-2.0-kotlinx-coroutines-core-NOTICE"
+  ]
+}

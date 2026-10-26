@@ -1,0 +1,7 @@
+{
+  "_comment": "Protocol Buffers v28.2 LICENSE: the jar shades protobuf-javalite 4.28.2 (its RuntimeVersion constants) and its own LICENSE.txt omits the copyright line",
+  "uniqueId": "androidx.datastore:datastore-preferences-external-protobuf",
+  "licenses": [
+    "BSD-3-Clause-datastore-preferences-external-protobuf"
+  ]
+}

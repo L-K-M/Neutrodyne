@@ -1,0 +1,7 @@
+{
+  "_comment": "META-INF/NOTICE.txt inside concurrent-futures-ktx 1.2.0 (Apache-2.0 4(d)); AGP strips it from the APK",
+  "uniqueId": "androidx.concurrent:concurrent-futures-ktx",
+  "licenses": [
+    "Apache-2.0-concurrent-futures-ktx-NOTICE"
+  ]
+}
