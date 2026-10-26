@@ -483,15 +483,20 @@ class PlaybackServiceTest {
     private fun tapNotification(label: String) {
         phase("notification/action-$label")
         check(device.openNotification()) { "Notification shade could not be opened" }
-        // Keep the former two-locator budget, but never reuse an invalidated accessibility node.
+        // Notification action buttons live in the SystemUI window. App content can
+        // contain the label as a substring ("Play" in "Playback fixture"), so scope
+        // every locator to SystemUI; unscoped matching clicked an episode row.
         val deadline = SystemClock.elapsedRealtime() + 2 * WAIT_MS
         var staleAttempts = 0
         while (SystemClock.elapsedRealtime() < deadline) {
             val remaining = deadline - SystemClock.elapsedRealtime()
             if (remaining <= 0) break
             val action =
-                device.wait(Until.findObject(By.descContains(label)), minOf(1_000L, remaining))
-                    ?: device.findObject(By.text(label))
+                device.wait(
+                    Until.findObject(By.descContains(label).pkg(SYSTEM_UI_PACKAGE)),
+                    minOf(1_000L, remaining),
+                )
+                    ?: device.findObject(By.text(label).pkg(SYSTEM_UI_PACKAGE))
                     ?: continue
             try {
                 action.click()
@@ -510,7 +515,7 @@ class PlaybackServiceTest {
                 phase("image/ready")
                 val probe = shell("printf ND_STDERR_PROBE >&2; exit 7")
                 check(probe.exitCode == 7 && probe.text.contains("ND_STDERR_PROBE"))
-                val systemUi = shell("pm path com.android.systemui")
+                val systemUi = shell("pm path $SYSTEM_UI_PACKAGE")
                 check(systemUi.exitCode == 0 && systemUi.text.lineSequence().any { it.startsWith("package:") }) {
                     "Playback framework tests require a full image with SystemUI: ${systemUi.text}"
                 }
@@ -599,6 +604,7 @@ class PlaybackServiceTest {
     private companion object {
         const val COVER_SIDE = 256
         const val SERVICE_CLASS = "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService"
+        const val SYSTEM_UI_PACKAGE = "com.android.systemui"
         const val PLAYBACK_NOTIFICATION = 4000
         const val SHORT_STREAM_REPEATS = 60
         const val LONG_STREAM_REPEATS = 480
