@@ -8,14 +8,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
-import android.media.browse.MediaBrowser;
-import android.media.session.MediaController;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
+import androidx.media3.session.MediaController;
+import androidx.media3.session.SessionToken;
+import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * The bgstart leg's inert external actor: a plain background service — never a
@@ -73,7 +74,7 @@ public final class BgActorService extends Service {
 
     private boolean bound;
     private boolean selfBound;
-    private MediaBrowser browser;
+    private ListenableFuture<MediaController> controllerFuture;
     private MediaController controller;
     private long startedAt;
 
@@ -143,35 +144,28 @@ public final class BgActorService extends Service {
      * preparing it (the production LOAD_PAUSED path deliberately stays lazy), so
      * the session reports PlaybackState NONE and SystemUI renders no media card.
      * A real external controller (Wear, a car) calls prepare() after connecting
-     * to surface that resumable state — a plain player command, no playback and
-     * no FGS attempt. The legacy browser surface is the same one SystemUI's own
-     * resumption uses, and keeps this APK free of a Media3 dependency.
+     * to surface that resumable state — a plain player command on the native
+     * Media3 controller surface, no playback and no FGS attempt.
      */
     private void prepareAsExternalController() {
         Context app = getApplicationContext();
         try {
-            browser =
-                new MediaBrowser(
-                    app,
-                    new ComponentName(TARGET_PACKAGE, TARGET_SERVICE),
-                    new MediaBrowser.ConnectionCallback() {
-                        @Override
-                        public void onConnected() {
-                            try {
-                                controller = new MediaController(app, browser.getSessionToken());
-                                controller.getTransportControls().prepare();
-                            } catch (RuntimeException e) {
-                                Log.e(TAG, "BGACTOR-PREP prepare threw " + e);
-                            }
-                        }
-
-                        @Override
-                        public void onConnectionFailed() {
-                            Log.e(TAG, "BGACTOR-PREP MediaBrowser connection refused");
-                        }
-                    },
-                    null);
-            browser.connect();
+            SessionToken token =
+                new SessionToken(
+                    app, new ComponentName(TARGET_PACKAGE, TARGET_SERVICE));
+            controllerFuture =
+                new MediaController.Builder(app, token).buildAsync();
+            controllerFuture.addListener(
+                () -> {
+                    try {
+                        controller = controllerFuture.get();
+                        controller.prepare();
+                        Log.i(TAG, "BGACTOR-PREP prepare issued");
+                    } catch (Exception e) {
+                        Log.e(TAG, "BGACTOR-PREP controller failed " + e);
+                    }
+                },
+                handler::post);
         } catch (RuntimeException e) {
             Log.e(TAG, "BGACTOR-PREP connect threw " + e);
         }
@@ -223,10 +217,12 @@ public final class BgActorService extends Service {
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
-        if (browser != null) {
-            browser.disconnect();
-            browser = null;
+        if (controller != null) {
+            controller.release();
             controller = null;
+        } else if (controllerFuture != null) {
+            controllerFuture.cancel(true);
+            controllerFuture = null;
         }
         if (bound) {
             bound = false;

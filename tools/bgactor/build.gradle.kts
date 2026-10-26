@@ -10,7 +10,7 @@ plugins {
 // TOP for the whole leg and would stamp every binding it makes with a granting
 // capability record. Its single background service binds the target's exported
 // MediaLibraryService from a demoted state, the external analogue of the in-app
-// MediaController.connect() path the case models. Java only: no Kotlin, no deps.
+// MediaController.connect() path the case models. Java only: no Kotlin.
 android {
     namespace = "ch.lkmc.neutrodyne.tools.bgactor"
     compileSdk = 37
@@ -54,4 +54,11 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
     }
+}
+
+dependencies {
+    // The native Media3 client surface: a real external controller's connect +
+    // prepare() is what surfaces the durable paused session as PAUSED so the
+    // SystemUI card can render. The same version the target ships.
+    implementation(libs.androidx.media3.session)
 }
