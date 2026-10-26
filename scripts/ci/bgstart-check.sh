@@ -3,8 +3,10 @@
 #
 # bgstart-check.sh <31|36> <evidence-dir>: M4 P6b external background-start gate.
 # A self-instrumented driver first restores a durable paused session through the
-# published release app's own import UI (phase bgseed). The host then force-stops
-# the target and the driver's bgstart leg — on an UNINSTRUMENTED release APK —
+# published release app's own import UI (phase bgseed). The host then kills the
+# target process (a stopped package would be invisible to the actor's
+# resolveService) and the driver's bgstart leg — on an UNINSTRUMENTED release
+# APK —
 # BINDS the playback service from the standalone `:tools:bgactor` APK (a separate
 # demoted uid — the external equivalent of MediaController.connect()), proves the
 # uid sits at or below SERVICE non-foreground for a continuous >=15s settle, taps
@@ -359,14 +361,19 @@ main() {
     case "$answer" in *\(*[1-9]*) ;; *) fail "no durable queue_entry after the seed: $answer" ;; esac
     selector durableQueueSeeded
 
-    # --- cold state: force-stop, then prove the uid sits below the FGS threshold ---
-    timeout 60 "$ADB" shell am force-stop "$PKG"
+    # --- cold state: kill the process, then prove the uid sits below the FGS
+    # threshold. NOT force-stop: a stopped package is invisible to a normal
+    # caller's resolveService ("Unable to start service ... not found"), so the
+    # external bind could never reach it — a real cold start is a dead process,
+    # not a stopped package.
+    TARGET_PID="$(timeout 30 "$ADB" shell pidof "$PKG" 2>/dev/null | tr -d '\r')"
+    [ -z "$TARGET_PID" ] || timeout 60 "$ADB" shell kill -9 "$TARGET_PID"
     for _ in $(seq 1 10); do
         [ -z "$(timeout 30 "$ADB" shell pidof "$PKG" 2>/dev/null | tr -d '\r')" ] && break
         sleep 1
     done
     [ -z "$(timeout 30 "$ADB" shell pidof "$PKG" 2>/dev/null | tr -d '\r')" ] \
-        || fail "target still running after force-stop"
+        || fail "target still running after the kill"
     require_below_bfgs cold
     selector targetColdBelowBfgs
 
