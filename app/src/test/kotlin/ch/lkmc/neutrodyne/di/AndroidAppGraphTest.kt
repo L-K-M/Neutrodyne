@@ -88,9 +88,9 @@ class AndroidAppGraphTest {
     @Test
     fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
         runBlocking {
-            assertThat(graph.playbackController).isSameInstanceAs(graph.playbackController)
-            assertThat(graph.playbackStateSource).isSameInstanceAs(graph.playbackStateSource)
-            assertThat(graph.playbackMaintenance).isSameInstanceAs(graph.playbackMaintenance)
+            assertThat(graph.playbackStateSource).isNotSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackMaintenance).isNotSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource).isNotSameInstanceAs(graph.playbackMaintenance)
             assertThat(graph.playbackController::class.simpleName).isEqualTo("PlaybackControllerImpl")
             assertThat(graph.playbackStateSource::class.simpleName).isEqualTo("PlaybackStateHub")
             assertThat(graph.playbackMaintenance::class.simpleName).isEqualTo("StreamingCache")

@@ -56,8 +56,9 @@ class PlaybackPageTest {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { SettingsHomeRoute(settings) }
                 }
             }
+            onNodeWithText("Playback").performScrollTo()
             onNodeWithText("1.5×, skip silence on").assertExists()
-            onNodeWithText("Playback").performScrollTo().performClick()
+            onNodeWithText("Playback").performClick()
             assertEquals(
                 listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(SettingsKey(SettingsPage.PLAYBACK))),
                 navigator.calls,
