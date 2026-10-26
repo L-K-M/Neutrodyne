@@ -63,5 +63,26 @@ class FetchCoordinateTest(unittest.TestCase):
         with self.assertRaises(android_notices.InputError):
             self.fetch({self.url("m1", f"{ARTIFACT}-{VERSION}.module"): 403}, dest)
 
+    def test_metadata_without_a_runtime_file_tries_the_next_mirror(self):
+        dest = self.dest_for("metadata")
+        self.fetch(
+            {
+                self.url("m1", f"{ARTIFACT}-{VERSION}.module"): b"module",
+                self.url("m1", f"{ARTIFACT}-{VERSION}.pom"): b"pom",
+                self.url("m2", f"{ARTIFACT}-{VERSION}.aar"): b"aar",
+            },
+            dest,
+        )
+        self.assertTrue(dest.joinpath(REL, f"{ARTIFACT}-{VERSION}.aar").is_file())
+
+    def test_a_cached_runtime_file_ends_the_fetch(self):
+        dest = self.dest_for("cached")
+        aar = dest.joinpath(REL, f"{ARTIFACT}-{VERSION}.aar")
+        aar.parent.mkdir(parents=True)
+        aar.write_bytes(b"cached")
+        self.fetch({self.url("m2", f"{ARTIFACT}-{VERSION}.jar"): b"jar"}, dest)
+        self.assertFalse(any(url.startswith("m2/") for url in self.requests))
+
+
 if __name__ == "__main__":
     unittest.main()

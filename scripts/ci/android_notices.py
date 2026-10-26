@@ -626,12 +626,10 @@ def fetch_coordinate(group: str, artifact: str, version: str, sources: list[str]
     without the jars and aars the build no longer needed to download."""
     rel = "/".join([*group.split("."), artifact, version])
     for base in sources:
-        found = False
         for name in (f"{artifact}-{version}.module", f"{artifact}-{version}.pom",
                      f"{artifact}-{version}.aar", f"{artifact}-{version}.jar"):
             target = dest.joinpath(rel, name)
             if target.is_file():
-                found = True
                 continue
             try:
                 with urllib.request.urlopen(f"{base.rstrip('/')}/{rel}/{name}", timeout=60) as response:
@@ -646,8 +644,8 @@ def fetch_coordinate(group: str, artifact: str, version: str, sources: list[str]
                 raise InputError(f"{base}: {rel}/{name}: {error.reason}") from error
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
-            found = True
-        if found:
+        if any(dest.joinpath(rel, f"{artifact}-{version}.{ext}").is_file()
+               for ext in ("aar", "jar")):
             return
 
 
