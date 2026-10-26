@@ -40,6 +40,9 @@ internal object BgStartSurface {
     const val TRIGGER_PACKAGE = "ch.lkmc.neutrodyne.tools.bgtrigger"
     const val TRIGGER_PROVIDER = "ch.lkmc.neutrodyne.tools.bgtrigger.provider"
     const val TRIGGER_LISTENER = "$TRIGGER_PACKAGE/.BgTriggerListenerService"
+
+    /** AOSP PROCESS_STATE_BOUND_FOREGROUND_SERVICE is hidden from the SDK. */
+    const val PROCSTATE_BOUND_FOREGROUND_SERVICE = 5
     const val PROCSTATE_SERVICE = 10
     const val SETTLE_MS = 15_000L
 
@@ -231,23 +234,33 @@ internal object BgStartSurface {
     }
 
     /**
-     * Finds the PlaybackState closest to the session block mentioning `pkg` (media_session
-     * prints the owning package above each session's state); null when the format is absent.
+     * Reads only the exact package's session block, including tag-prefixed AOSP headers.
+     * Stop at the next sibling so a missing state cannot borrow another session's sample.
      */
     fun mediaSessionPlayback(
         text: String,
         pkg: String,
     ): PlaybackSample? {
+        val header =
+            Regex("""^(\s*)(?:\S+\s+)?${Regex.escape(pkg)}/\S*\s+\(userId=\d+\)\s*$""")
         val lines = text.lines()
-        val pkgIndex = lines.indexOfFirst { it.contains(pkg) }
+        val pkgIndex = lines.indexOfFirst { header.containsMatchIn(it) }
         if (pkgIndex < 0) return null
-        val stateIndex =
-            lines.indices
-                .filter { PLAYBACK_LINE.containsMatchIn(lines[it]) }
-                .minByOrNull { kotlin.math.abs(it - pkgIndex) }
-                ?.takeIf { kotlin.math.abs(it - pkgIndex) <= 80 }
-                ?: return null
-        val line = lines[stateIndex]
+        val indent = header.find(lines[pkgIndex])!!.groupValues[1].length
+        var line: String? = null
+        for (i in pkgIndex + 1 until lines.size) {
+            val candidate = lines[i]
+            if (candidate.isNotBlank() &&
+                candidate.length - candidate.trimStart().length <= indent
+            ) {
+                break
+            }
+            if (PLAYBACK_LINE.containsMatchIn(candidate)) {
+                line = candidate
+                break
+            }
+        }
+        if (line == null) return null
         return PlaybackSample(
             state =
                 STATE_FIELD

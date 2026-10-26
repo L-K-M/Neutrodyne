@@ -1967,7 +1967,7 @@ class BgstartEvidenceTest(unittest.TestCase):
             "uid-state-cold.txt": "20 (NONEXISTENT)\n",
             "bgstart-uid-state-before.txt": "10 (SERVICE)\n",
             "bgstart-uid-state-untrusted.txt": "10 (SERVICE)\n",
-            "bgstart-uid-state-trusted.txt": "5 (BFGS)\n",
+            "bgstart-uid-state-trusted.txt": "5 (BOUND_FOREGROUND_SERVICE)\n",
             "bgstart-services-before.txt": bg_services("before", api),
             "bgstart-services-untrusted.txt": bg_services("untrusted", api),
             "bgstart-services-trusted.txt": bg_services("trusted", api),
@@ -2273,6 +2273,43 @@ class BgstartEvidenceTest(unittest.TestCase):
         def mutate(directory, run, texts, logs, statuses):
             run["selectors"]["targetColdBelowBfgs"] = "fail"
         self.assert_rejected({"api36": mutate}, "targetColdBelowBfgs")
+
+    def test_rejects_a_trusted_uid_state_other_than_bfgs(self):
+        """A trusted bind must elevate to BFGS, not leave the target demoted."""
+        for label, text, needle in (
+                ("unparsed", "uidState=garbage\n", "trusted uid-state"),
+                ("empty", "", "missing or empty"),
+                ("top", "2 (TOP)\n", "trusted uid-state"),
+                ("foreground", "4 (FOREGROUND_SERVICE)\n", "trusted uid-state"),
+                ("demoted", "10 (SERVICE)\n", "trusted uid-state"),
+                ("uid-like", f"{BG_UID} (UID)\n", "trusted uid-state")):
+            with self.subTest(state=label):
+                def mutate(directory, run, texts, logs, statuses):
+                    texts["bgstart-uid-state-trusted.txt"] = text
+                self.assert_rejected({"api31": mutate}, needle)
+
+    def test_rejects_divergent_actor_or_trigger_apks(self):
+        for field, device in (("actorApkSha256", "api36"),
+                              ("triggerApkSha256", "api31")):
+            with self.subTest(field=field, leg=device):
+                def mutate(directory, run, texts, logs, statuses):
+                    run[field] = "d" * 64
+                self.assert_rejected({device: mutate}, f"{field} differs")
+
+    def test_rejects_a_boolean_app_uid(self):
+        for value in (True, False):
+            with self.subTest(appUid=value):
+                def mutate(directory, run, texts, logs, statuses):
+                    run["appUid"] = value
+                self.assert_rejected({"api31": mutate}, "appUid evidence missing")
+
+    def test_rejects_non_mapping_selectors_without_crashing(self):
+        for value in ("pass", ["pass"]):
+            with self.subTest(selectors=repr(value)):
+                def mutate(directory, run, texts, logs, statuses):
+                    run["selectors"] = value
+                self.assert_rejected({"api31": mutate},
+                                     "selectors not all 'pass'")
 
 
 if __name__ == "__main__":

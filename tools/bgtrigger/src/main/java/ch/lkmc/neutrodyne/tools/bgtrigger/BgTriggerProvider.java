@@ -41,7 +41,8 @@ import java.util.concurrent.TimeUnit;
  *
  * Method (shell `content call --uri content://...provider --method X`):
  *   status  — "trusted=0|1 sessions=N target=0|1": whether the connect landed
- *             (a real bind exists) AND whether the session granted commands
+ *             (including a commandless connect released afterward) AND whether
+ *             the session granted commands
  *             (untrusted controllers connect with an empty command set — no
  *             COMMAND_PLAY_PAUSE, so they can never command playback).
  */
@@ -120,22 +121,23 @@ public final class BgTriggerProvider extends ContentProvider {
             SessionToken token =
                 new SessionToken(
                     context, new ComponentName(TARGET_PACKAGE, TARGET_SERVICE));
+            ListenableFuture<MediaController> future =
+                new MediaController.Builder(context, token).buildAsync();
             try {
-                ListenableFuture<MediaController> future =
-                    new MediaController.Builder(context, token).buildAsync();
                 c = future.get(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                connectLanded = true;
+                if (!commandsOf(c)) {
+                    release(c);
+                    return null;
+                }
+                controller = c;
+                return c;
             } catch (Exception e) {
+                releaseFuture(future);
                 Log.e(TAG, "BGTRIGGER-FAIL connect " + e);
                 connectLanded = false;
                 return null;
             }
-            connectLanded = true;
-            if (!commandsOf(c)) {
-                release(c);
-                return null;
-            }
-            controller = c;
-            return c;
         }
     }
 
@@ -143,8 +145,19 @@ public final class BgTriggerProvider extends ContentProvider {
         try {
             return onApplicationLooper(() -> hasCommands(c));
         } catch (Exception e) {
-            Log.e(TAG, "BGTRIGGER-FAIL commands " + e);
-            return false;
+            throw new IllegalStateException("cannot read controller commands", e);
+        }
+    }
+
+    private static void releaseFuture(ListenableFuture<MediaController> future) {
+        try {
+            // Media3 handles both pending and already-completed connects on its looper.
+            onApplicationLooper(() -> {
+                MediaController.releaseFuture(future);
+                return null;
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "BGTRIGGER-FAIL releaseFuture " + e);
         }
     }
 

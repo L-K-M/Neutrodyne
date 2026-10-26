@@ -964,6 +964,7 @@ BGSTART_STEP_ORDER = {
     "bgstart": ["sidecar", "actor", "bound", "settled", "guarded",
                 "untrusted", "trusted", "verdict"],
 }
+BGSTART_PROCSTATE_BOUND_FOREGROUND_SERVICE = 5
 BGSTART_PROCSTATE_SERVICE = 10
 BGSTART_SETTLE_MS = 15_000
 BGSTART_TRIGGER_PACKAGE = "ch.lkmc.neutrodyne.tools.bgtrigger"
@@ -1142,7 +1143,13 @@ def check_bgstart_trusted(device, directory):
     record attributing the FGS capability grant to the bind itself —
     `code:PROC_STATE_BFGS` with `startForegroundCount:0` — so the exemption
     precedes any startForeground attempt a denial could ever fire on."""
-    bgstart_text(directory, "bgstart-uid-state-trusted.txt")
+    trusted_state = uid_state(
+        bgstart_text(directory, "bgstart-uid-state-trusted.txt"))
+    if trusted_state != BGSTART_PROCSTATE_BOUND_FOREGROUND_SERVICE:
+        raise ValueError(
+            f"{device}: trusted uid-state {trusted_state!r} != "
+            f"BOUND_FOREGROUND_SERVICE"
+            f"({BGSTART_PROCSTATE_BOUND_FOREGROUND_SERVICE})")
     services = bgstart_text(directory, "bgstart-services-trusted.txt")
     if "ServiceRecord{" not in services or "app=ProcessRecord{" not in services:
         raise ValueError(f"{device}: trusted dump has no live ServiceRecord")
@@ -1223,7 +1230,7 @@ def check_bgstart_device(root, device, api):
     if run.get("driverPackage") == BMGR_TARGET or not run.get("driverPackage") \
             or not run.get("driverRunner"):
         raise ValueError(f"{device}: driver identity evidence missing")
-    if not isinstance(run.get("appUid"), int) or run["appUid"] <= 0:
+    if type(run.get("appUid")) is not int or run["appUid"] <= 0:
         raise ValueError(f"{device}: appUid evidence missing")
     app_uid = run["appUid"]
     instruments = (directory / "instrumentations.txt").read_text(errors="replace") \
@@ -1238,7 +1245,8 @@ def check_bgstart_device(root, device, api):
     selectors = run.get("selectors")
     if not isinstance(selectors, dict) \
             or any(selectors.get(n) != "pass" for n in BGSTART_SELECTORS):
-        missing = [n for n in BGSTART_SELECTORS if (selectors or {}).get(n) != "pass"]
+        found = selectors if isinstance(selectors, dict) else {}
+        missing = [n for n in BGSTART_SELECTORS if found.get(n) != "pass"]
         raise ValueError(f"{device}: selectors not all 'pass' ({', '.join(missing)})")
 
     # The bgseed -> bgstart sidecar binds the restored session's loopback enclosure.
@@ -1299,6 +1307,7 @@ def check_bgstart(root):
         runs[device] = json.loads((root / device / "run.json").read_text())
     a, b = runs["api31"], runs["api36"]
     for field in ("sourceSha", "apkSha256", "driverApkSha256",
+                  "actorApkSha256", "triggerApkSha256",
                   "driverPackage", "driverRunner"):
         if not a.get(field) or a[field] != b.get(field):
             raise ValueError(f"bgstart: {field} differs across legs")

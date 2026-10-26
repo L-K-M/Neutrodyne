@@ -178,7 +178,7 @@ class BgStartTest {
             finishDriverPhase(context, "bgstart", nonce, recorder, "ok")
         } catch (t: Throwable) {
             runCatching { probe.capture("fail", uid) }
-            probe.dumpHierarchy("fail")
+            runCatching { probe.dumpHierarchy("fail") }
             finishDriverPhase(context, "bgstart", nonce, recorder, "error:${t.javaClass.simpleName}:${t.message}", t)
         } finally {
             runCatching { probe.stopActor() }
@@ -225,6 +225,9 @@ class BgStartTest {
     private fun requireGrantStamped(stage: BgProbe.Stage) {
         check(stage.serviceRecord) { "no ServiceRecord for the bound service at ${stage.label}" }
         check(stage.serviceRunning) { "ServiceRecord has no live process at ${stage.label}" }
+        check(stage.uidState == BgStartSurface.PROCSTATE_BOUND_FOREGROUND_SERVICE) {
+            "trusted bind left target uid state ${stage.uidState}, not BFGS at ${stage.label}"
+        }
         check(stage.triggerGrantStamps().isNotEmpty()) {
             "the trusted bind stamped no PROC_STATE_BFGS/startForegroundCount:0 grant " +
                 "at ${stage.label} — the matrix row did not measure the exemption"

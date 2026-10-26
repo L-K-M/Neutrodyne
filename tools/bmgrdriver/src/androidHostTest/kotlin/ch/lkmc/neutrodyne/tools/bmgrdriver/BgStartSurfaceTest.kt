@@ -211,4 +211,204 @@ class BgStartSurfaceTest {
         assertTrue(pausedSample.paused)
         assertNull(BgStartSurface.mediaSessionPlayback("unrelated", "ch.lkmc.neutrodyne"))
     }
+
+    @Test
+    fun attributesPlaybackToTheExactSessionBlock() {
+        // A foreign session's state above the target header is nearer than the
+        // target's own state below it — distance must not win over block bounds.
+        val dump =
+            """
+            Media sessions (2):
+              MediaPlaybackService com.android.music/MediaPlaybackService (userId=0)
+                package=com.android.music
+                state=PlaybackState {state=PLAYING(3), position=111, buffered position=111, speed=1.0, updated=100}
+              neutrodyne ch.lkmc.neutrodyne/ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService (userId=0)
+                ownerPid=2851, ownerUid=10150, userId=0
+                package=ch.lkmc.neutrodyne
+                active=true
+                flags=7
+                rating type=0
+                controllers: 1
+                state=PlaybackState {state=PAUSED(2), position=750000, buffered position=750000, speed=0.0, updated=200}
+            """.trimIndent()
+        val sample = BgStartSurface.mediaSessionPlayback(dump, "ch.lkmc.neutrodyne")!!
+        assertEquals(2, sample.state)
+        assertEquals(750_000L, sample.position)
+        assertEquals(200L, sample.updatedElapsed)
+    }
+
+    @Test
+    fun ignoresSiblingPrefixSessionHeaders() {
+        // `ch.lkmc.neutrodyne.tools.*` contains the app package as a prefix; its
+        // session must not be attributed to `ch.lkmc.neutrodyne`.
+        val dump =
+            """
+            Media sessions (2):
+              bgmirror ch.lkmc.neutrodyne.tools.bgmirror/ch.lkmc.neutrodyne.tools.bgmirror.MirrorSession (userId=0)
+                package=ch.lkmc.neutrodyne.tools.bgmirror
+                state=PlaybackState {state=PLAYING(3), position=42, buffered position=42, speed=1.0, updated=50}
+              neutrodyne ch.lkmc.neutrodyne/ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService (userId=0)
+                package=ch.lkmc.neutrodyne
+                state=PlaybackState {state=PAUSED(2), position=750000, buffered position=750000, speed=0.0, updated=60}
+            """.trimIndent()
+        val sample = BgStartSurface.mediaSessionPlayback(dump, "ch.lkmc.neutrodyne")!!
+        assertEquals(2, sample.state)
+        assertEquals(750_000L, sample.position)
+    }
+
+    @Test
+    fun returnsNullWhenTheTargetSessionHasNoState() {
+        // The target block ends at the next sibling header; a later session's
+        // PlaybackState must not be attributed back to it.
+        val dump =
+            """
+            Media sessions (2):
+              neutrodyne ch.lkmc.neutrodyne/ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService (userId=0)
+                package=ch.lkmc.neutrodyne
+                active=false
+                state=null
+                queueTitle=null, size=0
+              other com.other.app/com.other.app.MusicService (userId=0)
+                package=com.other.app
+                state=PlaybackState {state=PLAYING(3), position=9, buffered position=9, speed=1.0, updated=10}
+            """.trimIndent()
+        assertNull(BgStartSurface.mediaSessionPlayback(dump, "ch.lkmc.neutrodyne"))
+    }
+
+    @Test
+    fun parsesTheSavedApi31AndApi36SessionDumps() {
+        val api31 = BgStartSurface.mediaSessionPlayback(api31SessionDump, "ch.lkmc.neutrodyne")!!
+        assertEquals(0, api31.state)
+        assertEquals(750_000L, api31.position)
+        assertEquals(117_008L, api31.updatedElapsed)
+        // api36 nests the target under a foreign com.android.music session whose
+        // state sits nearer the target header than the target's own state.
+        val api36 = BgStartSurface.mediaSessionPlayback(api36SessionDump, "ch.lkmc.neutrodyne")!!
+        assertEquals(0, api36.state)
+        assertEquals(750_000L, api36.position)
+        assertEquals(121_063L, api36.updatedElapsed)
+    }
+
+    // Saved api31 dump; long unrelated field tails are elided with `…`.
+    private val api31SessionDump =
+        """
+        MEDIA SESSION SERVICE (dumpsys media_session)
+
+        4 sessions listeners.
+        Global priority session is com.android.server.telecom/HeadsetMediaButton (userId=0)
+          HeadsetMediaButton com.android.server.telecom/HeadsetMediaButton (userId=0)
+            ownerPid=538, ownerUid=1000, userId=0
+            package=com.android.server.telecom
+            launchIntent=null
+            mediaButtonReceiver=null
+            active=false
+            flags=65537
+            rating type=0
+            controllers: 0
+            state=null
+            audioAttrs=AudioAttributes: usage=USAGE_VOICE_COMMUNICATION content=CONTENT_TYPE_SPEECH …
+            volumeType=1, controlType=2, max=0, current=0
+            metadata: null
+            queueTitle=null, size=0
+        User Records:
+        Record for full_user=0
+          Volume key long-press listener: null
+          Volume key long-press listener package:
+          Media key listener: null
+          Media key listener package:
+          OnMediaKeyEventDispatchedListener: added 0 listener(s)
+          OnMediaKeyEventSessionChangedListener: added 1 listener(s)
+            from com.android.bluetooth
+          Last MediaButtonReceiver: null
+          Media button session is null
+          Sessions Stack - have 1 sessions:
+            androidx.media3.session.id.neutrodyne ch.lkmc.neutrodyne/androidx.media3.session.id.neutrodyne (userId=0)
+              ownerPid=2695, ownerUid=10105, userId=0
+              package=ch.lkmc.neutrodyne
+              launchIntent=PendingIntent{8f532e0: PendingIntentRecord{f271999 ch.lkmc.neutrodyne startActivity}}
+              mediaButtonReceiver=Restored MBR {component=ComponentInfo{ch.lkmc.neutrodyne/androidx.media3.session…
+              active=true
+              flags=7
+              rating type=0
+              controllers: 1
+              state=PlaybackState {state=0, position=750000, buffered position=750000, speed=0.0, updated=117008, …
+              audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_SPEECH flags=0x800 tags= bundle=null
+              volumeType=1, controlType=2, max=0, current=0
+              metadata: size=14, description=Alpha Episode Two run-1793047478-3988, null, null
+              queueTitle=null, size=2
+        Audio playback (lastly played comes first)
+        Media session config:
+          media_button_receiver_fgs_allowlist_duration_ms: [cur: 10000, def: 10000]
+          media_session_calback_fgs_allowlist_duration_ms: [cur: 10000, def: 10000]
+          media_session_callback_fgs_while_in_use_temp_allow_duration_ms: [cur: 10000, def: 10000]
+        """.trimIndent()
+
+    // Saved api36 dump; long unrelated field tails are elided with `…`.
+    private val api36SessionDump =
+        """
+        MEDIA SESSION SERVICE (dumpsys media_session)
+
+        7 sessions listeners.
+        Global priority session is com.android.server.telecom/HeadsetMediaButton/1 (userId=0)
+          HeadsetMediaButton com.android.server.telecom/HeadsetMediaButton/1 (userId=0)
+            ownerPid=634, ownerUid=1000, userId=0
+            package=com.android.server.telecom
+            launchIntent=null
+            mediaButtonReceiver=null
+            active=false
+            flags=65537
+            rating type=0
+            controllers: 0
+            state=null
+            audioAttrs=AudioAttributes: usage=USAGE_VOICE_COMMUNICATION content=CONTENT_TYPE_SPEECH …
+            volumeType=LOCAL, controlType=ABSOLUTE, max=0, current=0, volumeControlId=null
+            metadata: null
+            queueTitle=null, size=0
+        User Records:
+        Record for full_user=0
+          Volume key long-press listener: null
+          Volume key long-press listener package:
+          Media key listener: null
+          Media key listener package:
+          OnMediaKeyEventDispatchedListener: added 0 listener(s)
+          OnMediaKeyEventSessionChangedListener: added 1 listener(s)
+            from com.android.bluetooth
+          Last MediaButtonReceiver: null
+          Media button session is null
+          Sessions Stack - have 2 sessions:
+            MediaPlaybackService com.android.music/MediaPlaybackService/6 (userId=0)
+              ownerPid=1670, ownerUid=10102, userId=0
+              package=com.android.music
+              launchIntent=PendingIntent{38d7436: PendingIntentRecord{4671f37 com.android.music startActivity}}
+              mediaButtonReceiver=null
+              active=false
+              flags=3
+              rating type=0
+              controllers: 0
+              state=PlaybackState {state=NONE(0), position=0, buffered position=0, speed=0.0, updated=0, …
+              audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_UNKNOWN flags=0x800 tags= bundle=null
+              volumeType=LOCAL, controlType=ABSOLUTE, max=0, current=0, volumeControlId=null
+              metadata: null
+              queueTitle=null, size=0
+            androidx.media3.session.id.neutrodyne ch.lkmc.neutrodyne/androidx.media3.session.id.neutrodyne/7 (userId=0)
+              ownerPid=2851, ownerUid=10150, userId=0
+              package=ch.lkmc.neutrodyne
+              launchIntent=PendingIntent{6f53ca4: PendingIntentRecord{9bcfa0d ch.lkmc.neutrodyne startActivity}}
+              mediaButtonReceiver=MBR {pi=null, componentName=ComponentInfo{ch.lkmc.neutrodyne/androidx.media3…
+              active=true
+              flags=7
+              rating type=0
+              controllers: 1
+              state=PlaybackState {state=NONE(0), position=750000, buffered position=750000, speed=0.0, updated=121063}
+              audioAttrs=AudioAttributes: usage=USAGE_MEDIA content=CONTENT_TYPE_SPEECH flags=0x800 tags= bundle=null
+              volumeType=LOCAL, controlType=ABSOLUTE, max=0, current=0, volumeControlId=null
+              metadata: size=14, description=Alpha Episode Two run-1793047657-14049, null, null
+              queueTitle=null, size=2
+        Audio playback (lastly played comes first)
+        Media session config:
+          media_button_receiver_fgs_allowlist_duration_ms: [cur: 10000, def: 10000]
+          media_session_calback_fgs_allowlist_duration_ms: [cur: 10000, def: 10000]
+          media_session_callback_fgs_while_in_use_temp_allow_duration_ms: [cur: 10000, def: 10000]
+          media_session_temp_user_engaged_duration_ms: [cur: 600000, def: 600000]
+        """.trimIndent()
 }
