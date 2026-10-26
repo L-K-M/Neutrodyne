@@ -172,7 +172,10 @@ class AboutLibrariesMetadataTest {
                     .licensesOf(lib)
                     .groupBy { it.spdxId ?: it.hash }
                     .filterValues { texts ->
-                        texts.all { text -> PLACEHOLDER_MARKERS.any { text.licenseContent.orEmpty().contains(it) } }
+                        texts.all { text ->
+                            val content = text.licenseContent.orEmpty()
+                            content.isBlank() || PLACEHOLDER_MARKERS.any { content.contains(it) }
+                        }
                     }.keys
                     .map { family -> "${lib.uniqueId} -> $family" }
             }
