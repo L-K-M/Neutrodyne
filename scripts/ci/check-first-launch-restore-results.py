@@ -20,6 +20,11 @@ Two modes:
   restored database content. `bmgr-check.sh` runs it before the empty control.
 - `--bmgr-empty EVIDENCE_DIR`: validates the subsequent empty-dataset capture.
   The `--bmgr` aggregate requires both phase checks verbatim.
+- `--bgstart ROOT`: the M4 P6b external background-start impossibility gate —
+  strict verification of the `scripts/ci/bgstart-check.sh` evidence tree (one
+  `apiNN/` directory per leg): the measured bind-stage dumpsys captures, the
+  instrument/status/marker wire, the verdict record, sidecar binding and
+  selectors.
 """
 
 import argparse
@@ -188,9 +193,9 @@ def status_values(text, key):
                       text, re.M)
 
 
-def check_instrument_log(device, phase, nonce, text):
-    expected = [(BMGR_CLASS, BMGR_METHODS[phase], 1),
-                (BMGR_CLASS, BMGR_METHODS[phase], 0)]
+def check_instrument_log(device, phase, nonce, text, cls=BMGR_CLASS, method=None):
+    method = BMGR_METHODS[phase] if method is None else method
+    expected = [(cls, method, 1), (cls, method, 0)]
     cases = instrument_cases(text)
     if cases != expected:
         raise ValueError(
@@ -217,7 +222,8 @@ def driver_v1(record):
     return type(version) is int and version == 1
 
 
-def check_driver_status(device, phase, nonce, api, driver_pkg, path):
+def check_driver_status(device, phase, nonce, api, driver_pkg, path,
+                        required_steps=None):
     """The durable per-phase record — a foreign, stale or unknown status fails."""
     try:
         status = json.loads(path.read_text())
@@ -234,9 +240,11 @@ def check_driver_status(device, phase, nonce, api, driver_pkg, path):
             or any(not isinstance(s.get("name"), str) or not isinstance(s.get("at"), int)
                    for s in steps):
         raise ValueError(f"{device}: {phase} status has malformed steps")
-    required = {"seed": {"built", "launched", "preview", "categories", "requested"},
-                "flip": {"built", "launched", "preview", "categories", "requested"},
-                "encrypted": {"built", "launched", "rejected"}}[phase]
+    required = required_steps or {
+        "seed": {"built", "launched", "preview", "categories", "requested"},
+        "flip": {"built", "launched", "preview", "categories", "requested"},
+        "encrypted": {"built", "launched", "rejected"},
+    }[phase]
     names = [s["name"] for s in steps]
     if len(names) != len(set(names)) or not required <= set(names):
         raise ValueError(f"{device}: {phase} status misses steps {sorted(required - set(names))}")
@@ -927,6 +935,385 @@ def check_bmgr(root):
     print("bmgr: PASS api31 + api36")
 
 
+# ---- M4 P6b bgstart external gate ---------------------------------------------
+# A genuine external background-FGS-start denial is unreachable on api31/api36:
+# every real media-control surface either cannot command playback (untrusted
+# Media3 controllers connect with a command set that lacks COMMAND_PLAY_PAUSE)
+# or is exempted by its own bind (a trusted caller's Media3 connect stamps
+# `code:PROC_STATE_BFGS` with `startForegroundCount:0` — the capability grant
+# precedes any startForeground attempt). This aggregate re-verifies the lane's
+# measured matrix — the demoted settle, the untrusted row, the trusted row and
+# exactly one `verdict=impossible` record; a run claiming a denial is a
+# fabrication and fails closed. (The case cannot live inside the instrumented
+# app APK: active instrumentation grants PROCESS_CAPABILITY_BFSL.)
+
+BGSTART_DEVICES = {"api31": 31, "api36": 36}
+BGSTART_CLASS = "ch.lkmc.neutrodyne.tools.bmgrdriver.BgStartTest"
+BGSTART_METHODS = {
+    "bgseed": "seedPausedSession",
+    "bgstart": "externalBackgroundStartDenialIsUnreachable",
+}
+BGSTART_LOGS = {phase: f"instrument-{phase}.log" for phase in BGSTART_METHODS}
+BGSTART_SELECTORS = (
+    "apkNonDebuggable", "driverInstrumentationAvailable", "seedImportDone",
+    "durableQueueSeeded", "targetColdBelowBfgs", "bgstartCompleted",
+)
+# The armed protocol order — an extra, missing or reordered step fails closed.
+BGSTART_STEP_ORDER = {
+    "bgseed": ["built", "launched", "preview", "revoked", "categories", "requested"],
+    "bgstart": ["sidecar", "actor", "bound", "settled", "guarded",
+                "untrusted", "trusted", "verdict"],
+}
+BGSTART_PROCSTATE_BOUND_FOREGROUND_SERVICE = 5
+BGSTART_PROCSTATE_SERVICE = 10
+BGSTART_SETTLE_MS = 15_000
+BGSTART_TRIGGER_PACKAGE = "ch.lkmc.neutrodyne.tools.bgtrigger"
+BGSTART_TRIGGER_LISTENER = "BgTriggerListenerService"
+# uidState names numerically worse than BFGS(5): an attempt made from any of these
+# cannot have been allowed by the uid's own process state.
+BGSTART_UIDSTATE_BELOW_BFGS = {
+    "IMPF", "IMPB", "TRNB", "BAK", "SVC", "RCVR", "TPSL",
+    "HVY", "HOME", "LAST", "CAC", "CCE", "CRE", "NONE", "NEX",
+}
+
+# The record body carries one-level brackets (`uidBFSL: [BFSL]`); the balanced
+# outer pair keeps the record from truncating at the first inner `]`.
+ALLOW_INFO_RE = re.compile(r"infoAllowStartForeground=\[((?:[^\[\]]|\[[^\]]*\])*)\]")
+ALLOW_FIELD_RE = re.compile(r"([a-zA-Z]+)\s*:\s*([^;]*)")
+IS_BIND_RE = re.compile(r"isBindService\s*:\s*(true|false)")
+BIND_FROM_RE = re.compile(r"bindFromPackage\s*:\s*([^\s:;]+)")
+TEMP_IN_RECORD_RE = re.compile(r"tempAllowListReason\s*:\s*(<null>|[^;\]]+)")
+TEMP_ALLOW_RE = re.compile(r"tempAllowListReason\s*[:=]\s*([^;\]\s]+)")
+UID_STATE_RE = re.compile(r"^\s*(-?\d+)\s*\(", re.M)
+
+
+def allow_infos(text):
+    """Every `infoAllowStartForeground=[...]` record as a {field: value} dict."""
+    records = []
+    for match in ALLOW_INFO_RE.finditer(text):
+        body = match.group(1)
+        fields = {m.group(1): m.group(2).strip()
+                  for m in ALLOW_FIELD_RE.finditer(body)}
+        is_bind = IS_BIND_RE.search(body)
+        temp = TEMP_IN_RECORD_RE.search(body)
+        bind_from = BIND_FROM_RE.search(body)
+        fields["isBindService"] = is_bind.group(1) if is_bind else None
+        fields["tempAllowListReason"] = temp.group(1) if temp else None
+        fields["bindFromPackage"] = bind_from.group(1) if bind_from else None
+        records.append(fields)
+    return records
+
+
+def self_attempt(info, app_uid):
+    """A non-bind attempt by the target — a genuine FGS start request. When the
+    record carries `isBindService` it alone decides; sparse records (api31)
+    fall back to the calling uid."""
+    is_bind = info.get("isBindService")
+    if is_bind is not None:
+        return is_bind == "false"
+    return info.get("callingUid") == str(app_uid)
+
+
+def uid_state(text):
+    match = UID_STATE_RE.search(text)
+    return int(match.group(1)) if match else None
+
+
+def bgstart_text(directory, name):
+    path = directory / name
+    if not path.is_file() or not path.read_text(errors="replace").strip():
+        raise ValueError(f"bgstart evidence missing or empty: {name}")
+    return path.read_text(errors="replace")
+
+
+def check_self_records(device, stage, services, app_uid):
+    """No record tied to the target's own attempt may carry an FGS grant surface."""
+    for info in allow_infos(services):
+        if not self_attempt(info, app_uid):
+            continue
+        if "BFSL" in (info.get("uidBFSL") or ""):
+            raise ValueError(
+                f"{device}: {stage} self record carries [BFSL]: {info}")
+        if info.get("uidState") and info["uidState"] \
+                not in BGSTART_UIDSTATE_BELOW_BFGS:
+            raise ValueError(
+                f"{device}: {stage} self record uidState "
+                f"{info['uidState']!r} above BFGS")
+        if info.get("tempAllowListReason") not in ("<null>", "null", None):
+            raise ValueError(
+                f"{device}: {stage} self record tempAllowListReason "
+                f"{info['tempAllowListReason']!r} != <null>")
+
+
+def check_no_grants(device, stage, services):
+    """Every allow record — self or binding — must show a DENIED verdict and no
+    capability propagated through a binding (`bindFromPackage`). A non-DENIED
+    code means that evaluation would have been allowed."""
+    for info in allow_infos(services):
+        if info.get("code") not in (None, "DENIED"):
+            raise ValueError(
+                f"{device}: {stage} allow record grants FGS: {info}")
+        bind_from = info.get("bindFromPackage")
+        if bind_from not in (None, "null", "<null>"):
+            raise ValueError(
+                f"{device}: {stage} binding grants FGS from "
+                f"{bind_from}: {info}")
+
+
+def check_not_foreground(device, stage, services):
+    """`ServiceRecord.dump` only prints `isForeground=` when the service is
+    foreground or a stale foregroundId survives — for a bound service its
+    absence is the non-foreground proof; `isForeground=true` is the violation."""
+    if "ServiceRecord{" not in services:
+        raise ValueError(f"{device}: {stage} dump has no ServiceRecord")
+    if "app=ProcessRecord{" not in services:
+        raise ValueError(
+            f"{device}: {stage} ServiceRecord has no live process (app=null)")
+    if "isForeground=true" in services:
+        raise ValueError(f"{device}: {stage} service is isForeground=true")
+
+
+def check_allow_fields(device, stage, services, api):
+    """`mAllowStart_*` verdicts print only on newer ServiceRecord dumps; where
+    the format emits them (API 36) both fields must read DENIED."""
+    if api >= 36:
+        for field in ("mAllowStart_noBinding", "mAllowStart_byBindings"):
+            if f"{field}=DENIED" not in services:
+                raise ValueError(f"{device}: {stage} {field} not DENIED")
+
+
+def check_bgstart_guarded(device, directory, stage, api):
+    """A guarded stage (before/untrusted): bound, live, demoted, nothing granting FGS."""
+    uid_text = bgstart_text(directory, f"bgstart-uid-state-{stage}.txt")
+    state = uid_state(uid_text)
+    if state is None or state < BGSTART_PROCSTATE_SERVICE:
+        raise ValueError(f"{device}: {stage} uid-state {state!r} above SERVICE")
+    services = bgstart_text(directory, f"bgstart-services-{stage}.txt")
+    check_not_foreground(device, stage, services)
+    check_allow_fields(device, stage, services, api)
+    check_no_grants(device, stage, services)
+    return services
+
+
+def check_bgstart_before(device, directory, api, app_uid):
+    """The guarded stage: a plain background service with no allow source."""
+    services = check_bgstart_guarded(device, directory, "before", api)
+    check_self_records(device, "before", services, app_uid)
+    cold = bgstart_text(directory, "uid-state-cold.txt")
+    cold_state = uid_state(cold)
+    if cold_state is None or cold_state < BGSTART_PROCSTATE_SERVICE:
+        raise ValueError(f"{device}: cold uid-state {cold_state!r} above SERVICE")
+
+
+def check_bgstart_untrusted(device, directory, api, app_uid):
+    """Matrix row 1 — the untrusted bound controller: real binds exist (the
+    actor's demoted bind and the trigger's pre-listener Media3 connect), the
+    target stays demoted with no allowlist and no granting record, and the
+    untrusted controller's command set carries no COMMAND_PLAY_PAUSE — it can
+    never command playback."""
+    services = check_bgstart_guarded(device, directory, "untrusted", api)
+    check_self_records(device, "untrusted", services, app_uid)
+    processes = bgstart_text(directory, "bgstart-processes-untrusted.txt")
+    temp_values = TEMP_ALLOW_RE.findall(services + processes)
+    if not temp_values:
+        raise ValueError(
+            f"{device}: no tempAllowListReason surface to prove no allowlist")
+    if any(v not in ("<null>", "null") for v in temp_values):
+        raise ValueError(f"{device}: temp allowlist granted: {temp_values}")
+    status = bgstart_text(directory, "bgstart-trigger-status-untrusted.txt")
+    if "target=1" not in status:
+        raise ValueError(
+            f"{device}: the untrusted trigger connect never landed: {status!r}")
+    if "trusted=0" not in status:
+        raise ValueError(
+            f"{device}: an untrusted controller holds player commands: {status!r}")
+    trigger = bgstart_text(directory, "bgstart-trigger-untrusted.txt")
+    if "enabledListeners=" not in trigger:
+        raise ValueError(
+            f"{device}: untrusted-stage trigger evidence lacks listener surface")
+    if BGSTART_TRIGGER_LISTENER in trigger:
+        raise ValueError(
+            f"{device}: the trigger listener was already enabled at the "
+            f"untrusted stage — the row is polluted")
+
+
+def check_bgstart_trusted(device, directory):
+    """Matrix row 2 — the impossibility stamp: the trusted (enabled
+    notification-listener) controller's Media3 connect must leave an allow
+    record attributing the FGS capability grant to the bind itself —
+    `code:PROC_STATE_BFGS` with `startForegroundCount:0` — so the exemption
+    precedes any startForeground attempt a denial could ever fire on."""
+    trusted_state = uid_state(
+        bgstart_text(directory, "bgstart-uid-state-trusted.txt"))
+    if trusted_state != BGSTART_PROCSTATE_BOUND_FOREGROUND_SERVICE:
+        raise ValueError(
+            f"{device}: trusted uid-state {trusted_state!r} != "
+            f"BOUND_FOREGROUND_SERVICE"
+            f"({BGSTART_PROCSTATE_BOUND_FOREGROUND_SERVICE})")
+    services = bgstart_text(directory, "bgstart-services-trusted.txt")
+    if "ServiceRecord{" not in services or "app=ProcessRecord{" not in services:
+        raise ValueError(f"{device}: trusted dump has no live ServiceRecord")
+    grants = [
+        info for info in allow_infos(services)
+        if info.get("callingPackage") == BGSTART_TRIGGER_PACKAGE
+        and info.get("code") == "PROC_STATE_BFGS"
+        and info.get("startForegroundCount") == "0"
+    ]
+    if not grants:
+        raise ValueError(
+            f"{device}: the trusted bind stamped no PROC_STATE_BFGS/"
+            f"startForegroundCount:0 grant for {BGSTART_TRIGGER_PACKAGE}")
+    status = bgstart_text(directory, "bgstart-trigger-status-trusted.txt")
+    if "trusted=1" not in status or "target=1" not in status:
+        raise ValueError(
+            f"{device}: the trusted connect held no commands or never landed: "
+            f"{status!r}")
+    trigger = bgstart_text(directory, "bgstart-trigger-trusted.txt")
+    if "enabledListeners=" not in trigger \
+            or BGSTART_TRIGGER_LISTENER not in trigger:
+        raise ValueError(
+            f"{device}: trusted-stage trigger evidence lacks listener membership")
+
+
+def check_bgstart_verdict(device, directory):
+    """Exactly one verdict record per leg, and it must be `impossible` — a run
+    claiming a denial is fabricated evidence and fails closed."""
+    text = bgstart_text(directory, "bgstart-verdict.txt")
+    verdicts = re.findall(r"^verdict=(\S+)\s*$", text, re.M)
+    if verdicts != ["impossible"]:
+        raise ValueError(
+            f"{device}: verdict records {verdicts!r} != ['impossible']")
+
+
+def check_bgstart_settle(device, directory):
+    """The >=15s continuous demoted-and-settled window the driver sampled.
+    Samples before the window (the uid still settling after the bind) are
+    legitimate; the longest run of demoted samples must span >=15s."""
+    settle = bgstart_text(directory, "bgstart-settle.txt")
+    rows = [(int(t), int(s), fg) for t, s, fg in
+            re.findall(r"^t=(\d+) state=(-?\d+) fg=(\S+)\s*$", settle, re.M)]
+    if len(rows) < 2:
+        raise ValueError(f"{device}: settle window has {len(rows)} samples")
+    best = 0
+    run_start = None
+    for t, state, fg in rows:
+        if state < BGSTART_PROCSTATE_SERVICE or fg == "true":
+            run_start = None
+            continue
+        if run_start is None:
+            run_start = t
+        best = max(best, t - run_start)
+    if best < BGSTART_SETTLE_MS:
+        raise ValueError(
+            f"{device}: demoted settle window {best}ms < {BGSTART_SETTLE_MS}ms")
+
+
+def check_bgstart_device(root, device, api):
+    directory = root / device
+    if not directory.is_dir():
+        raise ValueError(f"{device}: evidence directory missing")
+    run = json.loads((directory / "run.json").read_text())
+    if run.get("schema") != "bgstart-evidence/v1" or run.get("api") != api:
+        raise ValueError(f"{device}: run.json schema/api mismatch")
+    if not run.get("fingerprint") or run.get("abi") != "x86_64" \
+            or not run.get("avd"):
+        raise ValueError(f"{device}: emulator identity evidence missing")
+    if not NONCE.fullmatch(run.get("nonce", "")):
+        raise ValueError(f"{device}: run nonce invalid")
+    nonce = run["nonce"]
+    if run.get("apkSha256") == run.get("driverApkSha256") \
+            or not SHA256.fullmatch(run.get("apkSha256", "")) \
+            or not SHA256.fullmatch(run.get("driverApkSha256", "")) \
+            or not SHA256.fullmatch(run.get("actorApkSha256", "")) \
+            or not SHA256.fullmatch(run.get("triggerApkSha256", "")):
+        raise ValueError(f"{device}: apk/driver/actor/trigger sha256 evidence missing or shared")
+    if run.get("driverPackage") == BMGR_TARGET or not run.get("driverPackage") \
+            or not run.get("driverRunner"):
+        raise ValueError(f"{device}: driver identity evidence missing")
+    if type(run.get("appUid")) is not int or run["appUid"] <= 0:
+        raise ValueError(f"{device}: appUid evidence missing")
+    app_uid = run["appUid"]
+    instruments = (directory / "instrumentations.txt").read_text(errors="replace") \
+        if (directory / "instrumentations.txt").is_file() else ""
+    if f"instrumentation:{run['driverPackage']}/{run['driverRunner']} " \
+            f"(target={run['driverPackage']})" not in instruments \
+            or f"(target={BMGR_TARGET})" in instruments:
+        raise ValueError(f"{device}: driver instrumentation not self-targeting")
+    if run.get("cleanupStatus") != "ok":
+        raise ValueError(
+            f"{device}: cleanup status is {run.get('cleanupStatus')!r}, not 'ok'")
+    selectors = run.get("selectors")
+    if not isinstance(selectors, dict) \
+            or any(selectors.get(n) != "pass" for n in BGSTART_SELECTORS):
+        found = selectors if isinstance(selectors, dict) else {}
+        missing = [n for n in BGSTART_SELECTORS if found.get(n) != "pass"]
+        raise ValueError(f"{device}: selectors not all 'pass' ({', '.join(missing)})")
+
+    # The bgseed -> bgstart sidecar binds the restored session's loopback enclosure.
+    sidecar = json.loads(bgstart_text(directory, "bgstart.expected.json"))
+    if not driver_v1(sidecar) or sidecar.get("nonce") != nonce \
+            or sidecar.get("api") != api \
+            or not SHA256.fullmatch(sidecar.get("seedSha256", "")) \
+            or not isinstance(sidecar.get("seedBytes"), int) \
+            or not isinstance(sidecar.get("port"), int):
+        raise ValueError(f"{device}: bgstart sidecar identity malformed")
+    if not re.fullmatch(r"http://127\.0\.0\.1:\d+/ep2\.mp3",
+                        sidecar.get("enclosureUrl", "")) \
+            or not sidecar["enclosureUrl"].endswith(f":{sidecar['port']}/ep2.mp3"):
+        raise ValueError(f"{device}: sidecar enclosureUrl/port mismatch")
+    fixture = sidecar.get("fixture")
+    if not isinstance(fixture, dict) \
+            or not (fixture.get("session") or {}).get("current") \
+            or not fixture.get("queue"):
+        raise ValueError(f"{device}: sidecar fixture lacks a durable paused session")
+
+    for phase, name in BGSTART_LOGS.items():
+        path = directory / name
+        if not path.is_file():
+            raise ValueError(f"{device}: missing {name}")
+        check_instrument_log(device, phase, nonce,
+                             path.read_text(errors="replace"),
+                             BGSTART_CLASS, BGSTART_METHODS[phase])
+        status_path = directory / f"driver-status-{phase}.json"
+        if not status_path.is_file():
+            raise ValueError(f"{device}: missing driver-status-{phase}.json")
+        check_driver_status(device, phase, nonce, api, run["driverPackage"],
+                            status_path, set(BGSTART_STEP_ORDER[phase]))
+        status = json.loads(status_path.read_text())
+        names = [s.get("name") for s in status.get("steps", [])]
+        if names != BGSTART_STEP_ORDER[phase]:
+            raise ValueError(
+                f"{device}: {phase} steps {names} != "
+                f"{BGSTART_STEP_ORDER[phase]}")
+
+    # The listener-enablement log plus the per-stage trigger uid/listener dumps.
+    bgstart_text(directory, "bgstart-listener.txt")
+    bgstart_text(directory, "bgstart-trigger-status.txt")
+
+    check_bgstart_settle(device, directory)
+    check_bgstart_before(device, directory, api, app_uid)
+    check_bgstart_untrusted(device, directory, api, app_uid)
+    check_bgstart_trusted(device, directory)
+    check_bgstart_verdict(device, directory)
+    print(f"{device}: PASS bgstart external gate "
+          f"(unreachable denial: untrusted bind read-only, trusted bind "
+          f"stamped PROC_STATE_BFGS)")
+
+
+def check_bgstart(root):
+    runs = {}
+    for device, api in BGSTART_DEVICES.items():
+        check_bgstart_device(root, device, api)
+        runs[device] = json.loads((root / device / "run.json").read_text())
+    a, b = runs["api31"], runs["api36"]
+    for field in ("sourceSha", "apkSha256", "driverApkSha256",
+                  "actorApkSha256", "triggerApkSha256",
+                  "driverPackage", "driverRunner"):
+        if not a.get(field) or a[field] != b.get(field):
+            raise ValueError(f"bgstart: {field} differs across legs")
+    print("bgstart: PASS api31 + api36")
+
+
 def run_bmgr_pull(directory):
     """The pre-cleanup pull gate binds the closed facts, never run.json — the
     final run record is written only by cleanup(), so nothing in-progress can
@@ -965,10 +1352,14 @@ def main():
                         help="validate the subsequent empty-dataset capture")
     parser.add_argument("--bmgr-prelaunch", nargs=3, metavar=("EVIDENCE_DIR", "DEVICE", "NONCE"),
                         help="validate the stopped install/restore window before normal launch")
+    parser.add_argument("--bgstart", metavar="ROOT", type=Path,
+                        help="strict M4 P6b bgstart evidence root (api31/api36 dirs)")
     args = parser.parse_args()
     try:
         if args.bmgr is not None:
             check_bmgr(args.bmgr)
+        elif args.bgstart is not None:
+            check_bgstart(args.bgstart)
         elif args.bmgr_encoff is not None:
             run_bmgr_encoff(*args.bmgr_encoff)
         elif args.bmgr_tar is not None:

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.tools.bmgrdriver
 
+import android.content.Context
 import android.os.Build
+import android.os.Bundle
+import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -75,3 +78,28 @@ internal fun phaseStatusToken(
     nonce: String,
     result: String,
 ) = "$phase:$nonce:$result"
+
+/**
+ * Shared phase epilogue: on failure first capture the live UI hierarchy, then write the
+ * durable status JSON and emit the `bmgrDriver` marker the host's strict aggregate keys
+ * on. Re-throws so the instrument run reports the failure honestly.
+ */
+internal fun finishDriverPhase(
+    context: Context,
+    phase: String,
+    nonce: String,
+    recorder: StatusRecorder,
+    result: String,
+    failure: Throwable? = null,
+) {
+    if (failure != null) {
+        runCatching { UiRestore.captureFailure(phase) }
+            .onFailure { recorder.step("ui-capture-error", it.toString()) }
+    }
+    recorder.write(SeedVault.dir(context), result)
+    InstrumentationRegistry.getInstrumentation().sendStatus(
+        0,
+        Bundle().apply { putString("bmgrDriver", phaseStatusToken(phase, nonce, result)) },
+    )
+    failure?.let { throw it }
+}

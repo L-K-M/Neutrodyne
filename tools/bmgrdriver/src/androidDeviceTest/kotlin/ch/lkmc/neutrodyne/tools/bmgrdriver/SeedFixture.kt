@@ -127,8 +127,16 @@ internal object SeedFixture {
 
     private val json = Json { prettyPrint = false }
 
-    /** Seed content with every id nonce-bound so cross-run reuse is impossible. */
-    fun content(nonce: String): FixtureContent {
+    /**
+     * Seed content with every id nonce-bound so cross-run reuse is impossible.
+     * `enclosureBase` (the bgstart lane's `http://127.0.0.1:<port>`) rewrites the
+     * restored session's current episode to a loopback enclosure the sidecar records,
+     * so the seeded session points at a driver-owned address rather than a fixture URL.
+     */
+    fun content(
+        nonce: String,
+        enclosureBase: String? = null,
+    ): FixtureContent {
         val day = 86_400_000L
         val base = 1_700_000_000_000L
         val feedUrlA = "https://alpha.example.test/$nonce/feed.xml"
@@ -192,8 +200,8 @@ internal object SeedFixture {
                     g = "guid-$nonce-a2",
                     t = "Alpha Episode Two $nonce",
                     d = base - 3 * day,
-                    u = "https://alpha.example.test/$nonce/ep2.mp3",
-                    ty = "audio/mpeg",
+                    u = "${enclosureBase ?: "https://alpha.example.test/$nonce"}/ep2.mp3",
+                    ty = if (enclosureBase != null) "audio/wav" else "audio/mpeg",
                     dur = 3_600_000,
                     l = "https://alpha.example.test/$nonce/ep2",
                     st = base - 20_000,
@@ -258,8 +266,9 @@ internal object SeedFixture {
     fun seedZip(
         nonce: String,
         dest: File,
+        enclosureBase: String? = null,
     ): Pair<FixtureContent, File> {
-        val content = content(nonce)
+        val content = content(nonce, enclosureBase)
         val codec = BackupCodec()
         val library =
             LibraryV1(
