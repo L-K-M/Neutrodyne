@@ -18,17 +18,17 @@ android {
     defaultConfig {
         applicationId = "ch.lkmc.neutrodyne.tools.bgactor"
         minSdk = 26
-        // Below S the shell `am startservice` that brings this package up is exempt
-        // from the background service-start restriction (appRestrictedInBackgroundLocked
-        // only gates packages targeting 31+).
+        // Deliberately old: the fixture acts like a pre-S external controller
+        // (no FGS-type manifest requirements). The package comes up via
+        // `am start` on BgActorActivity — an activity launch is exempt from the
+        // bg-start restriction that denies `am startservice` on a cold package.
         targetSdk = 30
         versionCode = 1
         versionName = "1.0"
     }
     lint {
-        // Deliberate, load-bearing choice: targetSdk below S is what exempts the
-        // shell `am startservice` that brings this fixture up from the bg-start
-        // restriction. Never distributed — the "expired" warning does not apply.
+        // Deliberate, load-bearing choice: the fixture models a pre-S external
+        // controller. Never distributed — the "expired" warning does not apply.
         disable += "ExpiredTargetSdkVersion"
     }
     compileOptions {

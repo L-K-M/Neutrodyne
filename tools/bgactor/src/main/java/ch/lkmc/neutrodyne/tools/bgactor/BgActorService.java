@@ -13,15 +13,16 @@ import android.os.Process;
 import android.os.SystemClock;
 
 /**
- * The bgstart leg's inert external actor: a plain background service — never an
- * activity, never a foreground component — that BINDS the target's exported
- * MediaLibraryService like a third-party media controller (the in-app case reached
- * the same state through MediaController.connect()).
+ * The bgstart leg's inert external actor: a plain background service — never a
+ * foreground component — that BINDS the target's exported MediaLibraryService
+ * like a third-party media controller (the in-app case reached the same state
+ * through MediaController.connect()).
  *
- * The FGS-start capability evaluation stamps the CALLER's uid state at bind time,
- * so the bind waits until this process has demoted below TOP
- * (IMPORTANCE_SERVICE or worse): a binding made while foreground would leave a
- * granting record — exactly the capability a real denial must not carry.
+ * The FGS-start capability evaluation stamps the CALLER's uid state at bind
+ * time, so the bind waits until this process has demoted past TOP
+ * (IMPORTANCE_SERVICE or worse — the throwaway activity that started it has
+ * finished): a binding made while foreground would leave a granting record —
+ * exactly the capability a real denial must not carry.
  */
 public final class BgActorService extends Service {
     static final String TARGET_PACKAGE = "ch.lkmc.neutrodyne";

@@ -135,19 +135,21 @@ internal class BgProbe(
 
     /**
      * The external cold start is a BIND, not a start: the standalone
-     * `:tools:bgactor` service (a separate uid that targets SDK 30, so the shell
-     * `am startservice` that brings it up is exempt from the bg-start restriction)
-     * binds the target's exported media-library action once its process demotes,
-     * mirroring the in-app `MediaController.connect()`. A bind never auto-promotes
-     * the service to foreground the way `am startservice` did on the target.
+     * `:tools:bgactor` APK (a separate uid that never gains an instrumentation
+     * TOP) launches a throwaway activity — `am start` is exempt from the
+     * bg-start restriction that denies `am startservice` on a cold package —
+     * whose service binds the target's exported media-library action only once
+     * its own uid has demoted, mirroring the in-app `MediaController.connect()`.
+     * A bind never auto-promotes the service to foreground the way
+     * `am startservice` did on the target.
      */
     fun startActor() {
-        val out = shell("am startservice -n ${BgStartSurface.ACTOR_COMPONENT}")
-        check("Error" !in out && "Exception" !in out) { "actor service failed: $out" }
+        val out = shell("am start -n ${BgStartSurface.ACTOR_COMPONENT}")
+        check("Error" !in out && "Exception" !in out) { "actor activity failed: $out" }
     }
 
     fun stopActor() {
-        shell("am stopservice -n ${BgStartSurface.ACTOR_COMPONENT}")
+        shell("am stopservice -n ${BgStartSurface.ACTOR_SERVICE}")
     }
 
     /**

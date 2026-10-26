@@ -27,7 +27,8 @@ internal object BgStartSurface {
      * The standalone `:tools:bgactor` APK — a separate uid that stays demoted; a bind
      * from the driver's own instrumented uid would stamp a granting TOP/BFSL record.
      */
-    const val ACTOR_COMPONENT = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorService"
+    const val ACTOR_COMPONENT = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorActivity"
+    const val ACTOR_SERVICE = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorService"
     const val PROCSTATE_SERVICE = 10
     const val POSITION_ADVANCE_MS = 200L
     const val SETTLE_MS = 15_000L

@@ -2,8 +2,12 @@
 <!-- SPDX-License-Identifier: Unlicense -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="bgactor" android:allowBackup="false">
-        <!-- Exported so the rooted shell `am startservice` can bring the actor up;
-             it holds only a bind to the target's media-library service. -->
+        <!-- Exported so the rooted shell `am start` can bring the actor up — an
+             activity launch is exempt from the bg-start restriction that denies
+             `am startservice`. It starts the service and finishes at once. -->
+        <activity
+            android:name="ch.lkmc.neutrodyne.tools.bgactor.BgActorActivity"
+            android:exported="true" />
         <service
             android:name="ch.lkmc.neutrodyne.tools.bgactor.BgActorService"
             android:exported="true" />
