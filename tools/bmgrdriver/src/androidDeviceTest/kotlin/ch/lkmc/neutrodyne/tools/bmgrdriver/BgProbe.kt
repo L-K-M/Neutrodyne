@@ -136,9 +136,9 @@ internal class BgProbe(
      * `cmd notification allow_listener` on supported builds, else the durable
      * `enabled_notification_listeners` secure setting (existing entries
      * preserved). The membership is verified on the trigger's own surface —
-     * `getActiveSessions` throws until the uid is genuinely trusted — never by
-     * assuming the command took. Every attempt is written to
-     * `bgstart-listener.txt`.
+     * its Media3 connect lands a real controller whose command set stays empty
+     * until the uid is genuinely trusted — never by assuming the command took.
+     * Every attempt is written to `bgstart-listener.txt`.
      */
     fun enableTrigger() {
         val log = StringBuilder()
@@ -174,8 +174,8 @@ internal class BgProbe(
 
     /**
      * The trusted trigger's view of the session: `status` reports
-     * `trusted=1 target=1` only when the listener membership is real AND the
-     * target's restored session is visible through MediaSessionManager —
+     * `trusted=1 target=1` only when its Media3 connect landed AND the session
+     * granted a real command set (an untrusted connect has none) —
      * evidence that a genuine trusted controller issued the later command.
      */
     fun triggerSessionVisible(): Boolean {

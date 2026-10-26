@@ -34,9 +34,12 @@ internal object BgStartSurface {
     /**
      * The standalone `:tools:bgtrigger` APK — a third uid that earns genuine
      * trusted-controller status through an enabled NotificationListenerService
-     * (`isTrustedForMediaControl`), then relays prepare/play through
-     * `MediaSessionManager.getActiveSessions` — the framework MediaSessionRecord
-     * path, which binds nothing on the target's ServiceRecord.
+     * (`isTrustedForMediaControl`), then drives prepare/play through a native
+     * Media3 MediaController connect — the same bind+commands surface a real
+     * companion app uses. The connect's own bind makes the package visible to
+     * the target (r13: the framework relay's play() was omitted because the
+     * invisible package failed the target-side trust check); whether that
+     * BFGS-state caller's bind stamps a granting record is the measurement.
      */
     const val TRIGGER_PACKAGE = "ch.lkmc.neutrodyne.tools.bgtrigger"
     const val TRIGGER_PROVIDER = "ch.lkmc.neutrodyne.tools.bgtrigger.provider"

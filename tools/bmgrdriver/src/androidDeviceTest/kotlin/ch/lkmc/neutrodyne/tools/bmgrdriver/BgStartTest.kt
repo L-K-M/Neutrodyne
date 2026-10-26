@@ -24,9 +24,12 @@ import java.net.ServerSocket
  * binds the exported media-library action, never a `startService`), a verified
  * demoted-and-settled window, then a TRUSTED external controller: the standalone
  * `:tools:bgtrigger` uid carries an enabled NotificationListenerService
- * (`isTrustedForMediaControl`) and issues prepare()/play() through the framework
- * MediaSessionRecord — never a binding. A prepare() first surfaces the session as
- * PAUSED so the SystemUI card can render; the card's Play stays the preferred
+ * (`isTrustedForMediaControl`) and drives prepare()/play() through a native
+ * Media3 MediaController connect — the same bind+commands surface a companion
+ * app uses (the connect's bind is also what makes the package visible to the
+ * target's trust check; the r13 framework-relay play() was omitted as
+ * untrusted for lack of it). A prepare() first surfaces the session as PAUSED
+ * so the SystemUI card can render; the card's Play stays the preferred
  * trigger, with the trigger's own play() the fallback when the card never
  * resolves. The strict aggregate re-verifies every saved `bgstart-*.txt` file.
  */
@@ -148,8 +151,8 @@ class BgStartTest {
             recorder.step("guarded", "uidState=${before.uidState}")
             // The trusted controller: an enabled notification listener on the
             // third uid — isTrustedForMediaControl, the same membership a real
-            // companion app earns. Its commands relay through the framework
-            // MediaSessionRecord, so it never lands a binding on the target.
+            // companion app earns. Its Media3 connect is a real bind on the
+            // target — the stamped allow record is measured at the card stage.
             probe.enableTrigger()
             check(probe.tryAwait(BgProbe.TRUST_WAIT_MS) { probe.triggerSessionVisible() }) {
                 "the trusted trigger never saw the session"

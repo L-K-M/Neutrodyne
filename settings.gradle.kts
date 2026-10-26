@@ -113,7 +113,8 @@ include(":tools:bmgrdriver")
 // state; bindings by the instrumented driver's own uid would stamp a granting record.
 include(":tools:bgactor")
 // The M4 P6b bgstart trigger: a third uid whose enabled notification listener
-// makes it trusted for media control; its provider relays prepare/play through
-// the framework MediaSessionRecord, so no capable binding reaches the target.
+// makes it trusted for media control; its provider drives prepare/play through
+// a native Media3 MediaController connect — the bind a real companion app
+// makes, and the package visibility the target-side trust check needs.
 include(":tools:bgtrigger")
 // M6b: include(":benchmark")   v1.x: include(":feature:widgets")

@@ -554,8 +554,9 @@ jobs:
   # (phase bgseed), the host kills the target process and the bgstart leg then BINDS the
   # playback service from the standalone `:tools:bgactor` APK (a demoted, separate
   # uid — the driver never binds the target), arms the standalone `:tools:bgtrigger`
-  # uid with trusted-controller status (an enabled NotificationListenerService —
-  # framework-relayed commands, no binding on the target), issues a trusted
+  # uid with trusted-controller status (an enabled NotificationListenerService)
+  # and drives commands through a native Media3 MediaController connect — the
+  # bind a real companion app makes — issues a trusted
   # prepare() so the session reports PAUSED, taps the SystemUI media card's Play
   # button when it renders else the trigger's own play(), proves the real
   # ForegroundServiceStartNotAllowedException surfaces (non-foreground service, DENIED
@@ -602,7 +603,7 @@ jobs:
       # No target test APK: the release build stays instrument-free; the self-contained
       # driver APK owns its own package and instrumentation. The bgactor APK is the
       # inert separate-uid binder the bgstart leg needs; the bgtrigger APK is the
-      # trusted controller whose listener relays prepare/play via MediaSessionRecord.
+      # trusted controller whose listener + Media3 connect drives prepare/play.
       - name: Build the release and driver APKs before the emulators boot
         timeout-minutes: 30
         run: |

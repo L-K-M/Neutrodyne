@@ -1331,8 +1331,8 @@ def check_bgstart_device(root, device, api):
         raise ValueError(
             f"{device}: expected exactly one play step, got {sorted(fired)}")
 
-    # The trigger's own proof: real notification-listener trust and the restored
-    # session visible through the framework controller path, plus per-stage
+    # The trigger's own proof: real notification-listener trust and a real
+    # command set on its Media3 connect, plus per-stage
     # uid/listener dumps (the "does listener membership elevate" record).
     bgstart_text(directory, "bgstart-listener.txt")
     trigger_status = bgstart_text(directory, "bgstart-trigger-status.txt")

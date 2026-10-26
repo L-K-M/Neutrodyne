@@ -11,8 +11,9 @@
 # demoted uid — the external equivalent of MediaController.connect()), proves the
 # uid sits at or below SERVICE non-foreground for a continuous >=15s settle, then
 # arms the standalone `:tools:bgtrigger` uid with real trusted-controller status
-# (an enabled NotificationListenerService; its commands relay through the
-# framework MediaSessionRecord so no capable binding reaches the target), issues
+# (an enabled NotificationListenerService) and drives prepare/play through a
+# native Media3 MediaController connect — the bind a real companion app makes,
+# measured by the stamped allow records — issues
 # a trusted prepare() so the session reports PAUSED and the SystemUI card can
 # render, taps the card Play when it resolves else the trigger's own play(),
 # observes the genuine ForegroundServiceStartNotAllowedException surfaces (service stays

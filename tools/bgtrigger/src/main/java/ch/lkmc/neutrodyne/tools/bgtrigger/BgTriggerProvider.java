@@ -6,44 +6,54 @@ import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
-import android.media.session.MediaController;
-import android.media.session.MediaSessionManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
-import java.util.List;
+import androidx.media3.common.Player;
+import androidx.media3.session.MediaController;
+import androidx.media3.session.SessionToken;
+import com.google.common.util.concurrent.ListenableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The bgstart leg's trusted-command endpoint: `content call` methods that drive
- * the target's restored media session through the FRAMEWORK controller path —
- * `MediaSessionManager.getActiveSessions` hands back MediaController objects
- * that relay through MediaSessionRecord inside system_server. No bindService
- * ever reaches the target's ServiceRecord from this package, so this uid's
- * notification-listener elevation can never stamp a granting allow record on
- * the target — the r8/r11 evidence showed only direct bindings propagate.
+ * the target's restored media session through a native Media3 MediaController —
+ * exactly the surface a real companion app (Wear, a car head unit) uses.
+ *
+ * Why a Media3 connect and not the framework MediaSessionRecord relay: the r13
+ * evidence showed the relay reaches MediaSessionLegacyStub inside the target,
+ * where Media3 re-evaluates isTrustedForMediaControl — and that check resolves
+ * the calling package with the TARGET's PackageManager. API 30+ visibility
+ * hides this package (it bound nothing), so the controller was judged
+ * untrusted and play() was omitted: "Package
+ * ch.lkmc.neutrodyne.tools.bgtrigger doesn't exist" + "Calling play() omitted
+ * due to COMMAND_PLAY_PAUSE not being available" (r13 api31 logcat). A
+ * MediaController connect IS a bindService to the target's exported
+ * MediaLibraryService: bound clients are visible to the bound app, so the
+ * package resolves and the enabled notification listener then passes the NLS
+ * branch of the trust check. The stamped allow record on this bind — a
+ * BFGS-state caller — is exactly what the card-stage evidence measures.
  *
  * Methods (shell `content call --uri content://...provider --method X`):
- *   status  — "trusted=1 sessions=N target=0|1": membership + the restored
- *             session's visibility to this controller. trusted=0 means the
- *             listener is not enabled (getActiveSessions throws).
- *   prepare — TransportControls.prepare(): surfaces the durable restored
- *             queue as a PAUSED PlaybackState so SystemUI can render the
- *             media card (the untrusted bgactor's prepare is refused by the
- *             session — "Controller isn't allowed to call command= 2").
- *   play    — TransportControls.play(): the external trusted play that must
- *             produce the genuine FSSNAE denial on a demoted target.
+ *   status  — "trusted=1 sessions=N target=0|1": the connect landed AND the
+ *             session granted commands (untrusted controllers connect with an
+ *             empty command set — "Controller isn't allowed to call command").
+ *   prepare — controller.prepare(): surfaces the durable restored queue as a
+ *             PAUSED PlaybackState so SystemUI can render the media card.
+ *   play    — controller.play(): the external trusted play that must produce
+ *             the genuine FSSNAE denial on a demoted target.
  */
 public final class BgTriggerProvider extends ContentProvider {
     private static final String TAG = "BgTrigger";
     static final String TARGET_PACKAGE = "ch.lkmc.neutrodyne";
+    static final String TARGET_SERVICE =
+        "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService";
+    private static final long CONNECT_TIMEOUT_MS = 20_000;
 
-    private MediaSessionManager sessions;
+    private volatile MediaController controller;
 
     @Override
     public boolean onCreate() {
-        sessions =
-            (MediaSessionManager)
-                getContext().getSystemService(Context.MEDIA_SESSION_SERVICE);
         return true;
     }
 
@@ -73,55 +83,58 @@ public final class BgTriggerProvider extends ContentProvider {
         return out;
     }
 
-    private List<MediaController> active() {
-        return sessions.getActiveSessions(
-            new ComponentName(getContext(), BgTriggerListenerService.class));
-    }
-
-    private static MediaController target(List<MediaController> controllers) {
-        for (MediaController controller : controllers) {
-            if (TARGET_PACKAGE.equals(controller.getPackageName())) {
-                return controller;
+    /** Lazily connects; the connect's own bind makes this package visible to
+     * the target, after which listener membership grants real commands. */
+    private MediaController controller() {
+        MediaController c = controller;
+        if (c != null) return c;
+        synchronized (this) {
+            if (controller != null) return controller;
+            Context context = getContext();
+            SessionToken token =
+                new SessionToken(
+                    context, new ComponentName(TARGET_PACKAGE, TARGET_SERVICE));
+            try {
+                ListenableFuture<MediaController> future =
+                    new MediaController.Builder(context, token).buildAsync();
+                controller = future.get(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (Exception e) {
+                throw new IllegalStateException("controller connect failed", e);
             }
+            return controller;
         }
-        return null;
     }
 
     private void status(Bundle out) {
-        List<MediaController> controllers;
+        MediaController c;
         try {
-            controllers = active();
-        } catch (SecurityException e) {
+            c = controller();
+        } catch (RuntimeException e) {
             out.putString("result", "trusted=0");
             return;
         }
+        boolean trusted =
+            c.getAvailableCommands().contains(Player.COMMAND_PLAY_PAUSE);
         out.putString(
             "result",
-            "trusted=1 sessions=" + controllers.size()
-                + " target=" + (target(controllers) != null ? 1 : 0));
+            "trusted=" + (trusted ? 1 : 0) + " sessions=1 target=1");
     }
 
     private void command(Bundle out, boolean prepare) {
-        List<MediaController> controllers;
+        MediaController c;
         try {
-            controllers = active();
-        } catch (SecurityException e) {
-            Log.e(TAG, "BGTRIGGER-FAIL command while untrusted");
+            c = controller();
+        } catch (RuntimeException e) {
+            Log.e(TAG, "BGTRIGGER-FAIL command while unconnected");
             out.putString("result", "trusted=0");
             return;
         }
-        MediaController controller = target(controllers);
-        if (controller == null) {
-            Log.e(TAG, "BGTRIGGER-FAIL no session for " + TARGET_PACKAGE);
-            out.putString("result", "error=no-target-session sessions=" + controllers.size());
-            return;
-        }
         if (prepare) {
-            controller.getTransportControls().prepare();
-            Log.i(TAG, "BGTRIGGER-CMD prepare issued");
+            c.prepare();
+            Log.i(TAG, "BGTRIGGER-CMD prepare issued items=" + c.getMediaItemCount());
             out.putString("result", "prepared=1");
         } else {
-            controller.getTransportControls().play();
+            c.play();
             Log.i(TAG, "BGTRIGGER-CMD play issued");
             out.putString("result", "played=1");
         }

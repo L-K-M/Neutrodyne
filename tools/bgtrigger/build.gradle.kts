@@ -5,15 +5,16 @@ plugins {
     id("com.android.application")
 }
 
-// The M4 P6b bgstart trigger: a standalone, inert APK in its own package and uid —
-// deliberately outside both the self-instrumenting :tools:bmgrdriver (TOP all leg)
-// and the demoted :tools:bgactor binder (its binding must stay the only client on
-// the target's ServiceRecord). An enabled NotificationListenerService makes this
-// uid trusted for media control (MediaSessionManager.isTrustedForMediaControl);
-// its exported provider then issues prepare/play through the framework
-// MediaController — commands relay via MediaSessionRecord in system_server, so
-// NO app->app binding ever lands on the target's ServiceRecord and nothing the
-// trigger's own elevated uid does can stamp a granting allow record there.
+// The M4 P6b bgstart trigger: a standalone APK in its own package and uid —
+// deliberately outside the self-instrumenting :tools:bmgrdriver (TOP all leg).
+// An enabled NotificationListenerService makes this uid trusted for media
+// control; a native Media3 MediaController connect both binds the target's
+// exported MediaLibraryService (bound clients are visible to the bound app —
+// the r13 framework-relay play() was omitted because the package was invisible:
+// "Package ... doesn't exist" -> untrusted -> COMMAND_PLAY_PAUSE unavailable)
+// and carries the real prepare/play commands. Whether a trusted BFGS-state
+// caller's connect stamps a granting allow record is precisely what the
+// card-stage evidence measures.
 // Java only: no Kotlin.
 android {
     namespace = "ch.lkmc.neutrodyne.tools.bgtrigger"
@@ -56,4 +57,10 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
     }
+}
+
+dependencies {
+    // The native Media3 client surface a real trusted controller connects
+    // through; the same version the target ships.
+    implementation(libs.androidx.media3.session)
 }
