@@ -12,20 +12,5 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/bmgr_driver_paths" />
         </provider>
-        <!-- bgstart actor: binds the target's MediaLibraryService from a separate,
-             non-instrumented process so the bound service stays a plain background
-             client (no BFSL, no auto-promote). The activity only bootstraps the
-             holder service, then removes itself. -->
-        <activity
-            android:name="ch.lkmc.neutrodyne.tools.bmgrdriver.BgActorActivity"
-            android:process=":bgactor"
-            android:exported="true"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-        <service
-            android:name="ch.lkmc.neutrodyne.tools.bmgrdriver.BgActorService"
-            android:process=":bgactor"
-            android:exported="false" />
     </application>
 </manifest>

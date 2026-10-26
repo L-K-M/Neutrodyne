@@ -109,4 +109,7 @@ include(
 // The black-box bmgr driver (05 Testing with bmgr): a self-instrumenting device-test APK in
 // its own package/process; never an :app edge and never on the target's classpath.
 include(":tools:bmgrdriver")
+// The M4 P6b bgstart actor: a separate inert uid that binds the target from a demoted
+// state; bindings by the instrumented driver's own uid would stamp a granting record.
+include(":tools:bgactor")
 // M6b: include(":benchmark")   v1.x: include(":feature:widgets")

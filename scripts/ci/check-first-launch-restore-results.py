@@ -1265,8 +1265,9 @@ def check_bgstart_device(root, device, api):
     nonce = run["nonce"]
     if run.get("apkSha256") == run.get("driverApkSha256") \
             or not SHA256.fullmatch(run.get("apkSha256", "")) \
-            or not SHA256.fullmatch(run.get("driverApkSha256", "")):
-        raise ValueError(f"{device}: apk/driver sha256 evidence missing or shared")
+            or not SHA256.fullmatch(run.get("driverApkSha256", "")) \
+            or not SHA256.fullmatch(run.get("actorApkSha256", "")):
+        raise ValueError(f"{device}: apk/driver/actor sha256 evidence missing or shared")
     if run.get("driverPackage") == BMGR_TARGET or not run.get("driverPackage") \
             or not run.get("driverRunner"):
         raise ValueError(f"{device}: driver identity evidence missing")

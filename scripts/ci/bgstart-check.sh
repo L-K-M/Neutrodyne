@@ -5,11 +5,11 @@
 # A self-instrumented driver first restores a durable paused session through the
 # published release app's own import UI (phase bgseed). The host then force-stops
 # the target and the driver's bgstart leg — on an UNINSTRUMENTED release APK —
-# BINDS the playback service from a plain non-instrumented `:bgactor` process (the
-# external equivalent of MediaController.connect()), proves the uid sits at or
-# below SERVICE non-foreground for a continuous >=15s settle, taps the SystemUI
-# media card's Play button (a trusted STATUS_BAR_SERVICE controller), observes the
-# genuine ForegroundServiceStartNotAllowedException surfaces (service stays
+# BINDS the playback service from the standalone `:tools:bgactor` APK (a separate
+# demoted uid — the external equivalent of MediaController.connect()), proves the
+# uid sits at or below SERVICE non-foreground for a continuous >=15s settle, taps
+# the SystemUI media card's Play button (a trusted STATUS_BAR_SERVICE controller),
+# observes the genuine ForegroundServiceStartNotAllowedException surfaces (service stays
 # non-foreground, DENIED verdicts on every allow record, no temp allowlist, no
 # BFSL self record, uid at or below SERVICE, recovery notification 4001), then
 # taps the real notification "Resume" action and proves playback resumed
@@ -33,13 +33,14 @@ DRIVER_RUNNER="ch.lkmc.neutrodyne.tools.bmgrdriver.BmgrDriverRunner"
 DRIVER_PKG=""                     # from the driver APK badging
 DATA_DIR="/data/data/$PKG"
 DRIVER_DATA_DIR=""                # /data/data/$DRIVER_PKG, once discovered
+ACTOR_PKG="ch.lkmc.neutrodyne.tools.bgactor"
 NONCE="run-$(date +%s)-$RANDOM"
 APP_UID=""
 PROCSTATE_SERVICE=10
 
 # Ownership ledger. A flag arms before its mutating call; unarmed flags mean the
 # trap must not touch that state.
-ARMED=""; INSTALLED_PKG=""; INSTALLED_DRIVER=""; LOGCAT_PID=""
+ARMED=""; INSTALLED_PKG=""; INSTALLED_DRIVER=""; INSTALLED_ACTOR=""; LOGCAT_PID=""
 
 log() { echo "[bgstart-check $(date +%H:%M:%S)] $*"; }
 fail() { echo "[bgstart-check] FAIL: $*" >&2; exit 1; }
@@ -78,6 +79,7 @@ run = {
     "apkSha256": facts.get("apkSha256", ""),
     "apkBytes": int(facts.get("apkBytes", "0")),
     "driverApkSha256": facts.get("driverApkSha256", ""),
+    "actorApkSha256": facts.get("actorApkSha256", ""),
     "driverPackage": facts.get("driverPackage", ""),
     "driverRunner": facts.get("driverRunner", ""),
     "certSha256": facts.get("certSha256", ""),
@@ -108,6 +110,11 @@ cleanup() {
         if [ -n "$INSTALLED_DRIVER" ]; then
             timeout 60 "$ADB" shell pm uninstall --user 0 "$DRIVER_PKG" || true
             [ -z "$(timeout 60 "$ADB" shell pm path "$DRIVER_PKG" 2>/dev/null | tr -d '\r')" ] \
+                || failed=1
+        fi
+        if [ -n "$INSTALLED_ACTOR" ]; then
+            timeout 60 "$ADB" shell pm uninstall --user 0 "$ACTOR_PKG" || true
+            [ -z "$(timeout 60 "$ADB" shell pm path "$ACTOR_PKG" 2>/dev/null | tr -d '\r')" ] \
                 || failed=1
         fi
     fi
@@ -279,8 +286,11 @@ main() {
     [ -n "$APK" ] || APK="$(find app/build/outputs/apk/release -name 'app-*-release.apk' | head -1)"
     DRIVER_APK="${BGSTART_DRIVER_APK:-}"
     [ -n "$DRIVER_APK" ] || DRIVER_APK="$(find tools/bmgrdriver/build/outputs -name '*.apk' | head -1)"
+    ACTOR_APK="${BGSTART_ACTOR_APK:-}"
+    [ -n "$ACTOR_APK" ] || ACTOR_APK="$(find tools/bgactor/build/outputs -name '*-release.apk' -o -name '*-debug.apk' | head -1)"
     [ -f "$APK" ] || fail "release APK missing — build before boot"
     [ -f "$DRIVER_APK" ] || fail "driver APK missing — build :tools:bmgrdriver deviceTest"
+    [ -f "$ACTOR_APK" ] || fail "actor APK missing — build :tools:bgactor release"
     scripts/ci/check-apk.sh --published "$APK" | tee "$EV/check-apk.txt"
     timeout 60 "$(tool aapt2)" dump badging "$APK" > "$EV/apk-badging.txt" 2>&1 || true
     ! grep -q "application-debuggable" "$EV/apk-badging.txt" || fail "release APK is debuggable"
@@ -288,6 +298,7 @@ main() {
     fact apkSha256 "$(sha256sum "$APK" | cut -d' ' -f1)"
     fact apkBytes "$(stat -c%s "$APK")"
     fact driverApkSha256 "$(sha256sum "$DRIVER_APK" | cut -d' ' -f1)"
+    fact actorApkSha256 "$(sha256sum "$ACTOR_APK" | cut -d' ' -f1)"
     fact certSha256 "$(timeout 120 "$(tool apksigner)" verify --print-certs "$APK" | grep -o 'SHA-256 digest: .*' | head -1 | cut -d' ' -f3-)"
 
     # --- driver identity: self-instrumenting package discovered from its badging ---
@@ -299,10 +310,16 @@ main() {
     DRIVER_DATA_DIR="/data/data/$DRIVER_PKG"
     fact driverPackage "$DRIVER_PKG"
     fact driverRunner "$DRIVER_RUNNER"
+    timeout 60 "$(tool aapt2)" dump badging "$ACTOR_APK" > "$EV/actor-badging.txt" 2>&1 \
+        || fail "actor APK badging unreadable"
+    grep -q "package: name='$ACTOR_PKG'" "$EV/actor-badging.txt" \
+        || fail "actor APK package is not $ACTOR_PKG: $(head -3 "$EV/actor-badging.txt")"
     INSTALLED_PKG=1
     timeout 300 "$ADB" install --user 0 "$APK" | tee "$EV/install-target.txt"
     INSTALLED_DRIVER=1
     timeout 300 "$ADB" install -t --user 0 "$DRIVER_APK" | tee "$EV/install-driver.txt"
+    INSTALLED_ACTOR=1
+    timeout 300 "$ADB" install --user 0 "$ACTOR_APK" | tee "$EV/install-actor.txt"
     timeout 60 "$ADB" shell pm list instrumentation > "$EV/instrumentations.txt" 2>&1 || true
     grep -q "instrumentation:$DRIVER_PKG/$DRIVER_RUNNER (target=$DRIVER_PKG)" \
         "$EV/instrumentations.txt" \

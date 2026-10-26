@@ -20,11 +20,11 @@ import java.net.ServerSocket
 /**
  * The armed bgstart driver phases (M4 P6b): `bgseed` restores a durable paused session
  * through the real production import UI, then `bgstart` drives the UNINSTRUMENTED target
- * from outside — a bind-only external cold start (the `:bgactor` actor binds the exported
- * media-library action, never a `startService`), a verified demoted-and-settled window,
- * the SystemUI media card's Play button (a trusted STATUS_BAR_SERVICE controller) and
- * the real notification "Resume" tap. The strict aggregate re-verifies every saved
- * `bgstart-*.txt` file.
+ * from outside — a bind-only external cold start (the standalone `:tools:bgactor` APK
+ * binds the exported media-library action, never a `startService`), a verified
+ * demoted-and-settled window, the SystemUI media card's Play button (a trusted
+ * STATUS_BAR_SERVICE controller) and the real notification "Resume" tap. The strict
+ * aggregate re-verifies every saved `bgstart-*.txt` file.
  */
 @RunWith(AndroidJUnit4::class)
 class BgStartTest {
@@ -118,7 +118,7 @@ class BgStartTest {
             check(cold == null || cold >= BgStartSurface.PROCSTATE_SERVICE) {
                 "target uid $cold above the service threshold before the attempt"
             }
-            probe.startActor(context.packageName)
+            probe.startActor()
             recorder.step("actor")
             probe.await("bound live service record") {
                 val dump = probe.servicesDump()
@@ -191,7 +191,7 @@ class BgStartTest {
             probe.dumpHierarchy("fail")
             finishDriverPhase(context, "bgstart", nonce, recorder, "error:${t.javaClass.simpleName}:${t.message}", t)
         } finally {
-            runCatching { probe.stopActor(context.packageName) }
+            runCatching { probe.stopActor() }
             server?.close()
         }
     }

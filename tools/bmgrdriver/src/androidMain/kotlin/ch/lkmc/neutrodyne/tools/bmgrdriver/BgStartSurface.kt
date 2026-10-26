@@ -22,6 +22,12 @@ internal object BgStartSurface {
 
     /** The exported action a real external controller binds — never `am startservice`. */
     const val BIND_ACTION = "androidx.media3.session.MediaLibraryService"
+
+    /**
+     * The standalone `:tools:bgactor` APK — a separate uid that stays demoted; a bind
+     * from the driver's own instrumented uid would stamp a granting TOP/BFSL record.
+     */
+    const val ACTOR_COMPONENT = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorService"
     const val PROCSTATE_SERVICE = 10
     const val POSITION_ADVANCE_MS = 200L
     const val SETTLE_MS = 15_000L

@@ -82,12 +82,12 @@ class BgStartSurfaceTest {
             """
             ServiceRecord{u0 abc u0a150 ch.lkmc.neutrodyne/.NeutrodynePlaybackService}
               app=ProcessRecord{abc123 5123:ch.lkmc.neutrodyne/u0a150}
-              * Client AppBindRecord{aaa111 ProcessRecord{bbb222 5123:ch.lkmc.neutrodyne.tools.bmgrdriver.test:bgactor/u0a151}}
+              * Client AppBindRecord{aaa111 ProcessRecord{bbb222 5123:ch.lkmc.neutrodyne.tools.bgactor/u0a151}}
               * Client AppBindRecord{ccc333 ProcessRecord{ddd444 6001:com.android.systemui/u0a124}}
             """.trimIndent()
         assertEquals(
             listOf(
-                "ch.lkmc.neutrodyne.tools.bmgrdriver.test:bgactor/u0a151",
+                "ch.lkmc.neutrodyne.tools.bgactor/u0a151",
                 "com.android.systemui/u0a124",
             ),
             BgStartSurface.bindingClients(dump),
