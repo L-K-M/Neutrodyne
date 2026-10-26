@@ -331,5 +331,14 @@ internal class BgProbe(
 
     companion object {
         const val WAIT_MS = 30_000L
+
+        /**
+         * The bound stage's budget. The actor deliberately waits out the ~10 s
+         * activity-starter FGS grace before binding (a bind inside it stamps
+         * code:ACTIVITY_STARTER on the binding record), and a cold target
+         * process spawn can add several more seconds on a loaded emulator —
+         * r7 api36 missed the record by ~0.1 s on the default 30 s budget.
+         */
+        const val BOUND_WAIT_MS = 60_000L
     }
 }

@@ -56,8 +56,18 @@ public final class BgActorService extends Service {
             @Override
             public void onServiceDisconnected(ComponentName name) { }
         };
+    private final ServiceConnection selfConnection =
+        new ServiceConnection() {
+            @Override
+            public void onServiceConnected(ComponentName name, IBinder binder) { }
+
+            @Override
+            public void onServiceDisconnected(ComponentName name) { }
+        };
+    private final IBinder selfBinder = new android.os.Binder();
 
     private boolean bound;
+    private boolean selfBound;
     private long startedAt;
 
     @Override
@@ -99,6 +109,20 @@ public final class BgActorService extends Service {
             return;
         }
         bound = true;
+        // A started, unbound background service is explicitly stopped when its
+        // app has been idle ~60 s ("Stopping service due to app idle"), which
+        // would drop the target binding mid-leg. A service with a client is
+        // never idle — bind this service to itself so the leg's window stays
+        // open. A self-bind keeps the uid at its own demoted importance and
+        // stamps nothing on the target's allow records.
+        selfBound =
+            bindService(
+                new Intent(this, BgActorService.class),
+                selfConnection,
+                BIND_AUTO_CREATE);
+        if (!selfBound) {
+            Log.e(TAG, "BGACTOR-FAIL self-bind returned false");
+        }
     }
 
     /**
@@ -151,11 +175,15 @@ public final class BgActorService extends Service {
             bound = false;
             unbindService(connection);
         }
+        if (selfBound) {
+            selfBound = false;
+            unbindService(selfConnection);
+        }
         super.onDestroy();
     }
 
     @Override
     public IBinder onBind(Intent intent) {
-        return null;
+        return selfBinder;
     }
 }

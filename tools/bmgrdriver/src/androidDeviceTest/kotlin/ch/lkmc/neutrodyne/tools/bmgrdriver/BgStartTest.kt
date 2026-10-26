@@ -120,7 +120,7 @@ class BgStartTest {
             }
             probe.startActor()
             recorder.step("actor")
-            probe.await("bound live service record") {
+            probe.await("bound live service record", timeoutMs = BgProbe.BOUND_WAIT_MS) {
                 val dump = probe.servicesDump()
                 BgStartSurface.serviceRecordPresent(dump) && BgStartSurface.serviceRunning(dump)
             }
