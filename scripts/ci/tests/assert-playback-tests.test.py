@@ -29,8 +29,10 @@ class PlaybackEvidenceTest(unittest.TestCase):
         ET.ElementTree(suite).write(folder / "TEST-playback.xml")
 
     def test_each_device_needs_its_own_cases(self):
+        # The app-APK set never contains the routed background case; the
+        # external bgstart lane asserts deniedBackgroundStartOffersWorkingResume.
         self.report("api26", gate.SHORT)
-        self.report("api36", gate.SHORT | {gate.BACKGROUND})
+        self.report("api36", gate.SHORT)
         gate.verify(self.root, "ci", ["api26", "api36"])
         with self.assertRaises(ValueError):
             gate.verify(self.root, "ci", ["api34"])
@@ -43,7 +45,7 @@ class PlaybackEvidenceTest(unittest.TestCase):
             gate.verify(self.root, "ci", ["api26"])
 
     def test_nightly_requires_full_duration(self):
-        self.report("api34", gate.SHORT | {gate.BACKGROUND, gate.LONG})
+        self.report("api34", gate.SHORT | {gate.LONG})
         gate.verify(self.root, "nightly", ["api34"])
         path = self.root / "api34DebugAndroidTest" / "TEST-playback.xml"
         original = path.read_text()
@@ -53,7 +55,7 @@ class PlaybackEvidenceTest(unittest.TestCase):
                 gate.verify(self.root, "nightly", ["api34"])
 
     def test_api37_requires_hardening_and_release_requires_smoke(self):
-        self.report("connected", gate.SHORT | {gate.BACKGROUND})
+        self.report("connected", gate.SHORT)
         with self.assertRaises(ValueError):
             gate.verify(self.root, "api37", ["connected"])
         gate.verify(self.root, "release", ["connected"])
