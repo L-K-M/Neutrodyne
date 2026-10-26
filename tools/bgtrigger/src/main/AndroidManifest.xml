@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="bgtrigger" android:allowBackup="false">
+        <!-- The trusted-controller surface: once enabled in
+             enabled_notification_listeners (shell: `cmd notification
+             allow_listener` or `settings put secure`), this uid passes
+             MediaSessionManager.isTrustedForMediaControl — the same trust a
+             real third-party companion controller (Wear, a car head unit)
+             carries. Membership alone binds nothing; it only lets
+             getActiveSessions see and command the target session. -->
+        <service
+            android:name=".BgTriggerListenerService"
+            android:label="bgtrigger listener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+        <!-- Exported so the rooted shell `content call` can drive
+             status/prepare/play — and each call is a synchronous binder
+             transaction, the platform's own thaw for a cached-app-frozen
+             process (the api36 freezer ices this package like every other). -->
+        <provider
+            android:name=".BgTriggerProvider"
+            android:authorities="ch.lkmc.neutrodyne.tools.bgtrigger.provider"
+            android:exported="true" />
+    </application>
+</manifest>

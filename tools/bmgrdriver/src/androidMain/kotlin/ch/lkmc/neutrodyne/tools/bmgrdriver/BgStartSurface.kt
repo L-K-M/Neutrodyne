@@ -30,6 +30,17 @@ internal object BgStartSurface {
     const val ACTOR_COMPONENT = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorActivity"
     const val ACTOR_SERVICE = "ch.lkmc.neutrodyne.tools.bgactor/.BgActorService"
     const val ACTOR_PROVIDER = "ch.lkmc.neutrodyne.tools.bgactor.provider"
+
+    /**
+     * The standalone `:tools:bgtrigger` APK — a third uid that earns genuine
+     * trusted-controller status through an enabled NotificationListenerService
+     * (`isTrustedForMediaControl`), then relays prepare/play through
+     * `MediaSessionManager.getActiveSessions` — the framework MediaSessionRecord
+     * path, which binds nothing on the target's ServiceRecord.
+     */
+    const val TRIGGER_PACKAGE = "ch.lkmc.neutrodyne.tools.bgtrigger"
+    const val TRIGGER_PROVIDER = "ch.lkmc.neutrodyne.tools.bgtrigger.provider"
+    const val TRIGGER_LISTENER = "$TRIGGER_PACKAGE/.BgTriggerListenerService"
     const val PROCSTATE_SERVICE = 10
     const val POSITION_ADVANCE_MS = 200L
     const val SETTLE_MS = 15_000L

@@ -131,6 +131,76 @@ internal class BgProbe(
             BmgrArming.TARGET_PACKAGE,
         ) ?: error("target uid did not parse from the package listing")
 
+    /**
+     * Grants the `:tools:bgtrigger` package real trusted-controller membership:
+     * `cmd notification allow_listener` on supported builds, else the durable
+     * `enabled_notification_listeners` secure setting (existing entries
+     * preserved). The membership is verified on the trigger's own surface —
+     * `getActiveSessions` throws until the uid is genuinely trusted — never by
+     * assuming the command took. Every attempt is written to
+     * `bgstart-listener.txt`.
+     */
+    fun enableTrigger() {
+        val log = StringBuilder()
+        log.appendLine(
+            "allow_listener -> " +
+                shell("cmd notification allow_listener ${BgStartSurface.TRIGGER_LISTENER}").trim(),
+        )
+        if (!tryAwait(TRUST_WAIT_MS) { triggerSessionVisible() }) {
+            val current = shell("settings get secure enabled_notification_listeners").trim()
+            val merged =
+                when {
+                    current.isBlank() || current == "null" -> BgStartSurface.TRIGGER_LISTENER
+                    BgStartSurface.TRIGGER_LISTENER in current -> current
+                    else -> "$current:${BgStartSurface.TRIGGER_LISTENER}"
+                }
+            log.appendLine(
+                "settings put -> " +
+                    shell("settings put secure enabled_notification_listeners $merged").trim(),
+            )
+            tryAwait(TRUST_WAIT_MS) { triggerSessionVisible() }
+        }
+        write("bgstart-listener.txt", log.toString())
+    }
+
+    /**
+     * A synchronous binder transaction into the trigger's exported provider —
+     * the same thaw mechanism as [pokeActor] — carrying the trusted-command
+     * vocabulary (`status`/`prepare`/`play`). The provider answers via its
+     * returned Bundle, printed by `content` as `result=<k=v>`.
+     */
+    fun triggerCall(method: String): String =
+        shell("content call --uri content://${BgStartSurface.TRIGGER_PROVIDER} --method $method")
+
+    /**
+     * The trusted trigger's view of the session: `status` reports
+     * `trusted=1 target=1` only when the listener membership is real AND the
+     * target's restored session is visible through MediaSessionManager —
+     * evidence that a genuine trusted controller issued the later command.
+     */
+    fun triggerSessionVisible(): Boolean {
+        val out = triggerCall("status")
+        write("bgstart-trigger-status.txt", out)
+        return "trusted=1" in out && "target=1" in out
+    }
+
+    /** The trigger uid's own procstate + its listener membership, per stage. */
+    fun captureTrigger(label: String) {
+        val uid =
+            BgStartSurface.parseAppUid(
+                shell("cmd package list packages -U ${BgStartSurface.TRIGGER_PACKAGE}"),
+                BgStartSurface.TRIGGER_PACKAGE,
+            )
+        write(
+            "bgstart-trigger-$label.txt",
+            "uid=${uid ?: -1}\n" +
+                "uidState=${shell("cmd activity get-uid-state ${uid ?: -1}").trim()}\n" +
+                "enabledListeners=" +
+                shell("settings get secure enabled_notification_listeners").trim() +
+                "\n",
+        )
+    }
+
     fun uidState(uid: Int): Int? = BgStartSurface.parseUidState(shell("cmd activity get-uid-state $uid"))
 
     fun servicesDump(): String = shell("dumpsys -t 20 activity services ${BgStartSurface.SERVICE_COMPONENT}")
@@ -351,6 +421,20 @@ internal class BgProbe(
 
     companion object {
         const val WAIT_MS = 30_000L
+
+        /**
+         * Listener enablement plus the trigger's trusted view of the session —
+         * bounded like every other wait; NMS observes the settings row in well
+         * under this on a fresh image.
+         */
+        const val TRUST_WAIT_MS = 20_000L
+
+        /**
+         * The prepare→PAUSED probe. If the trusted prepare ever lands, the
+         * session republishes PAUSED well inside this window; a miss only means
+         * the card probe below will honestly report no card again.
+         */
+        const val PREPARED_WAIT_MS = 20_000L
 
         /**
          * The bound stage's budget. The actor deliberately waits out the ~10 s

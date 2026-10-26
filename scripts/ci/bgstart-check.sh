@@ -9,8 +9,12 @@
 # APK —
 # BINDS the playback service from the standalone `:tools:bgactor` APK (a separate
 # demoted uid — the external equivalent of MediaController.connect()), proves the
-# uid sits at or below SERVICE non-foreground for a continuous >=15s settle, taps
-# the SystemUI media card's Play button (a trusted STATUS_BAR_SERVICE controller),
+# uid sits at or below SERVICE non-foreground for a continuous >=15s settle, then
+# arms the standalone `:tools:bgtrigger` uid with real trusted-controller status
+# (an enabled NotificationListenerService; its commands relay through the
+# framework MediaSessionRecord so no capable binding reaches the target), issues
+# a trusted prepare() so the session reports PAUSED and the SystemUI card can
+# render, taps the card Play when it resolves else the trigger's own play(),
 # observes the genuine ForegroundServiceStartNotAllowedException surfaces (service stays
 # non-foreground, DENIED verdicts on every allow record, no temp allowlist, no
 # BFSL self record, uid at or below SERVICE, recovery notification 4001), then
@@ -36,13 +40,15 @@ DRIVER_PKG=""                     # from the driver APK badging
 DATA_DIR="/data/data/$PKG"
 DRIVER_DATA_DIR=""                # /data/data/$DRIVER_PKG, once discovered
 ACTOR_PKG="ch.lkmc.neutrodyne.tools.bgactor"
+TRIGGER_PKG="ch.lkmc.neutrodyne.tools.bgtrigger"
+TRIGGER_LISTENER="$TRIGGER_PKG/.BgTriggerListenerService"
 NONCE="run-$(date +%s)-$RANDOM"
 APP_UID=""
 PROCSTATE_SERVICE=10
 
 # Ownership ledger. A flag arms before its mutating call; unarmed flags mean the
 # trap must not touch that state.
-ARMED=""; INSTALLED_PKG=""; INSTALLED_DRIVER=""; INSTALLED_ACTOR=""; LOGCAT_PID=""
+ARMED=""; INSTALLED_PKG=""; INSTALLED_DRIVER=""; INSTALLED_ACTOR=""; INSTALLED_TRIGGER=""; LOGCAT_PID=""
 
 log() { echo "[bgstart-check $(date +%H:%M:%S)] $*"; }
 fail() { echo "[bgstart-check] FAIL: $*" >&2; exit 1; }
@@ -82,6 +88,7 @@ run = {
     "apkBytes": int(facts.get("apkBytes", "0")),
     "driverApkSha256": facts.get("driverApkSha256", ""),
     "actorApkSha256": facts.get("actorApkSha256", ""),
+    "triggerApkSha256": facts.get("triggerApkSha256", ""),
     "driverPackage": facts.get("driverPackage", ""),
     "driverRunner": facts.get("driverRunner", ""),
     "certSha256": facts.get("certSha256", ""),
@@ -117,6 +124,13 @@ cleanup() {
         if [ -n "$INSTALLED_ACTOR" ]; then
             timeout 60 "$ADB" shell pm uninstall --user 0 "$ACTOR_PKG" || true
             [ -z "$(timeout 60 "$ADB" shell pm path "$ACTOR_PKG" 2>/dev/null | tr -d '\r')" ] \
+                || failed=1
+        fi
+        if [ -n "$INSTALLED_TRIGGER" ]; then
+            timeout 60 "$ADB" shell cmd notification deny_listener "$TRIGGER_LISTENER" \
+                >/dev/null 2>&1 || true
+            timeout 60 "$ADB" shell pm uninstall --user 0 "$TRIGGER_PKG" || true
+            [ -z "$(timeout 60 "$ADB" shell pm path "$TRIGGER_PKG" 2>/dev/null | tr -d '\r')" ] \
                 || failed=1
         fi
     fi
@@ -290,9 +304,12 @@ main() {
     [ -n "$DRIVER_APK" ] || DRIVER_APK="$(find tools/bmgrdriver/build/outputs -name '*.apk' | head -1)"
     ACTOR_APK="${BGSTART_ACTOR_APK:-}"
     [ -n "$ACTOR_APK" ] || ACTOR_APK="$(find tools/bgactor/build/outputs -name '*-release.apk' -o -name '*-debug.apk' | head -1)"
+    TRIGGER_APK="${BGSTART_TRIGGER_APK:-}"
+    [ -n "$TRIGGER_APK" ] || TRIGGER_APK="$(find tools/bgtrigger/build/outputs -name '*-release.apk' -o -name '*-debug.apk' | head -1)"
     [ -f "$APK" ] || fail "release APK missing — build before boot"
     [ -f "$DRIVER_APK" ] || fail "driver APK missing — build :tools:bmgrdriver deviceTest"
     [ -f "$ACTOR_APK" ] || fail "actor APK missing — build :tools:bgactor release"
+    [ -f "$TRIGGER_APK" ] || fail "trigger APK missing — build :tools:bgtrigger release"
     scripts/ci/check-apk.sh --published "$APK" | tee "$EV/check-apk.txt"
     timeout 60 "$(tool aapt2)" dump badging "$APK" > "$EV/apk-badging.txt" 2>&1 || true
     ! grep -q "application-debuggable" "$EV/apk-badging.txt" || fail "release APK is debuggable"
@@ -301,6 +318,7 @@ main() {
     fact apkBytes "$(stat -c%s "$APK")"
     fact driverApkSha256 "$(sha256sum "$DRIVER_APK" | cut -d' ' -f1)"
     fact actorApkSha256 "$(sha256sum "$ACTOR_APK" | cut -d' ' -f1)"
+    fact triggerApkSha256 "$(sha256sum "$TRIGGER_APK" | cut -d' ' -f1)"
     fact certSha256 "$(timeout 120 "$(tool apksigner)" verify --print-certs "$APK" | grep -o 'SHA-256 digest: .*' | head -1 | cut -d' ' -f3-)"
 
     # --- driver identity: self-instrumenting package discovered from its badging ---
@@ -316,12 +334,18 @@ main() {
         || fail "actor APK badging unreadable"
     grep -q "package: name='$ACTOR_PKG'" "$EV/actor-badging.txt" \
         || fail "actor APK package is not $ACTOR_PKG: $(head -3 "$EV/actor-badging.txt")"
+    timeout 60 "$(tool aapt2)" dump badging "$TRIGGER_APK" > "$EV/trigger-badging.txt" 2>&1 \
+        || fail "trigger APK badging unreadable"
+    grep -q "package: name='$TRIGGER_PKG'" "$EV/trigger-badging.txt" \
+        || fail "trigger APK package is not $TRIGGER_PKG: $(head -3 "$EV/trigger-badging.txt")"
     INSTALLED_PKG=1
     timeout 300 "$ADB" install --user 0 "$APK" | tee "$EV/install-target.txt"
     INSTALLED_DRIVER=1
     timeout 300 "$ADB" install -t --user 0 "$DRIVER_APK" | tee "$EV/install-driver.txt"
     INSTALLED_ACTOR=1
     timeout 300 "$ADB" install --user 0 "$ACTOR_APK" | tee "$EV/install-actor.txt"
+    INSTALLED_TRIGGER=1
+    timeout 300 "$ADB" install --user 0 "$TRIGGER_APK" | tee "$EV/install-trigger.txt"
     timeout 60 "$ADB" shell pm list instrumentation > "$EV/instrumentations.txt" 2>&1 || true
     grep -q "instrumentation:$DRIVER_PKG/$DRIVER_RUNNER (target=$DRIVER_PKG)" \
         "$EV/instrumentations.txt" \
@@ -391,7 +415,9 @@ main() {
         bgstart-media-session-card.txt \
         bgstart-media-session-denied.txt bgstart-media-session-resumed.txt \
         bgstart-audio-denied.txt bgstart-audio-resumed.txt \
-        bgstart-settle.txt bgstart-positions.txt; do
+        bgstart-settle.txt bgstart-positions.txt \
+        bgstart-listener.txt bgstart-trigger-status.txt \
+        bgstart-trigger-card.txt bgstart-trigger-denied.txt; do
         [ -s "$EV/$name" ] || fail "driver evidence missing or empty: $name"
     done
     selector bgstartCompleted

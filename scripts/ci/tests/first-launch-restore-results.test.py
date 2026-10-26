@@ -1791,7 +1791,8 @@ BG_METHODS = {"bgseed": "seedPausedSession",
 BG_STEPS = {
     "bgseed": ["built", "launched", "preview", "revoked", "categories", "requested"],
     "bgstart": ["sidecar", "served", "actor", "bound", "settled", "guarded",
-                "card", "play-tapped", "denied", "resume-tapped", "resumed"],
+                "trusted", "prepared", "card", "play-tapped", "denied",
+                "resume-tapped", "resumed"],
 }
 BG_SELECTORS = (
     "apkNonDebuggable", "driverInstrumentationAvailable", "seedImportDone",
@@ -1924,6 +1925,7 @@ class BgstartEvidenceTest(unittest.TestCase):
             "fingerprint": "google/sdk/fp", "abi": "x86_64", "nonce": NONCE,
             "sourceSha": "abc", "apkSha256": "a" * 64, "apkBytes": 10,
             "driverApkSha256": "b" * 64, "actorApkSha256": "f" * 64,
+            "triggerApkSha256": "9" * 64,
             "driverPackage": DRV_PKG,
             "driverRunner": DRV_RUNNER, "certSha256": "c" * 64,
             "avd": f"bgstart-api{api}", "appUid": BG_UID,
@@ -1963,6 +1965,15 @@ class BgstartEvidenceTest(unittest.TestCase):
             "bgstart-positions.txt": BG_POSITIONS,
             "bgstart-fssnae-logcat.txt": "",
             "ui-bgstart-shade.xml": "<hierarchy />",
+            "bgstart-listener.txt": "allow_listener ->\n",
+            "bgstart-trigger-status.txt":
+                "Bundle[{result=trusted=1 sessions=2 target=1}]\n",
+            "bgstart-trigger-card.txt":
+                "uid=10152\nuidState=4 (BOUND_FOREGROUND_SERVICE)\n"
+                "enabledListeners=ch.lkmc.neutrodyne.tools.bgtrigger/.BgTriggerListenerService\n",
+            "bgstart-trigger-denied.txt":
+                "uid=10152\nuidState=4 (BOUND_FOREGROUND_SERVICE)\n"
+                "enabledListeners=ch.lkmc.neutrodyne.tools.bgtrigger/.BgTriggerListenerService\n",
         }
         logs = {p: bg_instrument_log(p, NONCE) for p in BG_METHODS}
         statuses = {p: bg_driver_status(p, NONCE, api) for p in BG_METHODS}

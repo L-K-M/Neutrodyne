@@ -553,8 +553,11 @@ jobs:
   # :tools:bmgrdriver APK seeds a durable paused session via the production import UI
   # (phase bgseed), the host kills the target process and the bgstart leg then BINDS the
   # playback service from the standalone `:tools:bgactor` APK (a demoted, separate
-  # uid — the driver never binds the target), taps the SystemUI media card's Play
-  # button (a trusted STATUS_BAR_SERVICE controller), proves the real
+  # uid — the driver never binds the target), arms the standalone `:tools:bgtrigger`
+  # uid with trusted-controller status (an enabled NotificationListenerService —
+  # framework-relayed commands, no binding on the target), issues a trusted
+  # prepare() so the session reports PAUSED, taps the SystemUI media card's Play
+  # button when it renders else the trigger's own play(), proves the real
   # ForegroundServiceStartNotAllowedException surfaces (non-foreground service, DENIED
   # allow verdicts, no temp allowlist, no BFSL self record, uid at/below SERVICE, paused
   # session, recovery notification 4001), then taps the notification's real "Resume"
@@ -598,14 +601,16 @@ jobs:
       # beside a starved emulator lost system_server's providers mid-run (see api37-16k).
       # No target test APK: the release build stays instrument-free; the self-contained
       # driver APK owns its own package and instrumentation. The bgactor APK is the
-      # inert separate-uid binder the bgstart leg needs.
+      # inert separate-uid binder the bgstart leg needs; the bgtrigger APK is the
+      # trusted controller whose listener relays prepare/play via MediaSessionRecord.
       - name: Build the release and driver APKs before the emulators boot
         timeout-minutes: 30
         run: |
-          ./gradlew --max-workers=2 :app:assembleRelease :tools:bmgrdriver:assembleAndroidDeviceTest :tools:bgactor:assembleRelease
+          ./gradlew --max-workers=2 :app:assembleRelease :tools:bmgrdriver:assembleAndroidDeviceTest :tools:bgactor:assembleRelease :tools:bgtrigger:assembleRelease
           test -n "$(find app/build/outputs/apk/release -name 'app-*-release.apk' -print -quit)" || { echo "::error::release APK missing"; exit 1; }
           test -n "$(find tools/bmgrdriver/build/outputs -name '*.apk' -print -quit)" || { echo "::error::driver APK missing"; exit 1; }
           test -n "$(find tools/bgactor/build/outputs -name '*-release.apk' -print -quit)" || { echo "::error::actor APK missing"; exit 1; }
+          test -n "$(find tools/bgtrigger/build/outputs -name '*-release.apk' -print -quit)" || { echo "::error::trigger APK missing"; exit 1; }
       - name: bgstart on api31
         id: api31
         continue-on-error: true # api36's evidence is required even when this leg fails

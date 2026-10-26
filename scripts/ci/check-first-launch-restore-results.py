@@ -953,8 +953,11 @@ BGSTART_SELECTORS = (
 BGSTART_STEPS = {
     "bgseed": {"built", "launched", "preview", "revoked", "categories", "requested"},
     "bgstart": {"sidecar", "served", "actor", "bound", "settled", "guarded",
-                "card", "play-tapped", "denied", "resume-tapped", "resumed"},
+                "trusted", "card", "denied", "resume-tapped", "resumed"},
 }
+# The trigger fires exactly one of two surfaces: the SystemUI card's Play when
+# the card renders, else the trusted trigger's own framework-path play().
+BGSTART_PLAY_STEPS = {"play-tapped", "play-triggered"}
 BGSTART_PROCSTATE_SERVICE = 10
 BGSTART_SETTLE_MS = 15_000
 BGSTART_RESUME_ID = 4001
@@ -1266,8 +1269,9 @@ def check_bgstart_device(root, device, api):
     if run.get("apkSha256") == run.get("driverApkSha256") \
             or not SHA256.fullmatch(run.get("apkSha256", "")) \
             or not SHA256.fullmatch(run.get("driverApkSha256", "")) \
-            or not SHA256.fullmatch(run.get("actorApkSha256", "")):
-        raise ValueError(f"{device}: apk/driver/actor sha256 evidence missing or shared")
+            or not SHA256.fullmatch(run.get("actorApkSha256", "")) \
+            or not SHA256.fullmatch(run.get("triggerApkSha256", "")):
+        raise ValueError(f"{device}: apk/driver/actor/trigger sha256 evidence missing or shared")
     if run.get("driverPackage") == BMGR_TARGET or not run.get("driverPackage") \
             or not run.get("driverRunner"):
         raise ValueError(f"{device}: driver identity evidence missing")
@@ -1319,6 +1323,29 @@ def check_bgstart_device(root, device, api):
             raise ValueError(f"{device}: missing driver-status-{phase}.json")
         check_driver_status(device, phase, nonce, api, run["driverPackage"],
                             status_path, BGSTART_STEPS[phase])
+
+    # Exactly one trigger surface may have fired — never both, never neither.
+    status = json.loads((directory / "driver-status-bgstart.json").read_text())
+    fired = {s.get("name") for s in status.get("steps", [])} & BGSTART_PLAY_STEPS
+    if len(fired) != 1:
+        raise ValueError(
+            f"{device}: expected exactly one play step, got {sorted(fired)}")
+
+    # The trigger's own proof: real notification-listener trust and the restored
+    # session visible through the framework controller path, plus per-stage
+    # uid/listener dumps (the "does listener membership elevate" record).
+    bgstart_text(directory, "bgstart-listener.txt")
+    trigger_status = bgstart_text(directory, "bgstart-trigger-status.txt")
+    if "trusted=1" not in trigger_status or "target=1" not in trigger_status:
+        raise ValueError(
+            f"{device}: trigger was not a trusted controller seeing the "
+            f"session: {trigger_status.strip()!r}")
+    for stage in ("card", "denied"):
+        evidence = bgstart_text(directory, f"bgstart-trigger-{stage}.txt")
+        if "enabledListeners=" not in evidence \
+                or "BgTriggerListenerService" not in evidence:
+            raise ValueError(
+                f"{device}: {stage} trigger evidence lacks listener membership")
 
     check_bgstart_settle(device, directory)
     check_bgstart_before(device, directory, api, app_uid)

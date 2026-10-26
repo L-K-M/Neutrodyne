@@ -55,10 +55,6 @@ android {
         }
     }
 }
-
-dependencies {
-    // The native Media3 client surface: a real external controller's connect +
-    // prepare() is what surfaces the durable paused session as PAUSED so the
-    // SystemUI card can render. The same version the target ships.
-    implementation(libs.androidx.media3.session)
-}
+// No dependencies: this APK only binds the target. Commanding the session is
+// the trusted :tools:bgtrigger package's job — an untrusted MediaController
+// here gets "Controller isn't allowed to call command" for every verb.

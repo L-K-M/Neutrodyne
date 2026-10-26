@@ -22,9 +22,13 @@ import java.net.ServerSocket
  * through the real production import UI, then `bgstart` drives the UNINSTRUMENTED target
  * from outside — a bind-only external cold start (the standalone `:tools:bgactor` APK
  * binds the exported media-library action, never a `startService`), a verified
- * demoted-and-settled window, the SystemUI media card's Play button (a trusted
- * STATUS_BAR_SERVICE controller) and the real notification "Resume" tap. The strict
- * aggregate re-verifies every saved `bgstart-*.txt` file.
+ * demoted-and-settled window, then a TRUSTED external controller: the standalone
+ * `:tools:bgtrigger` uid carries an enabled NotificationListenerService
+ * (`isTrustedForMediaControl`) and issues prepare()/play() through the framework
+ * MediaSessionRecord — never a binding. A prepare() first surfaces the session as
+ * PAUSED so the SystemUI card can render; the card's Play stays the preferred
+ * trigger, with the trigger's own play() the fallback when the card never
+ * resolves. The strict aggregate re-verifies every saved `bgstart-*.txt` file.
  */
 @RunWith(AndroidJUnit4::class)
 class BgStartTest {
@@ -139,26 +143,60 @@ class BgStartTest {
             val before = probe.capture("before", uid)
             requireGuarded(before, appUid)
             recorder.step("guarded", "uidState=${before.uidState}")
+            // The trusted controller: an enabled notification listener on the
+            // third uid — isTrustedForMediaControl, the same membership a real
+            // companion app earns. Its commands relay through the framework
+            // MediaSessionRecord, so it never lands a binding on the target.
+            probe.enableTrigger()
+            check(probe.tryAwait(BgProbe.TRUST_WAIT_MS) { probe.triggerSessionVisible() }) {
+                "the trusted trigger never saw the session"
+            }
+            probe.captureTrigger("trusted")
+            recorder.step("trusted", "clients=${before.bindingClients}")
+            // prepare() surfaces the durable queue as PAUSED (the target grants
+            // no commands to untrusted controllers — the actor's own prepare was
+            // refused: "Controller isn't allowed to call command= 2"). Only a
+            // PAUSED session lets SystemUI render the media card at all.
+            probe.triggerCall("prepare")
+            val prepared =
+                probe.tryAwait(BgProbe.PREPARED_WAIT_MS) {
+                    BgStartSurface
+                        .mediaSessionPlayback(
+                            probe.shell("dumpsys -t 20 media_session"),
+                            BmgrArming.TARGET_PACKAGE,
+                        )?.paused == true
+                }
+            recorder.step("prepared", prepared.toString())
             check(probe.openShade()) { "the SystemUI shade never opened" }
             probe.dumpHierarchy("shade")
             val play = probe.awaitCardPlay(BgProbe.WAIT_MS)
-            // The decisive BFSL probe: after the card renders (and binds, if it binds),
-            // the target must still sit demoted with no FGS grant on any record.
+            // The decisive BFSL probe: after the trigger connected (and the card
+            // renders, if it does), the target must still sit demoted with no
+            // FGS grant on any record — the trigger's own elevated uid binds
+            // nothing, so no binding can propagate capability here.
             val card = probe.capture("card", uid)
             requireGuarded(card, appUid)
             check(card.grantViolations().isEmpty()) {
                 "a binding granted FGS capability once the card rendered: " +
                     "${card.grantViolations()} — no genuine denial is reachable"
             }
+            probe.captureTrigger("card")
             recorder.step("card", "uidState=${card.uidState} clients=${card.bindingClients}")
-            if (play == null) {
-                // No trusted trigger exists on this image; the fallback is out of scope
-                // until this absence is proven — fail with the hierarchy as evidence.
+            if (play != null) {
+                play.click()
+                recorder.step("play-tapped")
+            } else {
+                // SystemUI did not surface the (now-PAUSED) session either: the
+                // same ordinary controller play arrives through the trigger's
+                // framework MediaController instead — an identical play()
+                // reaching the service's beforePlay/FGS path, and the honest
+                // "no card" verdict stays in ui-bgstart-no-card.xml.
                 probe.dumpHierarchy("no-card")
-                error("SystemUI media card Play never resolved")
+                check("played=1" in probe.triggerCall("play")) {
+                    "the trusted trigger's play() was never delivered"
+                }
+                recorder.step("play-triggered")
             }
-            play.click()
-            recorder.step("play-tapped")
             check(
                 probe.tryAwait(BgProbe.WAIT_MS) {
                     notificationDumpHas(
@@ -170,6 +208,7 @@ class BgStartTest {
             ) { "recovery notification 4001 never posted after the Play tap" }
             val denied = probe.capture("denied", uid)
             requireDenied(denied, appUid)
+            probe.captureTrigger("denied")
             probe.captureLogcat()
             recorder.step("denied", "uidState=${denied.uidState}")
             check(probe.openShade()) { "the shade could not be reopened for Resume" }

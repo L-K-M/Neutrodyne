@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.tools.bgactor;
 import android.app.ActivityManager;
 import android.app.Service;
 import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
@@ -14,16 +13,15 @@ import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
-import androidx.media3.common.Player;
-import androidx.media3.session.MediaController;
-import androidx.media3.session.SessionToken;
-import com.google.common.util.concurrent.ListenableFuture;
 
 /**
  * The bgstart leg's inert external actor: a plain background service — never a
  * foreground component — that BINDS the target's exported MediaLibraryService
  * like a third-party media controller (the in-app case reached the same state
- * through MediaController.connect()).
+ * through MediaController.connect()). It only binds: the target's session
+ * grants no player commands to untrusted controllers ("Controller isn't
+ * allowed to call command= 2"), so commanding the session is the trusted
+ * `:tools:bgtrigger` package's job, never this one's.
  *
  * The FGS-start capability evaluation stamps the CALLER's uid state at bind
  * time, so the bind waits until this process has demoted past TOP
@@ -53,9 +51,6 @@ public final class BgActorService extends Service {
     // The demotion gate itself can be slow — r8 api36 reached IMPORTANCE_SERVICE
     // only near the 60 s mark — so the deadline must out-wait the gate.
     private static final long BIND_DEADLINE_MS = 90_000;
-    // Loud-diagnostic window after the controller connects: the restored
-    // queue must surface on the player well inside the leg's card wait.
-    private static final long PREPARE_DEADLINE_MS = 45_000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ServiceConnection connection =
@@ -78,9 +73,6 @@ public final class BgActorService extends Service {
 
     private boolean bound;
     private boolean selfBound;
-    private ListenableFuture<MediaController> controllerFuture;
-    private MediaController controller;
-    private boolean prepareIssued;
     private long startedAt;
 
     @Override
@@ -127,7 +119,6 @@ public final class BgActorService extends Service {
             return;
         }
         bound = true;
-        prepareAsExternalController();
         // A started, unbound background service is explicitly stopped when its
         // app has been idle ~60 s ("Stopping service due to app idle"), which
         // would drop the target binding mid-leg. A service with a client is
@@ -141,70 +132,6 @@ public final class BgActorService extends Service {
                 BIND_AUTO_CREATE);
         if (!selfBound) {
             Log.e(TAG, "BGACTOR-FAIL self-bind returned false");
-        }
-    }
-
-    /**
-     * A cold bind restores the durable paused session into the player WITHOUT
-     * preparing it (the production LOAD_PAUSED path deliberately stays lazy), so
-     * the session reports PlaybackState NONE and SystemUI renders no media card.
-     * A real external controller (Wear, a car) calls prepare() after connecting
-     * to surface that resumable state — a plain player command on the native
-     * Media3 controller surface, no playback and no FGS attempt. The prepare
-     * must wait for the restored queue to land on the player: r10 issued it
-     * ~100 ms after the cold process spawned, before the durable restore
-     * applied, so it no-oped on an empty player and the session stayed NONE.
-     */
-    private void prepareAsExternalController() {
-        Context app = getApplicationContext();
-        try {
-            SessionToken token =
-                new SessionToken(
-                    app, new ComponentName(TARGET_PACKAGE, TARGET_SERVICE));
-            controllerFuture =
-                new MediaController.Builder(app, token).buildAsync();
-            controllerFuture.addListener(
-                () -> {
-                    try {
-                        controller = controllerFuture.get();
-                        controller.addListener(
-                            new Player.Listener() {
-                                @Override
-                                public void onEvents(Player player, Player.Events events) {
-                                    maybePrepare();
-                                }
-                            });
-                        maybePrepare();
-                        handler.postDelayed(
-                            this::checkPrepareDeadline, PREPARE_DEADLINE_MS);
-                    } catch (Exception e) {
-                        Log.e(TAG, "BGACTOR-PREP controller failed " + e);
-                    }
-                },
-                handler::post);
-        } catch (RuntimeException e) {
-            Log.e(TAG, "BGACTOR-PREP connect threw " + e);
-        }
-    }
-
-    private void maybePrepare() {
-        MediaController c = controller;
-        if (c == null || prepareIssued || c.getMediaItemCount() == 0) {
-            return;
-        }
-        prepareIssued = true;
-        c.prepare();
-        Log.i(TAG, "BGACTOR-PREP prepare issued items=" + c.getMediaItemCount());
-    }
-
-    private void checkPrepareDeadline() {
-        MediaController c = controller;
-        if (!prepareIssued) {
-            Log.e(
-                TAG,
-                "BGACTOR-PREP no restored queue items="
-                    + (c == null ? -1 : c.getMediaItemCount())
-                    + " state=" + (c == null ? -1 : c.getPlaybackState()));
         }
     }
 
@@ -254,13 +181,6 @@ public final class BgActorService extends Service {
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
-        if (controller != null) {
-            controller.release();
-            controller = null;
-        } else if (controllerFuture != null) {
-            controllerFuture.cancel(true);
-            controllerFuture = null;
-        }
         if (bound) {
             bound = false;
             getApplicationContext().unbindService(connection);
