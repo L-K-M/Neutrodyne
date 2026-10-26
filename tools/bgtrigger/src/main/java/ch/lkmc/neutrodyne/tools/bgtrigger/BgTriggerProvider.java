@@ -8,11 +8,15 @@ import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
 import com.google.common.util.concurrent.ListenableFuture;
+import java.util.concurrent.Callable;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -49,6 +53,7 @@ public final class BgTriggerProvider extends ContentProvider {
     static final String TARGET_SERVICE =
         "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService";
     private static final long CONNECT_TIMEOUT_MS = 20_000;
+    private static final long CALL_TIMEOUT_MS = 5_000;
 
     private volatile MediaController controller;
     private volatile boolean connectLanded;
@@ -89,6 +94,20 @@ public final class BgTriggerProvider extends ContentProvider {
     }
 
     /**
+     * MediaController methods must run on the thread whose looper built the
+     * controller: buildAsync() from a binder thread adopts the main looper, so
+     * every controller call is marshalled there. The async connect stays on the
+     * calling thread — blocking the main looper while its completion runs there
+     * would deadlock.
+     */
+    private static <T> T onApplicationLooper(Callable<T> action) throws Exception {
+        if (Looper.myLooper() == Looper.getMainLooper()) return action.call();
+        FutureTask<T> task = new FutureTask<>(action);
+        new Handler(Looper.getMainLooper()).post(task);
+        return task.get(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /**
      * Lazily connects; the connect's own bind makes this package visible to
      * the target, after which listener membership grants real commands. A
      * connected controller's command set is stamped once at connect and never
@@ -100,9 +119,9 @@ public final class BgTriggerProvider extends ContentProvider {
     private MediaController controller() {
         synchronized (this) {
             MediaController c = controller;
-            if (c != null && hasCommands(c)) return c;
+            if (c != null && commandsOf(c)) return c;
             if (c != null) {
-                c.release();
+                release(c);
                 controller = null;
             }
             Context context = getContext();
@@ -119,12 +138,32 @@ public final class BgTriggerProvider extends ContentProvider {
                 return null;
             }
             connectLanded = true;
-            if (!hasCommands(c)) {
-                c.release();
+            if (!commandsOf(c)) {
+                release(c);
                 return null;
             }
             controller = c;
             return c;
+        }
+    }
+
+    private static boolean commandsOf(MediaController c) {
+        try {
+            return onApplicationLooper(() -> hasCommands(c));
+        } catch (Exception e) {
+            Log.e(TAG, "BGTRIGGER-FAIL commands " + e);
+            return false;
+        }
+    }
+
+    private static void release(MediaController c) {
+        try {
+            onApplicationLooper(() -> {
+                c.release();
+                return null;
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "BGTRIGGER-FAIL release " + e);
         }
     }
 
@@ -144,14 +183,25 @@ public final class BgTriggerProvider extends ContentProvider {
             out.putString("result", "trusted=0");
             return;
         }
-        if (prepare) {
-            c.prepare();
-            Log.i(TAG, "BGTRIGGER-CMD prepare issued items=" + c.getMediaItemCount());
-            out.putString("result", "prepared=1");
-        } else {
-            c.play();
-            Log.i(TAG, "BGTRIGGER-CMD play issued");
-            out.putString("result", "played=1");
+        try {
+            if (prepare) {
+                int items = onApplicationLooper(() -> {
+                    c.prepare();
+                    return c.getMediaItemCount();
+                });
+                Log.i(TAG, "BGTRIGGER-CMD prepare issued items=" + items);
+                out.putString("result", "prepared=1");
+            } else {
+                onApplicationLooper(() -> {
+                    c.play();
+                    return null;
+                });
+                Log.i(TAG, "BGTRIGGER-CMD play issued");
+                out.putString("result", "played=1");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "BGTRIGGER-FAIL command " + e);
+            out.putString("result", "error=" + e.getClass().getSimpleName() + ":" + e.getMessage());
         }
     }
 
