@@ -33,14 +33,40 @@ internal object UiRestore {
     private const val WAIT_SHORT = 15_000L
     private const val WAIT_CLICK = 5_000L
 
+    private val ANR_TITLE: Pattern = Pattern.compile(".*isn't responding.*")
+    private val ANR_WAIT: Pattern = Pattern.compile("^Wait\$")
+    private const val ANR_WATCHER = "anr-wait"
+    private var watcherRegistered = false
+
     private val device: UiDevice
         get() = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
 
     private val context: Context
         get() = InstrumentationRegistry.getInstrumentation().targetContext
 
+    /**
+     * A system ANR dialog ("<app> isn't responding") sits above everything and
+     * starved-emulator SystemUI hit one for the whole r12 api31 preview wait.
+     * "Wait" keeps the hung process alive — the choice a user makes; "Close
+     * app" would abort the leg on a hiccup. UiDevice runs the watcher inside
+     * every subsequent wait()/findObject() poll, so registration once covers
+     * the rest of the leg while every hard timeout still fails loudly.
+     */
+    fun installAnrWaitWatcher() {
+        if (watcherRegistered) return
+        device.registerWatcher(ANR_WATCHER) {
+            if (!device.hasObject(By.text(ANR_TITLE))) return@registerWatcher false
+            device
+                .findObject(By.text(ANR_WAIT).clickable(true))
+                ?.click()
+            true
+        }
+        watcherRegistered = true
+    }
+
     /** Grant + launch the production `ExternalImportActivity` on a vault file's URI. */
     fun importViaProductionUi(file: File): Uri {
+        installAnrWaitWatcher()
         val uri = FileProvider.getUriForFile(context, SeedVault.AUTHORITY, file)
         context.grantUriPermission(
             BmgrArming.TARGET_PACKAGE,

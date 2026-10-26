@@ -116,6 +116,9 @@ class BgStartTest {
             recorder.step("served", "bytes=${body.size}")
             device.wakeUp()
             probe.shell("wm dismiss-keyguard")
+            // The seed leg registers it inside importViaProductionUi; this leg's
+            // long shade/card waits need the same ANR-dismissal coverage.
+            UiRestore.installAnrWaitWatcher()
             val appUid = probe.appUid()
             uid = appUid
             val cold = probe.uidState(appUid)
