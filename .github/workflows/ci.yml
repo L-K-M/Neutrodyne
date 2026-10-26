@@ -189,7 +189,7 @@ jobs:
       # The server JAR carries its third-party notices (generateThirdPartyNotices): the
       # rendered list with the slf4j copyright and the Apache text, each dependency's own
       # licence files, and no embedded NOTICE or licence file left out (scan reads the
-      # Gradle cache of this build).
+      # Gradle cache of this build and downloads what the cache lacks).
       - name: Third-party notices in the server JAR
         run: |
           jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
@@ -202,7 +202,9 @@ jobs:
           unzip -l "$jar" > "$RUNNER_TEMP/server-jar.lst"
           grep -q 'META-INF/licenses/org.slf4j/slf4j-api/LICENSE.txt' "$RUNNER_TEMP/server-jar.lst"
           python3 -I scripts/ci/android_notices.py check sync/server/build/generated/aboutLibraries/aboutlibraries.json --quiet
-          python3 -I scripts/ci/android_notices.py scan sync/server/build/generated/aboutLibraries/aboutlibraries.json --quiet
+          python3 -I scripts/ci/android_notices.py scan sync/server/build/generated/aboutLibraries/aboutlibraries.json --quiet \
+            --fetch-from https://dl.google.com/dl/android/maven2 \
+            --fetch-from https://repo.maven.apache.org/maven2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-apks # test artifacts only — never offered to users (risk P10)
