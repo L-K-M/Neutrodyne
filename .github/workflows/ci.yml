@@ -186,6 +186,17 @@ jobs:
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
         run: scripts/ci/check-apk.sh --published app/build/outputs/apk/release/*-release.apk
+      # The debug APKs are uploaded too (debug-apks), so they get check-apk.sh's section 7
+      # notices checks; its other sections are for release builds and reject debug code.
+      - name: Third-party notices in the debug APKs
+        run: |
+          for apk in app/build/outputs/apk/debug/*-debug.apk; do
+            python3 -I scripts/ci/android_notices.py check "$apk" --config app/policy/android-notices.toml --quiet
+            python3 -I scripts/ci/android_notices.py scan "$apk" --config app/policy/android-notices.toml --quiet \
+              --maven-repo third_party/room3-maven --maven-repo third_party/chaquopy-maven \
+              --fetch-from https://dl.google.com/dl/android/maven2 \
+              --fetch-from https://repo.maven.apache.org/maven2
+          done
       # The server JAR carries its third-party notices (generateThirdPartyNotices): the
       # rendered list with the slf4j copyright and the Apache text, each dependency's own
       # licence files, and no embedded NOTICE or licence file left out (scan reads the
