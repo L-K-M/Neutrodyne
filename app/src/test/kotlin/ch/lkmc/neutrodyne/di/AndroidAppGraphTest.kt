@@ -4,8 +4,10 @@ package ch.lkmc.neutrodyne.di
 import android.app.Application
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import androidx.work.testing.TestListenableWorkerBuilder
 import ch.lkmc.neutrodyne.SnapshotNowReceiver
 import ch.lkmc.neutrodyne.core.artwork.ArtworkProviderGraph
+import ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
@@ -86,9 +88,12 @@ class AndroidAppGraphTest {
     @Test
     fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
         runBlocking {
-            assertThat(graph.playbackController).isSameInstanceAs(graph.playbackController)
-            assertThat(graph.playbackStateSource).isSameInstanceAs(graph.playbackController)
-            assertThat(graph.playbackMaintenance).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource).isNotSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackMaintenance).isNotSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource).isNotSameInstanceAs(graph.playbackMaintenance)
+            assertThat(graph.playbackController::class.simpleName).isEqualTo("PlaybackControllerImpl")
+            assertThat(graph.playbackStateSource::class.simpleName).isEqualTo("PlaybackStateHub")
+            assertThat(graph.playbackMaintenance::class.simpleName).isEqualTo("StreamingCache")
             assertThat(graph.playbackStateSource.nowPlaying.value).isNull()
             assertThat(graph.playbackStateSource.effectivePlayback.value).isNull()
             assertThat(graph.playbackController.playEpisode(1)).isEqualTo(PlayResult.ServiceUnavailable)
@@ -98,9 +103,7 @@ class AndroidAppGraphTest {
             ).isEqualTo(PlayResult.ServiceUnavailable)
             assertThat(graph.playbackController.play()).isEqualTo(PlayResult.ServiceUnavailable)
             graph.playbackController.pause()
-            graph.playbackController.dismiss()
-            assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)
-            graph.playbackMaintenance.clearStreamingCache()
+            // Dismiss is a durable command; it is deliberately not invoked by a graph-construction test.
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
             assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
@@ -121,11 +124,30 @@ class AndroidAppGraphTest {
         }
 
     @Test
+    fun serviceInjectionDefersDatabaseConsumersWhileOpenIsPending() {
+        val service =
+            ch.lkmc.neutrodyne.playback.impl
+                .NeutrodynePlaybackService()
+        (graph as ch.lkmc.neutrodyne.playback.impl.PlaybackServiceInjector).inject(service)
+        assertThat(service.access).isNotNull()
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+    }
+
+    @Test
     fun artworkProviderContributionDefersDatabaseAccess() {
         val artwork = graph as ArtworkProviderGraph
         assertThat(artwork.artworkProviderAccess()).isNotNull()
         assertThat(graph.workerFactory).isNotNull()
         assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
+    fun artworkWorkerFactoryCreatesTheWorkerBeforeDatabaseOpen() {
+        TestListenableWorkerBuilder<ArtworkSyncWorker>(RuntimeEnvironment.getApplication())
+            .setWorkerFactory(graph.workerFactory)
+            .build()
+
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
     }
 
     @Test
@@ -323,6 +345,9 @@ class AndroidAppGraphTest {
                 "ExportFilesCleaner" to 300..399,
                 "ArtworkInitializer" to 300..300,
                 "PlaybackPrefsInitializer" to 300..300,
+                // PlaybackChannels order 10 (before the DB), PlayerConnection 300 (after prefs).
+                "PlaybackChannels" to 10..10,
+                "PlayerConnectionInitializer" to 300..300,
             )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */

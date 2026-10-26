@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first four slices are merged through #222, #224, #225 and #228; P5's sources and Media3 adapters are in draft #230 pending latest-main CI and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-25.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle slice is draft [#231](https://github.com/L-K-M/Neutrodyne/pull/231), pending current-head CI, hosted runtime gates and formal review. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -141,7 +141,7 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M4 playback, P1–P4 merged, P5 draft
+### M4 playback, P1–P5 merged, P6 draft
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,
@@ -242,7 +242,7 @@ Independent source review found no important issue. A parent regression exposed
 neutral PNG bytes reported as JPEG; MIME and display-name metadata now match the
 image. The unused playback `lifecycle-process` dependency is omitted.
 
-M4 plan row P5 is draft #230 on `impl/m4-p5-sources-adapters`, net-hunked from
+M4 plan row P5 merged through [#230](https://github.com/L-K-M/Neutrodyne/pull/230), net-hunked from
 the same frozen source record `453ea570` (`27a317ad` sources/factories,
 `563cf609` Media3 adapters, `f418ee50` MediaItemFactory constants/URI
 corrections) onto merged main `c9ecfe11` (P4's merge). It adds
@@ -266,20 +266,88 @@ silence before prepare, temporary-speed retention on metadata updates), and
 `ErrorRecovery` (classified skips vs bounded reprepare/reconnect inside the
 foreground window). The adapter harness runs Media3 test players against the
 real Room stores via the test-only Java bridge, plus MockWebServer HTTP tests
-and three synthetic MP3 fixtures with their generator script. No service,
-receiver, manifest activation or production graph binding lands: nothing
-constructs these classes outside tests, and the truthful unavailable
-controller/state/maintenance binding stays the only one per shell. No schema
-change; `lifecycle-process`, `coroutines-guava` and `coroutines-android`
-remain out; no P5 consumer imports them. The current affected aggregate has
+and three synthetic MP3 fixtures with their generator script. P5 introduced no
+service, receiver, manifest activation or production graph binding: that boundary
+kept the truthful unavailable controller/state/maintenance binding per shell.
+It made no schema change and omitted `lifecycle-process`, `coroutines-guava` and
+`coroutines-android`; no P5 consumer imports them. Its affected aggregate had
 1,977 records, zero failures/errors and three existing environment skips.
 The test-readiness correction executes 80 playback records and reuses 1,897
 same-input records; its 25-test projector class also passes on one CPU. Room
 metadata echo is required before arming refresh barriers, and all four semantic
 counterexamples still fail against the pre-fence baseline. The `5fd58109` CI
-and named API26/36 app/driver cases pass. This latest-main integration still
-requires matching-head CI and its own formal review. Service/UI/device/native
-acceptance is not inherited from the prototype's later-slice results.
+and named API26/36 app/driver cases passed. The later `5bd60eee` integration
+passed all six CI40174233128 jobs and the original named API26/36 cases. Full
+formal40175399577, independent source triage and parent checks left no important
+finding in delivered feedback; optional minors were deferred under the first
+minor-only stopping rule, with the truncated INFO tail recorded as unknown.
+The squash merge `9cf58b7b` exactly matches the reviewed complete tree. P5 does
+not inherit service/UI/device/native acceptance from the prototype.
+
+M4 plan row P6 is draft [#231](https://github.com/L-K-M/Neutrodyne/pull/231) on
+`impl/m4-p6-android-service`, net-hunked
+from the same frozen source record `453ea570` (`85c93bb0` Android
+service/session/controller/lifecycle, `f418ee50` service/session fixes,
+`c29dabc3` device-evidence gates, and only the `aed7bc5e` Playback
+settings-route activation) onto fresh main `9cf58b7b` (post-P5 merge). It
+replaces the truthful-unavailable `AndroidPlaybackStub` with the real
+`PlaybackControllerImpl`/`PlaybackStateHub`/`StreamingCache` bindings and
+`AndroidLocalMediaBindings` (the approved empty `LocalMediaIndex`), adds
+`NeutrodynePlaybackService` (MediaLibraryService + one ExoPlayer +
+MediaLibrarySession), `PlaybackServiceAccess` (deferred `Provider` ports behind
+`DatabaseOpener.awaitOpen()`), `SessionPlayer` (deferred listener ordering
+after tracker/projector/applier), `SessionCallback`, `MediaLibraryTree`,
+`MediaButtons`, `CustomCommands`, `MeteredStreamingGate`,
+`EndOfItemPauseArbiter`, `ResumptionProvider`, `TapToResumeNotifier`,
+`PlaybackChannels`, `PlayerConnection` (order-300 process observer), the
+`PlaybackBeforeUnsubscribe` seam + fake + `UnsubscribeUseCase` pause hook, the
+manifest/permission additions, and the app-hosted `PlaybackServiceTest` with
+`assert-playback-tests.py` selection/enforcement gates on the CI `ci`, nightly
+`nightly`/`api37` and `release` legs. The Playback settings row/route now
+activates against the real maintenance binding; P7 queue UI, P8 full
+player/root composition and the Appearance mini-player control stay out; the
+desktop binding stays truthfully unavailable. Independent review at `8590b615`
+found that notification/session-activity content taps targeted the exported
+launcher, so the internal player deep link was discarded. The shared
+PendingIntent now targets the protected `InternalMainActivity` alias. The
+existing notifier regression failed on the old target and passes after the fix
+(two focused cases). Initial parent verification at `69ac9f6d` covered 2,088 records with zero
+failures/errors and three existing environment skips: 422 executed (120
+playback, 151 app, 142 data Android-host and nine database Android-host), 1,666
+same-input records reused. Debug/test/release and standalone-driver assemblies,
+required release lint, module/dependency/licence/manifest/brand/banned-API guards,
+direct schema/input equality and all three published-APK checks pass. Receipts
+are under `build/review-m4-p6-parent-f1/` and
+`build/review-m4-p6-parent-final/`; original author receipts/report are retained
+separately. Doc validators report 0/14 and 0/78. No device/native/runtime
+evidence is produced by these host gates: exact-SHA
+labelled API26/36 CI, the nightly API26/33/34/36 legs including the real
+>=1800 s screen-off case, API37/16 KiB hardening, optimized release smoke and
+the physical headset/call/focus/silence/artwork/Auto/TalkBack checks remain
+parent gates with the rest of M4's acceptance.
+
+The first hosted P6 run, CI40190590760 at `69ac9f6d`, failed the unchanged OPML
+dense-input ratio guard and five framework cases. Original logs/XML are retained.
+Follow-up reproduced the artwork worker's construction failure through the real
+app graph: its internal binding container was not discovered across modules.
+The contribution is now public, and the new creation regression passes while
+database opening remains pending. The framework suite now uses stock full AOSP
+images for SystemUI and Home; its cache key includes the device convention.
+Notification clicks reacquire stale nodes within the original overall budget.
+Phase, hierarchy, UID/service and checked shell-exit diagnostics retain the
+remaining noisy-event and background-start questions for the next hosted run.
+The expanded local aggregate has 2,196 records, zero failures/errors and three
+existing environment skips (2,082 executed, 114 reused). The OPML guard also
+passed focused ordinary and one-CPU probes with its original inputs, 128 MiB
+heap, ratio threshold and timeout; only diagnostic output was added. Current-head
+CI and native/release acceptance are still required.
+
+CI40210591443 at `c0f5b826` passed five jobs and both images' notification controls;
+the artwork worker now succeeds on-device. Its remaining failures exposed a
+protected-broadcast rejection of shell UID 2000, a stopped activity needing an
+explicit foreground launch, and an unproven background-denial premise. The next
+fixture uses a system-authorized sender, target-owned diagnostic cache and a
+cold background service binding; current-head native proof is still required.
 
 P2's local verification had 4,674 test records with zero failures/errors and three
 existing environment skips. In the final aggregate, seven test tasks executed

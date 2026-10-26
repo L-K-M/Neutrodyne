@@ -18,6 +18,8 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.SettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMaintenance
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -41,8 +43,27 @@ class PlaybackPageTest {
         Locale.setDefault(oldLocale)
     }
 
-    // The settings-home Playback row and its route land with P6's SettingsHomeRoute/SettingsRoute
-    // activation; settingsHomePlaybackRowNavigatesAndShowsLiveSummary returns with those hunks.
+    @Test fun settingsHomePlaybackRowNavigatesAndShowsLiveSummary() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            runBlocking {
+                settings.set(PlaybackSettingKeys.SPEED, 1.5f)
+                settings.set(PlaybackSettingKeys.SKIP_SILENCE, true)
+            }
+            val navigator = RecordingAppNavigator()
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { SettingsHomeRoute(settings) }
+                }
+            }
+            onNodeWithText("Playback").performScrollTo()
+            onNodeWithText("1.5×, skip silence on").assertExists()
+            onNodeWithText("Playback").performClick()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(SettingsKey(SettingsPage.PLAYBACK))),
+                navigator.calls,
+            )
+        }
 
     @Test fun desktopHidesNavigationFocusAndExplainsMeteredPolicy() =
         runComposeUiTest {

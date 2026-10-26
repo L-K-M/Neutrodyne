@@ -29,19 +29,20 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** The app graph discovers this contribution across the module boundary. */
 @BindingContainer
 @ContributesTo(AppScope::class)
-internal object AndroidArtworkBindings {
+public object AndroidArtworkBindings {
     @Provides
-    fun context(application: Application): PlatformContext = application
+    public fun context(application: Application): PlatformContext = application
 
     @Provides
-    fun loader(application: Application): ImageLoader = SingletonImageLoader.get(application)
+    public fun loader(application: Application): ImageLoader = SingletonImageLoader.get(application)
 
     @Provides
     @IntoMap
     @WorkerKey(ArtworkSyncWorker::class)
-    fun worker(factory: ArtworkSyncWorker.Factory): WorkerCreator =
+    public fun worker(factory: ArtworkSyncWorker.Factory): WorkerCreator =
         { context, params -> factory.create(context, params) }
 }
 

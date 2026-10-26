@@ -417,7 +417,9 @@ flowchart LR
 
 ### Creation and destruction
 
-`NeutrodynePlaybackService : MediaLibraryService` receives its dependencies by Metro member injection (`@Inject lateinit var …: Lazy<…>` fields; [01 Components and scopes](01-foundation.md#components-and-scopes) rule 1); Media3 services are `LifecycleService`s since 1.10, so `lifecycleScope` (main) is the service scope. `onCreate`, all on the main looper:
+**Implementation note (2026-10-18, M4).** Framework injection constructs only database-free service access. `PlaybackServiceAccess.open()` awaits the database on IO before dereferencing Metro `Provider<T>` ports, including the core start, projection, position and settings objects. The session exists while opening is pending; its asynchronous callbacks await that access and the first `PlaybackPrefs` snapshot, so a stored metered policy governs the first cold resume. `PlaybackBeforeUnsubscribe` pauses and flushes an affected active item before the podcast cascade, without binding the service. Only the standard media-button receiver moves into M4; boot cards, full browse/search and hardware `SKIP` remain M5. M4 browse starts accept one canonical or `@upnext` identity and rebuild its URI; external playlist additions remain M5.
+
+`NeutrodynePlaybackService : MediaLibraryService` receives database-free service access by Metro member injection; that access holds `Provider<…>` fields for every database user ([01 Components and scopes](01-foundation.md#components-and-scopes) rule 1); Media3 services are `LifecycleService`s since 1.10, so `lifecycleScope` (main) is the service scope. `onCreate`, all on the main looper:
 
 1. `super.onCreate()`, then `((applicationContext as GraphHolder).graph as PlaybackServiceInjector).inject(this)`.
 2. `resolver.clearPins()`; `exo = playerFactory.create()`; `playerFactory.bindPrefs(exo, lifecycleScope)` ([Player configuration](#player-configuration)).

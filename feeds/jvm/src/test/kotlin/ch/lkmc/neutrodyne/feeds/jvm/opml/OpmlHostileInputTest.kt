@@ -245,7 +245,10 @@ class OpmlHostileInputTest {
         val baseline = timedSalvage("a".repeat(AMP_RUN))
         val dense = timedSalvage("&".repeat(AMP_RUN) + ";")
 
-        assertTrue(dense < baseline * AMP_DENSE_MAX_RATIO, "dense $dense vs baseline $baseline")
+        assertTrue(
+            dense < baseline * AMP_DENSE_MAX_RATIO,
+            "dense $dense vs baseline $baseline ratio=${dense / baseline}",
+        )
     }
 
     /** Reads [AMP_DENSE_TAGS] outlines carrying [value] and returns the salvage read's duration. */
