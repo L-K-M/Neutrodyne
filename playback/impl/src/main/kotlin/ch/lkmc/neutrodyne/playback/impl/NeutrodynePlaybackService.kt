@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.playback.impl
 import android.app.Application
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
-import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -14,7 +13,10 @@ import androidx.media3.session.MediaSessionService
 import ch.lkmc.neutrodyne.core.common.GraphHolder
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import dev.zacsweers.metro.Inject
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -27,6 +29,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
     private var exo: ExoPlayer? = null
     private var bridge: AndroidServiceBridge? = null
     private var starting: Deferred<AndroidServiceBridge>? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var startReserved = false
 
     override fun onCreate() {
@@ -38,13 +41,13 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
         access.resolver.clearPins()
         val factory = access.playerFactory()
         val player = factory.create().also { exo = it }
-        factory.bindPrefs(player, lifecycleScope)
+        factory.bindPrefs(player, serviceScope)
         val buttons = MediaButtons(access.prefs) { player.playbackParameters.speed }
         val runtime: suspend () -> ServiceBridge = { checkNotNull(starting).await() }
         val wrapper =
             SessionPlayer(
                 player,
-                lifecycleScope,
+                serviceScope,
                 beforePlay = {
                     val origin = requestOrigin()
                     runtime().beforePlay(origin)
@@ -61,7 +64,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 ResumptionProvider(runtime),
                 access.tree,
                 buttons,
-                lifecycleScope,
+                serviceScope,
                 access.io,
                 beforeStart = {
                     startReserved = true
@@ -98,13 +101,13 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 ).setMediaButtonPreferences(buttons.current())
                 .build()
         starting =
-            lifecycleScope.async {
+            serviceScope.async {
                 val ports = access.open()
                 AndroidServiceBridge(
                     player,
                     ports,
                     access,
-                    lifecycleScope,
+                    serviceScope,
                     isForeground = {
                         isPlaybackOngoing ||
                             ProcessLifecycleOwner
@@ -125,14 +128,14 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                         },
                     )
                     access.hub.attach(live)
-                    lifecycleScope.launch {
+                    serviceScope.launch {
                         access.prefs.current.collect {
                             session?.setMediaButtonPreferences(
                                 buttons.current(player.playbackParameters.speed),
                             )
                         }
                     }
-                    lifecycleScope.launch {
+                    serviceScope.launch {
                         live.effectivePlayback.collect {
                             session?.setMediaButtonPreferences(
                                 buttons.current(it?.speed?.value ?: 1f),
@@ -158,6 +161,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         starting?.cancel()
         bridge?.let { live ->
             live.detach()
