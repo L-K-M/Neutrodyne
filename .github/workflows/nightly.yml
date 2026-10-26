@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
+        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
         default: full
 
 permissions:
@@ -544,6 +544,127 @@ jobs:
         with:
           name: bmgr-results
           path: ${{ runner.temp }}/bmgr
+          if-no-files-found: error
+
+  # M4 P6b's external background-start gate (owner decision: the case cannot live inside
+  # the instrumented app APK — active instrumentation grants PROCESS_CAPABILITY_BFSL, and
+  # untrusted Media3 controllers cannot play cross-app). Each leg drives the untouched
+  # published release APK through scripts/ci/bgstart-check.sh: the self-instrumenting
+  # :tools:bmgrdriver APK seeds a durable paused session via the production import UI
+  # (phase bgseed), the host force-stops the target and the bgstart leg then performs a
+  # bare `am startservice`, taps the SystemUI media card's Play button (a trusted
+  # STATUS_BAR_SERVICE controller — the driver never binds the target), proves the real
+  # ForegroundServiceStartNotAllowedException surfaces (non-foreground service, DENIED
+  # allow verdicts, no temp allowlist, no BFSL self record, uid at/below SERVICE, paused
+  # session, recovery notification 4001), then taps the notification's real "Resume"
+  # action and proves playback (foreground 4000, target-UID active audio, position
+  # advance >200 ms, 4001 cancelled). check-first-launch-restore-results.py --bgstart is
+  # the strict aggregate over both legs; report-nightly.sh only runs after that verdict.
+  bgstart:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'bgstart'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/.ghcup
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm trigger --name-match=kvm || true
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # The runner image no longer ships the emulator package; the script needs adb.
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
+      - name: Install the pinned SDK tools
+        run: scripts/ci/install-android-sdk.sh
+      # Every APK the legs install is built before the first emulator boots — compiling
+      # beside a starved emulator lost system_server's providers mid-run (see api37-16k).
+      # No target test APK: the release build stays instrument-free; the self-contained
+      # driver APK owns its own package and instrumentation.
+      - name: Build the release and driver APKs before the emulators boot
+        timeout-minutes: 30
+        run: |
+          ./gradlew --max-workers=2 :app:assembleRelease :tools:bmgrdriver:assembleAndroidDeviceTest
+          test -n "$(find app/build/outputs/apk/release -name 'app-*-release.apk' -print -quit)" || { echo "::error::release APK missing"; exit 1; }
+          test -n "$(find tools/bmgrdriver/build/outputs -name '*.apk' -print -quit)" || { echo "::error::driver APK missing"; exit 1; }
+      - name: bgstart on api31
+        id: api31
+        continue-on-error: true # api36's evidence is required even when this leg fails
+        timeout-minutes: 20
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          BGSTART_DISPOSABLE_API31: "1" # acknowledges the disposable-AVD guard
+          BGSTART_EXPECT_AVD: bgstart-api31
+        with:
+          api-level: 31
+          avd-name: bgstart-api31
+          target: default # the rootable default image — never google_play
+          arch: x86_64
+          force-avd-creation: true
+          cores: 2
+          ram-size: 4096M
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim
+          script: scripts/ci/bgstart-check.sh 31 "$RUNNER_TEMP/bgstart/api31"
+      - name: bgstart on api36
+        id: api36
+        continue-on-error: true
+        timeout-minutes: 20
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          BGSTART_DISPOSABLE_API36: "1"
+          BGSTART_EXPECT_AVD: bgstart-api36
+        with:
+          api-level: 36
+          avd-name: bgstart-api36
+          target: default
+          arch: x86_64
+          force-avd-creation: true
+          cores: 2
+          ram-size: 4096M
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim
+          script: scripts/ci/bgstart-check.sh 36 "$RUNNER_TEMP/bgstart/api36"
+      # The strict aggregate is what closes the run — an emulator step's own exit status
+      # is necessary but never sufficient.
+      - name: Strict bgstart evidence aggregate
+        if: always()
+        timeout-minutes: 5
+        run: |
+          test "${{ steps.api31.outcome }}" = "success" || { echo "::error::api31 leg failed"; exit 1; }
+          test "${{ steps.api36.outcome }}" = "success" || { echo "::error::api36 leg failed"; exit 1; }
+          python3 scripts/ci/check-first-launch-restore-results.py --bgstart "$RUNNER_TEMP/bgstart"
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh bgstart
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh bgstart --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bgstart-results
+          path: ${{ runner.temp }}/bgstart
           if-no-files-found: error
 
   repro:
