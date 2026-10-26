@@ -25,6 +25,14 @@ import android.util.Log;
  * (IMPORTANCE_SERVICE or worse — the throwaway activity that started it has
  * finished): a binding made while foreground would leave a granting record —
  * exactly the capability a real denial must not carry.
+ *
+ * The activity bootstrap leaves a second grant: the activity-starter FGS
+ * exemption (REASON_ACTIVITY_STARTER — a ~10 s grace from the last activity
+ * launch/finish in the caller uid, the same window bg-activity-start uses).
+ * A bind inside that window stamps code:ACTIVITY_STARTER on the binding's
+ * allow record, which the card-stage probe correctly reads as a granting
+ * capability. The record is sticky, so the bind must also wait out the
+ * grace before it is created.
  */
 public final class BgActorService extends Service {
     private static final String TAG = "BgActor";
@@ -34,6 +42,9 @@ public final class BgActorService extends Service {
     static final String BIND_ACTION = "androidx.media3.session.MediaLibraryService";
 
     private static final long POLL_MS = 500;
+    // > the ~10 s activity-starter grace, counted from service start (the
+    // bootstrap activity launches and finishes ~0.3 s before this service).
+    private static final long MIN_BIND_AGE_MS = 15_000;
     private static final long BIND_DEADLINE_MS = 60_000;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -66,7 +77,8 @@ public final class BgActorService extends Service {
             return;
         }
         int importance = ownImportance();
-        if (importance < ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE) {
+        if (importance < ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE
+            || elapsed < MIN_BIND_AGE_MS) {
             handler.postDelayed(this::maybeBind, POLL_MS);
             return;
         }
