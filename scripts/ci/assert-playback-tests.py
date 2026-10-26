@@ -16,6 +16,7 @@ SHORT = {
 }
 LONG = "screenOffStreamsForThirtyMinutesAndAdvances"
 HARDENING = "hardeningUiNotificationAndColdMediaKeyStarts"
+SOAK_DEVICES = {"api34"}
 
 
 def verify(root, profile, devices):
@@ -23,18 +24,22 @@ def verify(root, profile, devices):
         # deniedBackgroundStartOffersWorkingResume runs in the external bgstart lane;
         # its aggregate asserts the case there (an instrumented target cannot deny it).
         expected = {"notificationTransportAndLocalArtwork"} if profile == "release" else set(SHORT)
-        if profile == "nightly" and device == "api34":
+        if profile == "nightly" and device in SOAK_DEVICES:
             expected.add(LONG)
         if profile == "api37":
             expected.add(HARDENING)
         evidence = {name: [] for name in expected}
+        flavors = ("Release",) if profile == "release" else ("Debug", "Release")
         for report in root.rglob("*.xml"):
-            if device != "connected" and not any(
-                re.fullmatch(re.escape(device) + r"(?:Debug|Release)AndroidTest", part) or part == device
+            if not any(
+                re.fullmatch(re.escape(device) + rf"(?:{'|'.join(flavors)})AndroidTest", part) or part == device
                 for part in report.parts
             ):
                 continue
-            suite = ET.parse(report).getroot()
+            try:
+                suite = ET.parse(report).getroot()
+            except ET.ParseError:
+                continue  # not a JUnit report (coverage/manifest output); absence check still fails closed
             for case in suite.iter("testcase"):
                 if case.get("classname") != CLASS:
                     continue

@@ -18,9 +18,9 @@ class PlaybackEvidenceTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
 
-    def report(self, device, names, skipped=None):
-        folder = self.root / f"{device}DebugAndroidTest"
-        folder.mkdir(exist_ok=True)
+    def report(self, device, names, skipped=None, flavor="Debug", directory=None):
+        folder = self.root / (directory or f"{device}{flavor}AndroidTest")
+        folder.mkdir(parents=True, exist_ok=True)
         suite = ET.Element("testsuite")
         for name in names:
             case = ET.SubElement(suite, "testcase", classname=gate.CLASS, name=name, time="1801")
@@ -58,7 +58,35 @@ class PlaybackEvidenceTest(unittest.TestCase):
         self.report("connected", gate.SHORT)
         with self.assertRaises(ValueError):
             gate.verify(self.root, "api37", ["connected"])
+        self.report("connected", {"notificationTransportAndLocalArtwork"}, flavor="Release")
         gate.verify(self.root, "release", ["connected"])
+
+    def test_release_lane_rejects_debug_flavor_evidence(self):
+        self.report("api36", {"notificationTransportAndLocalArtwork"})
+        with self.assertRaises(ValueError):
+            gate.verify(self.root, "release", ["api36"])
+        self.report("api36", {"notificationTransportAndLocalArtwork"}, flavor="Release")
+        gate.verify(self.root, "release", ["api36"])
+
+    def test_connected_lane_only_accepts_connected_evidence(self):
+        self.report("api26", gate.SHORT)
+        with self.assertRaises(ValueError):
+            gate.verify(self.root, "ci", ["connected"])
+        # Gradle writes connected results under a literal "connected" directory.
+        self.report("connected", gate.SHORT, directory="connected/debug")
+        gate.verify(self.root, "ci", ["connected"])
+        gate.verify(self.root, "ci", ["api26"])
+
+    def test_stray_xml_is_skipped_and_absence_still_fails_closed(self):
+        folder = self.root / "api26DebugAndroidTest"
+        folder.mkdir()
+        (folder / "coverage-report.xml").write_text("<coverage><unclosed")
+        with self.assertRaises(ValueError):
+            gate.verify(self.root, "ci", ["api26"])
+        self.report("api26", gate.SHORT)
+        gate.verify(self.root, "ci", ["api26"])
+        (folder / "manifest-fragment.xml").write_text("<manifest/>")
+        gate.verify(self.root, "ci", ["api26"])
 
     def test_failures_and_duplicate_evidence_are_rejected(self):
         self.report("api26", gate.SHORT)
