@@ -23,7 +23,16 @@ internal class TapToResumeNotifier(
         ) {
             return false
         }
+        val notificationManager = application.getSystemService(NotificationManager::class.java)
+        if (!notificationManager.areNotificationsEnabled()) {
+            return false
+        }
         PlaybackChannels.create(application)
+        if (notificationManager.getNotificationChannel(PlaybackChannels.ALERTS)?.importance ==
+            NotificationManager.IMPORTANCE_NONE
+        ) {
+            return false
+        }
         val resume =
             PlaybackPendingIntentBuilder(application, Player.COMMAND_PLAY_PAUSE, NeutrodynePlaybackService::class.java)
                 .setStartAsForegroundService(true)

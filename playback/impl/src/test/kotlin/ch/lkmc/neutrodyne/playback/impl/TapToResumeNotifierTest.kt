@@ -28,6 +28,26 @@ class TapToResumeNotifierTest {
         assertNull(shadowOf(manager).getNotification(PlaybackChannels.NOTIF_ID_TAP_TO_RESUME))
     }
 
+    @Test fun disabledNotificationsLeaveRecoveryInApp() {
+        val app: Application = RuntimeEnvironment.getApplication()
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = app.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationsEnabled(false)
+        assertFalse(TapToResumeNotifier(app).post())
+        assertNull(shadowOf(manager).getNotification(PlaybackChannels.NOTIF_ID_TAP_TO_RESUME))
+    }
+
+    @Test fun blockedAlertsChannelLeavesRecoveryInApp() {
+        val app: Application = RuntimeEnvironment.getApplication()
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        PlaybackChannels.create(app)
+        val manager = app.getSystemService(NotificationManager::class.java)
+        manager.getNotificationChannel(PlaybackChannels.ALERTS).importance =
+            NotificationManager.IMPORTANCE_NONE
+        assertFalse(TapToResumeNotifier(app).post())
+        assertNull(shadowOf(manager).getNotification(PlaybackChannels.NOTIF_ID_TAP_TO_RESUME))
+    }
+
     @Test fun grantedRecoveryOffersAnExplicitMediaButtonActionAndCancels() {
         val app: Application = RuntimeEnvironment.getApplication()
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
