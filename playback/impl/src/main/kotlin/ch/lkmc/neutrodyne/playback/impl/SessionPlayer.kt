@@ -50,14 +50,17 @@ internal class SessionPlayer private constructor(
         return state.buildUpon().setAvailableCommands(commands.build()).build()
     }
 
+    private var playWhenReadyIntent = false
+
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        playWhenReadyIntent = playWhenReady
         if (!playWhenReady) {
             exo.pause()
             return Futures.immediateVoidFuture()
         }
 
         return scope.future {
-            if (beforePlay()) exo.play()
+            if (beforePlay() && playWhenReadyIntent) exo.play()
             Unit
         }
     }
@@ -88,7 +91,11 @@ internal class SessionPlayer private constructor(
             }
         }
 
-    override fun handleStop(): ListenableFuture<*> = scope.future { stopAction() }
+    override fun handleStop(): ListenableFuture<*> =
+        scope.future {
+            playWhenReadyIntent = false
+            stopAction()
+        }
 }
 
 /** Media3 installs its forwarding listener during construction, before the database-backed adapters. */

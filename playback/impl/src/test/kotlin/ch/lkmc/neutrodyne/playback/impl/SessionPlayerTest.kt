@@ -6,6 +6,7 @@ import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -100,6 +101,17 @@ class SessionPlayerTest {
         player.seekToPreviousMediaItem()
         player.seekToPrevious()
         assertEquals(2, previous)
+    }
+
+    @Test fun pauseArrivingDuringBeforePlayWinsOverTheLatePlay() {
+        load()
+        val gate = CompletableDeferred<Boolean>()
+        val gated = SessionPlayer(exo, scope, { gate.await() }, { previous++ }, {})
+        gated.play()
+        gated.pause()
+        gate.complete(true)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(exo.playWhenReady)
     }
 
     @Test fun neverResumesWhenGateRefuses() {
