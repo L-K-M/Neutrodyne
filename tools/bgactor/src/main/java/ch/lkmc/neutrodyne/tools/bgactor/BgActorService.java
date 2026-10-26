@@ -6,11 +6,13 @@ import android.app.Service;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
+import android.util.Log;
 
 /**
  * The bgstart leg's inert external actor: a plain background service — never a
@@ -25,6 +27,7 @@ import android.os.SystemClock;
  * exactly the capability a real denial must not carry.
  */
 public final class BgActorService extends Service {
+    private static final String TAG = "BgActor";
     static final String TARGET_PACKAGE = "ch.lkmc.neutrodyne";
     static final String TARGET_SERVICE =
         "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService";
@@ -54,20 +57,66 @@ public final class BgActorService extends Service {
     }
 
     private void maybeBind() {
-        if (bound
-            || SystemClock.elapsedRealtime() - startedAt > BIND_DEADLINE_MS) {
+        if (bound) {
             return;
         }
-        if (ownImportance() < ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE) {
+        long elapsed = SystemClock.elapsedRealtime() - startedAt;
+        if (elapsed > BIND_DEADLINE_MS) {
+            failBind("bind deadline elapsed", ownImportance(), elapsed);
+            return;
+        }
+        int importance = ownImportance();
+        if (importance < ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE) {
             handler.postDelayed(this::maybeBind, POLL_MS);
             return;
         }
-        bound =
-            bindService(
-                new Intent(BIND_ACTION)
-                    .setComponent(new ComponentName(TARGET_PACKAGE, TARGET_SERVICE)),
-                connection,
-                BIND_AUTO_CREATE);
+        boolean accepted;
+        try {
+            accepted =
+                bindService(
+                    new Intent(BIND_ACTION)
+                        .setComponent(new ComponentName(TARGET_PACKAGE, TARGET_SERVICE)),
+                    connection,
+                    BIND_AUTO_CREATE);
+        } catch (RuntimeException e) {
+            failBind("bindService threw " + e, importance, elapsed);
+            return;
+        }
+        if (!accepted) {
+            failBind("bindService returned false", importance, elapsed);
+            return;
+        }
+        bound = true;
+    }
+
+    /**
+     * Loud, greppable terminal failure carrying the caller state at bind time:
+     * a false return leaves no dumpsys record for the driver to find, so the
+     * cause must be unmistakable in logcat. `targetPackageVisible` directly
+     * reports the Android 11+ visibility decision; `servicesMatchingAction`
+     * reports what the same filter lets a queryIntentServices see.
+     */
+    private void failBind(String reason, int importance, long elapsed) {
+        boolean targetVisible;
+        try {
+            getPackageManager().getPackageInfo(TARGET_PACKAGE, 0);
+            targetVisible = true;
+        } catch (PackageManager.NameNotFoundException e) {
+            targetVisible = false;
+        }
+        int matching =
+            getPackageManager()
+                .queryIntentServices(new Intent(BIND_ACTION), 0)
+                .size();
+        Log.e(
+            TAG,
+            "BGACTOR-FAIL " + reason
+                + " uid=" + Process.myUid()
+                + " importance=" + importance
+                + " elapsedMs=" + elapsed
+                + " targetPackageVisible=" + targetVisible
+                + " servicesMatchingAction=" + matching);
+        stopSelf();
     }
 
     private int ownImportance() {

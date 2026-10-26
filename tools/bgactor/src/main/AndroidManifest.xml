@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: Unlicense -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Android 11+ package visibility applies at this APK's targetSdk 30: a
+         normal caller cannot resolve the target's service at all, and
+         system_server's resolveService filters invisible packages even for an
+         explicit component — the bind dies there with "not found". Declaring
+         the package (plus the two actions its service filters for) keeps the
+         bind resolvable without lowering targetSdk. -->
+    <queries>
+        <package android:name="ch.lkmc.neutrodyne" />
+        <intent>
+            <action android:name="androidx.media3.session.MediaLibraryService" />
+        </intent>
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+    </queries>
     <application android:label="bgactor" android:allowBackup="false">
         <!-- Exported so the rooted shell `am start` can bring the actor up — an
              activity launch is exempt from the bg-start restriction that denies
