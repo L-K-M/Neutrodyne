@@ -20,6 +20,10 @@ Two modes:
   restored database content. `bmgr-check.sh` runs it before the empty control.
 - `--bmgr-empty EVIDENCE_DIR`: validates the subsequent empty-dataset capture.
   The `--bmgr` aggregate requires both phase checks verbatim.
+- `--bgstart ROOT`: the M4 P6b external background-start gate — strict
+  verification of the `scripts/ci/bgstart-check.sh` evidence tree (one
+  `apiNN/` directory per leg): denial and resume dumpsys captures, the
+  instrument/status/marker wire, sidecar binding and selectors.
 """
 
 import argparse
@@ -188,9 +192,9 @@ def status_values(text, key):
                       text, re.M)
 
 
-def check_instrument_log(device, phase, nonce, text):
-    expected = [(BMGR_CLASS, BMGR_METHODS[phase], 1),
-                (BMGR_CLASS, BMGR_METHODS[phase], 0)]
+def check_instrument_log(device, phase, nonce, text, cls=BMGR_CLASS, method=None):
+    method = BMGR_METHODS[phase] if method is None else method
+    expected = [(cls, method, 1), (cls, method, 0)]
     cases = instrument_cases(text)
     if cases != expected:
         raise ValueError(
@@ -217,7 +221,8 @@ def driver_v1(record):
     return type(version) is int and version == 1
 
 
-def check_driver_status(device, phase, nonce, api, driver_pkg, path):
+def check_driver_status(device, phase, nonce, api, driver_pkg, path,
+                        required_steps=None):
     """The durable per-phase record — a foreign, stale or unknown status fails."""
     try:
         status = json.loads(path.read_text())
@@ -234,9 +239,11 @@ def check_driver_status(device, phase, nonce, api, driver_pkg, path):
             or any(not isinstance(s.get("name"), str) or not isinstance(s.get("at"), int)
                    for s in steps):
         raise ValueError(f"{device}: {phase} status has malformed steps")
-    required = {"seed": {"built", "launched", "preview", "categories", "requested"},
-                "flip": {"built", "launched", "preview", "categories", "requested"},
-                "encrypted": {"built", "launched", "rejected"}}[phase]
+    required = required_steps or {
+        "seed": {"built", "launched", "preview", "categories", "requested"},
+        "flip": {"built", "launched", "preview", "categories", "requested"},
+        "encrypted": {"built", "launched", "rejected"},
+    }[phase]
     names = [s["name"] for s in steps]
     if len(names) != len(set(names)) or not required <= set(names):
         raise ValueError(f"{device}: {phase} status misses steps {sorted(required - set(names))}")
@@ -927,6 +934,324 @@ def check_bmgr(root):
     print("bmgr: PASS api31 + api36")
 
 
+# ---- M4 P6b bgstart external gate ---------------------------------------------
+# The denial+resume case cannot live inside the instrumented app APK (active
+# instrumentation grants PROCESS_CAPABILITY_BFSL), so this aggregate re-verifies
+# the external lane's saved dumpsys/notification/audio/session captures.
+
+BGSTART_DEVICES = {"api31": 31, "api36": 36}
+BGSTART_CLASS = "ch.lkmc.neutrodyne.tools.bmgrdriver.BgStartTest"
+BGSTART_METHODS = {
+    "bgseed": "seedPausedSession",
+    "bgstart": "deniedBackgroundStartOffersWorkingResume",
+}
+BGSTART_LOGS = {phase: f"instrument-{phase}.log" for phase in BGSTART_METHODS}
+BGSTART_SELECTORS = (
+    "apkNonDebuggable", "driverInstrumentationAvailable", "seedImportDone",
+    "durableQueueSeeded", "targetColdBelowBfgs", "bgstartCompleted",
+)
+BGSTART_STEPS = {
+    "bgseed": {"built", "launched", "preview", "revoked", "categories", "requested"},
+    "bgstart": {"sidecar", "served", "service-started", "guarded",
+                "play-tapped", "denied", "resume-tapped", "resumed"},
+}
+BGSTART_PROCSTATE_SERVICE = 10
+BGSTART_RESUME_ID = 4001
+BGSTART_PLAYBACK_ID = 4000
+BGSTART_RESUME_CHANNEL = "alerts"
+BGSTART_PLAYBACK_CHANNEL = "playback"
+BGSTART_POSITION_ADVANCE_MS = 200
+# uidState names numerically worse than BFGS(5): an attempt made from any of these
+# cannot have been allowed by the uid's own process state.
+BGSTART_UIDSTATE_BELOW_BFGS = {
+    "IMPF", "IMPB", "TRNB", "BAK", "SVC", "RCVR", "TPSL",
+    "HVY", "HOME", "LAST", "CAC", "CCE", "CRE", "NONE", "NEX",
+}
+
+# The record body carries one-level brackets (`uidBFSL: [BFSL]`); the balanced
+# outer pair keeps the record from truncating at the first inner `]`.
+ALLOW_INFO_RE = re.compile(r"infoAllowStartForeground=\[((?:[^\[\]]|\[[^\]]*\])*)\]")
+ALLOW_FIELD_RE = re.compile(r"([a-zA-Z]+)\s*:\s*([^;]*)")
+IS_BIND_RE = re.compile(r"isBindService\s*:\s*(true|false)")
+TEMP_IN_RECORD_RE = re.compile(r"tempAllowListReason\s*:\s*(<null>|[^;\]]+)")
+TEMP_ALLOW_RE = re.compile(r"tempAllowListReason\s*[:=]\s*([^;\]\s]+)")
+UID_STATE_RE = re.compile(r"^\s*(-?\d+)\s*\(", re.M)
+
+
+def allow_infos(text):
+    """Every `infoAllowStartForeground=[...]` record as a {field: value} dict."""
+    records = []
+    for match in ALLOW_INFO_RE.finditer(text):
+        body = match.group(1)
+        fields = {m.group(1): m.group(2).strip()
+                  for m in ALLOW_FIELD_RE.finditer(body)}
+        is_bind = IS_BIND_RE.search(body)
+        temp = TEMP_IN_RECORD_RE.search(body)
+        fields["isBindService"] = is_bind.group(1) if is_bind else None
+        fields["tempAllowListReason"] = temp.group(1) if temp else None
+        records.append(fields)
+    return records
+
+
+def uid_state(text):
+    match = UID_STATE_RE.search(text)
+    return int(match.group(1)) if match else None
+
+
+def has_notification(text, pkg, nid, channel):
+    return any(f"pkg={pkg}" in line and f"id={nid}" in line
+               and f"channel={channel}" in line
+               for line in text.splitlines())
+
+
+def has_notification_id(text, pkg, nid):
+    return any(f"pkg={pkg}" in line and f"id={nid}" in line
+               for line in text.splitlines())
+
+
+def apc_started(text, uid):
+    uid_token = re.compile(rf"uid[:=]\s*{uid}\b")
+    return any("state:started" in line and uid_token.search(line)
+               for line in text.splitlines())
+
+
+def playback_sample(text, pkg):
+    """The PlaybackState nearest the session block naming `pkg`, or None."""
+    lines = text.splitlines()
+    pkg_lines = [i for i, line in enumerate(lines) if pkg in line]
+    if not pkg_lines:
+        return None
+    candidates = [i for i, line in enumerate(lines) if "PlaybackState" in line]
+    if not candidates:
+        return None
+    index = min(candidates,
+                key=lambda i: min(abs(i - p) for p in pkg_lines))
+    if min(abs(index - p) for p in pkg_lines) > 80:
+        return None
+    line = lines[index]
+    state = re.search(r"state=(?:[A-Z_]+\()?(-?\d+)\)?", line)
+    position = re.search(r"(?<!buffered )position=(-?\d+)", line)
+    speed = re.search(r"speed=(-?[\d.]+)", line)
+    updated = re.search(r"updated=(-?\d+)", line)
+    return {
+        "state": int(state.group(1)) if state else None,
+        "position": int(position.group(1)) if position else None,
+        "speed": float(speed.group(1)) if speed else None,
+        "updated": int(updated.group(1)) if updated else None,
+    }
+
+
+def bgstart_text(directory, name):
+    path = directory / name
+    if not path.is_file() or not path.read_text(errors="replace").strip():
+        raise ValueError(f"bgstart evidence missing or empty: {name}")
+    return path.read_text(errors="replace")
+
+
+def check_self_records(device, stage, services, app_uid):
+    """No record tied to the target's own attempt may carry an FGS grant surface."""
+    for info in allow_infos(services):
+        self_record = info.get("isBindService") == "false" \
+            or info.get("callingUid") == str(app_uid)
+        if not self_record:
+            continue
+        if "BFSL" in (info.get("uidBFSL") or ""):
+            raise ValueError(
+                f"{device}: {stage} self record carries [BFSL]: {info}")
+        if info.get("uidState") and info["uidState"] \
+                not in BGSTART_UIDSTATE_BELOW_BFGS:
+            raise ValueError(
+                f"{device}: {stage} self record uidState "
+                f"{info['uidState']!r} above BFGS")
+        if info.get("tempAllowListReason") not in ("<null>", "null", None):
+            raise ValueError(
+                f"{device}: {stage} self record tempAllowListReason "
+                f"{info['tempAllowListReason']!r} != <null>")
+
+
+def check_bgstart_denial(device, directory, app_uid):
+    """The denied stage: genuine FSSNAE surfaces, nothing allowed, session paused."""
+    uid_text = bgstart_text(directory, "bgstart-uid-state-denied.txt")
+    state = uid_state(uid_text)
+    if state is None or state < BGSTART_PROCSTATE_SERVICE:
+        raise ValueError(f"{device}: denied uid-state {state!r} above SERVICE")
+    services = bgstart_text(directory, "bgstart-services-denied.txt")
+    processes = bgstart_text(directory, "bgstart-processes-denied.txt")
+    if "isForeground=false" not in services or "isForeground=true" in services:
+        raise ValueError(f"{device}: denied service not isForeground=false")
+    if "mAllowStart_noBinding=DENIED" not in services:
+        raise ValueError(f"{device}: denied dump lacks mAllowStart_noBinding=DENIED")
+    temp_values = TEMP_ALLOW_RE.findall(services + processes)
+    if not temp_values:
+        raise ValueError(
+            f"{device}: no tempAllowListReason surface to prove no allowlist")
+    if any(v not in ("<null>", "null") for v in temp_values):
+        raise ValueError(f"{device}: temp allowlist granted: {temp_values}")
+    check_self_records(device, "denied", services, app_uid)
+    notification = bgstart_text(directory, "bgstart-notification-denied.txt")
+    if not has_notification(notification, BMGR_TARGET, BGSTART_RESUME_ID,
+                            BGSTART_RESUME_CHANNEL):
+        raise ValueError(f"{device}: recovery notification 4001 absent")
+    audio = bgstart_text(directory, "bgstart-audio-denied.txt")
+    if apc_started(audio, app_uid):
+        raise ValueError(f"{device}: audio active for uid {app_uid} under denial")
+    sample = playback_sample(
+        bgstart_text(directory, "bgstart-media-session-denied.txt"), BMGR_TARGET)
+    if sample is None:
+        raise ValueError(f"{device}: no PlaybackState for the target session")
+    if sample["state"] != 2:
+        raise ValueError(f"{device}: denied session state {sample['state']} != PAUSED")
+
+
+def check_bgstart_before(device, directory):
+    """The pre-tap stage: a plain background service with no allow source."""
+    uid_text = bgstart_text(directory, "bgstart-uid-state-before.txt")
+    state = uid_state(uid_text)
+    if state is None or state < BGSTART_PROCSTATE_SERVICE:
+        raise ValueError(f"{device}: pre-tap uid-state {state!r} above SERVICE")
+    services = bgstart_text(directory, "bgstart-services-before.txt")
+    if "ServiceRecord{" not in services:
+        raise ValueError(f"{device}: pre-tap dump has no ServiceRecord")
+    if "isForeground=false" not in services or "isForeground=true" in services:
+        raise ValueError(f"{device}: pre-tap service not isForeground=false")
+    for field in ("mAllowStart_noBinding", "mAllowStart_byBindings"):
+        if f"{field}=DENIED" not in services:
+            raise ValueError(f"{device}: pre-tap {field} not DENIED")
+    cold = bgstart_text(directory, "uid-state-cold.txt")
+    cold_state = uid_state(cold)
+    if cold_state is None or cold_state < BGSTART_PROCSTATE_SERVICE:
+        raise ValueError(f"{device}: cold uid-state {cold_state!r} above SERVICE")
+
+
+def check_bgstart_resumed(device, directory, app_uid):
+    """The resumed stage: real playback — foreground 4000, audio, position, 4001 gone."""
+    services = bgstart_text(directory, "bgstart-services-resumed.txt")
+    if "isForeground=true" not in services:
+        raise ValueError(f"{device}: resumed service not isForeground=true")
+    notification = bgstart_text(directory, "bgstart-notification-resumed.txt")
+    if not has_notification(notification, BMGR_TARGET, BGSTART_PLAYBACK_ID,
+                            BGSTART_PLAYBACK_CHANNEL):
+        raise ValueError(f"{device}: playback notification 4000 absent")
+    if has_notification_id(notification, BMGR_TARGET, BGSTART_RESUME_ID):
+        raise ValueError(f"{device}: recovery notification 4001 not cancelled")
+    audio = bgstart_text(directory, "bgstart-audio-resumed.txt")
+    if not apc_started(audio, app_uid):
+        raise ValueError(f"{device}: no active playback for uid {app_uid}")
+    sample = playback_sample(
+        bgstart_text(directory, "bgstart-media-session-resumed.txt"), BMGR_TARGET)
+    if sample is None or sample["state"] != 3:
+        raise ValueError(f"{device}: resumed session not PLAYING")
+    positions = bgstart_text(directory, "bgstart-positions.txt")
+    lives = []
+    for match in re.finditer(
+            r"^sample=\d+ elapsed=(\d+) state=(\S+) position=(\S+) "
+            r"speed=(\S+) updated=(\S+) live=(\S+)$", positions, re.M):
+        elapsed, state, position, speed, updated, live = match.groups()
+        if state != "3":
+            raise ValueError(f"{device}: position sample not PLAYING: {match[0]}")
+        missing = ("None", "null")
+        if position in missing or speed in missing:
+            raise ValueError(f"{device}: unparseable position sample")
+        position, speed = int(position), float(speed)
+        computed = position + speed * (int(elapsed) - int(updated)) \
+            if updated not in missing else position
+        if live not in missing and abs(int(live) - computed) > 1:
+            raise ValueError(f"{device}: recorded live != computed position")
+        lives.append(computed)
+    if len(lives) != 2 or lives[1] - lives[0] <= BGSTART_POSITION_ADVANCE_MS:
+        raise ValueError(
+            f"{device}: position advance {lives} <= {BGSTART_POSITION_ADVANCE_MS}ms")
+
+
+def check_bgstart_device(root, device, api):
+    directory = root / device
+    if not directory.is_dir():
+        raise ValueError(f"{device}: evidence directory missing")
+    run = json.loads((directory / "run.json").read_text())
+    if run.get("schema") != "bgstart-evidence/v1" or run.get("api") != api:
+        raise ValueError(f"{device}: run.json schema/api mismatch")
+    if not run.get("fingerprint") or run.get("abi") != "x86_64" \
+            or not run.get("avd"):
+        raise ValueError(f"{device}: emulator identity evidence missing")
+    if not NONCE.fullmatch(run.get("nonce", "")):
+        raise ValueError(f"{device}: run nonce invalid")
+    nonce = run["nonce"]
+    if run.get("apkSha256") == run.get("driverApkSha256") \
+            or not SHA256.fullmatch(run.get("apkSha256", "")) \
+            or not SHA256.fullmatch(run.get("driverApkSha256", "")):
+        raise ValueError(f"{device}: apk/driver sha256 evidence missing or shared")
+    if run.get("driverPackage") == BMGR_TARGET or not run.get("driverPackage") \
+            or not run.get("driverRunner"):
+        raise ValueError(f"{device}: driver identity evidence missing")
+    if not isinstance(run.get("appUid"), int) or run["appUid"] <= 0:
+        raise ValueError(f"{device}: appUid evidence missing")
+    app_uid = run["appUid"]
+    instruments = (directory / "instrumentations.txt").read_text(errors="replace") \
+        if (directory / "instrumentations.txt").is_file() else ""
+    if f"instrumentation:{run['driverPackage']}/{run['driverRunner']} " \
+            f"(target={run['driverPackage']})" not in instruments \
+            or f"(target={BMGR_TARGET})" in instruments:
+        raise ValueError(f"{device}: driver instrumentation not self-targeting")
+    if run.get("cleanupStatus") != "ok":
+        raise ValueError(
+            f"{device}: cleanup status is {run.get('cleanupStatus')!r}, not 'ok'")
+    selectors = run.get("selectors")
+    if not isinstance(selectors, dict) \
+            or any(selectors.get(n) != "pass" for n in BGSTART_SELECTORS):
+        missing = [n for n in BGSTART_SELECTORS if (selectors or {}).get(n) != "pass"]
+        raise ValueError(f"{device}: selectors not all 'pass' ({', '.join(missing)})")
+
+    # The bgseed -> bgstart sidecar binds the restored session's loopback enclosure.
+    sidecar = json.loads(bgstart_text(directory, "bgstart.expected.json"))
+    if not driver_v1(sidecar) or sidecar.get("nonce") != nonce \
+            or sidecar.get("api") != api \
+            or not SHA256.fullmatch(sidecar.get("seedSha256", "")) \
+            or not isinstance(sidecar.get("seedBytes"), int) \
+            or not isinstance(sidecar.get("port"), int):
+        raise ValueError(f"{device}: bgstart sidecar identity malformed")
+    if not re.fullmatch(r"http://127\.0\.0\.1:\d+/ep2\.mp3",
+                        sidecar.get("enclosureUrl", "")) \
+            or not sidecar["enclosureUrl"].endswith(f":{sidecar['port']}/ep2.mp3"):
+        raise ValueError(f"{device}: sidecar enclosureUrl/port mismatch")
+    fixture = sidecar.get("fixture")
+    if not isinstance(fixture, dict) \
+            or not (fixture.get("session") or {}).get("current") \
+            or not fixture.get("queue"):
+        raise ValueError(f"{device}: sidecar fixture lacks a durable paused session")
+
+    for phase, name in BGSTART_LOGS.items():
+        path = directory / name
+        if not path.is_file():
+            raise ValueError(f"{device}: missing {name}")
+        check_instrument_log(device, phase, nonce,
+                             path.read_text(errors="replace"),
+                             BGSTART_CLASS, BGSTART_METHODS[phase])
+        status_path = directory / f"driver-status-{phase}.json"
+        if not status_path.is_file():
+            raise ValueError(f"{device}: missing driver-status-{phase}.json")
+        check_driver_status(device, phase, nonce, api, run["driverPackage"],
+                            status_path, BGSTART_STEPS[phase])
+
+    check_bgstart_before(device, directory)
+    check_bgstart_denial(device, directory, app_uid)
+    check_bgstart_resumed(device, directory, app_uid)
+    print(f"{device}: PASS bgstart external gate "
+          f"(denied background start -> SystemUI Resume -> playback)")
+
+
+def check_bgstart(root):
+    runs = {}
+    for device, api in BGSTART_DEVICES.items():
+        check_bgstart_device(root, device, api)
+        runs[device] = json.loads((root / device / "run.json").read_text())
+    a, b = runs["api31"], runs["api36"]
+    for field in ("sourceSha", "apkSha256", "driverApkSha256",
+                  "driverPackage", "driverRunner"):
+        if not a.get(field) or a[field] != b.get(field):
+            raise ValueError(f"bgstart: {field} differs across legs")
+    print("bgstart: PASS api31 + api36")
+
+
 def run_bmgr_pull(directory):
     """The pre-cleanup pull gate binds the closed facts, never run.json — the
     final run record is written only by cleanup(), so nothing in-progress can
@@ -965,10 +1290,14 @@ def main():
                         help="validate the subsequent empty-dataset capture")
     parser.add_argument("--bmgr-prelaunch", nargs=3, metavar=("EVIDENCE_DIR", "DEVICE", "NONCE"),
                         help="validate the stopped install/restore window before normal launch")
+    parser.add_argument("--bgstart", metavar="ROOT", type=Path,
+                        help="strict M4 P6b bgstart evidence root (api31/api36 dirs)")
     args = parser.parse_args()
     try:
         if args.bmgr is not None:
             check_bmgr(args.bmgr)
+        elif args.bgstart is not None:
+            check_bgstart(args.bgstart)
         elif args.bmgr_encoff is not None:
             run_bmgr_encoff(*args.bmgr_encoff)
         elif args.bmgr_tar is not None:

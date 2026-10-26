@@ -1783,5 +1783,331 @@ class BmgrHostScriptTest(unittest.TestCase):
         self.assertGreater((ev / "driver-status-seed.json").stat().st_size, 0)
 
 
+# ---- bgstart fixtures --------------------------------------------------------
+
+BG_CLASS = "ch.lkmc.neutrodyne.tools.bmgrdriver.BgStartTest"
+BG_METHODS = {"bgseed": "seedPausedSession",
+              "bgstart": "deniedBackgroundStartOffersWorkingResume"}
+BG_STEPS = {
+    "bgseed": ["built", "launched", "preview", "revoked", "categories", "requested"],
+    "bgstart": ["sidecar", "served", "service-started", "guarded",
+                "play-tapped", "denied", "resume-tapped", "resumed"],
+}
+BG_SELECTORS = (
+    "apkNonDebuggable", "driverInstrumentationAvailable", "seedImportDone",
+    "durableQueueSeeded", "targetColdBelowBfgs", "bgstartCompleted",
+)
+BG_UID = 10150
+
+
+def bg_instrument_log(phase, nonce, fail_code=0):
+    method = BG_METHODS[phase]
+    return (
+        f"INSTRUMENTATION_STATUS: class={BG_CLASS}\n"
+        f"INSTRUMENTATION_STATUS: test={method}\n"
+        f"INSTRUMENTATION_STATUS: numtests=1\n"
+        f"INSTRUMENTATION_STATUS_CODE: 1\n"
+        f"INSTRUMENTATION_STATUS: bmgrDriver={phase}:{nonce}:ok\n"
+        f"INSTRUMENTATION_STATUS_CODE: 0\n"
+        f"INSTRUMENTATION_STATUS: class={BG_CLASS}\n"
+        f"INSTRUMENTATION_STATUS: test={method}\n"
+        f"INSTRUMENTATION_STATUS_CODE: {fail_code}\n"
+        "INSTRUMENTATION_RESULT: stream=\nTest results ran to completion.\nOK (1 test)\n"
+        "INSTRUMENTATION_CODE: -1\n"
+    )
+
+
+def bg_driver_status(phase, nonce, api):
+    return {
+        "phase": phase, "nonce": nonce, "api": api,
+        "driverPackage": DRV_PKG, "targetPackage": PKG,
+        "startedAt": 1_700_000_000_000,
+        "steps": [{"name": s, "at": 1_700_000_000_000} for s in BG_STEPS[phase]],
+        "result": "ok",
+    }
+
+
+def bg_services(stage):
+    """A ServiceRecord dump: the denial attempt's own record with no grant surface."""
+    foreground = {"before": "false", "denied": "false", "resumed": "true"}[stage]
+    info = (
+        "infoAllowStartForeground=[callingPackage: ch.lkmc.neutrodyne; "
+        f"callingUid: {BG_UID}; uidState: SVC ; uidBFSL: []; "
+        "intent: Intent { cmp=ch.lkmc.neutrodyne/.NeutrodynePlaybackService }; "
+        "code:DENIED; tempAllowListReason:<null>; allowWiu:0; "
+        "targetSdkVersion:36; callerTargetSdkVersion:0; startForegroundCount:0; "
+        "bindFromPackage:null: isBindService:false]"
+    )
+    return f"""ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  ServiceRecord{{u0 4f7a123 u0a{BG_UID} ch.lkmc.neutrodyne/.NeutrodynePlaybackService}}
+    intent={{cmp=ch.lkmc.neutrodyne/ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService}}
+    packageName=ch.lkmc.neutrodyne
+    app=ProcessRecord{{abc123 5123:ch.lkmc.neutrodyne/u0a{BG_UID % 1000}}}
+    startRequested=true lastStartId=1
+    isForeground={foreground} foregroundId=0 foregroundNoti=null
+    mAllowStart_noBinding=DENIED
+    mAllowStart_inBindService=DENIED
+    mAllowStart_byBindings=DENIED
+    {info}
+"""
+
+
+def bg_processes():
+    return f"""ACTIVITY MANAGER LRU PROCESSES (dumpsys activity processes)
+  ProcessRecord{{abc123 5123:ch.lkmc.neutrodyne/u0a{BG_UID % 1000}}}
+    user #0 uid={BG_UID}
+    tempAllowListReason=<null>
+"""
+
+
+def bg_notification(records):
+    return "\n".join(records) + "\n"
+
+
+def bg_notif(nid, channel):
+    return (f"NotificationRecord(0x{nid:04x}: pkg={PKG} user=UserHandle{{0}} "
+            f"id={nid} tag=null key=t: Notification(channel={channel} pri=0))")
+
+
+def bg_audio(started):
+    state = "started" if started else "stopped"
+    return ("AudioPlaybackConfiguration items:\n"
+            f"  - piid:391 uid:{BG_UID} state:{state} "
+            "attr:{Content type: CONTENT_TYPE_SPEECH Usage: USAGE_MEDIA}\n")
+
+
+def bg_media_session(state, speed):
+    return (f"Media sessions (1):\n"
+            f"  {PKG}/ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService (userId=0)\n"
+            f"    PlaybackState {{state={state}, position=750000, "
+            f"buffered position=760000, speed={speed}, updated=9000, actions=12345}}\n")
+
+
+BG_POSITIONS = (
+    "sample=1 elapsed=10500 state=3 position=750000 speed=1.0 updated=9000 live=751500\n"
+    "sample=2 elapsed=12000 state=3 position=750000 speed=1.0 updated=9000 live=753000\n"
+    "delta=1500\n"
+)
+
+
+def bg_sidecar(nonce, api):
+    fixture = bmgr_fixture()
+    for episode in fixture["episodes"]:
+        if episode["k"] == "epk-a2":
+            episode["u"] = "http://127.0.0.1:47123/ep2.mp3"
+            episode["ty"] = "audio/wav"
+    return {
+        "v": 1, "nonce": nonce, "api": api,
+        "seedSha256": "e" * 64, "seedBytes": 7,
+        "port": 47123, "enclosureUrl": "http://127.0.0.1:47123/ep2.mp3",
+        "fixture": fixture,
+    }
+
+
+class BgstartEvidenceTest(unittest.TestCase):
+    """`--bgstart` strict-mode fixtures — built entirely with the stdlib, offline."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def build_leg(self, device, api, mutate=None):
+        directory = self.root / device
+        directory.mkdir(parents=True, exist_ok=True)
+        run = {
+            "schema": "bgstart-evidence/v1", "device": device, "api": api,
+            "fingerprint": "google/sdk/fp", "abi": "x86_64", "nonce": NONCE,
+            "sourceSha": "abc", "apkSha256": "a" * 64, "apkBytes": 10,
+            "driverApkSha256": "b" * 64, "driverPackage": DRV_PKG,
+            "driverRunner": DRV_RUNNER, "certSha256": "c" * 64,
+            "avd": f"bgstart-api{api}", "appUid": BG_UID,
+            "cleanupStatus": "ok",
+            "startedAt": "2026-01-01T00:00:00Z", "finishedAt": "2026-01-01T00:10:00Z",
+            "selectors": {name: "pass" for name in BG_SELECTORS},
+        }
+        texts = {
+            "facts.txt": f"device={device}\napi={api}\nnonce={NONCE}\n"
+                         + "".join(f"selector.{n}=pass\n" for n in BG_SELECTORS),
+            "selectors.txt": "".join(f"{n}=pass\n" for n in BG_SELECTORS),
+            "instrumentations.txt":
+                f"instrumentation:{DRV_PKG}/{DRV_RUNNER} (target={DRV_PKG})\n",
+            "bgstart.expected.json": json.dumps(bg_sidecar(NONCE, api)),
+            "uid-state-cold.txt": "20 (NONEXISTENT)\n",
+            "bgstart-uid-state-before.txt": "10 (SERVICE)\n",
+            "bgstart-uid-state-denied.txt": "10 (SERVICE)\n",
+            "bgstart-uid-state-resumed.txt": "4 (FOREGROUND_SERVICE)\n",
+            "bgstart-services-before.txt": bg_services("before"),
+            "bgstart-services-denied.txt": bg_services("denied"),
+            "bgstart-services-resumed.txt": bg_services("resumed"),
+            "bgstart-processes-before.txt": bg_processes(),
+            "bgstart-processes-denied.txt": bg_processes(),
+            "bgstart-processes-resumed.txt": bg_processes(),
+            "bgstart-notification-denied.txt": bg_notification([bg_notif(4001, "alerts")]),
+            "bgstart-notification-resumed.txt":
+                bg_notification([bg_notif(4000, "playback")]),
+            "bgstart-media-session-denied.txt": bg_media_session("PAUSED(2)", "0.0"),
+            "bgstart-media-session-resumed.txt": bg_media_session("PLAYING(3)", "1.0"),
+            "bgstart-audio-denied.txt": bg_audio(False),
+            "bgstart-audio-resumed.txt": bg_audio(True),
+            "bgstart-positions.txt": BG_POSITIONS,
+            "bgstart-fssnae-logcat.txt": "",
+            "ui-bgstart-shade.xml": "<hierarchy />",
+        }
+        logs = {p: bg_instrument_log(p, NONCE) for p in BG_METHODS}
+        statuses = {p: bg_driver_status(p, NONCE, api) for p in BG_METHODS}
+        if mutate:
+            mutate(directory, run, texts, logs, statuses)
+        for name, text in texts.items():
+            (directory / name).write_text(text)
+        for phase, text in logs.items():
+            (directory / f"instrument-{phase}.log").write_text(text)
+            (directory / f"driver-status-{phase}.json").write_text(
+                json.dumps(statuses[phase]))
+        (directory / "run.json").write_text(json.dumps(run))
+        return directory
+
+    def build(self, devices=("api31", "api36"), mutate=None):
+        apis = {"api31": 31, "api36": 36}
+        for device in devices:
+            self.build_leg(device, apis[device],
+                           mutate.get(device) if mutate else None)
+
+    def check(self):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "--bgstart", str(self.root)],
+            capture_output=True, text=True, timeout=60)
+
+    def assert_rejected(self, device_mutations, diagnostic=None):
+        self.build(mutate=device_mutations)
+        result = self.check()
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        if diagnostic:
+            self.assertIn(diagnostic, result.stderr)
+
+    def test_accepts_a_complete_two_leg_run(self):
+        self.build()
+        result = self.check()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("bgstart: PASS api31 + api36", result.stdout)
+
+    def test_rejects_a_missing_leg(self):
+        self.build(("api31",))
+        result = self.check()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("api36:", result.stderr)
+
+    def test_rejects_a_failed_or_skipped_case(self):
+        def mutate(directory, run, texts, logs, statuses):
+            logs["bgstart"] = bg_instrument_log("bgstart", NONCE, fail_code=-3)
+        self.assert_rejected({"api36": mutate}, "instrument evidence mismatch")
+
+    def test_rejects_a_nonce_mismatch(self):
+        def mutate(directory, run, texts, logs, statuses):
+            run["nonce"] = "other-nonce-1"
+            texts["bgstart.expected.json"] = json.dumps(
+                bg_sidecar("other-nonce-1", run["api"]))
+        self.assert_rejected({"api31": mutate}, "marker evidence")
+
+    def test_rejects_a_tampered_driver_status(self):
+        def mutate(directory, run, texts, logs, statuses):
+            statuses["bgstart"]["driverPackage"] = "evil.driver"
+        self.assert_rejected({"api31": mutate}, "status identity/result mismatch")
+
+    def test_rejects_a_targeting_instrumentation(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["instrumentations.txt"] = (
+                f"instrumentation:{DRV_PKG}/{DRV_RUNNER} (target={PKG})\n")
+        self.assert_rejected({"api36": mutate}, "self-targeting")
+
+    def test_rejects_a_foreground_service_under_denial(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-denied.txt"] = bg_services("resumed")
+        self.assert_rejected({"api31": mutate}, "not isForeground=false")
+
+    def test_rejects_a_bfsl_self_record(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-denied.txt"] = (
+                texts["bgstart-services-denied.txt"].replace(
+                    "uidBFSL: []", "uidBFSL: [BFSL]"))
+        self.assert_rejected({"api36": mutate}, "[BFSL]")
+
+    def test_rejects_an_elevated_uid_state(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-denied.txt"] = (
+                texts["bgstart-services-denied.txt"].replace(
+                    "uidState: SVC", "uidState: FGS"))
+        self.assert_rejected({"api31": mutate}, "above BFGS")
+
+    def test_rejects_a_temp_allowlist(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-services-denied.txt"] = (
+                texts["bgstart-services-denied.txt"].replace(
+                    "tempAllowListReason:<null>", "tempAllowListReason:EXEMPTED"))
+        self.assert_rejected({"api36": mutate}, "temp allowlist")
+
+    def test_rejects_a_missing_recovery_notification(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-notification-denied.txt"] = bg_notification(
+                [bg_notif(9999, "alerts")])
+        self.assert_rejected({"api31": mutate}, "4001")
+
+    def test_rejects_active_audio_under_denial(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-audio-denied.txt"] = bg_audio(True)
+        self.assert_rejected({"api36": mutate}, "audio active")
+
+    def test_rejects_a_missing_resume_surface(self):
+        for name, replacement, diagnostic in (
+                ("bgstart-notification-resumed.txt",
+                 bg_notification([bg_notif(4000, "other")]), "4000"),
+                ("bgstart-audio-resumed.txt", bg_audio(False), "active playback"),
+                ("bgstart-services-resumed.txt",
+                 bg_services("denied"), "isForeground=true")):
+            with self.subTest(evidence=name):
+                def mutate(directory, run, texts, logs, statuses,
+                           n=name, r=replacement):
+                    texts[n] = r
+                self.assert_rejected({"api31": mutate}, diagnostic)
+
+    def test_rejects_an_uncancelled_recovery_notification(self):
+        def mutate(directory, run, texts, logs, statuses):
+            texts["bgstart-notification-resumed.txt"] = bg_notification(
+                [bg_notif(4000, "playback"), bg_notif(4001, "alerts")])
+        self.assert_rejected({"api36": mutate}, "not cancelled")
+
+    def test_rejects_an_unmoving_position(self):
+        def mutate(directory, run, texts, logs, statuses):
+            # Keep live consistent with the sample fields; the delta shrinks to 100ms.
+            texts["bgstart-positions.txt"] = BG_POSITIONS.replace(
+                "elapsed=12000", "elapsed=10600").replace(
+                "live=753000", "live=751600")
+        self.assert_rejected({"api31": mutate}, "position advance")
+
+    def test_rejects_a_stale_sidecar(self):
+        def mutate(directory, run, texts, logs, statuses):
+            sidecar = json.loads(texts["bgstart.expected.json"])
+            sidecar["api"] = 28
+            texts["bgstart.expected.json"] = json.dumps(sidecar)
+        self.assert_rejected({"api36": mutate}, "sidecar identity malformed")
+
+    def test_rejects_a_non_loopback_enclosure(self):
+        def mutate(directory, run, texts, logs, statuses):
+            sidecar = json.loads(texts["bgstart.expected.json"])
+            sidecar["enclosureUrl"] = "https://example.test/ep2.mp3"
+            texts["bgstart.expected.json"] = json.dumps(sidecar)
+        self.assert_rejected({"api31": mutate}, "enclosureUrl/port mismatch")
+
+    def test_rejects_divergent_apks_across_legs(self):
+        def mutate(directory, run, texts, logs, statuses):
+            run["apkSha256"] = "d" * 64
+        self.assert_rejected({"api36": mutate}, "apkSha256 differs")
+
+    def test_rejects_an_unpassed_selector(self):
+        def mutate(directory, run, texts, logs, statuses):
+            run["selectors"]["targetColdBelowBfgs"] = "fail"
+        self.assert_rejected({"api36": mutate}, "targetColdBelowBfgs")
+
+
 if __name__ == "__main__":
     unittest.main()
