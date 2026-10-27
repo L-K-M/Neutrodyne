@@ -35,12 +35,9 @@ import java.util.concurrent.atomic.AtomicReference
  * [ReleaseSmoke] filter on the release legs of `release-build-smoke` (api36) and `api37-16k`;
  * the debug legs and the `ci` group run it alongside the rest of the suite.
  *
- * `ping` answering already proves `NeutrodyneApplication`'s `ProcessRole.YTX` branch survived
- * (it builds `YtxGraph`; a missing or R8-stripped Metro graph class would crash `onCreate`
- * before the binder ever answers). Android's process record below names the process that
- * `ProcessRole.current()` classifies, so `YTX` was classified there and no
- * `AndroidAppGraph` was built (the no-initializer/no-database probes are `YtxProcessStartTest`'s,
- * pending in 01's verification log).
+ * The answering PID must differ from the instrumented main process and match Android's
+ * `<package>:ytx` process record. This checks process wiring, not graph construction or
+ * initializer absence; those probes belong to `YtxProcessStartTest` (01's verification log).
  */
 @RunWith(AndroidJUnit4::class)
 @ReleaseSmoke
