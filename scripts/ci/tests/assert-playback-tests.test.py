@@ -11,6 +11,18 @@ spec = importlib.util.spec_from_file_location("gate", Path(__file__).parents[1] 
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
+RELEASE_SMOKE = {
+    "ch.lkmc.neutrodyne.SmokeTest": (
+        "fiveLabelledDestinations",
+        "destinationsSurviveRotationAndDarkMode",
+        "settingsOpensAndBackReturnsToTheTab",
+        "aboutShowsVersionAndAbi",
+        "licencesListsLibraries",
+    ),
+    "ch.lkmc.neutrodyne.YtxReleaseSmokeTest": ("selftestAnswersThroughYtxServiceInTheApp",),
+    gate.CLASS: ("notificationTransportAndLocalArtwork",),
+}
+
 
 class PlaybackEvidenceTest(unittest.TestCase):
     def setUp(self):
@@ -27,6 +39,22 @@ class PlaybackEvidenceTest(unittest.TestCase):
             if name == skipped:
                 ET.SubElement(case, "skipped")
         ET.ElementTree(suite).write(folder / "TEST-playback.xml")
+
+    def release_suite(self, directory, omit=(), marks=None, root=None,
+                      filename="TEST-release-smoke.xml"):
+        marks = marks or {}
+        folder = (root or self.root) / directory
+        folder.mkdir(parents=True, exist_ok=True)
+        suite = ET.Element("testsuite")
+        for classname, names in RELEASE_SMOKE.items():
+            for name in names:
+                if name in omit:
+                    continue
+                case = ET.SubElement(suite, "testcase", classname=classname, name=name, time="1")
+                if name in marks:
+                    ET.SubElement(case, marks[name])
+        ET.ElementTree(suite).write(folder / filename)
+        return folder
 
     def test_each_device_needs_its_own_cases(self):
         # The app-APK set never contains the routed background case; the
@@ -59,14 +87,55 @@ class PlaybackEvidenceTest(unittest.TestCase):
         self.report("connected", gate.SHORT)
         with self.assertRaises(ValueError):
             gate.verify(self.root, "api37", ["connected"])
-        self.report("connected", {"notificationTransportAndLocalArtwork"}, flavor="Release")
+        self.release_suite("connected/release")
         gate.verify(self.root, "release", ["connected"])
 
-    def test_release_lane_rejects_debug_flavor_evidence(self):
-        self.report("api36", {"notificationTransportAndLocalArtwork"})
+    def test_release_requires_the_full_seven_case_suite(self):
+        self.release_suite("api36ReleaseAndroidTest", omit=("licencesListsLibraries",))
         with self.assertRaises(ValueError):
             gate.verify(self.root, "release", ["api36"])
-        self.report("api36", {"notificationTransportAndLocalArtwork"}, flavor="Release")
+        self.release_suite("api36ReleaseAndroidTest")
+        gate.verify(self.root, "release", ["api36"])
+
+    def test_release_rejects_skipped_failed_errored_and_duplicate_cases(self):
+        directory = "api36ReleaseAndroidTest"
+        for mark in ("skipped", "failure", "error"):
+            self.release_suite(directory, marks={"fiveLabelledDestinations": mark})
+            with self.assertRaises(ValueError):
+                gate.verify(self.root, "release", ["api36"])
+        self.release_suite(directory)
+        self.release_suite(directory, filename="TEST-duplicate.xml")
+        with self.assertRaises(ValueError):
+            gate.verify(self.root, "release", ["api36"])
+
+    def test_release_foreign_class_is_not_evidence(self):
+        folder = self.release_suite("api36ReleaseAndroidTest", omit=("licencesListsLibraries",))
+        suite = ET.Element("testsuite")
+        ET.SubElement(suite, "testcase", classname="com.example.SmokeTest",
+                      name="licencesListsLibraries", time="1")
+        ET.ElementTree(suite).write(folder / "TEST-foreign.xml")
+        with self.assertRaises(ValueError):
+            gate.verify(self.root, "release", ["api36"])
+
+    def test_release_accepts_managed_device_and_connected_release_paths(self):
+        self.release_suite("managedDevice/release/api36")
+        self.release_suite("connected/release")
+        gate.verify(self.root, "release", ["api36", "connected"])
+
+    def test_release_rejects_debug_lane_report_paths(self):
+        for directory in ("managedDevice/debug/api36", "connected/debug",
+                          "release/managedDevice/debug/api36", "release/connected/debug"):
+            device = "connected" if "connected" in directory else "api36"
+            with self.subTest(directory=directory), tempfile.TemporaryDirectory() as other:
+                self.release_suite(directory, root=Path(other))
+                with self.assertRaises(ValueError):
+                    gate.verify(Path(other), "release", [device])
+
+    def test_release_lane_rejects_debug_flavor_evidence(self):
+        self.release_suite("api36DebugAndroidTest")
+        with self.assertRaises(ValueError):
+            gate.verify(self.root, "release", ["api36"])
+        self.release_suite("api36ReleaseAndroidTest")
         gate.verify(self.root, "release", ["api36"])
 
     def test_connected_lane_only_accepts_connected_evidence(self):

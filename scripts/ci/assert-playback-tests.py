@@ -17,6 +17,40 @@ SHORT = {
 LONG = "screenOffStreamsForThirtyMinutesAndAdvances"
 HARDENING = "hardeningUiNotificationAndColdMediaKeyStarts"
 SOAK_DEVICES = {"api34"}
+FLAVOR_FOLDERS = {"debug", "release"}
+RELEASE_SMOKE = {
+    "ch.lkmc.neutrodyne.SmokeTest": (
+        "fiveLabelledDestinations",
+        "destinationsSurviveRotationAndDarkMode",
+        "settingsOpensAndBackReturnsToTheTab",
+        "aboutShowsVersionAndAbi",
+        "licencesListsLibraries",
+    ),
+    "ch.lkmc.neutrodyne.YtxReleaseSmokeTest": ("selftestAnswersThroughYtxServiceInTheApp",),
+    CLASS: ("notificationTransportAndLocalArtwork",),
+}
+
+
+def device_report(parts, device, flavors):
+    """The report's own path must mark the device lane with an allowed flavor."""
+    composite = re.compile(
+        re.escape(device) + rf"(?:{'|'.join(f.title() for f in sorted(flavors))})AndroidTest"
+    )
+    for index, part in enumerate(parts):
+        if composite.fullmatch(part):
+            return True
+        if part != device:
+            continue
+        # managedDevice/<flavor>/<device> and connected/<flavor> layouts; a
+        # flavor folder elsewhere in the path proves nothing about this lane.
+        after = parts[index + 1].lower() if index + 1 < len(parts) - 1 else ""
+        if after in FLAVOR_FOLDERS:
+            if after in flavors:
+                return True
+            continue
+        if index and parts[index - 1].lower() in flavors:
+            return True
+    return False
 
 
 def verify(root, profile, devices):
@@ -24,40 +58,40 @@ def verify(root, profile, devices):
         # externalBackgroundStartDenialIsUnreachable runs in the external bgstart
         # lane; its aggregate asserts the case there (an instrumented target
         # cannot measure a denial).
-        expected = {"notificationTransportAndLocalArtwork"} if profile == "release" else set(SHORT)
-        if profile == "nightly" and device in SOAK_DEVICES:
-            expected.add(LONG)
-        if profile == "api37":
-            expected.add(HARDENING)
-        evidence = {name: [] for name in expected}
-        flavors = ("Release",) if profile == "release" else ("Debug", "Release")
+        if profile == "release":
+            expected = {classname: set(names) for classname, names in RELEASE_SMOKE.items()}
+        else:
+            expected = {CLASS: set(SHORT)}
+            if profile == "nightly" and device in SOAK_DEVICES:
+                expected[CLASS].add(LONG)
+            if profile == "api37":
+                expected[CLASS].add(HARDENING)
+        evidence = {
+            (classname, name): [] for classname, names in expected.items() for name in names
+        }
+        flavors = {"release"} if profile == "release" else FLAVOR_FOLDERS
         for report in root.rglob("*.xml"):
-            if not any(
-                re.fullmatch(re.escape(device) + rf"(?:{'|'.join(flavors)})AndroidTest", part) or part == device
-                for part in report.parts
-            ):
+            if not device_report(report.parts, device, flavors):
                 continue
             try:
                 suite = ET.parse(report).getroot()
             except ET.ParseError:
                 continue  # not a JUnit report (coverage/manifest output); absence check still fails closed
             for case in suite.iter("testcase"):
-                if case.get("classname") != CLASS:
-                    continue
-                name = case.get("name", "").split("[")[0]
-                if name in evidence:
-                    evidence[name].append((report, case))
-        for name, cases in evidence.items():
+                key = (case.get("classname"), case.get("name", "").split("[")[0])
+                if key in evidence:
+                    evidence[key].append((report, case))
+        for (classname, name), cases in evidence.items():
             if len(cases) != 1:
-                raise ValueError(f"{device}: expected one {CLASS}#{name}, found {len(cases)}")
+                raise ValueError(f"{device}: expected one {classname}#{name}, found {len(cases)}")
             report, case = cases[0]
             if any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
-                raise ValueError(f"{device}: {name} did not pass in {report}")
+                raise ValueError(f"{device}: {classname}#{name} did not pass in {report}")
             if name == LONG:
                 duration = float(case.get("time", "0"))
                 if not math.isfinite(duration) or duration < 1800:
-                    raise ValueError(f"{device}: {name} has no valid 30-minute duration")
-        print(f"{device}: {len(expected)} expected playback cases passed ({profile})")
+                    raise ValueError(f"{device}: {classname}#{name} has no valid 30-minute duration")
+        print(f"{device}: {len(evidence)} expected cases passed ({profile})")
 
 
 def main():
