@@ -131,6 +131,17 @@ class PlaybackEvidenceTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     gate.verify(Path(other), "release", [device])
 
+    def test_nearest_device_lane_overrides_release_ancestors(self):
+        for directory in (
+            "api36ReleaseAndroidTest/managedDevice/debug/api36",
+            "release/api36/managedDevice/debug/api36",
+            "api36ReleaseAndroidTest/nested/api36DebugAndroidTest",
+        ):
+            with self.subTest(directory=directory), tempfile.TemporaryDirectory() as other:
+                self.release_suite(directory, root=Path(other))
+                with self.assertRaises(ValueError):
+                    gate.verify(Path(other), "release", ["api36"])
+
     def test_release_lane_rejects_debug_flavor_evidence(self):
         self.release_suite("api36DebugAndroidTest")
         with self.assertRaises(ValueError):

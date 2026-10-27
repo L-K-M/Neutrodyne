@@ -31,25 +31,26 @@ RELEASE_SMOKE = {
 }
 
 
-def device_report(parts, device, flavors):
-    """The report's own path must mark the device lane with an allowed flavor."""
+def _device_report(parts, device, flavors):
+    """Use the nearest device/flavor marker, not an ancestor lane."""
     composite = re.compile(
-        re.escape(device) + rf"(?:{'|'.join(f.title() for f in sorted(flavors))})AndroidTest"
+        re.escape(device) + rf"(?P<flavor>{'|'.join(f.title() for f in sorted(FLAVOR_FOLDERS))})AndroidTest"
     )
-    for index, part in enumerate(parts):
-        if composite.fullmatch(part):
-            return True
+    for index in range(len(parts) - 1, -1, -1):
+        part = parts[index]
+        matched = composite.fullmatch(part)
+        if matched:
+            return matched.group("flavor").lower() in flavors
         if part != device:
             continue
-        # managedDevice/<flavor>/<device> and connected/<flavor> layouts; a
-        # flavor folder elsewhere in the path proves nothing about this lane.
+        # managedDevice/<flavor>/<device> and connected/<flavor> identify
+        # this lane even when a release folder appears farther up the path.
         after = parts[index + 1].lower() if index + 1 < len(parts) - 1 else ""
         if after in FLAVOR_FOLDERS:
-            if after in flavors:
-                return True
-            continue
-        if index and parts[index - 1].lower() in flavors:
-            return True
+            return after in flavors
+        before = parts[index - 1].lower() if index else ""
+        if before in FLAVOR_FOLDERS:
+            return before in flavors
     return False
 
 
@@ -71,7 +72,7 @@ def verify(root, profile, devices):
         }
         flavors = {"release"} if profile == "release" else FLAVOR_FOLDERS
         for report in root.rglob("*.xml"):
-            if not device_report(report.parts, device, flavors):
+            if not _device_report(report.parts, device, flavors):
                 continue
             try:
                 suite = ET.parse(report).getroot()
