@@ -3,7 +3,10 @@
 package ch.lkmc.neutrodyne.feature.queue
 
 import androidx.lifecycle.ViewModelStore
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.ContextType
@@ -33,8 +36,14 @@ import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_undo
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -55,7 +64,10 @@ class UpNextViewModelTest : MainDispatcherTest() {
     private val store = ViewModelStore()
     private val podcasts = FakePodcastRepository()
 
-    private fun viewModel(repository: QueueRepository = queue) =
+    private fun viewModel(
+        repository: QueueRepository = queue,
+        podcasts: PodcastRepository = this.podcasts,
+    ) =
         UpNextViewModel(
             queue = repository,
             controller = playback,
@@ -109,6 +121,24 @@ class UpNextViewModelTest : MainDispatcherTest() {
             )
         }
 
+    @Test fun bufferingCurrentRowProjectsPauseAffordance() =
+        runTest {
+            queue.session.value = PlaySessionInfo(1, null, 1)
+            playback.state.nowPlaying.value =
+                testNowPlaying().copy(
+                    isPlaying = false,
+                    playWhenReady = true,
+                    phase = PlayerPhase.BUFFERING,
+                )
+            val vm = viewModel()
+            advanceUntilIdle()
+            // playToggle pauses while a play is requested, so the row must offer Pause.
+            assertTrue(
+                vm.uiState.value.current!!
+                    .isPlaying,
+            )
+        }
+
     @Test fun currentRowPausesOrResumesOtherRowStartsExplicitly() =
         runTest {
             val vm = viewModel()
@@ -138,7 +168,10 @@ class UpNextViewModelTest : MainDispatcherTest() {
     @Test fun meteredConsentRetriesTheExactQueuedRowOnce() =
         runTest {
             val vm = viewModel()
-            playback.playResult = PlayResult.NeedsMeteredConsent(2)
+            val refused = PlayResult.NeedsMeteredConsent(2)
+            playback.playResult = refused
+            // The gate parks the refused prompt for the dialog the way `startLocked` does.
+            playback.state.pendingMeteredConsent.value = refused
             vm.onAction(EpisodeAction.PlayToggle(2))
             advanceUntilIdle()
             assertEquals(
@@ -152,6 +185,8 @@ class UpNextViewModelTest : MainDispatcherTest() {
             )
             playback.playResult = PlayResult.Started
             vm.playbackActions.consentOnce()
+            // `grantMeteredStreaming` clears the parked prompt.
+            playback.state.pendingMeteredConsent.value = null
             vm.playbackActions.consentOnce()
             advanceUntilIdle()
             assertEquals(
@@ -164,10 +199,21 @@ class UpNextViewModelTest : MainDispatcherTest() {
             )
         }
 
-    @Test fun passwordActionSavesCredentialsBeforeRetryingQueuedRow() =
+    @Test fun passwordSubmitSavesWithoutReplayingTheRefusedStart() =
         runTest {
-            episodes.episodes.value = mapOf(2L to testEpisodeDetail(2))
-            val vm = viewModel()
+            episodes.episodes.value = mapOf(2L to testEpisodeDetail(2, podcastId = 9))
+            val release = CompletableDeferred<Unit>()
+            val delayedPodcasts =
+                object : PodcastRepository by podcasts {
+                    override suspend fun setCredentials(
+                        podcastId: Long,
+                        credentials: BasicCredentials,
+                    ): Outcome<Unit, AddPodcastError> {
+                        release.await()
+                        return podcasts.setCredentials(podcastId, credentials)
+                    }
+                }
+            val vm = viewModel(podcasts = delayedPodcasts)
             playback.playResult = PlayResult.NotPlayable(2, UnplayableReason.AuthRequired)
             vm.onAction(EpisodeAction.PlayToggle(2))
             advanceUntilIdle()
@@ -177,17 +223,131 @@ class UpNextViewModelTest : MainDispatcherTest() {
                     .id,
             )
             assertEquals(2L, vm.passwordEpisode.value)
-            playback.playResult = PlayResult.Started
             vm.submitPassword(BasicCredentials("listener", "password"))
-            advanceUntilIdle()
-            assertTrue(podcasts.calls.single().startsWith("setCredentials("))
+            // The dialog closes at submit, like the sibling screens' credential commits.
             assertEquals(null, vm.passwordEpisode.value)
+            // A newer start issued while the suspending save is parked must not be replaced.
+            playback.playResult = PlayResult.Started
+            vm.onAction(EpisodeAction.PlayToggle(5))
+            advanceUntilIdle()
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("setCredentials(9, listener)", podcasts.calls.single())
             assertEquals(
                 listOf<FakePlaybackController.Call>(
                     FakePlaybackController.Call.Episode(2),
-                    FakePlaybackController.Call.Episode(2),
+                    FakePlaybackController.Call.Episode(5),
                 ),
                 playback.calls,
+            )
+        }
+
+    @Test fun completedPasswordSaveKeepsReopenedSameEpisodeDialog() =
+        runTest {
+            episodes.episodes.value = mapOf(2L to testEpisodeDetail(2, podcastId = 9))
+            val release = CompletableDeferred<Unit>()
+            val delayedPodcasts =
+                object : PodcastRepository by podcasts {
+                    override suspend fun setCredentials(
+                        podcastId: Long,
+                        credentials: BasicCredentials,
+                    ): Outcome<Unit, AddPodcastError> {
+                        release.await()
+                        return podcasts.setCredentials(podcastId, credentials)
+                    }
+                }
+            val vm = viewModel(podcasts = delayedPodcasts)
+            playback.playResult = PlayResult.NotPlayable(2, UnplayableReason.AuthRequired)
+            vm.onAction(EpisodeAction.PlayToggle(2))
+            advanceUntilIdle()
+            vm.onPlaybackMessageAction(
+                vm.uiState.value.messages
+                    .single()
+                    .id,
+            )
+            vm.submitPassword(BasicCredentials("listener", "password"))
+            // Cancel and re-trigger the same episode's prompt while the first save is parked.
+            vm.dismissPassword()
+            vm.onAction(EpisodeAction.PlayToggle(2))
+            advanceUntilIdle()
+            vm.onPlaybackMessageAction(
+                vm.uiState.value.messages
+                    .last()
+                    .id,
+            )
+            assertEquals(2L, vm.passwordEpisode.value)
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(2L, vm.passwordEpisode.value)
+            assertEquals("setCredentials(9, listener)", podcasts.calls.single())
+        }
+
+    @Test fun completedPasswordSaveKeepsReplacementDialog() =
+        runTest {
+            episodes.episodes.value =
+                mapOf(
+                    2L to testEpisodeDetail(2, podcastId = 9),
+                    3L to testEpisodeDetail(3, podcastId = 10),
+                )
+            val release = CompletableDeferred<Unit>()
+            val delayedPodcasts =
+                object : PodcastRepository by podcasts {
+                    override suspend fun setCredentials(
+                        podcastId: Long,
+                        credentials: BasicCredentials,
+                    ): Outcome<Unit, AddPodcastError> {
+                        release.await()
+                        return podcasts.setCredentials(podcastId, credentials)
+                    }
+                }
+            val vm = viewModel(podcasts = delayedPodcasts)
+            playback.playResult = PlayResult.NotPlayable(2, UnplayableReason.AuthRequired)
+            vm.onAction(EpisodeAction.PlayToggle(2))
+            advanceUntilIdle()
+            vm.onPlaybackMessageAction(
+                vm.uiState.value.messages
+                    .single()
+                    .id,
+            )
+            vm.submitPassword(BasicCredentials("listener", "password"))
+            // A different episode's prompt replaces the dialog while the first save is parked.
+            playback.playResult = PlayResult.NotPlayable(3, UnplayableReason.AuthRequired)
+            vm.onAction(EpisodeAction.PlayToggle(3))
+            advanceUntilIdle()
+            vm.onPlaybackMessageAction(
+                vm.uiState.value.messages
+                    .last()
+                    .id,
+            )
+            assertEquals(3L, vm.passwordEpisode.value)
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(3L, vm.passwordEpisode.value)
+            assertEquals("setCredentials(9, listener)", podcasts.calls.single())
+        }
+
+    @Test fun failedPasswordSaveLeavesAnActionableMessage() =
+        runTest {
+            episodes.episodes.value = mapOf(2L to testEpisodeDetail(2, podcastId = 9))
+            podcasts.credentialsOutcome = Outcome.Failure(AddPodcastError.Http(403))
+            val vm = viewModel()
+            playback.playResult = PlayResult.NotPlayable(2, UnplayableReason.AuthRequired)
+            vm.onAction(EpisodeAction.PlayToggle(2))
+            advanceUntilIdle()
+            vm.onPlaybackMessageAction(
+                vm.uiState.value.messages
+                    .single()
+                    .id,
+            )
+            vm.submitPassword(BasicCredentials("listener", "password"))
+            advanceUntilIdle()
+            assertEquals("setCredentials(9, listener)", podcasts.calls.single())
+            assertEquals(null, vm.passwordEpisode.value)
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                vm.uiState.value.messages
+                    .last()
+                    .text,
             )
         }
 
@@ -217,6 +377,52 @@ class UpNextViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertEquals(listOf(token), restored)
             vm.onMessageShown(message.id)
+            advanceUntilIdle()
+            assertTrue(
+                vm.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
+    @Test fun failedUndoRebindsTheSameTokenForRetry() =
+        runTest {
+            val token = QueueRemoval(listOf(2), listOf(1, 2, 3))
+            var attempts = 0
+            val restored = mutableListOf<QueueRemoval>()
+            val repository =
+                object : QueueRepository by queue {
+                    override suspend fun removeWithUndo(episodeIds: List<Long>): QueueRemoval = token
+
+                    override suspend fun undoRemoval(removal: QueueRemoval) {
+                        attempts++
+                        if (attempts == 1) throw IllegalStateException("disk full")
+                        restored += removal
+                    }
+                }
+            val vm = viewModel(repository)
+            vm.remove(2)
+            advanceUntilIdle()
+            val first =
+                vm.uiState.value.messages
+                    .single()
+            vm.undo(first.id)
+            // A duplicate tap consumes nothing: the token left the map with the first click.
+            vm.undo(first.id)
+            // ShowUserMessages acknowledges the snackbar right after launching its action.
+            vm.onMessageShown(first.id)
+            advanceUntilIdle()
+            assertEquals(1, attempts)
+            val retry =
+                vm.uiState.value.messages
+                    .single()
+            assertEquals(UiText.Res(Res.string.write_failed), retry.text)
+            assertEquals(UiText.Res(Res.string.action_undo), retry.action)
+            vm.undo(retry.id)
+            vm.undo(retry.id)
+            advanceUntilIdle()
+            assertEquals(2, attempts)
+            assertEquals(listOf(token), restored)
+            vm.onMessageShown(retry.id)
             advanceUntilIdle()
             assertTrue(
                 vm.uiState.value.messages

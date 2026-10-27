@@ -201,6 +201,21 @@ class UpNextScreenTest {
             assertEquals(1, cleared)
         }
 
+    @Test fun offlineBannerShowsBelowChromeOnlyWhileOffline() =
+        runDesktopComposeUiTest(width = 650, height = 950) {
+            val banner = "You're offline — downloaded episodes still play"
+            state.value = state.value.copy(caps = state.value.caps.copy(offline = true))
+            content()
+            onNodeWithText(banner).assertIsDisplayed()
+            val bannerTop = onNodeWithText(banner).fetchSemanticsNode().boundsInRoot.top
+            val titleBottom = onNodeWithText("Up next").fetchSemanticsNode().boundsInRoot.bottom
+            assertTrue(bannerTop >= titleBottom)
+            state.value = state.value.copy(upNext = emptyList())
+            onNodeWithText(banner).assertIsDisplayed()
+            state.value = state.value.copy(caps = state.value.caps.copy(offline = false))
+            onNodeWithText(banner).assertDoesNotExist()
+        }
+
     @Test fun emptyQueueOffersDiscover() =
         runDesktopComposeUiTest(width = 650, height = 950) {
             state.value =

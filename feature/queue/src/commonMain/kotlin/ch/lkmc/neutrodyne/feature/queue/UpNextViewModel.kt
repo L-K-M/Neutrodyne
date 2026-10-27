@@ -157,7 +157,8 @@ internal class UpNextViewModel(
                                     playing.title,
                                     playing.podcastTitle,
                                     playing.artwork,
-                                    playing.isPlaying,
+                                    // Buffering still toggles to Pause.
+                                    playing.isPlaying || playing.playWhenReady,
                                 )
                             } else {
                                 detail?.let { UpNextCurrent(it.id, it.title, it.podcastTitle, it.artwork, false) }
@@ -206,8 +207,12 @@ internal class UpNextViewModel(
     }
 
     fun undo(id: Long) {
+        // Consume once; re-offer the same token if restoration fails.
         val removal = undos.remove(id) ?: return
-        write { queue.undoRemoval(removal) }
+        viewModelScope.launch {
+            suspendRunCatching { queue.undoRemoval(removal) }
+                .onFailure { offerUndo(removal, UiText.Res(Res.string.write_failed)) }
+        }
     }
 
     fun stopAfter() {
@@ -268,20 +273,18 @@ internal class UpNextViewModel(
     }
 
     fun submitPassword(credentials: BasicCredentials) {
+        // Close before IO; saving must not replay or dismiss a newer dialog.
         val id = password.value ?: return
+        password.value = null
         write {
             val episode = episodes.observeEpisode(id).first()
             if (episode == null) {
-                password.value = null
                 messages.post(UiText.Res(Res.string.episode_not_found))
                 return@write
             }
             if (podcasts.setCredentials(episode.podcastId, credentials) is Outcome.Failure) {
                 messages.post(UiText.Res(Res.string.write_failed))
-                return@write
             }
-            password.value = null
-            playbackActions.play(null) { controller.playEpisode(id) }
         }
     }
 

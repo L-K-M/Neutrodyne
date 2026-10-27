@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.OfflineBanner
 import ch.lkmc.neutrodyne.core.ui.UpNextList
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
@@ -59,6 +60,7 @@ internal fun UpNextScreen(
                 topBarActions()
             },
         )
+        OfflineBanner(state.caps.offline)
         when {
             state.loadFailed -> {
                 TextButton(onClick = onRetry) { Text(stringResource(Res.string.action_retry)) }

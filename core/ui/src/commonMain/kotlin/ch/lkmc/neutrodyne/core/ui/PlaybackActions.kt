@@ -117,15 +117,15 @@ public class PlaybackActions(
 ) {
     private val consent = MutableStateFlow<MeteredConsent?>(null)
     public val meteredConsent: StateFlow<MeteredConsent?> = consent.asStateFlow()
-    private var consentRetry: Retry? = null
+    private var consentRetry: PendingConsent? = null
     private var startGeneration = 0L
     private var startJob: Job? = null
 
     init {
         scope.launch {
             states.pendingMeteredConsent.collect { pending ->
-                val awaiting = consent.value
-                if (awaiting != null && pending?.episodeId != awaiting.episodeId) consentDismiss()
+                val awaiting = consentRetry
+                if (awaiting != null && pending !== awaiting.prompt) consentDismiss()
             }
         }
     }
@@ -216,16 +216,16 @@ public class PlaybackActions(
         }
     }
 
-    /** Once: consent for this start only, then retry the refused attempt (08). */
+    /** Once: grant session consent and retry this pending attempt (08). */
     public fun consentOnce() {
-        val retry = consumeConsent() ?: return
+        val pending = consumeConsent() ?: return
         controller.grantMeteredStreaming()
-        play(retry.context, retry.attempt)
+        play(pending.retry.context, pending.retry.attempt)
     }
 
-    /** Always: persist ALLOW, consent for this start, then retry — a failed write aborts both. */
+    /** Persist ALLOW, then retry only if no newer start replaced the prompt. */
     public fun consentAlways() {
-        val retry = consumeConsent() ?: return
+        val pending = consumeConsent() ?: return
         val generation = startGeneration
         scope.launch {
             suspendRunCatching { allowMeteredStreaming() }
@@ -233,9 +233,9 @@ public class PlaybackActions(
                     onFailure(it)
                     return@launch
                 }
-            if (generation != startGeneration) return@launch
+            if (generation != startGeneration || states.pendingMeteredConsent.value !== pending.prompt) return@launch
             controller.grantMeteredStreaming()
-            play(retry.context, retry.attempt)
+            play(pending.retry.context, pending.retry.attempt)
         }
     }
 
@@ -244,9 +244,11 @@ public class PlaybackActions(
         consumeConsent()
     }
 
-    private fun consumeConsent(): Retry? {
+    private fun consumeConsent(): PendingConsent? {
+        val pending = consentRetry
+        consentRetry = null
         consent.value = null
-        return consentRetry.also { consentRetry = null }
+        return pending?.takeIf { states.pendingMeteredConsent.value === it.prompt }
     }
 
     /**
@@ -313,7 +315,8 @@ public class PlaybackActions(
             }
 
             is PlayResult.NeedsMeteredConsent -> {
-                consentRetry = Retry(context, attempt)
+                val prompt = states.pendingMeteredConsent.value?.takeIf { it.episodeId == result.episodeId } ?: return
+                consentRetry = PendingConsent(prompt, Retry(context, attempt))
                 consent.value = MeteredConsent(result.episodeId)
             }
 
@@ -423,6 +426,12 @@ public class PlaybackActions(
         )
 
     /** A start that consent may retry, or that the "Couldn't start playback" Retry re-runs. */
+    // A replacement can target the same episode with different context; bind its actual prompt.
+    private data class PendingConsent(
+        val prompt: PlayResult.NeedsMeteredConsent,
+        val retry: Retry,
+    )
+
     private data class Retry(
         val context: UiText?,
         val attempt: suspend () -> PlayResult,

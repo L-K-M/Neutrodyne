@@ -749,7 +749,9 @@ class PodcastViewModelTest : MainDispatcherTest() {
         runTest {
             val viewModel = viewModel()
             podcasts.detail.value = testPodcastDetail(7)
-            playbackController.playResult = PlayResult.NeedsMeteredConsent(42)
+            val refused = PlayResult.NeedsMeteredConsent(42)
+            playbackController.playResult = refused
+            playbackStates.pendingMeteredConsent.value = refused
             collect(viewModel)
             advanceUntilIdle()
 

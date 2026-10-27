@@ -1485,7 +1485,9 @@ class FeedsViewModelTest : MainDispatcherTest() {
     @Test
     fun needsMeteredConsentOpensTheDialogAndOnceRetriesTheStart() =
         viewModelTest {
-            playbackController.playResult = PlayResult.NeedsMeteredConsent(42)
+            val refused = PlayResult.NeedsMeteredConsent(42)
+            playbackController.playResult = refused
+            playbackController.state.pendingMeteredConsent.value = refused
             val model = viewModel()
             collect(model)
             runCurrent()
@@ -1522,7 +1524,9 @@ class FeedsViewModelTest : MainDispatcherTest() {
     fun consentAlwaysPersistsAllowThenRetries() =
         viewModelTest {
             settings.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.ASK)
-            playbackController.playResult = PlayResult.NeedsMeteredConsent(42)
+            val refused = PlayResult.NeedsMeteredConsent(42)
+            playbackController.playResult = refused
+            playbackController.state.pendingMeteredConsent.value = refused
             val model = viewModel()
             collect(model)
             runCurrent()
