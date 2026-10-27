@@ -65,6 +65,7 @@ internal class QueueProjector(
     private val clock: Clock,
     private val playerScope: CoroutineScope,
     private val io: CoroutineDispatcher,
+    private val beforeAdvance: (MediaItem) -> Boolean,
     private val reportFailure: (Exception) -> Unit = { android.util.Log.w(TAG, "Queue projection failed") },
 ) : Player.Listener {
     private var player: Player? = null
@@ -487,6 +488,7 @@ internal class QueueProjector(
     fun advance(exit: PlaybackExit = PlaybackExit.ERROR_SKIP) {
         val live = player ?: return
         if (!live.hasNextMediaItem()) return
+        if (!beforeAdvance(live.getMediaItemAt(live.nextMediaItemIndex))) return
         skipExit = exit
         live.seekToNextMediaItem()
     }

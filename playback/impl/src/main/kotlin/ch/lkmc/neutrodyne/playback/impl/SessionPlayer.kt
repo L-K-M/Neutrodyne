@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.Player
@@ -15,6 +16,7 @@ internal class SessionPlayer private constructor(
     private val exo: Player,
     private val scope: CoroutineScope,
     private val beforePlay: suspend () -> Boolean,
+    private val beforeSeek: (MediaItem) -> Boolean,
     private val previous: suspend () -> Unit,
     private val stopAction: suspend () -> Unit,
     private val sessionSource: SessionSource,
@@ -23,9 +25,10 @@ internal class SessionPlayer private constructor(
         exo: Player,
         scope: CoroutineScope,
         beforePlay: suspend () -> Boolean,
+        beforeSeek: (MediaItem) -> Boolean,
         previous: suspend () -> Unit,
         stopAction: suspend () -> Unit,
-    ) : this(exo, scope, beforePlay, previous, stopAction, SessionSource(exo))
+    ) : this(exo, scope, beforePlay, beforeSeek, previous, stopAction, SessionSource(exo))
 
     /** The session exists during database open, but its callbacks must follow position capture. */
     fun orderAfterPlaybackAdapters() {
@@ -76,7 +79,8 @@ internal class SessionPlayer private constructor(
             }
 
             Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
-                if (exo.hasNextMediaItem()) exo.seekToNextMediaItem()
+                val next = exo.nextMediaItemIndex
+                if (next != C.INDEX_UNSET && beforeSeek(exo.getMediaItemAt(next))) exo.seekToNextMediaItem()
                 Futures.immediateVoidFuture()
             }
 
@@ -87,7 +91,12 @@ internal class SessionPlayer private constructor(
             }
 
             else -> {
-                super.handleSeek(mediaItemIndex, positionMs, seekCommand)
+                val crossesItem = mediaItemIndex in 0 until exo.mediaItemCount && mediaItemIndex != exo.currentMediaItemIndex
+                if (crossesItem && !beforeSeek(exo.getMediaItemAt(mediaItemIndex))) {
+                    Futures.immediateVoidFuture()
+                } else {
+                    super.handleSeek(mediaItemIndex, positionMs, seekCommand)
+                }
             }
         }
 

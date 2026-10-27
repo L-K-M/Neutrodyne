@@ -2,12 +2,14 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import ch.lkmc.neutrodyne.core.model.PlayContextInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
@@ -49,6 +51,7 @@ internal class AndroidServiceBridge(
     private val scope: CoroutineScope,
     isForeground: () -> Boolean,
     private val stopService: () -> Unit,
+    private val pausePlayer: () -> Unit,
 ) : ServiceBridge,
     Player.Listener {
     private val tracker =
@@ -86,6 +89,7 @@ internal class AndroidServiceBridge(
             // Schedule initial collection after attach so a pending session start can reserve it.
             CoroutineScope(scope.coroutineContext + Dispatchers.Main),
             access.io,
+            beforeAdvance = ::allowAutomaticAdvance,
         )
     private val recovery =
         ErrorRecovery(
@@ -168,13 +172,13 @@ internal class AndroidServiceBridge(
 
     override fun pause() {
         tracker.flush(PositionFlushReason.PAUSE)
-        player.pause()
+        pausePlayer()
     }
 
     override suspend fun pauseBeforeUnsubscribe(podcastIds: List<Long>) {
         val id = player.episodeIdOrNull() ?: return
         if (access.index[id]?.podcastId !in podcastIds) return
-        player.pause()
+        pausePlayer()
         flush()
     }
 
@@ -344,13 +348,7 @@ internal class AndroidServiceBridge(
     private fun boundaryRefusal(origin: StartOrigin): PlayResult? {
         val next = player.nextMediaItemIndex
         if (next == C.INDEX_UNSET) return null
-        val item = player.getMediaItemAt(next)
-        val id = item.mediaId.removePrefix("episode:").toLongOrNull() ?: return PlayResult.ServiceUnavailable
-        return access.gate.check(
-            id,
-            item.requestMetadata.extras?.getBoolean(MediaItemFactory.LOCAL_HINT) == true,
-            origin,
-        )
+        return nextRefusal(player.getMediaItemAt(next), origin)
     }
 
     private fun updateBoundary() {
@@ -384,7 +382,38 @@ internal class AndroidServiceBridge(
         publish()
     }
 
-    override suspend fun previous() =
+    fun allowQueueSeek(item: MediaItem, origin: StartOrigin): Boolean {
+        access.gate.clearPending()
+        val refusal = nextRefusal(item, origin)
+        if (refusal != null) {
+            reportRefusal(refusal)
+            return false
+        }
+        serviceIssue = null
+        return true
+    }
+
+    private fun nextRefusal(item: MediaItem, origin: StartOrigin): PlayResult? {
+        val id = item.mediaId.removePrefix(EPISODE_ID_PREFIX).toLongOrNull() ?: return PlayResult.ServiceUnavailable
+        return access.gate.check(id, item.requestMetadata.extras?.getBoolean(MediaItemFactory.LOCAL_HINT) == true, origin)
+    }
+
+    // Error and mark-played skips are automatic, so ASK must not grant external-surface consent.
+    private fun allowAutomaticAdvance(item: MediaItem): Boolean {
+        val local = item.requestMetadata.extras?.getBoolean(MediaItemFactory.LOCAL_HINT) == true
+        if (!access.gate.blockBeforeNext(local)) return true
+        pausePlayer()
+        issue(
+            if (access.prefs.current.value.streamOnMetered == StreamOnMetered.NEVER) {
+                PlaybackIssue.METERED_BLOCKED
+            } else {
+                PlaybackIssue.METERED_PAUSE
+            },
+        )
+        return false
+    }
+
+    override suspend fun previous(origin: StartOrigin) =
         commands.withLock {
             when (val action = access.history.previous(player.currentPosition)) {
                 PreviousAction.Restart -> {
@@ -392,6 +421,12 @@ internal class AndroidServiceBridge(
                 }
 
                 is PreviousAction.GoBack -> {
+                    access.gate.clearPending()
+                    val refusal = access.gate.check(action.item.episodeId, access.local.localUriOrNull(action.item.episodeId) != null, origin)
+                    if (refusal != null) {
+                        reportRefusal(refusal)
+                        return@withLock
+                    }
                     val departure = tracker.capture(PlaybackExit.SEEK)?.departure ?: return@withLock
                     projector.beginOwnWrite()
                     var generation: Long? = null
@@ -420,7 +455,7 @@ internal class AndroidServiceBridge(
 
     override suspend fun stop() =
         commands.withLock {
-            player.pause()
+            pausePlayer()
             try {
                 flush()
             } finally {
@@ -432,7 +467,7 @@ internal class AndroidServiceBridge(
     override suspend fun dismiss() =
         commands.withLock {
             cancelPending()
-            player.pause()
+            pausePlayer()
             projector.beginOwnWrite()
             var generation: Long? = null
             try {
@@ -545,6 +580,7 @@ internal class AndroidServiceBridge(
     private enum class StartApplication { COMMAND, MEDIA3 }
 
     private companion object {
+        const val EPISODE_ID_PREFIX = "episode:"
         const val PENDING_START_TIMEOUT_MS = 10_000L
     }
 }
