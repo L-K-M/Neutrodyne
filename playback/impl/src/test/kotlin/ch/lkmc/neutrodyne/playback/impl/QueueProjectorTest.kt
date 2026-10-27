@@ -128,21 +128,21 @@ class QueueProjectorTest {
                         f.clock.now(),
                     )
                 f.queue.addLast(ids.drop(1))
-                val items = f.projector.prepareExternalStart(StartOutcome.Committed(f.sessions.virtualQueue(20), 0))
-                assertEquals(
-                    ids[0],
-                    f.sessions
-                        .virtualQueue(20)
-                        .current!!
-                        .episodeId,
-                )
+                val snapshot = f.sessions.virtualQueue(20)
+                assertEquals(ids[0], snapshot.current!!.episodeId)
+
+                // Finish Room reads first: real IO can advance the virtual apply timeout.
+                val items = f.projector.prepareExternalStart(StartOutcome.Committed(snapshot, 0))
                 runCurrent()
                 assertEquals(0, f.player.mediaItemCount)
                 f.player.setMediaItems(items, 0, 0)
                 awaitAdapter { f.player.ids() == ids }
                 runCurrent()
                 assertEquals(1, f.player.calls.count { it == "set" })
-                assertEquals(gen, f.sessions.virtualQueue(20).generation)
+
+                val applied = f.sessions.virtualQueue(20)
+                assertEquals(gen, applied.generation)
+                assertEquals(ids[0], applied.current!!.episodeId)
                 assertNotNull(f.index[ids[1]])
             } finally {
                 f.close()
