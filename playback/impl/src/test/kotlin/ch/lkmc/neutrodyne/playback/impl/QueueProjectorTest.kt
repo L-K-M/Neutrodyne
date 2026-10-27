@@ -139,7 +139,10 @@ class QueueProjectorTest {
                 awaitAdapter { f.player.ids() == ids }
                 runCurrent()
                 assertEquals(1, f.player.calls.count { it == "set" })
-                assertEquals(gen, f.sessions.virtualQueue(20).generation)
+
+                val applied = f.sessions.virtualQueue(20)
+                assertEquals(gen, applied.generation)
+                assertEquals(ids[0], applied.current!!.episodeId)
                 assertNotNull(f.index[ids[1]])
             } finally {
                 f.close()
