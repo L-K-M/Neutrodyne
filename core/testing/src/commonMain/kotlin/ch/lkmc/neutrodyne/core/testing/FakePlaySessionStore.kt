@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
@@ -25,6 +26,7 @@ class FakePlaySessionStore : PlaySessionStore {
         val departure: Departure? = null,
         val arrivalId: Long? = null,
         val origin: QueueOrigin? = null,
+        val expected: SessionRevision? = null,
     )
 
     override suspend fun virtualQueue(k: Int): VirtualQueue {
@@ -38,6 +40,21 @@ class FakePlaySessionStore : PlaySessionStore {
         calls += call
         failure?.let { throw it }
         generation = maxOf(generation, queue.generation) + 1
+        return generation
+    }
+
+    /** Attempts record like committed writes; a stale revision returns null without bumping. */
+    private fun fenced(
+        call: Call,
+        expected: SessionRevision,
+    ): Long? {
+        calls += call
+        failure?.let { throw it }
+        val current = maxOf(generation, queue.generation)
+        if (expected.currentEpisodeId != queue.current?.episodeId || expected.generation != current) {
+            return null
+        }
+        generation = current + 1
         return generation
     }
 
@@ -57,16 +74,19 @@ class FakePlaySessionStore : PlaySessionStore {
         departure: Departure?,
         arrivedEpisodeId: Long,
         arrivedOrigin: QueueOrigin,
+        expected: SessionRevision,
         now: Long,
-    ): Long =
-        commit(
+    ): Long? =
+        fenced(
             Call(
                 Operation.TRANSITION,
                 now,
                 departure = departure,
                 arrivalId = arrivedEpisodeId,
                 origin = arrivedOrigin,
+                expected = expected,
             ),
+            expected,
         )
 
     override suspend fun goBack(
@@ -86,14 +106,17 @@ class FakePlaySessionStore : PlaySessionStore {
 
     override suspend fun endSession(
         departure: Departure?,
+        expected: SessionRevision,
         now: Long,
-    ): Long =
-        commit(
+    ): Long? =
+        fenced(
             Call(
                 Operation.END,
                 now,
                 departure = departure,
+                expected = expected,
             ),
+            expected,
         )
 
     override suspend fun clearCurrent(

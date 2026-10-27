@@ -25,13 +25,15 @@ interface PlaySessionStore {
         now: Long,
     ): Long
 
-    /** Save departure, promote arrival/remove from Up next; advance anchor only for CONTEXT. */
+    /** Save departure, promote arrival/remove from Up next; advance anchor only for CONTEXT.
+     * Null when the persisted current/generation no longer equals [expected]: stale, no write. */
     suspend fun onTransition(
         departure: Departure?,
         arrivedEpisodeId: Long,
         arrivedOrigin: QueueOrigin,
+        expected: SessionRevision,
         now: Long,
-    ): Long
+    ): Long?
 
     /** Previous item becomes current; requeue interrupted item at the head.
      * Restore the anchor only if previous.origin is CONTEXT; history must retain that origin. */
@@ -41,11 +43,13 @@ interface PlaySessionStore {
         now: Long,
     ): Long
 
-    /** Natural end: save departure and clear current/context/anchor, retaining Up next. */
+    /** Natural end: save departure and clear current/context/anchor, retaining Up next.
+     * Null when the persisted current/generation no longer equals [expected]: stale, no write. */
     suspend fun endSession(
         departure: Departure?,
+        expected: SessionRevision,
         now: Long,
-    ): Long
+    ): Long?
 
     /** Explicit dismissal: same durable clearing, no implicit mark-played. */
     suspend fun clearCurrent(
@@ -76,6 +80,12 @@ data class Departure(
     val pinStartedAt: Long,
     val markPlayed: Boolean,
     val writePosition: Boolean,
+)
+
+/** Persisted session an asynchronous event was decided against; both fields must match. */
+data class SessionRevision(
+    val currentEpisodeId: Long?,
+    val generation: Long,
 )
 
 /**
