@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne
 
+import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -22,7 +23,6 @@ import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -37,8 +37,8 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * `ping` answering already proves `NeutrodyneApplication`'s `ProcessRole.YTX` branch survived
  * (it builds `YtxGraph`; a missing or R8-stripped Metro graph class would crash `onCreate`
- * before the binder ever answers). The process name asserted below is the same name
- * `ProcessRole.current()` reads in that process, so `YTX` was classified there and no
+ * before the binder ever answers). Android's process record below names the process that
+ * `ProcessRole.current()` classifies, so `YTX` was classified there and no
  * `AndroidAppGraph` was built (the no-initializer/no-database probes are `YtxProcessStartTest`'s,
  * pending in 01's verification log).
  */
@@ -85,11 +85,9 @@ class YtxReleaseSmokeTest {
         val ytxPid = JSONObject(engine.status()).getInt("pid")
         assertThat(ytxPid).isNotEqualTo(Process.myPid())
 
-        // …specifically the dedicated ":ytx" process. The kernel's cmdline record is exactly what
-        // ProcessRole.current() classified there, so the YTX branch ran (YtxGraph, no
-        // AndroidAppGraph, no initializers). Same-UID sibling processes are readable under
-        // Android's hidepid mount; this is the observable for the app's process wiring.
-        val ytxName = File("/proc/$ytxPid/cmdline").readText().substringBefore('\u0000')
+        // Non-debuggable siblings are hidden in /proc. Android still exposes this UID's process records.
+        val processes = context.getSystemService(ActivityManager::class.java).runningAppProcesses
+        val ytxName = processes?.firstOrNull { it.pid == ytxPid }?.processName
         assertThat(ytxName).isEqualTo("${context.packageName}:ytx")
     }
 
