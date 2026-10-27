@@ -64,6 +64,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.concurrent.TimeUnit
+import ch.lkmc.neutrodyne.BuildConfig as AppBuildConfig
 
 /**
  * Compiled into the app test APK, explicitly hosted by NeutrodyneApplication and its real graph.
@@ -98,7 +99,7 @@ class PlaybackServiceTest {
                 )
             }
             // Set before the service exists, never through a production preference.
-            if (debugBuild()) PlaybackTestHooks.foregroundServiceTimeoutMs = 5_000
+            if (AppBuildConfig.DEBUG) PlaybackTestHooks.foregroundServiceTimeoutMs = 5_000
             observation.launch { graph.playbackStateSource.nowPlaying.collect {} }
             graph.databaseOpener.awaitOpen()
             graph.playbackController.dismiss()
@@ -118,7 +119,7 @@ class PlaybackServiceTest {
             observation.cancel()
             scenario?.close()
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
-            if (debugBuild()) PlaybackTestHooks.foregroundServiceTimeoutMs = null
+            if (AppBuildConfig.DEBUG) PlaybackTestHooks.foregroundServiceTimeoutMs = null
             if (hardening) device.executeShellCommand("cmd audio set-enable-hardening enable")
             device.wakeUp()
             server.close()
