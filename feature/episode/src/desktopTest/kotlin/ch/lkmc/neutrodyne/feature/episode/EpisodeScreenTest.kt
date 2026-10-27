@@ -43,11 +43,15 @@ import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
+import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
@@ -213,6 +217,25 @@ class EpisodeScreenTest {
             // The enabled offline affordance still dispatches play, as in U2's episode rows.
             onNodeWithText("Offline").performClick()
             assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(9)), actions)
+        }
+
+    @Test
+    fun currentDetailShowsPauseEvenWhenOffline() =
+        runComposeUiTest {
+            val actions = mutableListOf<EpisodeAction>()
+            setEpisode(
+                loadedState(offline = true).copy(isNowPlaying = true, isPlaying = true),
+                onAction = { actions += it },
+            )
+            onNodeWithText("Pause").performClick()
+            assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(9)), actions)
+        }
+
+    @Test
+    fun pausedDetailShowsResume() =
+        runComposeUiTest {
+            setEpisode(loadedState().copy(isNowPlaying = true))
+            onNodeWithText("Resume").assertIsDisplayed()
         }
 
     @Test
@@ -434,7 +457,16 @@ class EpisodeScreenTest {
         episodes.episodes.value = mapOf(9L to episode)
         episodes.notes.value = if (notes != null) mapOf(9L to notes) else emptyMap()
         val viewModel =
-            EpisodeViewModel(9, episodes, FakeSettingsRepository(), FakeNetworkMonitor(FakeNetworkMonitor.ONLINE))
+            EpisodeViewModel(
+                9,
+                episodes,
+                FakePodcastRepository(),
+                FakeSettingsRepository(),
+                FakePlaybackController(),
+                FakePlaybackStateSource(),
+                testPlatformInfo,
+                FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+            )
         val owner =
             object : LifecycleOwner {
                 override val lifecycle =

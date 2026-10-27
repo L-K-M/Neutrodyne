@@ -1,0 +1,14 @@
+<resources>
+    <string name="queue_now_playing">Now playing</string>
+    <string name="queue_count">Up next · %1$d</string>
+    <string name="queue_clear">Clear Up next</string>
+    <string name="queue_removed">Removed from Up next</string>
+    <string name="queue_cleared">Up next cleared</string>
+    <string name="queue_remove">Remove from Up next</string>
+    <string name="queue_move_up">Move up</string>
+    <string name="queue_move_down">Move down</string>
+    <string name="queue_move_top">Move to top</string>
+    <string name="queue_then">Then: %1$s, %2$s</string>
+    <string name="queue_stop_after">Stop after Up next</string>
+    <string name="queue_play_group">Play %1$s</string>
+</resources>

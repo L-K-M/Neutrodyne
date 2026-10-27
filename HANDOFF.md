@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-27.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) is merged; main CI passes at `73040b2c`. Minified release linkage remains under repair ([#237](https://github.com/L-K-M/Neutrodyne/issues/237), [#238](https://github.com/L-K-M/Neutrodyne/issues/238)); M4 acceptance is open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-27.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged; main CI passes at `babd24b0`. P7 queue UI is in progress; M4 acceptance is open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -143,17 +143,26 @@ These are not blanket release approvals or completed work.
 
 ### M4 playback, P1–P6 source merged, acceptance open
 
-**2026-10-27 checkpoint.** Main `73040b2c` passes CI40549475131.
-The preceding `2dc3f9a2` API26 failure recovered in CI40419619320 attempt 2;
-downloaded XML passes all four named playback cases on API26 and API36.
-#240 fixes #236's test-clock race without changing production playback; its
-128 local tests and exact-head CI passed; two minor-only reviews completed.
+**2026-10-27 checkpoint.** Main `babd24b0` passes
+[CI40569423211](https://github.com/L-K-M/Neutrodyne/actions/runs/40569423211),
+all six jobs. #240 fixes #236's test-clock race without changing production
+playback. #241 restores the ordinary release APK's instrumentation ABI and
+requires all seven release cases. Its reviewed head `a6e915ef` passes
+[full nightly40561577857](https://github.com/L-K-M/Neutrodyne/actions/runs/40561577857):
+API36/API37 release cases, API37 debug, API26/33/34/36 debug playback,
+API34's 1,821.826-second screen-off case, bmgr, bgstart, mutation and APK
+comparison. The merged tree matches the reviewed head. One full review round
+found no confirmed current blocker; ABI-upgrade and fixture maintenance is
+tracked in [#242](https://github.com/L-K-M/Neutrodyne/issues/242).
+
 #232's API31/36 lane measures only its external exemption matrix, not a
 genuine platform denial or denial-to-resume recovery. No retained test drives
-that callback end to end. Release instrumentation's zero-case failures share
-an R8 target-ABI linkage failure; the repair is on `fix/release-smoke-discovery`.
-Clear those release gates, then continue with P7 queue UI and P8 player/root
-composition. Physical and native acceptance remains open.
+that callback end to end. YTX Binder/PID/name checks prove process wiring,
+not graph construction or initializer absence. Back passed unchanged on
+API36/API37; the earlier focus failure's platform cause remains unproved.
+Evidence and completion report are under `~/nd-wt/reviews/`.
+P7 queue UI is in progress on `impl/m4-p7-queue-ui`; P8 player/root composition
+follows. Physical/OEM, audible and genuine-denial acceptance remains open.
 
 M4 plan row P1 is merged through [#222](https://github.com/L-K-M/Neutrodyne/pull/222)
 (widened contracts, fakes, `PlayedRule` / `StartPositionRule` / `PositionSaver`,

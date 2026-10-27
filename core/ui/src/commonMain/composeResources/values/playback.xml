@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Playback start results, consent and queue-add rejections (08 Issues, results and
+         events; 05 Playing a group). Action labels reuse strings.xml's action_*. -->
+    <string name="playback_nothing_unplayed">Nothing unplayed in '%1$s'</string>
+    <string name="playback_external_only">Episodes in '%1$s' open in YouTube</string>
+    <string name="playback_nothing_to_play">Nothing to play</string>
+    <string name="playback_metered_title">Stream on mobile data?</string>
+    <string name="playback_metered_once">Once</string>
+    <string name="playback_metered_always">Always</string>
+    <string name="playback_metered_blocked">Streaming on mobile data is off</string>
+    <string name="playback_action_settings">Settings</string>
+    <string name="playback_audio_gone">This episode's audio file is gone</string>
+    <string name="playback_needs_password">This feed needs a password</string>
+    <string name="playback_unsupported_format">This file format can't be played</string>
+    <string name="playback_no_media">This episode has no audio</string>
+    <string name="playback_youtube_failed">YouTube playback failed. Try again later</string>
+    <string name="playback_start_failed">Couldn't start playback</string>
+    <string name="playback_queue_already_playing">This episode is already playing</string>
+    <string name="playback_queue_youtube">YouTube episodes open in YouTube</string>
+    <string name="playback_queue_unavailable">This episode isn't available</string>
+    <!-- 08 External reason texts, short column (the snackbar text of YouTubeExternal starts). -->
+    <string name="playback_youtube_not_yet">YouTube plays in the app in a later version</string>
+    <string name="playback_youtube_not_yet_desktop">Not yet available on this computer</string>
+    <string name="playback_youtube_not_in_apk">In-app YouTube isn't available in this version</string>
+    <string name="playback_youtube_not_in_apk_desktop">This build has no YouTube engine</string>
+    <string name="playback_youtube_disabled">In-app YouTube is off</string>
+    <string name="playback_youtube_engine_failed">The YouTube engine couldn't start</string>
+</resources>

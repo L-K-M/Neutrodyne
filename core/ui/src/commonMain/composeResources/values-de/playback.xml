@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- German translations of values/playback.xml. -->
+    <string name="playback_nothing_unplayed">Nichts Ungehörtes in '%1$s'</string>
+    <string name="playback_external_only">Episoden in '%1$s' werden in YouTube geöffnet</string>
+    <string name="playback_nothing_to_play">Nichts abzuspielen</string>
+    <string name="playback_metered_title">Über mobile Daten streamen?</string>
+    <string name="playback_metered_once">Einmal</string>
+    <string name="playback_metered_always">Immer</string>
+    <string name="playback_metered_blocked">Streaming über mobile Daten ist aus</string>
+    <string name="playback_action_settings">Einstellungen</string>
+    <string name="playback_audio_gone">Die Audiodatei dieser Episode ist weg</string>
+    <string name="playback_needs_password">Dieser Feed braucht ein Passwort</string>
+    <string name="playback_unsupported_format">Dieses Dateiformat kann nicht abgespielt werden</string>
+    <string name="playback_no_media">Diese Episode hat kein Audio</string>
+    <string name="playback_youtube_failed">YouTube-Wiedergabe fehlgeschlagen. Später erneut versuchen</string>
+    <string name="playback_start_failed">Wiedergabe konnte nicht gestartet werden</string>
+    <string name="playback_queue_already_playing">Diese Episode läuft schon</string>
+    <string name="playback_queue_youtube">YouTube-Episoden werden in YouTube geöffnet</string>
+    <string name="playback_queue_unavailable">Diese Episode ist nicht verfügbar</string>
+    <string name="playback_youtube_not_yet">YouTube spielt in einer späteren Version in der App</string>
+    <string name="playback_youtube_not_yet_desktop">Auf diesem Computer noch nicht verfügbar</string>
+    <string name="playback_youtube_not_in_apk">YouTube in der App ist in dieser Version nicht verfügbar</string>
+    <string name="playback_youtube_not_in_apk_desktop">Dieser Build hat keine YouTube-Engine</string>
+    <string name="playback_youtube_disabled">YouTube in der App ist aus</string>
+    <string name="playback_youtube_engine_failed">Die YouTube-Engine konnte nicht starten</string>
+</resources>

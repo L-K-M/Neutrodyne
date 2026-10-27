@@ -721,7 +721,11 @@ it keeps existing entries in their current relative order, including episodes
 requeued or moved since removal. Restored entries keep their own original order
 when surviving anchors have moved past one another. This replaces the separate re-add/move recipe
 below, which could overwrite concurrent moves. Unavailable stored entries remain
-editable and greyed.
+editable and greyed. `UpNextList` is shared with the player; its drag preview
+commits one move on release and cancels on Escape or changed membership.
+Feeds, Podcast and Episode playback/queue actions now use `PlaybackController`,
+superseding the pre-M4 inert-action notes in the implementation deviations below.
+In progress is enabled; Downloaded remains gated until M6.
 
 ```
 +--------------------------------------------------+

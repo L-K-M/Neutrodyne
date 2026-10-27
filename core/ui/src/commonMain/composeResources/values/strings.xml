@@ -21,8 +21,8 @@
     <string name="feeds_empty_body">New episodes from your podcasts show up here.</string>
     <string name="library_empty_title">Your library is empty</string>
     <string name="library_empty_body">Subscriptions you add appear here as cover tiles.</string>
-    <string name="up_next_empty_title">Up next is empty</string>
-    <string name="up_next_empty_body">Queue episodes from a feed or your library.</string>
+    <string name="up_next_empty_title">Nothing up next</string>
+    <string name="up_next_empty_body">Add episodes with Play next or Play last.</string>
     <string name="downloads_empty_title">No downloads</string>
     <string name="downloads_empty_body">Downloaded episodes are listed here.</string>
     <string name="discover_empty_title">Find something new</string>
