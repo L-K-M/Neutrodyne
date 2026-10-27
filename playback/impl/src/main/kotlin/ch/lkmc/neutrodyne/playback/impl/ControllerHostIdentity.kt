@@ -10,15 +10,8 @@ import androidx.media3.session.MediaSession.ControllerInfo
 import java.security.MessageDigest
 
 /**
- * Authenticates the package names Media3 recognizes for Android Auto and AAOS before
- * [SessionCallback] grants them control. [MediaSession.isAutoCompanionController] and
- * [MediaSession.isAutomotiveController] compare package names only — the Media3 Javadoc
- * says they perform no security validation — so a self-installed package claiming a
- * recognized name passes them. A recognized name must instead be bound to the calling
- * uid and carry the genuine host credential: `FLAG_SYSTEM`/`FLAG_UPDATED_SYSTEM_APP` on
- * an AAOS host package, a Google production signing certificate on Android Auto. Missing,
- * invisible or ambiguous identity fails closed. A controller bound to the service is
- * exempt from package visibility filtering, so no `<queries>` entry is required.
+ * Media3's Auto helpers verify names, not identity. Require UID ownership plus system-app
+ * provenance (AAOS) or Google's production signer lineage (Auto). Unavailable identity fails closed.
  */
 internal class ControllerHostIdentity(
     private val pm: PackageManager,
@@ -61,8 +54,7 @@ internal class ControllerHostIdentity(
 
     private fun hasGenuineAutoSigner(name: String): Boolean {
         val current = signing.currentSha256(name) ?: return false
-        // A co-signed package stays genuine only while every current signer is pinned;
-        // one unknown signer would extend the exception to anything else it signs.
+        // Do not extend the exception to unpinned co-signers.
         if (current.size > 1 && current.any { digest -> AUTO_PINS.none(digest::contentEquals) }) return false
         return AUTO_PINS.any { signing.inLineage(name, it) }
     }
@@ -74,9 +66,7 @@ internal class ControllerHostIdentity(
             listOf(
                 "fdb00c43dbde8b51cb312aa81d3b5fa17713adb94b28f598d77f8eb89daceedf",
                 "1ca8dcc0bed3cbd872d2cb791200c0292ca9975768a82d676b8b424fb65b5295",
-            ).map { hex ->
-                ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
-            }
+            ).map { it.hexToByteArray() }
     }
 }
 
@@ -98,13 +88,15 @@ internal interface SigningFacts {
     ): Boolean
 
     companion object {
+        private const val SHA_256 = "SHA-256"
+
         @Suppress("DEPRECATION")
         fun forPackageManager(pm: PackageManager): SigningFacts =
             object : SigningFacts {
                 override fun currentSha256(packageName: String): List<ByteArray>? =
                     try {
                         val signers =
-                            if (Build.VERSION.SDK_INT >= 28) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                                 pm
                                     .getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
                                     .signingInfo
@@ -122,7 +114,7 @@ internal interface SigningFacts {
                     sha256: ByteArray,
                 ): Boolean =
                     try {
-                        if (Build.VERSION.SDK_INT >= 28) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             pm.hasSigningCertificate(
                                 packageName,
                                 sha256,
@@ -135,7 +127,7 @@ internal interface SigningFacts {
                         false
                     }
 
-                private fun Signature.sha256(): ByteArray = MessageDigest.getInstance("SHA-256").digest(toByteArray())
+                private fun Signature.sha256(): ByteArray = MessageDigest.getInstance(SHA_256).digest(toByteArray())
             }
     }
 }
