@@ -49,6 +49,7 @@ class PlaybackServiceTest {
             object : PlaybackServiceInjector {
                 override fun inject(service: NeutrodynePlaybackService) {
                     service.access = h.access
+                    service.opener = h.opener
                 }
             }
     }
@@ -119,6 +120,60 @@ class PlaybackServiceTest {
             h.run { h.opener.awaitOpen() }
             assertEquals(0, h.dbProviderReads)
             assertNull(h.hub.bridge)
+        }
+    }
+
+    @Test fun boundControllerAttachesAndPlaysOnceGateRecoveryOpensTheDatabase() {
+        LifecycleHarness(app()).use { h ->
+            h.storage = Storage.FAILED
+            h.seedCurrent()
+            install(h)
+            val component = ComponentName(app(), NeutrodynePlaybackService::class.java)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            // Robolectric binds without resolving the component; hand the shadow the real binder.
+            shadowOf(app()).setComponentNameAndServiceForBindService(
+                component,
+                service.get().onBind(Intent("androidx.media3.session.MediaSessionService")),
+            )
+            val owner =
+                object : LifecycleOwner {
+                    override val lifecycle = LifecycleRegistry(this)
+                }
+            owner.lifecycle.currentState = Lifecycle.State.STARTED
+            val connection =
+                PlayerConnection(owner.lifecycle) {
+                    MediaController
+                        .Builder(app(), SessionToken(app(), component))
+                        .buildAsync()
+                }
+            val controller =
+                PlaybackControllerImpl(
+                    connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider { h.sessions },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
+            try {
+                pumpUntil { h.opener.openState.value is DatabaseOpenState.Failed }
+                assertNull(h.hub.bridge)
+                // The session stays available while its database open is failed.
+                assertNotNull(h.run { connection.awaitController() })
+                h.storage = Storage.READY
+                // The start-up gate's retry owns the next open, as on the app's real failure path.
+                h.run { h.opener.awaitOpen() }
+                assertEquals(PlayResult.Started, h.run { controller.play() })
+                pumpUntil { h.hub.bridge != null }
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                pumpUntil { player.mediaItemCount == 1 && player.playWhenReady }
+            } finally {
+                connection.controller?.release()
+                service.destroy()
+            }
         }
     }
 

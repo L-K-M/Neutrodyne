@@ -57,6 +57,7 @@ import kotlinx.coroutines.runBlocking
 import okio.Path
 import org.robolectric.Shadows.shadowOf
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -77,9 +78,13 @@ internal class LifecycleHarness(
     val clock = TestClock()
     val openStarted = CountDownLatch(1)
     val allowOpen = CountDownLatch(if (delayed) 1 else 0)
+    var storage = Storage.READY
     private val factory =
         object : DatabaseFactory by AndroidDatabaseFactory(app) {
-            override fun exists() = false
+            override fun exists(): Boolean {
+                if (storage == Storage.FAILED) throw IOException("storage unavailable")
+                return false
+            }
 
             override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
                 openStarted.countDown()
@@ -305,3 +310,5 @@ internal fun pumpUntil(condition: () -> Boolean) {
     }
     shadowOf(Looper.getMainLooper()).idle()
 }
+
+internal enum class Storage { FAILED, READY }
