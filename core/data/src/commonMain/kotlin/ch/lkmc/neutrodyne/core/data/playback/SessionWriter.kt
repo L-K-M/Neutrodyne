@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -73,11 +74,11 @@ internal class SessionWriter(
         start: SessionStart,
         now: Long,
     ): Long =
-        mutate(now) { session ->
+        explicit(now) { session ->
             saveDeparture(start.departure, now)
             promote(start.currentEpisodeId, now)
             val current = session.copy(currentEpisodeId = start.currentEpisodeId)
-            if (start.contextRetention == ContextRetention.KEEP) return@mutate current
+            if (start.contextRetention == ContextRetention.KEEP) return@explicit current
 
             require((start.anchorEpisodeId == null) == (start.anchorSortDate == null))
             val context = start.context
@@ -97,12 +98,17 @@ internal class SessionWriter(
         departure: Departure?,
         arrivedEpisodeId: Long,
         arrivedOrigin: QueueOrigin,
+        expected: SessionRevision,
         now: Long,
-    ): Long =
+    ): Long? =
         mutate(now) { session ->
-            saveDeparture(departure, now)
-            promote(arrivedEpisodeId, now)
-            session.copy(currentEpisodeId = arrivedEpisodeId).anchorFor(arrivedEpisodeId, arrivedOrigin)
+            if (!session.matches(expected)) {
+                null
+            } else {
+                saveDeparture(departure, now)
+                promote(arrivedEpisodeId, now)
+                session.copy(currentEpisodeId = arrivedEpisodeId).anchorFor(arrivedEpisodeId, arrivedOrigin)
+            }
         }
 
     override suspend fun goBack(
@@ -110,7 +116,7 @@ internal class SessionWriter(
         departure: Departure,
         now: Long,
     ): Long =
-        mutate(now) { session ->
+        explicit(now) { session ->
             require(previous.episodeId != departure.episodeId)
             saveDeparture(departure, now)
             promote(previous.episodeId, now)
@@ -120,37 +126,53 @@ internal class SessionWriter(
 
     override suspend fun endSession(
         departure: Departure?,
+        expected: SessionRevision,
         now: Long,
-    ): Long = clear(departure, now)
+    ): Long? =
+        mutate(now) { session ->
+            if (!session.matches(expected)) null else clear(session, departure, now)
+        }
 
     override suspend fun clearCurrent(
         departure: Departure?,
         now: Long,
-    ): Long = clear(departure, now)
+    ): Long = explicit(now) { session -> clear(session, departure, now) }
 
     private suspend fun clear(
+        session: PlaySessionEntity,
         departure: Departure?,
         now: Long,
-    ): Long =
-        mutate(now) { session ->
-            saveDeparture(departure, now)
-            PlaySessionEntity(generation = session.generation, updatedAt = now)
-        }
+    ): PlaySessionEntity {
+        saveDeparture(departure, now)
+        return PlaySessionEntity(generation = session.generation, updatedAt = now)
+    }
 
-    /** Ensure must be the first statement, including when a restored database lacks the singleton. */
+    /** Ensure must be the first statement, including when a restored database lacks the singleton.
+     * A null change rejects the write: nothing saves, promotes or bumps the generation. */
     private suspend fun mutate(
         now: Long,
-        change: suspend (PlaySessionEntity) -> PlaySessionEntity,
-    ): Long {
+        change: suspend (PlaySessionEntity) -> PlaySessionEntity?,
+    ): Long? {
         require(now >= 0)
         return db.withWriteTransaction {
             db.playSessionDao().ensureNow(now)
             val session = checkNotNull(db.playSessionDao().get())
-            val updated = change(session).copy(generation = session.generation + 1, updatedAt = now)
+            val updated =
+                change(session)?.copy(generation = session.generation + 1, updatedAt = now)
+                    ?: return@withWriteTransaction null
             db.playSessionDao().write(updated)
             updated.generation
         }
     }
+
+    /** Explicit operations are unconditional: their change is never rejected. */
+    private suspend fun explicit(
+        now: Long,
+        change: suspend (PlaySessionEntity) -> PlaySessionEntity,
+    ): Long = checkNotNull(mutate(now) { change(it) })
+
+    private fun PlaySessionEntity.matches(expected: SessionRevision): Boolean =
+        currentEpisodeId == expected.currentEpisodeId && generation == expected.generation
 
     private suspend fun promote(
         episodeId: Long,

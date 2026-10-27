@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 import app.cash.turbine.test
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -138,12 +139,14 @@ class FakePlaybackContractsTest {
             val departure = Departure(1, 3000, null, PositionSource.STREAM, 5, false, true)
             val start = SessionStart(1, null, ContextRetention.REPLACE, null, null)
             assertEquals(1L, f.commitStart(start, 10))
-            assertEquals(2L, f.onTransition(departure, 2, QueueOrigin.UP_NEXT, 11))
+            f.queue = VirtualQueue(1, QueueItem(1, QueueOrigin.CURRENT), emptyList(), emptyList())
+            assertEquals(2L, f.onTransition(departure, 2, QueueOrigin.UP_NEXT, SessionRevision(1, 1), 11))
             assertEquals(departure, f.calls.last().departure)
             assertEquals(2L, f.calls.last().arrivalId)
             f.goBack(QueueItem(1, QueueOrigin.CONTEXT), departure, 12)
-            f.endSession(departure, 13)
+            assertEquals(4L, f.endSession(departure, SessionRevision(1, 3), 13))
             f.clearCurrent(null, 14)
+            f.queue = VirtualQueue(5, null, emptyList(), emptyList())
             assertEquals(FakePlaySessionStore.Operation.entries, f.calls.map { it.operation })
             f.failure = IllegalStateException("full")
             assertFailsWith<IllegalStateException> { f.commitStart(start, 15) }
@@ -151,6 +154,25 @@ class FakePlaybackContractsTest {
             f.failure = null
             assertNull(f.virtualQueue(0).current)
             assertFailsWith<IllegalArgumentException> { f.virtualQueue(-1) }
+        }
+
+    @Test fun sessionFakeRejectsStaleRevisionsWithoutGenerationAdvance() =
+        runTest {
+            val f = FakePlaySessionStore()
+            f.queue = VirtualQueue(2, QueueItem(9, QueueOrigin.CURRENT), emptyList(), emptyList())
+            assertNull(f.endSession(null, SessionRevision(9, 1), 10))
+            assertNull(f.onTransition(null, 5, QueueOrigin.UP_NEXT, SessionRevision(8, 2), 11))
+            assertEquals(0L, f.generation)
+            assertEquals(3L, f.endSession(null, SessionRevision(9, 2), 12))
+            assertEquals(
+                listOf(
+                    FakePlaySessionStore.Operation.END,
+                    FakePlaySessionStore.Operation.TRANSITION,
+                    FakePlaySessionStore.Operation.END,
+                ),
+                f.calls.map { it.operation },
+            )
+            assertEquals(SessionRevision(8, 2), f.calls[1].expected)
         }
 
     @Test fun positionFakeHonorsSaveGuardsResetReplayAndFailure() =
