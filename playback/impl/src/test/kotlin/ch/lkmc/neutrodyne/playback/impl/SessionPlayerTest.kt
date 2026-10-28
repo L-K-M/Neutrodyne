@@ -34,11 +34,11 @@ class SessionPlayerTest {
         SessionPlayer(exo, scope, {
             calls += "gate"
             accepted
-        }, { previous++ }, {
+        }, { true }, { previous++ }, {
             calls += "flush"
             exo.stop()
             calls += "stop"
-        })
+        }, {})
 
     @After fun close() {
         player.release()
@@ -69,7 +69,7 @@ class SessionPlayerTest {
                     super.removeListener(listener)
                 }
             }
-        val wrapper = SessionPlayer(ordered, scope, { true }, {}, {})
+        val wrapper = SessionPlayer(ordered, scope, { true }, { true }, {}, {}, {})
         assertEquals(1, listeners.size)
         val tracker = object : Player.Listener {}
         val projector = object : Player.Listener {}
@@ -106,7 +106,7 @@ class SessionPlayerTest {
     @Test fun pauseArrivingDuringBeforePlayWinsOverTheLatePlay() {
         load()
         val gate = CompletableDeferred<Boolean>()
-        val gated = SessionPlayer(exo, scope, { gate.await() }, { previous++ }, {})
+        val gated = SessionPlayer(exo, scope, { gate.await() }, { true }, { previous++ }, {}, {})
         gated.play()
         gated.pause()
         gate.complete(true)

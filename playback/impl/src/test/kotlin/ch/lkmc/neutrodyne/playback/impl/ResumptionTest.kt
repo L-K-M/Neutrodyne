@@ -34,7 +34,7 @@ class ResumptionTest {
             h.publish(VirtualQueue(1, null, listOf(QueueItem(1, QueueOrigin.UP_NEXT)), emptyList()))
             val player = h.playerFactory.create()
             val ports = h.run { h.access.open() }
-            val bridge = AndroidServiceBridge(player, ports, h.access, h.scope, { true }, {})
+            val bridge = AndroidServiceBridge(player, ports, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach()
             try {
                 assertEquals(PlayResult.Started, h.run { bridge.start(StartRequest.Episode(1), StartOrigin.UI) })
@@ -80,7 +80,7 @@ class ResumptionTest {
                     }
                 },
             )
-            val bridge = AndroidServiceBridge(player, ports, h.access, h.scope, { true }, {})
+            val bridge = AndroidServiceBridge(player, ports, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach(hasPendingStart = true)
             try {
                 val window = h.run { bridge.resume(StartOrigin.EXTERNAL) }
@@ -115,7 +115,8 @@ class ResumptionTest {
                 )
             }
             val player = h.playerFactory.create()
-            val bridge = AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {})
+            val bridge =
+                AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach()
             try {
                 pumpUntil { player.mediaItemCount == 2 }
@@ -168,7 +169,8 @@ class ResumptionTest {
                 )
             }
             val player = h.playerFactory.create()
-            val bridge = AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {})
+            val bridge =
+                AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach()
             try {
                 pumpUntil { player.mediaItemCount == 2 }
@@ -198,6 +200,7 @@ class ResumptionTest {
                     h.scope,
                     { true },
                     { stopped = true },
+                    player::pause,
                 )
             bridge.attach()
             try {
@@ -241,7 +244,8 @@ class ResumptionTest {
                 )
             }
             val player = h.playerFactory.create()
-            val bridge = AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {})
+            val bridge =
+                AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach()
             try {
                 assertFailsWith<UnsupportedOperationException> { h.run { bridge.resume(StartOrigin.EXTERNAL) } }

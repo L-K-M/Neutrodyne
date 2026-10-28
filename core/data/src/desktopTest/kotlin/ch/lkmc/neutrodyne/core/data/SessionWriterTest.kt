@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -51,10 +52,13 @@ class SessionWriterTest {
             assertEquals(ids.drop(1), writer.virtualQueue(20).upNext.map { it.episodeId })
             assertEquals(100, db.episodeStateDao().byEpisode(ids[0])?.lastPlayedAt)
             assertNull(db.episodeStateDao().byEpisode(ids[0])?.startedAt)
-            assertEquals(2, writer.onTransition(departure(ids[0]), ids[1], QueueOrigin.UP_NEXT, 200))
+            assertEquals(2L, writer.onTransition(departure(ids[0]), ids[1], QueueOrigin.UP_NEXT, revision(), 200))
             assertEquals(99, db.positionDao().byEpisode(ids[0])?.positionMs)
             assertEquals(ids[0], db.playSessionDao().get()?.contextAnchorEpisodeId)
-            assertEquals(3, writer.onTransition(departure(ids[1], played = true), ids[2], QueueOrigin.CONTEXT, 300))
+            assertEquals(
+                3L,
+                writer.onTransition(departure(ids[1], played = true), ids[2], QueueOrigin.CONTEXT, revision(), 300),
+            )
             assertEquals(300, db.episodeStateDao().byEpisode(ids[1])?.playedAt)
             assertEquals(0, db.positionDao().byEpisode(ids[1])?.positionMs)
             assertEquals(200, db.playSessionDao().get()?.contextAnchorSortDate)
@@ -64,7 +68,7 @@ class SessionWriterTest {
             writer.goBack(QueueItem(ids[3], QueueOrigin.UP_NEXT), departure(ids[0]), 500)
             assertEquals(ids[0], db.playSessionDao().get()?.contextAnchorEpisodeId)
             assertEquals(listOf(ids[0], ids[2]), writer.virtualQueue(0).upNext.map { it.episodeId })
-            assertEquals(6, writer.endSession(departure(ids[3], played = true), 600))
+            assertEquals(6L, writer.endSession(departure(ids[3], played = true), revision(), 600))
             val ended = db.playSessionDao().get()!!
             assertNull(ended.currentEpisodeId)
             assertNull(ended.contextType)
@@ -208,7 +212,7 @@ class SessionWriterTest {
             assertEquals(ids.drop(1), writer.virtualQueue(20).contextTail.map { it.episodeId })
             assertEquals(restored, db.playSessionDao().get())
             queue(ids.drop(1))
-            assertEquals(901, writer.onTransition(null, ids[1], QueueOrigin.UP_NEXT, 200))
+            assertEquals(901L, writer.onTransition(null, ids[1], QueueOrigin.UP_NEXT, revision(), 200))
             assertEquals(listOf(ids[2]), writer.virtualQueue(20).upNext.map { it.episodeId })
         }
 
@@ -219,7 +223,7 @@ class SessionWriterTest {
             queue(listOf(ids[1]))
             val before = db.playSessionDao().get()
             assertFailsWith<IllegalArgumentException> {
-                writer.onTransition(departure(ids[0], played = true), -1, QueueOrigin.CONTEXT, 200)
+                writer.onTransition(departure(ids[0], played = true), -1, QueueOrigin.CONTEXT, revision(), 200)
             }
             db.useWriterConnection {
                 it.execSql(
@@ -228,7 +232,7 @@ class SessionWriterTest {
                 )
             }
             assertFailsWith<Exception> {
-                writer.onTransition(departure(ids[0], played = true), ids[1], QueueOrigin.CONTEXT, 200)
+                writer.onTransition(departure(ids[0], played = true), ids[1], QueueOrigin.CONTEXT, revision(), 200)
             }
             assertEquals(before, db.playSessionDao().get())
             assertEquals(listOf(ids[1]), db.queueDao().queuedEpisodeIds())
@@ -277,6 +281,75 @@ class SessionWriterTest {
                 }
             }
         }
+
+    @Test fun staleEndAfterNewerStartIsRejectedWithoutSideEffects() =
+        runTest {
+            val ids = seed(2)
+            writer.commitStart(start(ids[0]), 100)
+            writer.commitStart(start(ids[1]), 200)
+            assertNull(writer.endSession(departure(ids[0], played = true), SessionRevision(ids[0], 1), 300))
+            val session = db.playSessionDao().get()!!
+            assertEquals(ids[1], session.currentEpisodeId)
+            assertEquals(2, session.generation)
+            assertNull(db.episodeStateDao().byEpisode(ids[0])?.playedAt)
+            assertNull(db.positionDao().byEpisode(ids[0]))
+            assertEquals(3L, writer.endSession(departure(ids[1]), SessionRevision(ids[1], 2), 400))
+        }
+
+    @Test fun staleTransitionAfterNewerStartIsRejectedWithoutSideEffects() =
+        runTest {
+            val ids = seed(3)
+            writer.commitStart(start(ids[0]), 100)
+            queue(listOf(ids[2]))
+            writer.commitStart(start(ids[1]), 200)
+            assertNull(
+                writer.onTransition(
+                    departure(ids[0], played = true),
+                    ids[2],
+                    QueueOrigin.UP_NEXT,
+                    SessionRevision(ids[0], 1),
+                    300,
+                ),
+            )
+            val session = db.playSessionDao().get()!!
+            assertEquals(ids[1], session.currentEpisodeId)
+            assertEquals(2, session.generation)
+            assertEquals(listOf(ids[2]), db.queueDao().queuedEpisodeIds())
+            assertNull(db.episodeStateDao().byEpisode(ids[0])?.playedAt)
+            assertNull(db.episodeStateDao().byEpisode(ids[2])?.lastPlayedAt)
+            assertNull(db.positionDao().byEpisode(ids[0]))
+            assertEquals(
+                3L,
+                writer.onTransition(departure(ids[1]), ids[2], QueueOrigin.UP_NEXT, SessionRevision(ids[1], 2), 400),
+            )
+        }
+
+    @Test fun sameEpisodeCurrentRejectsWhenGenerationAdvanced() =
+        runTest {
+            val ids = seed(2)
+            writer.commitStart(start(ids[0]), 100)
+            writer.commitStart(start(ids[1]), 200)
+            writer.commitStart(start(ids[0]), 300)
+            assertNull(writer.endSession(departure(ids[0]), SessionRevision(ids[0], 1), 400))
+            val session = db.playSessionDao().get()!!
+            assertEquals(ids[0], session.currentEpisodeId)
+            assertEquals(3, session.generation)
+        }
+
+    @Test fun ensuredSingletonMatchesNullCurrentAtGenerationZero() =
+        runTest {
+            val ids = seed(1)
+            assertNull(writer.endSession(null, SessionRevision(ids[0], 0), 50))
+            assertNull(writer.onTransition(null, ids[0], QueueOrigin.CONTEXT, SessionRevision(null, 1), 60))
+            assertEquals(0L, db.playSessionDao().get()?.generation)
+            assertEquals(1L, writer.onTransition(null, ids[0], QueueOrigin.CONTEXT, SessionRevision(null, 0), 100))
+            val session = db.playSessionDao().get()!!
+            assertEquals(ids[0], session.currentEpisodeId)
+            assertEquals(ids[0], session.contextAnchorEpisodeId)
+        }
+
+    private suspend fun revision() =
+        db.playSessionDao().get()!!.let { SessionRevision(it.currentEpisodeId, it.generation) }
 
     private suspend fun seed(count: Int): List<Long> {
         val podcast = db.podcastDao().insertPodcast(podcastEntity())

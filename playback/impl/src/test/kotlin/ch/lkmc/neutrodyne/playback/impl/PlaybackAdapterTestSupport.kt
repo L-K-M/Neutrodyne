@@ -169,7 +169,8 @@ internal class AdapterFixture(
             clock,
             playerScope,
             Dispatchers.Unconfined,
-            failures::add,
+            beforeAdvance = { true },
+            reportFailure = failures::add,
         )
 
     fun attach() {
