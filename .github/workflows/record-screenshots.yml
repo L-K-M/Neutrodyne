@@ -1,0 +1,161 @@
+# SPDX-License-Identifier: Unlicense
+#
+# record-screenshots.yml — the hosted-only golden recorder (09 Helper
+# workflows). Reference PNGs for both golden sets are recorded only on
+# ubuntu-24.04 runners: font rasterisation differs per OS, so locally captured
+# screenshots are never committed (09 Recording policy, D59). Dispatch with a
+# branch and a tier, then apply the uploaded artifact in a checkout of that
+# exact commit with `scripts/ci/apply-screenshots.sh <run-id>` and commit the
+# references through a normal PR — this workflow never pushes (09 Helper
+# workflows).
+#
+# The job mirrors ci.yml's `unit` setup (Temurin 25+21, Python 3.14,
+# setup-gradle, the Robolectric SDK cache) so recording runs under the same
+# toolchain as verification.
+
+name: record-screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Same-repository branch, tag or SHA to record from"
+        required: true
+        default: main
+        type: string
+      tier:
+        description: "Golden tier to record (09 Tiers)"
+        required: true
+        default: pr
+        type: choice
+        options:
+          - pr
+          - full
+
+permissions:
+  contents: read
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+  LANG: C.UTF-8
+
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      # Same Robolectric SDK cache as ci.yml's unit job.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-4.17-sdk36
+      # 09's command line (`allTests test --tests '*Screenshot*'`) does not
+      # apply --tests across the aggregate reliably, so the actual per-target
+      # record tasks run unqualified: every roborazzi-applying module's
+      # Android host captures (recordRoborazziAndroidHostTest) and desktop
+      # captures (recordRoborazziDesktop) record together.
+      - name: Record both golden sets
+        run: >-
+          ./gradlew recordRoborazziAndroidHostTest recordRoborazziDesktop
+          -Proborazzi.test.record=true
+          -PscreenshotTier=${{ inputs.tier }}
+      # The manifest pins the checked-out source (git HEAD of the requested
+      # branch), not the workflow ref's github.sha — a dispatch on main that
+      # records branch B must bind the artifact to B's commit.
+      - name: Package screenshots-<sha>.zip
+        id: package
+        env:
+          REQUESTED_REF: ${{ inputs.branch }}
+          TIER: ${{ inputs.tier }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, subprocess, sys, zipfile
+
+          def sh(*args):
+              return subprocess.run(args, capture_output=True, text=True,
+                                    check=True).stdout.strip()
+
+          root = sh("git", "rev-parse", "--show-toplevel")
+          sha = sh("git", "rev-parse", "HEAD")
+          source_ref = sh("git", "rev-parse", "--abbrev-ref", "HEAD")
+
+          # Golden layout: <module>/screenshots/{android,desktop}/<name>.png,
+          # flat per set. ls-files covers tracked files plus untracked ones
+          # not ignored, so freshly recorded PNGs land in the zip while
+          # ignored build outputs never do.
+          raw = subprocess.run(
+              ["git", "-C", root, "ls-files", "-z", "--cached", "--others",
+               "--exclude-standard", "--", "*/screenshots/*/*.png"],
+              capture_output=True, check=True).stdout.decode()
+          names = sorted(n for n in raw.split("\0") if n)
+          members = [
+              n for n in names
+              if len(n.split("/")) >= 4
+              and n.split("/")[-3] == "screenshots"
+              and n.split("/")[-2] in ("android", "desktop")
+          ]
+
+          # 09 Tiers budgets: exceeding them means dropping variants, not
+          # shipping a bigger artifact.
+          LIMITS = {"android": (800, 30 * 1024 * 1024),
+                    "desktop": (400, 15 * 1024 * 1024)}
+          for setname, (max_count, max_bytes) in LIMITS.items():
+              sel = [n for n in members if n.split("/")[-2] == setname]
+              size = sum(os.path.getsize(os.path.join(root, n)) for n in sel)
+              if not sel:
+                  sys.exit(f"record produced no {setname} goldens")
+              if len(sel) > max_count or size > max_bytes:
+                  sys.exit(f"{setname} golden set over the 09 budget: "
+                           f"{len(sel)} files / {size} bytes "
+                           f"(limit {max_count} / {max_bytes})")
+
+          manifest = {
+              "schema": 1,
+              "repository": os.environ["REPOSITORY"],
+              "tier": os.environ["TIER"],
+              "sourceSha": sha,
+              "sourceRef": source_ref,
+              "requestedRef": os.environ["REQUESTED_REF"],
+              "workflowRef": os.environ["WORKFLOW_REF"],
+              "workflowSha": os.environ["WORKFLOW_SHA"],
+              "runId": os.environ["RUN_ID"],
+              "runUrl": os.environ["RUN_URL"],
+          }
+          os.makedirs("dist", exist_ok=True)
+          path = f"dist/screenshots-{sha}.zip"
+          with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+              zf.writestr("manifest.json",
+                          json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+              for name in members:
+                  zf.write(os.path.join(root, name), name)
+          print(f"{path}: {len(members)} goldens")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"sha={sha}\n")
+          PYEOF
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots-${{ steps.package.outputs.sha }}
+          path: dist/screenshots-${{ steps.package.outputs.sha }}.zip
+          retention-days: 14
