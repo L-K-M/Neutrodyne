@@ -78,6 +78,7 @@ class SessionCallbackConnectTest {
         controller: MediaSession.ControllerInfo,
     ) {
         val result = callback.onConnectAsync(session, controller).get()
+        assertTrue(result.isAccepted, controller.packageName)
         assertFalse(result.availablePlayerCommands.contains(Player.COMMAND_PLAY_PAUSE), controller.packageName)
         assertFalse(
             result.availableSessionCommands.contains(CustomCommands.command(CustomCommands.PLAY_CONTEXT)),
@@ -130,6 +131,7 @@ class SessionCallbackConnectTest {
                             ).get()
                     }
                 assertIs<IllegalStateException>(dispatch.cause)
+                assertEquals("Connection must not resolve database ports", dispatch.cause?.message)
                 assertEquals(0, h.dbProviderReads)
             } finally {
                 session.release()
@@ -160,6 +162,7 @@ class SessionCallbackConnectTest {
                 }
                 // The standard-command guard rejects the same way, before media-id parsing.
                 val items = mutableListOf(MediaItem.Builder().setMediaId("episode:1").build())
+                assertEquals(1L, SessionCallback.parseBrowseEpisode(items.single().mediaId))
                 val denied =
                     assertFailsWith<ExecutionException> {
                         callback
