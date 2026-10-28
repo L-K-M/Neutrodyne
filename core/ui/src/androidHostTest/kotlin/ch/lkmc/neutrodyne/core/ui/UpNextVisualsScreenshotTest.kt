@@ -60,7 +60,7 @@ class UpNextVisualsScreenshotTest {
     @Test fun externalDark() = capture(QueueVisual.EXTERNAL_DARK)
 
     @Test
-    @Config(qualifiers = "w360dp-h640dp-mdpi-ar-rXB")
+    @Config(qualifiers = "ar-rXB-w360dp-h640dp-mdpi")
     fun contentStress() = capture(QueueVisual.CONTENT_STRESS)
 
     private fun capture(visual: QueueVisual) {
