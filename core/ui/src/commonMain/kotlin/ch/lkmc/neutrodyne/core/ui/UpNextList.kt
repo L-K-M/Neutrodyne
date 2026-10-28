@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -400,12 +400,13 @@ private fun QueueSwipe(
                     .clearAndSetSemantics {}
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (rtl) Arrangement.End else Arrangement.Start,
+                horizontalArrangement = Arrangement.Start,
             ) {
                 Icon(NdIcons.Close, contentDescription = null)
                 Text(stringResource(Res.string.queue_remove))
             }
         }
-        Box(Modifier.offset { IntOffset(displacement.roundToInt(), 0) }) { content() }
+        // Pointer deltas are physical; only the revealed content follows layout start.
+        Box(Modifier.absoluteOffset { IntOffset(displacement.roundToInt(), 0) }) { content() }
     }
 }

@@ -6,6 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -23,7 +24,9 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.unit.LayoutDirection
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -52,6 +55,10 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class UpNextScreenTest {
+    private companion object {
+        const val SWIPE_PREVIEW_FRACTION = 0.2f
+    }
+
     private val state =
         mutableStateOf(
             UpNextUiState(
@@ -184,6 +191,36 @@ class UpNextScreenTest {
             assertEquals(listOf(3L), removals)
         }
 
+    @Test fun androidSwipeTracksFingerInLtr() = assertTouchSwipeTracksFinger(LayoutDirection.Ltr)
+
+    @Test fun androidSwipeTracksFingerInRtl() = assertTouchSwipeTracksFinger(LayoutDirection.Rtl)
+
+    private fun assertTouchSwipeTracksFinger(direction: LayoutDirection) =
+        runDesktopComposeUiTest(width = 650, height = 950) {
+            content(platform = PlatformKind.ANDROID, layoutDirection = direction)
+            val row = onNodeWithText("Episode 3")
+            val before = row.fetchSemanticsNode().boundsInRoot
+            val distance = before.width * SWIPE_PREVIEW_FRACTION * if (direction == LayoutDirection.Ltr) 1 else -1
+            row.performTouchInput {
+                down(center)
+                moveBy(Offset(distance, 0f))
+            }
+            val shift =
+                row
+                    .fetchSemanticsNode()
+                    .boundsInRoot.center.x - before.center.x
+            assertTrue(shift * distance > 0f, "$direction: row shifted $shift for pointer delta $distance")
+            onRoot().performTouchInput { up() }
+            waitForIdle()
+            assertEquals(before, row.fetchSemanticsNode().boundsInRoot)
+            assertTrue(removals.isEmpty())
+
+            row.performTouchInput {
+                if (direction == LayoutDirection.Rtl) swipeLeft() else swipeRight()
+            }
+            assertEquals(listOf(3L), removals)
+        }
+
     @Test fun desktopSwipeKeepsUnavailableRows() =
         runDesktopComposeUiTest(width = 650, height = 950) {
             state.value =
@@ -238,9 +275,16 @@ class UpNextScreenTest {
             onNodeWithText("Clear Up next").assertDoesNotExist()
         }
 
-    private fun ComposeUiTest.content(platform: PlatformKind = PlatformKind.DESKTOP) {
+    private fun ComposeUiTest.content(
+        platform: PlatformKind = PlatformKind.DESKTOP,
+        layoutDirection: LayoutDirection = LayoutDirection.Ltr,
+    ) {
         setContent {
-            CompositionLocalProvider(LocalUiClock provides TestClock(), LocalPlatformKind provides platform) {
+            CompositionLocalProvider(
+                LocalUiClock provides TestClock(),
+                LocalPlatformKind provides platform,
+                LocalLayoutDirection provides layoutDirection,
+            ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                     UpNextScreen(
                         state.value,
