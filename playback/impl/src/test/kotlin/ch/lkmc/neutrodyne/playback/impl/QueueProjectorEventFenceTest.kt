@@ -7,11 +7,11 @@ import androidx.media3.common.Player
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
-import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
+import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
-import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -34,95 +34,105 @@ class QueueProjectorEventFenceTest {
 
     @Test fun oldArrivalCannotPromoteOverANewerStartDuringProjection() = runTest { staleEvent(Event.ARRIVAL) }
 
-    @Test fun consecutiveArrivalsUseTheRevisionCommittedByThePreviousEvent() = runTest {
-        val entered = CompletableDeferred<Unit>()
-        val release = CompletableDeferred<Unit>()
-        val finished = CompletableDeferred<Unit>()
-        var holdFirst = true
-        var commits = 0
-        val f = AdapterFixture(this, sessionStore = { real ->
-            object : PlaySessionStore by real {
-                override suspend fun onTransition(
-                    departure: Departure?,
-                    arrivedEpisodeId: Long,
-                    arrivedOrigin: QueueOrigin,
-                    expected: SessionRevision,
-                    now: Long,
-                ): Long? {
-                    if (holdFirst) {
-                        holdFirst = false
-                        entered.complete(Unit)
-                        release.await()
+    @Test fun consecutiveArrivalsUseTheRevisionCommittedByThePreviousEvent() =
+        runTest {
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val finished = CompletableDeferred<Unit>()
+            var holdFirst = true
+            var commits = 0
+            val f =
+                AdapterFixture(this, sessionStore = { real ->
+                    object : PlaySessionStore by real {
+                        override suspend fun onTransition(
+                            departure: Departure?,
+                            arrivedEpisodeId: Long,
+                            arrivedOrigin: QueueOrigin,
+                            expected: SessionRevision,
+                            now: Long,
+                        ): Long? {
+                            if (holdFirst) {
+                                holdFirst = false
+                                entered.complete(Unit)
+                                release.await()
+                            }
+                            return real.onTransition(departure, arrivedEpisodeId, arrivedOrigin, expected, now).also {
+                                commits++
+                                if (commits == 2) finished.complete(Unit)
+                            }
+                        }
                     }
-                    return real.onTransition(departure, arrivedEpisodeId, arrivedOrigin, expected, now).also {
-                        commits++
-                        if (commits == 2) finished.complete(Unit)
-                    }
-                }
+                })
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(ids)
+                val generation = f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE).generation
+                f.player.seekToNextMediaItem()
+                awaitAdapter { entered.isCompleted }
+                f.player.seekToNextMediaItem()
+                release.complete(Unit)
+                awaitAdapter { finished.isCompleted }
+                val persisted = f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+                assertEquals(ids[2], persisted.current?.episodeId)
+                assertEquals(generation + 2, persisted.generation)
+                assertTrue(f.failures.isEmpty())
+                assertEquals(emptyList(), persisted.upNext)
+            } finally {
+                release.complete(Unit)
+                f.close()
             }
-        })
-        try {
-            val ids = f.seed(3)
-            f.attach()
-            f.start(ids)
-            val generation = f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE).generation
-            f.player.seekToNextMediaItem()
-            awaitAdapter { entered.isCompleted }
-            f.player.seekToNextMediaItem()
-            release.complete(Unit)
-            awaitAdapter { finished.isCompleted }
-            val persisted = f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
-            assertEquals(ids[2], persisted.current?.episodeId)
-            assertEquals(generation + 2, persisted.generation)
-            assertTrue(f.failures.isEmpty())
-            assertEquals(emptyList(), persisted.upNext)
-        } finally {
-            release.complete(Unit)
-            f.close()
         }
-    }
 
-    @Test fun aNewSessionCanEndWhileTheOldSessionsEndIsWaiting() = runTest {
-        val entered = CompletableDeferred<Unit>()
-        val release = CompletableDeferred<Unit>()
-        val finished = CompletableDeferred<Unit>()
-        var ends = 0
-        val f = AdapterFixture(this, sessionStore = { real ->
-            object : PlaySessionStore by real {
-                override suspend fun endSession(departure: Departure?, expected: SessionRevision, now: Long): Long? {
-                    ends++
-                    if (ends == 1) {
-                        entered.complete(Unit)
-                        release.await()
+    @Test fun aNewSessionCanEndWhileTheOldSessionsEndIsWaiting() =
+        runTest {
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val finished = CompletableDeferred<Unit>()
+            var ends = 0
+            val f =
+                AdapterFixture(this, sessionStore = { real ->
+                    object : PlaySessionStore by real {
+                        override suspend fun endSession(
+                            departure: Departure?,
+                            expected: SessionRevision,
+                            now: Long,
+                        ): Long? {
+                            ends++
+                            if (ends == 1) {
+                                entered.complete(Unit)
+                                release.await()
+                            }
+                            return real.endSession(departure, expected, now).also {
+                                if (ends == 2) finished.complete(Unit)
+                            }
+                        }
                     }
-                    return real.endSession(departure, expected, now).also {
-                        if (ends == 2) finished.complete(Unit)
-                    }
-                }
+                })
+            try {
+                val ids = f.seed(2)
+                f.attach()
+                f.start(listOf(ids[0]))
+                f.projector.onPlaybackStateChanged(Player.STATE_ENDED)
+                awaitAdapter { entered.isCompleted }
+                f.projector.beginOwnWrite()
+                val generation =
+                    f.sessions.commitStart(SessionStart(ids[1], null, ContextRetention.KEEP, null, null), f.clock.now())
+                f.projector.applyStart(
+                    StartOutcome.Committed(f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE), 0),
+                )
+                f.projector.endOwnWrite(generation)
+                f.projector.onPlaybackStateChanged(Player.STATE_ENDED)
+                release.complete(Unit)
+                awaitAdapter { finished.isCompleted }
+                val persisted = f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+                assertEquals(null, persisted.current)
+                assertEquals(generation + 1, persisted.generation)
+            } finally {
+                release.complete(Unit)
+                f.close()
             }
-        })
-        try {
-            val ids = f.seed(2)
-            f.attach()
-            f.start(listOf(ids[0]))
-            f.projector.onPlaybackStateChanged(Player.STATE_ENDED)
-            awaitAdapter { entered.isCompleted }
-            f.projector.beginOwnWrite()
-            val generation =
-                f.sessions.commitStart(SessionStart(ids[1], null, ContextRetention.KEEP, null, null), f.clock.now())
-            f.projector.applyStart(StartOutcome.Committed(f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE), 0))
-            f.projector.endOwnWrite(generation)
-            f.projector.onPlaybackStateChanged(Player.STATE_ENDED)
-            release.complete(Unit)
-            awaitAdapter { finished.isCompleted }
-            val persisted = f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
-            assertEquals(null, persisted.current)
-            assertEquals(generation + 1, persisted.generation)
-        } finally {
-            release.complete(Unit)
-            f.close()
         }
-    }
 
     @Test fun retriedEndCannotBorrowANewerStartsRevision() = runTest { staleRetry(Event.END) }
 
@@ -133,16 +143,17 @@ class QueueProjectorEventFenceTest {
         val release = CompletableDeferred<Unit>()
         val completed = CompletableDeferred<Unit>()
         var firstAttempt = true
-        val f = AdapterFixture(this, sessionStore = { real ->
-            SignallingSessions(real, completed) {
-                if (firstAttempt) {
-                    firstAttempt = false
-                    entered.complete(Unit)
-                    release.await()
-                    throw IOException("Injected first-attempt failure")
+        val f =
+            AdapterFixture(this, sessionStore = { real ->
+                SignallingSessions(real, completed) {
+                    if (firstAttempt) {
+                        firstAttempt = false
+                        entered.complete(Unit)
+                        release.await()
+                        throw IOException("Injected first-attempt failure")
+                    }
                 }
-            }
-        })
+            })
         try {
             val ids = f.seed(3)
             f.attach()
@@ -185,7 +196,12 @@ class QueueProjectorEventFenceTest {
             f.start(if (event == Event.END) listOf(ids[0]) else ids)
             val title = "Projection ready"
             f.db.podcastDao().setCustomTitle(f.lookup.get(ids[0])!!.podcastId, title)
-            awaitAdapter { f.player.currentMediaItem?.mediaMetadata?.albumTitle?.toString() == title }
+            awaitAdapter {
+                f.player.currentMediaItem
+                    ?.mediaMetadata
+                    ?.albumTitle
+                    ?.toString() == title
+            }
             f.projector.beginOwnWrite()
             val generation =
                 f.sessions.commitStart(SessionStart(ids[2], null, ContextRetention.KEEP, null, null), f.clock.now())
@@ -224,7 +240,11 @@ private class SignallingSessions(
     private val completed: CompletableDeferred<Unit>,
     private val beforeEvent: suspend () -> Unit = {},
 ) : PlaySessionStore by delegate {
-    override suspend fun endSession(departure: Departure?, expected: SessionRevision, now: Long): Long? {
+    override suspend fun endSession(
+        departure: Departure?,
+        expected: SessionRevision,
+        now: Long,
+    ): Long? {
         beforeEvent()
         return delegate.endSession(departure, expected, now).also { completed.complete(Unit) }
     }
@@ -237,12 +257,13 @@ private class SignallingSessions(
         now: Long,
     ): Long? {
         beforeEvent()
-        return delegate.onTransition(
-            departure,
-            arrivedEpisodeId,
-            arrivedOrigin,
-            expected,
-            now,
-        ).also { completed.complete(Unit) }
+        return delegate
+            .onTransition(
+                departure,
+                arrivedEpisodeId,
+                arrivedOrigin,
+                expected,
+                now,
+            ).also { completed.complete(Unit) }
     }
 }
