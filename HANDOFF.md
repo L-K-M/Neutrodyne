@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-27.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged; main CI passes at `babd24b0`. P7 queue UI is in progress; M4 acceptance is open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-28.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged; main CI passes at `5ddfe29a`. P7 queue UI is tracked in [#243](https://github.com/L-K-M/Neutrodyne/pull/243); P8 and M4 acceptance remain open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -142,6 +142,26 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 These are not blanket release approvals or completed work.
 
 ### M4 playback, P1–P6 source merged, acceptance open
+
+**2026-10-28 checkpoint.** Main `5ddfe29a` passes all six jobs in
+[CI40622726292](https://github.com/L-K-M/Neutrodyne/actions/runs/40622726292).
+#244 authenticates Auto/AAOS identities; #245 fences stale events/retries and
+late play replies, preserves streaming policy and retains storage recovery;
+#246 supplies source-bound hosted screenshot recording. Their completed
+reviews found no confirmed current blocker. Real Auto/AAOS behavior remains
+unverified; v1 has no AAOS-specific device-test requirement.
+
+P7 [#243](https://github.com/L-K-M/Neutrodyne/pull/243) contains the queue UI,
+episode playback actions and in-progress filter. Its 18 queue references
+were recorded on Linux from source `1771507d` in
+[40623702421](https://github.com/L-K-M/Neutrodyne/actions/runs/40623702421).
+The real API36 journey exposed snackbar occlusion of navigation targets;
+a failing-first geometry test and all 23 root tests pass after moving notices
+inside navigation content. Source `1771507d` passes the API26/API36 queue
+journey and API36 ATF negative control in
+[CI40623707135](https://github.com/L-K-M/Neutrodyne/actions/runs/40623707135);
+only missing references failed its unit job. No ATF result was suppressed.
+Final-head CI, review and nightly receipts belong to #243; P8 remains separate.
 
 **2026-10-27 checkpoint.** Main `babd24b0` passes
 [CI40569423211](https://github.com/L-K-M/Neutrodyne/actions/runs/40569423211),
