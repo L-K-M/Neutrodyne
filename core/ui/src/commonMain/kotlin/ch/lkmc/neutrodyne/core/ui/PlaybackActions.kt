@@ -425,13 +425,13 @@ public class PlaybackActions(
             },
         )
 
-    /** A start that consent may retry, or that the "Couldn't start playback" Retry re-runs. */
     // A replacement can target the same episode with different context; bind its actual prompt.
     private data class PendingConsent(
         val prompt: PlayResult.NeedsMeteredConsent,
         val retry: Retry,
     )
 
+    /** A start that consent or the "Couldn't start playback" action may retry. */
     private data class Retry(
         val context: UiText?,
         val attempt: suspend () -> PlayResult,

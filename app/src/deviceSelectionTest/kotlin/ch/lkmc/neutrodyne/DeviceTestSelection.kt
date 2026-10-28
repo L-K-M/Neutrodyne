@@ -17,6 +17,9 @@ internal fun selectSupportedDeviceTests(
             if (!seededRestore) {
                 put("ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest", "requires firstLaunchSeed=restore")
             }
+            if (sdk < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                put("ch.lkmc.neutrodyne.AccessibilityChecksTest", "ATF requires API 34+")
+            }
             if (sdk < Build.VERSION_CODES.TIRAMISU && shippedLocales.none { it.substringBefore('-') == "de" }) {
                 put(
                     "ch.lkmc.neutrodyne.PerAppLanguageTest#perAppLanguageRelabelsTheDestinations",

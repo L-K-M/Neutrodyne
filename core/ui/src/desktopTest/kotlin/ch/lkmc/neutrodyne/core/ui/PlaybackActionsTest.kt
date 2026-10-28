@@ -109,7 +109,10 @@ class PlaybackActionsTest : MainDispatcherTest() {
             val second = actions(controller)
             val original = PlayResult.NeedsMeteredConsent(1)
             controller.state.pendingMeteredConsent.value = original
-            first.play(null) { attempts += 1; original }
+            first.play(null) {
+                attempts += 1
+                original
+            }
             runCurrent()
             first.consentAlways()
             runCurrent()
@@ -192,7 +195,10 @@ class PlaybackActionsTest : MainDispatcherTest() {
             val original = PlayResult.NeedsMeteredConsent(1)
             controller.state.pendingMeteredConsent.value = original
             var attempts = 0
-            actions.play(null) { attempts++; original }
+            actions.play(null) {
+                attempts++
+                original
+            }
             runCurrent()
             actions.consentAlways()
             runCurrent()

@@ -67,21 +67,20 @@ class UpNextViewModelTest : MainDispatcherTest() {
     private fun viewModel(
         repository: QueueRepository = queue,
         podcasts: PodcastRepository = this.podcasts,
-    ) =
-        UpNextViewModel(
-            queue = repository,
-            controller = playback,
-            playback = playback.state,
-            episodes = episodes,
-            feeds = feeds,
-            groups = groups,
-            capabilities = FakeYouTubeCapabilitiesSource(),
-            network = FakeNetworkMonitor(),
-            liveSource = live,
-            settings = FakeSettingsRepository(),
-            platform = FakePlatformInfo(PlatformKind.ANDROID),
-            podcasts = podcasts,
-        ).also { store.put("queue", it) }
+    ) = UpNextViewModel(
+        queue = repository,
+        controller = playback,
+        playback = playback.state,
+        episodes = episodes,
+        feeds = feeds,
+        groups = groups,
+        capabilities = FakeYouTubeCapabilitiesSource(),
+        network = FakeNetworkMonitor(),
+        liveSource = live,
+        settings = FakeSettingsRepository(),
+        platform = FakePlatformInfo(PlatformKind.ANDROID),
+        podcasts = podcasts,
+    ).also { store.put("queue", it) }
 
     @AfterTest fun close() = store.clear()
 

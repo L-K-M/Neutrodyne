@@ -20,34 +20,45 @@ class DeviceTestSelectionTest {
     fun unseededOreoSelectsExactlyTheSupportedCases() {
         for (sdk in listOf(26, 27)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(','))
-                .containsExactly(RESTORE, RELABEL, YTX)
+                .containsExactly(RESTORE, RELABEL, YTX, ATF)
         }
     }
 
     @Test
     fun modernDevicesKeepLocaleAndPythonAcceptanceChecks() {
-        for (sdk in listOf(33, 34, 36)) {
+        assertThat(select(sdk = 33).getString("notClass")?.split(',')).containsExactly(RESTORE, ATF)
+        for (sdk in listOf(34, 36)) {
             assertThat(select(sdk = sdk).getString("notClass")).isEqualTo(RESTORE)
+        }
+    }
+
+    @Test
+    fun frameworkAccessibilityControlIsSelectedOnlyOnSupportedApis() {
+        for (sdk in listOf(26, 33)) {
+            assertThat(select(sdk = sdk).getString("notClass")?.split(',')).contains(ATF)
+        }
+        for (sdk in listOf(34, 36)) {
+            assertThat(select(sdk = sdk).getString("notClass")?.split(',')).doesNotContain(ATF)
         }
     }
 
     @Test
     fun supportedOreoAbiKeepsPythonCheck() {
         assertThat(select(sdk = 26, abi = "arm64-v8a").getString("notClass")?.split(','))
-            .containsExactly(RESTORE, RELABEL)
+            .containsExactly(RESTORE, RELABEL, ATF)
     }
 
     @Test
     fun pieKeepsPythonCheck() {
         assertThat(select(sdk = 28).getString("notClass")?.split(','))
-            .containsExactly(RESTORE, RELABEL)
+            .containsExactly(RESTORE, RELABEL, ATF)
     }
 
     @Test
     fun shippedGermanKeepsRelabelCheckOnOreo() {
         val arguments = Bundle()
         selectSupportedDeviceTests(arguments, 26, "arm64-v8a", listOf("en-US", "de-DE"), false)
-        assertThat(arguments.getString("notClass")).isEqualTo(RESTORE)
+        assertThat(arguments.getString("notClass")?.split(',')).containsExactly(RESTORE, ATF)
     }
 
     @Test
@@ -102,5 +113,6 @@ class DeviceTestSelectionTest {
         const val RESTORE = "ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest"
         const val RELABEL = "ch.lkmc.neutrodyne.PerAppLanguageTest#perAppLanguageRelabelsTheDestinations"
         const val YTX = "ch.lkmc.neutrodyne.YtxReleaseSmokeTest"
+        const val ATF = "ch.lkmc.neutrodyne.AccessibilityChecksTest"
     }
 }
