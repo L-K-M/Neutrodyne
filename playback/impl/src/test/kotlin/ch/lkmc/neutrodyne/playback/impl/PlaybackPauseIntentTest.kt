@@ -27,8 +27,9 @@ class PlaybackPauseIntentTest {
                 SessionPlayer(exo, h.scope, {
                     entered.complete(Unit)
                     decision.await()
-                }, { true }, {}, {})
-            val bridge = AndroidServiceBridge(exo, h.run { h.access.open() }, h.access, h.scope, { true }, {}, wrapper::pause)
+                }, { true }, {}, {}, h.hub::newPlaybackIntent)
+            val bridge =
+                AndroidServiceBridge(exo, h.run { h.access.open() }, h.access, h.scope, { true }, {}, wrapper::pause)
             h.hub.attach(bridge)
             try {
                 exo.setMediaItem(MediaItem.fromUri("https://synthetic.test/item.mp3"))

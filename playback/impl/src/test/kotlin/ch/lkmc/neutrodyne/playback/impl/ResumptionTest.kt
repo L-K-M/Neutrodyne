@@ -115,7 +115,8 @@ class ResumptionTest {
                 )
             }
             val player = h.playerFactory.create()
-            val bridge = AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
+            val bridge =
+                AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach()
             try {
                 pumpUntil { player.mediaItemCount == 2 }
@@ -168,7 +169,8 @@ class ResumptionTest {
                 )
             }
             val player = h.playerFactory.create()
-            val bridge = AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
+            val bridge =
+                AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach()
             try {
                 pumpUntil { player.mediaItemCount == 2 }
@@ -242,7 +244,8 @@ class ResumptionTest {
                 )
             }
             val player = h.playerFactory.create()
-            val bridge = AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
+            val bridge =
+                AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
             bridge.attach()
             try {
                 assertFailsWith<UnsupportedOperationException> { h.run { bridge.resume(StartOrigin.EXTERNAL) } }

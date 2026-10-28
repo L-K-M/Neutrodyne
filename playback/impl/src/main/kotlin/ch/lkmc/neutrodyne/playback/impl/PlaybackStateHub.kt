@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import java.util.concurrent.atomic.AtomicLong
 
 /** Observation never binds a controller. A detached service falls back to durable state. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -46,12 +47,13 @@ internal class PlaybackStateHub(
     queues: Provider<QueueRepository>,
     media: Provider<PlaybackMediaLookup>,
     positions: Provider<PositionStore>,
-    gate: MeteredStreamingGate,
+    private val gate: MeteredStreamingGate,
     private val clock: Clock,
     @ApplicationScope scope: CoroutineScope,
     @Dispatcher(NeutrodyneDispatchers.IO) io: CoroutineDispatcher,
 ) : PlaybackStateSource {
     private val active = MutableStateFlow<ServiceBridge?>(null)
+    private val playbackIntents = AtomicLong()
     val bridge: ServiceBridge? get() = active.value
     private val emitted = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
     override val events = emitted.asSharedFlow()
@@ -126,6 +128,15 @@ internal class PlaybackStateHub(
                 }
             }
         }
+
+    // Starts and pauses share one ticket across UI and Media3 surfaces.
+    fun newPlaybackIntent(): Long {
+        val intent = playbackIntents.incrementAndGet()
+        gate.clearPending()
+        return intent
+    }
+
+    fun isCurrentPlaybackIntent(intent: Long): Boolean = playbackIntents.get() == intent
 
     fun attach(bridge: ServiceBridge) {
         check(active.value == null)

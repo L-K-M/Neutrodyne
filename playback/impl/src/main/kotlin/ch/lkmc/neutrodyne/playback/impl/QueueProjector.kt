@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
@@ -72,16 +73,24 @@ internal class QueueProjector(
     private var observing: Job? = null
     private val writes = mutableSetOf<Job>()
     private val mutex = Mutex()
+    private val eventWrites = Mutex()
+    private var eventEpoch = 0L
+    private var committedRevision = SessionRevision(null, 0)
     private var entries = emptyList<WindowEntry>()
     private var applying = false
     private var revision = 0L
     private var skipExit: PlaybackExit? = null
-    private var ending = false
+    private var ending: EndMarker? = null
     private var external: ExternalApply? = null
     private var externalTimeout: Job? = null
     private var latest: Input? = null
     private var knownGeneration = 0L
     private var failedArrival: FailedArrival? = null
+
+    private data class EndMarker(
+        val epoch: Long,
+        val episodeId: Long?,
+    )
 
     private data class FailedArrival(
         val episodeId: Long,
@@ -98,7 +107,7 @@ internal class QueueProjector(
     )
 
     private data class ExternalApply(
-        val generation: Long,
+        val revision: SessionRevision,
         val mediaIds: List<String>,
         val entries: List<WindowEntry>,
     )
@@ -166,6 +175,7 @@ internal class QueueProjector(
             val desired = planner.window(input.queue, input.media)
             val built = build(desired)
             applier.prepareWindow(desired.mapNotNull { it.media }, input.groupId)
+            bindSession(outcome.queue.sessionRevision())
             install(desired, built, outcome.startPositionMs, WindowPlayback.KEEP)
             planner.appliedOwnGeneration(outcome.queue.generation)
             knownGeneration = maxOf(knownGeneration, outcome.queue.generation)
@@ -191,18 +201,18 @@ internal class QueueProjector(
             applier.prepareWindow(desired.mapNotNull { it.media }, input.groupId)
             index.putAll(desired.mapNotNull { it.media })
             applier.refreshFor(desired.firstOrNull()?.item?.episodeId)
-            expectExternalApply(snapshot.generation, built.map { it.mediaId }, desired)
+            expectExternalApply(snapshot.sessionRevision(), built.map { it.mediaId }, desired)
             built
         }
 
     /** Also supports external add callbacks: pass the COMPLETE expected timeline, not just adds. */
     private fun expectExternalApply(
-        generation: Long,
+        revision: SessionRevision,
         mediaIds: List<String>,
         window: List<WindowEntry>,
     ) {
         check(external == null)
-        external = ExternalApply(generation, mediaIds.toList(), window.toList())
+        external = ExternalApply(revision, mediaIds.toList(), window.toList())
         externalTimeout =
             playerScope.launch {
                 delay(EXTERNAL_APPLY_TIMEOUT_MS)
@@ -230,6 +240,7 @@ internal class QueueProjector(
         externalTimeout?.cancel()
         externalTimeout = null
         if (matched) {
+            bindSession(pending.revision)
             val currentChanged =
                 entries.firstOrNull()?.item?.episodeId !=
                     pending.entries
@@ -248,9 +259,9 @@ internal class QueueProjector(
                 }
             }
             if (currentChanged) tracker.startPositionApplied()
-            planner.appliedOwnGeneration(pending.generation)
+            planner.appliedOwnGeneration(pending.revision.generation)
         }
-        endOwnWrite(if (matched) pending.generation else null)
+        endOwnWrite(if (matched) pending.revision.generation else null)
         if (!matched && latest != null) refresh()
     }
 
@@ -310,6 +321,8 @@ internal class QueueProjector(
                 if (latest != null) refresh()
                 return@withLock
             }
+            // Failed-arrival projection can replace current visually, not durably.
+            bindSession(input.queue.sessionRevision())
             index.putAll(plan.entries.mapNotNull { it.media })
             val byId = built.associateBy { it.mediaId }
             applying = true
@@ -453,36 +466,63 @@ internal class QueueProjector(
         )
         beginOwnWrite()
         val since = tracker.currentSinceMs
+        val epoch = eventEpoch
         launchWrite {
             var generation: Long? = null
             try {
-                generation =
-                    retryTransition { sessions.onTransition(capture, arrivalId, arrival.item.origin, clock.now()) }
-                if (generation != null) departed?.let { history.record(it.item) }
-                if (generation == null && player === live && live.episodeIdOrNull() == arrivalId) {
-                    failedArrival = FailedArrival(arrivalId, knownGeneration)
+                eventWrites.withLock {
+                    if (epoch != eventEpoch) return@launchWrite
+                    val expected = committedRevision
+                    val result =
+                        retryTransition {
+                            sessions.onTransition(
+                                capture,
+                                arrivalId,
+                                arrival.item.origin,
+                                expected,
+                                clock.now(),
+                            )
+                        }
+                    generation = result.getOrNull()
+                    if (epoch != eventEpoch || (result.isSuccess && generation == null)) return@launchWrite
+                    generation?.let {
+                        committedRevision = SessionRevision(arrivalId, it)
+                        failedArrival = null
+                        departed?.let { old -> history.record(old.item) }
+                    }
+                    if (result.isFailure && player === live && live.episodeIdOrNull() == arrivalId) {
+                        failedArrival = FailedArrival(arrivalId, knownGeneration)
+                    }
                 }
-                if (player === live && live.episodeIdOrNull() == arrivalId && tracker.currentSinceMs == since) {
-                    val stored = positions.observe(arrivalId).first()
-                    val row = arrival.media
-                    val startMs =
-                        StartPositionRule().startPositionMs(
-                            stored?.positionMs,
-                            stored?.updatedAt,
-                            row?.measuredDurationMs ?: row?.durationMs,
-                            row?.playedAt != null || stored?.playedAt != null,
-                            clock.now(),
-                        )
-                    tracker.coreSeek { live.seekTo(startMs) }
-                    tracker.startPositionApplied()
-                    applier.applyFor(arrivalId)
-                    if (live.playerError != null || live.playbackState == Player.STATE_IDLE) live.prepare()
-                }
+                if (!isCurrentArrival(live, arrivalId, since, epoch)) return@launchWrite
+                val stored = positions.observe(arrivalId).first()
+                if (!isCurrentArrival(live, arrivalId, since, epoch)) return@launchWrite
+                val row = arrival.media
+                val startMs =
+                    StartPositionRule().startPositionMs(
+                        stored?.positionMs,
+                        stored?.updatedAt,
+                        row?.measuredDurationMs ?: row?.durationMs,
+                        row?.playedAt != null || stored?.playedAt != null,
+                        clock.now(),
+                    )
+                tracker.coreSeek { live.seekTo(startMs) }
+                tracker.startPositionApplied()
+                applier.applyFor(arrivalId)
+                if (live.playerError != null || live.playbackState == Player.STATE_IDLE) live.prepare()
             } finally {
                 endOwnWrite(generation)
             }
         }
     }
+
+    private fun isCurrentArrival(
+        live: Player,
+        episodeId: Long,
+        since: Long,
+        epoch: Long,
+    ): Boolean =
+        epoch == eventEpoch && player === live && live.episodeIdOrNull() == episodeId && tracker.currentSinceMs == since
 
     /** Error skips must not finish an item even if it failed near its end. */
     fun advance(exit: PlaybackExit = PlaybackExit.ERROR_SKIP) {
@@ -498,31 +538,54 @@ internal class QueueProjector(
     }
 
     private fun end(capture: PositionCapture?) {
-        if (ending) return
-        ending = true
+        // An older pending end must not suppress the next pin's end.
+        val marker = EndMarker(eventEpoch, player?.episodeIdOrNull())
+        if (ending == marker) return
+        ending = marker
         beginOwnWrite()
         launchWrite {
             var generation: Long? = null
             try {
-                generation = retryTransition { sessions.endSession(capture?.departure, clock.now()) }
+                eventWrites.withLock {
+                    if (marker.epoch != eventEpoch) return@withLock
+                    val expected = committedRevision
+                    generation =
+                        retryTransition {
+                            sessions.endSession(capture?.departure, expected, clock.now())
+                        }.getOrNull()
+                    generation?.let {
+                        if (marker.epoch == eventEpoch) committedRevision = SessionRevision(null, it)
+                    }
+                }
             } finally {
-                ending = false
+                if (ending === marker) ending = null
                 endOwnWrite(generation)
             }
         }
     }
 
-    private suspend fun retryTransition(write: suspend () -> Long): Long? {
-        repeat(2) { attempt ->
+    // Preserve consecutive native transitions, but invalidate frames from replaced windows.
+    private fun bindSession(next: SessionRevision) {
+        if (committedRevision == next) return
+        committedRevision = next
+        eventEpoch++
+    }
+
+    private suspend fun retryTransition(write: suspend () -> Long?): Result<Long?> {
+        repeat(WRITE_ATTEMPTS) { attempt ->
             try {
-                return write()
+                return Result.success(write())
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                if (attempt == 1) reportFailure(failure) else yield()
+                if (attempt == WRITE_ATTEMPTS - 1) {
+                    reportFailure(failure)
+                    return Result.failure(failure)
+                }
+                yield()
             }
         }
-        return null
+        error("No transition write attempted")
     }
 
     /**
@@ -588,8 +651,11 @@ internal class QueueProjector(
 
     private companion object {
         const val EXTERNAL_APPLY_TIMEOUT_MS = 2_000L
+        const val WRITE_ATTEMPTS = 2
         const val TAG = "QueueProjector"
     }
 }
 
 private fun Player.mediaIds(): List<String> = (0 until mediaItemCount).map { getMediaItemAt(it).mediaId }
+
+private fun VirtualQueue.sessionRevision(): SessionRevision = SessionRevision(current?.episodeId, generation)

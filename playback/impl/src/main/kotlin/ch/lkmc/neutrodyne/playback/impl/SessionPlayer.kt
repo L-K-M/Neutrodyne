@@ -2,9 +2,9 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.ForwardingSimpleBasePlayer
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -19,6 +19,7 @@ internal class SessionPlayer private constructor(
     private val beforeSeek: (MediaItem) -> Boolean,
     private val previous: suspend () -> Unit,
     private val stopAction: suspend () -> Unit,
+    private val cancelPendingPlay: () -> Unit,
     private val sessionSource: SessionSource,
 ) : ForwardingSimpleBasePlayer(sessionSource) {
     constructor(
@@ -28,7 +29,8 @@ internal class SessionPlayer private constructor(
         beforeSeek: (MediaItem) -> Boolean,
         previous: suspend () -> Unit,
         stopAction: suspend () -> Unit,
-    ) : this(exo, scope, beforePlay, beforeSeek, previous, stopAction, SessionSource(exo))
+        cancelPendingPlay: () -> Unit,
+    ) : this(exo, scope, beforePlay, beforeSeek, previous, stopAction, cancelPendingPlay, SessionSource(exo))
 
     /** The session exists during database open, but its callbacks must follow position capture. */
     fun orderAfterPlaybackAdapters() {
@@ -58,6 +60,7 @@ internal class SessionPlayer private constructor(
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         playWhenReadyIntent = playWhenReady
         if (!playWhenReady) {
+            cancelPendingPlay()
             exo.pause()
             return Futures.immediateVoidFuture()
         }
@@ -91,7 +94,8 @@ internal class SessionPlayer private constructor(
             }
 
             else -> {
-                val crossesItem = mediaItemIndex in 0 until exo.mediaItemCount && mediaItemIndex != exo.currentMediaItemIndex
+                val crossesItem =
+                    mediaItemIndex in 0 until exo.mediaItemCount && mediaItemIndex != exo.currentMediaItemIndex
                 if (crossesItem && !beforeSeek(exo.getMediaItemAt(mediaItemIndex))) {
                     Futures.immediateVoidFuture()
                 } else {
@@ -100,11 +104,11 @@ internal class SessionPlayer private constructor(
             }
         }
 
-    override fun handleStop(): ListenableFuture<*> =
-        scope.future {
-            playWhenReadyIntent = false
-            stopAction()
-        }
+    override fun handleStop(): ListenableFuture<*> {
+        playWhenReadyIntent = false
+        cancelPendingPlay()
+        return scope.future { stopAction() }
+    }
 }
 
 /** Media3 installs its forwarding listener during construction, before the database-backed adapters. */

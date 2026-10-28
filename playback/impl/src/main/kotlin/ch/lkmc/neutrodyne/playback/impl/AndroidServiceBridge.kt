@@ -382,7 +382,10 @@ internal class AndroidServiceBridge(
         publish()
     }
 
-    fun allowQueueSeek(item: MediaItem, origin: StartOrigin): Boolean {
+    fun allowQueueSeek(
+        item: MediaItem,
+        origin: StartOrigin,
+    ): Boolean {
         access.gate.clearPending()
         val refusal = nextRefusal(item, origin)
         if (refusal != null) {
@@ -393,9 +396,16 @@ internal class AndroidServiceBridge(
         return true
     }
 
-    private fun nextRefusal(item: MediaItem, origin: StartOrigin): PlayResult? {
+    private fun nextRefusal(
+        item: MediaItem,
+        origin: StartOrigin,
+    ): PlayResult? {
         val id = item.mediaId.removePrefix(EPISODE_ID_PREFIX).toLongOrNull() ?: return PlayResult.ServiceUnavailable
-        return access.gate.check(id, item.requestMetadata.extras?.getBoolean(MediaItemFactory.LOCAL_HINT) == true, origin)
+        return access.gate.check(
+            id,
+            item.requestMetadata.extras?.getBoolean(MediaItemFactory.LOCAL_HINT) == true,
+            origin,
+        )
     }
 
     // Error and mark-played skips are automatic, so ASK must not grant external-surface consent.
@@ -422,7 +432,12 @@ internal class AndroidServiceBridge(
 
                 is PreviousAction.GoBack -> {
                     access.gate.clearPending()
-                    val refusal = access.gate.check(action.item.episodeId, access.local.localUriOrNull(action.item.episodeId) != null, origin)
+                    val refusal =
+                        access.gate.check(
+                            action.item.episodeId,
+                            access.local.localUriOrNull(action.item.episodeId) != null,
+                            origin,
+                        )
                     if (refusal != null) {
                         reportRefusal(refusal)
                         return@withLock

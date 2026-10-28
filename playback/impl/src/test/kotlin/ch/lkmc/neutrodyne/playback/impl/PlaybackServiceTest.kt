@@ -17,7 +17,9 @@ import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.collect
@@ -35,6 +37,7 @@ import org.robolectric.annotation.Config
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -49,9 +52,83 @@ class PlaybackServiceTest {
             object : PlaybackServiceInjector {
                 override fun inject(service: NeutrodynePlaybackService) {
                     service.access = h.access
-                    service.opener = h.opener
                 }
             }
+    }
+
+    @Test fun pauseCancelsClientStartWhileServiceIsOpening() = pauseDuringStart(PauseSource.CANONICAL)
+
+    @Test fun sessionPauseCancelsClientStartWhileServiceIsOpening() = pauseDuringStart(PauseSource.SESSION)
+
+    private enum class PauseSource { CANONICAL, SESSION }
+
+    private fun pauseDuringStart(source: PauseSource) {
+        val settingsReady = CompletableDeferred<Unit>()
+        LifecycleHarness(app(), settingsReadGate = settingsReady).use { h ->
+            h.seedCurrent()
+            install(h)
+            val component = ComponentName(app(), NeutrodynePlaybackService::class.java)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            shadowOf(app()).setComponentNameAndServiceForBindService(
+                component,
+                service.get().onBind(Intent("androidx.media3.session.MediaSessionService")),
+            )
+            val owner =
+                object : LifecycleOwner {
+                    override val lifecycle = LifecycleRegistry(this)
+                }
+            owner.lifecycle.currentState = Lifecycle.State.STARTED
+            val connection =
+                PlayerConnection(owner.lifecycle) {
+                    MediaController.Builder(app(), SessionToken(app(), component)).buildAsync()
+                }
+            val controller =
+                PlaybackControllerImpl(
+                    connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider { h.sessions },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
+            try {
+                val pending = h.scope.async(start = CoroutineStart.UNDISPATCHED) { controller.play() }
+                pumpUntil { connection.controller != null }
+                assertFalse(pending.isCompleted)
+                assertNull(h.hub.bridge)
+                when (source) {
+                    PauseSource.CANONICAL -> {
+                        controller.pause()
+                    }
+
+                    PauseSource.SESSION -> {
+                        service
+                            .get()
+                            .onGetSession(controllerInfo())!!
+                            .player
+                            .pause()
+                    }
+                }
+                settingsReady.complete(Unit)
+                val result = runCatching { h.run { pending.await() } }
+                shadowOf(Looper.getMainLooper()).idle()
+                assertFalse(
+                    service
+                        .get()
+                        .onGetSession(controllerInfo())!!
+                        .player.playWhenReady,
+                )
+                assertIs<CancellationException>(result.exceptionOrNull())
+                assertTrue(pending.isCancelled)
+            } finally {
+                settingsReady.complete(Unit)
+                owner.lifecycle.currentState = Lifecycle.State.DESTROYED
+                service.destroy()
+            }
+        }
     }
 
     @Test

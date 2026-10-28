@@ -11,10 +11,6 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import ch.lkmc.neutrodyne.core.common.GraphHolder
-import ch.lkmc.neutrodyne.core.common.Log
-import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
-import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
-import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -23,14 +19,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** One player per service. Framework creation and session connection do not synchronously open Room. */
 public class NeutrodynePlaybackService : MediaLibraryService() {
     @Inject public lateinit var access: PlaybackServiceAccess
-
-    @Inject public lateinit var opener: DatabaseOpener
     private var session: MediaLibrarySession? = null
     private var sessionPlayer: SessionPlayer? = null
     private var exo: ExoPlayer? = null
@@ -65,6 +58,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     runtime().stop()
                     pauseAllPlayersAndStopSelf()
                 },
+                cancelPendingPlay = access.hub::newPlaybackIntent,
             ).also { sessionPlayer = it }
         val callback =
             SessionCallback(
@@ -110,7 +104,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 .build()
         starting =
             serviceScope.async {
-                val ports = openPorts()
+                val ports = access.open()
                 AndroidServiceBridge(
                     player,
                     ports,
@@ -157,21 +151,6 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
-
-    /**
-     * Like start-up initializer 100, a failed open keeps [starting] pending instead of failing it:
-     * the start-up gate owns the retry, and a controller bound across it still attaches once the
-     * retry publishes `Opened`. Only the typed open failure qualifies — any other error is a bug
-     * the deferred must keep reporting.
-     */
-    private suspend fun openPorts(): PlaybackPorts =
-        try {
-            access.open()
-        } catch (failure: DatabaseOpenException) {
-            Log.e("PlaybackService", failure) { "database open failed; waiting for start-up gate retry" }
-            opener.openState.first { it is DatabaseOpenState.Opened }
-            access.open()
-        }
 
     private fun requestOrigin(): StartOrigin {
         val session = session ?: return StartOrigin.EXTERNAL

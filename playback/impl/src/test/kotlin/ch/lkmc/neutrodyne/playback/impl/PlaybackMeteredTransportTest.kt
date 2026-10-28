@@ -29,11 +29,12 @@ class PlaybackMeteredTransportTest {
             h.lookup.items.value += 2L to media(id = 2)
             h.publish(h.store.queue.copy(upNext = listOf(QueueItem(2, QueueOrigin.UP_NEXT))))
             h.run { h.settings.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER) }
-            app.graph = object : PlaybackServiceInjector {
-                override fun inject(service: NeutrodynePlaybackService) {
-                    service.access = h.access
+            app.graph =
+                object : PlaybackServiceInjector {
+                    override fun inject(service: NeutrodynePlaybackService) {
+                        service.access = h.access
+                    }
                 }
-            }
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
             try {
                 pumpUntil { h.hub.bridge != null }

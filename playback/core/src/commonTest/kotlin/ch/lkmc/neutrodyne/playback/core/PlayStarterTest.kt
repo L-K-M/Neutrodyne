@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
@@ -58,10 +59,11 @@ class PlayStarterTest {
                 departure: Departure?,
                 arrivedEpisodeId: Long,
                 arrivedOrigin: QueueOrigin,
+                expected: SessionRevision,
                 now: Long,
-            ): Long {
-                val generation = sessions.onTransition(departure, arrivedEpisodeId, arrivedOrigin, now)
-                if (publishCommit) {
+            ): Long? {
+                val generation = sessions.onTransition(departure, arrivedEpisodeId, arrivedOrigin, expected, now)
+                if (publishCommit && generation != null) {
                     sessions.queue =
                         sessions.queue.copy(
                             generation = generation,
@@ -257,7 +259,7 @@ class PlayStarterTest {
             alreadyCurrent(StartRequest.Resume)
             sessions.queue = queue(current = null)
             assertEquals(2L, committed(StartRequest.Resume).queue.current!!.episodeId)
-            sessions.queue = queue(current = null, upNext = emptyList())
+            sessions.queue = queue(current = null, upNext = emptyList()).copy(generation = sessions.generation)
             assertEquals(4L, committed(StartRequest.Resume).queue.current!!.episodeId)
             assertEquals(QueueOrigin.CONTEXT, sessions.calls.last().origin)
         }
