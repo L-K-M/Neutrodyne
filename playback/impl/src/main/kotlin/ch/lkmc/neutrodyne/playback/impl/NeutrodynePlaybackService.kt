@@ -68,6 +68,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 buttons,
                 serviceScope,
                 access.io,
+                ControllerHostIdentity(packageManager),
                 beforeStart = {
                     startReserved = true
                     bridge?.reserveStart()
