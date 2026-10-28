@@ -5,8 +5,11 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
@@ -24,6 +27,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /** Injecting a framework service must not walk a database-backed constructor on main. */
@@ -56,7 +60,7 @@ public class PlaybackServiceAccess internal constructor(
 ) {
     internal suspend fun open(): PlaybackPorts =
         withContext(io) {
-            opener.awaitOpen()
+            awaitDatabase()
             prefs.start(applicationScope)
             prefs.awaitReady()
             PlaybackPorts(
@@ -71,6 +75,17 @@ public class PlaybackServiceAccess internal constructor(
                 items(),
             )
         }
+
+    // Keep bound sessions waiting while the startup gate owns storage recovery.
+    private suspend fun awaitDatabase() {
+        try {
+            opener.awaitOpen()
+        } catch (failure: DatabaseOpenException) {
+            Log.e("PlaybackService", failure) { "Database unavailable; waiting for startup retry" }
+            opener.openState.first { it is DatabaseOpenState.Opened }
+            opener.awaitOpen()
+        }
+    }
 }
 
 internal data class PlaybackPorts(

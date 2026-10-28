@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -183,7 +184,13 @@ class PlayStarter(
         val outgoing = captureDeparture()?.takeUnless { it.episodeId == selected.id }
         val generation =
             if (selected.resumeOrigin == QueueOrigin.CONTEXT) {
-                sessions.onTransition(outgoing, selected.id, QueueOrigin.CONTEXT, clock.now())
+                sessions.onTransition(
+                    outgoing,
+                    selected.id,
+                    QueueOrigin.CONTEXT,
+                    SessionRevision(queue.current?.episodeId, queue.generation),
+                    clock.now(),
+                ) ?: return StartOutcome.Refused(PlayResult.ServiceUnavailable)
             } else {
                 sessions.commitStart(
                     SessionStart(

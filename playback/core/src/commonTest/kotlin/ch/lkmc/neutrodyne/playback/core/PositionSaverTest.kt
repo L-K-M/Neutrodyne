@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.core
 
 import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
@@ -134,7 +135,7 @@ class PositionSaverTest {
             saver.onPlaying()
             val outgoing = saver.capture(95_000, 100_000, PlaybackExit.SEEK)!!
             val sessions = FakePlaySessionStore()
-            sessions.onTransition(outgoing.departure, 2, QueueOrigin.CONTEXT, clock.now())
+            sessions.onTransition(outgoing.departure, 2, QueueOrigin.CONTEXT, SessionRevision(null, 0), clock.now())
             saver.load(2, 2000, PositionSource.DOWNLOAD)
             saver.startPositionApplied()
             assertEquals(

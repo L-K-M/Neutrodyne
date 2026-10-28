@@ -63,16 +63,28 @@ internal class PlaybackControllerImpl(
 
     override suspend fun play(): PlayResult = start(StartRequest.Resume)
 
-    private suspend fun start(request: StartRequest): PlayResult =
-        withContext(Dispatchers.Main.immediate) {
-            val controller = connection.awaitController() ?: return@withContext PlayResult.ServiceUnavailable
+    private suspend fun start(request: StartRequest): PlayResult {
+        val intent = hub.newPlaybackIntent()
+        return withContext(Dispatchers.Main.immediate) {
+            requireCurrentIntent(intent)
+            val controller = connection.awaitController()
+            requireCurrentIntent(intent)
+            if (controller == null) return@withContext PlayResult.ServiceUnavailable
             val response = command(CustomCommands.PLAY_CONTEXT, CustomCommands.encode(request))
+            requireCurrentIntent(intent)
             val result = response?.let(CustomCommands::playResult) ?: PlayResult.ServiceUnavailable
             if (result == PlayResult.Started) controller.play()
             result
         }
+    }
+
+    private fun requireCurrentIntent(intent: Long) {
+        if (!hub.isCurrentPlaybackIntent(intent)) throw CancellationException("Playback intent superseded")
+    }
 
     override fun pause() {
+        hub.newPlaybackIntent()
+
         // Restore-Replace and unsubscribe must pause the actual player even without a UI binding.
         hub.bridge?.pause() ?: connection.controller?.pause()
     }
@@ -186,7 +198,7 @@ internal class PlaybackControllerImpl(
 
     override suspend fun dismiss() =
         withContext(Dispatchers.Main.immediate) {
-            gate.clearPending()
+            hub.newPlaybackIntent()
             if (connection.controller != null) {
                 val result = command(CustomCommands.DISMISS)
                 if (result?.resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS) {

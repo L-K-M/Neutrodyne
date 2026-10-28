@@ -9,6 +9,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ContextType
@@ -502,11 +503,12 @@ class QueueProjectorTest {
                             departure: Departure?,
                             arrivedEpisodeId: Long,
                             arrivedOrigin: QueueOrigin,
+                            expected: SessionRevision,
                             now: Long,
-                        ): Long {
+                        ): Long? {
                             attempts++
                             if (refuseTransition) throw IOException("Injected transition failure")
-                            return real.onTransition(departure, arrivedEpisodeId, arrivedOrigin, now)
+                            return real.onTransition(departure, arrivedEpisodeId, arrivedOrigin, expected, now)
                         }
                     }
                 })

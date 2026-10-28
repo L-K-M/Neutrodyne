@@ -52,11 +52,13 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     val origin = requestOrigin()
                     runtime().beforePlay(origin)
                 },
-                previous = { runtime().previous() },
+                beforeSeek = { item -> bridge?.allowQueueSeek(item, requestOrigin()) == true },
+                previous = { runtime().previous(requestOrigin()) },
                 stopAction = {
                     runtime().stop()
                     pauseAllPlayersAndStopSelf()
                 },
+                cancelPendingPlay = access.hub::newPlaybackIntent,
             ).also { sessionPlayer = it }
         val callback =
             SessionCallback(
@@ -86,7 +88,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
             object : MediaSessionService.Listener {
                 override fun onForegroundServiceStartNotAllowedException() {
                     // Pause immediately, before any suspend or permission-dependent recovery UI.
-                    bridge?.pause() ?: player.pause()
+                    bridge?.pause() ?: wrapper.pause()
                     bridge?.issue(PlaybackIssue.PLAYER_ERROR)
                     notification.post()
                 }
@@ -117,6 +119,8 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                                 .isAtLeast(Lifecycle.State.STARTED)
                     },
                     stopService = { pauseAllPlayersAndStopSelf() },
+                    // Canonical pause must also invalidate the session's suspended play intent.
+                    pausePlayer = wrapper::pause,
                 ).also { live ->
                     bridge = live
                     live.attach(hasPendingStart = startReserved)

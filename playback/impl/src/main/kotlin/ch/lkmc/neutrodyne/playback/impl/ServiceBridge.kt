@@ -34,7 +34,7 @@ internal interface ServiceBridge {
 
     suspend fun beforePlay(origin: StartOrigin): Boolean
 
-    suspend fun previous()
+    suspend fun previous(origin: StartOrigin)
 
     suspend fun stop()
 
