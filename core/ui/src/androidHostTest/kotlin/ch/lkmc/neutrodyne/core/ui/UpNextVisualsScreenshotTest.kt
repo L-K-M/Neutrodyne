@@ -3,10 +3,9 @@
 package ch.lkmc.neutrodyne.core.ui
 
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
@@ -26,7 +25,7 @@ import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(qualifiers = "w360dp-h640dp-mdpi")
+@Config(qualifiers = "en-rUS-w360dp-h640dp-mdpi")
 class UpNextVisualsScreenshotTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
@@ -69,7 +68,7 @@ class UpNextVisualsScreenshotTest {
                 AppearancePrefs(dynamicColor = false),
                 SystemUiState(dark = visual.appearance != QueueAppearance.LIGHT, contrast = 0.0, reducedMotion = true),
             ) {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     QueueVisualContent(visual)
                 }
             }

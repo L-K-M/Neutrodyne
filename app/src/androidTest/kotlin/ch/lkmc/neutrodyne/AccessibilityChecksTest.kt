@@ -30,7 +30,7 @@ class AccessibilityChecksTest {
     val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
-    @SdkSuppress(minSdkVersion = 34)
+    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     fun enabledChecksFailAnUnlabelledTinyTargetBeforeTheClick() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             compose.enableAccessibilityChecks()

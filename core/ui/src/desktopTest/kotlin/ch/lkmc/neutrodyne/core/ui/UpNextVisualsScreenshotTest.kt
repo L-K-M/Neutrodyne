@@ -2,10 +2,9 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onRoot
@@ -42,7 +41,7 @@ class UpNextVisualsScreenshotTest {
                             reducedMotion = true,
                         ),
                     ) {
-                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                             QueueVisualContent(visual)
                         }
                     }

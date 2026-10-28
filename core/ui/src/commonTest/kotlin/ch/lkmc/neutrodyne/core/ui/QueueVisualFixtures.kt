@@ -3,6 +3,8 @@
 package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -23,6 +25,7 @@ import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.up_next_empty_body
 import org.jetbrains.compose.resources.stringResource
+import kotlin.test.assertEquals
 
 internal enum class QueueVisualState { EMPTY, CURRENT_ONLY, CONTENT, EXTERNAL }
 
@@ -65,6 +68,7 @@ internal val queueVisualArtwork: List<ArtworkRef> =
 
 @Composable
 internal fun QueueVisualContent(visual: QueueVisual) {
+    assertEquals(MaterialTheme.colorScheme.onBackground, LocalContentColor.current)
     val density = LocalDensity.current
     val stress = visual.appearance == QueueAppearance.STRESS
     CompositionLocalProvider(
