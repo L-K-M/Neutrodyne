@@ -119,6 +119,7 @@ jobs:
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
+          python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
 
   unit:

@@ -33,6 +33,7 @@ internal class SessionCallback(
     private val buttons: MediaButtons,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
+    private val hosts: ControllerHostIdentity,
     private val beforeStart: () -> Unit = {},
 ) : MediaLibrarySession.Callback {
     private val commands = Mutex()
@@ -188,8 +189,8 @@ internal class SessionCallback(
         controller: ControllerInfo,
     ): Boolean =
         controller.isTrusted ||
-            session.isMediaNotificationController(controller) || session.isAutoCompanionController(controller) ||
-            session.isAutomotiveController(controller)
+            session.isMediaNotificationController(controller) ||
+            hosts.isAuthorizedAutoHost(session, controller)
 
     private fun origin(
         session: MediaSession,
