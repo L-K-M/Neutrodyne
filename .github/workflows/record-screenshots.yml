@@ -1,17 +1,5 @@
 # SPDX-License-Identifier: Unlicense
-#
-# record-screenshots.yml — the hosted-only golden recorder (09 Helper
-# workflows). Reference PNGs for both golden sets are recorded only on
-# ubuntu-24.04 runners: font rasterisation differs per OS, so locally captured
-# screenshots are never committed (09 Recording policy, D59). Dispatch with a
-# branch and a tier, then apply the uploaded artifact in a checkout of that
-# exact commit with `scripts/ci/apply-screenshots.sh <run-id>` and commit the
-# references through a normal PR — this workflow never pushes (09 Helper
-# workflows).
-#
-# The job mirrors ci.yml's `unit` setup (Temurin 25+21, Python 3.14,
-# setup-gradle, the Robolectric SDK cache) so recording runs under the same
-# toolchain as verification.
+# Record on CI's Linux toolchain; apply the source-pinned artifact through a PR.
 
 name: record-screenshots
 
@@ -60,9 +48,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      # Same Robolectric SDK cache as ci.yml's unit job.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          cache-read-only: true
+      # Requested branches must not populate main's shared caches.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-4.17-sdk36
@@ -72,10 +60,12 @@ jobs:
       # Android host captures (recordRoborazziAndroidHostTest) and desktop
       # captures (recordRoborazziDesktop) record together.
       - name: Record both golden sets
-        run: >-
-          ./gradlew recordRoborazziAndroidHostTest recordRoborazziDesktop
-          -Proborazzi.test.record=true
-          -PscreenshotTier=${{ inputs.tier }}
+        env:
+          TIER: ${{ inputs.tier }}
+        run: |
+          case "$TIER" in pr|full) ;; *) echo 'Invalid screenshot tier' >&2; exit 1 ;; esac
+          ./gradlew recordRoborazziAndroidHostTest recordRoborazziDesktop \
+            -Proborazzi.test.record=true -PscreenshotTier="$TIER"
       # The manifest pins the checked-out source (git HEAD of the requested
       # branch), not the workflow ref's github.sha — a dispatch on main that
       # records branch B must bind the artifact to B's commit.

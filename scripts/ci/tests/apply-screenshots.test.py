@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -94,9 +95,9 @@ class ApplyScreenshotsTest(unittest.TestCase):
             if p.is_file() and ".git" not in p.parts
         }
 
-    def run_apply(self, members, include_manifest=True, manifest_sha=None,
+    def run_apply(self, members, manifest_sha=None,
                   manifest_updates=None, artifact=None, zip_name=None,
-                  run_updates=None):
+                  run_updates=None, mutate_zip=None):
         artifact = artifact or f"screenshots-{self.head}"
         zip_name = zip_name or artifact + ".zip"
         zpath = self.zips / zip_name
@@ -114,13 +115,14 @@ class ApplyScreenshotsTest(unittest.TestCase):
         }
         manifest.update(manifest_updates or {})
         with zipfile.ZipFile(zpath, "w") as zf:
-            if include_manifest:
-                zf.writestr("manifest.json", json.dumps(manifest))
+            zf.writestr("manifest.json", json.dumps(manifest))
             for member in members:
                 if isinstance(member, zipfile.ZipInfo):
                     zf.writestr(member, b"target")
                 else:
                     zf.writestr(member[0], member[1])
+        if mutate_zip:
+            mutate_zip(zpath)
         run = {
             "conclusion": "success",
             "status": "completed",
@@ -172,6 +174,39 @@ class ApplyScreenshotsTest(unittest.TestCase):
         # a local golden absent from the artifact stays in place and is listed
         self.assertIn("mod/app/screenshots/android/stale.png", result.stdout)
         self.assertEqual(PNG + b"STALE", (shot / "android/stale.png").read_bytes())
+
+    def test_workflow_ref_can_differ_from_recorded_source(self):
+        result = self.run_apply(
+            [("mod/app/screenshots/android/new.png", PNG + b"NEW")],
+            run_updates={"headSha": "e" * 40, "headBranch": "main"})
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_foreign_manifest_run_rejects_before_copy(self):
+        before = self.tree()
+        result = self.run_apply(
+            [("mod/app/screenshots/android/new.png", PNG + b"NEW")],
+            manifest_updates={"runId": "999999"})
+        self.assert_rejected(result, before)
+
+    def test_declared_size_over_budget_rejects_before_read(self):
+        name = "mod/app/screenshots/android/new.png"
+        over_budget = 30 * 1024 * 1024 + 1
+        local_size_offset, central_size_offset = 22, 24
+
+        def inflate_header(path):
+            with zipfile.ZipFile(path) as archive:
+                info = archive.getinfo(name)
+                central_start = archive.start_dir
+            data = bytearray(path.read_bytes())
+            central = data.index(name.encode(), central_start) - zipfile.sizeCentralDir
+            struct.pack_into("<I", data, info.header_offset + local_size_offset, over_budget)
+            struct.pack_into("<I", data, central + central_size_offset, over_budget)
+            path.write_bytes(data)
+
+        before = self.tree()
+        result = self.run_apply([(name, PNG + b"NEW")], mutate_zip=inflate_header)
+        self.assert_rejected(result, before)
+        self.assertIn("budget", result.stderr)
 
     def test_manifest_source_sha_mismatch_rejects_before_copy(self):
         before = self.tree()
