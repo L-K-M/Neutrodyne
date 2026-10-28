@@ -280,36 +280,46 @@ private fun ReadyRoot(
                 suiteType = suiteType,
                 footer = { SettingsGearButton() },
             ) {
-                Column(Modifier.fillMaxSize()) {
-                    RootBanners(
-                        state = state,
-                        actions = actions,
-                        navigator = navigation,
-                        onFeedsOrLibrary =
-                            navigation.selectedTab == FeedsKey ||
-                                navigation.selectedTab == LibraryKey,
-                        importResume = { available ->
-                            val top = navigation.stack(navigation.selectedTab).lastOrNull()
-                            slots.importResume(available && (top == FeedsKey || top == LibraryKey)) { id ->
-                                // The banner's focused button disappears on push; retain a key-event target.
-                                importContentFocus.requestFocus()
-                                navigation.push(ImportKey(id.toString()))
+                Box(Modifier.fillMaxSize()) {
+                    Column(Modifier.fillMaxSize()) {
+                        RootBanners(
+                            state = state,
+                            actions = actions,
+                            navigator = navigation,
+                            onFeedsOrLibrary =
+                                navigation.selectedTab == FeedsKey ||
+                                    navigation.selectedTab == LibraryKey,
+                            importResume = { available ->
+                                val top = navigation.stack(navigation.selectedTab).lastOrNull()
+                                slots.importResume(available && (top == FeedsKey || top == LibraryKey)) { id ->
+                                    // The banner's focused button disappears on push; retain a key-event target.
+                                    importContentFocus.requestFocus()
+                                    navigation.push(ImportKey(id.toString()))
+                                }
+                            },
+                        )
+                        Row(Modifier.fillMaxWidth().weight(1f)) {
+                            Box(Modifier.weight(1f).focusRequester(importContentFocus).focusable()) {
+                                NeutrodyneNavHost(
+                                    state = navigation,
+                                    installers = installers,
+                                    directive = directive,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             }
-                        },
-                    )
-                    Row(Modifier.fillMaxWidth().weight(1f)) {
-                        Box(Modifier.weight(1f).focusRequester(importContentFocus).focusable()) {
-                            NeutrodyneNavHost(
-                                state = navigation,
-                                installers = installers,
-                                directive = directive,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                        if (layout.playerPanel) {
-                            slots.player(PlayerSlotState(layout, navigation::push))
+                            if (layout.playerPanel) {
+                                slots.player(PlayerSlotState(layout, navigation::push))
+                            }
                         }
                     }
+                    // Content bounds already exclude the navigation suite's touch targets.
+                    SnackbarHost(
+                        hostState = snackbarHost,
+                        modifier =
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = miniInset + SNACKBAR_MARGIN),
+                    )
                 }
             }
 
@@ -329,14 +339,6 @@ private fun ReadyRoot(
                             .padding(bottom = miniInset),
                 )
             }
-
-            SnackbarHost(
-                hostState = snackbarHost,
-                modifier =
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = miniInset + SNACKBAR_MARGIN),
-            )
         }
     }
 }
