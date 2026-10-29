@@ -153,8 +153,8 @@ release-evidence gap, not a PR merge requirement.
 P8 is being implemented on `impl/m4-p8-player`: mini/full player, speed sheet,
 root back/inset/deep-link composition and the Appearance mini-player setting.
 Verification, CI and review are pending. No desktop audio, chapters, sleep
-timer or artwork tint is added. Physical/OEM, audible, TalkBack and genuine
-platform-denial recovery checks remain unverified.
+timer or artwork tint is added. Physical/OEM, audible, TalkBack, desktop modal
+Escape and genuine platform-denial recovery checks remain unverified.
 
 **2026-10-28 checkpoint.** Main `5ddfe29a` passes all six jobs in
 [CI40622726292](https://github.com/L-K-M/Neutrodyne/actions/runs/40622726292).

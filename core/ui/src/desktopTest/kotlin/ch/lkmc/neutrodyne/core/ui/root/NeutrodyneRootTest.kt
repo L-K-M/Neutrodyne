@@ -35,6 +35,10 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.navigationevent.DirectNavigationEventInput
+import androidx.navigationevent.NavigationEvent
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -242,23 +246,37 @@ class NeutrodyneRootTest {
     fun speedSheetBackPrecedesThePlayer() =
         runComposeUiTest {
             var slot: PlayerSlotState? = null
+            var dispatcher: NavigationEventDispatcher? = null
             var collapsed = 0
+            val input = DirectNavigationEventInput()
             setContent {
                 TestRoot(
                     slots =
                         RootSlots(player = {
                             slot = it
+                            val owner = checkNotNull(LocalNavigationEventDispatcherOwner.current)
+                            dispatcher = owner.navigationEventDispatcher
                             PlayerBackProbe { collapsed++ }
                         }, userMessages = emptyFlow()),
                 )
             }
-            runOnIdle { requireNotNull(slot).navigate(SpeedKey) }
-            onNodeWithText("speed-sheet").assertIsDisplayed()
-            pressEscape()
-            onNodeWithText("speed-sheet").assertDoesNotExist()
-            runOnIdle { kotlin.test.assertEquals(0, collapsed) }
-            pressEscape()
-            runOnIdle { kotlin.test.assertEquals(1, collapsed) }
+            runOnIdle {
+                checkNotNull(dispatcher).addInput(input)
+                checkNotNull(slot).navigate(SpeedKey)
+            }
+            try {
+                onNodeWithText("speed-sheet").assertIsDisplayed()
+                runOnIdle {
+                    input.backStarted(NavigationEvent())
+                    input.backCompleted()
+                }
+                onNodeWithText("speed-sheet").assertDoesNotExist()
+                runOnIdle { kotlin.test.assertEquals(0, collapsed) }
+                runOnIdle { input.backCompleted() }
+                runOnIdle { kotlin.test.assertEquals(1, collapsed) }
+            } finally {
+                runOnIdle { checkNotNull(dispatcher).removeInput(input) }
+            }
         }
 
     @Test

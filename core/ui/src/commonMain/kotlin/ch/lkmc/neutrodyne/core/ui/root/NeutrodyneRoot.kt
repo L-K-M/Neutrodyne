@@ -187,14 +187,27 @@ public fun NeutrodyneRoot(
                                     }
                                 }
 
-                                Route.ExpandPlayer -> expandRequest++
-                                Route.None -> Unit
+                                Route.ExpandPlayer -> {
+                                    expandRequest++
+                                }
+
+                                Route.None -> {
+                                    Unit
+                                }
                             }
                         }
                     }
                     ReadyRoot(
-                        state, actions, slots, installers, navigation, snackbarHost, platform, modifier,
-                        expandRequest, collapseRequest,
+                        state,
+                        actions,
+                        slots,
+                        installers,
+                        navigation,
+                        snackbarHost,
+                        platform,
+                        modifier,
+                        expandRequest,
+                        collapseRequest,
                     )
                 }
             }
@@ -233,7 +246,9 @@ private fun ReadyRoot(
     val reducedMotion = LocalReducedMotion.current
     LaunchedEffect(hideSuite, reducedMotion) {
         if (reducedMotion) {
-            suiteState.snapTo(if (hideSuite) NavigationSuiteScaffoldValue.Hidden else NavigationSuiteScaffoldValue.Visible)
+            suiteState.snapTo(
+                if (hideSuite) NavigationSuiteScaffoldValue.Hidden else NavigationSuiteScaffoldValue.Visible,
+            )
         } else if (hideSuite) {
             suiteState.hide()
         } else {
@@ -360,14 +375,19 @@ private fun ReadyRoot(
                         )
                         Row(Modifier.fillMaxWidth().weight(1f)) {
                             Box(
-                                Modifier.weight(1f).focusRequester(importContentFocus).focusable().onGloballyPositioned {
-                                    // Freeze the dock while hidden, including a restored expanded sheet's first frame.
-                                    if ((!expandedSettled || contentBottomPx == 0f) && !suiteState.isAnimating &&
-                                        suiteState.currentValue == NavigationSuiteScaffoldValue.Visible
-                                    ) {
-                                        contentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
-                                    }
-                                },
+                                Modifier
+                                    .weight(
+                                        1f,
+                                    ).focusRequester(importContentFocus)
+                                    .focusable()
+                                    .onGloballyPositioned {
+                                        // Freeze the dock while hidden, including a restored expanded sheet's first frame.
+                                        if ((!expandedSettled || contentBottomPx == 0f) && !suiteState.isAnimating &&
+                                            suiteState.currentValue == NavigationSuiteScaffoldValue.Visible
+                                        ) {
+                                            contentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
+                                        }
+                                    },
                             ) {
                                 NeutrodyneNavHost(
                                     state = navigation,
