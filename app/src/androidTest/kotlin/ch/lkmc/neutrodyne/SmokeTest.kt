@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne
 
 import android.os.Build
 import android.os.Process
+import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -18,6 +19,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
 import ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
@@ -72,7 +75,13 @@ class SmokeTest {
         compose.enableAccessibilityChecks()
         openSettings()
 
-        pressBack()
+        try {
+            pressBack()
+        } catch (failure: RuntimeException) {
+            // Capture the focus owner before teardown, without replacing the Back failure.
+            runCatching(::recordWindowFocus).exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
+        }
         compose.waitForIdle()
         compose.onNodeWithTag(TAG_FEEDS).assertIsDisplayed()
     }
@@ -127,6 +136,17 @@ class SmokeTest {
         compose.waitForIdle()
     }
 
+    private fun recordWindowFocus() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        for (service in listOf("window", "activity activities")) {
+            Log.e(FOCUS_EVIDENCE_TAG, "dumpsys $service")
+            device
+                .executeShellCommand("dumpsys -t $FOCUS_DUMP_TIMEOUT_SECONDS $service")
+                .lineSequence()
+                .forEach { Log.e(FOCUS_EVIDENCE_TAG, it) }
+        }
+    }
+
     /** The APK's ABI, resolved like `AndroidBuildInfo`. */
     private fun apkAbi(): String? =
         if (Process.is64Bit()) {
@@ -147,6 +167,8 @@ class SmokeTest {
     private companion object {
         const val TAG_FEEDS = "nav_feeds"
         const val STARTUP_TIMEOUT_MS = 10_000L
+        const val FOCUS_EVIDENCE_TAG = "BackFocusEvidence"
+        const val FOCUS_DUMP_TIMEOUT_SECONDS = 5
 
         // Section headers render "<title> · <count>"; the separator keeps library names such as
         // "AboutLibraries" from matching.

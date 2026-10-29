@@ -24,13 +24,19 @@ RELEASE_SMOKE = {
 }
 
 
+QUEUE_JOURNEY = ("ch.lkmc.neutrodyne.UpNextJourneyTest",
+                 "queueEditsPersistUndoRestoresOrderAndNothingPlays")
+ATF_CONTROL = ("ch.lkmc.neutrodyne.AccessibilityChecksTest",
+               "enabledChecksFailAnUnlabelledTinyTargetBeforeTheClick")
+
+
 class PlaybackEvidenceTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
 
-    def report(self, device, names, skipped=None, flavor="Debug", directory=None):
+    def report(self, device, names, skipped=None, flavor="Debug", directory=None, omit_ui=()):
         folder = self.root / (directory or f"{device}{flavor}AndroidTest")
         folder.mkdir(parents=True, exist_ok=True)
         suite = ET.Element("testsuite")
@@ -38,6 +44,12 @@ class PlaybackEvidenceTest(unittest.TestCase):
             case = ET.SubElement(suite, "testcase", classname=gate.CLASS, name=name, time="1801")
             if name == skipped:
                 ET.SubElement(case, "skipped")
+        ui = [QUEUE_JOURNEY]
+        if device in ("api34", "api36", "api37"):
+            ui.append(ATF_CONTROL)
+        for classname, name in ui:
+            if name not in omit_ui:
+                ET.SubElement(suite, "testcase", classname=classname, name=name, time="1")
         ET.ElementTree(suite).write(folder / "TEST-playback.xml")
 
     def release_suite(self, directory, omit=(), marks=None, root=None,
@@ -65,6 +77,38 @@ class PlaybackEvidenceTest(unittest.TestCase):
         gate.verify(self.root, "ci", ["api26", "api36"])
         with self.assertRaises(ValueError):
             gate.verify(self.root, "ci", ["api34"])
+
+    def test_debug_requires_each_queue_accessibility_receipt(self):
+        for classname, name in (QUEUE_JOURNEY, ATF_CONTROL):
+            with self.subTest(case=name):
+                self.report("api36", gate.SHORT, omit_ui=(name,))
+                with self.assertRaisesRegex(ValueError, name):
+                    gate.verify(self.root, "ci", ["api36"])
+
+    def test_debug_rejects_failed_skipped_foreign_and_duplicate_ui_cases(self):
+        for classname, name in (QUEUE_JOURNEY, ATF_CONTROL):
+            for mark in ("skipped", "failure", "error", "foreign", "duplicate"):
+                with self.subTest(case=name, mark=mark):
+                    self.report("api36", gate.SHORT)
+                    path = self.root / "api36DebugAndroidTest" / "TEST-playback.xml"
+                    tree = ET.parse(path)
+                    case = next(c for c in tree.getroot() if c.get("name") == name)
+                    if mark == "foreign":
+                        case.set("classname", "foreign." + classname)
+                    elif mark == "duplicate":
+                        ET.SubElement(tree.getroot(), "testcase", classname=classname, name=name)
+                    else:
+                        ET.SubElement(case, mark)
+                    tree.write(path)
+                    with self.assertRaisesRegex(ValueError, name):
+                        gate.verify(self.root, "ci", ["api36"])
+
+    def test_api26_requires_journey_without_unsupported_framework_control(self):
+        self.report("api26", gate.SHORT)
+        gate.verify(self.root, "ci", ["api26"])
+        self.report("api26", gate.SHORT, omit_ui=(QUEUE_JOURNEY[1],))
+        with self.assertRaisesRegex(ValueError, QUEUE_JOURNEY[1]):
+            gate.verify(self.root, "ci", ["api26"])
 
     def test_empty_and_skipped_are_rejected(self):
         with self.assertRaises(ValueError):

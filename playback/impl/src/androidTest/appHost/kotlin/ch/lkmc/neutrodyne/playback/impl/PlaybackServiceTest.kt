@@ -265,7 +265,7 @@ class PlaybackServiceTest {
                         .byEpisode(ids.first())
                 saved != null && saved.positionMs >= 9_000
             }
-            await { !serviceDump().contains("isForeground=true") }
+            await { !serviceDump().contains(FOREGROUND_SERVICE_MARKER) }
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
             await { !serviceDump().contains("ServiceRecord{") }
             phase("recreation/foreground")
@@ -305,6 +305,8 @@ class PlaybackServiceTest {
                 controller?.release()
                 controller = null
             }
+            // Let Media3's post-pause foreground grace finish before the cold-start probe.
+            await { !serviceDump().contains(FOREGROUND_SERVICE_MARKER) }
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
             await { !serviceDump().contains("ServiceRecord{") }
             // System media-session dispatch exercises the manifest's standard MediaButtonReceiver.
@@ -610,6 +612,7 @@ class PlaybackServiceTest {
     private companion object {
         const val COVER_SIDE = 256
         const val SERVICE_CLASS = "ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService"
+        const val FOREGROUND_SERVICE_MARKER = "isForeground=true"
         const val SYSTEM_UI_PACKAGE = "com.android.systemui"
         const val PLAYBACK_NOTIFICATION = 4000
         const val SHORT_STREAM_REPEATS = 60

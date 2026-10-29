@@ -90,6 +90,7 @@ internal fun FeedsScreen(
     state: FeedsUiState,
     pagingFor: (FeedSource) -> Flow<PagingData<FeedItem>>,
     onRefresh: (FeedSource) -> Unit,
+    onPlay: (FeedSource) -> Unit,
     onFiltersChange: (FeedSource, FeedFilters) -> Unit,
     onAction: (EpisodeAction) -> Unit,
     onMarkAllPlayedClick: (FeedSource) -> Unit,
@@ -107,6 +108,9 @@ internal fun FeedsScreen(
     onAllGroups: () -> Unit = {},
     onCreateGroup: () -> Unit = {},
     selection: EpisodeSelectionController? = null,
+    onPlayEpisode: ((FeedSource, Long) -> Unit)? = null,
+    onPlaySelectionNext: (() -> Unit)? = null,
+    onPlaySelectionLast: (() -> Unit)? = null,
 ) {
     val selectedIds =
         selection
@@ -218,7 +222,13 @@ internal fun FeedsScreen(
             }.focusable(),
     ) {
         if (selectedIds.isNotEmpty() && selection != null) {
-            SelectionTopBar(selection, selectedIds.size, selectAll)
+            SelectionTopBar(
+                selection,
+                selectedIds.size,
+                selectAll,
+                onPlayNext = onPlaySelectionNext,
+                onPlayLast = onPlaySelectionLast,
+            )
         } else {
             NdTopAppBar(
                 title = stringResource(Res.string.nav_feeds),
@@ -317,8 +327,15 @@ internal fun FeedsScreen(
                             onVisibleIds = { onVisibleIds(entry.ref, it) },
                             visitBaseline = state.visitBaselines[source],
                             onRefresh = { onRefresh(source) },
+                            onPlay = { onPlay(source) },
                             onFiltersChange = { onFiltersChange(source, it) },
-                            onAction = onAction,
+                            onAction = { action ->
+                                if (action is EpisodeAction.PlayToggle && onPlayEpisode != null) {
+                                    onPlayEpisode(source, action.episodeId)
+                                } else {
+                                    onAction(action)
+                                }
+                            },
                             onMarkAllPlayedClick = { onMarkAllPlayedClick(source) },
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,

@@ -31,6 +31,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.runDesktopComposeUiTest
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -73,6 +74,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * S9's `runComposeUiTest` checks of `NeutrodyneRoot` on the desktop JVM (01 S9): the five labelled
@@ -160,6 +162,23 @@ class NeutrodyneRootTest {
                 onAllNodesWithText(message).fetchSemanticsNodes().size == 1 && onNodeWithText(message).isDisplayed()
             }
             onNodeWithText(message).assertIsDisplayed()
+        }
+
+    @Test
+    fun snackbarStaysAboveCompactNavigationTargets() =
+        runDesktopComposeUiTest(width = 400, height = 800) {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
+            onNodeWithTag("nav_library").performClick()
+            runOnIdle { pending.trySend(Route.SelectFeed("missing")) }
+
+            val message = "Couldn't save the change"
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodesWithText(message).fetchSemanticsNodes().size == 1 && onNodeWithText(message).isDisplayed()
+            }
+            val notice = onNodeWithText(message).fetchSemanticsNode().boundsInRoot
+            val navigation = onNodeWithTag("nav_feeds").fetchSemanticsNode().boundsInRoot
+            assertTrue(notice.bottom <= navigation.top, "Snackbar $notice covers navigation $navigation")
         }
 
     @Test

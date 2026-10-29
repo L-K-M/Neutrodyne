@@ -68,6 +68,7 @@ class FeedsRestorationHostTest {
                         state = state,
                         pagingFor = { feed },
                         onRefresh = {},
+                        onPlay = {},
                         onFiltersChange = { _, _ -> },
                         onAction = {},
                         onMarkAllPlayedClick = {},

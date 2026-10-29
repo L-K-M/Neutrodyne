@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
@@ -22,21 +23,28 @@ import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
+import ch.lkmc.neutrodyne.core.testing.testNowPlaying
+import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionAction
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOption
+import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_undo
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed_from_group
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.playback.api.PlayResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
@@ -64,20 +72,29 @@ class PodcastViewModelTest : MainDispatcherTest() {
     private val refreshController = FakeRefreshController()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
     private val clock = TestClock()
+    private val settings = FakeSettingsRepository()
+    private val playbackController = FakePlaybackController()
+    private val playbackStates = FakePlaybackStateSource()
 
-    private fun viewModel(podcastId: Long = 7) =
-        PodcastViewModel(
-            podcastId,
-            podcasts,
-            feeds,
-            episodes,
-            groups,
-            refreshController,
-            UnsubscribeUseCase(podcasts, FakeNewEpisodePoster()),
-            network,
-            liveSource,
-            clock,
-        )
+    private fun viewModel(
+        podcastId: Long = 7,
+        playbackController: FakePlaybackController = this.playbackController,
+    ) = PodcastViewModel(
+        podcastId,
+        podcasts,
+        feeds,
+        episodes,
+        groups,
+        refreshController,
+        UnsubscribeUseCase(podcasts, FakeNewEpisodePoster()),
+        settings,
+        playbackController,
+        playbackStates,
+        testPlatformInfo,
+        network,
+        liveSource,
+        clock,
+    )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
@@ -137,12 +154,12 @@ class PodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun gatedFiltersAreIgnoredForTransientPodcastQueries() =
+    fun transientQueriesKeepInProgressAndGateDownloaded() =
         runTest {
             val model = viewModel()
             collect(model)
-            val effective = FeedFilters(unplayedOnly = true)
-            model.onFiltersChange(effective.copy(downloadedOnly = true, inProgressOnly = true))
+            val effective = FeedFilters(unplayedOnly = true, inProgressOnly = true)
+            model.onFiltersChange(effective.copy(downloadedOnly = true))
             model.feed.take(1).asSnapshot()
             advanceUntilIdle()
             assertEquals(effective, feeds.lastRequest?.second)
@@ -663,5 +680,127 @@ class PodcastViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertNull(viewModel.markPlayed.state.value)
             assertEquals(listOf("markFeedPlayed($source, null, 1)"), episodes.calls)
+        }
+
+    @Test
+    fun rowPlayStartsThePodcastFeedAnchoredAtTheRow() =
+        runTest {
+            val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7, episodeOrder = FeedOrder.OLDEST_FIRST)
+            playbackController.playResult = PlayResult.Started
+            collect(viewModel)
+            advanceUntilIdle()
+
+            val filters = FeedFilters(unplayedOnly = true, media = MediaFilter.AUDIO)
+            viewModel.onFiltersChange(filters)
+            viewModel.onRowAction(EpisodeAction.PlayToggle(42))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Feed(
+                        FeedSource.Podcast(7),
+                        filters,
+                        FeedOrder.OLDEST_FIRST,
+                        42L,
+                    ),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun playToggleOnThePlayingItemPausesWithoutANewStart() =
+        runTest {
+            playbackStates.nowPlaying.value = testNowPlaying(42)
+            val viewModel = viewModel()
+
+            viewModel.onRowAction(EpisodeAction.PlayToggle(42))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun playNextAndPlayLastEnqueueTheRow() =
+        runTest {
+            val viewModel = viewModel()
+
+            viewModel.onRowAction(EpisodeAction.PlayNext(42))
+            viewModel.onRowAction(EpisodeAction.PlayLast(43))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Queue(FakePlaybackController.Placement.NEXT, listOf(42L)),
+                    FakePlaybackController.Call.Queue(FakePlaybackController.Placement.LAST, listOf(43L)),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun needsMeteredConsentOpensTheDialogAndOnceRetriesTheStart() =
+        runTest {
+            val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7)
+            val refused = PlayResult.NeedsMeteredConsent(42)
+            playbackController.playResult = refused
+            playbackStates.pendingMeteredConsent.value = refused
+            collect(viewModel)
+            advanceUntilIdle()
+
+            viewModel.onRowAction(EpisodeAction.PlayToggle(42))
+            advanceUntilIdle()
+            assertEquals(
+                42L,
+                viewModel.playback.meteredConsent.value
+                    ?.episodeId,
+            )
+
+            playbackController.calls.clear()
+            playbackController.playResult = PlayResult.Started
+            viewModel.playback.consentOnce()
+            advanceUntilIdle()
+
+            assertNull(viewModel.playback.meteredConsent.value)
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
+                    FakePlaybackController.Call.Feed(
+                        FeedSource.Podcast(7),
+                        FeedFilters(),
+                        FeedOrder.NEWEST_FIRST,
+                        42L,
+                    ),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun meteredBlockedPostsTheSettingsAction() =
+        runTest {
+            val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7)
+            playbackController.playResult = PlayResult.MeteredBlocked
+            collect(viewModel)
+            advanceUntilIdle()
+
+            viewModel.onRowAction(EpisodeAction.PlayToggle(42))
+            advanceUntilIdle()
+
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            assertEquals(
+                PlaybackMessageAction.OpenPlaybackSettings,
+                viewModel.playback.onMessageAction(message.id),
+            )
         }
 }
