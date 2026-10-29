@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -35,6 +36,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.up_next_empty_title
 import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 import org.jetbrains.compose.resources.stringResource
 
+internal enum class UpNextSurface { DESTINATION, PLAYER }
+
 @Composable
 internal fun UpNextScreen(
     state: UpNextUiState,
@@ -49,17 +52,24 @@ internal fun UpNextScreen(
     onVisibleIds: (Set<Long>) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable () -> Unit = {},
+    surface: UpNextSurface = UpNextSurface.DESTINATION,
 ) {
     Column(modifier.fillMaxSize()) {
-        NdTopAppBar(
-            title = stringResource(Res.string.nav_up_next),
-            actions = {
-                if (state.upNext.isNotEmpty()) {
-                    TextButton(onClick = onClear) { Text(stringResource(Res.string.queue_clear)) }
-                }
-                topBarActions()
-            },
-        )
+        if (surface == UpNextSurface.DESTINATION) {
+            NdTopAppBar(
+                title = stringResource(Res.string.nav_up_next),
+                actions = {
+                    if (state.upNext.isNotEmpty()) {
+                        TextButton(onClick = onClear) { Text(stringResource(Res.string.queue_clear)) }
+                    }
+                    topBarActions()
+                },
+            )
+        } else if (state.upNext.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onClear) { Text(stringResource(Res.string.queue_clear)) }
+            }
+        }
         OfflineBanner(state.caps.offline)
         when {
             state.loadFailed -> {
@@ -81,7 +91,10 @@ internal fun UpNextScreen(
                     onMove = onMove,
                     onRemove = onRemove,
                     onStopAfter = onStopAfter,
-                    modifier = Modifier.weight(1f).navigationBarsPadding(),
+                    modifier =
+                        Modifier.weight(1f).then(
+                            if (surface == UpNextSurface.DESTINATION) Modifier.navigationBarsPadding() else Modifier,
+                        ),
                     contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current + 16.dp),
                     onVisibleIds = onVisibleIds,
                     emptyContent = {

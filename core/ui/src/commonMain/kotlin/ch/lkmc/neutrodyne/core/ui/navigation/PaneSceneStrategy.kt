@@ -66,6 +66,10 @@ internal class PaneSceneStrategy(
     internal val currentTab: TopLevelKey get() = navigation.selectedTab
     internal val selectionGeneration: Long get() = navigation.selectionGeneration
     internal val canGoBack: Boolean get() = currentTab != FeedsKey || navigation.stack(currentTab).size > 1
+    internal val hasOverlay: Boolean
+        get() = navigation.stack(currentTab).lastOrNull()?.let {
+            entryProvider(it, currentTab).metadata.containsKey(NdSceneMetadata.KEY_OVERLAY)
+        } == true
 
     /** The generation rejects intervening tab changes, even before selection recomposes. */
     internal fun completeBack(

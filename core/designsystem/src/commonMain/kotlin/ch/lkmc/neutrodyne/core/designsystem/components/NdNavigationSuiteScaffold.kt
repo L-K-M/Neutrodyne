@@ -82,7 +82,11 @@ public fun NdNavigationSuiteScaffold(
     // (08 Contrast: no black-on-default-black text in dark mode).
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         NavigationSuiteScaffoldLayout(
-            navigationSuite = {
+            navigationSuite = navigationSuite@{
+                // Hidden chrome must not stay focusable under the full player.
+                if (state.currentValue == NavigationSuiteScaffoldValue.Hidden && !state.isAnimating) {
+                    return@navigationSuite
+                }
                 when (suiteType) {
                     NavigationSuiteType.WideNavigationRailCollapsed,
                     NavigationSuiteType.WideNavigationRailExpanded,

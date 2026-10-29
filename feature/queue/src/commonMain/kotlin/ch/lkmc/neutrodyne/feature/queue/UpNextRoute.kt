@@ -3,15 +3,21 @@
 package ch.lkmc.neutrodyne.feature.queue
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation3.runtime.NavKey
+import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.ui.EnterPasswordDialog
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
@@ -21,14 +27,37 @@ import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
+import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
 
+/** The shells embed this route without creating a dependency between player and queue features. */
+@Composable
+public fun PlayerUpNextRoute(navigate: (NavKey) -> Unit) {
+    val navigator = LocalAppNavigator.current
+    val playerNavigator =
+        remember(navigator, navigate) {
+            object : AppNavigator by navigator {
+                override fun push(key: NavKey) = navigate(key)
+
+                override fun pushDetail(key: NavKey) = navigate(key)
+
+                override fun selectTab(key: TopLevelKey) = navigate(key)
+            }
+        }
+    CompositionLocalProvider(LocalAppNavigator provides playerNavigator, LocalMiniPlayerInset provides 0.dp) {
+        UpNextRoute(surface = UpNextSurface.PLAYER)
+    }
+}
+
 /** Queue row starts use playEpisode, retaining the existing context when the row is queued. */
 @Composable
-internal fun UpNextRoute(viewModel: UpNextViewModel = metroViewModel()) {
+internal fun UpNextRoute(
+    viewModel: UpNextViewModel = metroViewModel(),
+    surface: UpNextSurface = UpNextSurface.DESTINATION,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val urls = LocalPlatformActions.current.urls
@@ -39,6 +68,7 @@ internal fun UpNextRoute(viewModel: UpNextViewModel = metroViewModel()) {
 
     UpNextScreen(
         state = state,
+        surface = surface,
         onAction = { action ->
             when (dispatchEpisodeRoute(action, navigator, urls)) {
                 EpisodeRouteResult.UNHANDLED -> {

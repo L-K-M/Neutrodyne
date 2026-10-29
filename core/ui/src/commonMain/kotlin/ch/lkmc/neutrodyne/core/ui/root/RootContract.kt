@@ -77,6 +77,13 @@ public data class PlayerSlotState(
     val layout: PaneLayout,
     /** Pushes a key onto the selected tab's stack (podcast link, Go to episode, …). */
     val navigate: (NavKey) -> Unit,
+    /** Content bottom in root pixels, held while the navigation suite is hidden. */
+    val contentBottomPx: Float = 0f,
+    /** Repeated deep links and navigation requests must remain observable. */
+    val expandRequest: Int = 0,
+    val collapseRequest: Int = 0,
+    /** The sheet hides navigation only after settling over it. */
+    val onExpandedSettled: (Boolean) -> Unit = {},
 )
 
 /** Root-level key chords dispatched to the shell's playback actions (08 Keyboard and mouse). */

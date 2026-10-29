@@ -87,6 +87,17 @@ class UpNextScreenTest {
 
     @AfterTest fun restoreLocale() = Locale.setDefault(previousLocale)
 
+    @Test fun embeddedQueueKeepsEditingWithoutDestinationChrome() =
+        runDesktopComposeUiTest(width = 650, height = 950) {
+            content(surface = UpNextSurface.PLAYER)
+            onNodeWithText("Up next").assertDoesNotExist()
+            onNodeWithTag("queueCurrent").assertIsDisplayed()
+            onNodeWithText("Clear Up next").performClick()
+            assertEquals(1, cleared)
+            onNodeWithText("Episode 3").performCustomAccessibilityActionWithLabel("Move up")
+            assertEquals(listOf(3L to 0), moves)
+        }
+
     @Test fun currentIsFixedAndContextStopsWithoutClearingQueue() =
         runDesktopComposeUiTest(width = 650, height = 950) {
             content()
@@ -278,6 +289,7 @@ class UpNextScreenTest {
     private fun ComposeUiTest.content(
         platform: PlatformKind = PlatformKind.DESKTOP,
         layoutDirection: LayoutDirection = LayoutDirection.Ltr,
+        surface: UpNextSurface = UpNextSurface.DESTINATION,
     ) {
         setContent {
             CompositionLocalProvider(
@@ -297,6 +309,7 @@ class UpNextScreenTest {
                         { discovered++ },
                         {},
                         {},
+                        surface = surface,
                     )
                 }
             }
