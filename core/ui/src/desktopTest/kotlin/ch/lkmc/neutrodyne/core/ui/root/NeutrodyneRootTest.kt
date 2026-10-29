@@ -7,10 +7,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -32,6 +35,10 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.navigationevent.DirectNavigationEventInput
+import androidx.navigationevent.NavigationEvent
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -50,6 +57,7 @@ import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -97,6 +105,188 @@ class NeutrodyneRootTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test
+    fun playerRoutesKeepWideWindowsAsSheets() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            var slot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    routes = pending.receiveAsFlow(),
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { pending.trySend(Route.ExpandPlayer) }
+            waitForIdle()
+            runOnIdle {
+                kotlin.test.assertEquals(1, slot?.expandRequest)
+                kotlin.test.assertFalse(requireNotNull(slot).layout.playerPanel)
+                assertTrue(requireNotNull(slot).contentBottomPx > 0f)
+            }
+            runOnIdle { pending.trySend(Route.ExpandPlayer) }
+            waitForIdle()
+            runOnIdle { kotlin.test.assertEquals(2, slot?.expandRequest) }
+        }
+
+    @Test
+    fun playerAnchorStaysAboveNavigationWhileTheSuiteIsHidden() =
+        runDesktopComposeUiTest(width = 400, height = 800) {
+            var slot: PlayerSlotState? = null
+            var current by mutableStateOf(true)
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = current),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                )
+            }
+            waitForIdle()
+            val bottom = requireNotNull(slot).contentBottomPx
+            val navTop = onNodeWithTag("nav_feeds").fetchSemanticsNode().boundsInRoot.top
+            assertTrue(bottom > 0f && bottom <= navTop, "Player anchor $bottom overlaps navigation $navTop")
+            runOnIdle { requireNotNull(slot).onExpandedSettled(true) }
+            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            runOnIdle { kotlin.test.assertEquals(bottom, slot?.contentBottomPx) }
+
+            // A cleared current must restore navigation even before the player's disposal callback.
+            runOnIdle { current = false }
+            onNodeWithTag("nav_feeds").assertExists()
+        }
+
+    @Test
+    fun restoredExpandedPlayerMeasuresBeforeHidingNavigation() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(
+                            player = {
+                                slot = it
+                                androidx.compose.runtime.SideEffect { it.onExpandedSettled(true) }
+                            },
+                            userMessages = emptyFlow(),
+                        ),
+                )
+            }
+            runOnIdle { assertTrue(requireNotNull(slot).contentBottomPx > 0f) }
+        }
+
+    @Test
+    fun playerSharesTheRootsBackAndViewModelOwners() =
+        runComposeUiTest {
+            var back: androidx.navigationevent.NavigationEventDispatcherOwner? = null
+            var expectedBack: androidx.navigationevent.NavigationEventDispatcherOwner? = null
+            var actual: androidx.lifecycle.ViewModelStoreOwner? = null
+            var root: androidx.lifecycle.ViewModelStoreOwner? = null
+            setContent {
+                root = androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner.current
+                val owner = androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner()
+                expectedBack = owner
+                CompositionLocalProvider(
+                    androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner provides owner,
+                ) {
+                    TestRoot(
+                        slots =
+                            RootSlots(player = {
+                                back = androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner.current
+                                actual = LocalRootViewModelStoreOwner.current
+                            }, userMessages = emptyFlow()),
+                    )
+                }
+            }
+            runOnIdle {
+                kotlin.test.assertNotNull(back)
+                kotlin.test.assertNotNull(root)
+                kotlin.test.assertSame(expectedBack, back)
+                kotlin.test.assertSame(root, actual)
+            }
+        }
+
+    @Test
+    fun navigationFromThePlayerCollapsesWithoutLosingTheTabStack() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            setContent { TestRoot(slots = RootSlots(player = { slot = it }, userMessages = emptyFlow())) }
+            runOnIdle { requireNotNull(slot).navigate(PodcastKey(3)) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            runOnIdle { assertTrue(requireNotNull(slot).collapseRequest > 0) }
+            runOnIdle { requireNotNull(slot).navigate(DiscoverKey) }
+            onAllNodesWithText("discover-content").onFirst().assertIsDisplayed()
+            onNodeWithTag("nav_feeds").performClick()
+            onNodeWithText("podcast-3").assertIsDisplayed()
+        }
+
+    @Test
+    fun incomingScreenRoutesRequestPlayerCollapse() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            var slot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    routes = pending.receiveAsFlow(),
+                    slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { pending.trySend(Route.Push(PodcastKey(3))) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            runOnIdle { assertTrue(requireNotNull(slot).collapseRequest > 0) }
+        }
+
+    @Test
+    fun playerBackPrecedesTheUnderlyingDetail() =
+        runComposeUiTest {
+            var collapsed = 0
+            setContent {
+                TestRoot(
+                    slots = RootSlots(player = { PlayerBackProbe { collapsed++ } }, userMessages = emptyFlow()),
+                )
+            }
+            onNodeWithText("open-podcast").performClick()
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            pressEscape()
+            runOnIdle { kotlin.test.assertEquals(1, collapsed) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+        }
+
+    @Test
+    fun speedSheetBackPrecedesThePlayer() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            var dispatcher: NavigationEventDispatcher? = null
+            var collapsed = 0
+            val input = DirectNavigationEventInput()
+            setContent {
+                TestRoot(
+                    slots =
+                        RootSlots(player = {
+                            slot = it
+                            val owner = checkNotNull(LocalNavigationEventDispatcherOwner.current)
+                            dispatcher = owner.navigationEventDispatcher
+                            PlayerBackProbe { collapsed++ }
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle {
+                checkNotNull(dispatcher).addInput(input)
+                checkNotNull(slot).navigate(SpeedKey)
+            }
+            try {
+                onNodeWithText("speed-sheet").assertIsDisplayed()
+                runOnIdle {
+                    input.backStarted(NavigationEvent())
+                    input.backCompleted()
+                }
+                onNodeWithText("speed-sheet").assertDoesNotExist()
+                runOnIdle { kotlin.test.assertEquals(0, collapsed) }
+                runOnIdle { input.backCompleted() }
+                runOnIdle { kotlin.test.assertEquals(1, collapsed) }
+            } finally {
+                runOnIdle { checkNotNull(dispatcher).removeInput(input) }
+            }
+        }
 
     @Test
     fun groupNotificationSelectsFeedsInsteadOfDroppingTheRoute() =
@@ -600,9 +790,30 @@ private val TestInstallers: Set<EntryProviderInstaller> =
                 Text("podcast-${key.podcastId}")
             }
         }
+        add { entry<SpeedKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("speed-sheet") } }
         add { entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("add-podcast-sheet") } }
         add { entry<ExportKey>(metadata = NdSceneMetadata.dialog()) { ExportDialogStub(it) } }
     }
+
+/** Same root-dispatch registration as the player, without coupling core UI tests to a feature. */
+@Composable
+private fun PlayerBackProbe(onBack: () -> Unit) {
+    val owner = checkNotNull(androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner.current)
+    val callback by rememberUpdatedState(onBack)
+    val handler =
+        remember(owner) {
+            object : androidx.navigationevent.NavigationEventHandler<androidx.navigationevent.NavigationEventInfo>(
+                androidx.navigationevent.NavigationEventInfo.None,
+                true,
+            ) {
+                override fun onBackCompleted() = callback()
+            }
+        }
+    DisposableEffect(owner, handler) {
+        owner.navigationEventDispatcher.addHandler(handler)
+        onDispose { handler.remove() }
+    }
+}
 
 @Composable
 private fun FeedsStub() {

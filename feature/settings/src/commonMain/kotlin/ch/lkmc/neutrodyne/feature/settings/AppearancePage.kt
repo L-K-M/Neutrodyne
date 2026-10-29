@@ -38,6 +38,8 @@ import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_dark
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_light
@@ -68,6 +70,10 @@ internal fun AppearancePage(
         settings
             .observe(AppearanceSettingKeys.DYNAMIC_COLOR)
             .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.DYNAMIC_COLOR.default)
+    val miniPlayerSkip by
+        settings
+            .observe(AppearanceSettingKeys.MINI_PLAYER_SKIP)
+            .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.MINI_PLAYER_SKIP.default)
     val scope = rememberCoroutineScope()
     val snackbarHost = LocalSnackbarHost.current
     val saveFailed = stringResource(Res.string.settings_save_failed)
@@ -94,6 +100,12 @@ internal fun AppearancePage(
                 title = stringResource(Res.string.appearance_theme),
                 summary = stringResource(themeLabel(theme)),
                 onClick = { showThemeDialog = true },
+            )
+            SettingsSwitchRow(
+                title = stringResource(Res.string.appearance_mini_player_skip),
+                summary = stringResource(Res.string.appearance_mini_player_skip_summary),
+                checked = miniPlayerSkip,
+                onCheckedChange = { save(AppearanceSettingKeys.MINI_PLAYER_SKIP, it) },
             )
             if (platform == PlatformKind.ANDROID) GestureSettings(settings)
             if (dynamicColorSupport == DynamicColorSupport.AVAILABLE) {

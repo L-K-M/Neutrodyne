@@ -7,6 +7,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelStoreOwner
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -24,6 +25,10 @@ public val LocalSnackbarHost: androidx.compose.runtime.ProvidableCompositionLoca
  */
 public val LocalRootScope: androidx.compose.runtime.ProvidableCompositionLocal<CoroutineScope> =
     compositionLocalOf { error("LocalRootScope is not provided by NeutrodyneRoot") }
+
+/** Speed controls share the player instance, not their navigation entry's ViewModel store. */
+public val LocalRootViewModelStoreOwner: androidx.compose.runtime.ProvidableCompositionLocal<ViewModelStoreOwner?> =
+    staticCompositionLocalOf { null }
 
 /** Whether the Settings gear shows the update badge (08 Settings gear badge, M11a). */
 public val LocalSettingsBadge: androidx.compose.runtime.ProvidableCompositionLocal<Boolean> =

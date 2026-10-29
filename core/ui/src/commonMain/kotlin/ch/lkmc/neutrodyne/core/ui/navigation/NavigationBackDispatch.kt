@@ -22,6 +22,8 @@ import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 
 private val LocalEntryBackDispatch = compositionLocalOf<EntryBackOwner?> { null }
 
+private enum class BackLayer { DISABLED, CONTENT, OVERLAY }
+
 /** Native handlers drive preview only; one real handler owns each completed Back event. */
 @Composable
 @Suppress("FunctionNaming") // Compose functions use PascalCase.
@@ -34,11 +36,16 @@ internal fun NavigationBackDispatch(panes: PaneSceneStrategy, content: @Composab
         events.attach(parent.navigationEventDispatcher)
         onDispose { events.dispose() }
     }
-    val enabled = panes.canGoBack
+    val layer =
+        when {
+            !panes.canGoBack -> BackLayer.DISABLED
+            panes.hasOverlay -> BackLayer.OVERLAY
+            else -> BackLayer.CONTENT
+        }
     val selectionGeneration = panes.selectionGeneration
     SideEffect {
         events.cancelPreviewIfSelectionChanged(selectionGeneration)
-        events.isBackEnabled = enabled
+        events.updateBackLayer(layer)
     }
 
     CompositionLocalProvider(
@@ -54,7 +61,10 @@ private class BackEventOwner(
     private val preview = DirectNavigationEventInput()
     private var origin: BackOrigin? = null
     private var previewActive = false
-    private val handler =
+    private val contentHandler = createHandler()
+    private val overlayHandler = createHandler()
+
+    private fun createHandler(): NavigationEventHandler<NavigationEventInfo> =
         object : NavigationEventHandler<NavigationEventInfo>(NavigationEventInfo.None, false) {
             override fun onBackStarted(event: NavigationEvent) {
                 origin = BackOrigin(panes.currentTab, panes.selectionGeneration)
@@ -86,7 +96,8 @@ private class BackEventOwner(
 
     fun attach(parent: NavigationEventDispatcher) {
         navigationEventDispatcher.addInput(preview)
-        parent.addHandler(handler)
+        parent.addHandler(contentHandler)
+        parent.addHandler(overlayHandler, NavigationEventDispatcher.PRIORITY_OVERLAY)
     }
 
     fun cancelPreviewIfSelectionChanged(selectionGeneration: Long) {
@@ -104,14 +115,15 @@ private class BackEventOwner(
         preview.backCancelled()
     }
 
-    var isBackEnabled: Boolean
-        get() = handler.isBackEnabled
-        set(value) {
-            handler.isBackEnabled = value
-        }
+    fun updateBackLayer(layer: BackLayer) {
+        // Keep registration order stable when a modal closes: player Back still precedes content.
+        contentHandler.isBackEnabled = layer == BackLayer.CONTENT
+        overlayHandler.isBackEnabled = layer == BackLayer.OVERLAY
+    }
 
     fun dispose() {
-        handler.remove()
+        contentHandler.remove()
+        overlayHandler.remove()
         navigationEventDispatcher.dispose()
     }
 }

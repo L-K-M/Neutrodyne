@@ -1633,6 +1633,16 @@ Serves R4.7, R4.8, R5.2, R5.5, R5.7, R8.5, N4. Delivered in M4 (sheet, mini and 
 
 ### Structure and states
 
+**M4 implementation boundary (2026-10-29).** Use the sheet at every width,
+without reserving a side-panel column or changing `ui.player_panel_hidden`.
+The side panel, tabletop layout and artwork tint remain MD1/M10. Chapters and
+sleep controls remain M5. The root supplies the measured content bottom and
+expand/collapse request tokens, retains the last visible-suite measurement
+while navigation is hidden, and shares its activity/window ViewModel owner
+with the speed sheet. Player and queue features meet through shell-owned
+composable slots, not a feature-to-feature dependency.
+
+**Target v1.0 structure (side panel deferred to MD1/M10).**
 `NeutrodyneRoot` (`:core:ui`, hosted by `MainActivity` and `NeutrodyneWindow`) composes `Box(Modifier.semantics { testTagsAsResourceId = true }) { NdNavigationSuiteScaffold { Row { Box(Modifier.weight(1f)) { NeutrodyneNavHost(…) }; if (layout.playerPanel) PlayerSidePanel(…) } }; if (!layout.playerPanel) PlayerSheet(…) }` (`testTagsAsResourceId` lets 09's UI Automator journeys find Compose nodes by resource ID on Android; the desktop's `runComposeUiTest` uses test tags directly): the sheet overlays the whole window, including the navigation bar, so it can grow over it without resizing the scaffold. When `LocalPaneLayout.playerPanel` is true the sheet is not composed and `PlayerSidePanel` takes its fixed width at the end of the content row ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)). With `nowPlaying == null` neither exists and `LocalMiniPlayerInset` is 0. Switching between the two (unfolding, resizing a window) never carries the sheet's value: a sheet created after the panel starts `Collapsed`.
 
 ```mermaid

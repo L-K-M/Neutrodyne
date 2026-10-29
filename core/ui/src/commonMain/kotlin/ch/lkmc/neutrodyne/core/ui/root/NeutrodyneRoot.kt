@@ -6,8 +6,10 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -16,14 +18,22 @@ import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.HingePolicy
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldValue
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
+import androidx.compose.material3.adaptive.navigationsuite.rememberNavigationSuiteScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -38,12 +48,17 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.navigation3.runtime.NavKey
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventInput
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.PlatformSystemBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.components.NdNavItem
 import ch.lkmc.neutrodyne.core.designsystem.components.NdNavigationSuiteScaffold
@@ -51,6 +66,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.defaultSuiteType
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.statusBarAppearanceFor
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
+import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -64,6 +80,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
@@ -116,9 +133,13 @@ public fun NeutrodyneRoot(
     initialTab: TopLevelKey = FeedsKey,
     routes: Flow<Route> = emptyFlow(),
 ) {
+    val rootViewModelOwner = LocalViewModelStoreOwner.current
+    val backOwner = LocalNavigationEventDispatcherOwner.current ?: rememberNavigationEventDispatcherOwner()
     val navigation = rememberNavigationState(initialTab)
     val snackbarHost = remember { SnackbarHostState() }
     val rootScope = rememberCoroutineScope()
+    var expandRequest by rememberSaveable { mutableIntStateOf(0) }
+    var collapseRequest by rememberSaveable { mutableIntStateOf(0) }
 
     val dark =
         when (prefs.theme) {
@@ -134,6 +155,8 @@ public fun NeutrodyneRoot(
             LocalSnackbarHost provides snackbarHost,
             LocalSettingsBadge provides state.settingsBadge,
             LocalRootScope provides rootScope,
+            LocalRootViewModelStoreOwner provides rootViewModelOwner,
+            LocalNavigationEventDispatcherOwner provides backOwner,
         ) {
             when (val gate = state.startup) {
                 StartupGateState.Pending, is StartupGateState.Failed -> {
@@ -146,28 +169,46 @@ public fun NeutrodyneRoot(
                         routes.collect { route ->
                             when (route) {
                                 is Route.Navigate -> {
+                                    collapseRequest++
                                     navigation.open(route.tab, route.stack)
                                 }
 
                                 is Route.Push -> {
+                                    if (route.key != SpeedKey) collapseRequest++
                                     navigation.push(route.key)
                                 }
 
                                 is Route.SelectFeed -> {
                                     if (actions.selectFeedSource(route.groupUuid)) {
+                                        collapseRequest++
                                         navigation.open(FeedsKey, emptyList())
                                     } else {
                                         launch { snackbarHost.showSnackbar(getString(Res.string.write_failed)) }
                                     }
                                 }
 
-                                else -> {
+                                Route.ExpandPlayer -> {
+                                    expandRequest++
+                                }
+
+                                Route.None -> {
                                     Unit
                                 }
                             }
                         }
                     }
-                    ReadyRoot(state, actions, slots, installers, navigation, snackbarHost, platform, modifier)
+                    ReadyRoot(
+                        state,
+                        actions,
+                        slots,
+                        installers,
+                        navigation,
+                        snackbarHost,
+                        platform,
+                        modifier,
+                        expandRequest,
+                        collapseRequest,
+                    )
                 }
             }
         }
@@ -185,10 +226,43 @@ private fun ReadyRoot(
     snackbarHost: SnackbarHostState,
     platform: BuildInfo.Platform,
     modifier: Modifier = Modifier,
+    expandRequest: Int = 0,
+    collapseRequest: Int = 0,
 ) {
+    var expandedSettled by remember { mutableStateOf(false) }
+    var playerNavigationRequests by rememberSaveable { mutableIntStateOf(0) }
+    var lastPlayerTab by remember { mutableStateOf(navigation.selectedTab) }
+    LaunchedEffect(navigation.selectedTab) {
+        if (lastPlayerTab != navigation.selectedTab) playerNavigationRequests++
+        lastPlayerTab = navigation.selectedTab
+    }
+    val navigateFromPlayer: (NavKey) -> Unit = { key ->
+        // Same-tab requests must collapse too; this token signals change, not event count.
+        if (key != SpeedKey) playerNavigationRequests++
+        if (key is TopLevelKey) navigation.selectTab(key) else navigation.push(key)
+    }
+    var contentBottomPx by remember { mutableFloatStateOf(0f) }
+    val suiteState = rememberNavigationSuiteScaffoldState()
+    val hideSuite = state.hasNowPlaying && expandedSettled && contentBottomPx > 0f
+    val reducedMotion = LocalReducedMotion.current
+    LaunchedEffect(hideSuite, reducedMotion) {
+        if (reducedMotion) {
+            suiteState.snapTo(
+                if (hideSuite) NavigationSuiteScaffoldValue.Hidden else NavigationSuiteScaffoldValue.Visible,
+            )
+        } else if (hideSuite) {
+            suiteState.hide()
+        } else {
+            suiteState.show()
+        }
+    }
+    LaunchedEffect(state.hasNowPlaying) {
+        if (!state.hasNowPlaying) expandedSettled = false
+    }
     val suiteType = defaultSuiteType()
     val windowInfo = currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)
     val density = LocalDensity.current
+    val dockBottomInsetPx = if (isRailSuite(suiteType)) WindowInsets.navigationBars.getBottom(density).toFloat() else 0f
     val windowWidthDp =
         with(density) {
             LocalWindowInfo.current.containerSize.width
@@ -201,7 +275,8 @@ private fun ReadyRoot(
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
             navChromeDp = navChromeDp,
-            hasNowPlaying = state.hasNowPlaying,
+            // M4 uses the sheet at every width; MD1/M10 activate the side panel.
+            hasNowPlaying = false,
             panelHidden = state.playerPanelHidden,
         )
     // The pane directive keeps the library's spacing/hinge values; only the partition count is ours.
@@ -279,6 +354,7 @@ private fun ReadyRoot(
                 onSelect = { index -> navigation.selectTab(navigation.tabs[index]) },
                 suiteType = suiteType,
                 footer = { SettingsGearButton() },
+                state = suiteState,
             ) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
@@ -299,7 +375,21 @@ private fun ReadyRoot(
                             },
                         )
                         Row(Modifier.fillMaxWidth().weight(1f)) {
-                            Box(Modifier.weight(1f).focusRequester(importContentFocus).focusable()) {
+                            Box(
+                                Modifier
+                                    .weight(
+                                        1f,
+                                    ).focusRequester(importContentFocus)
+                                    .focusable()
+                                    .onGloballyPositioned {
+                                        // Freeze the dock while hidden, including a restored expanded sheet's first frame.
+                                        if ((!expandedSettled || contentBottomPx == 0f) && !suiteState.isAnimating &&
+                                            suiteState.currentValue == NavigationSuiteScaffoldValue.Visible
+                                        ) {
+                                            contentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
+                                        }
+                                    },
+                            ) {
                                 NeutrodyneNavHost(
                                     state = navigation,
                                     installers = installers,
@@ -308,7 +398,7 @@ private fun ReadyRoot(
                                 )
                             }
                             if (layout.playerPanel) {
-                                slots.player(PlayerSlotState(layout, navigation::push))
+                                slots.player(PlayerSlotState(layout, navigateFromPlayer))
                             }
                         }
                     }
@@ -324,8 +414,17 @@ private fun ReadyRoot(
             }
 
             if (!layout.playerPanel) {
-                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-                    slots.player(PlayerSlotState(layout, navigation::push))
+                Box(Modifier.fillMaxSize()) {
+                    slots.player(
+                        PlayerSlotState(
+                            layout = layout,
+                            navigate = navigateFromPlayer,
+                            contentBottomPx = contentBottomPx,
+                            expandRequest = expandRequest,
+                            collapseRequest = collapseRequest + playerNavigationRequests,
+                            onExpandedSettled = { expandedSettled = it },
+                        ),
+                    )
                 }
             }
 
