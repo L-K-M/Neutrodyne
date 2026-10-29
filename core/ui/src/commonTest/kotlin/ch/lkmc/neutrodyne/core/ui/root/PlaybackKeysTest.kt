@@ -31,7 +31,7 @@ class PlaybackKeysTest {
     }
 
     @Test
-    fun bufferingTogglePausesAndPausedToggleResumes() {
+    fun bufferingToggleUsesPlayIntent() {
         val controller = FakePlaybackController()
         val buffering = testNowPlaying().copy(phase = PlayerPhase.BUFFERING, isPlaying = false)
         assertTrue(dispatchPlaybackKey(PlaybackKey.TOGGLE, controller, buffering))
@@ -41,6 +41,17 @@ class PlaybackKeysTest {
                 FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
                 FakePlaybackController.Call.Transport(FakePlaybackController.Action.TOGGLE),
             ),
+            controller.calls,
+        )
+    }
+
+    @Test
+    fun readyPausedToggleResumes() {
+        val controller = FakePlaybackController()
+        val paused = testNowPlaying().copy(phase = PlayerPhase.READY, isPlaying = false, playWhenReady = false)
+        assertTrue(dispatchPlaybackKey(PlaybackKey.TOGGLE, controller, paused))
+        assertEquals<List<FakePlaybackController.Call>>(
+            listOf(FakePlaybackController.Call.Transport(FakePlaybackController.Action.TOGGLE)),
             controller.calls,
         )
     }

@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.up_next_empty_title
 import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 import org.jetbrains.compose.resources.stringResource
 
+/** PLAYER inherits its host's header actions and system-bar insets. */
 internal enum class UpNextSurface { DESTINATION, PLAYER }
 
 @Composable

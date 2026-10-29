@@ -237,6 +237,7 @@ private fun ReadyRoot(
         lastPlayerTab = navigation.selectedTab
     }
     val navigateFromPlayer: (NavKey) -> Unit = { key ->
+        // Same-tab requests must collapse too; this token signals change, not event count.
         if (key != SpeedKey) playerNavigationRequests++
         if (key is TopLevelKey) navigation.selectTab(key) else navigation.push(key)
     }

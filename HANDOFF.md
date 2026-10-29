@@ -144,7 +144,7 @@ These are not blanket release approvals or completed work.
 ### M4 playback, P1–P7 merged, P8 in progress
 
 **2026-10-29 checkpoint.** P7 #243 merged as `a6a2f555` after two review
-rounds. [Main CI40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)
+rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)
 passes all six jobs after an unchanged runner retry. Downloaded XML confirms
 96 device cases without failures, errors or skips. Final-head full-debug
 nightly evidence remains unavailable after runner interruptions. That is a

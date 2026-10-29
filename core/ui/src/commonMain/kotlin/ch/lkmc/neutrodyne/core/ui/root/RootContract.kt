@@ -75,7 +75,7 @@ public data class RemoteSessionCard(
 public data class PlayerSlotState(
     /** The pane layout the root currently renders; the slot chooses sheet vs side panel from it. */
     val layout: PaneLayout,
-    /** Pushes a key onto the selected tab's stack (podcast link, Go to episode, …). */
+    /** Selects a top-level tab, or pushes another key onto the selected tab's stack. */
     val navigate: (NavKey) -> Unit,
     /** Content bottom in root pixels, held while the navigation suite is hidden. */
     val contentBottomPx: Float = 0f,

@@ -141,6 +141,7 @@ class NeutrodyneRootTest {
                     slots = RootSlots(player = { slot = it }, userMessages = emptyFlow()),
                 )
             }
+            waitForIdle()
             val bottom = requireNotNull(slot).contentBottomPx
             val navTop = onNodeWithTag("nav_feeds").fetchSemanticsNode().boundsInRoot.top
             assertTrue(bottom > 0f && bottom <= navTop, "Player anchor $bottom overlaps navigation $navTop")
@@ -177,21 +178,29 @@ class NeutrodyneRootTest {
     fun playerSharesTheRootsBackAndViewModelOwners() =
         runComposeUiTest {
             var back: androidx.navigationevent.NavigationEventDispatcherOwner? = null
+            var expectedBack: androidx.navigationevent.NavigationEventDispatcherOwner? = null
             var actual: androidx.lifecycle.ViewModelStoreOwner? = null
             var root: androidx.lifecycle.ViewModelStoreOwner? = null
             setContent {
                 root = androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner.current
-                TestRoot(
-                    slots =
-                        RootSlots(player = {
-                            back = androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner.current
-                            actual = LocalRootViewModelStoreOwner.current
-                        }, userMessages = emptyFlow()),
-                )
+                val owner = androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner()
+                expectedBack = owner
+                CompositionLocalProvider(
+                    androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner provides owner,
+                ) {
+                    TestRoot(
+                        slots =
+                            RootSlots(player = {
+                                back = androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner.current
+                                actual = LocalRootViewModelStoreOwner.current
+                            }, userMessages = emptyFlow()),
+                    )
+                }
             }
             runOnIdle {
                 kotlin.test.assertNotNull(back)
                 kotlin.test.assertNotNull(root)
+                kotlin.test.assertSame(expectedBack, back)
                 kotlin.test.assertSame(root, actual)
             }
         }
