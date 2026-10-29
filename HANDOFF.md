@@ -150,11 +150,21 @@ passes all six jobs after an unchanged runner retry. Downloaded XML confirms
 nightly evidence remains unavailable after runner interruptions. That is a
 release-evidence gap, not a PR merge requirement.
 
-P8 is being implemented on `impl/m4-p8-player`: mini/full player, speed sheet,
-root back/inset/deep-link composition and the Appearance mini-player setting.
-Verification, CI and review are pending. No desktop audio, chapters, sleep
-timer or artwork tint is added. Physical/OEM, audible, TalkBack, desktop modal
-Escape and genuine platform-denial recovery checks remain unverified.
+Root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) merged
+as `ceb3e487` after two minor-only review rounds.
+[Main CI 40960233783](https://github.com/L-K-M/Neutrodyne/actions/runs/40960233783)
+passes all six jobs. Reviewed-head XML confirms 96 device cases, no failures
+or skips. The player slice continues on `impl/m4-p8-player-ui`; hosted
+references, the real Play journey, CI and review remain pending.
+
+Buffering/refused-advance fixes are candidates on `fix/m4-buffered-advance`.
+Failing-first tests reproduced lost buffering intent and replay of a marked
+current after a refused skip. Local suites pass 102 core and 172 adapter
+cases, including source replacement across IO; CI/review remain pending.
+
+No desktop audio, chapters, sleep timer or artwork tint is added.
+Physical/OEM, audible, TalkBack, desktop modal Escape and genuine
+platform-denial recovery checks remain unverified.
 
 **2026-10-28 checkpoint.** Main `5ddfe29a` passes all six jobs in
 [CI40622726292](https://github.com/L-K-M/Neutrodyne/actions/runs/40622726292).
