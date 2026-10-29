@@ -136,6 +136,8 @@ class NeutrodyneWindowContentTest {
                     installers = graph.entryInstallers + platformProbeInstaller { provided = it },
                     menuActions = menuActions,
                     viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = graph.playbackController,
+                    playbackState = graph.playbackStateSource,
                 )
             }
 
@@ -167,6 +169,8 @@ class NeutrodyneWindowContentTest {
                     installers = graph.entryInstallers,
                     menuActions = DesktopMenuActions(),
                     viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = graph.playbackController,
+                    playbackState = graph.playbackStateSource,
                     banners = banners,
                 )
             }
@@ -253,6 +257,8 @@ class NeutrodyneWindowContentTest {
                 installers = graph.entryInstallers,
                 menuActions = DesktopMenuActions(),
                 viewModelFactory = graph.metroViewModelFactory,
+                playbackController = graph.playbackController,
+                playbackState = graph.playbackStateSource,
             )
         }
     }

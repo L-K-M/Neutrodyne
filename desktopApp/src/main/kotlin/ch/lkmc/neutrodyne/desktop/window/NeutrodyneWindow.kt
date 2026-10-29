@@ -46,6 +46,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
+import ch.lkmc.neutrodyne.core.ui.root.dispatchPlaybackKey
 import ch.lkmc.neutrodyne.desktop.DesktopOpenHandler
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.resources.Res
@@ -54,6 +55,10 @@ import ch.lkmc.neutrodyne.desktop.resources.tray_show
 import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
+import ch.lkmc.neutrodyne.feature.player.PlayerRoute
+import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -90,6 +95,8 @@ internal fun ApplicationScope.NeutrodyneWindow(
     appScope: CoroutineScope,
     dataDir: Path,
     viewModelFactory: MetroViewModelFactory,
+    playbackController: PlaybackController,
+    playbackState: PlaybackStateSource,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
 ) {
@@ -125,6 +132,8 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 onRetryStartup = { appScope.launch { suspendRunCatching { databaseOpener.awaitOpen() } } },
                 dataDir = dataDir,
                 viewModelFactory = viewModelFactory,
+                playbackController = playbackController,
+                playbackState = playbackState,
                 openHandler = openHandler,
             )
         }
@@ -277,6 +286,8 @@ internal fun NeutrodyneWindowContent(
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
     viewModelFactory: MetroViewModelFactory,
+    playbackController: PlaybackController,
+    playbackState: PlaybackStateSource,
     banners: DesktopBannerNotifier? = null,
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
@@ -285,17 +296,18 @@ internal fun NeutrodyneWindowContent(
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
+    val nowPlaying by playbackState.nowPlaying.collectAsState()
     // `NeutrodyneRoot` keys its snackbar effect on `slots` identity — a per-recomposition
     // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
     // remembered (they were all-no-op until the banner stream landed).
     val actions =
-        remember(platformActions, dataDir, onRetryStartup, banners) {
+        remember(platformActions, dataDir, onRetryStartup, banners, playbackController, playbackState) {
             RootActions(
                 retryStartup = onRetryStartup,
                 dismissNotice = {},
                 continueHere = {},
                 dismissRemoteSession = {},
-                playbackKey = { false },
+                playbackKey = { key -> dispatchPlaybackKey(key, playbackController, playbackState.nowPlaying.value) },
                 manageStorage =
                     dataDir?.let { dir ->
                         { platformActions.reveal?.reveal(dir.toString()) }
@@ -308,13 +320,12 @@ internal fun NeutrodyneWindowContent(
     val slots =
         remember(menuActions, banners, openHandler) {
             RootSlots(
-                // No player before M4; the slot composes inside the root, where the
-                // navigator is readable — it hands the shell's menus the root's push
-                // (recorded in 11, 2026-10-06).
+                // Keep menu and input hooks inside the root alongside the window-scoped player.
                 player = {
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
                     openHandler?.let { DesktopInputFeedback(it) }
+                    PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
                 },
                 userMessages = banners?.userMessages ?: emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },
@@ -329,7 +340,7 @@ internal fun NeutrodyneWindowContent(
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
-            state = RootUiState.READY.copy(startup = startup),
+            state = RootUiState.READY.copy(startup = startup, hasNowPlaying = nowPlaying != null),
             actions = actions,
             slots = slots,
             installers = installers,

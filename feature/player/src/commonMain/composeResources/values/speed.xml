@@ -1,0 +1,24 @@
+<resources>
+    <string name="speed_title">Playback speed</string>
+    <string name="speed_value">%1$s×</string>
+    <string name="speed_presets_edit">Edit presets</string>
+    <string name="speed_presets_title">Speed presets</string>
+    <string name="speed_presets_field">Speeds, separated by commas</string>
+    <string name="speed_presets_invalid">Enter 2–8 speeds from 0.5 to 3.0 in steps of 0.05</string>
+    <string name="speed_decrease">Decrease speed</string>
+    <string name="speed_increase">Increase speed</string>
+    <string name="speed_skip_silence">Skip silence</string>
+    <string name="speed_apply_to">Apply to</string>
+    <string name="speed_scope_podcast">This podcast</string>
+    <string name="speed_scope_group">Group '%1$s'</string>
+    <string name="speed_scope_group_any">Group</string>
+    <string name="speed_scope_all">All</string>
+    <string name="speed_scope_group_unavailable">Only when playing from a group</string>
+    <string name="speed_nothing_playing">Nothing playing</string>
+    <string name="speed_warning_title">Apply to a wider scope?</string>
+    <string name="speed_warning_podcast_speed">This also removes this podcast&apos;s own speed (%1$s×).</string>
+    <string name="speed_warning_group_speed">This also removes the speed set for group '%1$s' (%2$s×).</string>
+    <string name="speed_warning_podcast_silence">This also removes this podcast&apos;s own skip silence setting.</string>
+    <string name="speed_warning_group_silence">This also removes the skip silence setting of group '%1$s'.</string>
+    <string name="speed_apply">Apply</string>
+</resources>

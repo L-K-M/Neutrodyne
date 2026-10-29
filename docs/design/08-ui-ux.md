@@ -1660,13 +1660,15 @@ stateDiagram-v2
 ```kotlin
 // :feature:player
 enum class PlayerSheetValue { Collapsed, Expanded, Dismissed }
+enum class SheetDismissal { ALLOWED, BLOCKED }
 @Stable class PlayerSheetState(initial: PlayerSheetValue) {
     val drag = AnchoredDraggableState(initialValue = initial)          // foundation 1.12: anchors set later via updateAnchors
     val progress: Float get() = drag.progress(PlayerSheetValue.Collapsed, PlayerSheetValue.Expanded)
     val isExpanded: Boolean get() = drag.currentValue == PlayerSheetValue.Expanded
-    fun setAnchors(collapsedPx: Float, dismissible: Boolean) = drag.updateAnchors(DraggableAnchors {
-        PlayerSheetValue.Expanded at 0f; PlayerSheetValue.Collapsed at collapsedPx
-        if (dismissible) PlayerSheetValue.Dismissed at collapsedPx + dismissDistancePx })
+    fun setAnchors(collapsedPx: Float, dismissDistancePx: Float, dismissal: SheetDismissal) =
+        drag.updateAnchors(DraggableAnchors {
+            PlayerSheetValue.Expanded at 0f; PlayerSheetValue.Collapsed at collapsedPx
+            if (dismissal == SheetDismissal.ALLOWED) PlayerSheetValue.Dismissed at collapsedPx + dismissDistancePx })
     suspend fun expand() = drag.animateTo(PlayerSheetValue.Expanded, NeutrodyneMotion.spatial)
     suspend fun collapse() = drag.animateTo(PlayerSheetValue.Collapsed, NeutrodyneMotion.spatial)
     companion object { val Saver: Saver<PlayerSheetState, String> }    // saves Collapsed/Expanded (Dismissed → Collapsed)
@@ -1680,7 +1682,7 @@ enum class PlayerSheetValue { Collapsed, Expanded, Dismissed }
 
 ### Anchors and gestures
 
-- Anchors (px, measured in `BoxWithConstraints` over the full window, applied with `state.setAnchors` from a `LaunchedEffect` keyed on the measured values and `now.isPlaying`): `Expanded = 0`; `Collapsed = contentBottom − 64 dp − 8 dp`, where `contentBottom` is the bottom edge of the `NavDisplay` container measured while the navigation suite is shown (frozen while it is hidden, so anchors never jump); `Dismissed = Collapsed + 96 dp`, present only while `!now.isPlaying` (when playback starts while the sheet sits on `Dismissed`, `updateAnchors` moves it to the closest anchor, `Collapsed`).
+- Anchors (px, measured in `BoxWithConstraints` over the full window, applied with `state.setAnchors` from a `LaunchedEffect` keyed on the measured values and both `now.isPlaying` and `now.playWhenReady`): `Expanded = 0`; `Collapsed = contentBottom − 64 dp − 8 dp`, where `contentBottom` is the bottom edge of the `NavDisplay` container measured while the navigation suite is shown (frozen while it is hidden, so anchors never jump); `Dismissed = Collapsed + 96 dp`, present only while `!now.isPlaying && !now.playWhenReady` (when playback starts while the sheet sits on `Dismissed`, `updateAnchors` moves it to the closest anchor, `Collapsed`).
 - `Modifier.anchoredDraggable(state.drag, Orientation.Vertical, flingBehavior = AnchoredDraggableDefaults.flingBehavior(state.drag, positionalThreshold = { it * 0.5f }, animationSpec = NeutrodyneMotion.spatial))` on the sheet surface (mini player: whole surface; full player: the top bar and artwork area, not the scrubber or the tabs panel). In foundation 1.12 thresholds live on the fling behaviour, not the state (the state constructor with thresholds is deprecated); the velocity threshold is the built-in 125 dp/s (`AnchoredDraggableMinFlingVelocity`, not configurable) ([foundation 1.12.1 sources](https://dl.google.com/android/maven2/androidx/compose/foundation/foundation-android/1.12.1/foundation-android-1.12.1-sources.jar)).
 - Settling at `Dismissed` calls `PlaybackController.dismiss()` (06 `nd.DISMISS`), then snaps back to `Collapsed` (the sheet disappears when `nowPlaying` becomes null).
 - No horizontal swipe-to-skip on the mini player (it would fight the Feeds pager).

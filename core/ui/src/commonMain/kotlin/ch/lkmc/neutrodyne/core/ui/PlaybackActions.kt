@@ -176,6 +176,14 @@ public class PlaybackActions(
             }
     }
 
+    /** The root owns fire-and-forget refusals; an ordinary screen start keeps its own result. */
+    public fun onStartRefused(result: PlayResult) {
+        ++startGeneration
+        startJob?.cancel()
+        consentDismiss()
+        onPlayResult(result, null) { controller.play() }
+    }
+
     /** Up-next adds (row overflow, selection, detail) — queue edits, never audio starts (06). */
     public fun playNext(
         episodeIds: List<Long>,

@@ -47,6 +47,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.shownotes_image
 import ch.lkmc.neutrodyne.core.ui.resources.shownotes_load_images
@@ -72,6 +73,17 @@ public enum class ShowNotesImageMode {
      */
     BLOCKED,
 }
+
+/** Episode detail and player Notes apply the same metered-image policy. */
+public fun showNotesImageMode(
+    setting: ShowNotesImages,
+    metered: Boolean,
+): ShowNotesImageMode =
+    when (setting) {
+        ShowNotesImages.ALWAYS -> ShowNotesImageMode.SHOWN
+        ShowNotesImages.TAP_TO_LOAD -> ShowNotesImageMode.TAP_TO_LOAD
+        ShowNotesImages.WIFI_ONLY -> if (metered) ShowNotesImageMode.BLOCKED else ShowNotesImageMode.SHOWN
+    }
 
 /**
  * 08 "Show notes renderer": emits one lazy item per block of the sanitised model so long notes

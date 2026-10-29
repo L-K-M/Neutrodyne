@@ -1,0 +1,10 @@
+<resources>
+    <string name="player_notes">Notes</string>
+    <string name="player_notes_empty">No show notes for this episode.</string>
+    <string name="player_read_failed">Could not load this episode</string>
+    <string name="player_queue_count">Up next (%1$d)</string>
+    <string name="player_expand_panel">Expand player tabs</string>
+    <string name="player_collapse_panel">Collapse player tabs</string>
+    <string name="player_time_total">Show total time</string>
+    <string name="player_time_remaining">Show remaining time</string>
+</resources>

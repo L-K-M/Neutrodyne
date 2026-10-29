@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.root
 
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -51,7 +53,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation3.runtime.NavKey
@@ -242,10 +246,14 @@ private fun ReadyRoot(
         if (key is TopLevelKey) navigation.selectTab(key) else navigation.push(key)
     }
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
+    var viewportBottomPx by remember { mutableFloatStateOf(0f) }
     val suiteState = rememberNavigationSuiteScaffoldState()
     val hideSuite = state.hasNowPlaying && expandedSettled && contentBottomPx > 0f
     val reducedMotion = LocalReducedMotion.current
-    LaunchedEffect(hideSuite, reducedMotion) {
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(hideSuite, reducedMotion, focusManager) {
+        if (hideSuite) focusManager.clearFocus(force = true)
+
         if (reducedMotion) {
             suiteState.snapTo(
                 if (hideSuite) NavigationSuiteScaffoldValue.Hidden else NavigationSuiteScaffoldValue.Visible,
@@ -332,6 +340,7 @@ private fun ReadyRoot(
                 modifier
                     .fillMaxSize()
                     .testTagsAsResourceId()
+                    .onGloballyPositioned { viewportBottomPx = it.boundsInRoot().bottom }
                     .onKeyEvent { event ->
                         dispatchRootKey(
                             event = event,
@@ -355,6 +364,12 @@ private fun ReadyRoot(
                 suiteType = suiteType,
                 footer = { SettingsGearButton() },
                 state = suiteState,
+                modifier =
+                    Modifier
+                        .focusProperties {
+                            onEnter = { if (hideSuite) cancelFocusChange() }
+                        }.focusGroup()
+                        .then(if (hideSuite) Modifier.clearAndSetSemantics {} else Modifier),
             ) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
@@ -402,14 +417,6 @@ private fun ReadyRoot(
                             }
                         }
                     }
-                    // Content bounds already exclude the navigation suite's touch targets.
-                    SnackbarHost(
-                        hostState = snackbarHost,
-                        modifier =
-                            Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = miniInset + SNACKBAR_MARGIN),
-                    )
                 }
             }
 
@@ -438,6 +445,24 @@ private fun ReadyRoot(
                             .padding(bottom = miniInset),
                 )
             }
+
+            // One host stays above the player; collapsed messages retain the content dock.
+            val snackbarBottomPx =
+                if (hideSuite) {
+                    WindowInsets.navigationBars.getBottom(density).toFloat()
+                } else {
+                    (viewportBottomPx - contentBottomPx).coerceAtLeast(0f)
+                }
+            SnackbarHost(
+                hostState = snackbarHost,
+                modifier =
+                    Modifier.align(Alignment.BottomCenter).padding(
+                        start = if (hideSuite) 0.dp else navChromeDp.dp,
+                        bottom =
+                            with(density) { snackbarBottomPx.toDp() } +
+                                (if (hideSuite) 0.dp else miniInset) + SNACKBAR_MARGIN,
+                    ),
+            )
         }
     }
 }
