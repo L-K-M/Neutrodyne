@@ -199,7 +199,11 @@ fix. [Main CI 40990119510](https://github.com/L-K-M/Neutrodyne/actions/runs/4099
 passes five jobs; device execution is blocked by unavailable emulator
 hardware acceleration on two unchanged reruns. Its first unit convergence
 failure passed unchanged on both retries; a source-race explanation remains
-unconfirmed.
+unconfirmed. A controlled [probe](https://github.com/L-K-M/Neutrodyne/actions/runs/41009762790)
+showed udev returning before access changed; synchronous permissions and an
+acceleration check passed. The player candidate now uses that preparation
+after emulator installation. Actual device execution is still required;
+the original failing VM's cause remains unconfirmed.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine
