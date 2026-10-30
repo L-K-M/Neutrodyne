@@ -26,6 +26,8 @@ RELEASE_SMOKE = {
 
 QUEUE_JOURNEY = ("ch.lkmc.neutrodyne.UpNextJourneyTest",
                  "queueEditsPersistUndoRestoresOrderAndNothingPlays")
+PLAY_JOURNEY = ("ch.lkmc.neutrodyne.PlayJourneyTest",
+                "groupFeedPlayQueueFirstSheetShadePauseAndReopen")
 ATF_CONTROL = ("ch.lkmc.neutrodyne.AccessibilityChecksTest",
                "enabledChecksFailAnUnlabelledTinyTargetBeforeTheClick")
 
@@ -44,7 +46,7 @@ class PlaybackEvidenceTest(unittest.TestCase):
             case = ET.SubElement(suite, "testcase", classname=gate.CLASS, name=name, time="1801")
             if name == skipped:
                 ET.SubElement(case, "skipped")
-        ui = [QUEUE_JOURNEY]
+        ui = [QUEUE_JOURNEY, PLAY_JOURNEY]
         if device in ("api34", "api36", "api37"):
             ui.append(ATF_CONTROL)
         for classname, name in ui:
@@ -78,15 +80,20 @@ class PlaybackEvidenceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.verify(self.root, "ci", ["api34"])
 
-    def test_debug_requires_each_queue_accessibility_receipt(self):
-        for classname, name in (QUEUE_JOURNEY, ATF_CONTROL):
+    def test_debug_requires_play_journey(self):
+        self.report("api36", gate.SHORT, omit_ui=(PLAY_JOURNEY[1],))
+        with self.assertRaisesRegex(ValueError, PLAY_JOURNEY[1]):
+            gate.verify(self.root, "ci", ["api36"])
+
+    def test_debug_requires_each_ui_receipt(self):
+        for classname, name in (QUEUE_JOURNEY, PLAY_JOURNEY, ATF_CONTROL):
             with self.subTest(case=name):
                 self.report("api36", gate.SHORT, omit_ui=(name,))
                 with self.assertRaisesRegex(ValueError, name):
                     gate.verify(self.root, "ci", ["api36"])
 
     def test_debug_rejects_failed_skipped_foreign_and_duplicate_ui_cases(self):
-        for classname, name in (QUEUE_JOURNEY, ATF_CONTROL):
+        for classname, name in (QUEUE_JOURNEY, PLAY_JOURNEY, ATF_CONTROL):
             for mark in ("skipped", "failure", "error", "foreign", "duplicate"):
                 with self.subTest(case=name, mark=mark):
                     self.report("api36", gate.SHORT)
@@ -103,12 +110,14 @@ class PlaybackEvidenceTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, name):
                         gate.verify(self.root, "ci", ["api36"])
 
-    def test_api26_requires_journey_without_unsupported_framework_control(self):
+    def test_api26_requires_both_journeys_without_atf_control(self):
         self.report("api26", gate.SHORT)
         gate.verify(self.root, "ci", ["api26"])
-        self.report("api26", gate.SHORT, omit_ui=(QUEUE_JOURNEY[1],))
-        with self.assertRaisesRegex(ValueError, QUEUE_JOURNEY[1]):
-            gate.verify(self.root, "ci", ["api26"])
+        for classname, name in (QUEUE_JOURNEY, PLAY_JOURNEY):
+            with self.subTest(case=name):
+                self.report("api26", gate.SHORT, omit_ui=(name,))
+                with self.assertRaisesRegex(ValueError, name):
+                    gate.verify(self.root, "ci", ["api26"])
 
     def test_empty_and_skipped_are_rejected(self):
         with self.assertRaises(ValueError):
@@ -135,6 +144,8 @@ class PlaybackEvidenceTest(unittest.TestCase):
         gate.verify(self.root, "release", ["connected"])
 
     def test_release_requires_the_full_seven_case_suite(self):
+        self.assertEqual(RELEASE_SMOKE, gate.RELEASE_SMOKE)
+        self.assertEqual(7, sum(map(len, gate.RELEASE_SMOKE.values())))
         self.release_suite("api36ReleaseAndroidTest", omit=("licencesListsLibraries",))
         with self.assertRaises(ValueError):
             gate.verify(self.root, "release", ["api36"])

@@ -31,6 +31,12 @@ class PlayerMorphTest {
         assertEquals(480f, PlayerMorph.at(1f, PlayerGeometry(1600f, 1600f)).artworkSize)
     }
 
+    @Test fun fullArtworkRespectsTheScaledHeader() {
+        val scaled = geometry.copy(headerHeight = 80f)
+        assertEquals(104f, PlayerMorph.at(1f, scaled).artworkY)
+        assertEquals(8f, PlayerMorph.at(0f, scaled).artworkY)
+    }
+
     @Test fun dragMappingIsContinuousAndFadesNeverOverlap() {
         val values = (0..100).map { PlayerMorph.at(it / 100f, geometry) }
         values.zipWithNext().forEach { (before, after) ->

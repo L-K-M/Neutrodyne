@@ -21,6 +21,8 @@ FLAVOR_FOLDERS = {"debug", "release"}
 ACCESSIBILITY_MIN_API = 34
 QUEUE_JOURNEY = ("ch.lkmc.neutrodyne.UpNextJourneyTest",
                  "queueEditsPersistUndoRestoresOrderAndNothingPlays")
+PLAY_JOURNEY = ("ch.lkmc.neutrodyne.PlayJourneyTest",
+                "groupFeedPlayQueueFirstSheetShadePauseAndReopen")
 ATF_CONTROL = ("ch.lkmc.neutrodyne.AccessibilityChecksTest",
                "enabledChecksFailAnUnlabelledTinyTargetBeforeTheClick")
 RELEASE_SMOKE = {
@@ -67,7 +69,8 @@ def verify(root, profile, devices):
         if profile == "release":
             expected = {classname: set(names) for classname, names in RELEASE_SMOKE.items()}
         else:
-            expected = {CLASS: set(SHORT), QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]}}
+            expected = {CLASS: set(SHORT), QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]},
+                        PLAY_JOURNEY[0]: {PLAY_JOURNEY[1]}}
             api = re.fullmatch(r"api([0-9]+)", device)
             if profile == "api37" or (api and int(api[1]) >= ACCESSIBILITY_MIN_API):
                 expected[ATF_CONTROL[0]] = {ATF_CONTROL[1]}

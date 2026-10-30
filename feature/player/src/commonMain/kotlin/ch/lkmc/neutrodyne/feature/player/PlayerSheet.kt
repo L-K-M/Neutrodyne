@@ -80,6 +80,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.PlayerTimeDisplay
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
@@ -179,6 +180,7 @@ internal fun PlayerSheet(
     val motion = if (reducedMotion) SheetMotion.IMMEDIATE else SheetMotion.ANIMATED
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val panelPeekHeight = playerTabsPeekHeight(density.fontScale)
     val panelState = remember { PlayerSheetState() }
     var selectedTabName by rememberSaveable { mutableStateOf(PlayerTab.UP_NEXT.name) }
     val selectedTab = PlayerTab.entries.firstOrNull { it.name == selectedTabName } ?: PlayerTab.UP_NEXT
@@ -219,6 +221,8 @@ internal fun PlayerSheet(
             state,
             if (panelState.canCollapse) PlayerBackAvailability.INACTIVE else PlayerBackAvailability.ACTIVE,
         )
+        // Keep Back ownership while the closing panel leaves the visible composition.
+        PlayerBackHandler(panelState)
         // Consent may arrive before nowPlaying exists, so it must outlive the visible sheet.
         if (ui.consent != null) MeteredConsentDialog(consent, consentAlways, declineConsent)
         if (now == null) return@Box
@@ -248,6 +252,7 @@ internal fun PlayerSheet(
         val previousLabel = stringResource(Res.string.player_previous)
         val nextLabel = stringResource(Res.string.player_next)
         val paused = !now.isPlaying && !now.playWhenReady
+        val contextTitle = now.context?.takeIf { it.type != ContextType.EXTERNAL }?.title
         val expand: () -> Unit = { scope.launch { state.expand(motion) } }
         val collapse: () -> Unit = { scope.launch { state.collapse(motion) } }
         val navigate: (NavKey) -> Unit = { key ->
@@ -282,6 +287,23 @@ internal fun PlayerSheet(
                         .toDp()
                         .value
                 }
+            // Reserve full text lines before placing the artwork at large font scales.
+            val headerHeight =
+                with(density) {
+                    val contextHeight =
+                        if (contextTitle !=
+                            null
+                        ) {
+                            MaterialTheme.typography.bodySmall.lineHeight
+                                .toDp()
+                        } else {
+                            0.dp
+                        }
+                    (
+                        MaterialTheme.typography.bodyLarge.lineHeight
+                            .toDp() + contextHeight
+                    ).coerceAtLeast(MIN_PLAYER_HEADER_HEIGHT_DP.dp)
+                }
             val wideArt = now.sourceType != SourceType.RSS
             val morph =
                 PlayerMorph.at(
@@ -292,11 +314,12 @@ internal fun PlayerSheet(
                         statusBar,
                         if (wideArt) WIDE_ART_ASPECT else 1f,
                         startInset = (maxWidth.value - slot.layout.contentWidthDp).coerceAtLeast(0f),
+                        headerHeight = headerHeight.value,
                     ),
                 )
             val panelHeight =
-                (maxHeight - statusBar.dp - PLAYER_HEADER_HEIGHT - bottomInset).coerceAtLeast(
-                    PLAYER_TABS_PEEK,
+                (maxHeight - statusBar.dp - headerHeight - bottomInset).coerceAtLeast(
+                    panelPeekHeight,
                 )
             val artworkHeight = morph.artworkHeight
             val dragModifier =
@@ -445,13 +468,13 @@ internal fun PlayerSheet(
                                     alpha = morph.controlsAlpha
                                     translationY =
                                         morph.controlsOffset.dp.toPx()
-                                }.padding(top = statusBar.dp, bottom = PLAYER_TABS_PEEK + bottomInset)
+                                }.padding(top = statusBar.dp, bottom = panelPeekHeight + bottomInset)
                                 .verticalScroll(rememberScrollState())
                                 .testTag("full_player")
                                 // The panel owns accessibility while it covers the transport.
                                 .then(if (panelState.canCollapse) Modifier.clearAndSetSemantics {} else Modifier),
                         ) {
-                            Spacer(Modifier.height(PLAYER_HEADER_HEIGHT + artworkHeight.dp + 16.dp))
+                            Spacer(Modifier.height(headerHeight + artworkHeight.dp + 16.dp))
                             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                                 Text(
                                     now.title,
@@ -586,8 +609,6 @@ internal fun PlayerSheet(
                             selected = selectedTab,
                             onSelect = { selectedTabName = it.name },
                             count = ui.upNextCount,
-                            backAvailability =
-                                if (expanded) PlayerBackAvailability.ACTIVE else PlayerBackAvailability.INACTIVE,
                             upNext = upNext,
                             notes = notes,
                             modifier =
@@ -605,7 +626,7 @@ internal fun PlayerSheet(
                         Modifier
                             .padding(top = statusBar.dp)
                             .fillMaxWidth()
-                            .height(PLAYER_HEADER_HEIGHT)
+                            .height(headerHeight)
                             .graphicsLayer { alpha = morph.controlsAlpha }
                             .then(
                                 if (state.drag.settledValue == PlayerSheetValue.Expanded) {
@@ -619,10 +640,20 @@ internal fun PlayerSheet(
                         if (progress > FULL_SEMANTICS_START) {
                             NdIconButton(collapse, NdIcons.Close, collapseLabel)
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(Res.string.player_now))
-                                now.context
-                                    ?.takeIf { it.type != ch.lkmc.neutrodyne.core.model.ContextType.EXTERNAL }
-                                    ?.let { Text(it.title, style = MaterialTheme.typography.bodySmall) }
+                                Text(
+                                    stringResource(Res.string.player_now),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                contextTitle?.let {
+                                    Text(
+                                        it,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                             PlayerMenu(now, navigate, markPlayed, stop)
                         }
@@ -873,7 +904,6 @@ internal fun playerTime(ms: Long): String {
 }
 
 private val MINI_HEIGHT = 64.dp
-private val PLAYER_HEADER_HEIGHT = 56.dp
 private val MINI_ANCHOR_SPACE = 72.dp
 private val MINI_TEXT_START = 64.dp
 private val DISMISS_DISTANCE = 96.dp

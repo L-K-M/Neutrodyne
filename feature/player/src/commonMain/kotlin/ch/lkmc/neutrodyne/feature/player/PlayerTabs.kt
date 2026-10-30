@@ -20,10 +20,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
@@ -48,7 +50,6 @@ internal fun PlayerTabs(
     selected: PlayerTab,
     onSelect: (PlayerTab) -> Unit,
     count: Int,
-    backAvailability: PlayerBackAvailability,
     upNext: @Composable () -> Unit,
     notes: @Composable () -> Unit,
     modifier: Modifier = Modifier,
@@ -57,9 +58,9 @@ internal fun PlayerTabs(
     val reducedMotion = LocalReducedMotion.current
     val motion = if (reducedMotion) SheetMotion.IMMEDIATE else SheetMotion.ANIMATED
     val scope = rememberCoroutineScope()
-    PlayerBackHandler(state, backAvailability)
+    val peekHeight = playerTabsPeekHeight(density.fontScale)
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val peek = with(density) { PLAYER_TABS_PEEK.toPx() }
+        val peek = with(density) { peekHeight.toPx() }
         val collapsed = (with(density) { maxHeight.toPx() } - peek).coerceAtLeast(0f)
         LaunchedEffect(collapsed) { state.setAnchors(collapsed, 0f, SheetDismissal.BLOCKED) }
         Surface(
@@ -71,7 +72,7 @@ internal fun PlayerTabs(
         ) {
             Column {
                 Row(
-                    Modifier.fillMaxWidth().height(PLAYER_TABS_PEEK).anchoredDraggable(
+                    Modifier.fillMaxWidth().height(peekHeight).anchoredDraggable(
                         state.drag,
                         Orientation.Vertical,
                         flingBehavior =
@@ -81,6 +82,7 @@ internal fun PlayerTabs(
                                 animationSpec = NeutrodyneMotion.spatial(reducedMotion),
                             ),
                     ),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     NdIconButton(
                         onClick = {
@@ -128,6 +130,9 @@ internal fun PlayerTabs(
     }
 }
 
-internal val PLAYER_TABS_PEEK = 56.dp
+// The sheet and panel reserve the same scalable strip, including wrapped tab labels.
+internal fun playerTabsPeekHeight(fontScale: Float): Dp = PLAYER_TABS_PEEK * fontScale.coerceAtLeast(1f)
+
+private val PLAYER_TABS_PEEK = 56.dp
 private const val PANEL_SETTLE_FRACTION = 0.5f
 private const val PANEL_ICON_ROTATION = 90f

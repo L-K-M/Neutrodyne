@@ -2,7 +2,9 @@
 
 package ch.lkmc.neutrodyne.feature.player
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -15,11 +17,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.moveBy
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -33,6 +40,10 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.navigationevent.DirectNavigationEventInput
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventDispatcher
@@ -43,6 +54,10 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.model.ContextType
+import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.MediaFilter
+import ch.lkmc.neutrodyne.core.model.PlayContextInfo
 import ch.lkmc.neutrodyne.core.model.UpNextItem
 import ch.lkmc.neutrodyne.core.navigation.PaneLayout
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
@@ -392,6 +407,174 @@ class PlayerSheetTest {
             }
         }
 
+    @Test fun largeFontHeaderKeepsAContextLineVisibleAndTransportReachable() =
+        runComposeUiTest {
+            val groupTitle = "A long group name that must not disappear behind the artwork"
+            val fixture =
+                SheetFixture(PlayerSheetValue.Expanded).apply {
+                    now =
+                        sampleNow().copy(
+                            context =
+                                PlayContextInfo(
+                                    ContextType.GROUP,
+                                    3,
+                                    groupTitle,
+                                    FeedOrder.NEWEST_FIRST,
+                                    0,
+                                    MediaFilter.ALL,
+                                ),
+                        )
+                }
+            setContent { fixture.StressContent() }
+            val context = onNodeWithText(groupTitle, useUnmergedTree = true)
+            val layouts = mutableListOf<TextLayoutResult>()
+            context.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            val layout = layouts.single()
+            assertEquals(PLAYER_STRESS_FONT_SCALE, layout.layoutInput.density.fontScale)
+            // Horizontal ellipsis is allowed; its full font-scaled line must still fit.
+            assertEquals(1, layout.lineCount)
+            val lineHeight =
+                with(layout.layoutInput.density) {
+                    layout.layoutInput.style.lineHeight
+                        .toPx()
+                }
+            val bounds = context.fetchSemanticsNode().boundsInRoot
+            assertTrue(bounds.height >= lineHeight, "The context line was vertically clipped")
+            assertTrue(bounds.bottom <= onNodeWithTag("playerArtwork").fetchSemanticsNode().boundsInRoot.top)
+
+            onNodeWithTag("full_player").performScrollToNode(hasContentDescription("Play"))
+            onNodeWithContentDescription("Play").assertIsDisplayed().performClick()
+            runOnIdle { assertEquals(listOf("toggle"), fixture.calls) }
+        }
+
+    @Test fun largeFontTabLabelsAreNotVerticallyClipped() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            setContent { fixture.StressContent() }
+            val label =
+                onNode(hasText("Up next", substring = true).and(hasAnyAncestor(hasTestTag("player_tabs_panel"))))
+            val layouts = mutableListOf<TextLayoutResult>()
+            label.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            val layout = layouts.single()
+            val textHeight = layout.getLineBottom(layout.lineCount - 1) - layout.getLineTop(0)
+            assertTrue(
+                label.fetchSemanticsNode().boundsInRoot.height >= textHeight,
+                "The tab label was vertically clipped",
+            )
+        }
+
+    @Test fun cancelledPanelBackDuringSheetCollapseDoesNotTrapTheNextBack() =
+        runComposeUiTest {
+            val fixture =
+                SheetFixture(PlayerSheetValue.Expanded).apply {
+                    systemUi = SystemUiState.DEFAULT.copy(reducedMotion = false)
+                }
+            val dispatcher = NavigationEventDispatcher()
+            var underlyingBack = 0
+            dispatcher.addHandler(
+                object : NavigationEventHandler<NavigationEventInfo>(NavigationEventInfo.None, true) {
+                    override fun onBackCompleted() {
+                        underlyingBack++
+                    }
+                },
+            )
+            val input = DirectNavigationEventInput()
+            dispatcher.addInput(input)
+            val owner =
+                object : NavigationEventDispatcherOwner {
+                    override val navigationEventDispatcher = dispatcher
+                }
+            setContent {
+                CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) {
+                    fixture.Content(notes = { Text("Notes body") })
+                }
+            }
+            onNodeWithText("Notes").performClick()
+            onNodeWithText("Notes body").assertIsDisplayed()
+            mainClock.autoAdvance = false
+            onNodeWithContentDescription("Collapse player").performClick()
+            mainClock.advanceTimeByFrame()
+            waitForIdle()
+            runOnIdle {
+                assertFalse(fixture.expanded)
+                assertTrue(fixture.state.canCollapse)
+                input.backStarted(NavigationEvent())
+                input.backProgressed(NavigationEvent(progress = 0.5f))
+                input.backCancelled()
+            }
+            mainClock.autoAdvance = true
+            onNodeWithTag("mini_player").assertIsDisplayed()
+            runOnIdle {
+                input.backCompleted()
+                assertEquals(1, underlyingBack, "Cancelled panel Back trapped navigation behind the mini player")
+                dispatcher.dispose()
+            }
+        }
+
+    @Test fun heldSheetDragStillOwnsBackWhileThePanelCollapses() =
+        runComposeUiTest {
+            val fixture =
+                SheetFixture(PlayerSheetValue.Expanded).apply {
+                    systemUi = SystemUiState.DEFAULT.copy(reducedMotion = false)
+                }
+            val dispatcher = NavigationEventDispatcher()
+            var underlyingBack = 0
+            dispatcher.addHandler(
+                object : NavigationEventHandler<NavigationEventInfo>(NavigationEventInfo.None, true) {
+                    override fun onBackCompleted() {
+                        underlyingBack++
+                    }
+                },
+            )
+            val input = DirectNavigationEventInput()
+            dispatcher.addInput(input)
+            val owner =
+                object : NavigationEventDispatcherOwner {
+                    override val navigationEventDispatcher = dispatcher
+                }
+            setContent {
+                CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) { fixture.Content() }
+            }
+            onNodeWithText("Notes").performClick()
+            // A frozen frame clock parks the launched panel collapse mid-flight, holding the window
+            // where PlayerTabs is gone while panelState.canCollapse is still true.
+            mainClock.autoAdvance = false
+            val dragBy = onNodeWithTag("playerHost").fetchSemanticsNode().boundsInRoot.height * 0.55f
+            onNodeWithContentDescription("Collapse player").performTouchInput {
+                down(center)
+                moveBy(Offset(0f, 80f))
+                moveBy(Offset(0f, dragBy))
+            }
+            mainClock.advanceTimeByFrame()
+            waitForIdle()
+            runOnIdle {
+                assertTrue(
+                    fixture.state.progress in 0.01f..0.59f,
+                    "Held header drag left the sheet at progress ${fixture.state.progress}",
+                )
+            }
+            onNodeWithTag("player_tabs_panel").assertDoesNotExist()
+            runOnIdle {
+                input.backStarted(NavigationEvent())
+                input.backCompleted()
+            }
+            assertEquals(
+                0,
+                underlyingBack,
+                "Back reached the covered content while the collapsing player panel still owned it",
+            )
+            onNodeWithTag("playerHost").performTouchInput { up() }
+            mainClock.autoAdvance = true
+            runOnIdle { fixture.collapseToken++ }
+            onNodeWithTag("mini_player").assertIsDisplayed()
+            runOnIdle {
+                input.backStarted(NavigationEvent())
+                input.backCompleted()
+                assertEquals(1, underlyingBack)
+                dispatcher.dispose()
+            }
+        }
+
     @Test fun scrubberSeeksOnlyOnReleaseAndClampsAtEnd() =
         runComposeUiTest {
             val fixture = SheetFixture(PlayerSheetValue.Expanded)
@@ -455,9 +638,21 @@ private class SheetFixture(
     var collapseToken by mutableIntStateOf(0)
     var contentBottomPx = 0f
     var miniSkip = true
+    var systemUi = SystemUiState.DEFAULT.copy(reducedMotion = true)
     val calls = mutableListOf<String>()
     val navigated = mutableListOf<androidx.navigation3.runtime.NavKey>()
     var expanded = false
+
+    @androidx.compose.runtime.Composable
+    fun StressContent() {
+        val density = LocalDensity.current
+        CompositionLocalProvider(
+            LocalDensity provides Density(density.density, PLAYER_STRESS_FONT_SCALE),
+            LocalLayoutDirection provides LayoutDirection.Rtl,
+        ) {
+            Box(Modifier.requiredSize(360.dp, PLAYER_CAPTURE_HEIGHT_DP.dp)) { Content() }
+        }
+    }
 
     @androidx.compose.runtime.Composable
     fun Content(
@@ -465,7 +660,7 @@ private class SheetFixture(
         upNext: @androidx.compose.runtime.Composable () -> Unit = {},
         notes: @androidx.compose.runtime.Composable () -> Unit = {},
     ) {
-        NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT.copy(reducedMotion = true)) {
+        NeutrodyneTheme(AppearancePrefs(), systemUi) {
             BoxWithConstraints {
                 val paneLayout = PaneLayout(1, false, maxWidth.value.toInt())
                 PlayerSheet(

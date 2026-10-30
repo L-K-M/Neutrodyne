@@ -100,7 +100,8 @@ internal class PlayerSheetState(
     }
 
     public suspend fun cancelBack(motion: SheetMotion) {
-        animate(PlayerSheetValue.Expanded, motion)
+        // Resume the existing target; the panel may already be closing.
+        animate(drag.targetValue, motion)
     }
 
     public suspend fun commitBack(motion: SheetMotion = SheetMotion.ANIMATED) {
