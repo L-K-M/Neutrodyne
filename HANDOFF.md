@@ -173,8 +173,12 @@ context line. Measuring actual text instead of converting line-height sp
 fixes it; both Android-host and desktop regressions pass. Stress references
 from [40975400402](https://github.com/L-K-M/Neutrodyne/actions/runs/40975400402)
 and [40990941348](https://github.com/L-K-M/Neutrodyne/actions/runs/40990941348)
-were rejected; no PNGs are applied. Fresh captures, CI and formal player
-review remain pending. The real Play journey compiles but has not run.
+were rejected. Corrected references from
+[41008967659](https://github.com/L-K-M/Neutrodyne/actions/runs/41008967659),
+source `b370185d`, are inspected and applied: 24 player PNGs cover both
+platforms, light/dark, large-font RTL, panels and Speed. Verification-only
+checks pass all 24 images in 13 tests; recording stays disabled. Player CI
+and formal review remain pending. The real Play journey compiles but has not run.
 Non-release CI profiles require its receipt; the seven-case release smoke
 ABI is unchanged.
 
