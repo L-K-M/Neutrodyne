@@ -154,10 +154,12 @@ Root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) merged
 as `ceb3e487` after two minor-only review rounds.
 [Main CI 40960233783](https://github.com/L-K-M/Neutrodyne/actions/runs/40960233783)
 passes all six jobs. Reviewed-head XML confirms 96 device cases, no failures
-or skips. Player source `2d1ca132` is pushed on `impl/m4-p8-player-ui`;
-138 related local cases pass, with screenshot and journey sources compiled.
-Hosted recording succeeded; compact stress and transient Back fixes are in
-progress. References, real Play journey, CI and formal review remain pending.
+or skips. [Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) remains
+unmerged at `f5af9950`, after two formal rounds. Its 24 hosted references
+pass verification. [CI 41024179011](https://github.com/L-K-M/Neutrodyne/actions/runs/41024179011)
+passes five jobs and proves 98 device passes, including the real Play journey
+on API26/36. Unit repeats main's first-arrival latch failure; no unchanged
+retry is claimed as a fix.
 
 Buffering/refused-advance fixes
 [#251](https://github.com/L-K-M/Neutrodyne/pull/251) merged as `e20a440f`
@@ -165,17 +167,26 @@ after two review rounds with no verified important finding.
 [PR CI 40977054846](https://github.com/L-K-M/Neutrodyne/actions/runs/40977054846)
 passes all six jobs after an unchanged device-run retry. The exact latest
 artifact proves 96 device cases, no failures/errors/skips. Local core/adapter
-suites pass 274 cases. Main CI remains pending.
+suites pass 274 cases. [Main CI 40983471054](https://github.com/L-K-M/Neutrodyne/actions/runs/40983471054)
+passes all six jobs.
 
-A separate candidate on `fix/m4-dismiss-intent` fences durable-dismiss
-fallbacks with the existing playback-intent ticket. A real-controller/binder
-test first reproduced an old store call clearing a newer start. Native set,
-resumption and loaded Play reproduced the same gap and now share tickets
-with client starts. The store rejects superseded work inside its transaction,
-without a new public controller API. Integrated domain/testing/data/playback
-suites report 1,548 passes, no failures/errors and one Windows-only DPAPI skip
-on Linux; app compilation and nine-file lint pass. CI and formal review
-remain pending.
+Durable-dismiss fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252)
+merged as `6079ec10` after two review rounds. Client/native starts share an
+intent ticket, checked inside the clear transaction. [Reviewed-head CI](https://github.com/L-K-M/Neutrodyne/actions/runs/40988017111)
+passes all six jobs and proves 96 device passes. Integrated local suites pass
+1,548 cases with one Windows-only DPAPI skip. Main's device retries hit
+unavailable acceleration; its original VM's cause remains unconfirmed.
+
+Candidate `fix/m4-late-queue-snapshot` reproduces a real adapter gap: a
+coherent mid-start read delivered after installation keeps the same session
+generation and removes the next native items. Old-generation control passes;
+the same-generation red changes `[1,2,3]` to `[1]`. Emissions now trigger a
+fenced durable read, not direct replay. Matching streamed metadata is reused;
+reconciliation stays conflated during IO. A fanout mutation starts 101 reads
+instead of one and fails. Core/adapter gates pass 281 cases. The precise
+original CI timing remains unproven; its 100-iteration local diagnostic
+passed. CI/formal review remain pending. The candidate copies P8's already
+probed synchronous KVM preparation without changing test budgets or selection.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine

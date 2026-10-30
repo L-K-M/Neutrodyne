@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
+import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
@@ -97,6 +98,7 @@ internal class AdapterFixture(
     val scope: TestScope,
     sessionStore: (PlaySessionStore) -> PlaySessionStore = { it },
     mediaLookup: (PlaybackMediaLookup) -> PlaybackMediaLookup = { it },
+    queueRepository: (QueueRepository) -> QueueRepository = { it },
 ) {
     val serviceJob = SupervisorJob(scope.backgroundScope.coroutineContext[Job])
     val playerScope = CoroutineScope(scope.backgroundScope.coroutineContext + serviceJob)
@@ -113,7 +115,7 @@ internal class AdapterFixture(
     val local = FakeLocalMediaIndex()
     val sessions = sessionStore(PlaybackTestStores.sessions(db, ProtocolOrderKeys, caps))
     val positions = PlaybackTestStores.positions(db)
-    val queue = PlaybackTestStores.queue(db, sessions, ProtocolOrderKeys, clock, caps)
+    val queue = queueRepository(PlaybackTestStores.queue(db, sessions, ProtocolOrderKeys, clock, caps))
     val lookup = mediaLookup(PlaybackTestStores.media(db))
     val sources = AdapterSources()
     val exo = TestExoPlayerBuilder(app).setClock(fakeClock).setMediaSourceFactory(sources).build()
