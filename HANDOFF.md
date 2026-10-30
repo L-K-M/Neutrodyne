@@ -161,9 +161,10 @@ Up next/Notes panels, Speed, persistent time display and shared policy/error
 handling. Failing-first fixes cover stale model/panel state, covered-content
 semantics, snackbar access, transient Back ownership, cancelled predictive
 Back and large-font geometry. After #255 integration, split gates cover
-1,705 cases: 1,704 passes and one Windows-only DPAPI skip. Fresh UI/native
-gates pass 433 cases; unchanged domain/testing/data/API gates cover 1,272.
-Scoped 42-file lint, platform compilation and 18 presence fixtures pass.
+1,707 cases: 1,706 passes and one Windows-only DPAPI skip. UI/native gates
+cover 435 cases, including 283 freshly rerun core/adapter cases; unchanged
+domain/testing/data/API gates cover 1,272. Scoped 45-file lint, platform
+compilation and 18 presence fixtures pass.
 Earlier interrupted reports are not proof.
 
 Hosted stress captures exposed Android-only nonlinear font clipping despite
@@ -178,15 +179,31 @@ source `b370185d`, are inspected and applied: 24 player PNGs cover both
 platforms, light/dark, large-font RTL, panels and Speed. Verification-only
 checks pass all 24 images in 13 tests; recording stays disabled.
 
-[Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) has two completed
-formal rounds. On `47110070`, the real journey failed API26 idleness and
+[Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) has three completed
+formal rounds. R2/R3 found no verified important defect; optional nits stop. On `47110070`, the real journey failed API26 idleness and
 API36 navigation-target occlusion. The policy-aware frame loop and retained
 dock measurement fix both: [CI 41024179011](https://github.com/L-K-M/Neutrodyne/actions/runs/41024179011)
 at `f5af9950` proves 98 device passes, including the real Play journey once
 on API26/36. Its unchanged first-arrival unit failure prompted #255; the
-precise original timing remains unproven. The integrated head still needs
-fresh CI and review. Non-release profiles require the journey; the
-seven-case release smoke ABI is unchanged.
+precise original timing remains unproven. Non-release profiles require the
+journey; the seven-case release smoke ABI is unchanged.
+
+[CI 41135770086](https://github.com/L-K-M/Neutrodyne/actions/runs/41135770086)
+at integrated `d9076331` failed unit and device gates. An unowned test lookup
+barrier could hold a refresh instead of the explicit start, allowing an
+epoch-fenced event to disappear before the expected storage callback.
+A failing-first helper regression now passes with an owned barrier;
+181 adapter cases pass without changing product code, assertions or budgets.
+The exact CI interleaving was not recorded.
+
+API26 also had two independent process deaths: Compose's nested-layout
+invariant in Licences, and StrictMode's Activity instance counter during
+service-test teardown. Orchestrator isolates the tests. The service test
+now resumes its existing host after killing the service, avoiding unrelated
+Activity recreation without relaxing StrictMode. The Licences cause remains
+unproven; a test-runtime traversal race is a hypothesis, not a fix. Both
+real journeys passed, but only 67 app cases ran and the full 98-case gate
+did not finish. Fresh exact-head CI and device proof remain required.
 
 Buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251)
 merged as `e20a440f` after two review rounds. Local core/adapter suites pass

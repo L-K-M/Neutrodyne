@@ -269,8 +269,8 @@ class PlaybackServiceTest {
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
             await { !serviceDump().contains("ServiceRecord{") }
             phase("recreation/foreground")
-            scenario?.close()
-            scenario = ActivityScenario.launch(MainActivity::class.java)
+            // Recreate the service, not its host: resume the existing activity.
+            checkNotNull(scenario).moveToState(Lifecycle.State.RESUMED)
             val restored = withContext(Dispatchers.Main) { connect() }
             await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 } }
             withContext(Dispatchers.Main) { assertFalse(restored.playWhenReady) }
