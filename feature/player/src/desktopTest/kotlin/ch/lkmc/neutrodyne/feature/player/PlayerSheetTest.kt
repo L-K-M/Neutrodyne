@@ -433,11 +433,7 @@ class PlayerSheetTest {
             assertEquals(PLAYER_STRESS_FONT_SCALE, layout.layoutInput.density.fontScale)
             // Horizontal ellipsis is allowed; its full font-scaled line must still fit.
             assertEquals(1, layout.lineCount)
-            val lineHeight =
-                with(layout.layoutInput.density) {
-                    layout.layoutInput.style.lineHeight
-                        .toPx()
-                }
+            val lineHeight = layout.getLineBottom(0) - layout.getLineTop(0)
             val bounds = context.fetchSemanticsNode().boundsInRoot
             assertTrue(bounds.height >= lineHeight, "The context line was vertically clipped")
             assertTrue(bounds.bottom <= onNodeWithTag("playerArtwork").fetchSemanticsNode().boundsInRoot.top)

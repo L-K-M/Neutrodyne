@@ -160,15 +160,23 @@ The player candidate on `impl/m4-p8-player-ui` supplies mini/full transport,
 Up next/Notes panels, Speed, persistent time display and shared policy/error
 handling. Failing-first fixes cover stale model/panel state, covered-content
 semantics, snackbar access, transient Back ownership, cancelled predictive
-Back and large-font geometry. At `8bf8b511`, local gates pass 143 player,
-core UI, episode and desktop-window cases, one Android-host case and 18 CI
-presence fixtures. Integrated proof after playback merges remains pending.
-Android screenshot sources and the real Play journey compile; the journey
-has not run. Non-release CI profiles require its receipt; the seven-case
-release smoke ABI is unchanged. Initial hosted stress images from
-[40975400402](https://github.com/L-K-M/Neutrodyne/actions/runs/40975400402)
-were rejected; no references are applied. Fresh captures, CI and formal
-player review remain pending.
+Back and large-font geometry. After integrating #251/#252, split gates
+validate 1,695 relevant cases: 1,694 passes and one Windows-only DPAPI skip.
+The combined run timed out; its incomplete reports are not proof. The
+replacement gates cover 278 playback, 1,272 domain/testing/data/API and 145
+player/root/episode/window/Android-host cases. Scoped 37-file lint, platform
+test compilation and 18 CI-presence fixtures pass.
+
+Hosted stress captures exposed Android-only nonlinear font clipping despite
+desktop checks. A real SDK36 Robolectric regression failed `22 < 32` for the
+context line. Measuring actual text instead of converting line-height sp
+fixes it; both Android-host and desktop regressions pass. Stress references
+from [40975400402](https://github.com/L-K-M/Neutrodyne/actions/runs/40975400402)
+and [40990941348](https://github.com/L-K-M/Neutrodyne/actions/runs/40990941348)
+were rejected; no PNGs are applied. Fresh captures, CI and formal player
+review remain pending. The real Play journey compiles but has not run.
+Non-release CI profiles require its receipt; the seven-case release smoke
+ABI is unchanged.
 
 Buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251)
 merged as `e20a440f` after two review rounds. Local core/adapter suites pass
@@ -183,7 +191,11 @@ passes all six jobs; exact artifact XML proves 96 device passes without
 failures, errors or skips. Four failing-first client/native variants pass;
 the integrated local gate reports 1,548 passes and one Windows-only DPAPI
 skip. Connected-command ordering and navigation intents are outside this
-fix. Main CI at `6079ec10` remains pending.
+fix. [Main CI 40990119510](https://github.com/L-K-M/Neutrodyne/actions/runs/40990119510)
+passes five jobs; device execution is blocked by unavailable emulator
+hardware acceleration on two unchanged reruns. Its first unit convergence
+failure passed unchanged on both retries; a source-race explanation remains
+unconfirmed.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine

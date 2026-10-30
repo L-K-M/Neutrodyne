@@ -68,6 +68,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -180,6 +181,7 @@ internal fun PlayerSheet(
     val motion = if (reducedMotion) SheetMotion.IMMEDIATE else SheetMotion.ANIMATED
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
     val panelPeekHeight = playerTabsPeekHeight(density.fontScale)
     val panelState = remember { PlayerSheetState() }
     var selectedTabName by rememberSaveable { mutableStateOf(PlayerTab.UP_NEXT.name) }
@@ -253,6 +255,7 @@ internal fun PlayerSheet(
         val nextLabel = stringResource(Res.string.player_next)
         val paused = !now.isPlaying && !now.playWhenReady
         val contextTitle = now.context?.takeIf { it.type != ContextType.EXTERNAL }?.title
+        val nowPlayingLabel = stringResource(Res.string.player_now)
         val expand: () -> Unit = { scope.launch { state.expand(motion) } }
         val collapse: () -> Unit = { scope.launch { state.collapse(motion) } }
         val navigate: (NavKey) -> Unit = { key ->
@@ -287,22 +290,22 @@ internal fun PlayerSheet(
                         .toDp()
                         .value
                 }
-            // Reserve full text lines before placing the artwork at large font scales.
+            // Measure actual lines; nonlinear Android font scaling changes their height.
             val headerHeight =
                 with(density) {
+                    val titleHeight =
+                        textMeasurer
+                            .measure(nowPlayingLabel, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                            .size.height
+                            .toDp()
                     val contextHeight =
-                        if (contextTitle !=
-                            null
-                        ) {
-                            MaterialTheme.typography.bodySmall.lineHeight
+                        contextTitle?.let {
+                            textMeasurer
+                                .measure(it, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                .size.height
                                 .toDp()
-                        } else {
-                            0.dp
-                        }
-                    (
-                        MaterialTheme.typography.bodyLarge.lineHeight
-                            .toDp() + contextHeight
-                    ).coerceAtLeast(MIN_PLAYER_HEADER_HEIGHT_DP.dp)
+                        } ?: 0.dp
+                    (titleHeight + contextHeight).coerceAtLeast(MIN_PLAYER_HEADER_HEIGHT_DP.dp)
                 }
             val wideArt = now.sourceType != SourceType.RSS
             val morph =
@@ -641,7 +644,7 @@ internal fun PlayerSheet(
                             NdIconButton(collapse, NdIcons.Close, collapseLabel)
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    stringResource(Res.string.player_now),
+                                    nowPlayingLabel,
                                     style = MaterialTheme.typography.bodyLarge,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,

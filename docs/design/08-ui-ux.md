@@ -1641,9 +1641,10 @@ expand/collapse request tokens, retains the last visible-suite measurement
 while navigation is hidden, and shares its activity/window ViewModel owner
 with the speed sheet. Player and queue features meet through shell-owned
 composable slots, not a feature-to-feature dependency. Panel Back ownership
-outlives its visible content while closing. Font-scaled header and tab-strip
-space also drives artwork, body and panel geometry; the full body scrolls
-when large text cannot fit.
+outlives its visible content while closing. Measured header lines and a
+font-scaled tab strip drive artwork, body and panel geometry. Text measurement
+handles Android's nonlinear font metrics; the full body scrolls when large
+text cannot fit.
 
 **Target v1.0 structure (side panel deferred to MD1/M10).**
 `NeutrodyneRoot` (`:core:ui`, hosted by `MainActivity` and `NeutrodyneWindow`) composes `Box(Modifier.semantics { testTagsAsResourceId = true }) { NdNavigationSuiteScaffold { Row { Box(Modifier.weight(1f)) { NeutrodyneNavHost(…) }; if (layout.playerPanel) PlayerSidePanel(…) } }; if (!layout.playerPanel) PlayerSheet(…) }` (`testTagsAsResourceId` lets 09's UI Automator journeys find Compose nodes by resource ID on Android; the desktop's `runComposeUiTest` uses test tags directly): the sheet overlays the whole window, including the navigation bar, so it can grow over it without resizing the scaffold. When `LocalPaneLayout.playerPanel` is true the sheet is not composed and `PlayerSidePanel` takes its fixed width at the end of the content row ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)). With `nowPlaying == null` neither exists and `LocalMiniPlayerInset` is 0. Switching between the two (unfolding, resizing a window) never carries the sheet's value: a sheet created after the panel starts `Collapsed`.
