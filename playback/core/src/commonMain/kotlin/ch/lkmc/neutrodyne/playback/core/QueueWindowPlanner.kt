@@ -20,6 +20,7 @@ data class PlayerWindow(
     val currentSinceMs: Long = 0,
     val positionMs: Long = 0,
     val isPlaying: Boolean = false,
+    val playWhenReady: Boolean = false,
 )
 
 enum class WindowPlayback { KEEP, LOAD_PAUSED }
@@ -103,7 +104,8 @@ class QueueWindowPlanner(
                 ?.item
                 ?.episodeId
         val currentChanged = current?.episodeId != oldId
-        val loadPaused = foreign && (currentChanged || !player.isPlaying)
+        // Buffering still owns play intent; a same-current queue edit must not cancel it.
+        val loadPaused = foreign && (currentChanged || (!player.isPlaying && !player.playWhenReady))
         val start =
             if (current != null && (currentChanged || loadPaused)) {
                 val stored = positions.observe(current.episodeId).first()

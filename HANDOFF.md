@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-29.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243) and root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) are merged; main CI passes at `ceb3e487`. P8 player UI is a local candidate; M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-30.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243) and root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) are merged; buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251) is merged. Main CI passes at `e20a440f`. P8 player UI is a local candidate; M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -143,7 +143,7 @@ These are not blanket release approvals or completed work.
 
 ### M4 playback, P1–P7 merged, P8 in progress
 
-**2026-10-29 checkpoint.** P7 #243 merged as `a6a2f555` after two review
+**2026-10-30 checkpoint.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)
 passes all six jobs after an unchanged runner retry. Downloaded XML confirms
 96 device cases without failures, errors or skips. Final-head full-debug
@@ -159,17 +159,29 @@ or skips.
 The player candidate on `impl/m4-p8-player-ui` supplies mini/full transport,
 Up next/Notes panels, Speed, persistent time display and shared policy/error
 handling. Failing-first fixes cover stale model/panel state, covered-content
-semantics and shared snackbar access. Local gates pass 138 player, core UI,
-episode and desktop-window cases. Android screenshot sources and the real
-Play journey compile; hosted references and device execution remain pending.
-The journey is debug-only; the seven-case release smoke ABI is unchanged.
-CI and formal player review remain pending.
+semantics, snackbar access, transient Back ownership, cancelled predictive
+Back and large-font geometry. At `8bf8b511`, local gates pass 143 player,
+core UI, episode and desktop-window cases, one Android-host case and 18 CI
+presence fixtures. Integrated proof after playback merges remains pending.
+Android screenshot sources and the real Play journey compile; the journey
+has not run. Non-release CI profiles require its receipt; the seven-case
+release smoke ABI is unchanged. Initial hosted stress images from
+[40975400402](https://github.com/L-K-M/Neutrodyne/actions/runs/40975400402)
+were rejected; no references are applied. Fresh captures, CI and formal
+player review remain pending.
 
-Buffering/refused-advance fixes are candidates in
-[#251](https://github.com/L-K-M/Neutrodyne/pull/251), with 274 local core/adapter
-cases passing; CI/review remain pending. A separate real-controller regression
-reproduces stale durable dismissal clearing a newer start, including a delay
-inside the store. Its fix is in progress on `fix/m4-dismiss-intent`.
+Buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251)
+merged as `e20a440f` after two review rounds. Local core/adapter suites pass
+274 cases; reviewed-head XML proves 96 device cases without failures,
+errors or skips. [Main CI 40983471054](https://github.com/L-K-M/Neutrodyne/actions/runs/40983471054)
+passes all six jobs.
+
+Stale durable-dismiss fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252)
+at `68ebd30a` has two completed review rounds without a verified important
+finding. Four failing-first client/native variants pass; the integrated
+local gate reports 1,548 passes and one Windows-only DPAPI skip. Latest-head
+CI remains pending after an API26 Home/launcher failure on the prior head.
+Connected-command ordering and navigation intents are outside this fix.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine

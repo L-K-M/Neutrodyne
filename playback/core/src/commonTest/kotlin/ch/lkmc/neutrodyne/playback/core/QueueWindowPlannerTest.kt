@@ -156,6 +156,34 @@ class QueueWindowPlannerTest {
             assertEquals(CurrentAction.KEEP, result.currentAction)
         }
 
+    @Test fun foreignSameCurrentQueueEditPreservesBufferingIntent() =
+        runTest {
+            planner.appliedOwnGeneration(1)
+            val result =
+                planner.plan(
+                    queue(generation = 2, upNext = listOf(2), context = emptyList()),
+                    (1L..3L).associateWith(::media),
+                    PlayerWindow(listOf(entry(1), entry(2), entry(3)), positionMs = 40_000, playWhenReady = true),
+                )!!
+            assertEquals(WindowPlayback.KEEP, result.playback)
+            assertEquals(listOf(1L, 2L), result.entries.map { it.item.episodeId })
+            assertTrue(result.operations.none { it is WindowOp.SetAll })
+        }
+
+    @Test fun foreignChangedCurrentStillLoadsPausedDuringBuffering() =
+        runTest {
+            planner.appliedOwnGeneration(1)
+            positions.positions.value = mapOf(2L to StoredPosition(2, 45_000, clock.now(), null))
+            val result =
+                planner.plan(
+                    queue(generation = 2, current = 2),
+                    (1L..3L).associateWith(::media),
+                    PlayerWindow(listOf(entry(1)), playWhenReady = true),
+                )!!
+            assertEquals(WindowPlayback.LOAD_PAUSED, result.playback)
+            assertEquals(45_000L, assertIs<WindowOp.SetAll>(result.operations.single()).startPositionMs)
+        }
+
     @Test fun restoredSameCurrentLoadsItsStoredPositionPaused() =
         runTest {
             planner.appliedOwnGeneration(1)

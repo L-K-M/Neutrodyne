@@ -14,6 +14,7 @@ class FakePlaySessionStore : PlaySessionStore {
     var queue = VirtualQueue(0, null, emptyList(), emptyList())
     var generation = 0L
     var failure: Throwable? = null
+    var afterVirtualQueueRead: (suspend (VirtualQueue) -> Unit)? = null
     val calls = mutableListOf<Call>()
     val requestedWindows = mutableListOf<Int>()
 
@@ -33,7 +34,9 @@ class FakePlaySessionStore : PlaySessionStore {
         require(k >= 0)
         requestedWindows += k
         failure?.let { throw it }
-        return queue.copy(contextTail = queue.contextTail.take(k))
+        val snapshot = queue.copy(contextTail = queue.contextTail.take(k))
+        afterVirtualQueueRead?.invoke(snapshot)
+        return snapshot
     }
 
     private fun commit(call: Call): Long {
