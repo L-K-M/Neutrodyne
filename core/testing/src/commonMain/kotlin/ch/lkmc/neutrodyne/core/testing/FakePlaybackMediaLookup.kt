@@ -13,9 +13,11 @@ class FakePlaybackMediaLookup : PlaybackMediaLookup {
     val items = MutableStateFlow<Map<Long, PlaybackMediaInfo>>(emptyMap())
     val reads = mutableListOf<Long>()
     var failure: Throwable? = null
+    var beforeGet: (suspend (Long) -> Unit)? = null
 
     override suspend fun get(episodeId: Long): PlaybackMediaInfo? {
         reads += episodeId
+        beforeGet?.invoke(episodeId)
         failure?.let { throw it }
         return items.value[episodeId]
     }
