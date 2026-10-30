@@ -79,7 +79,8 @@ interface PlaybackController {
     /** Consent for this pending metered start, not a persistent policy change. Recheck gates. */
     fun grantMeteredStreaming()
 
-    /** Flush departure, clear current/context and notification; retain Up next. Failures propagate. */
+    /** Flush departure, clear current/context and notification; retain Up next. Failures propagate.
+     * May throw CancellationException when superseded by a newer playback intent. */
     suspend fun dismiss()
 }
 
