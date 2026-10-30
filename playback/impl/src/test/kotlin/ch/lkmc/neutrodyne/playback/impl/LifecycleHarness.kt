@@ -146,8 +146,9 @@ internal class LifecycleHarness(
             override suspend fun clearCurrent(
                 departure: Departure?,
                 now: Long,
+                allowed: () -> Boolean,
             ): Long {
-                val generation = store.clearCurrent(departure, now)
+                val generation = store.clearCurrent(departure, now, allowed)
                 publish(store.queue.copy(generation = generation, current = null, contextTail = emptyList()))
                 return generation
             }

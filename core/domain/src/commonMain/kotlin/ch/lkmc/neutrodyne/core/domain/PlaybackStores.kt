@@ -51,10 +51,14 @@ interface PlaySessionStore {
         now: Long,
     ): Long?
 
-    /** Explicit dismissal: same durable clearing, no implicit mark-played. */
+    /** Explicit dismissal: same durable clearing, no implicit mark-played.
+     * [allowed] is a fast thread-safe predicate read inside the transaction on the writer's
+     * dispatcher, not necessarily the caller's thread.
+     * False throws CancellationException and rolls back every write. */
     suspend fun clearCurrent(
         departure: Departure?,
         now: Long,
+        allowed: () -> Boolean = { true },
     ): Long
 }
 

@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-29.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243) is merged; main CI passes at `a6a2f555`. P8 player/root composition is in progress; M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-29.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243), root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) and playback safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251) are merged. P8 player UI is a candidate; M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -154,13 +154,28 @@ Root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) merged
 as `ceb3e487` after two minor-only review rounds.
 [Main CI 40960233783](https://github.com/L-K-M/Neutrodyne/actions/runs/40960233783)
 passes all six jobs. Reviewed-head XML confirms 96 device cases, no failures
-or skips. The player slice continues on `impl/m4-p8-player-ui`; hosted
-references, the real Play journey, CI and review remain pending.
+or skips. Player source `2d1ca132` is pushed on `impl/m4-p8-player-ui`;
+138 related local cases pass, with screenshot and journey sources compiled.
+Hosted recording succeeded; compact stress and transient Back fixes are in
+progress. References, real Play journey, CI and formal review remain pending.
 
-Buffering/refused-advance fixes are candidates on `fix/m4-buffered-advance`.
-Failing-first tests reproduced lost buffering intent and replay of a marked
-current after a refused skip. Local suites pass 102 core and 172 adapter
-cases, including source replacement across IO; CI/review remain pending.
+Buffering/refused-advance fixes
+[#251](https://github.com/L-K-M/Neutrodyne/pull/251) merged as `e20a440f`
+after two review rounds with no verified important finding.
+[PR CI 40977054846](https://github.com/L-K-M/Neutrodyne/actions/runs/40977054846)
+passes all six jobs after an unchanged device-run retry. The exact latest
+artifact proves 96 device cases, no failures/errors/skips. Local core/adapter
+suites pass 274 cases. Main CI remains pending.
+
+A separate candidate on `fix/m4-dismiss-intent` fences durable-dismiss
+fallbacks with the existing playback-intent ticket. A real-controller/binder
+test first reproduced an old store call clearing a newer start. Native set,
+resumption and loaded Play reproduced the same gap and now share tickets
+with client starts. The store rejects superseded work inside its transaction,
+without a new public controller API. Integrated domain/testing/data/playback
+suites report 1,548 passes, no failures/errors and one Windows-only DPAPI skip
+on Linux; app compilation and nine-file lint pass. CI and formal review
+remain pending.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine

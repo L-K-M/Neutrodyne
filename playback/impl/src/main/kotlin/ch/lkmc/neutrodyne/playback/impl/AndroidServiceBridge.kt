@@ -193,12 +193,15 @@ internal class AndroidServiceBridge(
     override suspend fun setMediaItems(
         request: StartRequest,
         origin: StartOrigin,
-    ): MediaSession.MediaItemsWithStartPosition =
-        commands.withLock {
+    ): MediaSession.MediaItemsWithStartPosition {
+        // Session starts bypass the client's intent ticket.
+        access.hub.newPlaybackIntent()
+        return commands.withLock {
             val result = startLocked(request, origin, StartApplication.MEDIA3)
             if (result != PlayResult.Started) throw UnsupportedOperationException("Playback refused: $result")
             resumeLocked(origin)
         }
+    }
 
     private suspend fun startLocked(
         request: StartRequest,
@@ -287,10 +290,12 @@ internal class AndroidServiceBridge(
         }
     }
 
-    override suspend fun resume(origin: StartOrigin): MediaSession.MediaItemsWithStartPosition =
-        commands.withLock {
+    override suspend fun resume(origin: StartOrigin): MediaSession.MediaItemsWithStartPosition {
+        access.hub.newPlaybackIntent()
+        return commands.withLock {
             resumeLocked(origin)
         }
+    }
 
     private suspend fun resumeLocked(origin: StartOrigin): MediaSession.MediaItemsWithStartPosition {
         val held = pending

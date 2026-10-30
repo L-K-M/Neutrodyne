@@ -196,9 +196,10 @@ internal class PlaybackControllerImpl(
         gate.grant()
     }
 
-    override suspend fun dismiss() =
+    override suspend fun dismiss() {
+        val intent = hub.newPlaybackIntent()
         withContext(Dispatchers.Main.immediate) {
-            hub.newPlaybackIntent()
+            requireCurrentIntent(intent)
             if (connection.controller != null) {
                 val result = command(CustomCommands.DISMISS)
                 if (result?.resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS) {
@@ -206,6 +207,7 @@ internal class PlaybackControllerImpl(
                 }
                 // Fall through to the bridge: a timeout or failed command must not crash the caller.
             }
+            requireCurrentIntent(intent)
             val bridge = hub.bridge
             if (bridge != null) {
                 bridge.dismiss()
@@ -214,10 +216,11 @@ internal class PlaybackControllerImpl(
             // Dismiss persisted state without a service bind when there is no active player.
             withContext(io) {
                 opener.awaitOpen()
-                sessions().clearCurrent(null, clock.now())
+                // The store checks again after acquiring its writer, not before suspended IO.
+                sessions().clearCurrent(null, clock.now()) { hub.isCurrentPlaybackIntent(intent) }
             }
-            Unit
         }
+    }
 
     private companion object {
         const val COMMAND_TIMEOUT_MS = 10_000L
