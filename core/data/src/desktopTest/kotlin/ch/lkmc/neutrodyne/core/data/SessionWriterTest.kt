@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -194,6 +195,34 @@ class SessionWriterTest {
             assertEquals(listOf(ids[3]), writer.virtualQueue(20).upNext.map { it.episodeId })
             assertFailsWith<IllegalArgumentException> { writer.virtualQueue(-1) }
             assertFailsWith<IllegalArgumentException> { writer.commitStart(start(ids[0], ids[0], null), 600) }
+        }
+
+    @Test fun supersededDismissLeavesTheSessionAndDepartureUntouched() =
+        runTest {
+            val ids = seed(2)
+            writer.commitStart(start(ids[0], ids[0], 200), 100)
+            queue(listOf(ids[1]))
+            val before = db.playSessionDao().get()!!
+
+            assertFailsWith<CancellationException> {
+                writer.clearCurrent(departure(ids[0], played = true), 200) { false }
+            }
+            assertEquals(before, db.playSessionDao().get())
+            assertEquals(listOf(ids[1]), db.queueDao().queuedEpisodeIds())
+            assertNull(db.positionDao().byEpisode(ids[0]))
+            assertNull(db.episodeStateDao().byEpisode(ids[0])?.playedAt)
+
+            assertEquals(before.generation + 1, writer.clearCurrent(departure(ids[0]), 300) { true })
+            assertNull(db.playSessionDao().get()?.currentEpisodeId)
+            assertEquals(listOf(ids[1]), db.queueDao().queuedEpisodeIds())
+        }
+
+    @Test fun supersededDismissDoesNotCreateAMissingSingleton() =
+        runTest {
+            db.useWriterConnection { it.execSql("DELETE FROM play_session") }
+            assertFailsWith<CancellationException> { writer.clearCurrent(null, 100) { false } }
+            assertNull(db.playSessionDao().get())
+            assertEquals(1, writer.clearCurrent(null, 200) { true })
         }
 
     @Test fun restoredForeignGenerationAndIncompleteAnchorsRemainReadable() =

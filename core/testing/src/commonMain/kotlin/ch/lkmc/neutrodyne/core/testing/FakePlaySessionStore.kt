@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
+import kotlinx.coroutines.CancellationException
 
 /** Recording writer with caller-published reads; generation advances only after a successful write. */
 class FakePlaySessionStore : PlaySessionStore {
@@ -125,12 +126,15 @@ class FakePlaySessionStore : PlaySessionStore {
     override suspend fun clearCurrent(
         departure: Departure?,
         now: Long,
-    ): Long =
-        commit(
+        allowed: () -> Boolean,
+    ): Long {
+        if (!allowed()) throw CancellationException("Playback dismissal superseded")
+        return commit(
             Call(
                 Operation.CLEAR,
                 now,
                 departure = departure,
             ),
         )
+    }
 }

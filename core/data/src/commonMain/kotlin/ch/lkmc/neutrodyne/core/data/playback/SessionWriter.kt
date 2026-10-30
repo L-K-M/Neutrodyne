@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CancellationException
 
 /** The database transaction is the serialization point for playback and restore writers alike. */
 @SingleIn(AppScope::class)
@@ -136,7 +137,12 @@ internal class SessionWriter(
     override suspend fun clearCurrent(
         departure: Departure?,
         now: Long,
-    ): Long = explicit(now) { session -> clear(session, departure, now) }
+        allowed: () -> Boolean,
+    ): Long =
+        explicit(now) { session ->
+            if (!allowed()) throw CancellationException("Playback dismissal superseded")
+            clear(session, departure, now)
+        }
 
     private suspend fun clear(
         session: PlaySessionEntity,
@@ -165,7 +171,7 @@ internal class SessionWriter(
         }
     }
 
-    /** Explicit operations are unconditional: their change is never rejected. */
+    /** Explicit operations commit or throw; they never return a stale-write null. */
     private suspend fun explicit(
         now: Long,
         change: suspend (PlaySessionEntity) -> PlaySessionEntity,

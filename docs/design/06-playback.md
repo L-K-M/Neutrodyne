@@ -184,7 +184,8 @@ interface PlaySessionStore {
                              expected: SessionRevision, now: Long): Long?
     suspend fun goBack(previous: QueueItem, departure: Departure, now: Long): Long
     suspend fun endSession(departure: Departure?, expected: SessionRevision, now: Long): Long?
-    suspend fun clearCurrent(departure: Departure?, now: Long): Long    // dismiss()
+    suspend fun clearCurrent(departure: Departure?, now: Long,
+                             allowed: () -> Boolean = { true }): Long  // dismiss(); predicate inside transaction
 }
 data class SessionRevision(val currentEpisodeId: Long?, val generation: Long)
 enum class ContextRetention { REPLACE, KEEP }
@@ -335,7 +336,7 @@ The core reaches the database only through the ports of [Modules and public API]
 
 Both adapters feed the core in the same order, which is what makes the two players agree:
 
-**Asynchronous fences (M4).** Client starts retain an application-memory intent ticket. A newer client start or delivered pause/stop/dismiss cancels an older result before its `play()` dispatch; cancellation is not reported as `Started`. Native arrival/end writes serialize against the committed `(currentEpisodeId, generation)`. SQLite compares this pair before departure/arrival effects; stale writes return `null`, distinct from IO failure. Each retry retains its original expected revision. Successful consecutive transitions advance the stored revision without invalidating the next queued frame.
+**Asynchronous fences (M4).** Playback intents use an application-memory ticket. Client starts retain it through their reply. Native set/resumption and delivered Play take a ticket too; passive boot-card reads do not. A newer start or delivered Play/pause/stop/dismiss cancels an older client result before its `play()` dispatch; cancellation is not reported as `Started`. Durable dismiss fallbacks retain the same ticket: `clearCurrent` checks its thread-safe predicate inside the writer transaction. Superseded dismissal throws `CancellationException`, rolling back departure, session and generation changes. A later dismissal still cancels an older pending start. Native arrival/end writes serialize against the committed `(currentEpisodeId, generation)`. SQLite compares this pair before departure/arrival effects; stale writes return `null`, distinct from IO failure. Each retry retains its original expected revision. Successful consecutive transitions advance the stored revision without invalidating the next queued frame.
 
 1. **Item change** (Media3 `onPositionDiscontinuity` to another item; engine `ItemTransition`): `PositionSaver` captures the outgoing position first; `PlayedRule` decides `Departure.markPlayed`; `PlaySessionStore.onTransition` commits in one transaction; `QueueWindowPlanner.endOwnWrite(generation)`; then `StartPositionRule`, `EffectivePlaybackSettings`, `ChapterIndex` and `SleepTimerCore` for the arriving item.
 2. **Advancing changes** (play, pause, buffering stall): `PositionSaver` saves when advancing stops; `SleepTimerCore` counts only while advancing.

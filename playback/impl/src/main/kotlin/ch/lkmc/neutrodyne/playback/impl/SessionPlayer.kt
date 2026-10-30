@@ -59,8 +59,9 @@ internal class SessionPlayer private constructor(
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         playWhenReadyIntent = playWhenReady
+        // Delivered Play also supersedes older client starts and dismiss fallbacks.
+        cancelPendingPlay()
         if (!playWhenReady) {
-            cancelPendingPlay()
             exo.pause()
             return Futures.immediateVoidFuture()
         }
