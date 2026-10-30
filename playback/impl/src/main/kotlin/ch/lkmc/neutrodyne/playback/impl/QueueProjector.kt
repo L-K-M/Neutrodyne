@@ -124,7 +124,7 @@ internal class QueueProjector(
         val media: Map<Long, PlaybackMediaInfo>,
         val groupId: Long?,
         val readRevision: Long? = null,
-        // Identity only: a collected emission can supersede a refresh without a bracket.
+        // Identity only: an upstream emission can supersede a refresh without a bracket.
         val readEmission: Input? = null,
     )
 
@@ -157,12 +157,12 @@ internal class QueueProjector(
                         lookup.observe(ids).map { media ->
                             observedMedia = media
                             Input(snapshot, media, session?.context?.takeIf { it.type == ContextType.GROUP }?.id)
+                                .also { latest = it }
                         }
                     }.conflate()
                         .collect { input ->
-                            latest = input
                             try {
-                                project(input)
+                                reconcile(input)
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (failure: Exception) {
@@ -704,12 +704,16 @@ internal class QueueProjector(
      * dropping the reconciliation.
      */
     private fun refresh() {
-        launchWrite {
-            val before = revision
-            val emission = latest
-            val snapshot = withContext(io) { sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE) }
-            project(input(snapshot).copy(readRevision = before, readEmission = emission))
-        }
+        launchWrite { reconcile() }
+    }
+
+    private suspend fun reconcile(signal: Input? = null) {
+        val before = revision
+        val emission = signal ?: latest
+        val snapshot = withContext(io) { sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE) }
+        // Verify queue state, but reuse matching streamed metadata to avoid N+1 reads.
+        val resolved = signal?.takeIf { it.queue == snapshot } ?: input(snapshot)
+        project(resolved.copy(readRevision = before, readEmission = emission))
     }
 
     private fun launchWrite(block: suspend () -> Unit) {
