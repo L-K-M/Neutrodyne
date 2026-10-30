@@ -179,8 +179,8 @@ source `b370185d`, are inspected and applied: 24 player PNGs cover both
 platforms, light/dark, large-font RTL, panels and Speed. Verification-only
 checks pass all 24 images in 13 tests; recording stays disabled.
 
-[Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) has three completed
-formal rounds. R2/R3 found no verified important defect; optional nits stop. On `47110070`, the real journey failed API26 idleness and
+[Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) has four completed
+formal rounds. R2–R4 found no verified important defect; optional nits stop. On `47110070`, the real journey failed API26 idleness and
 API36 navigation-target occlusion. The policy-aware frame loop and retained
 dock measurement fix both: [CI 41024179011](https://github.com/L-K-M/Neutrodyne/actions/runs/41024179011)
 at `f5af9950` proves 98 device passes, including the real Play journey once
@@ -203,7 +203,19 @@ now resumes its existing host after killing the service, avoiding unrelated
 Activity recreation without relaxing StrictMode. The Licences cause remains
 unproven; a test-runtime traversal race is a hypothesis, not a fix. Both
 real journeys passed, but only 67 app cases ran and the full 98-case gate
-did not finish. Fresh exact-head CI and device proof remain required.
+did not finish.
+
+[CI 41141671060](https://github.com/L-K-M/Neutrodyne/actions/runs/41141671060)
+at `cd205e15` passes unit and the other four non-device jobs. Licences and
+both real journeys pass. Service recreation fails on both APIs: moving the
+Activity lifecycle to RESUMED does not bring its task back from Home.
+The fixture now foregrounds the existing task through Activity Manager,
+preserving the launcher intent that ActivityScenario matches. It checks
+the captured host's lifecycle on Main, foreground package and original
+Activity identity. No Activity recreation, policy relaxation or larger
+budget is used. Compilation passes; fresh exact-head device proof remains
+required.
+The earlier Licences cause is still unproven.
 
 Buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251)
 merged as `e20a440f` after two review rounds. Local core/adapter suites pass

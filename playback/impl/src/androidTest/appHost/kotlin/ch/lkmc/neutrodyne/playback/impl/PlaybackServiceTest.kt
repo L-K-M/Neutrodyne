@@ -58,6 +58,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -269,8 +270,7 @@ class PlaybackServiceTest {
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
             await { !serviceDump().contains("ServiceRecord{") }
             phase("recreation/foreground")
-            // Recreate the service, not its host: resume the existing activity.
-            checkNotNull(scenario).moveToState(Lifecycle.State.RESUMED)
+            foregroundHost()
             val restored = withContext(Dispatchers.Main) { connect() }
             await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 } }
             withContext(Dispatchers.Main) { assertFalse(restored.playWhenReady) }
@@ -486,6 +486,30 @@ class PlaybackServiceTest {
         check(device.pressHome()) { "The full-image launcher could not be opened" }
         await { host.state == Lifecycle.State.CREATED }
         logEvidence("background-state", stateSnapshot())
+    }
+
+    private suspend fun foregroundHost() {
+        val host = checkNotNull(scenario)
+        lateinit var existing: MainActivity
+        host.onActivity { existing = it }
+
+        val flags =
+            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        val component = ComponentName(app, MainActivity::class.java).flattenToString()
+
+        // Keep launcher identity: onNewIntent replaces the intent that ActivityScenario matches.
+        val brought =
+            shell(
+                "am start -W -a ${Intent.ACTION_MAIN} -c ${Intent.CATEGORY_LAUNCHER} -f $flags -n $component",
+            )
+        logEvidence("foreground-command", "exit=${brought.exitCode}\n${brought.text}")
+        check(brought.exitCode == 0) { "The existing host task could not be foregrounded: ${brought.text}" }
+
+        await {
+            withContext(Dispatchers.Main) { existing.lifecycle.currentState == Lifecycle.State.RESUMED } &&
+                device.currentPackageName == app.packageName
+        }
+        host.onActivity { assertSame("Foregrounding must retain the host instance", existing, it) }
     }
 
     private fun tapNotification(label: String) {
