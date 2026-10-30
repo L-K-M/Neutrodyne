@@ -8,10 +8,14 @@ import android.os.Looper
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.media3.common.MediaItem
 import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
+import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionToken
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
+import ch.lkmc.neutrodyne.core.domain.Departure
+import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
@@ -34,6 +38,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -61,6 +66,14 @@ class PlaybackServiceTest {
     @Test fun sessionPauseCancelsClientStartWhileServiceIsOpening() = pauseDuringStart(PauseSource.SESSION)
 
     private enum class PauseSource { CANONICAL, SESSION }
+
+    private enum class StartPath { CLIENT, MEDIA_SESSION, SESSION_RESUME, SESSION_PLAY }
+
+    private companion object {
+        const val FALLBACK_GATE_TIMEOUT_SECONDS = 15L
+        const val CURRENT_EPISODE_ID = 1L
+        const val NEWER_EPISODE_ID = 2L
+    }
 
     private fun pauseDuringStart(source: PauseSource) {
         val settingsReady = CompletableDeferred<Unit>()
@@ -333,6 +346,136 @@ class PlaybackServiceTest {
                 runBlocking { dismissed.await() }
                 assertNull(h.store.queue.current)
             } finally {
+                connection.controller?.release()
+                service.destroy()
+            }
+        }
+    }
+
+    @Test fun aSupersededDurableDismissCannotClearANewerControllerStart() =
+        assertNewerStartSurvivesDismiss(
+            StartPath.CLIENT,
+        )
+
+    @Test fun aSupersededDurableDismissCannotClearANewerSessionStart() =
+        assertNewerStartSurvivesDismiss(StartPath.MEDIA_SESSION)
+
+    @Test fun aSupersededDurableDismissCannotClearANewerSessionResume() =
+        assertNewerStartSurvivesDismiss(StartPath.SESSION_RESUME)
+
+    @Test fun aSupersededDurableDismissCannotClearANewerLoadedSessionPlay() =
+        assertNewerStartSurvivesDismiss(StartPath.SESSION_PLAY)
+
+    private fun assertNewerStartSurvivesDismiss(path: StartPath) {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent()
+            h.lookup.items.value += NEWER_EPISODE_ID to media(id = NEWER_EPISODE_ID)
+            install(h)
+            val entered = CountDownLatch(1)
+            val allowClear = CountDownLatch(1)
+            val oldController =
+                PlaybackControllerImpl(
+                    h.connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider {
+                        object : PlaySessionStore by h.sessions {
+                            override suspend fun clearCurrent(
+                                departure: Departure?,
+                                now: Long,
+                                allowed: () -> Boolean,
+                            ): Long {
+                                entered.countDown()
+                                check(allowClear.await(FALLBACK_GATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                                    "Test did not release the durable dismiss"
+                                }
+                                return h.sessions.clearCurrent(departure, now, allowed)
+                            }
+                        }
+                    },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
+            val dismissed = h.scope.async { oldController.dismiss() }
+            pumpUntil { entered.count == 0L }
+
+            // The old dismiss already selected durable fallback; B uses the real binder path.
+            val component = ComponentName(app(), NeutrodynePlaybackService::class.java)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            shadowOf(app()).setComponentNameAndServiceForBindService(
+                component,
+                service.get().onBind(Intent(MediaSessionService.SERVICE_INTERFACE)),
+            )
+            val owner =
+                object : LifecycleOwner {
+                    override val lifecycle = LifecycleRegistry(this)
+                }
+            owner.lifecycle.currentState = Lifecycle.State.STARTED
+            val connection =
+                PlayerConnection(owner.lifecycle) {
+                    MediaController.Builder(app(), SessionToken(app(), component)).buildAsync()
+                }
+            val newerController =
+                PlaybackControllerImpl(
+                    connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider { h.sessions },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
+            try {
+                assertNotNull(h.run { connection.awaitController() })
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                val expectedEpisodeId =
+                    when (path) {
+                        StartPath.CLIENT -> {
+                            assertEquals(PlayResult.Started, h.run { newerController.playEpisode(NEWER_EPISODE_ID) })
+                            NEWER_EPISODE_ID
+                        }
+
+                        StartPath.MEDIA_SESSION -> {
+                            val live = checkNotNull(connection.controller)
+                            live.setMediaItem(MediaItem.Builder().setMediaId("episode:$NEWER_EPISODE_ID").build())
+                            live.play()
+                            NEWER_EPISODE_ID
+                        }
+
+                        StartPath.SESSION_RESUME -> {
+                            h.run {
+                                val resumed = checkNotNull(h.hub.bridge).resume(StartOrigin.EXTERNAL)
+                                player.setMediaItems(resumed.mediaItems, resumed.startIndex, resumed.startPositionMs)
+                                player.prepare()
+                                player.play()
+                            }
+                            CURRENT_EPISODE_ID
+                        }
+
+                        StartPath.SESSION_PLAY -> {
+                            pumpUntil { player.episodeIdOrNull() == CURRENT_EPISODE_ID }
+                            checkNotNull(connection.controller).play()
+                            CURRENT_EPISODE_ID
+                        }
+                    }
+                pumpUntil { player.episodeIdOrNull() == expectedEpisodeId && player.playWhenReady }
+                allowClear.countDown()
+                pumpUntil { dismissed.isCompleted }
+                val failure = runBlocking { runCatching { dismissed.await() }.exceptionOrNull() }
+                if (failure != null) assertIs<CancellationException>(failure)
+                assertEquals(
+                    expectedEpisodeId,
+                    h.store.queue.current
+                        ?.episodeId,
+                )
+                assertEquals(expectedEpisodeId, player.episodeIdOrNull())
+            } finally {
+                allowClear.countDown()
                 connection.controller?.release()
                 service.destroy()
             }
