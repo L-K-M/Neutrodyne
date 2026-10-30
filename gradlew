@@ -1,5 +1,79 @@
 #!/bin/sh
 
+# ==================== DIAGNOSTIC-ONLY PROBE — DO NOT MERGE ====================
+# diag/m4-kvm-access: discriminate why ci.yml api26Setup fails with
+# "x86_64 emulation currently requires hardware acceleration!":
+#   (a) /dev/kvm present but unreadable under the current udev prep,
+#   (b) /dev/kvm absent entirely, or
+#   (c) host CPU exposes no nested virtualization (no accel at all).
+# Prints probe output only, then ALWAYS exits 1 so the workflow produces
+# no build, no screenshots and no manifest/artifact.
+echo "================================================================"
+echo " DIAGNOSTIC-ONLY gradlew wrapper (diag/m4-kvm-access)"
+echo " no build, no screenshots, no artifact — probe then exit 1"
+echo " gradlew args received: $*"
+echo "================================================================"
+
+kvm_probe() {
+    echo "----- probe stage: $1 -----"
+    uname -a
+    id
+    echo "ANDROID_HOME=$ANDROID_HOME"
+    sudo -n true 2>/dev/null && echo "sudo: passwordless ok" || echo "sudo: UNAVAILABLE"
+    if [ -e /dev/kvm ]; then
+        echo "/dev/kvm: EXISTS"
+        ls -l /dev/kvm
+        stat -c 'kvm stat: mode=%a (%A) uid=%u(%U) gid=%g(%G)' /dev/kvm
+    else
+        echo "/dev/kvm: ABSENT"
+    fi
+    [ -r /dev/kvm ] && echo "kvm read: yes" || echo "kvm read: no"
+    [ -w /dev/kvm ] && echo "kvm write: yes" || echo "kvm write: no"
+    echo "kvm group: $(getent group kvm || echo '(no kvm group)')"
+    echo "cpu virt flags: $(grep -o -e vmx -e svm /proc/cpuinfo 2>/dev/null | sort -u | tr '\n' ' ')"
+    lscpu 2>/dev/null | grep -i -e 'Virtualization' -e 'Hypervisor' || echo "lscpu: no virtualization lines"
+    if [ -x "$ANDROID_HOME/emulator/emulator" ]; then
+        echo "emulator -accel-check:"
+        "$ANDROID_HOME/emulator/emulator" -accel-check 2>&1
+        echo "accel-check exit code: $?"
+    else
+        echo "emulator -accel-check: SKIP (no binary at $ANDROID_HOME/emulator/emulator)"
+    fi
+    echo
+}
+
+# Make the emulator binary available for -accel-check, using the same
+# sdkmanager install that ci.yml's instrumented job performs.
+if [ ! -x "$ANDROID_HOME/emulator/emulator" ]; then
+    echo "emulator binary missing; installing via sdkmanager (same as ci.yml)"
+    yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools >/dev/null 2>&1
+    echo "sdkmanager install exit code: $?"
+fi
+
+kvm_probe "A: fresh runner state, before ci udev prep"
+
+echo "===== applying EXACT current ci.yml 'Enable KVM' udev preparation ====="
+echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+sudo udevadm trigger --name-match=kvm
+echo "udevadm trigger exit code: $?"
+
+kvm_probe "B: after ci udev prep"
+
+if [ -e /dev/kvm ]; then
+    echo "===== /dev/kvm exists: final discriminating check, sudo chmod a+rw ====="
+    sudo chmod a+rw /dev/kvm
+    echo "chmod exit code: $?"
+    kvm_probe "C: after sudo chmod a+rw /dev/kvm"
+else
+    echo "===== /dev/kvm absent — chmod check skipped; host lacks the device ====="
+fi
+
+echo "================================================================"
+echo " DIAGNOSTIC-ONLY probe complete — exiting 1 intentionally"
+echo "================================================================"
+exit 1
+# ================== END DIAGNOSTIC-ONLY PROBE ===================
+
 #
 # Copyright © 2015 the original authors.
 #
