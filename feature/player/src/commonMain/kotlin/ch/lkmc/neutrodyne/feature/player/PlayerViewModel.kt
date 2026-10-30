@@ -55,7 +55,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
@@ -126,9 +125,8 @@ internal class PlayerViewModel(
                 settings.observe(AppearanceSettingKeys.PLAYER_TIME),
             ) { state, time -> state.copy(timeDisplay = time) }
             .combine(
-                queue.observeUpNext().catch {
+                queue.observeUpNext().retryPlayerRead(emptyList()) {
                     messages.post(UiText.Res(Res.string.player_read_failed))
-                    emit(emptyList())
                 },
             ) { state, next -> state.copy(upNextCount = next.count { it.row.id != state.now?.episodeId }) }
             .combine(messages.flow) { state, pending -> state.copy(messages = pending) }

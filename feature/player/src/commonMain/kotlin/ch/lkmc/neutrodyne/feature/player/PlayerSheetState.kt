@@ -31,11 +31,12 @@ internal class PlayerSheetState(
     public val drag: AnchoredDraggableState<PlayerSheetValue> = AnchoredDraggableState(initial)
     private var collapsedPx by mutableFloatStateOf(0f)
     private var backProgress by mutableStateOf<Float?>(null)
+    private var backStartProgress by mutableFloatStateOf(0f)
     private var dismissible: Boolean by mutableStateOf(false)
 
     public val progress: Float
         get() {
-            backProgress?.let { return 1f - it * BACK_PREVIEW_FRACTION }
+            backProgress?.let { return backStartProgress * (1f - it * BACK_PREVIEW_FRACTION) }
             val offset = drag.offset
             if (!offset.isFinite() || collapsedPx <= 0f) return if (isExpanded) 1f else 0f
             return (1f - offset / collapsedPx).coerceIn(0f, 1f)
@@ -81,10 +82,9 @@ internal class PlayerSheetState(
         value: PlayerSheetValue,
         motion: SheetMotion,
     ) {
-        backProgress?.let { preview ->
-            if (drag.offset.isFinite()) {
-                drag.dispatchRawDelta(collapsedPx * preview * BACK_PREVIEW_FRACTION - drag.offset)
-            }
+        if (backProgress != null && drag.offset.isFinite()) {
+            val previewOffset = collapsedPx * (1f - progress)
+            drag.dispatchRawDelta(previewOffset - drag.offset)
         }
         backProgress = null
         val spec: FiniteAnimationSpec<Float> = NeutrodyneMotion.spatial(motion == SheetMotion.IMMEDIATE)
@@ -92,6 +92,8 @@ internal class PlayerSheetState(
     }
 
     public fun previewBack(progress: Float) {
+        // A gesture may start mid-drag; it must not force full expansion.
+        if (backProgress == null) backStartProgress = this.progress
         backProgress = progress.coerceIn(0f, 1f)
     }
 

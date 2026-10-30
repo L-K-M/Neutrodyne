@@ -246,9 +246,20 @@ private fun ReadyRoot(
         if (key is TopLevelKey) navigation.selectTab(key) else navigation.push(key)
     }
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
+    var measuredContentBottomPx by remember { mutableFloatStateOf(0f) }
     var viewportBottomPx by remember { mutableFloatStateOf(0f) }
     val suiteState = rememberNavigationSuiteScaffoldState()
     val hideSuite = state.hasNowPlaying && expandedSettled && contentBottomPx > 0f
+    // Settling can admit a measurement without triggering another layout.
+    val dockBottomToCommit =
+        if ((!expandedSettled || contentBottomPx == 0f) && !suiteState.isAnimating &&
+            suiteState.currentValue == NavigationSuiteScaffoldValue.Visible
+        ) {
+            measuredContentBottomPx.takeIf { it > 0f }
+        } else {
+            null
+        }
+    SideEffect { dockBottomToCommit?.let { contentBottomPx = it } }
     val reducedMotion = LocalReducedMotion.current
     val focusManager = LocalFocusManager.current
     LaunchedEffect(hideSuite, reducedMotion, focusManager) {
@@ -397,12 +408,7 @@ private fun ReadyRoot(
                                     ).focusRequester(importContentFocus)
                                     .focusable()
                                     .onGloballyPositioned {
-                                        // Freeze the dock while hidden, including a restored expanded sheet's first frame.
-                                        if ((!expandedSettled || contentBottomPx == 0f) && !suiteState.isAnimating &&
-                                            suiteState.currentValue == NavigationSuiteScaffoldValue.Visible
-                                        ) {
-                                            contentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
-                                        }
+                                        measuredContentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
                                     },
                             ) {
                                 NeutrodyneNavHost(

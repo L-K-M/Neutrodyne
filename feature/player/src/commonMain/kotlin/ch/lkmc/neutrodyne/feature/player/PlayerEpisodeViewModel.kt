@@ -69,9 +69,8 @@ internal class PlayerEpisodeViewModel(
                 if (id == null) {
                     flowOf<EpisodeDetail?>(null)
                 } else {
-                    episodes.observeEpisode(id).catch {
+                    episodes.observeEpisode(id).retryPlayerRead(null) {
                         readFailed.value = true
-                        emit(null)
                     }
                 }
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)

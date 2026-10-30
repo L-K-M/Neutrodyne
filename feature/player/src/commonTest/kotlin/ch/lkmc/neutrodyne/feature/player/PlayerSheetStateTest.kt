@@ -31,6 +31,36 @@ class PlayerSheetStateTest {
             assertEquals(0.9f, state.progress)
         }
 
+    @Test fun predictivePreviewKeepsTheCurrentDragFraction() {
+        val state = PlayerSheetState(PlayerSheetValue.Expanded)
+        state.setAnchors(600f, 96f, SheetDismissal.ALLOWED)
+        state.drag.dispatchRawDelta(300f)
+        assertEquals(0.5f, state.progress)
+        state.previewBack(0f)
+        assertEquals(0.5f, state.progress)
+        state.previewBack(0.5f)
+        assertEquals(0.45f, state.progress)
+        state.cancelBack()
+        assertEquals(0.5f, state.progress)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun predictiveCommitFromPartialDragKeepsThePreviewOffset() =
+        runTest {
+            val state = PlayerSheetState(PlayerSheetValue.Expanded)
+            state.setAnchors(600f, 96f, SheetDismissal.ALLOWED)
+            state.drag.dispatchRawDelta(300f)
+            state.previewBack(0.5f)
+            val noFrames =
+                object : MonotonicFrameClock {
+                    override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = awaitCancellation()
+                }
+            backgroundScope.launch(noFrames) { state.commitBack() }
+            runCurrent()
+            assertEquals(0.45f, state.progress)
+        }
+
     @Test fun measuredAnchorsOnlyOfferDismissWhilePaused() {
         val state = PlayerSheetState()
         state.setAnchors(600f, 96f, SheetDismissal.ALLOWED)

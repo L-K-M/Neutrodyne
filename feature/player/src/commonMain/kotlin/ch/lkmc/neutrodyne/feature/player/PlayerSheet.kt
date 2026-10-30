@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.player
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
@@ -52,7 +53,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -802,7 +802,7 @@ private fun PlayerIssue(
     }
 }
 
-/** The frame clock schedules work; elapsedRealtime supplies the sample's time base, including sleep. */
+/** Honor the host animation policy; elapsedRealtime remains the time base, including sleep. */
 @Composable
 internal fun PlayerScrubber(
     snapshot: PositionSnapshot,
@@ -820,7 +820,7 @@ internal fun PlayerScrubber(
     LaunchedEffect(snapshot, positionAt) {
         displayed = positionAt(snapshot)
         if (snapshot.advancing) {
-            while (true) withFrameMillis { displayed = positionAt(snapshot) }
+            while (true) withInfiniteAnimationFrameMillis { displayed = positionAt(snapshot) }
         }
     }
     val duration = snapshot.durationMs?.takeIf { it > 0 }

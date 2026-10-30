@@ -161,10 +161,10 @@ Up next/Notes panels, Speed, persistent time display and shared policy/error
 handling. Failing-first fixes cover stale model/panel state, covered-content
 semantics, snackbar access, transient Back ownership, cancelled predictive
 Back and large-font geometry. After integrating #251/#252, split gates
-validate 1,695 relevant cases: 1,694 passes and one Windows-only DPAPI skip.
+validate 1,702 relevant cases: 1,701 passes and one Windows-only DPAPI skip.
 The combined run timed out; its incomplete reports are not proof. The
-replacement gates cover 278 playback, 1,272 domain/testing/data/API and 145
-player/root/episode/window/Android-host cases. Scoped 37-file lint, platform
+replacement gates cover 278 playback, 1,272 domain/testing/data/API and 152
+player/root/episode/window/Android-host cases. Scoped 39-file lint, platform
 test compilation and 18 CI-presence fixtures pass.
 
 Hosted stress captures exposed Android-only nonlinear font clipping despite
@@ -177,10 +177,18 @@ were rejected. Corrected references from
 [41008967659](https://github.com/L-K-M/Neutrodyne/actions/runs/41008967659),
 source `b370185d`, are inspected and applied: 24 player PNGs cover both
 platforms, light/dark, large-font RTL, panels and Speed. Verification-only
-checks pass all 24 images in 13 tests; recording stays disabled. Player CI
-and formal review remain pending. The real Play journey compiles but has not run.
-Non-release CI profiles require its receipt; the seven-case release smoke
-ABI is unchanged.
+checks pass all 24 images in 13 tests; recording stays disabled.
+
+[Player PR #253](https://github.com/L-K-M/Neutrodyne/pull/253) has one completed
+formal review. On `47110070`, [CI 41011165351](https://github.com/L-K-M/Neutrodyne/actions/runs/41011165351)
+passes five jobs but the real Play journey fails: API26 never idles after
+expansion; API36's misplaced mini player clips three navigation targets to
+40 dp. Local regressions/fixes honor the host animation policy and publish
+retained dock measurements after chrome settles. Review reds also prove
+permanent count/detail read loss and partial-drag Back jumps; recovery and
+relative previews now pass. Fresh device proof and the next formal round
+remain required. Non-release CI profiles require the journey; the seven-case
+release smoke ABI is unchanged.
 
 Buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251)
 merged as `e20a440f` after two review rounds. Local core/adapter suites pass
@@ -202,8 +210,9 @@ failure passed unchanged on both retries; a source-race explanation remains
 unconfirmed. A controlled [probe](https://github.com/L-K-M/Neutrodyne/actions/runs/41009762790)
 showed udev returning before access changed; synchronous permissions and an
 acceleration check passed. The player candidate now uses that preparation
-after emulator installation. Actual device execution is still required;
-the original failing VM's cause remains unconfirmed.
+after emulator installation; `47110070` passes preflight and boots devices.
+The Play-journey failures above still block delivery; the original failed
+VM's cause remains unconfirmed.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine

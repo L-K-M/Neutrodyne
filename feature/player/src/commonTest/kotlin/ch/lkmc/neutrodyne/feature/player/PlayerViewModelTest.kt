@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.player
 import androidx.lifecycle.ViewModelStore
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.SettingScope
@@ -29,7 +30,10 @@ import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -50,7 +54,10 @@ class PlayerViewModelTest : MainDispatcherTest() {
     private val queue = FakeQueueRepository()
     private val store = ViewModelStore()
 
-    private fun TestScope.model(repository: SettingsRepository = settings): PlayerViewModel {
+    private fun TestScope.model(
+        repository: SettingsRepository = settings,
+        queueRepository: QueueRepository = queue,
+    ): PlayerViewModel {
         val vm =
             PlayerViewModel(
                 controller,
@@ -58,7 +65,7 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 repository,
                 TestClock(),
                 FakePlatformInfo(PlatformKind.ANDROID),
-                queue,
+                queueRepository,
             )
         store.put("player", vm)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
@@ -116,6 +123,46 @@ class PlayerViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertEquals(2, vm.uiState.value.upNextCount)
             assertTrue(queue.requestedWindows.isEmpty())
+        }
+
+    @Test fun queueReadFailuresRecoverWithoutFreezingOtherStateOrFloodingMessages() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow()
+            queue.upNext.value = (1L..3L).map { UpNextItem(it, testEpisodeRow(it)) }
+            var subscriptions = 0
+            val recoveringQueue =
+                object : QueueRepository by queue {
+                    override fun observeUpNext(): Flow<List<UpNextItem>> =
+                        flow {
+                            if (++subscriptions <= 2) error("Queue read failed")
+                            emitAll(queue.observeUpNext())
+                        }
+                }
+            val vm = model(queueRepository = recoveringQueue)
+            runCurrent()
+            assertEquals(1, subscriptions)
+            assertEquals(
+                1L,
+                vm.uiState.value.now
+                    ?.episodeId,
+            )
+            assertEquals(1, vm.uiState.value.messages.size)
+
+            controller.state.nowPlaying.value = sampleNow(2)
+            runCurrent()
+            assertEquals(
+                2L,
+                vm.uiState.value.now
+                    ?.episodeId,
+            )
+            advanceUntilIdle()
+            assertEquals(2, vm.uiState.value.upNextCount)
+            assertEquals(3, subscriptions)
+            assertEquals(1, vm.uiState.value.messages.size)
+
+            queue.upNext.value = (3L..6L).map { UpNextItem(it, testEpisodeRow(it)) }
+            runCurrent()
+            assertEquals(4, vm.uiState.value.upNextCount)
         }
 
     @Test fun resumedCurrentCannotBeDismissedByAnEarlierSwipe() =

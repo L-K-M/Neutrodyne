@@ -137,6 +137,29 @@ class PlayerEpisodeViewModelTest : MainDispatcherTest() {
             assertFalse(vm.notes.value.loadFailed)
         }
 
+    @Test fun metadataReadFailureRecoversForTheSameEpisode() =
+        runTest {
+            episodes.episodes.value = mapOf(1L to testEpisodeDetail(1))
+            var subscriptions = 0
+            val repository =
+                object : EpisodeRepository by episodes {
+                    override fun observeEpisode(episodeId: Long): Flow<EpisodeDetail?> =
+                        flow {
+                            if (++subscriptions <= 2) error("Metadata read failed")
+                            emitAll(episodes.observeEpisode(episodeId))
+                        }
+                }
+            val vm = model(repository)
+            vm.displayEpisode(1)
+            runCurrent()
+            assertTrue(vm.readFailure.value)
+            vm.acknowledgeReadFailure()
+            advanceUntilIdle()
+            assertEquals(1L, vm.detail.value?.id)
+            assertEquals(3, subscriptions)
+            assertFalse(vm.readFailure.value)
+        }
+
     @Test fun metadataFailureDoesNotStopObservingLaterEpisodes() =
         runTest {
             episodes.episodes.value = mapOf(2L to testEpisodeDetail(2))
