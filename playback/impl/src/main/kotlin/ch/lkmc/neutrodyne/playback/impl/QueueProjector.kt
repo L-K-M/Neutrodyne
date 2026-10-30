@@ -14,6 +14,8 @@ import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
+import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.core.CurrentAction
 import ch.lkmc.neutrodyne.playback.core.PlaybackExit
 import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
@@ -25,6 +27,7 @@ import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowEntry
 import ch.lkmc.neutrodyne.playback.core.WindowOp
 import ch.lkmc.neutrodyne.playback.core.WindowPlayback
+import ch.lkmc.neutrodyne.playback.core.refusal
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -80,12 +83,31 @@ internal class QueueProjector(
     private var applying = false
     private var revision = 0L
     private var skipExit: PlaybackExit? = null
+    private var blockedAdvance: BlockedAdvance? = null
     private var ending: EndMarker? = null
     private var external: ExternalApply? = null
     private var externalTimeout: Job? = null
     private var latest: Input? = null
+
+    // Admission sees source changes even while the buffered projector waits for IO.
+    private var observedRevision: SessionRevision? = null
+    private var observedMedia = emptyMap<Long, PlaybackMediaInfo>()
     private var knownGeneration = 0L
     private var failedArrival: FailedArrival? = null
+
+    private data class BlockedAdvance(
+        val departureId: Long,
+        val playedAt: Long,
+        val pinStartedAt: Long,
+        val epoch: Long,
+        val sessionRevision: SessionRevision,
+    )
+
+    private data class AdvanceRead(
+        val playedAt: Long?,
+        val next: PlaybackMediaInfo?,
+        val sessionRevision: SessionRevision,
+    )
 
     private data class EndMarker(
         val epoch: Long,
@@ -125,6 +147,7 @@ internal class QueueProjector(
                         queue.observeSession(),
                         capabilities.capabilities.map { it.inAppPlayback }.distinctUntilChanged(),
                     ) { snapshot, session, _ ->
+                        observedRevision = snapshot.sessionRevision()
                         snapshot to session
                     }.flatMapLatest { (snapshot, session) ->
                         val ids =
@@ -132,6 +155,7 @@ internal class QueueProjector(
                                 .map { it.episodeId }
                                 .toSet()
                         lookup.observe(ids).map { media ->
+                            observedMedia = media
                             Input(snapshot, media, session?.context?.takeIf { it.type == ContextType.GROUP }?.id)
                         }
                     }.conflate()
@@ -432,6 +456,7 @@ internal class QueueProjector(
             tracker.currentSinceMs,
             live.currentPosition.coerceAtLeast(0),
             live.isPlaying,
+            playWhenReady = live.playWhenReady,
         )
     }
 
@@ -528,10 +553,91 @@ internal class QueueProjector(
     fun advance(exit: PlaybackExit = PlaybackExit.ERROR_SKIP) {
         val live = player ?: return
         if (!live.hasNextMediaItem()) return
-        if (!beforeAdvance(live.getMediaItemAt(live.nextMediaItemIndex))) return
+        if (!beforeAdvance(live.getMediaItemAt(live.nextMediaItemIndex))) {
+            // Retain user-mark intent, not error-recovery skips.
+            if (exit == PlaybackExit.MARKED_PLAYED) {
+                val id = live.episodeIdOrNull()
+                val playedAt = entries.firstOrNull { it.item.episodeId == id }?.media?.playedAt
+                if (player === live && id != null && playedAt != null) {
+                    blockedAdvance = BlockedAdvance(id, playedAt, tracker.currentSinceMs, eventEpoch, committedRevision)
+                }
+            }
+            return
+        }
+        blockedAdvance = null
         skipExit = exit
         live.seekToNextMediaItem()
     }
+
+    fun cancelBlockedAdvance() {
+        blockedAdvance = null
+    }
+
+    /** Resume the live next item without re-gating or reinstalling the marked departure. */
+    suspend fun tryResumeBlockedAdvance(check: (Long) -> PlayResult?): PlayResult? {
+        val pending = blockedAdvance ?: return null
+        if (applying || external != null) return PlayResult.ServiceUnavailable
+        val live = player
+        if (live == null || !isCurrentBlockedAdvance(pending, live)) {
+            blockedAdvance = null
+            return null
+        }
+        val nextMediaId = live.getMediaItemAt(live.nextMediaItemIndex).mediaId
+        val nextId = nextMediaId.removePrefix(EPISODE_ID_PREFIX).toLongOrNull() ?: return PlayResult.ServiceUnavailable
+        val read =
+            try {
+                withContext(io) {
+                    AdvanceRead(
+                        lookup.get(pending.departureId)?.playedAt,
+                        lookup.get(nextId),
+                        sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE).sessionRevision(),
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                reportFailure(failure)
+                return PlayResult.ServiceUnavailable
+            }
+        // Own-write brackets can defer a foreign projection; inspect its durable revision too.
+        if (!isCurrentBlockedAdvance(pending, live) || read.sessionRevision != pending.sessionRevision ||
+            live.getMediaItemAt(live.nextMediaItemIndex).mediaId != nextMediaId
+        ) {
+            if (blockedAdvance === pending) blockedAdvance = null
+            return PlayResult.ServiceUnavailable
+        }
+        val observedMark = observedMedia[pending.departureId]?.playedAt
+        if (read.playedAt == null || observedMark == null) {
+            blockedAdvance = null
+            return null
+        }
+        if (read.playedAt != pending.playedAt || observedMark != pending.playedAt) {
+            blockedAdvance = null
+            return PlayResult.ServiceUnavailable
+        }
+        val next = read.next
+        val observedNext = observedMedia[nextId]
+        if (next == null || observedNext == null) return PlayResult.NotPlayable(nextId, UnplayableReason.NoMedia)
+        val currentCapabilities = capabilities.capabilities.value
+        (next.refusal(currentCapabilities) ?: observedNext.refusal(currentCapabilities))?.let {
+            return PlayResult.NotPlayable(nextId, it)
+        }
+        check(nextId)?.let { return it }
+
+        blockedAdvance = null
+        skipExit = PlaybackExit.MARKED_PLAYED
+        live.seekToNextMediaItem()
+        return PlayResult.Started
+    }
+
+    private fun isCurrentBlockedAdvance(
+        pending: BlockedAdvance,
+        live: Player,
+    ): Boolean =
+        blockedAdvance === pending && !applying && external == null &&
+            pending.sessionRevision == committedRevision &&
+            observedRevision == pending.sessionRevision &&
+            live.hasNextMediaItem() && isCurrentArrival(live, pending.departureId, pending.pinStartedAt, pending.epoch)
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED && !applying && external == null) end(tracker.capture(PlaybackExit.END))
@@ -567,6 +673,7 @@ internal class QueueProjector(
     // Preserve consecutive native transitions, but invalidate frames from replaced windows.
     private fun bindSession(next: SessionRevision) {
         if (committedRevision == next) return
+        blockedAdvance = null
         committedRevision = next
         eventEpoch++
     }
@@ -637,6 +744,9 @@ internal class QueueProjector(
             it.removeListener(this)
         }
         player = null
+        blockedAdvance = null
+        observedRevision = null
+        observedMedia = emptyMap()
         observing?.cancel()
         observing = null
         externalTimeout?.cancel()
@@ -653,6 +763,7 @@ internal class QueueProjector(
         const val EXTERNAL_APPLY_TIMEOUT_MS = 2_000L
         const val WRITE_ATTEMPTS = 2
         const val TAG = "QueueProjector"
+        const val EPISODE_ID_PREFIX = "episode:"
     }
 }
 

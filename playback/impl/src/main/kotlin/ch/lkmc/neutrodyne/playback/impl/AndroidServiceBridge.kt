@@ -210,17 +210,25 @@ internal class AndroidServiceBridge(
     ): PlayResult {
         cancelPending()
         access.gate.clearPending()
-        if (request == StartRequest.Resume && boundaryPaused) {
-            boundaryRefusal(origin)?.let {
-                releaseReservation()
-                return it
-            }
-        }
+        if (request != StartRequest.Resume) projector.cancelBlockedAdvance()
         projector.beginOwnWrite()
         releaseReservation()
         var handedOff = false
         var generation: Long? = null
         try {
+            // Retry the refused mark before PlayStarter can re-gate its old current.
+            if (request == StartRequest.Resume && application == StartApplication.COMMAND) {
+                projector.tryResumeBlockedAdvance { streamingRefusal(it, origin) }?.let { result ->
+                    if (result == PlayResult.Started) {
+                        boundaryPaused = false
+                        serviceIssue = null
+                    }
+                    return result
+                }
+            }
+            if (request == StartRequest.Resume && boundaryPaused) {
+                boundaryRefusal(origin)?.let { return it }
+            }
             val outcome =
                 access.gate.withOrigin(origin) {
                     ports.starter.start(request, player.episodeIdOrNull()) { tracker.capture()?.departure }
@@ -321,12 +329,20 @@ internal class AndroidServiceBridge(
 
     override suspend fun beforePlay(origin: StartOrigin): Boolean =
         commands.withLock {
+            // Loaded-player media buttons reach this path without startLocked.
+            val advanced = projector.tryResumeBlockedAdvance { streamingRefusal(it, origin) }
+            if (advanced != null && advanced != PlayResult.Started) {
+                reportRefusal(advanced)
+                return@withLock false
+            }
+            if (advanced == PlayResult.Started) boundaryPaused = false
+
             val id = player.episodeIdOrNull() ?: return@withLock false
             val refusal =
                 if (boundaryPaused) {
                     boundaryRefusal(origin)
                 } else {
-                    access.gate.check(id, access.local.localUriOrNull(id) != null, origin)
+                    streamingRefusal(id, origin)
                 }
             if (refusal != null) {
                 reportRefusal(refusal)
@@ -349,6 +365,11 @@ internal class AndroidServiceBridge(
         issue(problem)
         access.hub.event(PlaybackEvent.StartRefused(result))
     }
+
+    private fun streamingRefusal(
+        episodeId: Long,
+        origin: StartOrigin,
+    ): PlayResult? = access.gate.check(episodeId, access.local.localUriOrNull(episodeId) != null, origin)
 
     private fun boundaryRefusal(origin: StartOrigin): PlayResult? {
         val next = player.nextMediaItemIndex
