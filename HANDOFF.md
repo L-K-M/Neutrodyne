@@ -172,10 +172,10 @@ fallbacks with the existing playback-intent ticket. A real-controller/binder
 test first reproduced an old store call clearing a newer start. Native set,
 resumption and loaded Play reproduced the same gap and now share tickets
 with client starts. The store rejects superseded work inside its transaction,
-without a new public controller API. Before integrating #251, local suites
-reported 1,432 passes, no failures/errors and one Windows-only DPAPI skip on
-Linux; app compilation and nine-file lint pass. Integrated checks, CI and
-formal review remain pending.
+without a new public controller API. Integrated domain/testing/data/playback
+suites report 1,548 passes, no failures/errors and one Windows-only DPAPI skip
+on Linux; app compilation and nine-file lint pass. CI and formal review
+remain pending.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine
