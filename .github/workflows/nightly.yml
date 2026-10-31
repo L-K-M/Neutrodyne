@@ -80,13 +80,15 @@ jobs:
       - name: GMD nightly group (debug)
         timeout-minutes: 90
         run: |
+          # One worker avoids queuing a device lease behind the 30-minute case.
+          readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
           if [ "${{ inputs.scope }}" = "youtube-smoke" ]; then
-            ./gradlew --max-workers=2 api36DebugAndroidTest \
+            ./gradlew --info "${GMD_LIMITS[@]}" api36DebugAndroidTest \
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
           else
-            ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
+            ./gradlew --info "${GMD_LIMITS[@]}" nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
