@@ -78,7 +78,7 @@ class SmokeTest {
         try {
             pressBack()
         } catch (failure: RuntimeException) {
-            // Capture the focus owner before teardown, without replacing the Back failure.
+            // Capture focus and ANR causes before teardown, without replacing the Back failure.
             runCatching(::recordWindowFocus).exceptionOrNull()?.let(failure::addSuppressed)
             throw failure
         }
@@ -138,10 +138,20 @@ class SmokeTest {
 
     private fun recordWindowFocus() {
         val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        for (service in listOf("window", "activity activities")) {
-            Log.e(FOCUS_EVIDENCE_TAG, "dumpsys $service")
+        // Per-test logcat omits boot and inter-test ANR records.
+        val commands =
+            listOf(
+                "dumpsys -t $FOCUS_DUMP_TIMEOUT_SECONDS window",
+                "dumpsys -t $FOCUS_DUMP_TIMEOUT_SECONDS activity activities",
+                "dumpsys -t $FOCUS_DUMP_TIMEOUT_SECONDS activity lastanr",
+                "dumpsys -t $FOCUS_DUMP_TIMEOUT_SECONDS dropbox --print system_app_anr",
+                "timeout $FOCUS_DUMP_TIMEOUT_SECONDS logcat -b events -d -v threadtime -s am_anr",
+            )
+
+        for (command in commands) {
+            Log.e(FOCUS_EVIDENCE_TAG, command)
             device
-                .executeShellCommand("dumpsys -t $FOCUS_DUMP_TIMEOUT_SECONDS $service")
+                .executeShellCommand(command)
                 .lineSequence()
                 .forEach { Log.e(FOCUS_EVIDENCE_TAG, it) }
         }

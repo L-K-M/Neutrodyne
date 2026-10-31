@@ -331,8 +331,9 @@ jobs:
         run: |
           ./gradlew assembleRelease
           sha256sum "$RELEASE_ABI_TARGET_APK" > "$RELEASE_ABI_TARGET_SHA"
+      # Preserve GMD boot and renderer details when SystemUI stalls.
       - name: api36 release smoke
-        run: ./gradlew -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true api36ReleaseAndroidTest
+        run: ./gradlew --info -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true api36ReleaseAndroidTest
       - name: Require unchanged published target APK
         run: |
           sha256sum "$RELEASE_ABI_TARGET_APK"
