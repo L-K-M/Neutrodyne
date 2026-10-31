@@ -30,9 +30,47 @@ import kotlin.test.assertTrue
 class PositionWriterTest {
     private val clock = TestClock(nowMs = 100)
     private val db = newDb(clock)
-    private val writer = PositionWriter(db)
+    private val writer = PositionWriter(db, clock)
 
     @AfterTest fun close() = db.close()
+
+    @Test fun measuredDurationEnsuresStateAndPreservesMarksPositionsQueueAndFeed() =
+        runTest {
+            val fresh = seed()
+            writer.setMeasuredDuration(fresh, 0)
+            writer.setMeasuredDuration(fresh, -1)
+            assertNull(db.episodeStateDao().byEpisode(fresh))
+            writer.setMeasuredDuration(9999, 5000)
+            writer.setMeasuredDuration(fresh, 5000)
+            assertEquals(5000, db.episodeStateDao().byEpisode(fresh)?.measuredDurationMs)
+            assertNull(db.positionDao().byEpisode(fresh))
+            val old =
+                EpisodeStateEntity(
+                    fresh,
+                    playedAt = 10,
+                    playCount = 2,
+                    startedAt = 5,
+                    lastPlayedAt = 9,
+                    isFavorite = true,
+                    measuredDurationMs = 5000,
+                    updatedAt = 50,
+                )
+            db.episodeStateDao().upsert(old)
+            db.positionDao().upsert(EpisodePositionEntity(fresh, 123, 4000, PositionSource.STREAM, 60))
+            db.queueDao().insert(QueueEntryEntity(episodeId = fresh, orderKey = "a0", addedAt = 60))
+            val position = db.positionDao().byEpisode(fresh)
+            val feed = db.episodeDao().byId(fresh)
+            writer.setMeasuredDuration(fresh, 6000)
+            assertEquals(old, db.episodeStateDao().byEpisode(fresh))
+            writer.setMeasuredDuration(fresh, 6001)
+            assertEquals(
+                old.copy(measuredDurationMs = 6001, updatedAt = clock.now()),
+                db.episodeStateDao().byEpisode(fresh),
+            )
+            assertEquals(position, db.positionDao().byEpisode(fresh))
+            assertEquals(feed, db.episodeDao().byId(fresh))
+            assertEquals(listOf(fresh), db.queueDao().queuedEpisodeIds())
+        }
 
     @Test fun positiveSaveStartsOnceAndPreservesUnknownDuration() =
         runTest {

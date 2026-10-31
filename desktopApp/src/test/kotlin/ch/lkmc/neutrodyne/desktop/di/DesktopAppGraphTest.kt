@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -102,6 +103,10 @@ class DesktopAppGraphTest {
             assertThat(graph.playbackMaintenance).isSameInstanceAs(graph.playbackController)
             assertThat(graph.playbackStateSource.nowPlaying.value).isNull()
             assertThat(graph.playbackStateSource.effectivePlayback.value).isNull()
+            assertThat(
+                graph.playbackStateSource.sleepTimer.value,
+            ).isEqualTo(SleepTimerState.Off)
+            assertThat(graph.playbackStateSource.currentChapter.value).isNull()
             assertThat(graph.playbackController.playEpisode(1)).isEqualTo(PlayResult.ServiceUnavailable)
             assertThat(graph.playbackController.playEpisodeAt(1, 20)).isEqualTo(PlayResult.ServiceUnavailable)
             assertThat(

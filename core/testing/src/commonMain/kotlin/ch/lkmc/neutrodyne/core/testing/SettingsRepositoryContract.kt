@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
@@ -200,6 +201,29 @@ abstract class SettingsRepositoryContract {
                     .associate { key -> key.name to repository.get(asAnyKey(key)) }
 
             assertEquals(expected, repository.observePortableSnapshot().first())
+        }
+
+    @Test fun m5DefaultsAndRoundTripsUsePortableKeys() =
+        runTest {
+            val repository = createRepository()
+            assertEquals(
+                HardwareButtons.EPISODE,
+                repository.get(PlaybackSettingKeys.HARDWARE_BUTTONS),
+            )
+            assertEquals(true, repository.get(PlaybackSettingKeys.SMART_RESUME))
+            assertEquals(30, repository.get(PlaybackSettingKeys.SLEEP_LAST_MINUTES))
+            repository.set(
+                PlaybackSettingKeys.HARDWARE_BUTTONS,
+                HardwareButtons.SKIP,
+            )
+            repository.set(PlaybackSettingKeys.SMART_RESUME, false)
+            repository.set(PlaybackSettingKeys.SLEEP_LAST_MINUTES, 240)
+            assertEquals(
+                HardwareButtons.SKIP,
+                repository.get(PlaybackSettingKeys.HARDWARE_BUTTONS),
+            )
+            assertEquals(false, repository.get(PlaybackSettingKeys.SMART_RESUME))
+            assertEquals(240, repository.get(PlaybackSettingKeys.SLEEP_LAST_MINUTES))
         }
 
     @Suppress("UNCHECKED_CAST")

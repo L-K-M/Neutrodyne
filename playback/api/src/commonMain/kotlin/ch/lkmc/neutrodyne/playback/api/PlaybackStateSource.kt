@@ -3,9 +3,11 @@ package ch.lkmc.neutrodyne.playback.api
 
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.PlayContextInfo
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.SourceType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +25,8 @@ interface PlaybackStateSource {
     /** Retained while awaiting a decision; clear on grant, replacement start or dismissal. */
     val pendingMeteredConsent: StateFlow<PlayResult.NeedsMeteredConsent?>
     val events: Flow<PlaybackEvent>
+    val sleepTimer: StateFlow<SleepTimerState>
+    val currentChapter: StateFlow<CurrentChapter?>
 }
 
 data class NowPlaying(
@@ -100,6 +104,8 @@ sealed interface UnplayableReason {
 }
 
 sealed interface PlaybackEvent {
+    data object SleepTimerFired : PlaybackEvent
+
     data class Skipped(
         val episodeId: Long,
         val title: String,

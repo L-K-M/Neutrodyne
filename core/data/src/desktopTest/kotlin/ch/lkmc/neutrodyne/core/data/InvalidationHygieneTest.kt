@@ -46,7 +46,7 @@ class InvalidationHygieneTest {
             val db = TestDb.inMemory(queryContext = StandardTestDispatcher(testScheduler))
             val counter = FeedInvalidationProbe.Counter(db, this, FeedSource.All)
             try {
-                val positions = PositionWriter(db)
+                val positions = PositionWriter(db, TestClock())
                 val sessions = SessionWriter(db, ProtocolOrderKeys, FakeYouTubeCapabilitiesSource())
                 val queue =
                     QueueRepositoryImpl(

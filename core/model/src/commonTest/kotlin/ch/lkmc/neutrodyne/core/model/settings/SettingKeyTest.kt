@@ -142,7 +142,7 @@ class SettingKeyTest {
      */
     @Test fun playbackKeysHaveDesignDefaultsAndSyncClassification() {
         val playbackKeys = PlaybackSettingKeys.ALL
-        assertEquals(8, playbackKeys.size)
+        assertEquals(11, playbackKeys.size)
         assertTrue(AllSettingKeys.list.containsAll(playbackKeys))
         val synced =
             setOf(
@@ -151,6 +151,8 @@ class SettingKeyTest {
                 "playback.speed_presets",
                 "playback.skip_back_ms",
                 "playback.skip_forward_ms",
+                "playback.smart_resume",
+                "playback.sleep_last_minutes",
             )
         for (key in playbackKeys) {
             assertEquals(SettingsFile.PORTABLE, key.file, key.name)

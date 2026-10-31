@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.database
 
 import androidx.room3.Embedded
+import androidx.room3.Relation
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -25,7 +26,7 @@ data class UpNextRow(
  * `episode_position`. `durationMs` is the effective value (`COALESCE(measured, feed)`);
  * `measuredDurationMs` the raw stored one (06 Measured duration's >1 s writeback check). The two
  * URL columns complete the `ArtworkRef`s (`:core:data` composes them; pinned-first resolution is
- * 08's artwork store). The alternate-enclosure columns of the reference SQL ship with M5.
+ * 08's artwork store). The M5 alternate relation is batched and read in the same transaction.
  */
 data class MediaLookupRow(
     val id: Long,
@@ -55,6 +56,9 @@ data class MediaLookupRow(
     val podcastArtworkKey: String,
     val podcastArtworkUrl: String?,
     val podcastArtworkVersion: Int,
+    /** Batched relation: JSON remains opaque in SQL; the mapper can try every ranked row. */
+    @Relation(parentColumns = ["id"], entityColumns = ["episodeId"])
+    val audioAlternates: List<EpisodeAltEnclosureEntity>,
 )
 
 /**

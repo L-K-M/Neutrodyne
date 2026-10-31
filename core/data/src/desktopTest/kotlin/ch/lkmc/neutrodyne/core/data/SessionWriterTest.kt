@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CancellationException
@@ -122,7 +123,7 @@ class SessionWriterTest {
     @Test fun startDeparturesUseTransitionPositionAndPlayedGuards() =
         runTest {
             val ids = seed(6)
-            val positions = PositionWriter(db)
+            val positions = PositionWriter(db, TestClock())
             positions.save(ids[0], 500, 1000, PositionSource.STREAM, 110, 100) { true }
             positions.markPlayed(ids[1], 120)
             queue(listOf(ids[2]))

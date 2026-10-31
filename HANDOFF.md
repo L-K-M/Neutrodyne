@@ -74,7 +74,7 @@ the named smoke XML and strict non-skipped API26/API36 seeded case. This does no
 approve a scheduled/tagged release, native dialogs/providers, physical devices
 or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/evidence/`.
 
-**Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37. The configured Chaquopy `buildPython` path for CPython 3.14 is currently unavailable; local Kotlin compilation does not prove Python bytecode compilation. Available host CPython is 3.11.2; record any fallback explicitly. Builds need `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`. Local software-emulator attempts have not supplied usable device evidence; run instrumented tests and Gradle Managed Devices in CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
+**Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37. The configured Chaquopy `buildPython` path now provides CPython 3.14.7. The M5 foundation's fresh debug Python asset task passes; both shim `.pyc` files in `app.imy` match its bytecode magic. Earlier Kotlin-only builds did not prove Python compilation; no fallback was used for this gate. Builds need `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`. Local software-emulator attempts have not supplied usable device evidence; run instrumented tests and Gradle Managed Devices in CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
 
 **Owner execution instructions, retain through compaction:**
 
@@ -140,6 +140,20 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 - #88 residual policy, owner-visible: a recycled `KNOWN_INDEPENDENT` GUID claims by authority; an episode returning without an enclosure to an unproven rotated slot duplicates.
 
 These are not blanket release approvals or completed work.
+
+### M5 foundation, integration in progress
+
+The first M5 slice ports only `129a1b56` onto current main, preserving M4's
+session revisions and playback-intent fences. It adds chapter/sleep contracts,
+recording fakes, validated hardware/smart-resume/sleep preferences,
+measured-duration writes and ranked audio-alternate metadata. Schema V2 and
+existing migrations remain unchanged. The timer, chapter loaders, hardware
+mapping, Auto/boot behavior and UI remain later slices; reserved commands are
+not advertised or active. Local gates pass 4,511 cases with three existing
+environment skips (Windows DPAPI and two native desktop picker cases), both
+Android instrumented-source compilations, formatting, module boundaries and
+documentation checks. No schema drift is generated. CI/review are pending;
+M4/M5 physical/manual acceptance remains open.
 
 ### M4 playback, P1–P8 merged, acceptance open
 
@@ -251,9 +265,20 @@ The full GMD profile now selects supported Lavapipe/ANGLE instead of deprecated
 `swiftshader_indirect`. API37 already selects that renderer through its
 unsupported guest-rendering fallback, not actual in-guest rendering. This
 changes the renderer implementation, not the entire gfxstream backend.
-The configuration fixture fails before the change and passes after it;
-fresh 200-case runtime/presence proof remains required. No unchanged retry
-or emulator fix is claimed.
+The configuration fixture fails before the change and passes after it.
+[#260](https://github.com/L-K-M/Neutrodyne/pull/260) merged as `2bb3a043`,
+tree-equal to reviewed `45f8fb2c`, after three review rounds without a
+confirmed important remainder. The
+[full branch nightly](https://github.com/L-K-M/Neutrodyne/actions/runs/41227175217)
+passes 200 actual debug cases without failures, errors or skips, including
+API34's 1,815.478-second screen-off case. All 48 reported renderer selections
+are Lavapipe/ANGLE. API36/API37 each pass seven optimized-release cases and
+real target-APK parity; API37 also passes 16 KB alignment. The GMD step takes
+59 minutes 2 seconds within the unchanged budget.
+[Main CI](https://github.com/L-K-M/Neutrodyne/actions/runs/41232513823)
+passes six jobs and 98 actual device cases. This verifies a renderer
+workaround, not an upstream fix or scheduled/tagged release acceptance.
+Physical/manual checks and the older SystemUI/SDK34 triggers remain open.
 
 **Earlier 2026-10-30 evidence.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)
