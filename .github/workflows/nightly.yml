@@ -82,6 +82,12 @@ jobs:
         run: |
           # One worker avoids queuing a device lease behind the 30-minute case.
           readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
+          # A later emulator launch deletes unconsented Crashpad reports.
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          python3 scripts/ci/preserve-emulator-crashes.py \
+            "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
+          readonly CRASH_PRESERVER_PID=$!
+          trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
           if [ "${{ inputs.scope }}" = "youtube-smoke" ]; then
             ./gradlew --info "${GMD_LIMITS[@]}" api36DebugAndroidTest \
               -Pneutrodyne.testScope=nightly \

@@ -231,8 +231,18 @@ expiring behind the real 30-minute case. Shell fixtures fail before either
 bound and pass after both are set in both scopes. This removes
 an overcommit risk, not a proven cause of the runner shutdown. All cases,
 renderers, playback duration and existing time budgets remain unchanged.
-Fresh complete runtime/presence proof is still required; no further unchanged
-retry of the interrupted candidate is planned.
+The serialized `76a64dde` run completes its GMD step in 59 minutes 21 seconds,
+within the unchanged budget, but has only 176 completed cases: API33 loses
+24 cases after its host emulator crashes. All completed cases pass, including
+API34's real 30-minute case (1,816.811 seconds). Multi-AVD overcommit does not explain
+this API33 crash reproduction. The host records a Crashpad
+report, then the next emulator launch deletes it for lack of upload consent.
+The logs' color-buffer warning also occurs on a passing API36 device, so it
+does not identify the crash cause. A scoped preserver now snapshots native
+minidumps before deletion into the existing artifact without enabling uploads.
+Fixtures reproduce deletion-before-retention, preserve bytes across cleanup
+and keep the original Gradle failure. Fresh complete runtime/presence proof
+and the native crash cause remain open; no unchanged retry is planned.
 
 **Earlier 2026-10-30 evidence.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)

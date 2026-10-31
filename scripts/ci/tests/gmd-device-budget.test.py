@@ -5,6 +5,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,8 +33,13 @@ def _nightly_script():
 
 class GmdDeviceBudgetTest(unittest.TestCase):
     def _run_scope(self, scope):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory(prefix="android-") as crashes:
             root = Path(directory)
+            runner = root / "runner"
+            runner.mkdir()
+            helper = root / "scripts/ci/preserve-emulator-crashes.py"
+            helper.parent.mkdir(parents=True)
+            shutil.copyfile(ROOT / "scripts/ci/preserve-emulator-crashes.py", helper)
             record = root / "arguments.json"
             gradle = root / "gradlew"
             gradle.write_text(
@@ -46,7 +52,12 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             result = subprocess.run(
                 ["bash", "-euo", "pipefail", "-c", _nightly_script().replace("${{ inputs.scope }}", scope)],
                 cwd=root,
-                env={**os.environ, "GMD_ARGUMENTS": str(record)},
+                env={
+                    **os.environ,
+                    "GMD_ARGUMENTS": str(record),
+                    "RUNNER_TEMP": str(runner),
+                    "USER": Path(crashes).name.removeprefix("android-"),
+                },
                 capture_output=True,
                 text=True,
                 timeout=10,
