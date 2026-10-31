@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-31.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243) and root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) are merged; buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251) and dismissal fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252) are merged. Native projection #255 and player #253 are merged. Last green main CI: `40a5086d`; the later `53f8ff37` device run failed two test oracles. M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-31.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243) and root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) are merged; buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251) and dismissal fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252) are merged. Native projection #255, player #253 and device-oracle repair #256 are merged. Compact transport #258 is merged. Last green main CI: `e90f83aa`, with 98 actual device cases and no failures, errors or skips. M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -157,18 +157,70 @@ passes five jobs but fails the device gate. Artifact `13022898095` has only
 and the artwork test's shared-server request count. This is not a complete
 98-case pass. No unchanged retry was requested.
 
-The focused oracle repair shares the state-based Home check with E3.
-The provider's HTTP guard moves to an isolated Android-host test with a
-real HTTP positive control; UI/audio can legitimately use the device
-server. Device checks retain the content URI, pinned pixels, missing-file
-fallback and native transport. The extra request's exact origin was not
-recorded; Coil is a hypothesis, not captured attribution. Local checks pass
-45 artwork Android-host cases, four-file lint, Android-test compilation and
-18 presence fixtures. An injected test-only HTTP request fails the new guard
-(1 versus 2); the mutation is removed. Exact-head device verification remains
-required. Release-ABI maintenance
-[#242](https://github.com/L-K-M/Neutrodyne/issues/242) is paused until this
-repair is reviewed and merged. Manual and nightly acceptance remain open.
+Oracle repair [#256](https://github.com/L-K-M/Neutrodyne/pull/256) merged as
+`3e3ed8d2` after one formal round; two optional diagnostics were deferred.
+[CI 41156682441](https://github.com/L-K-M/Neutrodyne/actions/runs/41156682441)
+passes all six jobs. Artifact `13025468378` proves 98 cases without failures,
+errors or skips, including E3 once per API26/36. Reviewed and merge trees match.
+The shared Home helper checks resulting state, not its accessibility receipt.
+The provider HTTP guard runs in an isolated host fixture; device URI, pixels,
+missing-file fallback and native transport checks remain. The old extra
+request's path was not recorded. Local checks pass 45 artwork host cases;
+a test-only HTTP leak trips the new guard and is removed before the final gate.
+
+Post-merge main [41158537934](https://github.com/L-K-M/Neutrodyne/actions/runs/41158537934)
+passes five jobs but fails eight API36 app cases. API26 passes; the remaining
+lanes did not run, so this is not 98-case evidence. Captured window dumps show
+`Application Not Responding: com.android.systemui` owning input focus above
+RESUMED MainActivity; E3/service hierarchies show the same system dialog.
+Its trigger remains unknown. No test auto-dismissal or weaker focus check was
+added. After diagnosis, one unchanged device-job retry passes. Artifact
+`13027621429` proves 98 cases without failures, errors or skips, E3 once per
+API26/36; all six main CI jobs pass. This is gate recovery, not a SystemUI
+bug fix. Manual and nightly acceptance remain open.
+
+Release-ABI maintenance [#242](https://github.com/L-K-M/Neutrodyne/issues/242)
+is a separate candidate. The new fast source check resolves actual AGP/R8
+inputs and reproduces focused tracing. It detected two missing lifecycle
+getter keeps; controlled regeneration adds only those exact members. The
+combined local dump/check, full formatting check, 23 driver fixtures and
+19 independent presence fixtures pass. Both release lanes compare target
+APK digests across normal/test-selected builds and archive the reference.
+PR [#257](https://github.com/L-K-M/Neutrodyne/pull/257) at `352dc1ba` passes
+all six CI jobs, with 98 actual device cases and no failures, errors or skips.
+Two formal rounds leave no confirmed important defect; optional nits stop.
+
+Its [full nightly](https://github.com/L-K-M/Neutrodyne/actions/runs/41164535852)
+passes six applicable jobs. Artifact `13029793180` proves 200 debug cases
+without failures, errors or skips, including API34's real screen-off case
+in 1,821.727 seconds. API36 passes all seven optimized-release cases and
+within-job normal/test-selected APK parity. Pinned-container reproducibility
+passes for all three APKs. Cross-job CI/API36 target digests differ; their
+content difference is uninvestigated because the nightly APK was not retained.
+This is not a claim of cross-job byte identity.
+
+API37 fails: its log explicitly reports KVM permission denied and
+`-accel off`. Boot takes 1,044 seconds; app XML has zero cases, then device
+property reads time out and the library suite reports Unknown API Level.
+The nightly setup now applies permissions directly to the existing KVM node,
+as CI already does, rather than trusting udev. Regression fixtures first fail
+for all eight nightly setups, then pass; denied chmod and failed accelerator
+probes remain failures. Nightly grants access before emulator installation,
+so it cannot invoke that binary in this step. No budgets or gates are weakened.
+Integrated `55cfbc17` passes all six CI jobs (98 actual device cases), four
+review rounds and 200 full-debug cases, including API34 screen-off playback
+in 1,823.962 seconds. API37 passes 36 debug and all seven optimized-release
+cases, actual target-APK parity and 16 KB alignment. The older SDK34
+snapshot-thread failure's cause remains unknown; this is recovery, not a fix.
+
+API36 release fails twice: Settings/Back loses focus to a captured SystemUI
+ANR dialog; the six other cases pass. The one justified unchanged retry is
+spent; parity and non-debuggable checks were not reached. Notification/shade
+actions follow the failure, but the stall trigger is still unknown. The
+failure hook now captures ActivityManager's last ANR, system-app DropBox
+stacks and ANR events; GMD `--info` preserves boot/renderer details. This is
+a diagnostic probe, not a claimed fix. No wait, gate, budget or optimization
+is weakened. Exact-head API36 seven-case/parity proof remains required.
 
 **Earlier 2026-10-30 evidence.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)

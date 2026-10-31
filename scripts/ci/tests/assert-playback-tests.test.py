@@ -20,7 +20,7 @@ RELEASE_SMOKE = {
         "licencesListsLibraries",
     ),
     "ch.lkmc.neutrodyne.YtxReleaseSmokeTest": ("selftestAnswersThroughYtxServiceInTheApp",),
-    gate.CLASS: ("notificationTransportAndLocalArtwork",),
+    "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest": ("notificationTransportAndLocalArtwork",),
 }
 
 
@@ -143,12 +143,17 @@ class PlaybackEvidenceTest(unittest.TestCase):
         self.release_suite("connected/release")
         gate.verify(self.root, "release", ["connected"])
 
-    def test_release_requires_the_full_seven_case_suite(self):
+    def test_release_smoke_abi_is_fixed(self):
         self.assertEqual(RELEASE_SMOKE, gate.RELEASE_SMOKE)
         self.assertEqual(7, sum(map(len, gate.RELEASE_SMOKE.values())))
-        self.release_suite("api36ReleaseAndroidTest", omit=("licencesListsLibraries",))
-        with self.assertRaises(ValueError):
-            gate.verify(self.root, "release", ["api36"])
+
+    def test_release_requires_the_full_seven_case_suite(self):
+        for names in RELEASE_SMOKE.values():
+            for name in names:
+                with self.subTest(case=name):
+                    self.release_suite("api36ReleaseAndroidTest", omit=(name,))
+                    with self.assertRaisesRegex(ValueError, name):
+                        gate.verify(self.root, "release", ["api36"])
         self.release_suite("api36ReleaseAndroidTest")
         gate.verify(self.root, "release", ["api36"])
 
