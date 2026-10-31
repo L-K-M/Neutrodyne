@@ -503,8 +503,9 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   substitute for release reports. The published app always retains this
   separately compiled client's exact ABI ([01 Instrumentation ABI repair](01-foundation.md#release-build-and-baseline-profiles));
   test-only app keeps or disabled optimization would test different bytes.
-  Compare target APK hashes with and without `testBuildType=release`, and run
-  the actual API36 and API37 release lanes before accepting a linkage repair.
+  Both release lanes compare target APK hashes across normal and
+  `testBuildType=release` builds and archive the reference digest. Run the
+  actual API36 and API37 release lanes before accepting a linkage repair.
   Fast assemble CI regenerates the focused ABI in check-only mode using
   [01's maintenance commands](01-foundation.md#release-build-and-baseline-profiles).
   Presence fixtures pin the literal seven cases and reject each omission

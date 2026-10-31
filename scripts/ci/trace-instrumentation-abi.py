@@ -4,6 +4,7 @@
 import argparse
 import difflib
 from enum import Enum
+from fnmatch import fnmatchcase
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -20,6 +21,7 @@ ZIP_UNIX_PLATFORM = 3
 CLASS_FILE_MODE = 0o100644
 LEGACY_JUNIT = ("junit/",)
 KEEP_RULE_PREFIX = "-keep "
+CLASS_KEEP_PREFIX = "-keep class "
 HEADER = """# SPDX-License-Identifier: Unlicense
 # Release instrumentation is a separately compiled client of the shipped APK.
 # Preserve its exact call surface in every build, not a test-only variant.
@@ -70,6 +72,20 @@ def _merge_classes(paths, output, excluded_prefixes=()):
     return len(classes)
 
 
+def _validate_analysis_roots(source):
+    """Reject stale roots that R8 would silently ignore."""
+    with ZipFile(source) as jar:
+        names = [name.removesuffix(".class").replace("/", ".")
+                 for name in jar.namelist() if name.endswith(".class")]
+    for line in ROOTS.read_text(encoding="utf-8").splitlines():
+        rule = line.strip()
+        if not rule.startswith(CLASS_KEEP_PREFIX):
+            continue
+        pattern = rule.removeprefix(CLASS_KEEP_PREFIX).split()[0]
+        if not any(fnmatchcase(name, pattern) for name in names):
+            raise ValueError(f"Analysis root matches no input classes: {pattern}; update {ROOTS}")
+
+
 def _load_inputs(path):
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -112,6 +128,7 @@ def _trace(data, directory):
     _merge_classes(data["target"], target)
     # Android supplies JUnit 3. Keep it library-only while shrinking the JUnit 4 roots.
     _merge_classes([source], focus_input, LEGACY_JUNIT)
+    _validate_analysis_roots(focus_input)
     java = [str(data["java"]), f"-Xmx{JVM_HEAP_MIB}m", "-Dfile.encoding=UTF-8",
             "-cp", str(data["r8Jar"])]
     libraries = [*data["boot"], *data["targetLibraries"], source]

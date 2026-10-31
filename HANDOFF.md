@@ -183,9 +183,10 @@ Release-ABI maintenance [#242](https://github.com/L-K-M/Neutrodyne/issues/242)
 is a separate candidate. The new fast source check resolves actual AGP/R8
 inputs and reproduces focused tracing. It detected two missing lifecycle
 getter keeps; controlled regeneration adds only those exact members. The
-combined local dump/check, full formatting check, 22 driver fixtures and
-19 independent presence fixtures pass. Actual seven-case API36/API37 release
-linkage and latest-head CI/review remain required.
+combined local dump/check, full formatting check, 23 driver fixtures and
+19 independent presence fixtures pass. Both release lanes now compare target
+APK digests across normal/test-selected builds and archive the reference.
+Actual seven-case API36/API37 linkage and latest-head CI/review remain required.
 
 **Earlier 2026-10-30 evidence.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)

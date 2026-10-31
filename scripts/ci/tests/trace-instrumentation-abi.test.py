@@ -65,6 +65,20 @@ SOURCE_ENTRIES = {
     "notes.txt": b"not-a-class",
 }
 
+ANALYSIS_ROOT_ENTRIES = {
+    name.replace(".", "/") + ".class": b"fixture:" + name.encode()
+    for name in (
+        "ch.lkmc.neutrodyne.NeutrodyneTestRunner",
+        "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
+        "androidx.test.runner.AndroidJUnitRunner",
+        "androidx.test.ext.junit.runners.AndroidJUnit4",
+        "org.junit.Test",
+        "kotlinx.coroutines.test.internal.ExceptionCollectorAsService",
+        "kotlinx.coroutines.test.internal.TestMainDispatcherFactory",
+    )
+}
+
+# shortcut: fake Java needs POSIX; add a Windows launcher before running this suite there.
 FAKE_JAVA = r'''
 import json
 import os
@@ -246,7 +260,7 @@ class CliTest(unittest.TestCase):
         self.target = self.root / "target.jar"
         write_jar(self.target, TARGET_ENTRIES)
         self.source = self.root / "instrumentation-classes"
-        write_tree(self.source, SOURCE_ENTRIES)
+        write_tree(self.source, SOURCE_ENTRIES | ANALYSIS_ROOT_ENTRIES)
         self.boot = self.root / "android.jar"
         write_jar(self.boot, {"android/app/Activity.class": cls("android.app.Activity"),
                               "android/os/Bundle.class": cls("android.os.Bundle")})
@@ -424,6 +438,21 @@ class CliTest(unittest.TestCase):
                               env_extra={"FAKE_R8_BODY": "# No target definitions\n"})
         self.assertEqual(EXPECTED, self.keep.read_text())
         self.assertNotEqual(0, result.returncode)
+
+    def test_missing_analysis_provider_root_preserves_the_baseline(self):
+        self.keep.write_text(EXPECTED)
+        for name in ("ExceptionCollectorAsService", "TestMainDispatcherFactory"):
+            with self.subTest(provider=name):
+                path = self.source / "kotlinx/coroutines/test/internal" / (name + ".class")
+                original = path.read_bytes()
+                path.unlink()
+                try:
+                    result = self.run_cli("--write", "--keep-file", str(self.keep))
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn(name, result.stdout + result.stderr)
+                    self.assertEqual(EXPECTED, self.keep.read_text())
+                finally:
+                    path.write_bytes(original)
 
     def test_mode_flags_are_required_and_mutually_exclusive(self):
         self.assertNotEqual(0, self.run_cli("--keep-file", str(self.keep)).returncode)
