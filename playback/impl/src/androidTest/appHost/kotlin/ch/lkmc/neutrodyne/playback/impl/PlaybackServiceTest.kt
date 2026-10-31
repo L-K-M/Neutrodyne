@@ -483,8 +483,21 @@ class PlaybackServiceTest {
 
     private suspend fun backgroundHost() {
         val host = checkNotNull(scenario)
-        check(device.pressHome()) { "The full-image launcher could not be opened" }
-        await { host.state == Lifecycle.State.CREATED }
+        lateinit var existing: MainActivity
+        host.onActivity { existing = it }
+        check(
+            withContext(Dispatchers.Main) { existing.lifecycle.currentState == Lifecycle.State.RESUMED } &&
+                device.currentPackageName == app.packageName,
+        ) { "The host must be foreground before Home" }
+
+        // pressHome reports a content-event acknowledgement, not the Activity's resulting state.
+        val eventObserved = device.pressHome()
+        logEvidence("home-event", "windowContentChanged=$eventObserved")
+        await {
+            val foreground = device.currentPackageName
+            withContext(Dispatchers.Main) { existing.lifecycle.currentState == Lifecycle.State.CREATED } &&
+                !foreground.isNullOrEmpty() && foreground != app.packageName
+        }
         logEvidence("background-state", stateSnapshot())
     }
 

@@ -179,8 +179,8 @@ source `b370185d`, are inspected and applied: 24 player PNGs cover both
 platforms, light/dark, large-font RTL, panels and Speed. Verification-only
 checks pass all 24 images in 13 tests; recording stays disabled.
 
-[Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) has four completed
-formal rounds. R2–R4 found no verified important defect; optional nits stop. On `47110070`, the real journey failed API26 idleness and
+[Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) has five completed
+formal rounds. R2–R5 found no verified important defect; optional nits stop. On `47110070`, the real journey failed API26 idleness and
 API36 navigation-target occlusion. The policy-aware frame loop and retained
 dock measurement fix both: [CI 41024179011](https://github.com/L-K-M/Neutrodyne/actions/runs/41024179011)
 at `f5af9950` proves 98 device passes, including the real Play journey once
@@ -216,6 +216,17 @@ Activity identity. No Activity recreation, policy relaxation or larger
 budget is used. Compilation passes; fresh exact-head device proof remains
 required.
 The earlier Licences cause is still unproven.
+
+[CI 41145890602](https://github.com/L-K-M/Neutrodyne/actions/runs/41145890602)
+at `d27d87e5` passes unit and API36 service recreation, including retained
+host identity. API26 fails earlier: Home stopped the host and displayed
+Launcher3, but UiAutomator missed its one-second content-event acknowledgement.
+UiAutomator 2.4.0 source confirms that acknowledgement determines its Boolean,
+not the resulting Activity state. The fixture retains the real Home press,
+logs its acknowledgement and requires a foreground-to-stopped/background
+transition. Those state checks replace the incorrect event-ack assertion;
+a missing acknowledgement stays visible. No retry or longer timeout is
+added. The complete 98-case gate remains pending.
 
 Buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251)
 merged as `e20a440f` after two review rounds. Local core/adapter suites pass
