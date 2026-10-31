@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github/workflows/nightly.yml"
 DEVICE_PROPERTY = "android.experimental.testOptions.managedDevices.maxConcurrentDevices"
 DEVICE_ARGUMENT = f"-P{DEVICE_PROPERTY}=1"
+GPU_PROPERTY = "android.testoptions.manageddevices.emulator.gpu"
 
 
 def _nightly_script():
@@ -77,6 +78,11 @@ class GmdDeviceBudgetTest(unittest.TestCase):
         self.assertIn("nightlyGroupDebugAndroidTest", arguments)
         self.assertIn("nightlyGroupAndroidDeviceTest", arguments)
         self.assertIn("-Pneutrodyne.testScope=nightly", arguments)
+
+    def test_full_uses_the_alternate_software_renderer(self):
+        arguments = self._run_scope("full")
+        renderers = [arg for arg in arguments if arg.startswith(f"-P{GPU_PROPERTY}=")]
+        self.assertEqual(renderers, [f"-P{GPU_PROPERTY}=lavapipe"], "Do not restore the crashing legacy renderer")
 
     def test_youtube_smoke_bounds_active_devices(self):
         arguments = self._run_scope("youtube-smoke")

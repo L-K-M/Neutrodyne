@@ -230,7 +230,7 @@ details. One worker prevents another task's ten-minute device-lock wait from
 expiring behind the real 30-minute case. Shell fixtures fail before either
 bound and pass after both are set in both scopes. This removes
 an overcommit risk, not a proven cause of the runner shutdown. All cases,
-renderers, playback duration and existing time budgets remain unchanged.
+playback duration and existing time budgets remain unchanged.
 The serialized `76a64dde` run completes its GMD step in 59 minutes 21 seconds,
 within the unchanged budget, but has only 176 completed cases: API33 loses
 24 cases after its host emulator crashes. All completed cases pass, including
@@ -241,8 +241,19 @@ The logs' color-buffer warning also occurs on a passing API36 device, so it
 does not identify the crash cause. A scoped preserver now snapshots native
 minidumps before deletion into the existing artifact without enabling uploads.
 Fixtures reproduce deletion-before-retention, preserve bytes across cleanup
-and keep the original Gradle failure. Fresh complete runtime/presence proof
-and the native crash cause remain open; no unchanged retry is planned.
+and keep the original Gradle failure.
+
+The `ebf544d5` capture retains the 763,968-byte host dump in artifact
+`13051795420`: 189 completed cases pass, but API33 still loses 11 cases.
+The matching emulator 37.2.13 binary confirms a null-pointer read at `0x28`
+in `libgfxstream_backend.so`; the upstream trigger remains unknown.
+The full GMD profile now selects supported Lavapipe/ANGLE instead of deprecated
+`swiftshader_indirect`. API37 already selects that renderer through its
+unsupported guest-rendering fallback, not actual in-guest rendering. This
+changes the renderer implementation, not the entire gfxstream backend.
+The configuration fixture fails before the change and passes after it;
+fresh 200-case runtime/presence proof remains required. No unchanged retry
+or emulator fix is claimed.
 
 **Earlier 2026-10-30 evidence.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)

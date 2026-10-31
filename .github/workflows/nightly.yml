@@ -94,10 +94,11 @@ jobs:
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
           else
+            # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
             ./gradlew --info "${GMD_LIMITS[@]}" nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
-              -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+              -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe
           fi
       - name: Require short playback and the API 34 screen-off case
         if: inputs.scope != 'youtube-smoke'
