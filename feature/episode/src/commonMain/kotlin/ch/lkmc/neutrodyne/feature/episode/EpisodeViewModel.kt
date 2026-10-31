@@ -19,7 +19,6 @@ import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
-import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.PlaybackActions
@@ -32,6 +31,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.core.ui.showNotesImageMode
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.Assisted
@@ -125,7 +125,7 @@ public class EpisodeViewModel
                     notes = notes,
                     loaded = true,
                     offline = !net.isConnected,
-                    imageMode = imageMode(images, net.isMetered),
+                    imageMode = showNotesImageMode(images, net.isMetered),
                     messages = messages,
                 )
             }
@@ -264,24 +264,5 @@ public class EpisodeViewModel
         private companion object {
             const val TAG = "EpisodeViewModel"
             val SHARING = SharingStarted.WhileSubscribed(5_000)
-        }
-    }
-
-/** `feeds.show_notes_images` + metered → the renderer's three modes (03 Images and links, PO-21). */
-private fun imageMode(
-    setting: ShowNotesImages,
-    metered: Boolean,
-): ShowNotesImageMode =
-    when (setting) {
-        ShowNotesImages.ALWAYS -> {
-            ShowNotesImageMode.SHOWN
-        }
-
-        ShowNotesImages.TAP_TO_LOAD -> {
-            ShowNotesImageMode.TAP_TO_LOAD
-        }
-
-        ShowNotesImages.WIFI_ONLY -> {
-            if (metered) ShowNotesImageMode.BLOCKED else ShowNotesImageMode.SHOWN
         }
     }

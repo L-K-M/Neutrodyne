@@ -1,0 +1,10 @@
+<resources>
+    <string name="player_notes">Beschreibung</string>
+    <string name="player_notes_empty">Keine Beschreibung für diese Folge.</string>
+    <string name="player_read_failed">Diese Folge konnte nicht geladen werden</string>
+    <string name="player_queue_count">Als Nächstes (%1$d)</string>
+    <string name="player_expand_panel">Player-Tabs aufklappen</string>
+    <string name="player_collapse_panel">Player-Tabs einklappen</string>
+    <string name="player_time_total">Gesamtzeit anzeigen</string>
+    <string name="player_time_remaining">Restzeit anzeigen</string>
+</resources>

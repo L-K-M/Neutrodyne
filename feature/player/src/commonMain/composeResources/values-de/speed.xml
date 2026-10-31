@@ -1,0 +1,24 @@
+<resources>
+    <string name="speed_title">Wiedergabegeschwindigkeit</string>
+    <string name="speed_value">%1$s×</string>
+    <string name="speed_presets_edit">Vorlagen bearbeiten</string>
+    <string name="speed_presets_title">Geschwindigkeitsvorlagen</string>
+    <string name="speed_presets_field">Geschwindigkeiten, durch Kommas getrennt</string>
+    <string name="speed_presets_invalid">2–8 Geschwindigkeiten von 0.5 bis 3.0 in 0.05er-Schritten eingeben (Dezimalpunkt)</string>
+    <string name="speed_decrease">Geschwindigkeit verringern</string>
+    <string name="speed_increase">Geschwindigkeit erhöhen</string>
+    <string name="speed_skip_silence">Stille überspringen</string>
+    <string name="speed_apply_to">Anwenden auf</string>
+    <string name="speed_scope_podcast">Diesen Podcast</string>
+    <string name="speed_scope_group">Gruppe '%1$s'</string>
+    <string name="speed_scope_group_any">Gruppe</string>
+    <string name="speed_scope_all">Alle</string>
+    <string name="speed_scope_group_unavailable">Nur bei Wiedergabe aus einer Gruppe</string>
+    <string name="speed_nothing_playing">Keine Wiedergabe</string>
+    <string name="speed_warning_title">Auf einen größeren Bereich anwenden?</string>
+    <string name="speed_warning_podcast_speed">Damit wird auch die eigene Geschwindigkeit dieses Podcasts (%1$s) entfernt.</string>
+    <string name="speed_warning_group_speed">Damit wird auch die für Gruppe '%1$s' festgelegte Geschwindigkeit (%2$s) entfernt.</string>
+    <string name="speed_warning_podcast_silence">Damit wird auch die eigene Einstellung „Stille überspringen“ dieses Podcasts entfernt.</string>
+    <string name="speed_warning_group_silence">Damit wird auch die Einstellung „Stille überspringen“ der Gruppe '%1$s' entfernt.</string>
+    <string name="speed_apply">Anwenden</string>
+</resources>

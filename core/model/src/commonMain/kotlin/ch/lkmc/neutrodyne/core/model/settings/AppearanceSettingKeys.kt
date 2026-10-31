@@ -77,6 +77,13 @@ public object AppearanceSettingKeys {
     /** Mini player › optional forward-skip control (08 Player sheet, M4). */
     public val MINI_PLAYER_SKIP = SettingKey.Bool("appearance.mini_player_skip", true)
 
+    public val PLAYER_TIME: SettingKey.Choice<PlayerTimeDisplay> =
+        SettingKey.Choice(
+            name = "appearance.player_time",
+            default = PlayerTimeDisplay.REMAINING,
+            values = persistentListOf(PlayerTimeDisplay.REMAINING, PlayerTimeDisplay.TOTAL),
+        )
+
     public val ALL: List<SettingKey<*>> =
         listOf(
             THEME,
@@ -90,5 +97,6 @@ public object AppearanceSettingKeys {
             LIBRARY_GROUP_FILTER,
             LIBRARY_SEGMENT,
             MINI_PLAYER_SKIP,
+            PLAYER_TIME,
         )
 }

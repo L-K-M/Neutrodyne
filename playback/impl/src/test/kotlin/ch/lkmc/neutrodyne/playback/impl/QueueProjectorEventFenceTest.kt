@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -182,12 +183,13 @@ class QueueProjectorEventFenceTest {
         val completed = CompletableDeferred<Unit>()
         val reached = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
+        val projection = CoroutineName("held explicit start")
         lateinit var lookup: GatedLookup
         val f =
             AdapterFixture(
                 this,
                 sessionStore = { SignallingSessions(it, completed) },
-                mediaLookup = { real -> GatedLookup(real).also { lookup = it } },
+                mediaLookup = { real -> GatedLookup(real, projection).also { lookup = it } },
             )
         var applying: Deferred<Unit>? = null
         try {
@@ -210,7 +212,7 @@ class QueueProjectorEventFenceTest {
                 reached.complete(Unit)
                 release.await()
             }
-            applying = async { f.projector.applyStart(StartOutcome.Committed(snapshot, 0)) }
+            applying = async(projection) { f.projector.applyStart(StartOutcome.Committed(snapshot, 0)) }
             awaitAdapter("New start did not reach the projection barrier") { reached.isCompleted }
 
             when (event) {

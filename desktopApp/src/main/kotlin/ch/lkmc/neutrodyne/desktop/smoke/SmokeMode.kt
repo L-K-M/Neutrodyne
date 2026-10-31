@@ -208,6 +208,8 @@ internal class SmokeMode(
                         installers = graph.entryInstallers,
                         menuActions = menuActions,
                         viewModelFactory = graph.metroViewModelFactory,
+                        playbackController = graph.playbackController,
+                        playbackState = graph.playbackStateSource,
                         startup =
                             graph.databaseOpener.openState.value
                                 .toGateState(),

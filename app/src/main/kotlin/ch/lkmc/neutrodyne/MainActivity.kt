@@ -47,8 +47,11 @@ import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupFailure
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
+import ch.lkmc.neutrodyne.core.ui.root.dispatchPlaybackKey
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
+import ch.lkmc.neutrodyne.feature.player.PlayerRoute
+import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -60,8 +63,8 @@ import kotlin.time.Duration.Companion.seconds
  * The one launcher activity (01 Application element and components): AppCompat for per-app language, the system
  * splash, edge-to-edge, then the shared [NeutrodyneRoot]. The start-up gate renders
  * `DatabaseOpener.openState` (01 Splash and start-up gate): "Try again" re-runs `awaitOpen()` (a
- * failed result is never cached), "Manage storage" opens `ACTION_INTERNAL_STORAGE_SETTINGS`; playback,
- * notices and sync wire their state in later milestones.
+ * failed result is never cached), "Manage storage" opens `ACTION_INTERNAL_STORAGE_SETTINGS`.
+ * Player state observation does not bind or start the playback service.
  */
 class MainActivity : AppCompatActivity() {
     /** `appearance.*` once the settings file has emitted; null until then (08 App scheme). */
@@ -88,6 +91,7 @@ class MainActivity : AppCompatActivity() {
         setContent {
             val opener = graph.databaseOpener
             val openState by opener.openState.collectAsStateWithLifecycle()
+            val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
 
             val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
             CompositionLocalProvider(
@@ -100,7 +104,7 @@ class MainActivity : AppCompatActivity() {
                 LocalMetroViewModelFactory provides graph.metroViewModelFactory,
             ) {
                 NeutrodyneRoot(
-                    state = ROOT_STATE_BASE.copy(startup = openState.toGateState()),
+                    state = ROOT_STATE_BASE.copy(startup = openState.toGateState(), hasNowPlaying = nowPlaying != null),
                     actions =
                         RootActions(
                             selectFeedSource = { uuid ->
@@ -115,14 +119,20 @@ class MainActivity : AppCompatActivity() {
                             dismissNotice = {},
                             continueHere = {},
                             dismissRemoteSession = {},
-                            playbackKey = { false },
+                            playbackKey = { key ->
+                                dispatchPlaybackKey(
+                                    key,
+                                    graph.playbackController,
+                                    graph.playbackStateSource.nowPlaying.value,
+                                )
+                            },
                             manageStorage = {
                                 // 01 deviation: the SDK's storage-settings action is
                                 // INTERNAL_STORAGE_SETTINGS (docs say ACTION_MANAGE_STORAGE).
                                 startActivity(Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS))
                             },
                         ),
-                    slots = M0_ROOT_SLOTS,
+                    slots = ROOT_SLOTS,
                     routes = routing.routes,
                     installers = graph.entryInstallers,
                     prefs = appearance.value ?: AppearancePrefs(),
@@ -182,13 +192,13 @@ class MainActivity : AppCompatActivity() {
         /** 01 Application start-up: the settings wait never blocks the splash past 1 s. */
         val PREFS_GATE_TIMEOUT = 1.seconds
 
-        /** Everything below `startup` is still the M0 default (playback, notices, sync later). */
+        /** Notices and remote sessions stay at their defaults until their milestones. */
         val ROOT_STATE_BASE = RootUiState.READY
 
-        /** No player (M4) and no user messages yet. */
-        val M0_ROOT_SLOTS =
+        /** Player and import UI resolve only after the root's database gate opens. */
+        val ROOT_SLOTS =
             RootSlots(
-                player = {},
+                player = { slot -> PlayerRoute(slot, upNext = { PlayerUpNextRoute(slot.navigate) }) },
                 userMessages = emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },
             )

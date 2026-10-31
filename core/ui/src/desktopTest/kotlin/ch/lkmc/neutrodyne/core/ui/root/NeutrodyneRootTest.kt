@@ -2,12 +2,18 @@
 
 package ch.lkmc.neutrodyne.core.ui.root
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -20,8 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.isDisplayed
@@ -32,6 +40,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
@@ -202,6 +211,87 @@ class NeutrodyneRootTest {
                 kotlin.test.assertNotNull(root)
                 kotlin.test.assertSame(expectedBack, back)
                 kotlin.test.assertSame(root, actual)
+            }
+        }
+
+    @Test
+    fun expandedPlayerHidesUnderlyingContentSemantics() =
+        runDesktopComposeUiTest(width = 400, height = 800) {
+            var expanded by mutableStateOf(false)
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(player = {
+                            SideEffect { it.onExpandedSettled(expanded) }
+                            if (expanded) Text("full-player")
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            onNodeWithText("open-podcast").assertIsDisplayed()
+            runOnIdle { expanded = true }
+            onNodeWithText("full-player").assertIsDisplayed()
+            onNodeWithText("open-podcast").assertDoesNotExist()
+            runOnIdle { expanded = false }
+            onNodeWithText("open-podcast").assertIsDisplayed()
+        }
+
+    @Test
+    fun expandedPlayerReleasesUnderlyingKeyboardFocus() =
+        runDesktopComposeUiTest(width = 400, height = 800) {
+            var expanded by mutableStateOf(false)
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(player = {
+                            SideEffect { it.onExpandedSettled(expanded) }
+                            if (expanded) Text("full-player")
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            onNodeWithText("open-podcast").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            runOnIdle { expanded = true }
+            onNodeWithText("full-player").assertIsDisplayed()
+            onNodeWithTag("root-box").performKeyInput {
+                keyDown(Key.Enter)
+                keyUp(Key.Enter)
+            }
+            runOnIdle { expanded = false }
+            onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("open-podcast").assertIsDisplayed()
+        }
+
+    @Test
+    fun snackbarActionRemainsAboveTheExpandedPlayer() =
+        runDesktopComposeUiTest(width = 400, height = 800) {
+            var result: SnackbarResult? = null
+            var playerClicks = 0
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(player = {
+                            SideEffect { it.onExpandedSettled(true) }
+                            val host = LocalSnackbarHost.current
+                            LaunchedEffect(host) {
+                                result =
+                                    host.showSnackbar(
+                                        "Player error",
+                                        "Retry",
+                                        duration = SnackbarDuration.Indefinite,
+                                    )
+                            }
+                            Box(Modifier.fillMaxSize().clickable { playerClicks++ }) { Text("full-player") }
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            onAllNodesWithText("Player error").assertCountEquals(1)
+            // Send a real pointer event; a semantics click would bypass an obscuring player.
+            onNodeWithText("Retry").performTouchInput { click() }
+            runOnIdle {
+                kotlin.test.assertEquals(SnackbarResult.ActionPerformed, result)
+                kotlin.test.assertEquals(0, playerClicks)
             }
         }
 

@@ -1,6 +1,6 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-29.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243), root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) and playback safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251) are merged. P8 player UI is a candidate; M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-30.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3's source and scripted API31/36 backup gate are merged through #218 and #223; other acceptance evidence remains listed below. M4's first five slices are merged through #222, #224, #225, #228 and #230; P6's Android service/lifecycle source is merged through [#231](https://github.com/L-K-M/Neutrodyne/pull/231) and [#232](https://github.com/L-K-M/Neutrodyne/pull/232). The test-clock repair [#240](https://github.com/L-K-M/Neutrodyne/pull/240) and release-linkage repair [#241](https://github.com/L-K-M/Neutrodyne/pull/241) are merged. Controller authentication [#244](https://github.com/L-K-M/Neutrodyne/pull/244), playback safety [#245](https://github.com/L-K-M/Neutrodyne/pull/245) and hosted recording [#246](https://github.com/L-K-M/Neutrodyne/pull/246) are merged. P7 queue UI [#243](https://github.com/L-K-M/Neutrodyne/pull/243) and root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) are merged; buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251) and dismissal fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252) are merged. Last verified main CI: `e20a440f`. P8 player UI is a local candidate; M4 acceptance remains open. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 **Helper policy (2026-10-20):** Prefer Devin `swe-2-max`, then prepaid Xiaomi
 MiMo, and cheap Junie tiers for small tasks. Use Z.ai helpers only after
@@ -143,7 +143,7 @@ These are not blanket release approvals or completed work.
 
 ### M4 playback, P1–P7 merged, P8 in progress
 
-**2026-10-29 checkpoint.** P7 #243 merged as `a6a2f555` after two review
+**2026-10-30 checkpoint.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)
 passes all six jobs after an unchanged runner retry. Downloaded XML confirms
 96 device cases without failures, errors or skips. Final-head full-debug
@@ -154,39 +154,114 @@ Root scaffolding [#250](https://github.com/L-K-M/Neutrodyne/pull/250) merged
 as `ceb3e487` after two minor-only review rounds.
 [Main CI 40960233783](https://github.com/L-K-M/Neutrodyne/actions/runs/40960233783)
 passes all six jobs. Reviewed-head XML confirms 96 device cases, no failures
-or skips. [Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) remains
-unmerged at `f5af9950`, after two formal rounds. Its 24 hosted references
-pass verification. [CI 41024179011](https://github.com/L-K-M/Neutrodyne/actions/runs/41024179011)
-passes five jobs and proves 98 device passes, including the real Play journey
-on API26/36. Unit repeats main's first-arrival latch failure; no unchanged
-retry is claimed as a fix.
+or skips.
 
-Buffering/refused-advance fixes
-[#251](https://github.com/L-K-M/Neutrodyne/pull/251) merged as `e20a440f`
-after two review rounds with no verified important finding.
-[PR CI 40977054846](https://github.com/L-K-M/Neutrodyne/actions/runs/40977054846)
-passes all six jobs after an unchanged device-run retry. The exact latest
-artifact proves 96 device cases, no failures/errors/skips. Local core/adapter
-suites pass 274 cases. [Main CI 40983471054](https://github.com/L-K-M/Neutrodyne/actions/runs/40983471054)
+The player candidate on `impl/m4-p8-player-ui` supplies mini/full transport,
+Up next/Notes panels, Speed, persistent time display and shared policy/error
+handling. Failing-first fixes cover stale model/panel state, covered-content
+semantics, snackbar access, transient Back ownership, cancelled predictive
+Back and large-font geometry. After #255 integration, split gates cover
+1,707 cases: 1,706 passes and one Windows-only DPAPI skip. UI/native gates
+cover 435 cases, including 283 freshly rerun core/adapter cases; unchanged
+domain/testing/data/API gates cover 1,272. Scoped 45-file lint, platform
+compilation and 18 presence fixtures pass.
+Earlier interrupted reports are not proof.
+
+Hosted stress captures exposed Android-only nonlinear font clipping despite
+desktop checks. A real SDK36 Robolectric regression failed `22 < 32` for the
+context line. Measuring actual text instead of converting line-height sp
+fixes it; Android-host and desktop regressions pass. Stress references from
+[40975400402](https://github.com/L-K-M/Neutrodyne/actions/runs/40975400402)
+and [40990941348](https://github.com/L-K-M/Neutrodyne/actions/runs/40990941348)
+were rejected. Corrected references from
+[41008967659](https://github.com/L-K-M/Neutrodyne/actions/runs/41008967659),
+source `b370185d`, are inspected and applied: 24 player PNGs cover both
+platforms, light/dark, large-font RTL, panels and Speed. Verification-only
+checks pass all 24 images in 13 tests; recording stays disabled.
+
+[Player #253](https://github.com/L-K-M/Neutrodyne/pull/253) has five completed
+formal rounds. R2–R5 found no verified important defect; optional nits stop. On `47110070`, the real journey failed API26 idleness and
+API36 navigation-target occlusion. The policy-aware frame loop and retained
+dock measurement fix both: [CI 41024179011](https://github.com/L-K-M/Neutrodyne/actions/runs/41024179011)
+at `f5af9950` proves 98 device passes, including the real Play journey once
+on API26/36. Its unchanged first-arrival unit failure prompted #255; the
+precise original timing remains unproven. Non-release profiles require the
+journey; the seven-case release smoke ABI is unchanged.
+
+[CI 41135770086](https://github.com/L-K-M/Neutrodyne/actions/runs/41135770086)
+at integrated `d9076331` failed unit and device gates. An unowned test lookup
+barrier could hold a refresh instead of the explicit start, allowing an
+epoch-fenced event to disappear before the expected storage callback.
+A failing-first helper regression now passes with an owned barrier;
+181 adapter cases pass without changing product code, assertions or budgets.
+The exact CI interleaving was not recorded.
+
+API26 also had two independent process deaths: Compose's nested-layout
+invariant in Licences, and StrictMode's Activity instance counter during
+service-test teardown. Orchestrator isolates the tests. The service test
+now resumes its existing host after killing the service, avoiding unrelated
+Activity recreation without relaxing StrictMode. The Licences cause remains
+unproven; a test-runtime traversal race is a hypothesis, not a fix. Both
+real journeys passed, but only 67 app cases ran and the full 98-case gate
+did not finish.
+
+[CI 41141671060](https://github.com/L-K-M/Neutrodyne/actions/runs/41141671060)
+at `cd205e15` passes unit and the other four non-device jobs. Licences and
+both real journeys pass. Service recreation fails on both APIs: moving the
+Activity lifecycle to RESUMED does not bring its task back from Home.
+The fixture now foregrounds the existing task through Activity Manager,
+preserving the launcher intent that ActivityScenario matches. It checks
+the captured host's lifecycle on Main, foreground package and original
+Activity identity. No Activity recreation, policy relaxation or larger
+budget is used. Compilation passes; fresh exact-head device proof remains
+required.
+The earlier Licences cause is still unproven.
+
+[CI 41145890602](https://github.com/L-K-M/Neutrodyne/actions/runs/41145890602)
+at `d27d87e5` passes unit and API36 service recreation, including retained
+host identity. API26 fails earlier: Home stopped the host and displayed
+Launcher3, but UiAutomator missed its one-second content-event acknowledgement.
+UiAutomator 2.4.0 source confirms that acknowledgement determines its Boolean,
+not the resulting Activity state. The fixture retains the real Home press,
+logs its acknowledgement and requires a foreground-to-stopped/background
+transition. Those state checks replace the incorrect event-ack assertion;
+a missing acknowledgement stays visible. No retry or longer timeout is
+added. The complete 98-case gate remains pending.
+
+Buffering/refused-advance safety [#251](https://github.com/L-K-M/Neutrodyne/pull/251)
+merged as `e20a440f` after two review rounds. Local core/adapter suites pass
+274 cases; reviewed-head XML proves 96 device cases without failures,
+errors or skips. [Main CI 40983471054](https://github.com/L-K-M/Neutrodyne/actions/runs/40983471054)
 passes all six jobs.
 
-Durable-dismiss fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252)
-merged as `6079ec10` after two review rounds. Client/native starts share an
-intent ticket, checked inside the clear transaction. [Reviewed-head CI](https://github.com/L-K-M/Neutrodyne/actions/runs/40988017111)
-passes all six jobs and proves 96 device passes. Integrated local suites pass
-1,548 cases with one Windows-only DPAPI skip. Main's device retries hit
-unavailable acceleration; its original VM's cause remains unconfirmed.
+Stale durable-dismiss fencing [#252](https://github.com/L-K-M/Neutrodyne/pull/252)
+merged as `6079ec10` after two review rounds without a verified important
+finding. [PR CI 40988017111](https://github.com/L-K-M/Neutrodyne/actions/runs/40988017111)
+passes all six jobs and proves 96 device passes. Four failing-first
+client/native variants pass; integrated local suites pass 1,548 cases with
+one Windows-only DPAPI skip. Connected-command ordering and navigation
+intents remain outside that fix.
 
-Candidate `fix/m4-late-queue-snapshot` reproduces a real adapter gap: a
-coherent mid-start read delivered after installation keeps the same session
-generation and removes the next native items. Old-generation control passes;
-the same-generation red changes `[1,2,3]` to `[1]`. Emissions now trigger a
-fenced durable read, not direct replay. Matching streamed metadata is reused;
-reconciliation stays conflated during IO. A fanout mutation starts 101 reads
-instead of one and fails. Core/adapter gates pass 281 cases. The precise
-original CI timing remains unproven; its 100-iteration local diagnostic
-passed. CI/formal review remain pending. The candidate copies P8's already
-probed synchronous KVM preparation without changing test budgets or selection.
+Late-snapshot fencing [#255](https://github.com/L-K-M/Neutrodyne/pull/255)
+merged as `40a5086d` after one formal round without a verified important
+finding. A coherent same-generation mid-start read changed native
+`[1,2,3]` to `[1]`. Emissions now trigger fenced durable reconciliation;
+matching metadata is reused and collection stays conflated during IO.
+A temporary async code mutation failed with 101 pending reads instead of
+one; it was reverted. Current code passes the one-read burst assertion,
+marker-backed queue check and persisted native Next. Local core/adapter
+suites pass 281 cases. [CI 41035737384](https://github.com/L-K-M/Neutrodyne/actions/runs/41035737384)
+at reviewed head `3f521bda` passes all six jobs after one unchanged unit-only
+retry of an unrelated feed timing guard; 179 adapter and 96 actual device
+cases pass. No timing threshold changed. The original first-arrival case
+passes too, but the earlier CI timing was not reproduced directly.
+[Main CI 41132537848](https://github.com/L-K-M/Neutrodyne/actions/runs/41132537848)
+passes all six jobs.
+
+Synchronous KVM preparation is now on main. A controlled
+[probe](https://github.com/L-K-M/Neutrodyne/actions/runs/41009762790)
+showed udev returning before permissions changed. P8 and #255 pass preflight
+and device execution; the original failed VM's cause remains unconfirmed.
 
 No desktop audio, chapters, sleep timer or artwork tint is added.
 Physical/OEM, audible, TalkBack, desktop modal Escape and genuine

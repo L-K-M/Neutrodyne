@@ -274,6 +274,8 @@ internal object DesktopShell {
                 appScope = graph.appScope,
                 dataDir = dirs.data,
                 viewModelFactory = graph.metroViewModelFactory,
+                playbackController = graph.playbackController,
+                playbackState = graph.playbackStateSource,
                 onQuitRequest = ::exitApplication,
             )
         }

@@ -1640,7 +1640,15 @@ sleep controls remain M5. The root supplies the measured content bottom and
 expand/collapse request tokens, retains the last visible-suite measurement
 while navigation is hidden, and shares its activity/window ViewModel owner
 with the speed sheet. Player and queue features meet through shell-owned
-composable slots, not a feature-to-feature dependency.
+composable slots, not a feature-to-feature dependency. Panel Back ownership
+outlives its visible content while closing. Predictive previews start at the
+current drag fraction. Dock measurements are retained until chrome is stable;
+settling need not trigger another layout. Count/detail reads retry once per
+second while observed, with one notice per failure streak; Notes retain
+explicit retry. Measured header lines and a
+font-scaled tab strip drive artwork, body and panel geometry. Text measurement
+handles Android's nonlinear font metrics; the full body scrolls when large
+text cannot fit.
 
 **Target v1.0 structure (side panel deferred to MD1/M10).**
 `NeutrodyneRoot` (`:core:ui`, hosted by `MainActivity` and `NeutrodyneWindow`) composes `Box(Modifier.semantics { testTagsAsResourceId = true }) { NdNavigationSuiteScaffold { Row { Box(Modifier.weight(1f)) { NeutrodyneNavHost(…) }; if (layout.playerPanel) PlayerSidePanel(…) } }; if (!layout.playerPanel) PlayerSheet(…) }` (`testTagsAsResourceId` lets 09's UI Automator journeys find Compose nodes by resource ID on Android; the desktop's `runComposeUiTest` uses test tags directly): the sheet overlays the whole window, including the navigation bar, so it can grow over it without resizing the scaffold. When `LocalPaneLayout.playerPanel` is true the sheet is not composed and `PlayerSidePanel` takes its fixed width at the end of the content row ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)). With `nowPlaying == null` neither exists and `LocalMiniPlayerInset` is 0. Switching between the two (unfolding, resizing a window) never carries the sheet's value: a sheet created after the panel starts `Collapsed`.
@@ -1660,13 +1668,15 @@ stateDiagram-v2
 ```kotlin
 // :feature:player
 enum class PlayerSheetValue { Collapsed, Expanded, Dismissed }
+enum class SheetDismissal { ALLOWED, BLOCKED }
 @Stable class PlayerSheetState(initial: PlayerSheetValue) {
     val drag = AnchoredDraggableState(initialValue = initial)          // foundation 1.12: anchors set later via updateAnchors
     val progress: Float get() = drag.progress(PlayerSheetValue.Collapsed, PlayerSheetValue.Expanded)
     val isExpanded: Boolean get() = drag.currentValue == PlayerSheetValue.Expanded
-    fun setAnchors(collapsedPx: Float, dismissible: Boolean) = drag.updateAnchors(DraggableAnchors {
-        PlayerSheetValue.Expanded at 0f; PlayerSheetValue.Collapsed at collapsedPx
-        if (dismissible) PlayerSheetValue.Dismissed at collapsedPx + dismissDistancePx })
+    fun setAnchors(collapsedPx: Float, dismissDistancePx: Float, dismissal: SheetDismissal) =
+        drag.updateAnchors(DraggableAnchors {
+            PlayerSheetValue.Expanded at 0f; PlayerSheetValue.Collapsed at collapsedPx
+            if (dismissal == SheetDismissal.ALLOWED) PlayerSheetValue.Dismissed at collapsedPx + dismissDistancePx })
     suspend fun expand() = drag.animateTo(PlayerSheetValue.Expanded, NeutrodyneMotion.spatial)
     suspend fun collapse() = drag.animateTo(PlayerSheetValue.Collapsed, NeutrodyneMotion.spatial)
     companion object { val Saver: Saver<PlayerSheetState, String> }    // saves Collapsed/Expanded (Dismissed → Collapsed)
@@ -1676,11 +1686,11 @@ enum class PlayerSheetValue { Collapsed, Expanded, Dismissed }
                             vm: PlayerViewModel = metroViewModel())          // metrox-viewmodel-compose (01)
 ```
 
-`PlayerViewModel` (scoped to the Android activity or the desktop window, created by the shared root outside `NavDisplay` with the shell's `LocalMetroViewModelFactory`) combines `PlaybackStateSource` (`nowPlaying`, `sleepTimer`, `currentChapter`, `effectivePlayback`, `events`), `QueueRepository.observeUpNext()` (count and tab), `ChapterRepository.observe(current)`, `EpisodeRepository.observeShowNotes(current)` (only while the Notes tab is open), `ArtworkRepository.observeColors(now.artwork.key, fallbackPodcastId = now.podcastId)` (the episode art's colours, else the podcast cover's — a streamed episode's own art and a YouTube thumbnail are usually not in the store, [Colour extraction](#colour-extraction)), `YouTubeHealth.state` and the `playback.*`/`appearance.*` settings it displays, into one `PlayerUiState`. `positionTicks` (1 Hz) drive the mini player's progress line; the expanded scrubber runs a `withFrameMillis` loop only while the full player is visible and `now.position.advancing` (06), and on each frame reads `now.position.positionAt(clock.elapsedRealtime())` (`:core:common`'s `Clock`: `SystemClock.elapsedRealtime()` on Android, a monotonic clock on the desktop, the same clock `sampledAtElapsedMs` uses, 06) — never the frame time itself: on Android, Choreographer frame times are in the `System.nanoTime()` (uptime) base, `PositionSnapshot.sampledAtElapsedMs` is elapsed realtime, and the two differ by the device's total deep-sleep time ([Choreographer.FrameCallback](https://developer.android.com/reference/android/view/Choreographer.FrameCallback#doFrame(long)), [SystemClock](https://developer.android.com/reference/android/os/SystemClock)). So no 60 Hz flow exists.
+`PlayerViewModel` (scoped to the Android activity or the desktop window, created by the shared root outside `NavDisplay` with the shell's `LocalMetroViewModelFactory`) combines `PlaybackStateSource` (`nowPlaying`, `sleepTimer`, `currentChapter`, `effectivePlayback`, `events`), `QueueRepository.observeUpNext()` (count and tab), `ChapterRepository.observe(current)`, `EpisodeRepository.observeShowNotes(current)` (only while the Notes tab is open), `ArtworkRepository.observeColors(now.artwork.key, fallbackPodcastId = now.podcastId)` (the episode art's colours, else the podcast cover's — a streamed episode's own art and a YouTube thumbnail are usually not in the store, [Colour extraction](#colour-extraction)), `YouTubeHealth.state` and the `playback.*`/`appearance.*` settings it displays, into one `PlayerUiState`. `positionTicks` (1 Hz) drive the mini player's progress line; the expanded scrubber runs a `withInfiniteAnimationFrameMillis` loop (honoring the host's infinite-animation policy) only while the full player is visible and `now.position.advancing` (06), and on each frame reads `now.position.positionAt(clock.elapsedRealtime())` (`:core:common`'s `Clock`: `SystemClock.elapsedRealtime()` on Android, a monotonic clock on the desktop, the same clock `sampledAtElapsedMs` uses, 06) — never the frame time itself: on Android, Choreographer frame times are in the `System.nanoTime()` (uptime) base, `PositionSnapshot.sampledAtElapsedMs` is elapsed realtime, and the two differ by the device's total deep-sleep time ([Choreographer.FrameCallback](https://developer.android.com/reference/android/view/Choreographer.FrameCallback#doFrame(long)), [SystemClock](https://developer.android.com/reference/android/os/SystemClock)). So no 60 Hz flow exists.
 
 ### Anchors and gestures
 
-- Anchors (px, measured in `BoxWithConstraints` over the full window, applied with `state.setAnchors` from a `LaunchedEffect` keyed on the measured values and `now.isPlaying`): `Expanded = 0`; `Collapsed = contentBottom − 64 dp − 8 dp`, where `contentBottom` is the bottom edge of the `NavDisplay` container measured while the navigation suite is shown (frozen while it is hidden, so anchors never jump); `Dismissed = Collapsed + 96 dp`, present only while `!now.isPlaying` (when playback starts while the sheet sits on `Dismissed`, `updateAnchors` moves it to the closest anchor, `Collapsed`).
+- Anchors (px, measured in `BoxWithConstraints` over the full window, applied with `state.setAnchors` from a `LaunchedEffect` keyed on the measured values and both `now.isPlaying` and `now.playWhenReady`): `Expanded = 0`; `Collapsed = contentBottom − 64 dp − 8 dp`, where `contentBottom` is the bottom edge of the `NavDisplay` container measured while the navigation suite is shown (frozen while it is hidden, so anchors never jump); `Dismissed = Collapsed + 96 dp`, present only while `!now.isPlaying && !now.playWhenReady` (when playback starts while the sheet sits on `Dismissed`, `updateAnchors` moves it to the closest anchor, `Collapsed`).
 - `Modifier.anchoredDraggable(state.drag, Orientation.Vertical, flingBehavior = AnchoredDraggableDefaults.flingBehavior(state.drag, positionalThreshold = { it * 0.5f }, animationSpec = NeutrodyneMotion.spatial))` on the sheet surface (mini player: whole surface; full player: the top bar and artwork area, not the scrubber or the tabs panel). In foundation 1.12 thresholds live on the fling behaviour, not the state (the state constructor with thresholds is deprecated); the velocity threshold is the built-in 125 dp/s (`AnchoredDraggableMinFlingVelocity`, not configurable) ([foundation 1.12.1 sources](https://dl.google.com/android/maven2/androidx/compose/foundation/foundation-android/1.12.1/foundation-android-1.12.1-sources.jar)).
 - Settling at `Dismissed` calls `PlaybackController.dismiss()` (06 `nd.DISMISS`), then snaps back to `Collapsed` (the sheet disappears when `nowPlaying` becomes null).
 - No horizontal swipe-to-skip on the mini player (it would fight the Feeds pager).

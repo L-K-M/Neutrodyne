@@ -46,10 +46,12 @@ import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -76,13 +78,16 @@ internal class GatedSessions(
     }
 }
 
-/** Same one-shot barrier for the media reads a refresh performs after the queue read. */
+/** One-shot media-read barrier; an owner prevents unrelated refreshes from consuming it. */
 internal class GatedLookup(
     private val delegate: PlaybackMediaLookup,
+    private val owner: CoroutineName? = null,
 ) : PlaybackMediaLookup {
     var barrier: (suspend () -> Unit)? = null
 
     override suspend fun get(episodeId: Long): PlaybackMediaInfo? {
+        if (owner != null && currentCoroutineContext()[CoroutineName] != owner) return delegate.get(episodeId)
+
         barrier?.let {
             barrier = null
             it()
