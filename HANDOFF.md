@@ -194,6 +194,15 @@ domain/testing/data/API gates cover 1,272. Scoped 45-file lint, platform
 compilation and 18 presence fixtures pass.
 Earlier interrupted reports are not proof.
 
+API37 [nightly 41169755465](https://github.com/L-K-M/Neutrodyne/actions/runs/41169755465)
+at `859ea408` exposes a compact-player defect: four 58 dp text buttons plus
+72 dp Play exceed the 272 dp available at 320 dp. Forward's expanded touch
+area overlaps Next, leaving Next a 47 dp accessibility target. A native SDK36
+regression reproduces the overlap before the fix. The actions now share the
+space left by Play. Local checks pass 138 player cases, including 13 visual
+tests; all 24 reference PNGs remain byte-identical. Fresh CI/review and API37
+confirmation remain required; ATF is unchanged.
+
 Hosted stress captures exposed Android-only nonlinear font clipping despite
 desktop checks. A real SDK36 Robolectric regression failed `22 < 32` for the
 context line. Measuring actual text instead of converting line-height sp

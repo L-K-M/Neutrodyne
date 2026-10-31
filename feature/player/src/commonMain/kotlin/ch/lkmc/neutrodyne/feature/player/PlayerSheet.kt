@@ -499,6 +499,7 @@ internal fun PlayerSheet(
                                     ui.timeDisplay,
                                     toggleTime,
                                 )
+                                // Share remaining width so the last action keeps its touch target.
                                 Row(
                                     Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -507,7 +508,7 @@ internal fun PlayerSheet(
                                     TextButton(
                                         onClick = back,
                                         modifier =
-                                            Modifier.semantics {
+                                            Modifier.weight(1f, fill = false).semantics {
                                                 contentDescription =
                                                     backLabel
                                             },
@@ -522,7 +523,7 @@ internal fun PlayerSheet(
                                     TextButton(
                                         onClick = previous,
                                         modifier =
-                                            Modifier.semantics {
+                                            Modifier.weight(1f, fill = false).semantics {
                                                 contentDescription =
                                                     previousLabel
                                             },
@@ -532,7 +533,7 @@ internal fun PlayerSheet(
                                         onClick = next,
                                         enabled = now.hasNext,
                                         modifier =
-                                            Modifier.semantics {
+                                            Modifier.weight(1f, fill = false).semantics {
                                                 contentDescription =
                                                     nextLabel
                                             },
@@ -540,7 +541,7 @@ internal fun PlayerSheet(
                                     TextButton(
                                         onClick = forward,
                                         modifier =
-                                            Modifier.semantics {
+                                            Modifier.weight(1f, fill = false).semantics {
                                                 contentDescription = forwardLabel
                                             },
                                     ) {
