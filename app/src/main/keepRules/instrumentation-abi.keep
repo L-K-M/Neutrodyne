@@ -4,6 +4,7 @@
 # Traced with R8 9.4.24 from the seven smoke cases, runner and test framework.
 # Other code remains eligible for shrinking and optimization.
 -keep class androidx.activity.ComponentActivity {
+  public androidx.lifecycle.Lifecycle getLifecycle();
 }
 -keep @interface androidx.annotation.ChecksSdkIntAtLeast {
   public int extension();
@@ -306,6 +307,7 @@
 }
 -keep class androidx.lifecycle.Lifecycle {
   public void addObserver(androidx.lifecycle.LifecycleObserver);
+  public androidx.lifecycle.Lifecycle$State getCurrentState();
   public void removeObserver(androidx.lifecycle.LifecycleObserver);
 }
 -keep interface androidx.lifecycle.LifecycleEventObserver {

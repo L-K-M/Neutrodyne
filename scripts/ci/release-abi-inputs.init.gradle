@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: Unlicense
+import groovy.json.JsonOutput
+
+// Keep AGP's internal input discovery out of the application's build and variants.
+gradle.projectsEvaluated {
+    def app = rootProject.findProject(':app')
+    if (app == null) return // Included convention builds do not contain the Android shell.
+
+    app.tasks.register('dumpReleaseR8Inputs') {
+        notCompatibleWithConfigurationCache('Inspects the resolved AGP task inputs and local tool classpath')
+        def target = app.tasks.findByName('minifyReleaseWithR8')
+        def tests = app.tasks.findByName('minifyReleaseAndroidTestWithR8')
+        if (target == null || tests == null) {
+            throw new GradleException('Dump release ABI inputs with -PtestBuildType=release')
+        }
+        def output = app.rootProject.layout.buildDirectory.file('release-smoke-discovery/r8-inputs.json').get().asFile
+        // Build class inputs, not a QA APK or a second minified target.
+        dependsOn(target.classes, tests.classes, target.referencedClasses, tests.referencedClasses, target.bootClasspath)
+        inputs.files(target.classes, tests.classes, target.referencedClasses, tests.referencedClasses, target.bootClasspath)
+        outputs.file(output)
+        outputs.upToDateWhen { false } // The manifest records machine-local resolved paths.
+
+        doLast {
+            def versionClass = target.class.classLoader.loadClass('com.android.tools.r8.Version')
+            def version = versionClass.getField('LABEL').get(null).toString()
+            def tools = app.configurations.detachedConfiguration(app.dependencies.create("com.android.tools:r8:$version"))
+            tools.transitive = false
+            // Use the original artifact, not Gradle's instrumented plugin-classloader copy.
+            def r8Jar = tools.singleFile
+            def javaName = System.getProperty('os.name').startsWith('Windows') ? 'java.exe' : 'java'
+            def java = new File(System.getProperty('java.home'), "bin/$javaName")
+            def paths = { files -> files.files.collect { it.absolutePath }.sort() }
+            def data = [target: paths(target.classes), source: paths(tests.classes),
+                        targetLibraries: paths(target.referencedClasses),
+                        sourceLibraries: paths(tests.referencedClasses), boot: paths(target.bootClasspath),
+                        java: java.absolutePath, r8Jar: r8Jar.absolutePath, r8Version: version]
+            output.parentFile.mkdirs()
+            output.setText(JsonOutput.prettyPrint(JsonOutput.toJson(data)) + '\n', 'UTF-8')
+            println output.absolutePath
+        }
+    }
+}

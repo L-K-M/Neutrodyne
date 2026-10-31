@@ -505,6 +505,10 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   test-only app keeps or disabled optimization would test different bytes.
   Compare target APK hashes with and without `testBuildType=release`, and run
   the actual API36 and API37 release lanes before accepting a linkage repair.
+  Fast assemble CI regenerates the focused ABI in check-only mode using
+  [01's maintenance commands](01-foundation.md#release-build-and-baseline-profiles).
+  Presence fixtures pin the literal seven cases and reject each omission
+  independently; the source check does not replace runtime linkage proof.
 
 - **M4 debug journey presence.** Non-release profiles of
   `assert-playback-tests.py` require both `UpNextJourneyTest` and

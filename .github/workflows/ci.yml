@@ -119,6 +119,7 @@ jobs:
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
+          python3 scripts/ci/tests/trace-instrumentation-abi.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
 
@@ -183,6 +184,12 @@ jobs:
       # TODO(M0b): add :desktopApp:createDistributable — the desktop image needs
       # the runtime.lock/jlink setup that lands with the desktop package (it
       # fails at createRuntimeImage today).
+      - name: Check release instrumentation ABI
+        run: |
+          ./gradlew --no-configuration-cache --max-workers=2 \
+            --init-script scripts/ci/release-abi-inputs.init.gradle \
+            -PtestBuildType=release :app:dumpReleaseR8Inputs
+          python3 scripts/ci/trace-instrumentation-abi.py --check
       - name: Build the APKs and the server JAR
         run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
