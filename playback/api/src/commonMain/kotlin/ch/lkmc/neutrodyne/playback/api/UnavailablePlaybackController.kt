@@ -2,12 +2,15 @@
 package ch.lkmc.neutrodyne.playback.api
 
 import ch.lkmc.neutrodyne.core.model.AddResult
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.RejectReason
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +23,8 @@ open class UnavailablePlaybackController :
     PlaybackController,
     PlaybackStateSource,
     PlaybackMaintenance {
+    override val sleepTimer: StateFlow<SleepTimerState> = MutableStateFlow(SleepTimerState.Off)
+    override val currentChapter: StateFlow<CurrentChapter?> = MutableStateFlow(null)
     override val pendingMeteredConsent: StateFlow<PlayResult.NeedsMeteredConsent?> = MutableStateFlow(null)
     override val nowPlaying: StateFlow<NowPlaying?> = MutableStateFlow(null)
     override val positionTicks: Flow<PositionSnapshot> = emptyFlow()
@@ -58,6 +63,14 @@ open class UnavailablePlaybackController :
     override fun skipToNext() = Unit
 
     override fun skipToPrevious() = Unit
+
+    override fun setSleepTimer(mode: SleepTimerMode) = Unit
+
+    override fun extendSleepTimer(minutes: Int) = Unit
+
+    override fun nextChapter() = Unit
+
+    override fun previousChapter() = Unit
 
     override suspend fun setSpeed(
         speed: Float,

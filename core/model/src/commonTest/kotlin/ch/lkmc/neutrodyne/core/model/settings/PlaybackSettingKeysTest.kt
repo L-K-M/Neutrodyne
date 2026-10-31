@@ -49,6 +49,9 @@ class PlaybackSettingKeysTest {
     @Test fun registryValidationChecksTypesChoicesAndIntervalCacheRanges() {
         val valid: List<Pair<SettingKey<*>, Any>> =
             listOf(
+                PlaybackSettingKeys.SLEEP_LAST_MINUTES to 1,
+                PlaybackSettingKeys.SLEEP_LAST_MINUTES to 240,
+                PlaybackSettingKeys.HARDWARE_BUTTONS to HardwareButtons.SKIP,
                 PlaybackSettingKeys.SKIP_BACK_MS to 5_000L,
                 PlaybackSettingKeys.SKIP_FORWARD_MS to 90_000L,
                 PlaybackSettingKeys.STREAM_CACHE_MB to 1_000,
@@ -56,6 +59,10 @@ class PlaybackSettingKeysTest {
             )
         val invalid: List<Pair<SettingKey<*>, Any>> =
             listOf(
+                PlaybackSettingKeys.SLEEP_LAST_MINUTES to 0,
+                PlaybackSettingKeys.SLEEP_LAST_MINUTES to 241,
+                PlaybackSettingKeys.SLEEP_LAST_MINUTES to 30L,
+                PlaybackSettingKeys.HARDWARE_BUTTONS to "SKIP",
                 PlaybackSettingKeys.SKIP_BACK_MS to 7_000L,
                 PlaybackSettingKeys.SKIP_FORWARD_MS to 5_000L,
                 PlaybackSettingKeys.STREAM_CACHE_MB to 333,

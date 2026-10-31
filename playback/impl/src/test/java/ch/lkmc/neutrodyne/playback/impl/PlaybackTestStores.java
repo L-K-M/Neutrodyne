@@ -21,7 +21,7 @@ final class PlaybackTestStores {
   }
 
   static PositionStore positions(NeutrodyneDatabase db) {
-    return new PositionWriter(db);
+    return new PositionWriter(db, new ch.lkmc.neutrodyne.core.testing.TestClock());
   }
 
   static PlaybackMediaLookup media(NeutrodyneDatabase db) {

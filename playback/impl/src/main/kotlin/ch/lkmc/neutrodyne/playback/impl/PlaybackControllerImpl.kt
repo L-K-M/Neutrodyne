@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
@@ -122,6 +123,15 @@ internal class PlaybackControllerImpl(
     override fun skipToPrevious() {
         connection.controller?.seekToPreviousMediaItem()
     }
+
+    // shortcut: dispatch stays inactive until M5's sleep/chapter adapters; no UI or session advertises it.
+    override fun setSleepTimer(mode: SleepTimerMode) = Unit
+
+    override fun extendSleepTimer(minutes: Int) = Unit
+
+    override fun nextChapter() = Unit
+
+    override fun previousChapter() = Unit
 
     override suspend fun setSpeed(
         speed: Float,

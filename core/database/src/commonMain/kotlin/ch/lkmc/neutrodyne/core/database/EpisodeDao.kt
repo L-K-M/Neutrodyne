@@ -7,6 +7,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
+import androidx.room3.Transaction
 import ch.lkmc.neutrodyne.core.model.Availability
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -17,7 +18,7 @@ private const val NOTIFICATION_BIND_CHUNK = 500
 /**
  * The [MediaLookupRow] SELECT list and joins (02 Media lookup, M4): `episode`, `podcast` and the
  * low-churn LEFT joins (`episode_state`, `download`, both artwork lookups), never
- * `episode_position`. The alternate-enclosure columns of the reference SQL ship with M5.
+ * `episode_position`. M5 adds the batched alternate relation to the projection.
  */
 private const val MEDIA_INFO_SELECT =
     "SELECT e.id, e.podcastId, e.title, e.sortDate, e.enclosureUrl, e.enclosureType, e.enclosureLength," +
@@ -151,12 +152,13 @@ interface EpisodeDao {
     suspend fun mediaInfo(ids: List<Long>): List<MediaLookupRow> =
         ids.distinct().chunked(NOTIFICATION_BIND_CHUNK).flatMap { mediaInfoChunk(it) }
 
+    @Transaction
     @Query("$MEDIA_INFO_SELECT WHERE e.id IN (:ids)")
     suspend fun mediaInfoChunk(ids: List<Long>): List<MediaLookupRow>
 
     /**
      * The observed variant (06's projector): Room tracks exactly the queried low-churn tables:
-     * `episode`, `podcast`, `episode_state`, `download`, `artwork`, so position ticks never
+     * `episode`, `podcast`, `episode_state`, `download`, `artwork`, `episode_alt_enclosure`, so position ticks never
      * re-emit. Batch reads chunk like [mediaInfo]; an empty set emits one empty list.
      */
     fun observeMediaInfo(ids: List<Long>): Flow<List<MediaLookupRow>> =
@@ -172,6 +174,7 @@ interface EpisodeDao {
                 }
             }
 
+    @Transaction
     @Query("$MEDIA_INFO_SELECT WHERE e.id IN (:ids)")
     fun observeMediaInfoChunk(ids: List<Long>): Flow<List<MediaLookupRow>>
 

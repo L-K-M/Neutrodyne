@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.RejectReason
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
@@ -56,7 +57,28 @@ class FakePlaybackController(
         ) : Call
     }
 
-    enum class Action { PLAY, PAUSE, TOGGLE, SEEK, BACK, FORWARD, NEXT, PREVIOUS, CONSENT, DISMISS }
+    data class SleepSet(
+        val mode: SleepTimerMode,
+    ) : Call
+
+    data class SleepExtend(
+        val minutes: Int,
+    ) : Call
+
+    enum class Action {
+        PLAY,
+        PAUSE,
+        TOGGLE,
+        SEEK,
+        BACK,
+        FORWARD,
+        NEXT,
+        PREVIOUS,
+        CONSENT,
+        DISMISS,
+        CHAPTER_NEXT,
+        CHAPTER_PREV,
+    }
 
     enum class Placement { NEXT, LAST }
 
@@ -116,6 +138,22 @@ class FakePlaybackController(
 
     override fun skipToPrevious() {
         calls += Call.Transport(Action.PREVIOUS)
+    }
+
+    override fun setSleepTimer(mode: SleepTimerMode) {
+        calls += SleepSet(mode)
+    }
+
+    override fun extendSleepTimer(minutes: Int) {
+        calls += SleepExtend(minutes)
+    }
+
+    override fun nextChapter() {
+        calls += Call.Transport(Action.CHAPTER_NEXT)
+    }
+
+    override fun previousChapter() {
+        calls += Call.Transport(Action.CHAPTER_PREV)
     }
 
     override suspend fun setSpeed(

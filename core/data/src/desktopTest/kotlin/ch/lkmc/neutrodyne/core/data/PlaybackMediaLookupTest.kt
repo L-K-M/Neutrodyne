@@ -4,14 +4,25 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.data.playback.PlaybackMediaLookupImpl
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
+import ch.lkmc.neutrodyne.core.database.EpisodeAltEnclosureEntity
+import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
+import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,6 +34,86 @@ class PlaybackMediaLookupTest {
     private val lookup = PlaybackMediaLookupImpl(db)
 
     @AfterTest fun close() = db.close()
+
+    @Test fun alternateRankingTriesDefaultsThenOrdinalAndObservesReplacementWithoutPositionTicks() =
+        runTest {
+            val podcast = db.podcastDao().insertPodcast(podcastEntity())
+            val id =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = podcast) {
+                        copy(
+                            isVideo = true,
+                            enclosureUrl = "https://cdn/original.mp4",
+                            enclosureType = "video/mp4",
+                            chaptersUrl = "https://cdn/chapters.json",
+                            chaptersType = "application/json+chapters",
+                        )
+                    },
+                )
+            val emissions = Channel<PlaybackMediaInfo>(Channel.UNLIMITED)
+            val observer =
+                backgroundScope.launch {
+                    lookup.observe(setOf(id)).collect { rows -> rows[id]?.let { emissions.send(it) } }
+                }
+
+            suspend fun next() = withContext(Dispatchers.Default) { withTimeout(5000) { emissions.receive() } }
+
+            suspend fun replace(rows: List<EpisodeAltEnclosureEntity>) {
+                db.ingestDao().replaceChildren(id, null, emptyList(), rows, emptyList(), emptyList(), emptyList())
+            }
+
+            fun alternate(
+                ordinal: Int,
+                uri: String?,
+                default: Boolean = false,
+                type: String = "audio/mpeg",
+            ) = EpisodeAltEnclosureEntity(
+                id,
+                ordinal,
+                type,
+                length = 42,
+                isDefault = default,
+                sourcesJson = uri?.let { """[{"uri":"$it"}]""" } ?: "[]",
+            )
+            try {
+                val original = next()
+                assertNull(original.audioAlternate)
+                assertEquals("https://cdn/chapters.json", original.chaptersUrl)
+                assertEquals("application/json+chapters", original.chaptersType)
+                assertEquals("video/mp4", original.enclosureType)
+                replace(
+                    listOf(
+                        alternate(0, null, true),
+                        alternate(1, "https://cdn/ordinary.mp3"),
+                        alternate(3, "https://cdn/later.mp3", true),
+                        alternate(2, "https://cdn/earlier.mp3", true),
+                        alternate(4, "https://cdn/video.mp4", true, "video/mp4"),
+                    ),
+                )
+                assertEquals(AudioAlternate("https://cdn/earlier.mp3", "audio/mpeg", 42), next().audioAlternate)
+                replace(
+                    listOf(
+                        alternate(0, null, true).copy(sourcesJson = "malformed"),
+                        alternate(1, "relative.mp3", true),
+                        alternate(2, "ftp://cdn/a", true),
+                        alternate(3, "https://cdn/fallback.mp3"),
+                    ),
+                )
+                val selected = next()
+                assertEquals("https://cdn/fallback.mp3", selected.audioAlternate?.url)
+                assertEquals("https://cdn/original.mp4", selected.enclosureUrl)
+                assertTrue(selected.isVideo)
+                assertEquals(selected, lookup.get(id))
+                db.positionDao().upsert(
+                    EpisodePositionEntity(id, 123, positionSource = PositionSource.STREAM, updatedAt = 1),
+                )
+                assertNull(withContext(Dispatchers.Default) { withTimeoutOrNull(100) { emissions.receive() } })
+                replace(listOf(alternate(0, "file:///local")))
+                assertNull(next().audioAlternate)
+            } finally {
+                observer.cancel()
+            }
+        }
 
     @Test fun mapsBothArtworkReferencesMeasuredDurationAndPlaybackInputs() =
         runTest {

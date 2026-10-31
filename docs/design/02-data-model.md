@@ -725,6 +725,8 @@ data class FundingEntity(
 
 ### chapter
 
+**Implementation note (2026-10-19, M5).** `ChapterSource.winning` selects the first normalized source with visible rows. `normalize` drops negative starts, stable-sorts and keeps first duplicate starts including hidden rows. Missing/invalid ends use the next start; valid ends cap there, shorter ends leave gaps and the final unknown end stays null. Hidden boundaries remain. Repository source writes are atomic and identical lists are no-ops; failed JSON preserves cached sources. No schema change.
+
 One table for every chapter source; the playback rule "first non-empty source wins" is 06's ([06 Chapters](06-playback.md#chapters)).
 
 ```kotlin
@@ -1452,6 +1454,8 @@ member's display title, which the reference projection did not carry.
 
 ### Play context
 
+**Implementation note (2026-10-19, M5).** Auto browse shares membership, visibility, filters and order with play context, but includes eligible queued episodes and omits the tail anchor and queue exclusion. `contextTail` is not the browse query.
+
 Rules (which items, start item, exclusions): [05 Playing a group](05-groups-opml-backup.md#playing-a-group); consumption: [06 Queue and play context](06-playback.md#queue-and-play-context). Delivered in M4. `FeedQueryBuilder.contextTail(scope, filters, order, anchor, k, youtubePlayable)` reuses the feed-page source predicates; `ContextType` maps to `GROUP → Group`, `PODCAST → Podcast`, `ALL → All`, `UNGROUPED → Ungrouped`, `DOWNLOADS` → no source predicate plus `d.state = 'COMPLETED'` (all podcasts, ignoring `includeInAll`), `EXTERNAL` → no tail. The filters come from `contextFilterFlags`, `contextMediaFilter` and `contextMinSortDate`.
 
 ```sql
@@ -1494,20 +1498,16 @@ SELECT e.id, e.podcastId, e.title, e.enclosureUrl, e.enclosureType, e.enclosureL
        COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, s.playedAt, d.state AS downloadState,
        COALESCE(p.customTitle, p.title) AS podcastTitle, p.author, p.sourceType, p.credentialId,
        COALESCE(e.artworkKey, p.artworkKey) AS artworkKey, COALESCE(a.version, 0) AS artworkVersion,
-       p.artworkKey AS podcastArtworkKey, COALESCE(pa.version, 0) AS podcastArtworkVersion,
-       alt.type AS audioAlternateType, alt.length AS audioAlternateLength, alt.sourcesJson AS audioAlternateSourcesJson
+       p.artworkKey AS podcastArtworkKey, COALESCE(pa.version, 0) AS podcastArtworkVersion
 FROM episode e JOIN podcast p ON p.id = e.podcastId
 LEFT JOIN episode_state s ON s.episodeId = e.id
 LEFT JOIN download d ON d.episodeId = e.id
 LEFT JOIN artwork a ON a.key = COALESCE(e.artworkKey, p.artworkKey)
 LEFT JOIN artwork pa ON pa.key = p.artworkKey
-LEFT JOIN episode_alt_enclosure alt ON alt.episodeId = e.id AND alt.ordinal =
-     (SELECT x.ordinal FROM episode_alt_enclosure x WHERE x.episodeId = e.id AND x.type LIKE 'audio/%'
-      ORDER BY x.isDefault DESC, x.ordinal LIMIT 1)
 WHERE e.id IN (:ids)
 ```
 
-The mapper picks the first `http(s)` URI from `audioAlternateSourcesJson` (JSON is never read in SQL); no such URI → no alternate.
+**Implementation note (2026-10-19, M5).** `MediaLookupRow.audioAlternates` adds a batched Room relation in the same transaction, observing alternate changes without position ticks. This replaces the single-row join: rank audio rows by `isDefault DESC, ordinal`, then take the first row with a usable HTTP(S) source in list order. Skip malformed/empty/unusable rows. JSON stays in the mapper. `PlaybackMediaInfo` exposes chapter URL/type and `audioAlternate: AudioAlternate?` (URL/type/length); null means original enclosure. Preserve `isVideo`. M6 shares this ranking.
 
 **Implementation note (2026-10-18, M4).** `PlaybackMediaInfo` carries a
 `podcastArtwork` reference as well as the episode-preferred `artwork`. Its

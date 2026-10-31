@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 
 /**
  * M4 commands shared by both players (06). Call from the UI/main thread; adapters serialize
@@ -58,6 +59,21 @@ interface PlaybackController {
 
     /** After 3 s restart current, otherwise use the process's bounded previous-item history. */
     fun skipToPrevious()
+
+    /** Ordered main-thread commands. Invalid minutes leave timer/volume unchanged. No persistence.
+     * EndOfEpisode follows manual item changes; without a current item it stays Off. Off,
+     * replacement, expiry and teardown restore normal volume and clear only sleep's arbiter reason.
+     * Buffering holds fade; explicit pause restores volume. Expiry emits SleepTimerFired once. */
+    fun setSleepTimer(mode: SleepTimerMode)
+
+    /** Add 1..240 minutes to a running minute timer, cap remaining at 240 minutes; otherwise no-op. */
+    fun extendSleepTimer(minutes: Int)
+
+    /** Seek within winning visible chapters; empty/no next is a no-op, never wrap or smart rewind. */
+    fun nextChapter()
+
+    /** >3 seconds into current: restart it; otherwise previous visible start, no previous: no-op. */
+    fun previousChapter()
 
     /** Clamp/round finite speed to 0.5..3.0 in 0.05 steps; clear more-specific chain overrides. */
     suspend fun setSpeed(

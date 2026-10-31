@@ -78,7 +78,10 @@ data class EffectivePlayback(
 /** Owned by 04; shared here so playback API need not depend on youtube API. */
 enum class ExternalReason { NOT_YET_AVAILABLE, NOT_IN_THIS_APK, DISABLED_BY_USER, ENGINE_FAILED }
 
-/** Low-churn player input, mapped by W2 without exposing Room to shared playback rules. */
+/** Smaller differences do not justify a duration metadata write or player-source reload. */
+const val MEASURED_DURATION_TOLERANCE_MS: Long = 1_000L
+
+/** Low-churn player input without exposing Room to shared playback rules. */
 data class PlaybackMediaInfo(
     val episodeId: Long,
     val podcastId: Long,
@@ -101,6 +104,17 @@ data class PlaybackMediaInfo(
     /** Optional system-surface metadata from the existing media lookup projection. */
     val podcastAuthor: String? = null,
     val pubDate: Long? = null,
+    val enclosureType: String? = null,
+    val chaptersUrl: String? = null,
+    val chaptersType: String? = null,
+    /** Audio candidate only; null means use the original enclosure. isVideo remains feed metadata. */
+    val audioAlternate: AudioAlternate? = null,
+)
+
+data class AudioAlternate(
+    val url: String,
+    val type: String,
+    val length: Long?,
 )
 
 /**
