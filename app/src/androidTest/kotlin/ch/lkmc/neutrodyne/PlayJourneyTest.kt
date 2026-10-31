@@ -26,7 +26,6 @@ import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.lifecycle.Lifecycle
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.espresso.Espresso.pressBack
@@ -214,8 +213,7 @@ class PlayJourneyTest {
             assertThat(nowPlaying()?.stream).isEqualTo(StreamKind.STREAM)
 
             phase("background/shade-pause")
-            check(device.pressHome()) { "The full-image launcher could not be opened" }
-            await { compose.activityRule.scenario.state == Lifecycle.State.CREATED }
+            pressHomeAndAwaitBackground(device, compose.activity, WAIT_MS)
             tapNotification("Pause")
             await { nowPlaying()?.isPlaying == false && nowPlaying()?.playWhenReady == false }
 

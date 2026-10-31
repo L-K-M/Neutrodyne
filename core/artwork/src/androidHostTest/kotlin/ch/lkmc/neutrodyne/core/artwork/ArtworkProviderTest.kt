@@ -24,6 +24,10 @@ import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -34,6 +38,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import java.io.FileNotFoundException
+import java.net.HttpURLConnection
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
@@ -304,6 +309,52 @@ class ArtworkProviderTest {
             assertEquals(0, fixture.enqueues)
         }
 
+    @Test fun pinnedAndMissingFileReadsNeverFetchTheirRemoteUrl() =
+        runBlocking {
+            val server = MockWebServer()
+            server.dispatcher =
+                object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest) =
+                        MockResponse(code = HttpURLConnection.HTTP_NO_CONTENT)
+                }
+            server.start()
+            try {
+                val control =
+                    (server.url("/control").toUrl().openConnection() as HttpURLConnection).apply {
+                        connectTimeout = HTTP_CONTROL_TIMEOUT_MS
+                        readTimeout = HTTP_CONTROL_TIMEOUT_MS
+                    }
+                try {
+                    assertEquals(HttpURLConnection.HTTP_NO_CONTENT, control.responseCode)
+                } finally {
+                    control.disconnect()
+                }
+                assertEquals(1, server.requestCount, "The HTTP tripwire must observe a real request")
+                val before = server.requestCount
+
+                // Isolate the provider: no UI, audio stream or artwork worker shares this server.
+                fixture.open()
+                val remote = server.url("/cover.jpg").toString()
+                fixture.podcast(key, remote)
+                val image = fixture.codec.encode(fixture.monograms.render(Monogram.spec("Offline")))
+                fixture.store.applyBatch(listOf(ArtworkProduction(key, remote, image)), fixture.clock.now())
+                provider.openFile(uri(), "r").use { assertEquals(image.bytes.size.toLong(), it.statSize) }
+                assertTrue(assertNotNull(fixture.store.pinnedFile(key)).toFile().delete())
+                assertPng(provider.openFile(uri(), "r"))
+                assertEquals(
+                    "$key.fallback.png",
+                    fixture.db
+                        .artworkDao()
+                        .byKey(key)
+                        ?.localPath,
+                )
+                assertEquals(before, server.requestCount, "Provider reads must not fetch the remote cover")
+                assertEquals(0, fixture.enqueues)
+            } finally {
+                server.close()
+            }
+        }
+
     private fun uri(value: String = key): Uri = Uri.parse("content://${app.packageName}.artwork/$value?v=1")
 
     private fun assertPng(descriptor: ParcelFileDescriptor) {
@@ -313,5 +364,9 @@ class ArtworkProviderTest {
             assertEquals(512, bitmap.height)
             bitmap.recycle()
         }
+    }
+
+    private companion object {
+        const val HTTP_CONTROL_TIMEOUT_MS = 5_000
     }
 }
