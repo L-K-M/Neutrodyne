@@ -121,6 +121,8 @@ jobs:
           python3 scripts/ci/tests/assert-playback-tests.test.py
           python3 scripts/ci/tests/trace-instrumentation-abi.test.py
           python3 scripts/ci/tests/emulator-acceleration.test.py
+          python3 scripts/ci/tests/gmd-device-budget.test.py
+          python3 scripts/ci/tests/preserve-emulator-crashes.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
 
