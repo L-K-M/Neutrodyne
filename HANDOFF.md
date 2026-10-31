@@ -184,9 +184,30 @@ is a separate candidate. The new fast source check resolves actual AGP/R8
 inputs and reproduces focused tracing. It detected two missing lifecycle
 getter keeps; controlled regeneration adds only those exact members. The
 combined local dump/check, full formatting check, 23 driver fixtures and
-19 independent presence fixtures pass. Both release lanes now compare target
+19 independent presence fixtures pass. Both release lanes compare target
 APK digests across normal/test-selected builds and archive the reference.
-Actual seven-case API36/API37 linkage and latest-head CI/review remain required.
+PR [#257](https://github.com/L-K-M/Neutrodyne/pull/257) at `352dc1ba` passes
+all six CI jobs, with 98 actual device cases and no failures, errors or skips.
+Two formal rounds leave no confirmed important defect; optional nits stop.
+
+Its [full nightly](https://github.com/L-K-M/Neutrodyne/actions/runs/41164535852)
+passes six applicable jobs. Artifact `13029793180` proves 200 debug cases
+without failures, errors or skips, including API34's real screen-off case
+in 1,821.727 seconds. API36 passes all seven optimized-release cases and
+within-job normal/test-selected APK parity. Pinned-container reproducibility
+passes for all three APKs. Cross-job CI/API36 target digests differ; their
+content difference is uninvestigated because the nightly APK was not retained.
+This is not a claim of cross-job byte identity.
+
+API37 fails: its log explicitly reports KVM permission denied and
+`-accel off`. Boot takes 1,044 seconds; app XML has zero cases, then device
+property reads time out and the library suite reports Unknown API Level.
+The nightly setup now applies permissions directly to the existing KVM node,
+as CI already does, rather than trusting udev. Regression fixtures first fail
+for all eight nightly setups, then pass; denied chmod and failed accelerator
+probes remain failures. Nightly grants access before emulator installation,
+so it cannot invoke that binary in this step. No budgets or gates are weakened.
+Fresh API37 linkage/parity, latest-head CI and review remain required.
 
 **Earlier 2026-10-30 evidence.** P7 #243 merged as `a6a2f555` after two review
 rounds. [Main CI 40882142965](https://github.com/L-K-M/Neutrodyne/actions/runs/40882142965)
