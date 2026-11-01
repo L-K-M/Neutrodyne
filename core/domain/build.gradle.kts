@@ -13,6 +13,7 @@ kotlin {
             api(project(":download:api"))
             api(project(":youtube:api"))
             api(libs.androidx.paging.common)
+            api(libs.kotlinx.collections.immutable)
             implementation(libs.kotlinx.coroutines.core)
         }
     }
