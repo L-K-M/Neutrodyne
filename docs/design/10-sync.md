@@ -369,6 +369,10 @@ The web UI's routes (`/`, `/link`, `/setup`, …, [Web UI](#web-ui)) are HTML on
 
 ### Discovery
 
+**Implementation note (2026-11-01, MS1).** Keep the fixed name. Browser sign-in
+creates purpose=web server-side in LinkService; public LinkStartRequest remains
+device-only and pollers cannot change credential scope.
+
 ```http
 GET /.well-known/neutrodyne-sync
 200 OK
@@ -1232,6 +1236,17 @@ Serves R7.8, N5, N8, N9, N13. Delivered in M0b (skeleton: `serve`, health, disco
 
 ### Module and classes
 
+**Implementation note (2026-11-01, MS1).** `SyncContracts.kt` freezes principals,
+transactions, raw persistence, pages/extras, writer, events and snapshot/export
+paths. DB-only callbacks never suspend, encode responses, access network or leak handles;
+events publish after commit only. Raw-state serialization for SQL persistence is
+database work; request/response encoding stays outside (clarifies the plan). Plain constructors (D82), no client/Room modules.
+ServerInputs injects wall time/SecureRandom bytes; seed HLC from durable watermark
+and non-null maxima, observe admitted losing clocks too, persist atomically and
+never lower on GC/restore. Shutdown stops requests, joins jobs/streams, drains
+writes, closes resources; only successful `serve` writes the clean marker.
+JVM fakes in `core/testing/src/serverFixtures` compile as server test sources.
+
 `:sync:server` (convention plugin `neutrodyne.server.application`: `kotlin("jvm")`, `jvmTarget` 21, `application`, `fatJar`; main class `ch.lkmc.neutrodyne.sync.server.MainKt`; artefact `neutrodyne-server-{v}.jar` from `:sync:server:fatJar`) depends only on `:sync:protocol` and `:feeds` (PLAN 5.1 rule 7).
 
 | Class | Responsibility |
@@ -1275,6 +1290,25 @@ Ktor's XForwardedHeaders plugin is not installed: it offers no check of the imme
 
 ### Request pipeline
 
+**Implementation note (2026-11-01, MS1).** W3 counts the complete received wire
+body before gzip decoding, including chunked bodies and trailing bytes. Both
+buffers have exact inclusive byte caps; strict UTF-8 validation uses bounded
+scratch space, and JSON charset declarations must be UTF-8. The shared codec pre-scans depth and token lengths before tree
+construction. Invalid envelopes fail the request; semantic changes remain W4's
+independent results. Missing/below-minimum protocol headers return 426, malformed
+or duplicate headers return 400; above-maximum versions remain the client's
+discovery compatibility decision. Named Ktor account limiters require an
+injected authenticated principal; W5 owns authentication and failed-login delay.
+Only discovery is publicly registered, with its IP limiter; no sync endpoint is
+exposed by this intermediate implementation.
+
+**Implementation note (2026-11-01, MS1).** Malformed JSON/envelope/DTO shapes,
+body/depth/global string-token caps fail the request; field/ID/type/admission
+failures reject one change. Shared names enforce `[A-Za-z0-9_.~]{1,64}`: registry
+and vectors conform, valid extensions stay LWW; this fixes MS0 to documented v1.
+Reset is inclusive: cutoff 20 removes 19/20, keeps 21. W4 tests absent/bad/expired/
+future cursors before mutation and concurrent writes.
+
 1. `ClientAddress` resolves the client IP and scheme. When the public URL is `https://` and a request arrives over plain HTTP from a peer that is neither loopback nor a trusted proxy reporting `https`, the API and web routes answer `421 insecure_transport` (health routes still answer).
 2. `RequestGuards`: `Content-Length` > 2 MiB → 413; the body is read through a counting stream (2 MiB) and, with `Content-Encoding: gzip`, a counting `GZIPInputStream` (16 MiB decoded) → 413 beyond; unsupported encodings → 415; a pre-scan of the JSON rejects nesting deeper than 16 (outside strings) → 400.
 3. Authentication; rate limits; `Neutrodyne-Sync-Protocol` check (missing or below `min` → 426 on `/api/v1/*`).
@@ -1282,6 +1316,38 @@ Ktor's XForwardedHeaders plugin is not installed: it offers no check of the imme
 5. The route; `StatusPages` maps failures to problems.
 
 ### Storage
+
+**Implementation note (2026-11-01, MS1).** W2 implements the corrected schema
+below in numbered JDBC SQL, without changing client Room entities or indexes.
+One serve process holds a singleton lease and a shared maintenance lease;
+live administration takes only the shared maintenance lease, and offline
+restore requires its exclusive form. OS locks release after a crash. Backup
+destinations cannot replace the active database or its WAL/SHM files. Only a
+serve instance that reached Ktor's ready event and stopped successfully can
+publish the clean marker; the JVM shutdown hook stops CIO and drains storage
+before publishing it. Store/admin close alone never does. Snapshots use
+separate read transactions and stream outside the writer; callers must close
+them promptly to release pinned WAL pages. Pre-upgrade copies use checked
+VACUUM INTO plus atomic publication; a UTC-minute timestamp and random suffix
+keep repeated upgrade attempts from replacing earlier copies. Failed SQL
+upgrades roll back as a unit. Initial auto-vacuum is selected before entering
+WAL as well as before creating tables; an empty WAL database otherwise ignores
+the setting.
+
+**Implementation note (2026-11-01, MS1).** Corrections superseding the v1 sketch for
+W2 (no client D22 change): account adds `password_set_at`, durable `clock_packed`;
+server_metadata stores stable `installation_id`; record.data is complete
+RecordState including `matchClocks`, max_hlc nullable. Death uses server-observed
+`dead_at`, cleared on revival, unaffected by edits/resequence; record_gc indexes
+(account_id,dead,dead_at). Dedupe updates atomically. Add device unique(account_id,id),
+token unique(account_id,hash), account-qualified token/device and dedupe/record FKs.
+Link adds `start_ip`, `consumed_at`, `approver_token_hash`; preview/confirm bind and
+revalidate account/credential. Tokens add `consumed_at`. Session CSRF derives
+SHA-256(domain prefix `neutrodyne-csrf-v1` + raw cookie), constant-time comparison,
+no recoverable secret stored; anonymous forms use pre-auth cookies.
+`identity_redirect(account_id,coll,from_rid,to_rid)` has immutable source PK,
+no self-edges, survives GC, no FK to collectible records. W2 tests populated SQL
+upgrade/rollback, pre-upgrade backup and newer-schema refusal, never Room.
 
 `SyncStore` hides SQL from routes; `SqliteSyncStore` uses sqlite-jdbc 3.53.4.0 ([xerial/sqlite-jdbc](https://github.com/xerial/sqlite-jdbc), Apache-2.0, natives for Linux x86-64 and aarch64 among others) and plain JDBC, with SQL kept to the subset that SQLite ≥ 3.35 and PostgreSQL ≥ 13 share (`INSERT … ON CONFLICT … DO UPDATE`, [SQLite UPSERT](https://www.sqlite.org/lang_upsert.html); `RETURNING`, [SQLite RETURNING](https://www.sqlite.org/lang_returning.html)), so a PostgreSQL store stays possible on demand (v1.x, M16). Connection settings: `journal_mode = WAL`, `synchronous = FULL`, `foreign_keys = ON`, `busy_timeout = 5000`; one write connection behind the writer dispatcher, four read connections. **Durability (2026-10-05):** not `NORMAL` — "a transaction committed in WAL mode with synchronous=NORMAL might roll back following a power loss or system crash" ([PRAGMA synchronous](https://www.sqlite.org/pragma.html#pragma_synchronous)), but a client deletes its outbox rows once a push is `applied`, and a rolled-back `seq` would be re-used under a cursor that still looks valid, so a device would silently skip the re-used range. `FULL` costs one extra sync per commit, negligible at household write rates. Defence in depth for storage that does not honour flushes (SD cards): `serve` deletes `<data>/clean-shutdown` at start and writes it after a clean stop; when the database exists and the marker does not, the start runs `PRAGMA quick_check`, rotates every account's `epoch` in one transaction and audit-logs `unclean_start`, so every device gets `410` and re-asserts what the server may have lost ([Cursor semantics and resync](#cursor-semantics-and-resync); [D94](../PLAN.md#3-key-decisions)). Database file `<data>/neutrodyne-server.db`; `PRAGMA auto_vacuum = INCREMENTAL` is set by `Migrator` before the first table exists (SQLite ignores a later change without a full `VACUUM`, [PRAGMA auto_vacuum](https://www.sqlite.org/pragma.html#pragma_auto_vacuum)), so GC's `incremental_vacuum` works. sqlite-jdbc extracts its native library to `org.sqlite.tmpdir` (default `java.io.tmpdir`, [loader](https://github.com/xerial/sqlite-jdbc/blob/master/src/main/java/org/sqlite/SQLiteJDBCLoader.java)); `ServerConfig` sets it to `<data>/native` (`0700`) before the first connection unless the administrator set it, because systemd's `PrivateTmp` inherits a host `/tmp` that may be `noexec` and Docker mounts `tmpfs` `noexec` by default ([Container image](#container-image)).
 
@@ -1417,15 +1483,81 @@ Every purge raises `account.min_cursor` to the highest purged `seq`, so only a d
 
 ### Backups
 
+**Implementation note (2026-11-01, MS1).** W10 interoperability follows 05's
+existing media-evidence rule: an unknown opaque episode key without `u` or `yt`
+cannot create a playable stub and is reported as unmatched. It restores against
+an already known episode; an enclosure/YouTube hint permits a fresh stub.
+Exports do not invent media URLs or GUID provenance to evade this rule. Tests
+exercise both Merge and Replace, sparse matching, hints, positions and settings.
+Session references resolve through the same snapshot's retained ledger, even
+when redirect records have been collected; ZIP I/O never owns the writer.
+
+
+**Implementation note (2026-11-01, MS1).** W7 stages a validated copy of the
+current database, imports backed-up content for matching current accounts,
+then applies the carried identity ledger before atomically replacing the file.
+The replaced WAL-consistent database is retained. Current credentials, devices,
+audit, installation identity and clock watermark survive; links are dropped and
+epochs rotate. Unreadable current authority refuses ordinary restore without
+modifying it: recover that database or initialize a fresh server and forget old
+sync metadata on every client before re-linking. There is no implicit recovery
+that trusts stale backup credentials. Daily exports replace the same date only
+after validation; file and process locks serialize export/download with purge.
+Purge removes per-account ZIPs, including temporary files, but existing whole
+server backups retain their historical content until retention removes them.
+Copy both backup directories off-machine and protect them like the live database.
+
+
+**Implementation note (2026-11-01, MS1).** Normal restore carries current auth and
+immutable redirect ledger forward, canonicalizes restored records/children,
+ignores obsolete backup assignments, preserves raw clocks/hints, maximum watermark,
+installation ID, password-set/revocation/consumption state, then rotates epochs.
+Unreadable ledger: refuse ordinary restore. Explicit offline identity reset
+requires confirmation, fresh identities/installation ID, revocation of **all**
+credentials, dropped links and every client forgetting old sync metadata and
+re-linking; retain replaced files. This supersedes the weaker fallback below.
+W7/W10 implement/prove recovery. Sparse exports use custom title, known title/hint,
+then `Untitled podcast`/`Untitled episode`, no invented GUID. Platform/ABI=`server`,
+stable installation ID, SQL schema metadata, six stable 05 entries streamed from
+detached snapshots, Merge step 2 clocks, synced overrides only, no credentials/
+local fields/`fc` or feed/audio fetching. Prove real M3 staging and Merge/Replace.
+
 - **Server database:** `BackupJob` runs nightly at `backup.time` (default 03:30 server local time) `VACUUM INTO '<data>/backups/neutrodyne-server-YYYY-MM-DD.db'` ([SQLite VACUUM INTO](https://www.sqlite.org/lang_vacuum.html): a consistent copy of a live database), keeps 7, and records the result for the status page and `/metrics`. The CLI's `backup <file>` does the same on demand. Every migration is preceded by `neutrodyne-server-pre-migration-v{from}-{yyyyMMddHHmm}.db` (kept until the next successful nightly backup after 7 days).
 - **Per account:** `AccountBackupWriter` writes a Neutrodyne backup ZIP (05 format v1, `EpisodeLineV1.ts` mapped as in [Merge](#merge) step 2 — the newest of the record's non-`pos` state clocks, 0 when it has none — and no `fc`: `manifest.json` with `app.abi = "server"`, `library.json`, `episodes.jsonl`, `queue.json`, `settings.json`, `subscriptions.opml` through `:feeds`' `OpmlWriter`) to `<data>/account-backups/<accountId>/neutrodyne-backup-YYYY-MM-DD.zip`, keeps 14, and serves the latest through the web UI's "Download my data" and `GET /api/v1/account/export`. Feed passwords are never included. The app restores it like any backup, so a user can recover even if the server is gone.
 - **Restore (`restore <file>`, server stopped):** checks `PRAGMA integrity_check` and `schema_version ≤` supported, moves the current database to `neutrodyne-server-replaced-<ts>.db`, installs the copy, **carries the authentication state over** and **rotates every account's `epoch`**. Carry-over (2026-10-05), when the replaced database opens and passes `quick_check`: `account` credentials and status (`password_hash`, `role`, `disabled_at`; accounts created after the backup are copied without records), every `device` row (with `revoked_at`; devices linked after the backup are copied), every `token` row (device tokens, revocations, web sessions, invites, app passwords) and the `audit` table; pending `link_request` rows are dropped. A revocation, password change or account disable made after the backup therefore stays in force — a stolen phone revoked yesterday stays revoked (N13). When the replaced database is unreadable, the restore revokes every web session and invite and prints the account's devices whose revocation or link state may be stale for the administrator to re-check; devices linked after the backup then get `401` ([Relinking, reconnecting and copied installations](#relinking-reconnecting-and-copied-installations)). The restore is audit-logged. Every device then gets `410` and resyncs, re-asserting with their original clocks the changes the restored copy lacks ([Cursor semantics and resync](#cursor-semantics-and-resync)).
 
 ### Event bus and SSE
 
+**Implementation note (2026-11-01, MS1).** W6 reserves stream slots and rechecks
+credentials before sending response headers. The streamed response owns the
+subscription until completion or cancellation. Account changes use a no-replay,
+one-element `DROP_OLDEST` flow; a separate close signal prevents change bursts
+from discarding revocation or shutdown. Tests cover post-commit publication,
+rollback, slow subscribers, isolation, subscription/revocation races and caps.
+A real CIO socket test verifies retry, the clamped heartbeat, uncompressed SSE
+and closure after logout. Account summaries count live rows in SQL rather than
+loading the library. Purge removes records/indexes, rotates the epoch and
+revokes account devices' tokens and browser sessions; W7 must coordinate backup
+deletion with purge/export before exposing exports.
+
 `EventBus` keeps one `MutableSharedFlow<ChangedEvent>` per account with an active subscriber (`replay = 0`, buffer 1, `DROP_OLDEST`), created on demand and dropped when the last stream closes. `EventsRoutes` checks the token, the account's concurrent-stream count (≤ 10) and the device's (≤ 2), emits `retry: 10000`, then forwards events (`conflate()`) and heartbeats; a revocation event for the device closes its streams. Memory per open stream is one coroutine and its socket.
 
 ### Web UI
+
+**Implementation note (2026-11-01, MS1).** W8 uses the existing auth services
+and escaped kotlinx.html text/attributes. Setup signs the new administrator into
+a browser session. Forms are capped at 16 KiB before parameter decoding.
+Anonymous setup/login forms also require an HttpOnly SameSite cookie, an exact
+Origin and a synchronizer token. Browser code sign-in
+keeps its polling secret in an HttpOnly cookie and consumes only `web` requests;
+the HTML contains only the human approval code. Library titles are paged over
+1,000 stored records at a time and never include feed URL fields. Password reset
+by invite atomically clears the password, revokes credentials and issues the
+invite,
+including when an administrator resets their own account. Live CLI revocations
+are rechecked before SSE events and heartbeats; in-process revocations close
+streams immediately. Backup controls await W7 and are not advertised before its
+export/purge hooks exist.
 
 Server-rendered HTML through kotlinx.html; no JavaScript; English only (N10); every page sends the headers of [Web sessions and CSRF](#web-sessions-and-csrf).
 
@@ -1460,12 +1592,59 @@ A red banner "This server is not using HTTPS" appears on every page in insecure 
 
 ### Observability
 
-- **Logs:** one line per request to stdout (`NEUTRODYNE_SERVER_LOG_FORMAT=text` or `json`): time, request ID, account ID (numeric), route template (never the raw path or query), status, duration, changes pushed, records returned. Startup, migrations, backups and GC log one line each. Never logged: tokens, invite and link codes (except the first-start setup code, [First administrator](#first-administrator)), passwords, feed URLs, request or response bodies, record contents (`LogRedactionTest`). Level via `NEUTRODYNE_SERVER_LOG_LEVEL`.
+**Implementation note (2026-11-01, MS1).** W9 emits request lines directly to
+stdout in the selected format, with fixed route labels (`unmatched` for unknown
+paths) and hashed request IDs, including syntactically valid IDs supplied by a
+client. Framework request logging stays disabled. Exception text
+never enters request logs or serve-failure output. Auth audit reads and account
+deletions extend the DB-only contracts without a schema change; library-reset
+audit writes share the record transaction. Metrics are registered only on the
+separate configured listener. Backup/GC metric hooks are available for W7;
+unavailable backup time is represented as age `-1`, with success `0`.
+
+- **Logs:** one line per request to stdout (`NEUTRODYNE_SERVER_LOG_FORMAT=text` or `json`): time, request ID, account ID (numeric), route template (never the raw path or query), status, duration, changes pushed, records returned. Startup, migrations, backups and GC log one line each. Never logged: tokens, invite and link codes, setup codes, passwords, feed URLs, request or response bodies, record contents (`LogRedactionTest`). Level via `NEUTRODYNE_SERVER_LOG_LEVEL`.
 - **Health:** `/healthz`, `/readyz` ([Account and health endpoints](#account-and-health-endpoints)); the image's `HEALTHCHECK` runs `HealthCheck`.
 - **Metrics:** with `NEUTRODYNE_SERVER_METRICS_LISTEN` set (for example `127.0.0.1:9787`), Prometheus text from hand-written counters and gauges: requests by route and status, changes applied/stale/merged/rejected, records returned, SSE streams, accounts, records, database size, last backup age and result, GC purges. No Micrometer.
 - **Audit:** `AuditLog` writes logins (success and failure, with IP), link approvals and denials, invite creation and redemption, token revocations, password changes, account resets and purges, admin actions; visible on `/admin/server`.
 
 ### Performance and footprint
+
+**Implementation note (2026-11-01, MS1).** W5's packaged Argon2id gate passed
+on Linux amd64, Temurin 21.0.12.1+1, with the flattened JAR and compiled
+`PackagedAuthProbe` test classes as the only classpath entries. The probe checks
+that PasswordHasher and Bouncy Castle load from that same JAR, runs six
+concurrent hash/verify workflows through the process-wide two-hash bound, then
+checks SQLite account creation, invite redemption, device authentication and
+revocation. With `-Xmx96m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k`,
+wall time was 1.473 s and peak RSS 147,876 KiB. Artifact SHA-256:
+`d408f0606ea2ca1168a0db32c6004f9cba4b020c1370f60cb16bc638d3b3e96d`.
+Run `ch.lkmc.neutrodyne.sync.server.PackagedAuthProbe` with a fresh writable
+data-directory argument. This local feasibility result does not close S16:
+Pi hardware, arm64 execution, ten-minute idle and the authenticated 50,000-record
+load remain W11 gates.
+
+**Implementation note (2026-11-01, MS1).** Early packaged-fat-JAR JDBC gate
+passed on Linux amd64, Temurin 21.0.12.1+1, sqlite-jdbc 3.53.4.0
+(SQLite 3.53.4), with /tmp on the host overlay filesystem.
+DriverManager service discovery, WAL create/insert/read, and native extraction
+under the selected data/native directory passed with only the flattened JAR
+and the compiled test probe on the classpath. Both Linux x86_64 and aarch64
+native resources and META-INF/services/java.sql.Driver survived packaging.
+Artifact SHA-256: `09a076f9771a848bb135739d397624e1dd35183dbd8de1cb69a3b4988e5d2e4e`.
+With the documented JVM flags, process wall time was 0.354 s, JDBC work 277 ms,
+and peak RSS 50,152 KiB (local temporary storage). Reproduce with
+`PackagedJdbcProbe.java` from the server test sources: compile it with javac,
+then run its main class with the fat JAR and probe classes on the classpath,
+passing a fresh writable data directory. This is an early feasibility result,
+not PB30 acceptance: Bouncy Castle/authentication, ten-minute idle, capped
+50,000-record upload, arm64 execution, Pi 4 and Pi 3/Zero 2 W remain for W5/W11.
+
+The final local W2/W3 JAR repeated the JDBC service/native check and passed
+12 packaged CIO checks with `-Xmx96m`: exact chunked wire/decoded caps, malformed
+JSON, protocol policy, readiness, native extraction/permissions, failed bind
+and graceful SIGTERM shutdown. Final artifact SHA-256:
+`2727980ec623ae2d66d876fe9fb85f59db4c5315a8d751c60bfa7f45d95d0b7d`.
+This local feasibility evidence does not close S16.
 
 Prototype measured by the research for this plan (Ktor 3.6.0 CIO + sqlite-jdbc 3.53.4.0 on a 4-vCPU x86-64 container, OpenJDK 21): 27.5 MB of JARs; idle RSS 92 MB with `-Xmx64m -XX:+UseSerialGC -Xss512k -XX:TieredStopAtLevel=1` (133 MB with the default heap); 50,000 single-field changes pushed in 1.7–2.0 s and pulled in 0.5–0.7 s. The real merge of JSON documents is slower per change (Unverified); a household sees a few hundred changes a day and one-off initial uploads of about 50,000 records, so throughput is not a concern. The documented flags are `-Xmx96m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k`; S16 confirms them on a Raspberry Pi 4 against PB30 (idle ≤ 160 MB RSS, a 50,000-record initial upload ≤ 60 s) ([Spikes](#spikes)); Unverified until then: the footprint and upload time on a Pi.
 
@@ -1496,6 +1675,12 @@ Serves R7.2, N13. Delivered in MS1. Honours [D94](../PLAN.md#3-key-decisions), [
 
 ### First administrator
 
+**Implementation note (2026-11-01, MS1).** Supersedes the banner below: token
+only in `<data>/setup-token`, created `0600` before writing; print only its path,
+never token to stdout/stderr/log/audit. Keep 24-hour single use and hash-only DB.
+Restart invalidates before atomic replacement; admin creation invalidates and
+removes the file. N13 unchanged; PO-49 keeps the banner alternative open.
+
 When the database has no admin, `SetupService` creates a one-time **setup code** (16 characters from the link alphabet, valid 24 h, stored hashed with kind `setup`) and prints it once at start, in a banner on stdout: "No administrator yet. Open https://sync.example.org/setup and enter ABCD-EFGH-JKLM-NPQR, or run `neutrodyne-server admin create`". This is the single deliberate exception to the rule that logs never contain secrets: the code is useless as soon as any admin exists (it is then deleted) and after 24 h (a restart prints a new one while no admin exists) ([Open questions](#open-questions) 2). `admin create` on the CLI is the alternative for administrators who do not read logs.
 
 ### Invites
@@ -1521,6 +1706,18 @@ Optional per account (for the web UI and password login). `PasswordHasher` uses 
 
 ### Tokens
 
+**Implementation note (2026-11-01, MS1).** W5 adds the DB-only `AuthStore` /
+`AuthRead` / `AuthWrite` contracts beside the record store, with testing fakes.
+SQLite auth writes share the record writer and publish revocations only after
+commit. Both link lookup codes are SHA-256 hashes in the existing columns;
+preview binds the account and credential, and confirm/redemption recheck that
+credential. Failed approval checks are serialized through their outcome so
+concurrent entries cannot bypass the five-failure budget. W8 consumes the
+setup, invite, password, device and web-session services; its HTML/CLI routes
+remain separate. Administrator creation also invalidates setup credentials and
+removes the token file. The setup-file policy above supersedes every older
+setup-banner exception in this document; N13 remains unchanged.
+
 | Kind | Format | Lifetime | Use |
 |---|---|---|---|
 | `device` | `nds_` + base64url(32 random bytes from `SecureRandom`) — the prefix lets secret scanners recognise it | until revoked | API |
@@ -1542,6 +1739,12 @@ Every query is scoped by the `account_id` of the authenticated token; record IDs
 
 ### Rate limits
 
+**Implementation note (2026-11-01, MS1).** Account-wide password backoff returns
+`429` with `Retry-After`; requests do not sleep while retaining a connection or
+hash permit. Failed-login and failed-approval buckets are bounded in-memory
+state, like the named Ktor request limiters. Code lookup/consumption and polling
+intervals remain durable in SQLite.
+
 Ktor RateLimit token buckets, keyed by the client IP from `ClientAddress` and where noted by account or username:
 
 | Limiter | Limit | Key |
@@ -1559,6 +1762,17 @@ Ktor RateLimit token buckets, keyed by the client IP from `ClientAddress` and wh
 ---
 
 ## Deployment
+
+**Implementation note (2026-11-01, MS1).** W11 supplies the reference assets
+and image/release gates. SQLite JNI extraction uses the private executable
+`data/native` directory before JDBC initializes, including offline CLI paths;
+`/tmp` can remain `noexec`. Database backups are created with owner-only
+permissions before SQLite writes them, including destinations outside `data`.
+PR image checks use `--no-sources` only to omit release archive downloads;
+read-only, nonroot, no-shell, JNI, backup and live-restore checks still run.
+Nightly compose coverage exercises Caddy and nginx heartbeats for five minutes,
+backup/restore, token revocation and outbound capture. Docker, GHCR publication
+and both native image architectures still require their CI execution evidence.
 
 Serves R6.7, R7.8, N8, N12, N13. Delivered in M0b (JAR skeleton), MS1 (image, compose, systemd, README section), M11b (final guidance). Honours [D95](../PLAN.md#3-key-decisions), [D3](../PLAN.md#3-key-decisions), [D63](../PLAN.md#3-key-decisions), [D79](../PLAN.md#3-key-decisions). Release jobs: [09 `release.yml`](09-quality-and-release.md#releaseyml); channels: [09 Distribution channels](09-quality-and-release.md#distribution-channels).
 
@@ -1750,13 +1964,41 @@ Covered in [Backups](#backups). The README's "Run the server" section (09 owns t
 
 ### Update notice
 
+**Implementation note (2026-11-01, MS1).** W9 bounds each manifest attempt to
+10 seconds, 64 KiB per response and three redirects. Destinations are HTTPS on
+port 443 only: this repository's GitHub manifest release paths, then
+`release-assets.githubusercontent.com` (signed queries are allowed only there).
+The parser validates and rebuilds this repository's release/JAR links and checks
+the image digest reference and minimum Java version. No JAR or image is fetched.
+The first check has up to one hour of jitter; later attempts, including failures,
+are at least 24 hours apart with up to one hour of jitter. Disabling checks
+creates no job or HTTP client and makes no request. Tests inject transport;
+production retains the boolean configuration and JDK HttpClient.
+
 `ServerUpdateNotice` (on unless `NEUTRODYNE_SERVER_UPDATE_CHECK=false`) fetches `https://github.com/{owner}/Neutrodyne/releases/latest/download/neutrodyne-update.json` once a day (jittered, JDK `HttpClient`, redirects followed only to GitHub's release-asset hosts), reads `versionName`, the release page URL and the additive `server` entry (`jar`, `image`, `minJava`) of the update manifest ([D78](../PLAN.md#3-key-decisions), [09 Update check](09-quality-and-release.md#update-check)), and shows "Neutrodyne Sync X.Y.Z is available" with the release link on `/admin/server`. It never downloads or installs anything. This is the server's only outbound request (network inventory ID `server-updates`, [09 Network inventory](09-quality-and-release.md#network-inventory)); the nightly `server-image-smoke` capture shows no other.
 
 ### Image sources and the runtime exception
 
+**Implementation note (2026-11-01, MS1).** D95 remains distroless Java 25 on
+Debian 13, pinned by the multi-platform index in
+[`image-sources.lock.json`](../../sync/server/deploy/image-sources.lock.json).
+Registry metadata for both architectures lists 25 Debian binary packages;
+19 distinct corresponding source packages are pinned by exact source filenames,
+versions, sizes and SHA-256s. The source collector verifies all bytes before
+publication and creates the base archive plus `RUNTIME-SOURCES.md`.
+The pinned Temurin 25.0.4.1+1 runtime matches `desktopApp/runtime.lock`, so one
+runtime archive currently covers both products. A future mismatch requires a
+second exact archive before publication. Base changes must update the inventory
+and pass the image/source gates together. PLAN D3 already permits these
+unmodified base layers; AGENTS and README now agree. PO-48 is unrelated.
+The release publishes source archives to the matching GHCR repository before
+moving image tags; no release tag moves while the GitHub release is a draft.
+The exact-source collector and negative fixtures passed locally. Image runtime
+and package-to-inventory checks remain CI evidence until Docker is available.
+
 The image bundles an unmodified OpenJDK runtime and Debian base layers under [D3](../PLAN.md#3-key-decisions)'s runtime exception (risk L5):
 
-- each release attaches `neutrodyne-server-image-sources-{v}.tar.xz` — the source packages of the base image's GPL and LGPL components, at the versions recorded in the image (Unverified: that distroless images carry dpkg status files listing them; `check-server-image.sh` reads whatever the image records and fails when a package lacks its source) — and the Temurin source tarball of the image's runtime version;
+- each release attaches `neutrodyne-server-image-sources-{v}.tar.xz` — the source packages of the base image's GPL and LGPL components, at the versions recorded in the image (the pinned distroless metadata carries dpkg status entries; `check-server-image.sh` compares the built image with the inventory and fails when a package lacks its source) — and the Temurin source tarball of the image's runtime version;
 - if the pinned base image's Temurin version differs from the desktop runtime of the same release (`desktopApp/runtime.lock`), the release attaches both source tarballs and `RUNTIME-SOURCES.md` lists both ([Open questions](#open-questions) 4);
 - the image keeps the runtime's `legal/` notices; our layer adds `/app/THIRD_PARTY_NOTICES.md` with the server classpath's licences (Licensee report);
 - **Source from the same place (2026-10-05).** The image is distributed from ghcr.io, while the release assets live on github.com; GPL-2.0 §3 counts network access to the source as distribution only when it is offered "from the same place" ([GPL-2.0](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)), and LGPL-2.1 §6 is similar. So `image-tags` also pushes both source tarballs to the same GHCR repository as an OCI artefact under the tag `{v}-sources` (with [ORAS](https://github.com/oras-project/oras), Apache-2.0, a CI tool only; and, where GHCR serves the OCI referrers API, attached to the image index digest — Unverified, S17), before it moves `{v}`; the image carries `/app/SOURCES.md` and the label `ch.lkmc.neutrodyne.sources` naming `ghcr.io/{owner}/neutrodyne-server:{v}-sources` and the release page, plus a written offer, valid for three years, to provide the corresponding source on request as a fallback. This is the plan's reading of the licences, not legal advice.
@@ -1878,12 +2120,57 @@ Serves N1, N9, N13. Strategy and CI placement: [09 Test strategy](09-quality-and
 
 ### Convergence property test
 
+**Implementation note (2026-11-01, MS1).** W10 supplies the SQLite adapter for
+all five replicas, original clocks, resets, grow sets and hint provenance.
+The pure fixture suite enumerates pure cases; `ServerConformanceTest` executes
+all fixtures, including the four original server scenarios and the parent-rekey
+regression, without assumptions or deferred skips. Real convergence exposed two
+boundary defects: a parent-only relocation must not consume an episode's first
+rekey, and a guarded zero-position write can leave a hint-only record. Hint-only
+replay is admitted with complete original hint clocks; empty or clockless writes
+still reject. An empty rekey destination has no wire payload; replay is a no-op
+while canonical comparisons retain its raw record. The retained ledger is
+unchanged by a parent relocation or retry. Seed tests use temporary SQLite files
+on tmpfs when available, with the production WAL/FULL settings; disk recovery
+and durability tests remain separate. JNI bootstraps outside noexec tmpfs.
+
+**Implementation note (2026-11-01, MS1).** SyncServerAdapter factory injects
+push/rekey/page/snapshot/expiry into the unchanged generator; default fake stays,
+W10 owns real adapter lifetime. Reproduced identityRollbackCanViolateTheSingleAuthorityDomain:
+A→B, ledger lost, A→C rejects `invalid`. Adopt ledger carry-forward/canonicalization
+([Backups](#backups)), not epoch rotation alone. This resolves the design gap
+below. W7 recovery tests prove JDBC ledger carry-forward and W10 executes all
+server vectors through the real writer without deferred skips.
+
 S15 and `SyncConvergenceTest` (`:sync:impl` `commonTest`):
 
 - 5 simulated devices, each a replica of the synced state with its own `HlcClock`, wall clock skewed by up to ±4 min (within the admission bound) and an outbox; the server is `InMemorySyncServer`. `ServerConvergenceTest` (`:sync:server`, nightly) drives the same generator with field-level replicas against the real `RecordWriter` on a temporary database, so client and server implementations of the shared rules are both covered.
 - Random operations from a seeded generator: subscribe (including the same feed on two devices), unsubscribe, feed move, group create/rename (including equal names)/delete, membership add/remove/reorder, Up next add/move/remove, position saves, reset, mark played/unplayed, favourite, settings, rekey; random offline periods; duplicated, delayed and reordered pushes; pull pages cut at random points; one device's cursor expired.
 - After quiescence: every replica equals the server's state and each other; invariants: no position 0 replaced a non-zero one without `reset`; an effectively played episode is never in Up next; no podcast or group exists twice by key or `nameKey`; every Up next list has unique keys after tie-break.
 - 1,000 seeds in PR CI (`unit`), 100,000 nightly (`sync-convergence`); a failing seed is printed and becomes a regression test.
+
+**Implementation note (2026-11-01, MS0).** The common-code generator and
+`InMemorySyncServer` in `:core:testing` start five offline replicas with
+colliding feeds/names. Every seed exercises every operation, then a random
+suffix, duplicated/reordered writes and randomly cut full-record pages.
+Expiry and content rollback exercise original-clock replay. The fake reuses
+`RecordMerger`, `SurvivorRule`, feed identity and group-name normalization.
+
+Canonical comparison folds raw payloads into terminal IDs and compares
+redirects over all known addresses, retaining clocks, resets, sets and hint
+provenance. It also compares episode, membership, settings and list
+projections; tied keys sort by stable record ID. Short regression resources
+and the intermediate-parent rekey case pin failures. Desktop code only
+supplies configuration/resources; failing seeds and traces appear in XML.
+
+Seed 2 exposed an out-of-domain identity rollback: a restored server can
+reassign an already known redirect, which W2 rejects as `invalid`. The
+minimized `identityRollbackCanViolateTheSingleAuthorityDomain` test pins
+this rejection. S15 retains one authoritative identity ledger, carried forward by W7 recovery
+and exercised by W10 against SQLite. D92's field-kind fallback is unchanged.
+The simulator does not certify GC scheduling, the MS2 database applier or
+user effects. W10 supplies `ServerConvergenceTest` against the real writer;
+S15 still requires the 100,000-seed nightly evidence.
 
 ### Client database tests
 
@@ -1917,7 +2204,7 @@ S14 plus MS2, in `desktopTest` with the bundled SQLite driver and a subset as An
 - guards: 2 MiB / 16 MiB / 1,000-change / depth / string caps, gzip bombs, `415`, `421`, `426`, rate limits with `Retry-After`;
 - jobs: GC with the device-cursor rule and `min_cursor` (including live members of dead podcasts), nightly backup and per-account ZIP (the ZIP restored by 05's `BackupCodec`), migrations with the pre-migration backup, refusal of a newer schema, `restore` rotating epochs and carrying tokens, revocations, devices, web sessions and password hashes over (`RestoreAuthCarryOverTest`: a token revoked after the backup still gets `401`), the unclean-start epoch rotation;
 - server clock and life cycle: the library reset with `beforeCursor` (including a concurrent subscribe from a device whose clock lags 4 min, stamped below the resetting device's `t0`, which survives), revival and "Keep mine" against stored clocks 4 min ahead, Up next removal on a podcast's death, re-sequencing on revival, `stale` extras outside the page budget, `last_cursor` from `/changes`;
-- `LogRedactionTest`: no token, code (except the setup banner), password, feed URL or payload in any log line across the suite;
+- `LogRedactionTest`: no token, code, password, feed URL or payload in any log line across the suite;
 - `HealthCheckTest`, `ListenRuleTest` (M0b acceptance 16).
 
 ### Cross-device journey
@@ -1974,6 +2261,14 @@ Each scenario is a test; the property test generates the first four at random, t
 | S15 Convergence harness (MS0) | Do the field kinds and episode rules converge under skew, duplication and reordering? | [Convergence property test](#convergence-property-test) | MS0 acceptance 2 at 100,000 seeds | simplify field kinds (drop `MaxField` for `playCount`, make `lastPlayedAt` LWW) |
 | S16 Server on a Raspberry Pi (MS1) | Footprint and speed on the smallest supported hardware | Pi 4 (4 GB, 64-bit Raspberry Pi OS), the JAR on Temurin 21 and the image; the documented flags; idle RSS after 10 min; 50,000-record initial upload with `SyncLoadTool` (server test sources); start-up time; repeat on a Pi 3 or Zero 2 W (arm64) | PB30: idle ≤ 160 MB RSS, upload ≤ 60 s; recorded in the MS1 release issue | tighter flags (`-Xmx64m`, `-XX:ReservedCodeCacheSize=32m`, `-XX:MaxMetaspaceSize=64m`); recommend ≥ 2 GB devices; streaming record merge |
 | S17 Network paths (MS2–MS3) | Android 17 `ACCESS_LOCAL_NETWORK` for LAN servers; public names resolving to LAN addresses; a global IPv6 server on the same Wi-Fi (directly-connected route); a `10.x` server reached through a VPN; Tailscale `100.64.0.0/10`; SSE through Caddy and nginx (buffering, idle timeouts); no `502` from proxy keep-alive reuse against CIO's idle timeout (`/sync` calls spaced 40–200 s apart through both proxies); the macOS Local Network prompt with the ad-hoc identity, before and after an update | Physical Android 17 phone on Wi-Fi with a server on `192.168.x.x`; split-horizon DNS; a Tailscale node; `server-image-smoke` with the reference compose and a test certificate plus an nginx variant holding an SSE stream for 2 h; a desktop build updated over itself on macOS 15 | MS2 acceptance 5, MS3 acceptance 4; documented results for the unverified cases | polling-only mode for problematic paths; documentation of the macOS switch; treat CGNAT ranges as local in the gate if Android does |
+
+**Implementation note (2026-11-01, MS1).** S16 remains **open for owner
+hardware evidence**. Local x86-64 tests and CI image smoke do not close it.
+Record the Pi 4 JAR-on-Java-21 and arm64-image measurements with the documented
+flags: idle RSS after ten minutes (PB30 ≤ 160 MB), a 50,000-record initial
+upload with `SyncLoadTool` (≤ 60 seconds), startup time, then repeat on a Pi 3
+or Zero 2 W. Neither the physical devices nor their measurements are available
+in this worktree.
 
 ### Budgets
 
