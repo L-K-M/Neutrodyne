@@ -328,13 +328,27 @@ class ChapterRepositoryTest {
             }
             respond()
             val failed = runCatching { repo.ensureLoaded(id) }
-            assertEquals(ChapterSource.PSC, repo.observe(id).first().single().source)
+            assertEquals(
+                ChapterSource.PSC,
+                repo
+                    .observe(id)
+                    .first()
+                    .single()
+                    .source,
+            )
             db.useWriterConnection { it.execSql("DROP TRIGGER reject_chapter_insert") }
             respond()
             repo.ensureLoaded(id)
             assertEquals(2, serverRule.server.requestCount, "Local failures must not consume network retry allowance")
             assertTrue(failed.isFailure, "The caller must see the local persistence failure")
-            assertEquals(ChapterSource.PODCASTING20_JSON, repo.observe(id).first().single().source)
+            assertEquals(
+                ChapterSource.PODCASTING20_JSON,
+                repo
+                    .observe(id)
+                    .first()
+                    .single()
+                    .source,
+            )
         }
 
     @Test fun changedUrlClearsFailedAttemptAllowance() =

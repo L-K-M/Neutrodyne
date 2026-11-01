@@ -33,11 +33,11 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
-import ch.lkmc.neutrodyne.core.model.DownloadState
-import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
+import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes

@@ -42,7 +42,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.downloads_now
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_retry_now
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_wifi
 import ch.lkmc.neutrodyne.core.ui.resources.notifications_blocked
-import ch.lkmc.neutrodyne.core.ui.resources.notifications_open_settings
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource

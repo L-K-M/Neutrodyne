@@ -180,10 +180,6 @@ public class EpisodeViewModel
             viewModelScope.launch { suspendRunCatching { chapters.ensureLoaded(episodeId) } }
         }
 
-        /**
-         * A show-notes timestamp or chapter tap (M5): the current item seeks in place; any other
-         * episode starts at the position through the shared consent/refusal/retry path.
-         */
         public fun onVisible() {
             visibleDownloadIds.value = setOf(episodeId)
         }
@@ -193,6 +189,10 @@ public class EpisodeViewModel
             visibleDownloadIds.value = emptySet()
         }
 
+        /**
+         * A show-notes timestamp or chapter tap (M5): the current item seeks in place; any other
+         * episode starts at the position through the shared consent/refusal/retry path.
+         */
         public fun onTimestamp(positionMs: Long) {
             playback.seekOrPlay(episodeId, positionMs, uiState.value.episode?.durationMs)
         }
