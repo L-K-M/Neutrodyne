@@ -27,6 +27,7 @@ class ArtworkManifestTest {
         assertNull(provider.readPermission)
         assertNull(provider.writePermission)
         assertFalse(provider.grantUriPermissions)
-        assertEquals(app.applicationInfo.processName, provider.processName)
+        // Robolectric leaves the implicit application process unset; Android uses the package name.
+        assertEquals(app.applicationInfo.processName ?: app.packageName, provider.processName)
     }
 }
