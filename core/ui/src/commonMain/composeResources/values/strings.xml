@@ -656,4 +656,5 @@
     <string name="import_err_empty">No podcasts found in this file.</string>
     <string name="import_err_single_feed">This is a podcast feed, not a list of subscriptions.</string>
     <string name="import_err_unsupported">This file format is not supported.</string>
+    <string name="settings_update_available">Settings, update available</string>
 </resources>
