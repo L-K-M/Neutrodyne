@@ -324,6 +324,10 @@ PROBE_PROTOCOLS="$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^protocols//p' | sed '
 printf '%s\n' "$PROBE_LICENSE" >"$OUT/ffmpeg-license.txt"
 printf '%s\n' "$PROBE_PROTOCOLS" >"$OUT/ffmpeg-protocols.txt"
 
+# The build's own config.h, copied next to the libraries so the licence check and
+# the image scan can read it from the install tree without the build directory.
+cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h"
+
 # The enabled-component inventory, read from the build's own config.h.
 {
     echo "# enabled components of the $TARGET build (from config.h)"

@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Unlicense
+# playback/native/native-components.lock — the native components of :playback:native
+# (01 Python and native components, 11 Lockfiles). checkNativeLicences applies D3's
+# allow-list: permissive licences always, LGPL-2.1/3.0 only when the component is
+# dynamically linked and separately replaceable, which is exactly how the four FFmpeg
+# libraries are built and loaded (11 FFmpeg LGPL obligations). Nothing here is vendored
+# into the repository: build.sh downloads and checksum-verifies each source at build time.
+schema = 1
+
+# The minimal FFmpeg build of D86: four shared libraries with their upstream names,
+# never linked into ndmedia and never renamed, so a user can replace them.
+[ffmpeg]
+name = "FFmpeg"
+version = "9.0.2"
+spdx = "LGPL-2.1-or-later"
+sourceUrl = "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz"
+sha256 = "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+signatureUrl = "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc"
+signatureSha256 = "d617fd94ea354dadd2a8bb16243d37c44e1e9729b06b6ad58fe30bfb0fa943f2"
+signingKey = "playback/native/ffmpeg/ffmpeg-release-signing-key.asc"
+signingKeyFingerprint = "FCF986EA15E6E293A5644F10B4322F04D67658D8"
+aboutLibrariesId = "neutrodyne:ffmpeg"
+# The four libraries, in the order they load; the layout file and the licence check
+# name them exactly like this (11 FFmpeg build).
+libraries = ["avcodec", "avformat", "avutil", "swresample"]
+# The shared configure line of playback/native/ffmpeg/build.sh. A point release may
+# move it; a licence flag never appears here.
+configure = "--disable-everything --disable-programs --disable-doc --disable-network --disable-autodetect --enable-shared --disable-static --disable-avdevice --disable-avfilter --disable-swscale --enable-swresample"
+
+# miniaudio: the output device, ring buffer and per-OS shims of ndmedia (D86). Its
+# single header is downloaded and checksum-verified by build.sh; the licence is
+# elected as MIT-0 (its alternative is public domain).
+[miniaudio]
+name = "miniaudio"
+version = "0.11.22"
+spdx = "MIT-0"
+sourceUrl = "https://raw.githubusercontent.com/mackron/miniaudio/0.11.22/miniaudio.h"
+sha256 = "9019743287e443c55e5737a7297f38e5e358561701d6db2d905afb114390c410"
+aboutLibrariesId = "neutrodyne:miniaudio"
