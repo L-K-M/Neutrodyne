@@ -22,7 +22,9 @@ internal class MeasuredDuration(
     private val positions: PositionStore,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
-    private val reportFailure: (Exception) -> Unit = { android.util.Log.w("MeasuredDuration", "Duration save failed", it) },
+    private val reportFailure: (
+        Exception,
+    ) -> Unit = { android.util.Log.w("MeasuredDuration", "Duration save failed", it) },
 ) : Player.Listener {
     private var currentId: Long? = null
     private var epoch = 0L

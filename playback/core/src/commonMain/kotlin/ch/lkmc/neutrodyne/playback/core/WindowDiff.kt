@@ -86,6 +86,7 @@ class WindowDiff {
             enclosureUrl = b.enclosureUrl,
             enclosureLength = b.enclosureLength,
             externalMediaId = b.externalMediaId,
+            audioAlternate = b.audioAlternate,
         ) == b
     }
 
@@ -96,7 +97,9 @@ class WindowDiff {
         a.media?.sourceType == b.media?.sourceType &&
             a.media?.enclosureUrl == b.media?.enclosureUrl &&
             a.media?.enclosureLength == b.media?.enclosureLength &&
-            a.media?.externalMediaId == b.media?.externalMediaId && a.localUri == b.localUri
+            a.media?.externalMediaId == b.media?.externalMediaId && a.localUri == b.localUri &&
+            // A video's selected audio alternate decides what the resolver pins.
+            a.media?.isVideo == b.media?.isVideo && a.media?.audioAlternate == b.media?.audioAlternate
 
     private fun lcs(
         have: List<Long>,

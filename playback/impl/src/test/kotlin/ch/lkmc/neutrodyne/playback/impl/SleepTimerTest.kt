@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -23,6 +24,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+
+private const val REPLAY_MS = 60_000L
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -124,6 +127,56 @@ class SleepTimerTest {
             } finally {
                 timer.detach()
                 exo.release()
+            }
+        }
+
+    @Test fun seekingARetainedCompletedItemStartsAReplayWithDurableProgress() =
+        runTest {
+            val f = AdapterFixture(this)
+            f.sources.keepPositionOnMetadataUpdate = true
+            val timer = SleepTimer(f.player, EndOfItemPauseArbiter {}, f.clock, f.playerScope, {}, {})
+            try {
+                val ids = f.seed(2)
+                val id = ids.first()
+                f.attach()
+                f.start(ids, AdapterFixture.DURATION_MS - 1)
+                awaitAdapter { f.player.ids() == ids }
+                timer.attach()
+                timer.set(SleepTimerMode.EndOfEpisode)
+                f.fakeClock.advanceTime(1)
+                f.projector.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+                timer.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+                awaitAdapter { f.events.size == 1 }
+
+                // A seek alone keeps the completed state until audio actually plays.
+                f.fakeClock.advanceTime(1)
+                f.player.seekTo(REPLAY_MS)
+                awaitAdapter { f.player.currentPosition == REPLAY_MS }
+                assertNotNull(f.db.episodeStateDao().byEpisode(id)?.playedAt)
+
+                f.player.advancing = true
+                f.tracker.onIsPlayingChanged(true)
+                awaitAdapter("Replay did not clear played") {
+                    runBlocking { f.db.episodeStateDao().byEpisode(id)?.playedAt == null }
+                }
+
+                f.player.advancing = false
+                f.fakeClock.advanceTime(1)
+                f.tracker.onIsPlayingChanged(false)
+                awaitAdapter("Replay progress was not saved", {
+                    val saved = runBlocking { f.db.positionDao().byEpisode(id) }
+                    val state = runBlocking { f.db.episodeStateDao().byEpisode(id) }
+                    "saved=$saved state=$state player=${f.player.currentPosition} " +
+                        "playWhenReady=${f.player.playWhenReady} failures=${f.failures} calls=${f.player.calls}"
+                }) {
+                    runBlocking { f.db.positionDao().byEpisode(id)?.positionMs == REPLAY_MS }
+                }
+                assertEquals(id, f.player.episodeIdOrNull(), "Replay must stay on the retained item")
+                assertEquals(id, f.sessions.virtualQueue(0).current?.episodeId)
+                assertTrue(f.failures.isEmpty(), f.failures.toString())
+            } finally {
+                timer.detach()
+                f.close()
             }
         }
 

@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
+import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
@@ -26,6 +27,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.IOException
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
@@ -34,6 +36,62 @@ class QueueProjectorEventFenceTest {
     @Test fun oldEndCannotClearANewerStartDuringProjection() = runTest { staleEvent(Event.END) }
 
     @Test fun oldArrivalCannotPromoteOverANewerStartDuringProjection() = runTest { staleEvent(Event.ARRIVAL) }
+
+    @Test fun oldBoundaryCannotMarkTheEpisodeANewerSessionRestored() =
+        runTest {
+            val completed = CompletableDeferred<Unit>()
+            val reached = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val projection = CoroutineName("held restore")
+            lateinit var lookup: GatedLookup
+            val f =
+                AdapterFixture(
+                    this,
+                    sessionStore = { SignallingSessions(it, completed) },
+                    mediaLookup = { real -> GatedLookup(real, projection).also { lookup = it } },
+                )
+            var applying: Deferred<Unit>? = null
+            try {
+                val ids = f.seed(3)
+                f.attach()
+                f.start(listOf(ids[0]), AdapterFixture.DURATION_MS - 1)
+                awaitAdapter { f.player.ids() == listOf(ids[0]) }
+
+                // A restore moves A back to Up next with its saved position while A is still loaded.
+                f.projector.beginOwnWrite()
+                val generation =
+                    f.sessions.commitStart(SessionStart(ids[2], null, ContextRetention.KEEP, null, null), f.clock.now())
+                f.positions.save(ids[0], RESTORED_MS, null, PositionSource.STREAM, f.clock.now(), 0) { true }
+                f.queue.addLast(listOf(ids[0]))
+                val snapshot = f.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+                lookup.barrier = {
+                    reached.complete(Unit)
+                    release.await()
+                }
+                applying = async(projection) { f.projector.applyStart(StartOutcome.Committed(snapshot, 0)) }
+                awaitAdapter("Restore did not reach the projection barrier") { reached.isCompleted }
+
+                f.fakeClock.advanceTime(1)
+                f.projector.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+                awaitAdapter("The old boundary never reached storage") {
+                    completed.isCompleted || f.events.isNotEmpty()
+                }
+
+                assertNull(f.db.episodeStateDao().byEpisode(ids[0])?.playedAt, "A stale boundary must not mark played")
+                assertEquals(RESTORED_MS, f.db.positionDao().byEpisode(ids[0])?.positionMs)
+                assertEquals(listOf(ids[0]), f.sessions.virtualQueue(0).upNext.map { it.episodeId })
+                assertTrue(f.events.isEmpty(), f.events.toString())
+
+                release.complete(Unit)
+                applying.await()
+                f.projector.endOwnWrite(generation)
+                awaitAdapter { f.player.currentMediaItem?.mediaId == "episode:${ids[2]}" }
+            } finally {
+                release.complete(Unit)
+                applying?.cancelAndJoin()
+                f.close()
+            }
+        }
 
     @Test fun consecutiveArrivalsUseTheRevisionCommittedByThePreviousEvent() =
         runTest {
@@ -237,11 +295,22 @@ class QueueProjectorEventFenceTest {
     }
 }
 
+private const val RESTORED_MS = 90_000L
+
 private class SignallingSessions(
     private val delegate: PlaySessionStore,
     private val completed: CompletableDeferred<Unit>,
     private val beforeEvent: suspend () -> Unit = {},
 ) : PlaySessionStore by delegate {
+    override suspend fun markBoundaryPlayed(
+        episodeId: Long,
+        expected: SessionRevision,
+        now: Long,
+    ): Boolean {
+        beforeEvent()
+        return delegate.markBoundaryPlayed(episodeId, expected, now).also { completed.complete(Unit) }
+    }
+
     override suspend fun endSession(
         departure: Departure?,
         expected: SessionRevision,
