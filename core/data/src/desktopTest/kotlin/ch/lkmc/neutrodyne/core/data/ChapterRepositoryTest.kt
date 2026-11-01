@@ -18,7 +18,10 @@ import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import io.ktor.client.HttpClient
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -42,6 +45,8 @@ class ChapterRepositoryTest {
     private val clients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent())
     private val client = clients.client(HttpClientKind.API)
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+    private val loadingJob = SupervisorJob()
+    private val loadingScope = CoroutineScope(loadingJob + Dispatchers.Default)
     private val repo =
         ChapterRepositoryImpl(
             db,
@@ -52,9 +57,11 @@ class ChapterRepositoryTest {
             ),
             network,
             clock,
+            loadingScope,
         )
 
     @After fun close() {
+        runBlocking { loadingJob.cancelAndJoin() }
         clients.close()
         db.close()
     }
@@ -177,6 +184,7 @@ class ChapterRepositoryTest {
                     ),
                     network,
                     clock,
+                    loadingScope,
                 )
             another.ensureLoaded(id)
             assertEquals(1, serverRule.server.requestCount)

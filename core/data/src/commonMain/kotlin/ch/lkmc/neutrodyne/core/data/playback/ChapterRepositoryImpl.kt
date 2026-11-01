@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.core.data.playback
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.ChapterEntity
@@ -14,6 +15,7 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
@@ -41,10 +43,12 @@ internal class ChapterRepositoryImpl(
     private val parser: Podcasting20ChaptersParser,
     private val network: NetworkMonitor,
     private val clock: Clock,
+    @ApplicationScope private val loadingScope: CoroutineScope,
 ) : ChapterRepository {
     private data class Load(
         val url: String,
         val work: Deferred<Unit>,
+        var waiters: Int = 1,
     )
 
     private data class Failure(
@@ -83,7 +87,10 @@ internal class ChapterRepositoryImpl(
             val load =
                 mutex.withLock {
                     val existing = inFlight[episodeId]
-                    if (existing?.url == url && !existing.work.isCancelled) return@withLock existing
+                    if (existing?.url == url && !existing.work.isCancelled) {
+                        existing.waiters++
+                        return@withLock existing
+                    }
                     existing?.work?.cancel()
                     val failure = failures[episodeId]
                     if (failure?.url != url) failures.remove(episodeId)
@@ -93,7 +100,7 @@ internal class ChapterRepositoryImpl(
                     val backingOff = failure?.url == url && clock.elapsedRealtime() - failure.at < RETRY_MS
                     if (!network.status.value.isConnected || backingOff) return@withLock null
                     val work =
-                        async(start = CoroutineStart.LAZY) {
+                        loadingScope.async(start = CoroutineStart.LAZY) {
                             val ownJob = currentCoroutineContext()[Job]
                             try {
                                 load(episodeId, url)
@@ -107,7 +114,21 @@ internal class ChapterRepositoryImpl(
                         }
                     Load(url, work).also { inFlight[episodeId] = it }
                 } ?: return@coroutineScope
-            load.work.await()
+            try {
+                currentCoroutineContext().ensureActive()
+                load.work.await()
+            } finally {
+                // A closing screen releases only its interest, not the playback consumer's load.
+                withContext(NonCancellable) {
+                    mutex.withLock {
+                        load.waiters--
+                        if (load.waiters == 0) {
+                            if (!load.work.isCompleted) load.work.cancel()
+                            if (inFlight[episodeId]?.work === load.work) inFlight.remove(episodeId)
+                        }
+                    }
+                }
+            }
         }
 
     private suspend fun load(

@@ -70,11 +70,14 @@ internal class Chapters(
         val id = player.episodeIdOrNull() ?: return
         val currentScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
         occurrence = currentScope
+        // A failed enrichment observer must not terminate audio playback.
         currentScope.launch {
-            repository.observe(id).collect { rows ->
-                if (captured != epoch) return@collect
-                index = ChapterIndex(rows)
-                evaluate()
+            bestEffort {
+                repository.observe(id).collect { rows ->
+                    if (captured != epoch) return@collect
+                    index = ChapterIndex(rows)
+                    evaluate()
+                }
             }
         }
         currentScope.launch { bestEffort { repository.ensureLoaded(id) } }
