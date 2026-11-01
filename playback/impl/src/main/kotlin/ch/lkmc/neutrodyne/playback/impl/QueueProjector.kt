@@ -22,9 +22,9 @@ import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
 import ch.lkmc.neutrodyne.playback.core.PlayerWindow
 import ch.lkmc.neutrodyne.playback.core.PositionCapture
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
-import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.WindowEntry
 import ch.lkmc.neutrodyne.playback.core.WindowOp
 import ch.lkmc.neutrodyne.playback.core.WindowPlayback

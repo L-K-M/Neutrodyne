@@ -139,7 +139,9 @@ internal class SessionPlayer private constructor(
                 }
             }
 
-            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> nextEpisode()
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
+                nextEpisode()
+            }
 
             Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> {
                 val duration = exo.duration.takeIf { it != C.TIME_UNSET && it > 0 }

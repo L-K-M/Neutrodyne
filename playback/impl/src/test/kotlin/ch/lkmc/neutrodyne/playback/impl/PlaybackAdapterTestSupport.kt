@@ -43,9 +43,9 @@ import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
 import ch.lkmc.neutrodyne.playback.core.PlayedRule
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
-import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope

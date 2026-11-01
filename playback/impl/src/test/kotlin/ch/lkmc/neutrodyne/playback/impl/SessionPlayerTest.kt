@@ -4,9 +4,9 @@ package ch.lkmc.neutrodyne.playback.impl
 import android.app.Application
 import android.content.Intent
 import android.os.Bundle
+import android.os.Looper
 import android.os.Process
 import android.view.KeyEvent
-import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -31,8 +31,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
