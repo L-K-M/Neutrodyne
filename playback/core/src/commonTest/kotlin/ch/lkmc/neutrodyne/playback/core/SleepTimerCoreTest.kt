@@ -122,6 +122,20 @@ class SleepTimerCoreTest {
         assertEquals(SleepTimerState.Off, core.state)
     }
 
+    @Test fun endOfEpisodeRequestedBeforeTheItemLoadsArmsOnArrival() {
+        core.set(SleepTimerMode.EndOfEpisode, null)
+        assertEquals(SleepTimerState.Off, core.state)
+        assertTrue(SleepTimerCore.Effect.ArmEndOfItem(true) in core.currentChanged(7))
+        assertEquals(SleepTimerState.EndOfEpisode(7), core.state)
+    }
+
+    @Test fun cancellingAnUnloadedEndOfEpisodeRequestLeavesTheNextItemUnarmed() {
+        core.set(SleepTimerMode.EndOfEpisode, null)
+        core.set(SleepTimerMode.Off, null)
+        assertTrue(SleepTimerCore.Effect.ArmEndOfItem(true) !in core.currentChanged(7))
+        assertEquals(SleepTimerState.Off, core.state)
+    }
+
     @Test fun missingCurrentDisarmsEndOfEpisodeWithoutFiring() {
         core.set(SleepTimerMode.EndOfEpisode, null)
         assertEquals(SleepTimerState.Off, core.state)

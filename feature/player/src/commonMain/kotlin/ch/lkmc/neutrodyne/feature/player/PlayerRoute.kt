@@ -134,6 +134,7 @@ private fun PlayerRouteContent(
         previous = vm::previous,
         next = vm::next,
         seek = { value -> vm.seekTo(value, seekEpisodeId) },
+        seekChapter = vm::onTimestamp,
         nextEpisode = vm::nextEpisode,
         previousEpisode = vm::previousEpisode,
         dismiss = vm::dismissPaused,

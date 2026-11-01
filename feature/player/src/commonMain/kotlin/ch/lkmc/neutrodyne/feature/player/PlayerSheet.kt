@@ -177,6 +177,7 @@ internal fun PlayerSheet(
     previous: () -> Unit,
     next: () -> Unit,
     seek: (Long) -> Unit,
+    seekChapter: (Long) -> Unit,
     dismiss: () -> Unit,
     stop: () -> Unit,
     markPlayed: () -> Unit,

@@ -646,7 +646,7 @@ class PlayerSheetTest {
             onNodeWithText("Chapters (2)").performClick()
             onNodeWithText("Interview").assertIsSelected().performClick()
             onNodeWithText("Opening").performClick()
-            assertEquals(listOf("seek:30000", "seek:0"), fixture.calls)
+            assertEquals(listOf("chapter:30000", "chapter:0"), fixture.calls)
 
             runOnIdle { fixture.chapters = emptyList() }
             onAllNodes(hasText("Chapters (")).assertCountEquals(0)
@@ -762,6 +762,7 @@ private class SheetFixture(
                     previousEpisode = previousEpisode,
                     nextEpisode = nextEpisode,
                     seek = { calls += "seek:$it" },
+                    seekChapter = { calls += "chapter:$it" },
                     dismiss = { calls += "dismiss" },
                     stop = { calls += "stop" },
                     markPlayed = { calls += "markPlayed" },

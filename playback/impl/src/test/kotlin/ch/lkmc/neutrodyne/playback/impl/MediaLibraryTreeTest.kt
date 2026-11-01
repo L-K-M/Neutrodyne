@@ -58,6 +58,18 @@ class MediaLibraryTreeTest {
         }
     }
 
+    @Test fun upNextCapCountsOnlyPlayableEntries() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            val external = (1L..100L).associateWith { media(id = it, type = SourceType.YOUTUBE_CHANNEL) }
+            h.lookup.items.value = external + (101L to media(id = 101))
+            h.publish(h.store.queue.copy(upNext = (1L..101L).map { QueueItem(it, QueueOrigin.UP_NEXT) }))
+            assertEquals(
+                listOf("episode:101@upnext"),
+                h.run { h.tree.children("upnext", 0, 100) }.map { it.mediaId },
+            )
+        }
+    }
+
     @Test fun invalidParentsAndPaginationFailExplicitly() {
         LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
             assertFailsWith<IllegalArgumentException> { h.run { h.tree.children("unknown", 0, 1) } }

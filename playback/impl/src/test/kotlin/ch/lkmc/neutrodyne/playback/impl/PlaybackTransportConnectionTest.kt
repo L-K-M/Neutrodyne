@@ -12,8 +12,11 @@ import androidx.media3.session.MediaSession
 import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.robolectric.TestPlayerRunHelper
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import com.google.common.util.concurrent.SettableFuture
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.launch
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -80,7 +83,66 @@ class PlaybackTransportConnectionTest {
         }
     }
 
+    @Test fun aSeekWaitingForItsBindingCannotLandOnTheNextEpisode() {
+        val app: Application = RuntimeEnvironment.getApplication()
+        LifecycleHarness(app).use { h ->
+            h.seedCurrent(FIRST_ID)
+            val observing = h.scope.launch { h.hub.nowPlaying.collect {} }
+            val player = TestExoPlayerBuilder(app).setMediaSourceFactory(AdapterSources()).build()
+            player.setMediaItems(listOf(episode(FIRST_ID), episode(SECOND_ID)))
+            player.prepare()
+            TestPlayerRunHelper.runUntilPlaybackState(player, Player.STATE_READY)
+            val session = MediaSession.Builder(app, player).build()
+            val owner = Owner().also { it.lifecycle.currentState = Lifecycle.State.STARTED }
+            val binding = SettableFuture.create<MediaController>()
+            val connection = PlayerConnection(owner.lifecycle) { binding }
+            val controller =
+                PlaybackControllerImpl(
+                    connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider { h.sessions },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
+            try {
+                pumpUntil { h.hub.nowPlaying.value?.episodeId == FIRST_ID }
+                controller.seekTo(TARGET_MS)
+
+                // The first episode ends while the binding is still connecting.
+                player.seekTo(1, 0)
+                val live = h.run { MediaController.Builder(app, session.token).buildAsync().await() }
+                binding.set(live)
+                pumpUntil { connection.controller === live }
+
+                // Session commands apply in order, so the marker proves any earlier seek has landed.
+                live.setPlaybackSpeed(MARKER_SPEED)
+                pumpUntil { player.playbackParameters.speed == MARKER_SPEED }
+                assertEquals(SECOND_ID, player.episodeIdOrNull())
+                assertEquals(0L, player.currentPosition)
+            } finally {
+                observing.cancel()
+                connection.onStop(owner)
+                session.release()
+                player.release()
+            }
+        }
+    }
+
+    private fun episode(id: Long): MediaItem =
+        MediaItem
+            .Builder()
+            .setMediaId("episode:$id")
+            .setUri("https://fixture.test/$id.mp3")
+            .build()
+
     private companion object {
         const val TARGET_MS = 23_456L
+        const val FIRST_ID = 1L
+        const val SECOND_ID = 2L
+        const val MARKER_SPEED = 1.5f
     }
 }

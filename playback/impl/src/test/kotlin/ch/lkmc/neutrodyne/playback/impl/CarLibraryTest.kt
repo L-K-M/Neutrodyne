@@ -242,6 +242,72 @@ class CarLibraryTest {
         }
     }
 
+    @Test fun podcastFoldersPageCompletelyAndSubscribersSeeTheFullCount() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            val ids =
+                h.run {
+                    h.opener.awaitOpen()
+                    val db = h.opener.requireDatabase()
+                    (1..PODCAST_COUNT).map { n ->
+                        db.podcastDao().insertPodcast(podcastEntity(title = "Podcast ${n.toString().padStart(3, '0')}"))
+                    }
+                }
+            val expected = ids.map { "podcast:$it" }
+            val exo = h.playerFactory.create()
+            val callback =
+                SessionCallback(
+                    { error("Browse activated playback") },
+                    ResumptionProvider { error("Unexpected playback") },
+                    h.tree,
+                    MediaButtons(h.prefs),
+                    h.scope,
+                    Dispatchers.IO,
+                    ControllerHostIdentity(h.app.packageManager),
+                )
+            val session = MediaLibrarySession.Builder(h.app, exo, callback).build()
+            val counts = mutableListOf<Int>()
+            val listener =
+                object : MediaBrowser.Listener {
+                    override fun onChildrenChanged(
+                        browser: MediaBrowser,
+                        parentId: String,
+                        itemCount: Int,
+                        params: LibraryParams?,
+                    ) {
+                        counts += itemCount
+                    }
+                }
+            val browser =
+                h.run { MediaBrowser.Builder(h.app, session.token).setListener(listener).buildAsync().await() }
+            try {
+                h.run {
+                    suspend fun pages(size: Int): List<String> {
+                        val seen = mutableListOf<String>()
+                        var page = 0
+                        while (true) {
+                            val items =
+                                browser
+                                    .getChildren(MediaLibraryTree.PODCASTS, page++, size, null)
+                                    .await()
+                                    .value!!
+                            if (items.isEmpty()) return seen
+                            seen += items.map { it.mediaId }
+                        }
+                    }
+                    assertEquals(expected, pages(100))
+                    assertEquals(expected, pages(200))
+                    assertEquals(0, browser.subscribe(MediaLibraryTree.PODCASTS, null).await().resultCode)
+                }
+                pumpUntil { counts.isNotEmpty() }
+                assertEquals(PODCAST_COUNT, counts.last())
+            } finally {
+                browser.release()
+                session.release()
+                exo.release()
+            }
+        }
+    }
+
     @Test fun mediaBrowserExercisesRootLimitChildrenSearchAndReadOnlyBrowse() {
         LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
             h.seedCurrent()
@@ -316,5 +382,9 @@ class CarLibraryTest {
                 exo.release()
             }
         }
+    }
+
+    private companion object {
+        const val PODCAST_COUNT = 300
     }
 }

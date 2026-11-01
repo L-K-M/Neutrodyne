@@ -84,6 +84,27 @@ class CarBrowseQueriesTest {
             }
         }
 
+    @Test fun searchFindsNonAsciiTitlesInTheirCommonCaseForms() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val p = db.podcastDao().insertPodcast(podcastEntity())
+
+                suspend fun add(title: String) = db.episodeDao().insertStub(episodeEntity(podcastId = p, title = title))
+
+                suspend fun find(pattern: String) = db.episodeDao().searchTitles(pattern, 20, false).toSet()
+                val capitalized = add("Ärger mit Österreich")
+                val upper = add("ÄRGER HEUTE")
+                val lower = add("ärger morgen")
+                add("unrelated")
+                assertEquals(setOf(capitalized, upper, lower), find("%ärger%"))
+                assertEquals(setOf(capitalized), find("%ärger mit österreich%"))
+                assertEquals(setOf(capitalized), find("%ÄRGER MIT ÖSTERREICH%"))
+            } finally {
+                db.close()
+            }
+        }
+
     @Test fun searchBindsLiteralWildcardsUnicodeAndUsesNewestIdTieBreak() =
         runTest {
             val db = TestDb.inMemory()
