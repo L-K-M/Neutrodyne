@@ -8,7 +8,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
-            implementation(libs.kotlinx.collections.immutable)
+            api(libs.kotlinx.collections.immutable)
             implementation(libs.kotlinx.datetime)
         }
     }

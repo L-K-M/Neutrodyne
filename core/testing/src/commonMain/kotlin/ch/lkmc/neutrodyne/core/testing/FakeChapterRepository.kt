@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import kotlinx.coroutines.flow.Flow
@@ -13,6 +14,18 @@ import kotlinx.coroutines.flow.map
 /** In-memory source isolation/selection; loading is recorded, never fakes network success. */
 class FakeChapterRepository : ChapterRepository {
     val rows = MutableStateFlow<Map<Long, List<EpisodeChapter>>>(emptyMap())
+    val localLoads = mutableListOf<Pair<Long, String>>()
+    var localResult: EmbeddedChapterResult = EmbeddedChapterResult.Unavailable
+
+    override suspend fun ensureLocalLoaded(
+        episodeId: Long,
+        fileUri: String,
+    ): EmbeddedChapterResult {
+        localLoads += episodeId to fileUri
+        failure?.let { throw it }
+        return localResult
+    }
+
     val loads = mutableListOf<Long>()
     val writes = mutableListOf<Write>()
     var failure: Throwable? = null
