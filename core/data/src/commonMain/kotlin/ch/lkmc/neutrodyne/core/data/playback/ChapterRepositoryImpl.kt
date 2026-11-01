@@ -95,6 +95,7 @@ internal class ChapterRepositoryImpl(
                     val failure = failures[episodeId]
                     if (failure?.url != url) failures.remove(episodeId)
                     if (db.chapterDao().ofSource(episodeId, ChapterSource.PODCASTING20_JSON).isNotEmpty()) {
+                        failures.remove(episodeId)
                         return@withLock null
                     }
                     val backingOff = failure?.url == url && clock.elapsedRealtime() - failure.at < RETRY_MS
@@ -145,24 +146,38 @@ internal class ChapterRepositoryImpl(
                     fetch.cancel()
                 }
             try {
-                val rows = fetch.await()
+                val rows = awaitRows(fetch, episodeId, url) ?: return@supervisorScope
+                // A local write failure reaches every waiter and consumes no network allowance.
                 db.withWriteTransaction {
                     if (db.episodeDao().byId(episodeId)?.chaptersUrl == url) {
                         replace(episodeId, ChapterSource.PODCASTING20_JSON, rows)
                     }
                 }
-            } catch (_: TimeoutCancellationException) {
-                // A caller's deadline must not consume the network retry allowance.
-                currentCoroutineContext().ensureActive()
-                recordFailure(episodeId, url)
-            } catch (cancelled: CancellationException) {
-                currentCoroutineContext().ensureActive()
-                if (db.episodeDao().byId(episodeId)?.chaptersUrl == url) throw cancelled
-            } catch (_: Exception) {
-                recordFailure(episodeId, url)
             } finally {
                 changed.cancel()
             }
+        }
+
+    /** Null when the request failed or went stale. Only remote failures start the retry delay. */
+    private suspend fun awaitRows(
+        fetch: Deferred<List<EpisodeChapter>>,
+        episodeId: Long,
+        url: String,
+    ): List<EpisodeChapter>? =
+        try {
+            fetch.await()
+        } catch (_: TimeoutCancellationException) {
+            // A caller's deadline must not consume the network retry allowance.
+            currentCoroutineContext().ensureActive()
+            recordFailure(episodeId, url)
+            null
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (db.episodeDao().byId(episodeId)?.chaptersUrl == url) throw cancelled
+            null
+        } catch (_: Exception) {
+            recordFailure(episodeId, url)
+            null
         }
 
     private suspend fun recordFailure(

@@ -220,6 +220,27 @@ class ChapterRepositoryTest {
             assertEquals(2, serverRule.server.requestCount)
         }
 
+    @Test fun localPersistenceFailureIsReportedAndCanRetryImmediately() =
+        runBlocking {
+            val id = seed()
+            repo.replace(id, ChapterSource.PSC, listOf(row()))
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER reject_chapter_insert BEFORE INSERT ON chapter " +
+                        "BEGIN SELECT RAISE(ABORT, 'test persistence failure'); END",
+                )
+            }
+            respond()
+            val failed = runCatching { repo.ensureLoaded(id) }
+            assertEquals(ChapterSource.PSC, repo.observe(id).first().single().source)
+            db.useWriterConnection { it.execSql("DROP TRIGGER reject_chapter_insert") }
+            respond()
+            repo.ensureLoaded(id)
+            assertEquals(2, serverRule.server.requestCount, "Local failures must not consume network retry allowance")
+            assertTrue(failed.isFailure, "The caller must see the local persistence failure")
+            assertEquals(ChapterSource.PODCASTING20_JSON, repo.observe(id).first().single().source)
+        }
+
     @Test fun changedUrlClearsFailedAttemptAllowance() =
         runBlocking {
             val id = seed()
