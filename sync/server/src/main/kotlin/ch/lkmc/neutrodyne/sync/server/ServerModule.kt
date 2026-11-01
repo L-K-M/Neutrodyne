@@ -14,19 +14,20 @@ import kotlin.time.Clock
 
 /**
  * Ktor application module (10 Server architecture, Module and classes): installs the request
- * pipeline's insecure-transport guard and the routes. The M0b skeleton carries health and
- * discovery; the API, web and event routes and the body guards arrive with MS1.
+ * pipeline's insecure-transport guard and the routes. Health and discovery are live; the
+ * request guards, API, web and event routes arrive with the later MS1 groups.
  */
 internal class ServerModule(
     private val config: ServerConfig,
     private val serverVersion: String,
     private val clock: Clock = Clock.System,
+    private val writeProbe: suspend () -> Boolean = { true },
 ) {
     fun install(application: Application) {
         with(application) {
             InsecureTransportGuard(config).install(this)
             routing {
-                HealthRoutes(config.dataDir).install(this)
+                HealthRoutes(config.dataDir, writeProbe = writeProbe).install(this)
                 WellKnownRoutes(serverVersion, clock).install(this)
             }
         }

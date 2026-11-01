@@ -214,6 +214,27 @@ class ProtocolContractTest {
     }
 
     @Test
+    fun fieldNameGrammarIsSharedAndFailuresStayPerChange() {
+        val value = fv(JsonPrimitive("extension"))
+        listOf("A0_.~", "x".repeat(64)).forEach {
+            ProtocolValidation.field(SyncCollection.PODCAST, it, value)
+        }
+        listOf("", "x".repeat(65), "bad-name", "é", "bad name").forEach { name ->
+            val bad = ChangeDto("podcast", podcastWire(), fields = mapOf(name to value))
+            val good = bad.copy(fields = mapOf("title" to value))
+            val request =
+                ProtocolCodec.decodeRequest(
+                    SyncJson.encodeToString(SyncRequest.serializer(), SyncRequest(changes = listOf(bad, good))),
+                )
+            assertInvalid { ProtocolValidation.change(request.changes[0]) }
+            assertTrue(ProtocolValidation.change(request.changes[1]) is ValidatedChange.Write)
+        }
+        assertInvalid { ProtocolCodec.parse("\"" + "x".repeat(4_097) + "\"") }
+    }
+
+    private fun podcastWire() = JsonPrimitive(podcast.value)
+
+    @Test
     fun malformedChangesAreRejectedIndependently() {
         val bad = ChangeDto("future", JsonPrimitive("id"))
         val good =
@@ -234,6 +255,19 @@ class ProtocolContractTest {
         assertInvalid { ProtocolValidation.change(good.copy(op = "remove")) }
         assertInvalid { ProtocolValidation.change(good.copy(to = JsonPrimitive(podcast.value))) }
         assertInvalid { ProtocolValidation.change(good.copy(fields = emptyMap())) }
+    }
+
+    @Test
+    fun hintOnlyReplayRetainsItsOriginalProvenanceWithoutInventingFields() {
+        val id = RecordId.Episode(podcast, EpisodeKey("g:hint-only"))
+        val hints = MatchHints(title = "Retained hint")
+        val dto = ChangeDto("episode", id.toWire(), match = hints, matchClocks = mapOf("title" to clock.toString()))
+        val replay = ProtocolValidation.change(dto) as ValidatedChange.Write
+        assertTrue(replay.state.fields.isEmpty())
+        assertEquals(hints, replay.state.match)
+        assertEquals(mapOf("title" to clock), replay.state.matchClocks)
+        assertInvalid { ProtocolValidation.change(dto.copy(matchClocks = emptyMap())) }
+        assertInvalid { ProtocolValidation.change(dto.copy(match = MatchHints(), matchClocks = emptyMap())) }
     }
 
     @Test

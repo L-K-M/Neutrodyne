@@ -48,7 +48,9 @@ object ProtocolValidation {
                 if (from == to || from.podcast != to.podcast) invalid("rekey must change key within podcast")
                 return@checked ValidatedChange.Rekey(from, to)
             }
-            if (dto.op != null || dto.to != null || dto.fields.isEmpty()) invalid("invalid write operation")
+            if (dto.op != null || dto.to != null || (dto.fields.isEmpty() && dto.match?.values().isNullOrEmpty())) {
+                invalid("invalid write operation")
+            }
             val state = readState(coll, dto.fields, dto.match, dto.matchClocks, null, serverTimeMs)
             ValidatedChange.Write(id, state)
         }
@@ -84,7 +86,11 @@ object ProtocolValidation {
         name: String,
         value: FieldValue,
     ) {
-        if (name.isEmpty() || !fitsUtf8(name, ProtocolLimits.MAX_STRING)) invalid("invalid field name")
+        if (name.length !in 1..ProtocolLimits.MAX_FIELD_NAME ||
+            name.any { it !in 'A'..'Z' && it !in 'a'..'z' && it !in '0'..'9' && it !in "_.~" }
+        ) {
+            invalid("invalid field name")
+        }
         val spec =
             coll.fields[name] ?: FieldSpec(
                 name,

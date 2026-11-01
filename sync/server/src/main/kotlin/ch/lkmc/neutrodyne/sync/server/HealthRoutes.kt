@@ -7,17 +7,19 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
+import kotlinx.coroutines.CancellationException
 import java.nio.file.Files
 import java.nio.file.Path
 
 /**
  * `/healthz` and `/readyz` (10 Protocol › Account and health endpoints): liveness answers `200 ok`
- * while the process serves; readiness answers `200` when the data volume has room — the database
- * write check joins with MS1's storage — and `503` otherwise, with no details in the body.
+ * while the process serves; readiness requires free disk space and a successful rolled-back
+ * database write, and answers `503` otherwise, with no details in the body.
  */
 internal class HealthRoutes(
     private val dataDir: Path,
     private val usableSpace: (Path) -> Long = { directory -> Files.getFileStore(directory).usableSpace },
+    private val writeProbe: suspend () -> Boolean = { true },
 ) {
     fun install(routing: Routing) {
         routing.apply {
@@ -34,11 +36,15 @@ internal class HealthRoutes(
         }
     }
 
-    /** Ready when the data volume has room; the database write check joins with MS1's storage. */
-    internal fun isReady(): Boolean =
-        runCatching {
-            Files.isDirectory(dataDir) && usableSpace(dataDir) >= MIN_FREE_DISK_BYTES
-        }.getOrDefault(false)
+    /** Both storage capacity and the actual JDBC write path must work. */
+    internal suspend fun isReady(): Boolean =
+        try {
+            Files.isDirectory(dataDir) && usableSpace(dataDir) >= MIN_FREE_DISK_BYTES && writeProbe()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (_: Exception) {
+            false
+        }
 
     internal companion object {
         const val HEALTH_PATH = "/healthz"

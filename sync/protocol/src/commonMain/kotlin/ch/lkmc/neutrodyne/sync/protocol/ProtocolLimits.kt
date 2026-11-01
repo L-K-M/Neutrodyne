@@ -14,6 +14,7 @@ object ProtocolLimits {
     const val MAX_TITLE = 1_024
     const val MAX_IDENTITY_KEY = 2_048
     const val MAX_SETTING_KEY = 64
+    const val MAX_FIELD_NAME = 64
     const val MAX_FIELDS_PER_RECORD = 64
     const val MAX_GROW_SET = 64
     const val MAX_ORDER_KEY = 64

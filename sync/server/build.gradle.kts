@@ -25,6 +25,7 @@ val generateServerVersionResource =
     tasks.register("generateServerVersionResource", WriteProperties::class) {
         description = "Writes neutrodyne-server.properties carrying neutrodyne.versionName."
         property(serverVersionKey, providers.gradleProperty(versionNameProperty))
+        property("repoUrl", providers.gradleProperty("neutrodyne.repoUrl"))
         destinationFile = layout.buildDirectory.file("generated/server-version/$serverPropertiesFile")
     }
 
@@ -39,13 +40,31 @@ dependencies {
     implementation(platform(libs.ktor.bom))
     implementation(libs.bundles.server.ktor)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.sqlite.jdbc)
     implementation(libs.slf4j.api)
     runtimeOnly(libs.slf4j.simple)
 
+    testImplementation(project(":core:testing"))
     testImplementation(libs.kotlin.test)
     testImplementation(libs.junit4)
     testImplementation(platform(libs.ktor.bom))
     testImplementation(libs.ktor.server.test.host)
+}
+
+// Compile JVM-only domain fakes here; :core:testing must not depend on the server application.
+kotlin.sourceSets.named("test") {
+    kotlin.srcDir(rootProject.file("core/testing/src/serverFixtures/kotlin"))
+}
+
+// Child JVMs prove OS lock/crash behavior using the same resolved runtime as the tests.
+tasks.named<org.gradle.api.tasks.testing.Test>("test") {
+    systemProperty(
+        "neutrodyne.server.testClasspath",
+        project.extensions
+            .getByType<org.gradle.api.tasks.SourceSetContainer>()
+            .getByName("test")
+            .runtimeClasspath.asPath,
+    )
 }
 
 // Keys of the generated resource (read by ServerVersion).
