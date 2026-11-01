@@ -523,6 +523,9 @@ class PlaybackServiceTest {
             phase("recreation/foreground")
             foregroundHost()
             val restored = withContext(Dispatchers.Main) { connect() }
+            // The lazy runtime keeps the queue out of the player until a runtime call;
+            // prepare() drives the non-play resumption path that loads the saved card.
+            withContext(Dispatchers.Main) { restored.prepare() }
             await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 } }
             withContext(Dispatchers.Main) { assertFalse(restored.playWhenReady) }
             await { withContext(Dispatchers.Main) { restored.currentPosition >= 9_000 } }
