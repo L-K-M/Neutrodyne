@@ -11,6 +11,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.plugins.BadRequestException
@@ -33,17 +34,26 @@ import kotlin.time.Clock
 
 /**
  * Ktor application module (10 Server architecture, Module and classes): installs the request
- * pipeline, transport guard, health/discovery and the public rate limiter. The authenticated
- * API, web and event routes arrive with the later MS1 groups.
+ * pipeline, transport guard, health/discovery, authenticated API and event routes. The admin
+ * web UI arrives with a later MS1 group.
  */
 internal class ServerModule(
     private val config: ServerConfig,
     private val serverVersion: String,
     private val clock: Clock = Clock.System,
     private val writeProbe: suspend () -> Boolean = { true },
+    private val services: ServerServices? = null,
+    private val requestLog: ((String) -> Unit)? = null,
 ) {
     fun install(application: Application) {
         with(application) {
+            RequestLogger(config.logFormat, services?.metrics ?: ServerMetrics()) { line ->
+                if (requestLog != null) {
+                    requestLog.invoke(line)
+                } else if (config.logLevel in setOf(LogLevel.TRACE, LogLevel.DEBUG, LogLevel.INFO)) {
+                    println(line)
+                }
+            }.install(this)
             install(CallId) {
                 retrieveFromHeader("X-Request-Id")
                 generate { UUID.randomUUID().toString() }
@@ -70,6 +80,10 @@ internal class ServerModule(
                 excludeContentType(ContentType.Text.EventStream)
             }
             install(StatusPages) {
+                exception<AuthThrottled> { call, failure ->
+                    call.response.headers.append(HttpHeaders.RetryAfter, failure.retrySeconds.toString())
+                    call.problem(HttpStatusCode.TooManyRequests, "rate_limited")
+                }
                 exception<BoundaryException> { call, failure -> call.problem(failure.status, failure.code) }
                 exception<ProtocolException> { call, failure ->
                     val status =
@@ -99,10 +113,25 @@ internal class ServerModule(
             RateLimits(config).install(this)
             InsecureTransportGuard(config).install(this)
             RequestGuards().install(this)
+            val authRoutes = services?.let { AuthRoutes(it, config) }
+            authRoutes?.authenticate(this)
+            if (services != null) monitor.subscribe(ApplicationStopping) { services.events.close() }
             routing {
                 HealthRoutes(config.dataDir, writeProbe = writeProbe).install(this)
                 rateLimit(RateLimits.PUBLIC) {
-                    WellKnownRoutes(serverVersion, clock).install(this)
+                    WellKnownRoutes(
+                        serverVersion,
+                        clock,
+                        services?.let { it::features } ?: { emptyList() },
+                    ).install(this)
+                }
+                if (services != null) {
+                    authRoutes?.install(this)
+                    DeviceRoutes(services.devices).install(this)
+                    SyncRoutes(services.records, services.metrics).install(this)
+                    ChangesRoutes(services.records, services.inputs, services.metrics).install(this)
+                    AccountRoutes(services.accounts, services.records).install(this)
+                    EventsRoutes(services.events, services.metrics, services.tokens::valid).install(this)
                 }
             }
         }
