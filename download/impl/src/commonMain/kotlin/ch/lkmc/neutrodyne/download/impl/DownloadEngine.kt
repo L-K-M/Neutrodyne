@@ -333,7 +333,9 @@ internal class DownloadEngine(
         try {
             if (entry.intent != null) throw CancellationException("Download stopped before transfer")
             currentCoroutineContext().ensureActive()
-            end = TransferEnd.Finished(transfer.run())
+            val result = transfer.run()
+            currentCoroutineContext().ensureActive()
+            end = TransferEnd.Finished(result)
         } catch (cancelled: CancellationException) {
             end = TransferEnd.Stopped(entry.intent ?: StopIntent.RunnerStopped(UNKNOWN_RUNNER_STOP_REASON))
             throw cancelled
@@ -497,7 +499,10 @@ internal class DownloadEngine(
                 val source =
                     db.episodeDao().downloadSources(listOf(row.episodeId)).singleOrNull()
                         ?: return TransferResult.Permanent(DownloadError.HTTP_NOT_FOUND, null)
-                completed = verification.finish(checkNotNull(part), source, plan, result)
+                // Retain the final path even if cancellation arrives just after atomic rename.
+                withContext(NonCancellable) {
+                    completed = verification.finish(checkNotNull(part), source, plan, result)
+                }
                 result
             } catch (failure: IOException) {
                 storageFailure(failure)
@@ -542,7 +547,13 @@ internal class DownloadEngine(
             val intent = (end as? TransferEnd.Stopped)?.intent
             if (intent is StopIntent.Cancel || intent is StopIntent.Delete) {
                 val reason = if (intent is StopIntent.Cancel) intent.reason else (intent as StopIntent.Delete).reason
-                val removal = row.copy(rootId = part?.rootId ?: row.rootId, tempPath = part?.path ?: row.tempPath)
+                val removal =
+                    row.copy(
+                        rootId = part?.rootId ?: row.rootId,
+                        tempPath = part?.path ?: row.tempPath,
+                        relativePath = completed?.relativePath ?: row.relativePath,
+                        finalUri = completed?.finalUri ?: row.finalUri,
+                    )
                 part?.close()
                 controllerFiles.prepareRemoval(listOf(removal))
                 db.withWriteTransaction {

@@ -90,6 +90,7 @@ internal class FaultFiles(
     var writeFailure: IOException? = null
     var syncFailure: IOException? = null
     var moveFailure: IOException? = null
+    var afterMove: () -> Unit = {}
     var largestWrite = 0
     val operations = mutableListOf<String>()
 
@@ -149,6 +150,7 @@ internal class FaultFiles(
         moveFailure?.let { throw it }
         operations += "move"
         super.atomicMove(source, target)
+        afterMove()
     }
 }
 

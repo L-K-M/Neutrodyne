@@ -97,6 +97,7 @@ internal class EngineRig(
                     assertNull(dao.byEpisode(row.episodeId))
                     events += "delete:${row.episodeId}"
                     row.tempPath?.let { files.delete(row.rootId, it) }
+                    row.relativePath?.let { files.delete(row.rootId, it) }
                 }
             }
 
