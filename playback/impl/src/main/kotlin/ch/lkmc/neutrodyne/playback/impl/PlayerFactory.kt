@@ -115,6 +115,8 @@ internal class PlayerFactory(
                         }
                     },
                 )
+                // Armed only by device tests; the callback sees the player before any prepare.
+                PlaybackTestHooks.playerCreated?.invoke(this)
             }
     }
 

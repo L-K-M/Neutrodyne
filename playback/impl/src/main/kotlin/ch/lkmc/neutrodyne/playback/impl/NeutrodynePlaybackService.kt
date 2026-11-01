@@ -209,4 +209,10 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
 @androidx.annotation.VisibleForTesting
 public object PlaybackTestHooks {
     @Volatile public var foregroundServiceTimeoutMs: Long? = null
+
+    /**
+     * Device tests attach Media3 analytics before the first prepare, so decoder counts include
+     * every initialization; production never sets it and the field stays a no-op callback.
+     */
+    @Volatile public var playerCreated: ((ExoPlayer) -> Unit)? = null
 }
