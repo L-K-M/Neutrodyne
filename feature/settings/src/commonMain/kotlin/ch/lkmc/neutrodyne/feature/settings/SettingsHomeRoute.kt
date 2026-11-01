@@ -24,6 +24,8 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_root_new
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
@@ -91,6 +93,12 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                         speed.toString(),
                     ),
                 onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
+            )
+            SettingsRow(
+                icon = NdIcons.Download,
+                title = stringResource(Res.string.downloads_settings),
+                summary = stringResource(Res.string.downloads_root_new),
+                onClick = { navigator.push(SettingsKey(SettingsPage.DOWNLOADS)) },
             )
             SettingsRow(
                 icon = NdIcons.History,

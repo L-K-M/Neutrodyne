@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -19,10 +20,14 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
+import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.PlaybackActions
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
@@ -35,6 +40,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.core.ui.showNotesImageMode
+import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.Assisted
@@ -74,6 +80,7 @@ public data class EpisodeUiState(
     val isPlaying: Boolean = false,
     val chapters: List<EpisodeChapter> = emptyList(),
     val currentChapter: CurrentChapter? = null,
+    val downloadLive: RowLive? = null,
 ) {
     public val gone: Boolean
         get() = loaded && episode == null
@@ -82,7 +89,7 @@ public data class EpisodeUiState(
 /**
  * The `EpisodeKey` ViewModel (08 Episode detail): the episode and its show notes come from
  * `EpisodeRepository`; played/favourite writes are repository calls. Play/queue actions go to
- * `PlaybackController` through [PlaybackActions] (M4/W10); download actions wait for M6.
+ * `PlaybackController` through [PlaybackActions] (M4/W10); download actions use the shared request handler.
  */
 public class EpisodeViewModel
     @AssistedInject
@@ -96,8 +103,27 @@ public class EpisodeViewModel
         private val playbackStates: PlaybackStateSource,
         platformInfo: PlatformInfo,
         network: NetworkMonitor,
+        downloadController: DownloadController,
+        liveStateSource: EpisodeLiveStateSource,
     ) : ViewModel() {
+        private val visibleDownloadIds = MutableStateFlow<Set<Long>>(emptySet())
         private val userMessages = UserMessages()
+        public val downloads =
+            DownloadRequestHandler(
+                viewModelScope,
+                downloadController,
+                userMessages,
+                allowAlways = {
+                    check(
+                        settings.set(DownloadSettingKeys.MANUAL_METERED, ManualMeteredPolicy.ALWAYS) is Outcome.Success,
+                    )
+                },
+                markNotificationPrompted = {
+                    check(settings.set(DownloadSettingKeys.NOTIFICATION_PROMPTED, true) is Outcome.Success)
+                },
+                onFailure = ::reportWriteFailed,
+            )
+
         private val failedLinks = mutableMapOf<Long, String>()
 
         /**
@@ -145,6 +171,8 @@ public class EpisodeViewModel
                 state.copy(chapters = rows)
             }.combine(playbackStates.currentChapter) { state, current ->
                 state.copy(currentChapter = current?.takeIf { it.episodeId == episodeId })
+            }.combine(liveStateSource.observe(visibleDownloadIds)) { state, live ->
+                state.copy(downloadLive = live[episodeId])
             }.stateIn(viewModelScope, SHARING, EpisodeUiState())
 
         init {
@@ -156,6 +184,15 @@ public class EpisodeViewModel
          * A show-notes timestamp or chapter tap (M5): the current item seeks in place; any other
          * episode starts at the position through the shared consent/refusal/retry path.
          */
+        public fun onVisible() {
+            visibleDownloadIds.value = setOf(episodeId)
+        }
+
+        /** Release the window even while stateIn retains its upstream during the sharing grace. */
+        public fun onHidden() {
+            visibleDownloadIds.value = emptySet()
+        }
+
         public fun onTimestamp(positionMs: Long) {
             playback.seekOrPlay(episodeId, positionMs, uiState.value.episode?.durationMs)
         }
@@ -175,6 +212,10 @@ public class EpisodeViewModel
                     }
                 }
 
+                is EpisodeAction.DownloadToggle -> {
+                    downloads.toggle(action.episodeId)
+                }
+
                 is EpisodeAction.PlayNext -> {
                     playback.playNext(listOf(action.episodeId))
                 }
@@ -183,8 +224,7 @@ public class EpisodeViewModel
                     playback.playLast(listOf(action.episodeId))
                 }
 
-                // DownloadToggle needs the download engine (M6); CheckAvailability needs the
-                // YouTube engine (M8).
+                // Availability checks need the YouTube engine (M8).
                 else -> {
                     Unit
                 }

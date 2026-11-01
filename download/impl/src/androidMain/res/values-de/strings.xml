@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="download_channel">Downloads</string>
+    <string name="download_error_channel">Download-Fehler</string>
+    <string name="download_episode">„%1$s“ wird heruntergeladen</string>
+    <string name="download_bytes">%1$s von %2$s</string>
+    <string name="download_aggregate">%1$d %% · %2$s</string>
+    <string name="download_starting">Downloads starten</string>
+    <string name="download_pause_all">Alle pausieren</string>
+    <string name="download_retry">Wiederholen</string>
+    <string name="download_storage_full">Nicht genügend Speicher für Downloads</string>
+    <string name="download_manage_storage">Speicher verwalten</string>
+    <string name="download_paused">Downloads pausiert</string>
+    <string name="download_open_to_continue">Neutrodyne öffnen, um fortzufahren</string>
+    <plurals name="download_active"><item quantity="one">%d Episode wird heruntergeladen</item><item quantity="other">%d Episoden werden heruntergeladen</item></plurals>
+    <plurals name="download_failed"><item quantity="one">%d Download fehlgeschlagen</item><item quantity="other">%d Downloads fehlgeschlagen</item></plurals>
+    <plurals name="download_waiting"><item quantity="one">%d Episode wartet</item><item quantity="other">%d Episoden warten</item></plurals>
+</resources>

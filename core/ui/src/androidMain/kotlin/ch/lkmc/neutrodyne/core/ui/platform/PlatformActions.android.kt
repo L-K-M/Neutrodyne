@@ -75,6 +75,36 @@ internal class AndroidPlatformActions(
     private val createLauncher: ActivityResultLauncher<CreateDocumentRequest>,
     private val notificationLauncher: ActivityResultLauncher<String>,
 ) : PlatformActions {
+    override val settings: SystemSettingsOpener =
+        SystemSettingsOpener { target ->
+            val intent =
+                when (target) {
+                    SystemSettingsTarget.STORAGE -> {
+                        Intent(android.os.storage.StorageManager.ACTION_MANAGE_STORAGE)
+                    }
+
+                    SystemSettingsTarget.BACKGROUND_DATA -> {
+                        Intent(
+                            android.provider.Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    }
+
+                    SystemSettingsTarget.APP_DETAILS -> {
+                        Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                    }
+                }
+            try {
+                context.startActivity(intent)
+                true
+            } catch (_: ActivityNotFoundException) {
+                false
+            }
+        }
+
     override val urls: ExternalUrlOpener =
         ExternalUrlOpener { url ->
             val intent =
