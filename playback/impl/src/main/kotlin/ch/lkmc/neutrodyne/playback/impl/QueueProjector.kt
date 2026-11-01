@@ -34,7 +34,6 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -157,7 +156,7 @@ internal class QueueProjector(
             playerScope.launch {
                 localChanges?.changes?.collect { changed ->
                     if (entries.any { it.item.episodeId in changed && it.item.episodeId != player.episodeIdOrNull() }) {
-                        latest?.let { refresh(it.queue) }
+                        if (latest != null) refresh()
                     }
                 }
             }
