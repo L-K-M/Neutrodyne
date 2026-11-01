@@ -16,7 +16,7 @@
 # published ISO-8601 UTC; notes == changelogs/<versionCode>.txt and <= 500
 # chars; releaseUrl == {repoUrl}/releases/tag/{tag}; every apks[]/desktop[]/jar
 # url exactly {repoUrl}/releases/download/{tag}/{file} (no user-info, query,
-# fragment, port, dot-segments or escapes — the parser's link rule); the APK
+# fragment, non-default port, dot-segments or escapes — the parser's link rule); the APK
 # set exactly arm64-v8a + x86_64 + armeabi-v7a; sha256 64 lowercase hex;
 # unknown additive fields tolerated; whole manifest <= 64 KB.
 
@@ -38,11 +38,13 @@ REPO_URL="$(prop neutrodyne.repoUrl)"
 TAG="${TAG:-v$VERSION_NAME}"
 CHANGELOG="$REPO_ROOT/changelogs/$VERSION_CODE.txt"
 
-python3 - "$MANIFEST" "$ASSETS" "$TAG" "$VERSION_NAME" "$VERSION_CODE" "$REPO_URL" "$CHANGELOG" <<'PYEOF'
+python3 - "$MANIFEST" "$ASSETS" "$TAG" "$VERSION_NAME" "$VERSION_CODE" "$REPO_URL" "$CHANGELOG" "$REPO_ROOT" <<'PYEOF'
 import datetime, hashlib, json, os, re, sys
 from urllib.parse import unquote, urlsplit
 
-manifest_path, assets, tag, vname, vcode, repo_url, changelog = sys.argv[1:8]
+manifest_path, assets, tag, vname, vcode, repo_url, changelog, repo_root = sys.argv[1:9]
+sys.path.insert(0, os.path.join(repo_root, "scripts", "ci"))
+from update_manifest_assets import desktop_assets
 errors = []
 def fail(msg): errors.append(msg)
 
@@ -52,17 +54,19 @@ if len(raw) > 64 * 1024:
 doc = json.loads(raw.decode("utf-8"))
 
 version = tag[1:]
-if doc.get("schema") != 1:
+if type(doc.get("schema")) is not int or doc.get("schema") != 1:
     fail(f"schema is {doc.get('schema')!r}, expected 1")
 if doc.get("versionName") != vname or doc.get("versionName") != version:
     fail(f"versionName {doc.get('versionName')!r} != tag/gradle.properties {version}")
-m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", vname)
+m = re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)", vname)
+if m is None:
+    sys.exit("check-update-json: version must be canonical major.minor.patch, minor/patch <= 99")
 want_code = int(m.group(1)) * 1000000 + int(m.group(2)) * 10000 + int(m.group(3)) * 100 + 95
-if doc.get("versionCode") != int(vcode) or int(vcode) != want_code:
+if type(doc.get("versionCode")) is not int or doc.get("versionCode") != int(vcode) or int(vcode) != want_code or want_code > 9223372036854775807:
     fail(f"versionCode {doc.get('versionCode')!r} != gradle.properties {vcode} / formula {want_code}")
 if not str(vcode).endswith("95"):
     fail(f"versionCode {vcode} does not end in S=95")
-if doc.get("minSdk") != 26:
+if type(doc.get("minSdk")) is not int or doc.get("minSdk") != 26:
     fail(f"minSdk {doc.get('minSdk')!r} != 26")
 
 pub = doc.get("published", "")
@@ -75,11 +79,11 @@ notes = doc.get("notes")
 want_notes = open(changelog, encoding="utf-8").read().strip()
 if notes != want_notes:
     fail("notes do not equal changelogs/<versionCode>.txt")
-elif len(notes) > 500:
-    fail("notes longer than 500 chars")
+elif not notes or len(notes) > 500:
+    fail("notes must contain 1..500 characters")
 
 # The link rule (09 Update manifest): https only, repo host, no user-info,
-# query, fragment or port; the raw path split on '/' and each segment decoded
+# query, fragment or non-default port; the raw path split on '/' and each segment decoded
 # once must equal the expected list exactly; a segment decoding to '.', '..' or
 # containing '/' or '\\' rejects it.
 repo = urlsplit(repo_url)
@@ -97,9 +101,9 @@ def check_url(url, segments, label):
         fail(f"{label}: port in {url!r}")
     if parts.hostname != repo.hostname:
         fail(f"{label}: host of {url!r} is not {repo.hostname}")
-    if parts.query or parts.fragment:
+    if "?" in url or "#" in url or any(ord(c) <= 32 for c in url):
         fail(f"{label}: query/fragment in {url!r}")
-    got = [unquote(s) for s in parts.path.split("/") if s != ""]
+    got = [unquote(s) for s in parts.path.removeprefix("/").split("/")]
     for s in got:
         if s in (".", "..") or "/" in s or "\\" in s:
             fail(f"{label}: dot/segment escape in {url!r}")
@@ -116,11 +120,13 @@ def check_entry(e, label):
         fail(f"{label}: missing file")
     if not isinstance(e.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", e.get("sha256", "")):
         fail(f"{label}: sha256 is not 64 lower-case hex")
-    if not isinstance(e.get("size"), int) or e.get("size", -1) <= 0:
+    if type(e.get("size")) is not int or not 0 < e.get("size", -1) <= 9223372036854775807:
         fail(f"{label}: bad size {e.get('size')!r}")
     check_url(e.get("url", ""), owner_repo + ["releases", "download", tag, e.get("file", "")], f"{label}.url")
     if e.get("url", "").rsplit("/", 1)[-1] != e.get("file", None):
         fail(f"{label}: url's last segment != file")
+    if e.get("file") not in (e.get("file", "").split("/")[-1],) or "\\" in e.get("file", "") or e.get("file") in (".", ".."):
+        return fail(f"{label}: unsafe file name")
     if assets:
         path = os.path.join(assets, e.get("file", ""))
         if not os.path.isfile(path):
@@ -140,11 +146,26 @@ else:
     if abis != ["arm64-v8a", "armeabi-v7a", "x86_64"]:
         fail(f"apks abi set {abis} != the three published ABIs")
     for a in apks:
+        if a.get("file") != f"neutrodyne-{version}-{a.get('abi')}.apk":
+            fail("APK file does not match canonical version and ABI")
         check_entry(a, f"apks[{a.get('abi')}]")
 
 # Additive fields: desktop[] (M0b) and server (MS1) are validated when present,
 # tolerated when absent (D78).
-for i, d in enumerate(doc.get("desktop") or []):
+expected_desktop = desktop_assets(repo_root, version)
+desktop = doc.get("desktop", [])
+if not isinstance(desktop, list):
+    fail("desktop must be an array")
+    desktop = []
+active_desktop = "desktop" in doc or bool(assets and set(os.listdir(assets)) & set(expected_desktop.values()))
+if active_desktop:
+    actual = [(d.get("os"), d.get("arch"), d.get("kind")) for d in desktop]
+    if len(actual) != len(expected_desktop) or set(actual) != set(expected_desktop):
+        fail("desktop must contain the exact canonical target set, without unknown or duplicate tuples")
+for i, d in enumerate(desktop):
+    target = (d.get("os"), d.get("arch"), d.get("kind"))
+    if expected_desktop.get(target) != d.get("file"):
+        fail(f"desktop[{i}]: file does not match canonical target")
     check_entry(d, f"desktop[{i}]")
     if d.get("os") == "windows" and d.get("minOs") != "10.0":
         fail(f"desktop[{i}]: windows minOs {d.get('minOs')!r} != 10.0")
@@ -160,10 +181,10 @@ if srv is not None:
     else:
         fail("server.jar missing")
     img = srv.get("image", "")
-    pat = rf"ghcr\.io/{re.escape(repo.path.strip('/').split('/')[0])}/neutrodyne-server@sha256:[0-9a-f]{{64}}"
+    pat = rf"ghcr\.io/{re.escape(repo.path.strip('/').split('/')[0].lower())}/neutrodyne-server@sha256:[0-9a-f]{{64}}"
     if not re.fullmatch(pat, img):
         fail(f"server.image {img!r} is not this repo's digest reference")
-    if srv.get("minJava") != 21:
+    if type(srv.get("minJava")) is not int or srv.get("minJava") != 21:
         fail(f"server.minJava {srv.get('minJava')!r} != 21")
 
 if errors:
