@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.media.browse.MediaBrowser
 import android.media.session.MediaController
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -23,6 +24,7 @@ import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -158,25 +160,27 @@ class CarLibraryDeviceTest {
             try {
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.SKIP)
                 graph.settingsRepository.set(PlaybackSettingKeys.SKIP_FORWARD_MS, 10_000L)
+                // The service-side prefs collector trails the durable write; confirm
+                // the value is observable before the transport call consumes it.
+                graph.settingsRepository
+                    .observe(PlaybackSettingKeys.HARDWARE_BUTTONS)
+                    .first { it == HardwareButtons.SKIP }
                 withContext(Dispatchers.Main) { transport.playFromMediaId("episode:$episode@upnext", null) }
                 awaitCurrent()
                 withContext(Dispatchers.Main) { transport.skipToNext() }
                 withTimeout(20_000) {
-                    while (graph.playbackStateSource.nowPlaying.value
-                            ?.position
-                            ?.positionMs
-                            ?.let { it >= 10_000 } !=
-                        true
+                    while (graph.playbackStateSource.nowPlaying.value?.let {
+                            it.episodeId == episode &&
+                                it.position.positionAt(SystemClock.elapsedRealtime()) >= 10_000
+                        } != true
                     ) {
                         delay(50)
                     }
                 }
-                assertEquals(
-                    episode,
-                    graph.playbackStateSource.nowPlaying.value
-                        ?.episodeId,
-                )
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.EPISODE)
+                graph.settingsRepository
+                    .observe(PlaybackSettingKeys.HARDWARE_BUTTONS)
+                    .first { it == HardwareButtons.EPISODE }
                 // The setting collector is asynchronous; the observed transport result is the proof.
                 delay(500)
                 withContext(Dispatchers.Main) { transport.skipToNext() }

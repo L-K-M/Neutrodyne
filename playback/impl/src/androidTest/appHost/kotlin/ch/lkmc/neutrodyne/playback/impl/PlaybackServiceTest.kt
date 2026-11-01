@@ -264,7 +264,9 @@ class PlaybackServiceTest {
             start()
             // The stream source is loopback, so it survives the wifi->cellular handoff.
             device.executeShellCommand("svc data enable")
-            device.executeShellCommand("svc wifi disable")
+            // Shell lacks CHANGE_WIFI_STATE on API 26, so svc wifi cannot toggle; the
+            // WifiService observer on the global WIFI_ON setting applies this write.
+            device.executeShellCommand("settings put global wifi_on 0")
             graph.settingsRepository.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER)
             try {
                 val connectivity = app.getSystemService(ConnectivityManager::class.java)
@@ -313,7 +315,7 @@ class PlaybackServiceTest {
                     PlaybackSettingKeys.STREAM_ON_METERED,
                     PlaybackSettingKeys.STREAM_ON_METERED.default,
                 )
-                device.executeShellCommand("svc wifi enable")
+                device.executeShellCommand("settings put global wifi_on 1")
                 device.executeShellCommand("svc data enable")
             }
         }

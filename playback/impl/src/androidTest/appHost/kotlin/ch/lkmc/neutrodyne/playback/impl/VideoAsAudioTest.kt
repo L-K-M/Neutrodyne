@@ -99,7 +99,7 @@ class VideoAsAudioTest {
             scenario = ActivityScenario.launch(MainActivity::class.java)
         }
 
-    @After fun close() =
+    @After fun close() {
         runBlocking {
             withContext(Dispatchers.Main) { controller?.release() }
             graph.playbackController.dismiss()
@@ -115,6 +115,7 @@ class VideoAsAudioTest {
                 )
             }
         }
+    }
 
     @ReleaseSmoke
     @Test fun muxedH264AacAdvancesAudioWithScreenOffAndNoVideoDecoder() = runBlocking { prove(Alternate.NONE) }
