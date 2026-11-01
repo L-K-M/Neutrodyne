@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -159,6 +160,7 @@ internal class AdapterFixture(
     val factory = MediaItemFactory(TestArtwork, local)
     val planner =
         QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), StartPositionRule(), PlayedRule())
+    var resumePolicy = SmartResumePolicy.DISABLED
     val projector =
         QueueProjector(
             planner,
@@ -179,6 +181,7 @@ internal class AdapterFixture(
             beforeAdvance = { true },
             reportFailure = failures::add,
             boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
+            resumePolicy = { resumePolicy },
         )
 
     fun attach() {

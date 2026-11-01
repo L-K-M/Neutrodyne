@@ -51,7 +51,7 @@ internal class MediaItemFactory(
         }
         val key =
             if (row.sourceType == SourceType.RSS) {
-                row.enclosureUrl?.let { EnclosureFingerprint.cacheKey(row.episodeId, it, row.enclosureLength) }
+                row.audioSource()?.let { EnclosureFingerprint.cacheKey(row.episodeId, it.url, it.length) }
             } else {
                 row.externalMediaId?.let { "yt:$it" }
             }

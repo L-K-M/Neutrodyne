@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Test
@@ -124,15 +125,15 @@ class SmartResumeTest {
                 val ids = f.seed(3)
                 for (id in ids) f.positions.save(id, 80_000, null, PositionSource.STREAM, f.clock.now(), 0) { true }
                 f.fakeClock.advanceTime(300_001)
-                f.smartResume = true
+                f.resumePolicy = SmartResumePolicy.ENABLED
                 f.sessions.commitStart(SessionStart(ids[0], null, ContextRetention.REPLACE, null, null), f.clock.now())
                 f.queue.addLast(ids.drop(1))
                 f.attach()
                 awaitAdapter { f.player.episodeIdOrNull() == ids[0] && f.player.currentPosition == 75_000L }
-                f.smartResume = false
+                f.resumePolicy = SmartResumePolicy.DISABLED
                 f.player.seekToNextMediaItem()
                 awaitAdapter { f.player.episodeIdOrNull() == ids[1] && f.player.currentPosition == 80_000L }
-                f.smartResume = true
+                f.resumePolicy = SmartResumePolicy.ENABLED
                 f.player.seekToNextMediaItem()
                 awaitAdapter { f.player.episodeIdOrNull() == ids[2] && f.player.currentPosition == 75_000L }
                 assertEquals(

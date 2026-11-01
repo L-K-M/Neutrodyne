@@ -1223,7 +1223,7 @@ Serves R4.7, R5.2. Delivered in M4 (lock screen, System UI, Bluetooth metadata),
 
 ## Video
 
-**Implementation note (2026-10-19, M5).** Use default audio rows first, then ordinal, trying rows until a usable HTTP(S) source; otherwise keep the original muxed enclosure. This supersedes 02’s single-row interpretation and also governs M6. Preserve `isVideo` and disabled VIDEO/TEXT tracks. W1 exposes the candidate; W8 selects it.
+**Implementation note (2026-10-19, M5).** Use default audio rows first, then ordinal, trying rows until a usable HTTP(S) source; otherwise keep the original muxed enclosure. This supersedes 02’s single-row interpretation and also governs M6. Preserve `isVideo` and disabled VIDEO/TEXT tracks. W1 exposes the candidate; W8 selects it. The Android factory also omits video/text renderers, so controller track-selection changes cannot instantiate a visual decoder. Actual audio/decoder evidence remains part of the device gate.
 
 Serves R4.7. Delivered in M5 (audio-only), M14 (video surface, PiP, YouTube video). Honours [D64](../PLAN.md#3-key-decisions), PO-9 (YouTube audio-only). The desktop also plays video podcasts as audio in v1.0 (video through libmpv in v1.x, M17; [11 Desktop playback engine](11-desktop.md#desktop-playback-engine)).
 

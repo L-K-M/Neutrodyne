@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -337,6 +338,19 @@ class PlayStarterTest {
             assertEquals(0L, committed(StartRequest.Episode(8)).startPositionMs)
             sessions.queue = queue(current = null)
             assertEquals(500L, committed(StartRequest.Episode(8, 500)).startPositionMs)
+        }
+
+    @Test fun videoWithOnlyAnAudioAlternateCanStartButAudioWithoutAnEnclosureCannot() =
+        runTest {
+            val alternateOnly = media(8).copy(
+                isVideo = true,
+                enclosureUrl = null,
+                audioAlternate = AudioAlternate("https://example.org/audio.m4a", "audio/mp4", 123),
+            )
+            lookup.items.value = lookup.items.value + (8L to alternateOnly)
+            assertEquals(8, committed(StartRequest.Episode(8)).queue.current?.episodeId)
+            lookup.items.value = lookup.items.value + (8L to alternateOnly.copy(isVideo = false))
+            assertEquals(UnplayableReason.NoMedia, refusalReason(StartRequest.Episode(8)))
         }
 
     @Test fun smartResumeSettingReachesColdStartsAndExplicitPositionsWin() =
