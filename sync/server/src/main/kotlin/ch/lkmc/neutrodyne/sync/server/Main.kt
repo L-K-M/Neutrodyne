@@ -53,6 +53,7 @@ internal fun serve(config: ServerConfig) {
                                 writeProbe = storage.store::writeProbe,
                                 services = services,
                             ).install(this)
+                            services.updates.start(this)
                             monitor.subscribe(ServerReady) { ready.set(true) }
                         }
                     },
@@ -64,9 +65,11 @@ internal fun serve(config: ServerConfig) {
                         }
                     connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
                 }
+            val metricsListener = config.metricsListen?.let { services.metrics.listen(it) }
             logger.info("neutrodyne-server {} listening on {}", ServerVersion.current(), config.listen)
             val shutdownHook =
                 Thread({
+                    metricsListener?.close()
                     server.stop(SHUTDOWN_GRACE_MS, SHUTDOWN_TIMEOUT_MS)
                     if (ready.get()) storage.finishGracefully()
                 }, "neutrodyne-shutdown")
@@ -76,6 +79,7 @@ internal fun serve(config: ServerConfig) {
                 // CIO's wait may return before the stop hook finishes closing the application.
                 shutdownHook.join()
             } finally {
+                metricsListener?.close()
                 try {
                     Runtime.getRuntime().removeShutdownHook(shutdownHook)
                 } catch (_: IllegalStateException) {

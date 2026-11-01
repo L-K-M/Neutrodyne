@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.sync.server
 
-/** Constructor wiring for the authenticated API, web sessions and events. Admin, audit, backups and jobs arrive with the later MS1 groups. */
+/** Constructor wiring for the authenticated API, web sessions, events and admin. Backups and jobs arrive with the later MS1 groups. */
 internal class ServerServices(
     store: SqliteSyncStore,
     config: ServerConfig,
@@ -17,7 +17,11 @@ internal class ServerServices(
     val sessions = WebSessions(tokens, config, inputs)
     val devices = DeviceService(store, inputs)
     val accounts = AccountService(store, store, inputs)
+    val admin = AdminService(store, store, inputs)
+    val audit = AuditLog(store, inputs)
     val metrics = ServerMetrics(store, config.dataDir)
+    val updates =
+        ServerUpdateNotice(if (config.updateCheck) UpdateCheckMode.ENABLED else UpdateCheckMode.DISABLED, inputs)
     val records = StoredRecordWriter(store, inputs, config.retentionUnsubscribedDays)
 
     suspend fun features(): List<String> =

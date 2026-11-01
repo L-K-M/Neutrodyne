@@ -34,8 +34,7 @@ import kotlin.time.Clock
 
 /**
  * Ktor application module (10 Server architecture, Module and classes): installs the request
- * pipeline, transport guard, health/discovery, authenticated API and event routes. The admin
- * web UI arrives with a later MS1 group.
+ * pipeline, transport guard, health/discovery, authenticated API, event and admin web routes.
  */
 internal class ServerModule(
     private val config: ServerConfig,
@@ -132,6 +131,7 @@ internal class ServerModule(
                     ChangesRoutes(services.records, services.inputs, services.metrics).install(this)
                     AccountRoutes(services.accounts, services.records).install(this)
                     EventsRoutes(services.events, services.metrics, services.tokens::valid).install(this)
+                    AdminWeb(services, config, serverVersion).install(this)
                 }
             }
         }
