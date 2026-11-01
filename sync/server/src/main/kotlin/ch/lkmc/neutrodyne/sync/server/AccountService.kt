@@ -10,6 +10,7 @@ internal class AccountService(
     private val auth: AuthStore,
     private val store: SyncStore,
     private val inputs: ServerInputs,
+    private val backups: AccountBackups? = null,
 ) {
     private val secrets = AuthSecrets(inputs)
 
@@ -43,7 +44,14 @@ internal class AccountService(
         confirm: String,
     ) {
         if (confirm != "DELETE") invalidAuth()
-        purgeRecords(principal)
+        if (backups != null) {
+            backups.locked(principal.accountId) {
+                purgeRecords(principal)
+                backups.deleteLocked(principal.accountId)
+            }
+        } else {
+            purgeRecords(principal)
+        }
     }
 
     private suspend fun purgeRecords(principal: AccountPrincipal) {

@@ -34,7 +34,8 @@ import kotlin.time.Clock
 
 /**
  * Ktor application module (10 Server architecture, Module and classes): installs the request
- * pipeline, transport guard, health/discovery, authenticated API, event and admin web routes.
+ * pipeline, transport guard, health/discovery, authenticated API, web and event routes.
+ * Metrics belong exclusively to the separately configured listener.
  */
 internal class ServerModule(
     private val config: ServerConfig,
@@ -129,7 +130,7 @@ internal class ServerModule(
                     DeviceRoutes(services.devices).install(this)
                     SyncRoutes(services.records, services.metrics).install(this)
                     ChangesRoutes(services.records, services.inputs, services.metrics).install(this)
-                    AccountRoutes(services.accounts, services.records).install(this)
+                    AccountRoutes(services.accounts, services.records, services.backups).install(this)
                     EventsRoutes(services.events, services.metrics, services.tokens::valid).install(this)
                     AdminWeb(services, config, serverVersion).install(this)
                 }
