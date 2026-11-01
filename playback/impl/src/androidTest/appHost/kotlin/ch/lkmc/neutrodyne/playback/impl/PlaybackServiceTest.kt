@@ -262,11 +262,16 @@ class PlaybackServiceTest {
             seed()
             graph.queueRepository().addLast(ids)
             start()
-            // The stream source is loopback, so it survives the wifi->cellular handoff.
-            device.executeShellCommand("svc data enable")
-            // Shell lacks CHANGE_WIFI_STATE on API 26, so svc wifi cannot toggle; the
-            // WifiService observer on the global WIFI_ON setting applies this write.
-            device.executeShellCommand("settings put global wifi_on 0")
+            // Shell lacks CHANGE_WIFI_STATE on API 26, so instead of dropping Wi-Fi
+            // the connected network is marked metered through a netpolicy override.
+            val networkId =
+                device
+                    .executeShellCommand("cmd netpolicy list wifi-networks")
+                    .lineSequence()
+                    .map { it.substringBefore(';') }
+                    .firstOrNull { it.isNotBlank() }
+                    ?: error("No Wi-Fi network available to mark metered")
+            device.executeShellCommand("cmd netpolicy set metered-network $networkId true")
             graph.settingsRepository.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER)
             try {
                 val connectivity = app.getSystemService(ConnectivityManager::class.java)
@@ -315,8 +320,7 @@ class PlaybackServiceTest {
                     PlaybackSettingKeys.STREAM_ON_METERED,
                     PlaybackSettingKeys.STREAM_ON_METERED.default,
                 )
-                device.executeShellCommand("settings put global wifi_on 1")
-                device.executeShellCommand("svc data enable")
+                device.executeShellCommand("cmd netpolicy set metered-network $networkId undefined")
             }
         }
 
