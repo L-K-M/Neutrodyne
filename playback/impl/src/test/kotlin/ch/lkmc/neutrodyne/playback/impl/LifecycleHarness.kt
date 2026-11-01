@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.PlaySessionInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -105,6 +106,7 @@ internal class LifecycleHarness(
     val queues = FakeQueueRepository()
     val store = FakePlaySessionStore()
     val positions = FakePositionStore()
+    val chapters = FakeChapterRepository()
     val lookup = FakePlaybackMediaLookup()
     val contexts = FakePlayContextResolver()
     val local = FakeLocalMediaIndex()
@@ -253,6 +255,7 @@ internal class LifecycleHarness(
             deferred(positions),
             deferred(lookup),
             deferred(items),
+            deferred(chapters),
         )
     val connection =
         PlayerConnection(

@@ -135,7 +135,16 @@ class SmartResumeTest {
                 awaitAdapter { f.player.episodeIdOrNull() == ids[1] && f.player.currentPosition == 80_000L }
                 f.resumePolicy = SmartResumePolicy.ENABLED
                 f.player.seekToNextMediaItem()
-                awaitAdapter { f.player.episodeIdOrNull() == ids[2] && f.player.currentPosition == 75_000L }
+                try {
+                    awaitAdapter(diagnostics = {
+                        "id=${f.player.episodeIdOrNull()} position=${f.player.currentPosition} " +
+                            "policy=${f.resumePolicy} clock=${f.clock.now()} calls=${f.player.calls} failures=${f.failures}"
+                    }) { f.player.episodeIdOrNull() == ids[2] && f.player.currentPosition == 75_000L }
+                } catch (failure: AssertionError) {
+                    val saved = f.db.positionDao().byEpisode(ids[2])
+                    val state = f.db.episodeStateDao().byEpisode(ids[2])
+                    throw AssertionError("${failure.message}; saved=$saved state=$state", failure)
+                }
                 assertEquals(
                     80_000L,
                     f.db

@@ -318,6 +318,7 @@ internal class AdapterSources : MediaSource.Factory {
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal fun TestScope.awaitAdapter(
     message: String = "Adapter did not converge",
+    diagnostics: () -> String = { "" },
     predicate: () -> Boolean,
 ) {
     repeat(2_000) {
@@ -326,7 +327,7 @@ internal fun TestScope.awaitAdapter(
         if (predicate()) return
         Thread.sleep(2)
     }
-    fail(message)
+    fail("$message ${diagnostics()}".trimEnd())
 }
 
 private object TestArtwork : ArtworkStore {

@@ -23,6 +23,8 @@ import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -250,6 +252,36 @@ class ChaptersTest {
                         .orEmpty()
                         .any { it.source == ChapterSource.MP4 },
                 )
+            } finally {
+                chapters.detach()
+                exo.release()
+            }
+        }
+
+    @Test fun observationFailureLeavesChapterCommandsAndOtherEnrichmentAlive() =
+        runTest {
+            val exo = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+            val player = TestPlayer(exo) { testScheduler.currentTime }
+            val repo = FakeChapterRepository()
+            val repository =
+                object : ChapterRepository by repo {
+                    override fun observe(episodeId: Long): Flow<List<EpisodeChapter>> =
+                        flow {
+                            throw java.io.IOException("Chapter store unavailable")
+                        }
+                }
+            var current: CurrentChapter? = null
+            val chapters = Chapters(player, repository, backgroundScope) { current = it }
+            try {
+                chapters.attach()
+                runCurrent()
+                assertNull(current)
+                assertEquals(listOf(1L), repo.loads)
+                assertEquals(
+                    androidx.media3.session.SessionResult.RESULT_SUCCESS,
+                    chapters.command(PlaybackSessionCommands.CHAPTER_NEXT)?.resultCode,
+                )
+                assertTrue(player.seeks.isEmpty())
             } finally {
                 chapters.detach()
                 exo.release()

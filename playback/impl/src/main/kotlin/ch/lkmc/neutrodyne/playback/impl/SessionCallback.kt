@@ -35,6 +35,7 @@ internal class SessionCallback(
     private val io: CoroutineDispatcher,
     private val hosts: ControllerHostIdentity,
     private val beforeStart: () -> Unit = {},
+    private val chapterCommand: (String) -> SessionResult? = { null },
 ) : MediaLibrarySession.Callback {
     private val commands = Mutex()
 
@@ -79,6 +80,7 @@ internal class SessionCallback(
                         }
                     val live = bridge()
                     SleepTimerCommands.handle(customCommand.customAction, args, live)?.let { return@withLock it }
+                    chapterCommand(customCommand.customAction)?.let { return@withLock it }
                     when (customCommand.customAction) {
                         CustomCommands.PLAY_CONTEXT -> {
                             CustomCommands.result(live.start(checkNotNull(request), origin(session, controller)))

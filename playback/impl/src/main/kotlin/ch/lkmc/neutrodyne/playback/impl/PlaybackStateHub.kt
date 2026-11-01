@@ -62,11 +62,16 @@ internal class PlaybackStateHub(
     override val events = emitted.asSharedFlow()
     private val sleepTimerState = MutableStateFlow<SleepTimerState>(SleepTimerState.Off)
     override val sleepTimer = sleepTimerState.asStateFlow()
-    override val currentChapter: StateFlow<CurrentChapter?> = MutableStateFlow(null)
+    private val chapterState = MutableStateFlow<CurrentChapter?>(null)
+    override val currentChapter = chapterState.asStateFlow()
     override val pendingMeteredConsent = gate.pendingConsent
 
     fun updateSleepTimer(state: SleepTimerState) {
         sleepTimerState.value = state
+    }
+
+    fun updateCurrentChapter(chapter: CurrentChapter?) {
+        chapterState.value = chapter
     }
 
     private val durable =

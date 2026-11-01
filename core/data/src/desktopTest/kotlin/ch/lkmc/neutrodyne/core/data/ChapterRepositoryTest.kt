@@ -17,9 +17,11 @@ import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import io.ktor.client.HttpClient
+import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
@@ -30,6 +32,7 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ChapterRepositoryTest {
@@ -191,7 +194,7 @@ class ChapterRepositoryTest {
         runBlocking {
             val id = seed()
             repo.replace(id, ChapterSource.PSC, listOf(row()))
-            serverRule.server.enqueue(MockResponse.Builder().code(500).build())
+            serverRule.server.enqueue(MockResponse.Builder().code(HttpStatusCode.InternalServerError.value).build())
             repo.ensureLoaded(id)
             repo.ensureLoaded(id)
             assertEquals(1, serverRule.server.requestCount)
@@ -212,7 +215,7 @@ class ChapterRepositoryTest {
     @Test fun changedUrlClearsFailedAttemptAllowance() =
         runBlocking {
             val id = seed()
-            serverRule.server.enqueue(MockResponse.Builder().code(500).build())
+            serverRule.server.enqueue(MockResponse.Builder().code(HttpStatusCode.InternalServerError.value).build())
             repo.ensureLoaded(id)
             setUrl(id, serverRule.server.url("/replacement").toString())
             respond()
@@ -270,6 +273,35 @@ class ChapterRepositoryTest {
             db.podcastDao().deleteCascade(db.episodeDao().byId(id)!!.podcastId, clock.now())
             old.await()
             assertTrue(repo.observe(id).first().isEmpty())
+        }
+
+    @Test fun closingTheFirstChapterConsumerDoesNotCancelThePlaybackConsumer() =
+        runBlocking {
+            val id = seed()
+            serverRule.server.enqueue(
+                MockResponse
+                    .Builder()
+                    .body("""{"version":"1","chapters":[{"startTime":0,"title":"Shared"}]}""")
+                    .bodyDelay(COALESCED_RESPONSE_DELAY_SECONDS, TimeUnit.SECONDS)
+                    .build(),
+            )
+            val screen = async(start = CoroutineStart.UNDISPATCHED) { repo.ensureLoaded(id) }
+            request()
+            val playback = async(start = CoroutineStart.UNDISPATCHED) { repo.ensureLoaded(id) }
+            // Let the real Room read register the second waiter while the response is held.
+            delay(SECOND_CONSUMER_JOIN_MS)
+            screen.cancelAndJoin()
+            assertFalse(playback.isCancelled, "Leaving the screen must not cancel playback's chapter load")
+            playback.await()
+            assertEquals(1, serverRule.server.requestCount)
+            assertEquals(
+                "Shared",
+                repo
+                    .observe(id)
+                    .first()
+                    .single()
+                    .title,
+            )
         }
 
     @Test fun cancellationDoesNotBackOff() =
@@ -379,8 +411,16 @@ class ChapterRepositoryTest {
 
     private suspend fun request() =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            serverRule.server.takeRequest()
+            checkNotNull(serverRule.server.takeRequest(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                "No chapter HTTP request arrived"
+            }
         }
+
+    private companion object {
+        const val COALESCED_RESPONSE_DELAY_SECONDS = 3L
+        const val SECOND_CONSUMER_JOIN_MS = 500L
+        const val REQUEST_TIMEOUT_SECONDS = 10L
+    }
 
     private fun row(source: ChapterSource = ChapterSource.PSC) =
         EpisodeChapter(0, null, "chapter", null, null, source, false)
