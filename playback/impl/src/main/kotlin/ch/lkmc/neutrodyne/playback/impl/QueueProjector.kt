@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.playback.core.PositionCapture
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.WindowEntry
 import ch.lkmc.neutrodyne.playback.core.WindowOp
 import ch.lkmc.neutrodyne.playback.core.WindowPlayback
@@ -71,6 +72,9 @@ internal class QueueProjector(
     private val io: CoroutineDispatcher,
     private val beforeAdvance: (MediaItem) -> Boolean,
     private val reportFailure: (Exception) -> Unit = { android.util.Log.w(TAG, "Queue projection failed") },
+    private val resumePolicy: () -> SmartResumePolicy = { SmartResumePolicy.DISABLED },
+    private val pauseAtBoundary: () -> Boolean = { false },
+    private val boundaryCompleted: (Long) -> Unit = {},
 ) : Player.Listener {
     private var player: Player? = null
     private var observing: Job? = null
@@ -85,6 +89,7 @@ internal class QueueProjector(
     private var skipExit: PlaybackExit? = null
     private var blockedAdvance: BlockedAdvance? = null
     private var ending: EndMarker? = null
+    private var completedBoundary: BoundaryCompletion? = null
     private var external: ExternalApply? = null
     private var externalTimeout: Job? = null
     private var latest: Input? = null
@@ -107,6 +112,12 @@ internal class QueueProjector(
         val playedAt: Long?,
         val next: PlaybackMediaInfo?,
         val sessionRevision: SessionRevision,
+    )
+
+    private data class BoundaryCompletion(
+        val epoch: Long,
+        val episodeId: Long,
+        val pinStartedAt: Long,
     )
 
     private data class EndMarker(
@@ -333,7 +344,9 @@ internal class QueueProjector(
             val beforeIds = live.mediaIds()
             val beforeIndex = live.currentMediaItemIndex.coerceAtLeast(0)
             val window = playerWindow(live)
-            val plan = planner.plan(snapshot, media, window) ?: return@withLock
+            val plan =
+                planner.plan(snapshot, media, window, resumePolicy = resumePolicy(), frozen = ::isCompletedBoundary)
+                    ?: return@withLock
             // Pause a foreign load before IO yields, so a discarded plan cannot later autoplay.
             if (plan.playback == WindowPlayback.LOAD_PAUSED && before == revision) live.pause()
             val built = build(plan.entries)
@@ -530,6 +543,7 @@ internal class QueueProjector(
                         row?.measuredDurationMs ?: row?.durationMs,
                         row?.playedAt != null || stored?.playedAt != null,
                         clock.now(),
+                        smartResume = resumePolicy() == SmartResumePolicy.ENABLED,
                     )
                 tracker.coreSeek { live.seekTo(startMs) }
                 tracker.startPositionApplied()
@@ -640,7 +654,48 @@ internal class QueueProjector(
             live.hasNextMediaItem() && isCurrentArrival(live, pending.departureId, pending.pinStartedAt, pending.epoch)
 
     override fun onPlaybackStateChanged(playbackState: Int) {
-        if (playbackState == Player.STATE_ENDED && !applying && external == null) end(tracker.capture(PlaybackExit.END))
+        if (playbackState != Player.STATE_ENDED || applying || external != null) return
+        val id = player?.episodeIdOrNull()
+        if (pauseAtBoundary() || (id != null && isCompletedBoundary(id))) {
+            completeBoundary()
+        } else {
+            end(tracker.capture(PlaybackExit.END))
+        }
+    }
+
+    override fun onPlayWhenReadyChanged(
+        playWhenReady: Boolean,
+        reason: Int,
+    ) {
+        if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) completeBoundary()
+    }
+
+    private fun isCompletedBoundary(episodeId: Long): Boolean =
+        completedBoundary == BoundaryCompletion(eventEpoch, episodeId, tracker.currentSinceMs)
+
+    /** A boundary pause completes this item, not the session or the next queued item. */
+    private fun completeBoundary() {
+        if (applying || external != null) return
+        val capture = tracker.capture(PlaybackExit.END)?.departure ?: return
+        if (!capture.writePosition || !capture.markPlayed || isCompletedBoundary(capture.episodeId)) return
+        val marker = BoundaryCompletion(eventEpoch, capture.episodeId, tracker.currentSinceMs)
+        completedBoundary = marker
+        beginOwnWrite()
+        launchWrite {
+            try {
+                eventWrites.withLock {
+                    if (marker.epoch != eventEpoch) return@withLock
+                    positions.markPlayed(capture.episodeId, clock.now())
+                    boundaryCompleted(capture.episodeId)
+                }
+            } catch (failure: Exception) {
+                if (completedBoundary == marker) completedBoundary = null
+                throw failure
+            } finally {
+                endOwnWrite(null)
+                refresh()
+            }
+        }
     }
 
     private fun end(capture: PositionCapture?) {
@@ -674,6 +729,7 @@ internal class QueueProjector(
     private fun bindSession(next: SessionRevision) {
         if (committedRevision == next) return
         blockedAdvance = null
+        completedBoundary = null
         committedRevision = next
         eventEpoch++
     }

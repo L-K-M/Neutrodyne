@@ -6,6 +6,8 @@ import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.session.MediaSession
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +23,9 @@ internal class SessionPlayer private constructor(
     private val stopAction: suspend () -> Unit,
     private val cancelPendingPlay: () -> Unit,
     private val sessionSource: SessionSource,
+    private val hardwareButtons: () -> HardwareButtons,
+    private val userPaused: () -> Unit,
+    private val transportProtocol: () -> TransportProtocol,
 ) : ForwardingSimpleBasePlayer(sessionSource) {
     constructor(
         exo: Player,
@@ -30,7 +35,22 @@ internal class SessionPlayer private constructor(
         previous: suspend () -> Unit,
         stopAction: suspend () -> Unit,
         cancelPendingPlay: () -> Unit,
-    ) : this(exo, scope, beforePlay, beforeSeek, previous, stopAction, cancelPendingPlay, SessionSource(exo))
+        hardwareButtons: () -> HardwareButtons = { HardwareButtons.EPISODE },
+        userPaused: () -> Unit = {},
+        transportProtocol: () -> TransportProtocol = { TransportProtocol.MEDIA3 },
+    ) : this(
+        exo,
+        scope,
+        beforePlay,
+        beforeSeek,
+        previous,
+        stopAction,
+        cancelPendingPlay,
+        SessionSource(exo),
+        hardwareButtons,
+        userPaused,
+        transportProtocol,
+    )
 
     /** The session exists during database open, but its callbacks must follow position capture. */
     fun orderAfterPlaybackAdapters() {
@@ -58,35 +78,68 @@ internal class SessionPlayer private constructor(
     private var playWhenReadyIntent = false
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
-        playWhenReadyIntent = playWhenReady
-        // Delivered Play also supersedes older client starts and dismiss fallbacks.
-        cancelPendingPlay()
         if (!playWhenReady) {
-            exo.pause()
+            userPaused()
+            pauseForPolicy()
             return Futures.immediateVoidFuture()
         }
 
+        playWhenReadyIntent = true
+        // Delivered Play also supersedes older client starts and dismiss fallbacks.
+        cancelPendingPlay()
         return scope.future {
             if (beforePlay() && playWhenReadyIntent) exo.play()
             Unit
         }
     }
 
+    /** Internal pauses cancel suspended Play without acquiring a user-pause rewind. */
+    fun pauseForPolicy() {
+        playWhenReadyIntent = false
+        cancelPendingPlay()
+        exo.pause()
+    }
+
     override fun handleSeek(
         mediaItemIndex: Int,
         positionMs: Long,
         seekCommand: Int,
-    ): ListenableFuture<*> =
-        when (seekCommand) {
-            Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
+    ): ListenableFuture<*> {
+        // Legacy skip controls use MEDIA_ITEM commands, without a distinct episode transport.
+        val command =
+            if (transportProtocol() == TransportProtocol.LEGACY) {
+                when (seekCommand) {
+                    Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> Player.COMMAND_SEEK_TO_NEXT
+                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> Player.COMMAND_SEEK_TO_PREVIOUS
+                    else -> seekCommand
+                }
+            } else {
+                seekCommand
+            }
+        return when (command) {
+            Player.COMMAND_SEEK_TO_PREVIOUS -> {
+                if (hardwareButtons() == HardwareButtons.SKIP) {
+                    exo.seekBack()
+                    Futures.immediateVoidFuture()
+                } else {
+                    scope.future { previous() }
+                }
+            }
+
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
                 scope.future { previous() }
             }
 
-            Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
-                val next = exo.nextMediaItemIndex
-                if (next != C.INDEX_UNSET && beforeSeek(exo.getMediaItemAt(next))) exo.seekToNextMediaItem()
-                Futures.immediateVoidFuture()
+            Player.COMMAND_SEEK_TO_NEXT -> {
+                if (hardwareButtons() == HardwareButtons.SKIP) {
+                    exo.seekForward()
+                    Futures.immediateVoidFuture()
+                } else {
+                    nextEpisode()
+                }
             }
+
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> nextEpisode()
 
             Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM -> {
                 val duration = exo.duration.takeIf { it != C.TIME_UNSET && it > 0 }
@@ -104,6 +157,13 @@ internal class SessionPlayer private constructor(
                 }
             }
         }
+    }
+
+    private fun nextEpisode(): ListenableFuture<*> {
+        val next = exo.nextMediaItemIndex
+        if (next != C.INDEX_UNSET && beforeSeek(exo.getMediaItemAt(next))) exo.seekToNextMediaItem()
+        return Futures.immediateVoidFuture()
+    }
 
     override fun handleStop(): ListenableFuture<*> {
         playWhenReadyIntent = false
@@ -111,6 +171,15 @@ internal class SessionPlayer private constructor(
         return scope.future { stopAction() }
     }
 }
+
+internal enum class TransportProtocol { MEDIA3, LEGACY }
+
+internal fun MediaSession?.transportProtocol(): TransportProtocol =
+    if (this?.controllerForCurrentRequest?.controllerVersion == MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION) {
+        TransportProtocol.LEGACY
+    } else {
+        TransportProtocol.MEDIA3
+    }
 
 /** Media3 installs its forwarding listener during construction, before the database-backed adapters. */
 private class SessionSource(

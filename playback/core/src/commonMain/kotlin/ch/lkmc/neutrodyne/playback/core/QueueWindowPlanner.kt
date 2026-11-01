@@ -89,6 +89,7 @@ class QueueWindowPlanner(
         snapshot: VirtualQueue,
         media: Map<Long, PlaybackMediaInfo>,
         player: PlayerWindow,
+        resumePolicy: SmartResumePolicy = SmartResumePolicy.DISABLED,
         frozen: (Long) -> Boolean = { false },
     ): WindowPlan? {
         if (ownWritesInFlight > 0 || snapshot.generation < (appliedGeneration ?: snapshot.generation)) {
@@ -119,6 +120,7 @@ class QueueWindowPlanner(
                     ),
                     media[current.episodeId]?.playedAt != null || stored?.playedAt != null,
                     clock.now(),
+                    smartResume = resumePolicy == SmartResumePolicy.ENABLED,
                 )
             } else {
                 0

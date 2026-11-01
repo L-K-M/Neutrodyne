@@ -178,6 +178,7 @@ internal class AdapterFixture(
             Dispatchers.Unconfined,
             beforeAdvance = { true },
             reportFailure = failures::add,
+            boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
         )
 
     fun attach() {

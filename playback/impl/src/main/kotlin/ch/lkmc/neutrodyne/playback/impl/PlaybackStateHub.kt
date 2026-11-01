@@ -59,9 +59,14 @@ internal class PlaybackStateHub(
     val bridge: ServiceBridge? get() = active.value
     private val emitted = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
     override val events = emitted.asSharedFlow()
-    override val sleepTimer: StateFlow<SleepTimerState> = MutableStateFlow(SleepTimerState.Off)
+    private val sleepTimerState = MutableStateFlow<SleepTimerState>(SleepTimerState.Off)
+    override val sleepTimer = sleepTimerState.asStateFlow()
     override val currentChapter: StateFlow<CurrentChapter?> = MutableStateFlow(null)
     override val pendingMeteredConsent = gate.pendingConsent
+
+    fun updateSleepTimer(state: SleepTimerState) {
+        sleepTimerState.value = state
+    }
 
     private val durable =
         flow {
