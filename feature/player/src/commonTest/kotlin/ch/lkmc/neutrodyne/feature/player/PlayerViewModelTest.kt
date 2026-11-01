@@ -383,7 +383,10 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 listOf<Call>(FakePlaybackController.SleepSet(SleepTimerMode.Minutes(30))),
                 controller.calls,
             )
-            assertTrue(vm.uiState.value.messages.isNotEmpty())
+            assertTrue(
+                vm.uiState.value.messages
+                    .isNotEmpty(),
+            )
         }
 
     @Test fun chaptersFollowTheCurrentItemAndSteerTransports() =
@@ -411,7 +414,10 @@ class PlayerViewModelTest : MainDispatcherTest() {
             // Rows keyed to another episode never steer the transport.
             chapters.rows.value = mapOf(9L to listOf(chapter))
             runCurrent()
-            assertTrue(vm.uiState.value.chapters.isEmpty())
+            assertTrue(
+                vm.uiState.value.chapters
+                    .isEmpty(),
+            )
             vm.next()
             vm.previous()
             assertEquals(
@@ -430,7 +436,11 @@ class PlayerViewModelTest : MainDispatcherTest() {
             assertNull(vm.uiState.value.currentChapter)
             controller.state.currentChapter.value = CurrentChapter(1, 0, 1, chapter)
             runCurrent()
-            assertEquals(chapter, vm.uiState.value.currentChapter?.chapter)
+            assertEquals(
+                chapter,
+                vm.uiState.value.currentChapter
+                    ?.chapter,
+            )
         }
 
     @Test fun timestampSeeksTheCurrentItemAndRejectsOutOfRange() =
