@@ -401,7 +401,11 @@ class EpisodeViewModelTest : MainDispatcherTest() {
 
             assertEquals(listOf(5L), chapters.loads)
             assertEquals(listOf(chapter), viewModel.uiState.value.chapters)
-            assertEquals(chapter, viewModel.uiState.value.currentChapter?.chapter)
+            assertEquals(
+                chapter,
+                viewModel.uiState.value.currentChapter
+                    ?.chapter,
+            )
             playbackStates.currentChapter.value = CurrentChapter(9, 0, 1, chapter)
             advanceUntilIdle()
             assertNull(viewModel.uiState.value.currentChapter)
@@ -458,7 +462,11 @@ class EpisodeViewModelTest : MainDispatcherTest() {
 
             viewModel.onTimestamp(754_000)
             advanceUntilIdle()
-            assertEquals(5L, viewModel.playback.meteredConsent.value?.episodeId)
+            assertEquals(
+                5L,
+                viewModel.playback.meteredConsent.value
+                    ?.episodeId,
+            )
             assertTrue(playbackController.calls.isNotEmpty())
 
             playbackController.playResult = PlayResult.Started
@@ -467,6 +475,7 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             assertEquals(
                 listOf<FakePlaybackController.Call>(
                     FakePlaybackController.Call.Episode(5, 754_000),
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
                     FakePlaybackController.Call.Episode(5, 754_000),
                 ),
                 playbackController.calls,
