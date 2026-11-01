@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
@@ -245,6 +246,23 @@ class PlaybackActionsTest : MainDispatcherTest() {
                         754_000,
                     ),
                 ),
+                controller.calls,
+            )
+        }
+
+    @Test fun savedCurrentTimestampStartsAtThePointThroughAdmission() =
+        runTest {
+            val controller = FakePlaybackController()
+            controller.state.nowPlaying.value = testNowPlaying(7).copy(
+                phase = PlayerPhase.NOT_LOADED,
+                isPlaying = false,
+                playWhenReady = false,
+            )
+            val actions = actions(controller)
+            actions.seekOrPlay(7, 754_000, 3_600_000)
+            runCurrent()
+            assertEquals(
+                listOf<FakePlaybackController.Call>(FakePlaybackController.Call.Episode(7, 754_000)),
                 controller.calls,
             )
         }
