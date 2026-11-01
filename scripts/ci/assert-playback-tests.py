@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Unlicense
-"""Reject absent, skipped, failed or duplicate playback evidence for each requested device."""
+"""Require playback/download device evidence and inspect M6a backup exclusion."""
 import argparse
 import math
 from pathlib import Path
 import re
+import tarfile
 import xml.etree.ElementTree as ET
+import zipfile
 
 CLASS = "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest"
 SHORT = {
@@ -37,6 +39,11 @@ RELEASE_SMOKE = {
     CLASS: ("notificationTransportAndLocalArtwork",),
 }
 
+DOWNLOAD_CLASS = "ch.lkmc.neutrodyne.DownloadJourneyTest"
+JOURNEY = "downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete"
+WORKER = "visibleApi33DownloadUsesDataSyncForegroundWorker"
+UIDT = "backgroundUidtBesidePlaybackForTwentyMinutes"
+
 
 def _device_report(parts, device, flavors):
     """Use the nearest device/flavor marker, not an ancestor lane."""
@@ -61,23 +68,49 @@ def _device_report(parts, device, flavors):
     return False
 
 
-def verify(root, profile, devices):
-    for device in devices:
+def download_cases(profile, device):
+    names = {JOURNEY}
+    if profile in ("nightly", "downloads") and device == "api33":
+        names.add(WORKER)
+    if profile in ("nightly", "downloads") and device in ("api34", "api36"):
+        names.add(UIDT)
+    return {(DOWNLOAD_CLASS, name) for name in names}
+
+
+def expected_map(profile, device):
+    """Every (class -> cases) the lane must report once, passing."""
+    if profile == "downloads":
+        expected = {}
+    elif profile == "release":
+        expected = {classname: set(names) for classname, names in RELEASE_SMOKE.items()}
+    else:
         # externalBackgroundStartDenialIsUnreachable runs in the external bgstart
         # lane; its aggregate asserts the case there (an instrumented target
         # cannot measure a denial).
-        if profile == "release":
-            expected = {classname: set(names) for classname, names in RELEASE_SMOKE.items()}
-        else:
-            expected = {CLASS: set(SHORT), QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]},
-                        PLAY_JOURNEY[0]: {PLAY_JOURNEY[1]}}
-            api = re.fullmatch(r"api([0-9]+)", device)
-            if profile == "api37" or (api and int(api[1]) >= ACCESSIBILITY_MIN_API):
-                expected[ATF_CONTROL[0]] = {ATF_CONTROL[1]}
-            if profile == "nightly" and device in SOAK_DEVICES:
-                expected[CLASS].add(LONG)
-            if profile == "api37":
-                expected[CLASS].add(HARDENING)
+        expected = {CLASS: set(SHORT), QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]},
+                    PLAY_JOURNEY[0]: {PLAY_JOURNEY[1]}}
+        api = re.fullmatch(r"api([0-9]+)", device)
+        if profile == "api37" or (api and int(api[1]) >= ACCESSIBILITY_MIN_API):
+            expected[ATF_CONTROL[0]] = {ATF_CONTROL[1]}
+        if profile == "nightly" and device in SOAK_DEVICES:
+            expected[CLASS].add(LONG)
+        if profile == "api37":
+            expected[CLASS].add(HARDENING)
+    for classname, name in download_cases(profile, device):
+        expected.setdefault(classname, set()).add(name)
+    return expected
+
+
+def expected_cases(profile, device):
+    return {
+        (classname, name) for classname, names in expected_map(profile, device).items() for name in names
+    }
+
+
+def verify(root, profile, devices):
+    durations = {LONG: 1800, UIDT: 1200}
+    for device in devices:
+        expected = expected_map(profile, device)
         evidence = {
             (classname, name): [] for classname, names in expected.items() for name in names
         }
@@ -99,22 +132,66 @@ def verify(root, profile, devices):
             report, case = cases[0]
             if any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
                 raise ValueError(f"{device}: {classname}#{name} did not pass in {report}")
-            if name == LONG:
+            if name in durations:
+                minimum = durations[name]
                 duration = float(case.get("time", "0"))
-                if not math.isfinite(duration) or duration < 1800:
-                    raise ValueError(f"{device}: {classname}#{name} has no valid 30-minute duration")
+                if not math.isfinite(duration) or duration < minimum:
+                    raise ValueError(f"{device}: {classname}#{name} has no valid {minimum}-second duration")
         print(f"{device}: {len(evidence)} expected cases passed ({profile})")
+
+
+ASSETS = {
+    "cbr_128k_2s.mp3", "vbr_xing_2s.mp3", "silence_gaps_3s.mp3", "h264_aac_8s.mp4",
+    "chapters_id3.mp3", "chapters_nero.m4b", "chapters_quicktime.m4b", "chapters_both.m4b", "chapters.json",
+}
+
+
+def verify_assets(apk):
+    with zipfile.ZipFile(apk) as archive:
+        for asset in ASSETS:
+            name = f"assets/media/{asset}"
+            if name not in archive.namelist() or archive.getinfo(name).file_size == 0:
+                raise ValueError(f"{apk}: missing or empty {name}")
+
+
+def verify_backup(archive):
+    prefix = "apps/ch.lkmc.neutrodyne/"
+    allowed = {"f/backup/auto-snapshot.zip", "f/datastore/settings.preferences_pb"}
+    seen = set()
+    with tarfile.open(archive, "r:*") as backup:
+        for entry in backup:
+            if entry.isdir():
+                continue
+            if not entry.name.startswith(prefix):
+                raise ValueError(f"unexpected backup package: {entry.name}")
+            path = entry.name[len(prefix):]
+            if path in ("_manifest", "_meta") or path.startswith("a/"):
+                continue
+            if path not in allowed or not entry.isfile() or entry.size <= 0 or path in seen:
+                raise ValueError(f"unexpected, empty or duplicate backup data: {path}")
+            seen.add(path)
+    if seen != allowed:
+        raise ValueError(f"backup missing included data: {allowed - seen}")
+    print("bmgr: both included files present; no media/database/device data")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", choices=("ci", "nightly", "api37", "release"))
+    parser.add_argument("profile", choices=("ci", "nightly", "api37", "release", "downloads", "bmgr"))
     parser.add_argument("root", type=Path)
-    parser.add_argument("--device", action="append", required=True)
+    parser.add_argument("--device", action="append", default=[])
+    parser.add_argument("--apk", type=Path, action="append", default=[])
     args = parser.parse_args()
     try:
+        if args.profile == "bmgr":
+            verify_backup(args.root)
+            return
+        if not args.device:
+            parser.error("device evidence requires --device")
+        for apk in args.apk:
+            verify_assets(apk)
         verify(args.root, args.profile, args.device)
-    except (ValueError, ET.ParseError) as error:
+    except (ValueError, ET.ParseError, OSError, zipfile.BadZipFile, tarfile.TarError) as error:
         parser.exit(1, f"{error}\n")
 
 

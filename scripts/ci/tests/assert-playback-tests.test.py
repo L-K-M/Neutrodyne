@@ -38,7 +38,8 @@ class PlaybackEvidenceTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
 
-    def report(self, device, names, skipped=None, flavor="Debug", directory=None, omit_ui=()):
+    def report(self, device, names, skipped=None, flavor="Debug", directory=None,
+               omit_ui=(), profile="ci"):
         folder = self.root / (directory or f"{device}{flavor}AndroidTest")
         folder.mkdir(parents=True, exist_ok=True)
         suite = ET.Element("testsuite")
@@ -52,6 +53,8 @@ class PlaybackEvidenceTest(unittest.TestCase):
         for classname, name in ui:
             if name not in omit_ui:
                 ET.SubElement(suite, "testcase", classname=classname, name=name, time="1")
+        for classname, name in gate.download_cases(profile, device):
+            ET.SubElement(suite, "testcase", classname=classname, name=name, time="1201")
         ET.ElementTree(suite).write(folder / "TEST-playback.xml")
 
     def release_suite(self, directory, omit=(), marks=None, root=None,
@@ -67,6 +70,12 @@ class PlaybackEvidenceTest(unittest.TestCase):
                 case = ET.SubElement(suite, "testcase", classname=classname, name=name, time="1")
                 if name in marks:
                     ET.SubElement(case, marks[name])
+        for classname, name in gate.download_cases("release", "api36"):
+            if name in omit:
+                continue
+            case = ET.SubElement(suite, "testcase", classname=classname, name=name, time="1")
+            if name in marks:
+                ET.SubElement(case, marks[name])
         ET.ElementTree(suite).write(folder / filename)
         return folder
 
@@ -127,7 +136,7 @@ class PlaybackEvidenceTest(unittest.TestCase):
             gate.verify(self.root, "ci", ["api26"])
 
     def test_nightly_requires_full_duration(self):
-        self.report("api34", gate.SHORT | {gate.LONG})
+        self.report("api34", gate.SHORT | {gate.LONG}, profile="nightly")
         gate.verify(self.root, "nightly", ["api34"])
         path = self.root / "api34DebugAndroidTest" / "TEST-playback.xml"
         original = path.read_text()

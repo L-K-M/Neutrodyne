@@ -44,6 +44,7 @@ internal class EngineRig(
     private val scope: TestScope,
     credentials: CredentialLookup = CredentialLookup.None,
     driver: SQLiteDriver = TestDb.bundledDriver(),
+    sourceFactory: ((EngineRig) -> TransferSource)? = null,
 ) : AutoCloseable,
     CoroutineScope by scope {
     fun runCurrent() = scope.testScheduler.runCurrent()
@@ -120,7 +121,7 @@ internal class EngineRig(
             clock,
             credentials,
             conditions,
-            setOf(source, youtube),
+            setOf(sourceFactory?.invoke(this) ?: source, youtube),
             files,
             roots,
             verification,
@@ -172,6 +173,7 @@ internal class EngineRig(
 
     suspend fun seed(
         count: Int = 1,
+        enclosureUrl: String? = null,
         transform: (DownloadEntity) -> DownloadEntity = { it },
     ): List<Long> {
         val podcast = db.podcastDao().insertPodcast(podcastEntity())
@@ -182,7 +184,7 @@ internal class EngineRig(
                         copy(
                             guid = "guid-$n",
                             title = "Episode $n",
-                            enclosureUrl = "https://origin.example/$n.mp3",
+                            enclosureUrl = enclosureUrl ?: "https://origin.example/$n.mp3",
                             enclosureType = "audio/mpeg",
                         )
                     },
@@ -196,7 +198,7 @@ internal class EngineRig(
                         priority = 100,
                         requestedAt = n.toLong(),
                         sourceKind = SourceKind.RSS_ENCLOSURE,
-                        sourceRef = "https://origin.example/$n.mp3",
+                        sourceRef = enclosureUrl ?: "https://origin.example/$n.mp3",
                         rootId = "old",
                         allowMetered = true,
                     ),
