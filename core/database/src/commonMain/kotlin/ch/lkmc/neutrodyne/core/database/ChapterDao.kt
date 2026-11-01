@@ -7,6 +7,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.model.ChapterSource
+import kotlinx.coroutines.flow.Flow
 
 /**
  * `chapter` writes (02 chapter): writers replace all rows of one `(episodeId, source)` pair in one
@@ -27,6 +28,12 @@ abstract class ChapterDao(
             insert(rows)
         }
     }
+
+    @Query("SELECT * FROM chapter WHERE episodeId = :episodeId ORDER BY source, ordinal")
+    abstract fun observe(episodeId: Long): Flow<List<ChapterEntity>>
+
+    @Query("SELECT chaptersUrl FROM episode WHERE id = :episodeId")
+    abstract fun observeUrl(episodeId: Long): Flow<String?>
 
     @Query("DELETE FROM chapter WHERE episodeId = :episodeId AND source = :source")
     protected abstract suspend fun deleteOfSource(
