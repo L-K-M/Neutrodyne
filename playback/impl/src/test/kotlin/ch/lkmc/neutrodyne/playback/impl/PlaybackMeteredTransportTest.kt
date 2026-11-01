@@ -3,11 +3,14 @@ package ch.lkmc.neutrodyne.playback.impl
 
 import android.os.Looper
 import androidx.media3.common.Player
+import androidx.media3.session.MediaController
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.playback.core.StartRequest
+import kotlinx.coroutines.guava.await
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -37,9 +40,25 @@ class PlaybackMeteredTransportTest {
                 }
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
             try {
-                pumpUntil { h.hub.bridge != null }
-                val player = assertNotNull(service.get().onGetSession(controllerInfo())).player
-                pumpUntil { player.mediaItemCount == 2 }
+                val session = assertNotNull(service.get().onGetSession(controllerInfo()))
+                // A real client start is what opens the lazy runtime and installs the queue.
+                val client =
+                    h.run { MediaController.Builder(app, session.token).buildAsync().await() }
+                try {
+                    h.run {
+                        client
+                            .sendCustomCommand(
+                                CustomCommands.command(CustomCommands.PLAY_CONTEXT),
+                                CustomCommands.encode(StartRequest.Resume),
+                            ).await()
+                    }
+                    client.play()
+                    pumpUntil { session.player.mediaItemCount == 2 }
+                    client.pause()
+                } finally {
+                    client.release()
+                }
+                val player = session.player
                 player.play()
                 shadowOf(Looper.getMainLooper()).idle()
                 h.network.setStatus(FakeNetworkMonitor.ONLINE.copy(isMetered = true))
