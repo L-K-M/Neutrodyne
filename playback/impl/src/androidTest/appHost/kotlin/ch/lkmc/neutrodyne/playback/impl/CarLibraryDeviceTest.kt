@@ -246,13 +246,16 @@ class CarLibraryDeviceTest {
                 Bundle(),
                 object : MediaBrowserCompat.SubscriptionCallback() {
                     override fun onChildrenLoaded(
-                        parentId: String,
-                        children: MutableList<MediaBrowserCompat.MediaItem>,
+                        parentId: String?,
+                        children: MutableList<MediaBrowserCompat.MediaItem>?,
                     ) {
-                        result.complete(children)
+                        children?.let(result::complete)
+                            ?: result.completeExceptionally(
+                                IllegalArgumentException("Legacy browse failed: $parentId"),
+                            )
                     }
 
-                    override fun onError(parentId: String) {
+                    override fun onError(parentId: String?) {
                         result.completeExceptionally(IllegalArgumentException("Legacy browse failed: $parentId"))
                     }
                 },

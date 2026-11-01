@@ -494,7 +494,7 @@ internal object OwnerProbe {
     }
 }
 
-private class OwnerProbeVm : ViewModel() {
+internal class OwnerProbeVm : ViewModel() {
     val identity = OwnerProbe.nextIdentity.getAndIncrement()
 
     override fun onCleared() {
