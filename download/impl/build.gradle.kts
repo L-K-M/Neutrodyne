@@ -7,7 +7,9 @@ plugins {
 
 kotlin {
     targets.named("android") {
-        (this as KotlinMultiplatformAndroidLibraryTarget).withHostTest { }
+        (this as KotlinMultiplatformAndroidLibraryTarget).androidResources.enable = true
+        (this as KotlinMultiplatformAndroidLibraryTarget).withHostTest { isIncludeAndroidResources = true }
+        (this as KotlinMultiplatformAndroidLibraryTarget).withDeviceTest { }
     }
 
     sourceSets {
@@ -29,12 +31,25 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }
+        androidMain.dependencies {
+            implementation(libs.androidx.core.ktx)
+            implementation(libs.androidx.work.runtime)
+            implementation(libs.androidx.lifecycle.process)
+        }
+        getByName("androidDeviceTest").dependencies {
+            implementation(libs.androidx.test.ext.junit)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.work.testing)
+        }
         desktopTest.dependencies {
             implementation(libs.okhttp.mockwebserver3)
             implementation(libs.okhttp.tls)
             implementation("com.squareup.okio:okio-fakefilesystem:${libs.versions.okio.get()}")
         }
         getByName("androidHostTest").dependencies {
+            implementation(libs.androidx.work.testing)
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(project(":core:testing"))
             implementation(libs.robolectric)
             implementation(libs.junit4)
             implementation(libs.truth)

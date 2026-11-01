@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.impl.DownloadComponentsInjector
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -47,7 +48,7 @@ import kotlinx.coroutines.CoroutineScope
  * (D73): `:ytx` builds [YtxGraph], `:acra` builds nothing.
  */
 @DependencyGraph(AppScope::class, bindingContainers = [YouTubeBindingsModule::class])
-interface AndroidAppGraph {
+interface AndroidAppGraph : DownloadComponentsInjector {
     val application: Application
 
     @ApplicationScope

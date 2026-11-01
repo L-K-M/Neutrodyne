@@ -98,7 +98,7 @@
       android:exported="true"
       tools:ignore="ExportedContentProvider" />
 
-    <!-- Export share-sheet URIs (05 Destinations); the paths resource exposes only <cache>/export/. -->
+    <!-- Export share-sheet URIs (05 Destinations); the paths resource exposes export cache and primary/internal Podcasts roots. -->
     <provider
       android:name="androidx.core.content.FileProvider"
       android:authorities="${applicationId}.fileprovider"
