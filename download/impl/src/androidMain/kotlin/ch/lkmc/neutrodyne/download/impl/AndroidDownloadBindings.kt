@@ -64,8 +64,13 @@ object AndroidDownloadBindings {
                 components.value.reconciler.reconcile()
                 scheduler.value.ensureScheduled(DownloadLane.MANUAL)
             },
-            stop = { token, intent -> components.value.engine.stopRunner(token, intent) },
-            wake = { components.value.engine.wake(it) },
+            // Framework callbacks can arrive before DB readiness; no drain exists to signal then.
+            stop = { token, intent ->
+                if (components.isInitialized()) components.value.engine.stopRunner(token, intent)
+            },
+            wake = { lane ->
+                if (components.isInitialized()) components.value.engine.wake(lane)
+            },
             controller = { components.value.controller },
         )
 

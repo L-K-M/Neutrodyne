@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.download.api.RootChangeResult
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -52,6 +53,8 @@ internal class DownloadControllerImpl(
     private val files: DownloadControllerFiles,
     private val mediaLookup: PlaybackMediaLookup,
     private val askNotificationPermission: suspend () -> Boolean,
+    private val activity: Flow<Long> = flowOf(0L),
+    private val hasActiveTransfers: () -> Boolean = { false },
 ) : DownloadController {
     private val dao = db.downloadDao()
 
@@ -358,21 +361,22 @@ internal class DownloadControllerImpl(
     override fun observeFailedCount() = dao.observeFailedCount().distinctUntilChanged()
 
     override fun observeBusy(): Flow<Boolean> =
-        combine(dao.observeEntries(), network.status) { rows, status ->
-            rows.any { entry ->
-                val row = entry.download
-                row.state in ACTIVE_STATES || (
-                    row.state == DownloadState.QUEUED && row.runnerToken == null &&
-                        row.waitReason !in
-                        setOf(
-                            WaitReason.STORAGE,
-                            WaitReason.NEEDS_FOREGROUND,
-                            WaitReason.CHARGING,
-                        ) &&
-                        (row.nextAttemptAt?.let { it <= clock.now() } != false) && status.isConnected &&
-                        (row.allowMetered || !status.isMetered)
-                )
-            }
+        combine(dao.observeEntries(), network.status, activity) { rows, status, _ ->
+            hasActiveTransfers() ||
+                rows.any { entry ->
+                    val row = entry.download
+                    row.state in ACTIVE_STATES || (
+                        row.state == DownloadState.QUEUED && row.runnerToken == null &&
+                            row.waitReason !in
+                            setOf(
+                                WaitReason.STORAGE,
+                                WaitReason.NEEDS_FOREGROUND,
+                                WaitReason.CHARGING,
+                            ) &&
+                            (row.nextAttemptAt?.let { it <= clock.now() } != false) && status.isConnected &&
+                            (row.allowMetered || !status.isMetered)
+                    )
+                }
         }.distinctUntilChanged()
 
     override suspend fun storageRoots() = roots.list()

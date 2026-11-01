@@ -20,7 +20,9 @@ import ch.lkmc.neutrodyne.download.api.DeleteReason
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
@@ -29,6 +31,8 @@ internal class DownloadHost(
     val liveTokens: () -> Set<String>,
     val askNotificationPermission: suspend () -> Boolean,
     val share: (String, String) -> String?,
+    val activity: Flow<Long> = flowOf(0L),
+    val hasActiveTransfers: () -> Boolean = { false },
 )
 
 /** Lazily resolved after DB open by the platform hosts, never by the index's constructor. */
@@ -126,6 +130,8 @@ internal class DownloadComponents(
             storage,
             media,
             host.askNotificationPermission,
+            host.activity,
+            host.hasActiveTransfers,
         )
     val lifecycle: DownloadLifecycle =
         object : DownloadLifecycle {
