@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
@@ -524,6 +525,49 @@ class PlaybackServiceTest {
                 assertEquals(ScopeWriteResult.FAILED, h.run { controller.setSpeed(Float.NaN, SettingScope.GLOBAL) })
             } finally {
                 connection.controller?.release()
+                service.destroy()
+            }
+        }
+    }
+
+    @Test fun sessionAndUiPausePathsUseElapsedSmartResumeWithoutReloading() {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent()
+            install(h)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            try {
+                pumpUntil { h.hub.bridge != null }
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                pumpUntil { player.mediaItemCount == 1 && player.currentPosition == 12_000L }
+                player.play()
+                pumpUntil { player.playWhenReady }
+                player.pause()
+                h.clock.elapsedMs += 300_000
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(12_000L, player.currentPosition)
+                h.controller.pause()
+                h.clock.elapsedMs += 300_001
+                h.clock.nowMs -= 1_000_000
+                player.play()
+                pumpUntil { player.currentPosition == 7_000L }
+                assertEquals(1, player.mediaItemCount)
+                player.pause()
+                h.run { h.settings.set(PlaybackSettingKeys.SMART_RESUME, false) }
+                pumpUntil { !h.prefs.current.value.smartResume }
+                h.clock.elapsedMs += 300_001
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(7_000L, player.currentPosition)
+                h.run { h.settings.set(PlaybackSettingKeys.SMART_RESUME, true) }
+                pumpUntil { h.prefs.current.value.smartResume }
+                player.pause()
+                h.clock.elapsedMs += 300_001
+                h.run { checkNotNull(h.hub.bridge).start(StartRequest.Episode(1, 754_000), StartOrigin.UI) }
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(754_000L, player.currentPosition)
+            } finally {
                 service.destroy()
             }
         }

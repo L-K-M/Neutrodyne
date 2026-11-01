@@ -28,6 +28,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
     private var sessionPlayer: SessionPlayer? = null
     private var exo: ExoPlayer? = null
     private var bridge: AndroidServiceBridge? = null
+    private var chapters: Chapters? = null
     private var starting: Deferred<AndroidServiceBridge>? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var startReserved = false
@@ -59,6 +60,9 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     pauseAllPlayersAndStopSelf()
                 },
                 cancelPendingPlay = access.hub::newPlaybackIntent,
+                hardwareButtons = { access.prefs.current.value.hardwareButtons },
+                userPaused = { bridge?.userPaused() },
+                transportProtocol = { session.transportProtocol() },
             ).also { sessionPlayer = it }
         val callback =
             SessionCallback(
@@ -73,6 +77,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     startReserved = true
                     bridge?.reserveStart()
                 },
+                chapterCommand = { chapters?.command(it) },
             )
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider
@@ -88,7 +93,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
             object : MediaSessionService.Listener {
                 override fun onForegroundServiceStartNotAllowedException() {
                     // Pause immediately, before any suspend or permission-dependent recovery UI.
-                    bridge?.pause() ?: wrapper.pause()
+                    bridge?.pauseForPolicy() ?: wrapper.pauseForPolicy()
                     bridge?.issue(PlaybackIssue.PLAYER_ERROR)
                     notification.post()
                 }
@@ -120,10 +125,18 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     },
                     stopService = { pauseAllPlayersAndStopSelf() },
                     // Canonical pause must also invalidate the session's suspended play intent.
-                    pausePlayer = wrapper::pause,
+                    pausePlayer = wrapper::pauseForPolicy,
                 ).also { live ->
                     bridge = live
                     live.attach(hasPendingStart = startReserved)
+                    chapters =
+                        Chapters(
+                            player,
+                            ports.chapters,
+                            serviceScope,
+                            seek = wrapper::seekTo,
+                            publish = access.hub::updateCurrentChapter,
+                        ).also { it.attach() }
                     wrapper.orderAfterPlaybackAdapters()
                     player.addListener(
                         object : Player.Listener {
@@ -168,6 +181,8 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         serviceScope.cancel()
         starting?.cancel()
+        chapters?.detach()
+        chapters = null
         bridge?.let { live ->
             live.detach()
             access.hub.detach(live)

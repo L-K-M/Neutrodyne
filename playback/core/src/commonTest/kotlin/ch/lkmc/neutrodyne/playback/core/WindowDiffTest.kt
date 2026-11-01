@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.core
 
+import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -74,6 +75,17 @@ class WindowDiffTest {
     @Test fun sourceChangeReloadsOnlyNonCurrentAndDefersCurrent() {
         val have = listOf(entry(1), entry(2))
         val want = have.map { it.copy(media = it.media!!.copy(enclosureUrl = "https://example.org/new.mp3")) }
+        assertEquals(listOf(WindowOp.Reload(1, item(2))), diff.diff(have, want))
+    }
+
+    @Test fun audioAlternateChangeReloadsOnlyNonCurrent() {
+        val x = AudioAlternate("https://example.org/x.m4a", "audio/mp4", 1)
+        val y = AudioAlternate("https://example.org/y.m4a", "audio/mp4", 2)
+        val have =
+            listOf(entry(1), entry(2)).map {
+                it.copy(media = it.media!!.copy(isVideo = true, audioAlternate = x))
+            }
+        val want = have.map { it.copy(media = it.media!!.copy(audioAlternate = y)) }
         assertEquals(listOf(WindowOp.Reload(1, item(2))), diff.diff(have, want))
     }
 

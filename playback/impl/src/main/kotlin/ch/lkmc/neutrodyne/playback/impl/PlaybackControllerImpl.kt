@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
+import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import dev.zacsweers.metro.Inject
@@ -124,14 +125,38 @@ internal class PlaybackControllerImpl(
         connection.controller?.seekToPreviousMediaItem()
     }
 
-    // shortcut: dispatch stays inactive until M5's sleep/chapter adapters; no UI or session advertises it.
-    override fun setSleepTimer(mode: SleepTimerMode) = Unit
+    override fun setSleepTimer(mode: SleepTimerMode) {
+        if (mode is SleepTimerMode.Minutes && !SleepTimerMode.isValidMinutes(mode.minutes)) return
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(PlaybackSessionCommands.SLEEP_SET, SleepTimerCommands.encode(mode))
+        }
+    }
 
-    override fun extendSleepTimer(minutes: Int) = Unit
+    override fun extendSleepTimer(minutes: Int) {
+        if (!SleepTimerMode.isValidMinutes(minutes)) return
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(
+                PlaybackSessionCommands.SLEEP_EXTEND,
+                Bundle().apply { putInt(PlaybackSessionCommands.MINUTES, minutes) },
+            )
+        }
+    }
 
-    override fun nextChapter() = Unit
+    override fun nextChapter() {
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(PlaybackSessionCommands.CHAPTER_NEXT)
+        }
+    }
 
-    override fun previousChapter() = Unit
+    override fun previousChapter() {
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(PlaybackSessionCommands.CHAPTER_PREV)
+        }
+    }
 
     override suspend fun setSpeed(
         speed: Float,

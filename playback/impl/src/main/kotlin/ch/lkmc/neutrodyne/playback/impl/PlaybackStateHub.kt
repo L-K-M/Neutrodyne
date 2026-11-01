@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
@@ -59,9 +60,19 @@ internal class PlaybackStateHub(
     val bridge: ServiceBridge? get() = active.value
     private val emitted = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
     override val events = emitted.asSharedFlow()
-    override val sleepTimer: StateFlow<SleepTimerState> = MutableStateFlow(SleepTimerState.Off)
-    override val currentChapter: StateFlow<CurrentChapter?> = MutableStateFlow(null)
+    private val sleepTimerState = MutableStateFlow<SleepTimerState>(SleepTimerState.Off)
+    override val sleepTimer = sleepTimerState.asStateFlow()
+    private val chapterState = MutableStateFlow<CurrentChapter?>(null)
+    override val currentChapter = chapterState.asStateFlow()
     override val pendingMeteredConsent = gate.pendingConsent
+
+    fun updateSleepTimer(state: SleepTimerState) {
+        sleepTimerState.value = state
+    }
+
+    fun updateCurrentChapter(chapter: CurrentChapter?) {
+        chapterState.value = chapter
+    }
 
     private val durable =
         flow {

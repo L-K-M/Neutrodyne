@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.playback.impl
 import android.net.Uri
 import androidx.media3.datasource.DataSpec
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
+import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
@@ -35,6 +36,70 @@ import java.util.concurrent.atomic.AtomicReference
 @Config(sdk = [34])
 class EpisodeResolverTest {
     @get:Rule val temporary = TemporaryFolder()
+
+    @Test fun videoAlternateRequestsSelectedUrlAndLengthWithoutSwitchingCurrentPin() {
+        SourceHarness(temporary.newFolder()).use { h ->
+            val original = media(url = "https://cdn.example/movie.mp4").copy(isVideo = true, enclosureLength = 999)
+            val alternate =
+                original.copy(
+                    audioAlternate =
+                        AudioAlternate(
+                            "https://cdn.example/audio.m4a",
+                            "audio/mp4",
+                            123,
+                        ),
+                )
+            h.index.putAll(listOf(alternate))
+            val selected = h.resolve()
+            assertEquals("https://cdn.example/audio.m4a", selected.uri.toString())
+            assertEquals(EnclosureFingerprint.cacheKey(1, alternate.audioAlternate!!.url, 123), selected.key)
+            assertNotEquals(EnclosureFingerprint.cacheKey(1, original.enclosureUrl!!, 999), selected.key)
+            h.index.putAll(listOf(alternate.copy(audioAlternate = alternate.audioAlternate!!.copy(length = 456))))
+            assertEquals(selected.key, h.resolve().key)
+            h.resolver.unpin(1)
+            assertNotEquals(selected.key, h.resolve().key)
+            h.resolver.unpin(1)
+            h.index.putAll(listOf(original))
+            assertEquals(original.enclosureUrl, h.resolve().uri.toString())
+        }
+    }
+
+    @Test fun invalidAudioAlternatesFallBackAndLocalStillWins() {
+        SourceHarness(temporary.newFolder()).use { h ->
+            for (url in listOf("", "relative.mp3", "file:///unsafe", "ftp://cdn/a", "https://")) {
+                h.index.putAll(
+                    listOf(
+                        media().copy(
+                            isVideo = true,
+                            audioAlternate =
+                                ch.lkmc.neutrodyne.core.model
+                                    .AudioAlternate(url, "audio/mpeg", 3),
+                        ),
+                    ),
+                )
+                assertEquals(media().enclosureUrl, h.resolve().uri.toString())
+                h.resolver.unpin(1)
+            }
+            h.local.files[1] = "file:///download.mp3"
+            assertEquals("file:///download.mp3", h.resolve().uri.toString())
+            h.resolver.unpin(1)
+            h.local.files.clear()
+            h.index.putAll(
+                listOf(
+                    media().copy(
+                        isVideo = false,
+                        audioAlternate =
+                            AudioAlternate(
+                                "https://cdn.example/alternate",
+                                "audio/mpeg",
+                                3,
+                            ),
+                    ),
+                ),
+            )
+            assertEquals(media().enclosureUrl, h.resolve().uri.toString())
+        }
+    }
 
     @Test fun nonCanonicalUrisPassThroughAndMalformedIdentitiesRefuse() {
         SourceHarness(temporary.newFolder()).use { h ->

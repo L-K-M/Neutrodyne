@@ -51,6 +51,14 @@ interface PlaySessionStore {
         now: Long,
     ): Long?
 
+    /** A boundary pause completed the current item in place: mark it played, keeping the session.
+     * False when the persisted current/generation no longer equals [expected]: stale, no write. */
+    suspend fun markBoundaryPlayed(
+        episodeId: Long,
+        expected: SessionRevision,
+        now: Long,
+    ): Boolean
+
     /** Explicit dismissal: same durable clearing, no implicit mark-played.
      * [allowed] is a fast thread-safe predicate read inside the transaction on the writer's
      * dispatcher, not necessarily the caller's thread.
