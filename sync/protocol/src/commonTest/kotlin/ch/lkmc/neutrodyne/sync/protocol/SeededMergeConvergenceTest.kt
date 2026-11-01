@@ -120,6 +120,7 @@ class SeededMergeConvergenceTest {
 
         private fun nextOps(replica: Replica): List<Op> {
             val c = replica.clock.tick().toString()
+
             fun fv(
                 value: JsonElement,
                 clock: String = c,

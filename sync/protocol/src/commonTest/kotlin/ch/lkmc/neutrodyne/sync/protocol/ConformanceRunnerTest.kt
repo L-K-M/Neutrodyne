@@ -24,22 +24,22 @@ class ConformanceRunnerTest {
         val error = expectError?.let { "\"error\": \"$it\"," } ?: ""
         val serverTime = serverTimeMs?.let { "\"serverTimeMs\": $it," } ?: ""
         return """
-        {
-          "name": "negative-control",
-          "collection": "podcast",
-          "id": "11111111-1111-4111-8111-111111111111",
-          $serverTime
-          "changes": [
-            {"fields": {"subscribedAt": {"v": 100, "c": "$clock"}}}
-          ],
-          "expect": {
-            $error
-            "status": ["$expectStatus"],
-            "fields": {"subscribedAt": {"v": $expectValue, "c": "$clock"}},
-            "maxClock": "$expectMaxClock"
-          }
-        }
-        """.trimIndent()
+            {
+              "name": "negative-control",
+              "collection": "podcast",
+              "id": "11111111-1111-4111-8111-111111111111",
+              $serverTime
+              "changes": [
+                {"fields": {"subscribedAt": {"v": 100, "c": "$clock"}}}
+              ],
+              "expect": {
+                $error
+                "status": ["$expectStatus"],
+                "fields": {"subscribedAt": {"v": $expectValue, "c": "$clock"}},
+                "maxClock": "$expectMaxClock"
+              }
+            }
+            """.trimIndent()
     }
 
     @Test
