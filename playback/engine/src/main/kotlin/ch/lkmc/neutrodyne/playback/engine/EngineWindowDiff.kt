@@ -41,6 +41,9 @@ data class EngineWindowDiff(
             result[index] = item
         }
         for (episodeId in removed) {
+            require(window.any { it.episodeId == episodeId }) {
+                "the diff removes unknown item $episodeId"
+            }
             result.removeAll { it.episodeId == episodeId }
         }
         for (placed in inserted.sortedBy { it.index }) {

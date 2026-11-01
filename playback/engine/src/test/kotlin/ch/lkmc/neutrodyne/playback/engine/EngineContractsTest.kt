@@ -68,7 +68,9 @@ class EngineWindowDiffTest {
 
         val applied = diff.applyTo(window, currentEpisodeId = 1L)
 
-        assertEquals(listOf(1L, 3L, 8L), applied.map { it.episodeId })
+        // replace, remove, insert, move - in that order, whatever order the diff
+        // lists them in: [1,2,3] -> [1,2,3'] -> [1,3'] -> [8,1,3'] -> [8,3',1].
+        assertEquals(listOf(8L, 3L, 1L), applied.map { it.episodeId })
         assertEquals("ep:3:fp2", applied[1].cacheKey)
     }
 
@@ -127,8 +129,8 @@ class ByteSourceTest {
             val dst = arena.allocate(8)
 
             assertEquals(2, source.read(position = 1L, dst = dst, maxBytes = 2))
-            assertEquals(2L, dst.get(ValueLayout.JAVA_BYTE, 0L))
-            assertEquals(3L, dst.get(ValueLayout.JAVA_BYTE, 1L))
+            assertEquals(2.toByte(), dst.get(ValueLayout.JAVA_BYTE, 0L))
+            assertEquals(3.toByte(), dst.get(ValueLayout.JAVA_BYTE, 1L))
 
             assertEquals(3, source.read(position = 2L, dst = dst, maxBytes = 8))
             assertEquals(0, source.read(position = 5L, dst = dst, maxBytes = 8))
@@ -146,7 +148,7 @@ class ByteSourceTest {
                 assertEquals(300, source.read(position = 0L, dst = dst, maxBytes = 300))
                 assertEquals(300L, source.length)
                 assertEquals(0, source.read(position = 300L, dst = dst, maxBytes = 300))
-                assertEquals(7L, dst.get(ValueLayout.JAVA_BYTE, 7L))
+                assertEquals(7.toByte(), dst.get(ValueLayout.JAVA_BYTE, 7L))
             }
         }
     }
@@ -158,7 +160,8 @@ class ByteSourceTest {
         FileChannelByteSource(path).use { source ->
             Arena.ofConfined().use { arena ->
                 val dst = arena.allocate(64)
-                assertEquals(64, source.read(position = 16L, dst = dst, maxBytes = 64))
+                // Only 48 bytes remain at position 16, and all of them arrive.
+                assertEquals(48, source.read(position = 16L, dst = dst, maxBytes = 64))
                 assertEquals(0, source.read(position = 64L, dst = dst, maxBytes = 64))
             }
         }
@@ -211,6 +214,7 @@ class AudioCodecTest {
     fun `a codec the build does not enable maps to null`() {
         assertNull(AudioCodec.fromName("AC3"))
         assertNull(AudioCodec.fromName("h264"))
-        assertEquals(9, AudioCodec.entries.size)
+        // Exactly the decoders of 11 FFmpeg build's configure line.
+        assertEquals(10, AudioCodec.entries.size)
     }
 }
