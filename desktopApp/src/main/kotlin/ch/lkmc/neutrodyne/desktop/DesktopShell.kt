@@ -276,6 +276,9 @@ internal object DesktopShell {
                 viewModelFactory = graph.metroViewModelFactory,
                 playbackController = graph.playbackController,
                 playbackState = graph.playbackStateSource,
+                updateChecker = graph.appUpdateChecker,
+                updateNotices = graph.updateNotices,
+                settings = graph.settingsRepository,
                 onQuitRequest = ::exitApplication,
             )
         }

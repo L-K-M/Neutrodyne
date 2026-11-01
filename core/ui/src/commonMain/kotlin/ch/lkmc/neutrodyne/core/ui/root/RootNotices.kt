@@ -66,7 +66,9 @@ internal fun RootBanners(
 
     val shown = if (held != null && onFeedsOrLibrary) 1 else 0
     val hasImport = importResume(shown < MAX_BANNERS)
-    if (state.notice == RootNotice.FIRST_RUN_CHOICE && shown + (if (hasImport) 1 else 0) < MAX_BANNERS) {
+    if (onFeedsOrLibrary && state.notice == RootNotice.FIRST_RUN_CHOICE &&
+        shown + (if (hasImport) 1 else 0) < MAX_BANNERS
+    ) {
         NdBanner(
             message = stringResource(Res.string.notice_first_run_body),
             primary =

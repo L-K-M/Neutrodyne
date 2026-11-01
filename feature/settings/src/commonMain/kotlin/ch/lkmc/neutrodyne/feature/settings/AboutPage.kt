@@ -7,48 +7,30 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
-import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
-import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
-import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_debug_build
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_desktop
-import ch.lkmc.neutrodyne.feature.settings.resources.about_link_copy
-import ch.lkmc.neutrodyne.feature.settings.resources.about_link_no_handler
 import ch.lkmc.neutrodyne.feature.settings.resources.about_source
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_abi
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_desktop
 import ch.lkmc.neutrodyne.feature.settings.resources.app_name
-import ch.lkmc.neutrodyne.feature.settings.resources.install_help_android
-import ch.lkmc.neutrodyne.feature.settings.resources.install_help_close
 import ch.lkmc.neutrodyne.feature.settings.resources.install_help_title
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -59,47 +41,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal fun AboutPage(buildInfo: BuildInfo) {
     val navigator = LocalAppNavigator.current
-    val urls = LocalPlatformActions.current.urls
-    val snackbarHost = LocalSnackbarHost.current
-    val clipboard = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
-    val noHandlerMessage = stringResource(Res.string.about_link_no_handler)
-    val copyLabel = stringResource(Res.string.about_link_copy)
-    var showInstallHelp by rememberSaveable { mutableStateOf(false) }
-
-    // 08 Show notes renderer: a link nothing can open shows "No app can open this link" with
-    // "Copy link" as its action.
-    fun openLink(url: String) {
-        if (urls.open(url) == OpenResult.OPENED) return
-        scope.launch {
-            // 08's duration rule: an action shows `Long` (10 s) — Material3 would default this
-            // to `Indefinite` and hold the one serial host.
-            val result =
-                snackbarHost.showSnackbar(
-                    message = noHandlerMessage,
-                    actionLabel = copyLabel,
-                    duration = SnackbarDuration.Long,
-                )
-            if (result == SnackbarResult.ActionPerformed) {
-                clipboard.setText(AnnotatedString(url))
-            }
-        }
-    }
-    if (showInstallHelp) {
-        NdDialog(
-            onDismissRequest = { showInstallHelp = false },
-            title = stringResource(Res.string.install_help_title),
-            confirm =
-                NdDialogAction(stringResource(Res.string.install_help_close)) {
-                    showInstallHelp = false
-                },
-        ) {
-            Text(
-                stringResource(Res.string.install_help_android),
-                Modifier.verticalScroll(rememberScrollState()),
-            )
-        }
-    }
+    val openLink = updateLinkOpener()
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
             title = stringResource(Res.string.settings_about),
@@ -131,14 +73,12 @@ internal fun AboutPage(buildInfo: BuildInfo) {
                 summary = null,
                 onClick = { navigator.push(LicencesKey) },
             )
-            if (buildInfo.platform == BuildInfo.Platform.ANDROID) {
-                SettingsRow(
-                    icon = NdIcons.Article,
-                    title = stringResource(Res.string.install_help_title),
-                    summary = null,
-                    onClick = { showInstallHelp = true },
-                )
-            }
+            SettingsRow(
+                icon = NdIcons.Article,
+                title = stringResource(Res.string.install_help_title),
+                summary = null,
+                onClick = { navigator.push(InstallHelpKey()) },
+            )
             SettingsRow(
                 icon = NdIcons.Explore,
                 title = stringResource(Res.string.about_source),
@@ -186,20 +126,20 @@ private fun licenceStatementFor(platform: BuildInfo.Platform) =
     }
 
 // OS/arch/install-kind labels are product names, not translated copy.
-private fun osLabel(os: DesktopOs): String =
+internal fun osLabel(os: DesktopOs): String =
     when (os) {
         DesktopOs.WINDOWS -> "Windows"
         DesktopOs.MACOS -> "macOS"
         DesktopOs.LINUX -> "Linux"
     }
 
-private fun archLabel(arch: DesktopArch): String =
+internal fun archLabel(arch: DesktopArch): String =
     when (arch) {
         DesktopArch.X64 -> "x64"
         DesktopArch.ARM64 -> "arm64"
     }
 
-private fun kindLabel(kind: InstallKind): String =
+internal fun kindLabel(kind: InstallKind): String =
     when (kind) {
         InstallKind.MSI -> "MSI"
         InstallKind.ZIP -> "ZIP"
