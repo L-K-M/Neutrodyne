@@ -127,7 +127,7 @@ class SeededMergeConvergenceTest {
             ) = FieldValue(value, clock)
 
             return when (random.nextInt(14)) {
-                0 ->
+                0 -> {
                     listOf(
                         Op(
                             SyncCollection.PODCAST,
@@ -135,8 +135,9 @@ class SeededMergeConvergenceTest {
                             mapOf("title" to fv(JsonPrimitive("show-${random.nextInt(4)}"))),
                         ),
                     )
+                }
 
-                1 ->
+                1 -> {
                     listOf(
                         Op(
                             SyncCollection.PODCAST,
@@ -144,8 +145,9 @@ class SeededMergeConvergenceTest {
                             mapOf("subscribed" to fv(JsonPrimitive(random.nextBoolean()))),
                         ),
                     )
+                }
 
-                2 ->
+                2 -> {
                     listOf(
                         Op(
                             SyncCollection.PODCAST,
@@ -158,18 +160,23 @@ class SeededMergeConvergenceTest {
                             ),
                         ),
                     )
+                }
 
-                3 ->
+                3 -> {
                     listOf(
                         Op(
                             SyncCollection.PODCAST,
                             RecordId.Podcast(podcast),
                             mapOf(
                                 "subscribedAt" to
-                                    FieldValue(JsonPrimitive(random.nextLong(0, 1_000)), c.takeIf { random.nextBoolean() }),
+                                    FieldValue(
+                                        JsonPrimitive(random.nextLong(0, 1_000)),
+                                        c.takeIf { random.nextBoolean() },
+                                    ),
                             ),
                         ),
                     )
+                }
 
                 4 -> {
                     // Position save: non-zero listening, a guarded zero or an explicit reset.
@@ -220,12 +227,13 @@ class SeededMergeConvergenceTest {
                     if (played) listOf(pair, remove) else listOf(pair)
                 }
 
-                6 ->
+                6 -> {
                     listOf(
                         Op(SyncCollection.EPISODE, episodeB, mapOf("fav" to fv(JsonPrimitive(random.nextBoolean())))),
                     )
+                }
 
-                7 ->
+                7 -> {
                     listOf(
                         Op(
                             SyncCollection.EPISODE,
@@ -241,8 +249,9 @@ class SeededMergeConvergenceTest {
                             ),
                         ),
                     )
+                }
 
-                8 ->
+                8 -> {
                     listOf(
                         Op(
                             SyncCollection.MEMBER,
@@ -253,8 +262,9 @@ class SeededMergeConvergenceTest {
                             ),
                         ),
                     )
+                }
 
-                9 ->
+                9 -> {
                     listOf(
                         Op(
                             SyncCollection.GROUP,
@@ -265,8 +275,9 @@ class SeededMergeConvergenceTest {
                             ),
                         ),
                     )
+                }
 
-                10 ->
+                10 -> {
                     listOf(
                         Op(
                             SyncCollection.GROUP,
@@ -274,8 +285,9 @@ class SeededMergeConvergenceTest {
                             mapOf("deleted" to fv(JsonPrimitive(true))),
                         ),
                     )
+                }
 
-                11 ->
+                11 -> {
                     listOf(
                         Op(
                             SyncCollection.SETTING,
@@ -283,8 +295,9 @@ class SeededMergeConvergenceTest {
                             mapOf("v" to fv(JsonPrimitive(1.0 + random.nextInt(0, 20) / 10.0))),
                         ),
                     )
+                }
 
-                12 ->
+                12 -> {
                     listOf(
                         Op(
                             SyncCollection.SESSION,
@@ -303,8 +316,9 @@ class SeededMergeConvergenceTest {
                             match = MatchHints(guid = "g:ep1", kv = 1),
                         ),
                     )
+                }
 
-                else ->
+                else -> {
                     listOf(
                         Op(
                             SyncCollection.PODCAST,
@@ -315,6 +329,7 @@ class SeededMergeConvergenceTest {
                             ),
                         ),
                     )
+                }
             }
         }
 
