@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
-import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -12,6 +9,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.lang.foreign.Arena
+import java.lang.foreign.ValueLayout
+import java.nio.file.Files
 
 class EngineWindowDiffTest {
     private val first = EngineItem(episodeId = 1L, cacheKey = "ep:1:fp", localHint = true)
