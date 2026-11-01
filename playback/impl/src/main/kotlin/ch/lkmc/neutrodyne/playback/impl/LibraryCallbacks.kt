@@ -54,7 +54,13 @@ internal open class LibraryCallbacks(
         val limit = rootLimits[browser] ?: 4
         return scope.future(io) {
             try {
-                LibraryResult.ofItemList(tree.children(parentId, page, pageSize, limit), params)
+                // Legacy browsers subscribe without paging extras; media3 forwards
+                // non-positive placeholders that mean "the whole list", not an error.
+                val boundedSize = if (pageSize > 0) pageSize else Int.MAX_VALUE
+                LibraryResult.ofItemList(
+                    tree.children(parentId, page.coerceAtLeast(0), boundedSize, limit),
+                    params,
+                )
             } catch (_: IllegalArgumentException) {
                 LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
             }
@@ -101,8 +107,11 @@ internal open class LibraryCallbacks(
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
         scope.future(io) {
             try {
-                MediaLibraryTree.validatePage(page, pageSize)
-                LibraryResult.ofItemList(MediaLibraryTree.page(tree.search(query), page, pageSize), params)
+                val boundedSize = if (pageSize > 0) pageSize else Int.MAX_VALUE
+                LibraryResult.ofItemList(
+                    MediaLibraryTree.page(tree.search(query), page.coerceAtLeast(0), boundedSize),
+                    params,
+                )
             } catch (_: IllegalArgumentException) {
                 LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
             }
