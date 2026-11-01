@@ -183,6 +183,7 @@ internal class LifecycleHarness(
     val items = MediaItemFactory(art, local)
     val tree =
         MediaLibraryTree(
+            app,
             opener,
             deferred(sessions),
             deferred(lookup),

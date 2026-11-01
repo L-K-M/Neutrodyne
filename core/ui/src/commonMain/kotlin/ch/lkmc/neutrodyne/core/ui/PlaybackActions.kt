@@ -55,6 +55,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.playback_youtube_not_yet
 import ch.lkmc.neutrodyne.core.ui.resources.playback_youtube_not_yet_desktop
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_enter_password
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
@@ -161,8 +162,8 @@ public class PlaybackActions(
 
     /**
      * An explicit timestamp or chapter tap (06 Show notes; M5): [episodeId] is the episode the
-     * position belongs to, never the row's. The current item seeks in place; any other episode
-     * starts at exactly [positionMs] through the same consent/refusal/retry path as a start —
+     * position belongs to, never the row's. A loaded current item seeks in place; saved-only or
+     * other episodes start at [positionMs] through the same consent/refusal/retry path as a start:
      * explicit positions never toggle playback, and a retried start replays the same position.
      */
     public fun seekOrPlay(
@@ -174,7 +175,8 @@ public class PlaybackActions(
         ++startGeneration
         startJob?.cancel()
         consentDismiss()
-        if (states.nowPlaying.value?.episodeId == episodeId) {
+        val now = states.nowPlaying.value
+        if (now != null && now.episodeId == episodeId && now.phase != PlayerPhase.NOT_LOADED) {
             controller.seekTo(positionMs)
             return
         }

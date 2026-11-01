@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.impl
 
+import android.app.Application
 import android.os.Bundle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.map
 /** All suspend reads run on the callback's IO lane; providers are dereferenced after the DB gate. */
 @Inject
 internal class MediaLibraryTree(
+    private val application: Application,
     private val opener: DatabaseOpener,
     private val sessions: Provider<PlaySessionStore>,
     private val media: Provider<PlaybackMediaLookup>,
@@ -59,10 +61,10 @@ internal class MediaLibraryTree(
             when (parentId) {
                 ROOT -> {
                     listOf(
-                        folder(UP_NEXT, "Up next"),
-                        folder(GROUPS, "Groups"),
-                        folder(DOWNLOADS, "Downloads"),
-                        folder(PODCASTS, "Podcasts", GRID),
+                        folder(UP_NEXT, application.getString(R.string.auto_up_next)),
+                        folder(GROUPS, application.getString(R.string.auto_groups)),
+                        folder(DOWNLOADS, application.getString(R.string.auto_downloads)),
+                        folder(PODCASTS, application.getString(R.string.auto_podcasts), GRID),
                     ).take(rootLimit.coerceIn(0, ROOT_COUNT))
                 }
 

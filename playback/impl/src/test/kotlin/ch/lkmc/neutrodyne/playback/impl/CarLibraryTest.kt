@@ -39,6 +39,19 @@ import kotlin.test.assertTrue
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
 class CarLibraryTest {
+    @Test
+    @Config(qualifiers = "de")
+    fun rootFolderTitlesUseTheApplicationLocale() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            val titles = h.run {
+                withContext(Dispatchers.IO) {
+                    h.tree.children(MediaLibraryTree.ROOT, 0, 4).map { it.mediaMetadata.title.toString() }
+                }
+            }
+            assertEquals(listOf("Als Nächstes", "Gruppen", "Downloads", "Podcasts"), titles)
+        }
+    }
+
     @Test fun groupTapRetainsContextAndRejectsForgedStaleAndDownloadsParents() {
         LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
             h.run {

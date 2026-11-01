@@ -1,0 +1,11 @@
+<resources>
+    <string name="channel_playback">Wiedergabe</string>
+    <string name="channel_alerts">App-Hinweise</string>
+    <string name="playback_paused">Wiedergabe angehalten</string>
+    <string name="tap_to_resume">Android hat Neutrodyne die Wiedergabe im Hintergrund nicht erlaubt. Tippe, um fortzufahren.</string>
+    <string name="resume_playback">Fortsetzen</string>
+    <string name="auto_up_next">Als Nächstes</string>
+    <string name="auto_groups">Gruppen</string>
+    <string name="auto_downloads">Downloads</string>
+    <string name="auto_podcasts">Podcasts</string>
+</resources>

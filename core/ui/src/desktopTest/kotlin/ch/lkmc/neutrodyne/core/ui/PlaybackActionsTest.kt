@@ -311,6 +311,7 @@ class PlaybackActionsTest : MainDispatcherTest() {
             assertEquals(
                 listOf<FakePlaybackController.Call>(
                     FakePlaybackController.Call.Episode(9, 754_000),
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
                     FakePlaybackController.Call.Episode(9, 754_000),
                 ),
                 controller.calls,
