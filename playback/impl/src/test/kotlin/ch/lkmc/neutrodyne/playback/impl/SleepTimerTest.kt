@@ -152,12 +152,22 @@ class SleepTimerTest {
                 f.fakeClock.advanceTime(1)
                 f.player.seekTo(REPLAY_MS)
                 awaitAdapter { f.player.currentPosition == REPLAY_MS }
-                assertNotNull(f.db.episodeStateDao().byEpisode(id)?.playedAt)
+                assertNotNull(
+                    f.db
+                        .episodeStateDao()
+                        .byEpisode(id)
+                        ?.playedAt,
+                )
 
                 f.player.advancing = true
                 f.tracker.onIsPlayingChanged(true)
                 awaitAdapter("Replay did not clear played") {
-                    runBlocking { f.db.episodeStateDao().byEpisode(id)?.playedAt == null }
+                    runBlocking {
+                        f.db
+                            .episodeStateDao()
+                            .byEpisode(id)
+                            ?.playedAt == null
+                    }
                 }
 
                 f.player.advancing = false
@@ -169,10 +179,21 @@ class SleepTimerTest {
                     "saved=$saved state=$state player=${f.player.currentPosition} " +
                         "playWhenReady=${f.player.playWhenReady} failures=${f.failures} calls=${f.player.calls}"
                 }) {
-                    runBlocking { f.db.positionDao().byEpisode(id)?.positionMs == REPLAY_MS }
+                    runBlocking {
+                        f.db
+                            .positionDao()
+                            .byEpisode(id)
+                            ?.positionMs == REPLAY_MS
+                    }
                 }
                 assertEquals(id, f.player.episodeIdOrNull(), "Replay must stay on the retained item")
-                assertEquals(id, f.sessions.virtualQueue(0).current?.episodeId)
+                assertEquals(
+                    id,
+                    f.sessions
+                        .virtualQueue(0)
+                        .current
+                        ?.episodeId,
+                )
                 assertTrue(f.failures.isEmpty(), f.failures.toString())
             } finally {
                 timer.detach()

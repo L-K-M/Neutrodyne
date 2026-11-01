@@ -77,9 +77,27 @@ class QueueProjectorEventFenceTest {
                     completed.isCompleted || f.events.isNotEmpty()
                 }
 
-                assertNull(f.db.episodeStateDao().byEpisode(ids[0])?.playedAt, "A stale boundary must not mark played")
-                assertEquals(RESTORED_MS, f.db.positionDao().byEpisode(ids[0])?.positionMs)
-                assertEquals(listOf(ids[0]), f.sessions.virtualQueue(0).upNext.map { it.episodeId })
+                assertNull(
+                    f.db
+                        .episodeStateDao()
+                        .byEpisode(ids[0])
+                        ?.playedAt,
+                    "A stale boundary must not mark played",
+                )
+                assertEquals(
+                    RESTORED_MS,
+                    f.db
+                        .positionDao()
+                        .byEpisode(ids[0])
+                        ?.positionMs,
+                )
+                assertEquals(
+                    listOf(ids[0]),
+                    f.sessions
+                        .virtualQueue(0)
+                        .upNext
+                        .map { it.episodeId },
+                )
                 assertTrue(f.events.isEmpty(), f.events.toString())
 
                 release.complete(Unit)
