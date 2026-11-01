@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.common.GraphHolder
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -63,7 +64,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
         val callback =
             SessionCallback(
                 runtime,
-                ResumptionProvider(runtime),
+                ResumptionProvider(access.savedResumption::load, runtime),
                 access.tree,
                 buttons,
                 serviceScope,
@@ -103,8 +104,10 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     TapToResumeNotifier.openPlayer(app),
                 ).setMediaButtonPreferences(buttons.current())
                 .build()
+        // Lazy: browse and metadata-only (isForPlayback = false) requests must not open the
+        // playback runtime; the first runtime call starts this deferred via runtime().await().
         starting =
-            serviceScope.async {
+            serviceScope.async(start = CoroutineStart.LAZY) {
                 val ports = access.open()
                 AndroidServiceBridge(
                     player,

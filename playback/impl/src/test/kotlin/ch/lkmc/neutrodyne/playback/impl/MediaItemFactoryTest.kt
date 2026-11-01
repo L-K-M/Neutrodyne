@@ -6,6 +6,7 @@ import androidx.media3.session.MediaConstants
 import ch.lkmc.neutrodyne.core.artwork.ArtworkStore
 import ch.lkmc.neutrodyne.core.artwork.PinReason
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex
 import okio.Path
@@ -52,6 +53,18 @@ class MediaItemFactoryTest {
         }
     private val local = FakeLocalMediaIndex()
     private val factory = MediaItemFactory(art, local)
+
+    @Test fun downloadExtrasAreLongAndAlternateUsesItsOwnFingerprint() {
+        val row = media()
+        for ((state, expected) in listOf(
+            null to MediaConstants.EXTRAS_VALUE_STATUS_NOT_DOWNLOADED,
+            DownloadState.COMPLETED to MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADED,
+            DownloadState.DOWNLOADING to MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADING,
+        )) {
+            val extras = factory.build(row.copy(downloadState = state)).mediaMetadata.extras!!
+            assertEquals(expected, extras.getLong(MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS))
+        }
+    }
 
     @Test fun canonicalIdentityNoMimeAndFingerprintAgreeWithResolver() {
         val row = media()

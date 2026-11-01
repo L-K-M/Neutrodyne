@@ -10,9 +10,11 @@ import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,15 @@ class PlaybackMediaLookupTest {
     private val lookup = PlaybackMediaLookupImpl(db)
 
     @AfterTest fun close() = db.close()
+
+    @Test fun downloadMappingUsesSavedCompletedStateAndNullDefault() =
+        runTest {
+            val p = db.podcastDao().insertPodcast(podcastEntity())
+            val id = db.episodeDao().insertStub(episodeEntity(podcastId = p))
+            assertNull(lookup.get(id)!!.downloadState)
+            db.downloadDao().insert(downloadEntity(id, state = DownloadState.COMPLETED))
+            assertEquals(DownloadState.COMPLETED, lookup.get(id)!!.downloadState)
+        }
 
     @Test fun alternateRankingTriesDefaultsThenOrdinalAndObservesReplacementWithoutPositionTicks() =
         runTest {
