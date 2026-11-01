@@ -272,9 +272,14 @@ class PlaybackServiceTest {
             phase("recreation/foreground")
             foregroundHost()
             val restored = withContext(Dispatchers.Main) { connect() }
-            await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 } }
-            withContext(Dispatchers.Main) { assertFalse(restored.playWhenReady) }
-            await { withContext(Dispatchers.Main) { restored.currentPosition >= 9_000 } }
+            // The lazy runtime keeps a recreated service empty until a real play resumes it.
+            withContext(Dispatchers.Main) { assertEquals(0, restored.mediaItemCount) }
+            withContext(Dispatchers.Main) { restored.play() }
+            await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 && restored.playWhenReady } }
+            withContext(Dispatchers.Main) { restored.pause() }
+            await {
+                withContext(Dispatchers.Main) { !restored.playWhenReady && restored.currentPosition >= 9_000 }
+            }
         }
 
     // The external background-start case moved to the external bgstart lane as
