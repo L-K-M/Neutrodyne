@@ -518,13 +518,15 @@ data: {"cursor":"c:7f3a9c01:4796","by":"3b1f0c9e-…"}
     val cursor: String, val hasMore: Boolean, val serverTime: String)
 @Serializable data class ChangesPage(val records: List<RecordDto>, val cursor: String, val hasMore: Boolean, val serverTime: String)
 @Serializable data class ChangeDto(val coll: String, val id: JsonElement, val op: String? = null,   // op: null | "rekey"
-    val to: JsonElement? = null, val match: MatchHints? = null, val fields: Map<String, FieldValue> = emptyMap())
+    val to: JsonElement? = null, val match: MatchHints? = null, val fields: Map<String, FieldValue> = emptyMap(),
+    val matchClocks: Map<String, String> = emptyMap())   // optional per-hint provenance, same admission bound as fields
 @Serializable data class FieldValue(val v: JsonElement? = null, val c: String? = null, val reset: Boolean? = null,
     val add: List<String>? = null)                               // add: grow-set fields only
 @Serializable data class MatchHints(val guid: String? = null, val enc: String? = null, val title: String? = null,
     val date: String? = null, val link: String? = null, val ytId: String? = null, val kv: Int? = null)
 @Serializable data class RecordDto(val coll: String, val id: JsonElement, val seq: Long, val by: String?,
-    val fields: Map<String, FieldValue>, val match: MatchHints? = null, val mergedInto: JsonElement? = null)
+    val fields: Map<String, FieldValue>, val match: MatchHints? = null, val mergedInto: JsonElement? = null,
+    val matchClocks: Map<String, String> = emptyMap())
 @Serializable data class ChangeResultDto(val i: Int, val status: String,  // applied | stale | merged | rejected
     val mergedInto: JsonElement? = null, val code: String? = null)
 @Serializable data class ChangedEvent(val cursor: String, val by: String?)
@@ -650,7 +652,8 @@ Unknown fields (a newer client, an older server) are stored by the server as opa
 // :sync:protocol
 @Serializable data class FieldState(val v: JsonElement?, val c: Hlc?, val reset: Boolean = false)
 data class RecordState(val coll: SyncCollection, val fields: Map<String, FieldState>,
-                       val growSets: Map<String, Set<String>>, val match: MatchHints?, val mergedInto: RecordId?)
+                       val growSets: Map<String, Set<String>>, val match: MatchHints?, val mergedInto: RecordId?,
+                       val matchClocks: Map<String, Hlc> = emptyMap())   // per-hint provenance
 data class MergeResult(val record: RecordState, val advanced: Set<String>, val lost: Set<String>) {
     val status: ChangeStatus get() = when {
         record.mergedInto != null -> ChangeStatus.MERGED
@@ -673,6 +676,24 @@ enum class SyncCollection(val wire: String, val fields: Map<String, FieldSpec>) 
 }
 data class FieldSpec(val name: String, val kind: FieldKind, val type: ValueType, val maxBytes: Int)
 ```
+
+**Implementation note (2026-11-01, MS0).** Equal complete clocks identify
+the same field write, including reset; conflicting LWW payloads are `invalid`.
+Redirects have one authoritative server assignment: identical repeats are
+idempotent, conflicting assignments are diagnosed rather than promised to
+commute. Extrema preserve the maximum complete clock independently of value.
+State equality includes raw clocks, resets, sets and hint provenance. D92 and
+its S15 fallback remain unchanged.
+
+A pushed hint's provenance is the greatest field clock in that change; a
+hint without an anchor is invalid. Keep each newest non-null hint, using the
+lexicographically greater canonical JSON scalar for equal-provenance ties.
+`RecordState.matchClocks` retains per-hint provenance. `RecordDto` and replay
+`ChangeDto` carry optional `matchClocks: Map<String, String>` so relaying a
+full record cannot promote a partial hint update to the newest field clock.
+Legacy records and changes without it anchor to their greatest field clock.
+Supplied provenance is admitted by the same clock bound as fields. This
+additive v1 metadata does not make absent hints erase known ones.
 
 ### Episode-state rules
 
