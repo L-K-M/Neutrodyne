@@ -274,8 +274,7 @@ object FeedQueryBuilder {
         k: Int,
         youtubePlayable: Boolean,
         episodeId: Long? = null,
-    ): RoomRawQuery =
-        contextSelection(spec, null, null, k, youtubePlayable, false, ContextSelection.BROWSE, episodeId)
+    ): RoomRawQuery = contextSelection(spec, null, null, k, youtubePlayable, false, ContextSelection.BROWSE, episodeId)
 
     private enum class ContextSelection { TAIL, BROWSE }
 

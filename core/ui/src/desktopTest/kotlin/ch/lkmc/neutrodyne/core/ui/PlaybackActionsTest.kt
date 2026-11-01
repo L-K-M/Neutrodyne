@@ -253,11 +253,12 @@ class PlaybackActionsTest : MainDispatcherTest() {
     @Test fun savedCurrentTimestampStartsAtThePointThroughAdmission() =
         runTest {
             val controller = FakePlaybackController()
-            controller.state.nowPlaying.value = testNowPlaying(7).copy(
-                phase = PlayerPhase.NOT_LOADED,
-                isPlaying = false,
-                playWhenReady = false,
-            )
+            controller.state.nowPlaying.value =
+                testNowPlaying(7).copy(
+                    phase = PlayerPhase.NOT_LOADED,
+                    isPlaying = false,
+                    playWhenReady = false,
+                )
             val actions = actions(controller)
             actions.seekOrPlay(7, 754_000, 3_600_000)
             runCurrent()

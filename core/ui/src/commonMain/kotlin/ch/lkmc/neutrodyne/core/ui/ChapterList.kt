@@ -43,8 +43,9 @@ public fun ChapterList(
 ) {
     LazyColumn(modifier) {
         itemsIndexed(chapters, key = { _, chapter -> chapter.startMs }) { index, chapter ->
-            val title = chapter.title?.takeIf { it.isNotBlank() }
-                ?: stringResource(Res.string.chapter_number, index + 1)
+            val title =
+                chapter.title?.takeIf { it.isNotBlank() }
+                    ?: stringResource(Res.string.chapter_number, index + 1)
             val selected = current?.chapter?.startMs == chapter.startMs
             val seekLabel = stringResource(Res.string.chapter_seek, title)
             val color =
