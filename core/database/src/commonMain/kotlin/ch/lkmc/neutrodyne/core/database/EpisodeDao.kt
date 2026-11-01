@@ -43,7 +43,26 @@ private const val MEDIA_INFO_SELECT =
  * besides refresh, restore stubs and retention — 02).
  */
 @Dao
-interface EpisodeDao {
+interface EpisodeDao : DownloadSourceQueries {
+    override suspend fun downloadSources(ids: List<Long>): List<DownloadSourceRow> =
+        ids.distinct().chunked(DOWNLOAD_BIND_CHUNK).flatMap { downloadSourcesChunk(it) }.map { row ->
+            val ranked =
+                row.audioAlternates
+                    .filter { it.type.startsWith("audio/", ignoreCase = true) }
+                    .sortedWith(compareByDescending<EpisodeAltEnclosureEntity> { it.isDefault }.thenBy { it.ordinal })
+            row.copy(audioAlternates = ranked)
+        }
+
+    @Transaction
+    @Query(
+        "SELECT e.id AS episodeId, e.podcastId, e.title, e.sortDate, e.isVideo, e.availability," +
+            " COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, p.sourceType," +
+            " COALESCE(p.customTitle, p.title) AS podcastTitle, e.enclosureUrl, e.enclosureType," +
+            " e.enclosureLength, e.externalMediaId FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " LEFT JOIN episode_state s ON s.episodeId = e.id WHERE e.id IN (:ids)",
+    )
+    suspend fun downloadSourcesChunk(ids: List<Long>): List<DownloadSourceRow>
+
     /**
      * Restore's stub insertion (05 `Stubs and matching`, 02's `INSERT OR IGNORE`): `inFeed = 0`
      * rows a later refresh matches by `identityKey`. OR IGNORE because a `(podcastId,

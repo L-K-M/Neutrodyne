@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.Flow
  * insert fires no Room trigger. Every other write is an `UPDATE … WHERE id = 0`.
  */
 @Dao
-interface PlaySessionDao {
+interface PlaySessionDao : DownloadSessionQueries {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun ensure(row: PlaySessionEntity): Long
 
@@ -31,7 +31,7 @@ interface PlaySessionDao {
 
     /** 07's deferral check and the now-playing sources (02 Downloads): low-churn observation. */
     @Query("SELECT currentEpisodeId FROM play_session WHERE id = 0")
-    fun observeCurrentEpisodeId(): Flow<Long?>
+    override fun observeCurrentEpisodeId(): Flow<Long?>
 
     /**
      * 05 Replace pre-step (UP_NEXT): the local context is cleared before the backup's session

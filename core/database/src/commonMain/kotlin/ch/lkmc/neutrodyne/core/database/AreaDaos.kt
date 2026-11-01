@@ -350,7 +350,21 @@ data class GroupMosaicRow(
 
 /** `episode_state` (M4: the user-state write chains of 02 User-state writes). */
 @Dao
-interface EpisodeStateDao {
+interface EpisodeStateDao : DownloadStateQueries {
+    @Query(
+        "UPDATE episode_state SET downloadDismissedAt = NULL WHERE episodeId IN (:ids) AND downloadDismissedAt IS NOT NULL",
+    )
+    override suspend fun clearDismissed(ids: List<Long>)
+
+    @Query(
+        "UPDATE episode_state SET downloadDismissedAt = :at, updatedAt = :at" +
+            " WHERE episodeId IN (:ids) AND downloadDismissedAt IS NOT :at",
+    )
+    override suspend fun setDismissed(
+        ids: List<Long>,
+        at: Long,
+    )
+
     /** Lazy-row primitive (02 DAO rule 2): `INSERT OR IGNORE` then targeted UPDATEs by writers. */
     @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
     suspend fun ensure(row: EpisodeStateEntity): Long
@@ -546,33 +560,6 @@ interface QueueDao {
             " " + FeedQueryBuilder.ROW_JOINS + " ORDER BY q.orderKey, q.id",
     )
     fun observeUpNext(): Flow<List<UpNextRow>>
-}
-
-/** `download` (M6: the claim/state machine of 07). */
-@Dao
-interface DownloadDao {
-    @Insert
-    suspend fun insert(row: DownloadEntity)
-
-    @Query("SELECT * FROM download WHERE episodeId = :episodeId")
-    suspend fun byEpisode(episodeId: Long): DownloadEntity?
-
-    /** 07's file-deletion set of an unsubscribe/merge (03 PodcastRepository). */
-    @Query(
-        "SELECT d.episodeId FROM download d JOIN episode e ON e.id = d.episodeId" +
-            " WHERE e.podcastId IN (:podcastIds)",
-    )
-    suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long>
-
-    /**
-     * 02 Live row state: the `download` transition columns `RowLive` merges; callers chunk at
-     * 200 ids. `downloadedBytes` is persisted only on transitions (D17), never progress cadence.
-     */
-    @Query(
-        "SELECT episodeId, state, waitReason, downloadedBytes, totalBytes, estimatedBytes," +
-            " nextAttemptAt, lastError FROM download WHERE episodeId IN (:ids)",
-    )
-    fun observeLiveFor(ids: List<Long>): Flow<List<DownloadLiveRow>>
 }
 
 /** `artwork` (M4: references and garbage collection; `@Upsert`-able single-writer table). */
