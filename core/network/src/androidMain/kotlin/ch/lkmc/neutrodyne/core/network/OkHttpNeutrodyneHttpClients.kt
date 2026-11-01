@@ -40,7 +40,17 @@ public class OkHttpNeutrodyneHttpClients
         private val clients =
             HttpClientKind.entries.associateWith { kind ->
                 HttpClient(OkHttp) {
-                    engine { preconfigured = networkClients[kind] }
+                    engine {
+                        preconfigured = networkClients[kind]
+                        // Ktor disables engine redirects by default. Keep API redirects in one
+                        // OkHttp call so its update-policy tag and 8s timeout cover every hop.
+                        if (kind == HttpClientKind.API) {
+                            config {
+                                followRedirects(true)
+                                followSslRedirects(false)
+                            }
+                        }
+                    }
                     // Status codes are data for 03's fetch pipeline, not exceptions.
                     expectSuccess = false
                     // The engine level keeps the island's per-kind redirect policy; Ktor's plugin must

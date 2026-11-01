@@ -36,6 +36,7 @@ class AuthInterceptor(
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
+        if (request.tag(UpdateManifestCall::class.java) != null) return chain.proceed(request)
         if (request.header("Authorization") != null) return chain.proceed(request)
         val value = lookup().basicAuthorization(Origin.of(request.url)) ?: return chain.proceed(request)
         return chain.proceed(request.newBuilder().header("Authorization", value).build())
