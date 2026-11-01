@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -52,6 +53,7 @@ import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.ui.AvailabilityText
+import ch.lkmc.neutrodyne.core.ui.ChapterList
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.FeedDates
@@ -95,8 +97,8 @@ import org.jetbrains.compose.resources.stringResource
 /**
  * The episode detail screen (08 Episode detail): a 120 dp cover beside the title (YouTube renders
  * its art 16:9 full width instead), the meta line, the action row and the sanitised show notes as
- * one lazy item per block. Play, download and Up-next actions dispatch to the route's handler and
- * use the playback controller in M4 and download engine in M6; timestamps wait for M5's seek.
+ * one lazy item per block. Play, download and Up-next actions dispatch to the route's handler;
+ * timestamps and chapter taps seek the current item or start the detailed one at the position.
  */
 @Composable
 internal fun EpisodeScreen(
@@ -104,6 +106,7 @@ internal fun EpisodeScreen(
     onAction: (EpisodeAction) -> Unit,
     onFavorite: (Boolean) -> Unit,
     onOpenLink: (String) -> Unit,
+    onTimestamp: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val episode = state.episode
@@ -136,6 +139,16 @@ internal fun EpisodeScreen(
                     item(key = "header", contentType = "header") {
                         EpisodeHeader(episode, state, onAction)
                     }
+                    if (state.chapters.isNotEmpty()) {
+                        item(key = "chapters", contentType = "chapters") {
+                            ChapterList(
+                                state.chapters,
+                                state.currentChapter,
+                                onTimestamp,
+                                Modifier.heightIn(max = CHAPTER_LIST_MAX_HEIGHT),
+                            )
+                        }
+                    }
                     val notes = state.notes
                     if (notes == null || notes.blocks.isEmpty()) {
                         item(key = "noNotes", contentType = "notes") {
@@ -159,8 +172,7 @@ internal fun EpisodeScreen(
                                 },
                             durationMs = episode.durationMs,
                             onLink = onOpenLink,
-                            // M5 seeks; M1a timestamps render but do nothing (deviation in 08).
-                            onTimestamp = {},
+                            onTimestamp = onTimestamp,
                             onLoadImages = { imagesRevealed = true },
                         )
                     }
@@ -554,5 +566,6 @@ private val BUTTONS_TOP = 8.dp
 private val BUTTON_ICON = 18.dp
 private val BUTTON_LABEL_GAP = 4.dp
 private val NOTES_PADDING = 16.dp
+private val CHAPTER_LIST_MAX_HEIGHT = 320.dp
 private val LOADING_PADDING = 32.dp
 private val LOADING_TEXT_GAP = 16.dp

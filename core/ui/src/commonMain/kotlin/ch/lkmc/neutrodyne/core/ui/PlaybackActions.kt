@@ -159,6 +159,28 @@ public class PlaybackActions(
         }
     }
 
+    /**
+     * An explicit timestamp or chapter tap (06 Show notes; M5): [episodeId] is the episode the
+     * position belongs to, never the row's. The current item seeks in place; any other episode
+     * starts at exactly [positionMs] through the same consent/refusal/retry path as a start —
+     * explicit positions never toggle playback, and a retried start replays the same position.
+     */
+    public fun seekOrPlay(
+        episodeId: Long,
+        positionMs: Long,
+        durationMs: Long? = null,
+    ) {
+        if (positionMs < 0 || (durationMs != null && positionMs > durationMs)) return
+        ++startGeneration
+        startJob?.cancel()
+        consentDismiss()
+        if (states.nowPlaying.value?.episodeId == episodeId) {
+            controller.seekTo(positionMs)
+            return
+        }
+        play(null) { controller.playEpisodeAt(episodeId, positionMs) }
+    }
+
     /** A context/header start (08's page Play): [attempt] runs on [scope], its result maps below. */
     public fun play(
         context: UiText?,

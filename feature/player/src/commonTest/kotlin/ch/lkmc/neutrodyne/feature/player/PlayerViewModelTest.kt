@@ -8,13 +8,18 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.UpNextItem
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlayerTimeDisplay
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakePlatformInfo
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController.Action
@@ -52,11 +57,13 @@ class PlayerViewModelTest : MainDispatcherTest() {
     private val controller = FakePlaybackController()
     private val settings = FakeSettingsRepository()
     private val queue = FakeQueueRepository()
+    private val chapters = FakeChapterRepository()
     private val store = ViewModelStore()
 
     private fun TestScope.model(
         repository: SettingsRepository = settings,
         queueRepository: QueueRepository = queue,
+        chapterRepository: FakeChapterRepository = chapters,
     ): PlayerViewModel {
         val vm =
             PlayerViewModel(
@@ -66,6 +73,7 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 TestClock(),
                 FakePlatformInfo(PlatformKind.ANDROID),
                 queueRepository,
+                chapterRepository,
             )
         store.put("player", vm)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
@@ -324,6 +332,116 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 vm.uiState.value.messages
                     .isNotEmpty(),
             )
+        }
+
+    @Test fun sleepChoicePersistsOnlyValidatedMinutes() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow()
+            val vm = model()
+            vm.setSleepTimer(SleepTimerMode.Minutes(30))
+            vm.setSleepTimer(SleepTimerMode.EndOfEpisode)
+            vm.setSleepTimer(SleepTimerMode.Off)
+            advanceUntilIdle()
+            assertEquals(
+                listOf<Call>(
+                    FakePlaybackController.SleepSet(SleepTimerMode.Minutes(30)),
+                    FakePlaybackController.SleepSet(SleepTimerMode.EndOfEpisode),
+                    FakePlaybackController.SleepSet(SleepTimerMode.Off),
+                ),
+                controller.calls,
+            )
+            assertEquals(30, settings.get(PlaybackSettingKeys.SLEEP_LAST_MINUTES))
+            // The two non-minute modes never rewrite the preference.
+            assertEquals(1, settings.calls.count { it.startsWith("set(") })
+        }
+
+    @Test fun sleepRequiresAPlayerAndRejectsOutOfRangeMinutes() =
+        runTest {
+            val vm = model()
+            vm.setSleepTimer(SleepTimerMode.Minutes(30))
+            controller.state.nowPlaying.value = sampleNow()
+            vm.setSleepTimer(SleepTimerMode.Minutes(0))
+            vm.setSleepTimer(SleepTimerMode.Minutes(241))
+            vm.extendSleepTimer(0)
+            vm.extendSleepTimer(241)
+            vm.extendSleepTimer(5)
+            advanceUntilIdle()
+            assertEquals(
+                listOf<Call>(FakePlaybackController.SleepExtend(5)),
+                controller.calls,
+            )
+        }
+
+    @Test fun sleepPreferenceWriteFailureIsReported() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow()
+            val vm = model()
+            settings.failNextSet = SettingsError.WriteFailed
+            vm.setSleepTimer(SleepTimerMode.Minutes(30))
+            advanceUntilIdle()
+            assertEquals(
+                listOf<Call>(FakePlaybackController.SleepSet(SleepTimerMode.Minutes(30))),
+                controller.calls,
+            )
+            assertTrue(vm.uiState.value.messages.isNotEmpty())
+        }
+
+    @Test fun chaptersFollowTheCurrentItemAndSteerTransports() =
+        runTest {
+            val chapter = EpisodeChapter(0, 60_000, "Opening", null, null, ChapterSource.PSC, false)
+            controller.state.nowPlaying.value = sampleNow(1)
+            val vm = model()
+            runCurrent()
+            chapters.rows.value = mapOf(1L to listOf(chapter))
+            runCurrent()
+            assertEquals(listOf(chapter), vm.uiState.value.chapters)
+            vm.next()
+            vm.previous()
+            vm.nextEpisode()
+            vm.previousEpisode()
+            assertEquals(
+                listOf<Call>(
+                    Call.Transport(Action.CHAPTER_NEXT),
+                    Call.Transport(Action.CHAPTER_PREV),
+                    Call.Transport(Action.NEXT),
+                    Call.Transport(Action.PREVIOUS),
+                ),
+                controller.calls,
+            )
+            // Rows keyed to another episode never steer the transport.
+            chapters.rows.value = mapOf(9L to listOf(chapter))
+            runCurrent()
+            assertTrue(vm.uiState.value.chapters.isEmpty())
+            vm.next()
+            vm.previous()
+            assertEquals(
+                listOf<Call>(Call.Transport(Action.NEXT), Call.Transport(Action.PREVIOUS)),
+                controller.calls.takeLast(2),
+            )
+        }
+
+    @Test fun currentChapterIsScopedToTheNowPlayingItem() =
+        runTest {
+            val chapter = EpisodeChapter(0, 60_000, "Opening", null, null, ChapterSource.PSC, false)
+            controller.state.nowPlaying.value = sampleNow(1)
+            val vm = model()
+            controller.state.currentChapter.value = CurrentChapter(9, 0, 1, chapter)
+            runCurrent()
+            assertNull(vm.uiState.value.currentChapter)
+            controller.state.currentChapter.value = CurrentChapter(1, 0, 1, chapter)
+            runCurrent()
+            assertEquals(chapter, vm.uiState.value.currentChapter?.chapter)
+        }
+
+    @Test fun timestampSeeksTheCurrentItemAndRejectsOutOfRange() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow()
+            val vm = model()
+            runCurrent()
+            vm.onTimestamp(45_000)
+            vm.onTimestamp(90_000)
+            runCurrent()
+            assertEquals(listOf<Call>(Call.Transport(Action.SEEK, 45_000)), controller.calls)
         }
 
     @Test fun invalidPresetsAndScopeFailuresDoNotClaimSuccess() =

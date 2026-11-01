@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMaintenance
@@ -54,6 +55,33 @@ class PlaybackSettingsViewModelTest : MainDispatcherTest() {
             assertEquals(StreamOnMetered.NEVER, state.streamOnMetered)
             assertEquals(250, state.streamCacheMb)
             assertEquals(8, settings.calls.size)
+        }
+
+    @Test fun hardwareAndSmartResumeUseTheirTypedKeysAndObserve() =
+        runTest {
+            val vm = page()
+            vm.setHardwareButtons(HardwareButtons.SKIP)
+            vm.setSmartResume(true)
+            runCurrent()
+            assertEquals(HardwareButtons.SKIP, vm.uiState.value.hardwareButtons)
+            assertTrue(vm.uiState.value.smartResume)
+            assertEquals(HardwareButtons.SKIP, settings.get(PlaybackSettingKeys.HARDWARE_BUTTONS))
+            assertTrue(settings.get(PlaybackSettingKeys.SMART_RESUME))
+            vm.setHardwareButtons(HardwareButtons.EPISODE)
+            vm.setSmartResume(false)
+            runCurrent()
+            assertEquals(HardwareButtons.EPISODE, vm.uiState.value.hardwareButtons)
+            assertFalse(vm.uiState.value.smartResume)
+        }
+
+    @Test fun failedHardwareWriteKeepsTheDisplayedDefault() =
+        runTest {
+            val vm = page()
+            settings.failNextSet = SettingsError.WriteFailed
+            vm.setHardwareButtons(HardwareButtons.SKIP)
+            runCurrent()
+            assertEquals(HardwareButtons.EPISODE, vm.uiState.value.hardwareButtons)
+            assertEquals(1, vm.uiState.value.messages.size)
         }
 
     @Test fun rejectedAndFailedWritesDoNotChangeDisplayedValues() =
