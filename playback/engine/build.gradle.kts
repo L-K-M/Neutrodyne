@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 plugins {
     alias(libs.plugins.neutrodyne.desktop.library)
-    alias(libs.plugins.kotlin.serialization)
+    // On the build classpath via build-logic, so id-only apply (01 Gradle-side policy tasks).
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 dependencies {
