@@ -82,13 +82,17 @@ internal class SessionWriter(
             if (start.membership == StartMembership.CONTEXT) {
                 val spec = requireNotNull(start.context)
                 when (spec.type) {
-                    ContextType.GROUP ->
+                    ContextType.GROUP -> {
                         requireNotNull(db.groupDao().groupById(requireNotNull(spec.contextId)))
+                    }
 
-                    ContextType.PODCAST ->
+                    ContextType.PODCAST -> {
                         requireNotNull(db.podcastDao().byId(requireNotNull(spec.contextId)))
+                    }
 
-                    else -> throw IllegalArgumentException("Unsupported browse context")
+                    else -> {
+                        throw IllegalArgumentException("Unsupported browse context")
+                    }
                 }
                 require(
                     db

@@ -108,13 +108,18 @@ class PlayStarter(
                 is StartRequest.Episode -> {
                     require(request.positionMs == null || request.positionMs >= 0)
                     require(request.externalQueue == null || request.externalQueue.size < 100)
-                    val rest = request.externalQueue.orEmpty().distinct().filter { it != request.episodeId }
+                    val rest =
+                        request.externalQueue
+                            .orEmpty()
+                            .distinct()
+                            .filter { it != request.episodeId }
                     for (id in rest) {
                         require(id > 0)
                         val row =
                             media.get(id)
                                 ?: return StartOutcome.Refused(PlayResult.NotPlayable(id, UnplayableReason.NoMedia))
-                        row.refusal(capabilities.capabilities.value)
+                        row
+                            .refusal(capabilities.capabilities.value)
                             ?.let { return StartOutcome.Refused(PlayResult.NotPlayable(id, it)) }
                     }
                     val keep =

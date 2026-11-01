@@ -616,10 +616,10 @@ internal fun PlayerSheet(
                                                 }
 
                                                 is SleepTimerState.Running -> {
-                                                    stringResource(
-                                                        Res.string.sleep_minutes,
-                                                        ((timer.remainingMs + MILLIS_PER_MINUTE - 1) / MILLIS_PER_MINUTE).toInt(),
-                                                    )
+                                                    val minutes =
+                                                        (timer.remainingMs + MILLIS_PER_MINUTE - 1) /
+                                                            MILLIS_PER_MINUTE
+                                                    stringResource(Res.string.sleep_minutes, minutes.toInt())
                                                 }
 
                                                 is SleepTimerState.EndOfEpisode -> {

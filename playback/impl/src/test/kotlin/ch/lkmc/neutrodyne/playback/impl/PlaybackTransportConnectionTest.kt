@@ -40,14 +40,23 @@ class PlaybackTransportConnectionTest {
             val session = MediaSession.Builder(app, player).build()
             val owner = Owner().also { it.lifecycle.currentState = Lifecycle.State.STARTED }
             var builds = 0
-            val connection = PlayerConnection(owner.lifecycle) {
-                builds++
-                MediaController.Builder(app, session.token).buildAsync()
-            }
-            val controller = PlaybackControllerImpl(
-                connection, h.hub, h.gate, h.opener, Provider { h.queues }, Provider { h.sessions },
-                h.clock, h.scope, Dispatchers.IO,
-            )
+            val connection =
+                PlayerConnection(owner.lifecycle) {
+                    builds++
+                    MediaController.Builder(app, session.token).buildAsync()
+                }
+            val controller =
+                PlaybackControllerImpl(
+                    connection,
+                    h.hub,
+                    h.gate,
+                    h.opener,
+                    Provider { h.queues },
+                    Provider { h.sessions },
+                    h.clock,
+                    h.scope,
+                    Dispatchers.IO,
+                )
             try {
                 controller.seekTo(TARGET_MS)
                 pumpUntil { player.currentPosition == TARGET_MS }
