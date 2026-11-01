@@ -22,13 +22,13 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.moveBy
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -636,7 +636,7 @@ class PlayerSheetTest {
             val interview = EpisodeChapter(30_000, 60_000, "Interview", null, null, ChapterSource.PSC, false)
             val fixture = SheetFixture(PlayerSheetValue.Expanded)
             setContent { fixture.Content() }
-            onNodeWithText("Up next (0)").performClick()
+            onNode(hasText("Up next (0)").and(hasAnyAncestor(hasTestTag("player_tabs_panel")))).performClick()
             onAllNodes(hasText("Chapters (")).assertCountEquals(0)
 
             runOnIdle {
@@ -650,7 +650,7 @@ class PlayerSheetTest {
 
             runOnIdle { fixture.chapters = emptyList() }
             onAllNodes(hasText("Chapters (")).assertCountEquals(0)
-            onNodeWithText("Up next (0)").assertIsDisplayed()
+            onNode(hasText("Up next (0)").and(hasAnyAncestor(hasTestTag("player_tabs_panel")))).assertIsDisplayed()
         }
 
     @Test fun chapterStepsTakeTheTransportWhileEpisodeStepsMoveToTheMenu() =
