@@ -11,7 +11,9 @@ import androidx.core.content.FileProvider
 import androidx.work.WorkerParameters
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.WorkerCreator
 import ch.lkmc.neutrodyne.core.common.WorkerKey
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
@@ -26,12 +28,15 @@ import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.api.LocalMediaReadiness
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoMap
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @ContributesTo(AppScope::class)
@@ -123,6 +128,11 @@ object AndroidDownloadBindings {
     @Provides internal fun controller(components: DownloadComponents): DownloadController = components.controller
 
     @Provides internal fun progress(components: DownloadComponents): DownloadProgressSource = components.progress
+
+    @Provides internal fun readiness(
+        components: Lazy<DownloadComponents>,
+        @Dispatcher(NeutrodyneDispatchers.IO) io: CoroutineDispatcher,
+    ): LocalMediaReadiness = LocalMediaReadiness { withContext(io) { components.value.reconciler.initialLoad() } }
 
     @Provides internal fun lifecycle(components: DownloadComponents): DownloadLifecycle = components.lifecycle
 

@@ -648,7 +648,19 @@ class ImportRouteTest {
                                         key,
                                         sessionId,
                                         vm,
-                                        RestoreViewModel(sessionId, backups, imports, playbackController, appScope),
+                                        RestoreViewModel(
+                                            sessionId,
+                                            backups,
+                                            imports,
+                                            playbackController,
+                                            appScope,
+                                            ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
+                                                ch.lkmc.neutrodyne.core.testing
+                                                    .FakeDownloadController(),
+                                                ch.lkmc.neutrodyne.core.testing
+                                                    .FakePlaybackMediaLookup(),
+                                            ),
+                                        ),
                                     )
                                 }
                             }

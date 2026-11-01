@@ -37,6 +37,91 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DownloadReconcilerTest {
+    @Test fun mergePreservesTheOnlyFileAcrossRollbackAndMoveThenReplaceDefersCurrentDeletion() =
+        runTest {
+            EngineRig(this).use { f ->
+                val ids =
+                    f.seed(2) { row ->
+                        row.copy(
+                            state = DownloadState.COMPLETED,
+                            totalBytes = 4096,
+                            relativePath = "saved-${row.episodeId}.mp3",
+                            finalUri = "file:///old/saved-${row.episodeId}.mp3",
+                        )
+                    }
+                val loser = ids[0]
+                val winner = ids[1]
+                f.dao.removeUnclaimed(listOf(winner))
+                val rig = ReconcileRig(f)
+                val row = f.row(loser)
+                val path = checkNotNull(row.relativePath)
+                val uri = checkNotNull(row.finalUri)
+                rig.write(path)
+                rig.index.put(loser, uri)
+                f.db.playSessionDao().ensureNow(f.clock.now())
+                f.db.playSessionDao().write(checkNotNull(f.db.playSessionDao().get()).copy(currentEpisodeId = loser))
+                val playback =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakePlaybackBeforeUnsubscribe()
+                val completed = mutableListOf<Long>()
+                val lifecycle =
+                    DownloadLifecycleImpl(
+                        f.db,
+                        rig.controller,
+                        rig.storage,
+                        rig.index,
+                        playback,
+                        f.engine.claimMutex,
+                        Dispatchers.Unconfined,
+                        { completed += it.episodeId },
+                    )
+                lifecycle.beforeEpisodeMerge(loser, winner)
+                assertNull(rig.index.localUriOrNull(loser))
+                assertTrue(rig.deletes.entries().isNotEmpty())
+                lifecycle.afterEpisodeMerges(listOf(loser, winner)) // The database attempt rolled back.
+                assertEquals(uri, rig.index.localUriOrNull(loser))
+                assertNotNull(f.files.stat("old", path))
+                assertTrue(rig.deletes.entries().isEmpty())
+                lifecycle.beforeEpisodeMerge(loser, winner)
+                f.db.podcastMergeDao().moveDownload(loser, winner)
+                f.db.podcastMergeDao().moveCurrentEpisode(loser, winner)
+                lifecycle.afterEpisodeMerges(listOf(loser, winner))
+                assertNull(rig.index.localUriOrNull(loser))
+                assertEquals(uri, rig.index.localUriOrNull(winner))
+                assertEquals(row.copy(episodeId = winner), f.row(winner))
+                assertNotNull(f.files.stat("old", path))
+                assertEquals(listOf(loser, winner), completed)
+                assertEquals(2, playback.calls.size)
+                lifecycle.beforeLibraryReplace()
+                assertNull(f.dao.byEpisode(winner))
+                assertNull(rig.index.localUriOrNull(winner))
+                assertNotNull(f.files.stat("old", path))
+                assertEquals(
+                    null,
+                    f.db
+                        .episodeStateDao()
+                        .byEpisode(winner)
+                        ?.downloadDismissedAt,
+                )
+                rig.deletes.drain(null)
+                assertNull(f.files.stat("old", path))
+                assertTrue(rig.deletes.entries().isEmpty())
+            }
+        }
+
+    @Test fun repeatedReadinessLoadKeepsPublishedSnapshot() =
+        runTest {
+            EngineRig(this).use { f ->
+                val id = f.seed { it.copy(state = DownloadState.COMPLETED, finalUri = "file:///first.mp3") }.single()
+                val rig = ReconcileRig(f)
+                rig.reconciler.initialLoad()
+                assertEquals("file:///first.mp3", rig.index.localUriOrNull(id))
+                rig.index.put(id, "file:///new.mp3")
+                rig.reconciler.initialLoad()
+                assertEquals("file:///new.mp3", rig.index.localUriOrNull(id))
+            }
+        }
+
     @Test fun deleteArrivingImmediatelyAfterRenameStillJournalsAndRemovesFinalFile() =
         runTest {
             EngineRig(this).use { f ->
@@ -70,34 +155,8 @@ class DownloadReconcilerTest {
                 f.db.playSessionDao().ensureNow(f.clock.now())
                 f.db.playSessionDao().write(checkNotNull(f.db.playSessionDao().get()).copy(currentEpisodeId = id))
                 rig.index.put(id, "file:///old/playing.mp3")
-                val storage =
-                    DownloadStorage(
-                        f.db,
-                        f.files,
-                        f.roots,
-                        rig.store,
-                        rig.index,
-                        rig.deletes,
-                        rig.reconciler,
-                        f.engine.claimMutex,
-                        FakePlaybackMediaLookup(),
-                        TestArtwork(),
-                        { _, _ -> null },
-                    )
-                val controller =
-                    DownloadControllerImpl(
-                        f.db,
-                        FakeSettingsRepository(),
-                        FakeNetworkMonitor(),
-                        f.clock,
-                        f.roots,
-                        f.scheduler,
-                        f.engine.claimMutex,
-                        f.engine::stopTransfer,
-                        storage,
-                        FakePlaybackMediaLookup(),
-                        { false },
-                    )
+                val storage = rig.storage
+                val controller = rig.controller
                 controller.delete(listOf(id), DeleteReason.USER)
                 assertNull(f.dao.byEpisode(id))
                 assertNull(rig.index.localUriOrNull(id))
@@ -193,7 +252,7 @@ class DownloadReconcilerTest {
                 rig.deletes.journal(listOf(f.row(id)))
                 rig.store.fail = true
                 index.remove(id)
-                assertFailsWith<IOException> { rig.reconciler.initialLoad() }
+                assertFailsWith<IOException> { ReconcileRig(f, index, store = rig.store).reconciler.initialLoad() }
                 assertEquals("file:///old/file", index.localUriOrNull(id))
             }
         }
@@ -420,6 +479,37 @@ internal class ReconcileRig(
             live,
             clock,
         )
+
+    val storage by lazy {
+        DownloadStorage(
+            engine.db,
+            engine.files,
+            engine.roots,
+            store,
+            index,
+            deletes,
+            reconciler,
+            engine.engine.claimMutex,
+            FakePlaybackMediaLookup(),
+            TestArtwork(),
+            { _, _ -> null },
+        )
+    }
+    val controller by lazy {
+        DownloadControllerImpl(
+            engine.db,
+            FakeSettingsRepository(),
+            FakeNetworkMonitor(),
+            engine.clock,
+            engine.roots,
+            engine.scheduler,
+            engine.engine.claimMutex,
+            engine.engine::stopTransfer,
+            storage,
+            FakePlaybackMediaLookup(),
+            { false },
+        )
+    }
 
     suspend fun write(
         path: String,

@@ -25,13 +25,16 @@ internal class DownloadReconciler(
 ) {
     private val dao = db.downloadDao()
     private var reset = false
+    private var loaded = false
     val orphanBytes = MutableStateFlow(0L)
 
     /** Only startup replaces the whole snapshot: later passes must not erase concurrent puts. */
     suspend fun initialLoad() =
         claimMutex.withLock {
+            if (loaded) return@withLock
             index.replace(dao.completedIndex().associate { it.episodeId to it.finalUri })
             deletes.drain(null)
+            loaded = true
         }
 
     suspend fun resetOrphanedRunners() =
