@@ -336,6 +336,8 @@ class AndroidAppGraphTest {
                 "DebugToolsInitializer" to 0..99,
                 "NewEpisodeChannelsInitializer" to 10..10,
                 "ImportBackupChannelsInitializer" to 10..10,
+                "UpdateChannelsInitializer" to 10..10,
+                "UpdateCheckInitializer" to 200..200,
                 "GroupChannelsInitializer" to 140..140,
                 "DatabaseOpenInitializer" to 100..119,
                 // 05 First-launch restore: order 110, inside the database band.
