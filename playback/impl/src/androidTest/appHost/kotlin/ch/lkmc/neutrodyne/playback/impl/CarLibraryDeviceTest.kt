@@ -243,6 +243,7 @@ class CarLibraryDeviceTest {
         withContext(Dispatchers.Main) {
             browser!!.subscribe(
                 parent,
+                Bundle(),
                 object : MediaBrowserCompat.SubscriptionCallback() {
                     override fun onChildrenLoaded(
                         parentId: String,
