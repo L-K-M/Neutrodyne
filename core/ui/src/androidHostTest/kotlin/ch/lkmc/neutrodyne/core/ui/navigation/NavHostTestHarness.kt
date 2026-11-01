@@ -507,8 +507,8 @@ private class OwnerProbeVm : ViewModel() {
 internal fun OwnerProbePage(
     tag: String,
     color: Color,
+    vm: OwnerProbeVm = viewModel { OwnerProbeVm() },
 ) {
-    val vm = viewModel { OwnerProbeVm() }
     val owner = LocalViewModelStoreOwner.current
     val saved = rememberSaveable { mutableIntStateOf(0) }
     SideEffect {

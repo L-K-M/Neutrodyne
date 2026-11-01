@@ -178,10 +178,12 @@ private fun LibraryStub() {
 }
 
 @Composable
-private fun PodcastStub(key: PodcastKey) {
+private fun PodcastStub(
+    key: PodcastKey,
     // The host's rememberViewModelStoreNavEntryDecorator() scopes this to the nav entry, not the
     // activity: two PodcastKey entries must not share the instance.
-    val vm = viewModel { ProbeViewModel() }
+    vm: ProbeViewModel = viewModel { ProbeViewModel() },
+) {
     SideEffect { PodcastVmProbe.register(key, vm) }
     val navigator = LocalAppNavigator.current
     Column(Modifier.fillMaxSize()) {

@@ -177,14 +177,14 @@ internal fun PlayerSheet(
     previous: () -> Unit,
     next: () -> Unit,
     seek: (Long) -> Unit,
-    nextEpisode: () -> Unit = next,
-    previousEpisode: () -> Unit = previous,
     dismiss: () -> Unit,
     stop: () -> Unit,
     markPlayed: () -> Unit,
     consent: () -> Unit,
     declineConsent: () -> Unit,
     modifier: Modifier = Modifier,
+    nextEpisode: () -> Unit = next,
+    previousEpisode: () -> Unit = previous,
     state: PlayerSheetState = rememberPlayerSheetState(),
     upNext: @Composable () -> Unit = {},
     notes: @Composable () -> Unit = {},
@@ -616,10 +616,10 @@ internal fun PlayerSheet(
                                                 }
 
                                                 is SleepTimerState.Running -> {
-                                                    stringResource(
-                                                        Res.string.sleep_minutes,
-                                                        ((timer.remainingMs + MILLIS_PER_MINUTE - 1) / MILLIS_PER_MINUTE).toInt(),
-                                                    )
+                                                    val minutes =
+                                                        (timer.remainingMs + MILLIS_PER_MINUTE - 1) /
+                                                            MILLIS_PER_MINUTE
+                                                    stringResource(Res.string.sleep_minutes, minutes.toInt())
                                                 }
 
                                                 is SleepTimerState.EndOfEpisode -> {
