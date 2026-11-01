@@ -60,7 +60,8 @@ interface PlaybackController {
     /** After 3 s restart current, otherwise use the process's bounded previous-item history. */
     fun skipToPrevious()
 
-    /** Ordered main-thread commands. Invalid minutes leave timer/volume unchanged. No persistence.
+    /** Ordered main-thread commands. Invalid minutes leave timer/volume unchanged.
+     * Active state is not persisted; callers store only the last chosen minutes.
      * EndOfEpisode follows manual item changes; without a current item it stays Off. Off,
      * replacement, expiry and teardown restore normal volume and clear only sleep's arbiter reason.
      * Buffering holds fade; explicit pause restores volume. Expiry emits SleepTimerFired once. */

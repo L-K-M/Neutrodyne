@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
@@ -58,6 +59,7 @@ public class PlaybackServiceAccess internal constructor(
     private val positions: Provider<PositionStore>,
     private val lookup: Provider<PlaybackMediaLookup>,
     private val items: Provider<MediaItemFactory>,
+    private val chapters: Provider<ChapterRepository>,
 ) {
     internal suspend fun open(): PlaybackPorts =
         withContext(io) {
@@ -74,6 +76,7 @@ public class PlaybackServiceAccess internal constructor(
                 positions(),
                 lookup(),
                 items(),
+                chapters(),
             )
         }
 
@@ -99,6 +102,7 @@ internal data class PlaybackPorts(
     val positions: PositionStore,
     val lookup: PlaybackMediaLookup,
     val items: MediaItemFactory,
+    val chapters: ChapterRepository,
 )
 
 @ContributesTo(AppScope::class)

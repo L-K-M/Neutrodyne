@@ -43,6 +43,7 @@ import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
 import ch.lkmc.neutrodyne.playback.core.PlayedRule
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
@@ -159,6 +160,7 @@ internal class AdapterFixture(
     val factory = MediaItemFactory(TestArtwork, local)
     val planner =
         QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), StartPositionRule(), PlayedRule())
+    var resumePolicy = SmartResumePolicy.DISABLED
     val projector =
         QueueProjector(
             planner,
@@ -178,6 +180,8 @@ internal class AdapterFixture(
             Dispatchers.Unconfined,
             beforeAdvance = { true },
             reportFailure = failures::add,
+            boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
+            resumePolicy = { resumePolicy },
         )
 
     fun attach() {
@@ -314,6 +318,7 @@ internal class AdapterSources : MediaSource.Factory {
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal fun TestScope.awaitAdapter(
     message: String = "Adapter did not converge",
+    diagnostics: () -> String = { "" },
     predicate: () -> Boolean,
 ) {
     repeat(2_000) {
@@ -322,7 +327,7 @@ internal fun TestScope.awaitAdapter(
         if (predicate()) return
         Thread.sleep(2)
     }
-    fail(message)
+    fail("$message ${diagnostics()}".trimEnd())
 }
 
 private object TestArtwork : ArtworkStore {

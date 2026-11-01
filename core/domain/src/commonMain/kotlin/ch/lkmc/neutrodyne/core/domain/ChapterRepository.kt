@@ -12,7 +12,8 @@ interface ChapterRepository {
     fun observe(episodeId: Long): Flow<List<EpisodeChapter>>
 
     /** Best-effort JSON load; coalesce calls, preserve cache on failure, propagate cancellation.
-     * Offline skips consume no attempt; failures back off 24 h per episode/URL. URL changes reset
+     * Offline skips consume no attempt; remote failures back off 24 h per episode/URL. Local write
+     * failures propagate, consume no attempt and may retry immediately. URL changes reset
      * retry state; check URL/existence inside save transaction. Empty success completes occurrence.
      * Local-file/EmbeddedChapterReader support is M6. */
     suspend fun ensureLoaded(episodeId: Long)

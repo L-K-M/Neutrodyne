@@ -5,8 +5,10 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -28,7 +30,12 @@ internal data class PlaybackPrefsSnapshot(
     val pauseForNavigation: Boolean,
     val streamOnMetered: StreamOnMetered,
     val streamCacheMb: Int,
+    val hardwareButtons: HardwareButtons = PlaybackSettingKeys.HARDWARE_BUTTONS.default,
+    val smartResume: Boolean = PlaybackSettingKeys.SMART_RESUME.default,
 ) {
+    val resumePolicy: SmartResumePolicy
+        get() = if (smartResume) SmartResumePolicy.ENABLED else SmartResumePolicy.DISABLED
+
     companion object {
         val DEFAULT: PlaybackPrefsSnapshot =
             PlaybackPrefsSnapshot(
@@ -71,6 +78,14 @@ internal class PlaybackPrefs
                         repo.observe(PlaybackSettingKeys.STREAM_CACHE_MB),
                     ) { back, forward, navigation, metered, cacheMb ->
                         PlaybackPrefsSnapshot(back, forward, navigation, metered, cacheMb)
+                    }.let { base ->
+                        combine(
+                            base,
+                            repo.observe(PlaybackSettingKeys.HARDWARE_BUTTONS),
+                            repo.observe(PlaybackSettingKeys.SMART_RESUME),
+                        ) { prefs, hardware, smart ->
+                            prefs.copy(hardwareButtons = hardware, smartResume = smart)
+                        }
                     }.distinctUntilChanged()
                         .collect {
                             _current.value = it
