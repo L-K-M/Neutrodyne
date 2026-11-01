@@ -13,6 +13,20 @@
     @org.junit.Before <methods>;
     @org.junit.After <methods>;
     public void notificationTransportAndLocalArtwork();
+    public void sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce();
+    public void chaptersAndTimestampSeekThroughRealSession();
+}
+-keep class ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest {
+    public <init>();
+    @org.junit.Before <methods>;
+    @org.junit.After <methods>;
+    @org.junit.Test <methods>;
+}
+-keep class ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest {
+    public <init>();
+    @org.junit.Before <methods>;
+    @org.junit.After <methods>;
+    @org.junit.Test <methods>;
 }
 -keep class androidx.test.runner.** { *; }
 -keep class androidx.test.ext.junit.runners.** { *; }

@@ -6,16 +6,34 @@ import math
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+import zipfile
 
 CLASS = "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest"
+VIDEO_CLASS = "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest"
+CAR_CLASS = "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest"
 SHORT = {
     "queueFirstStartSeekAndTransitionSave",
     "notificationTransportAndLocalArtwork",
     "focusLossAndNoisyPause",
     "serviceRecreationLoadsPausedAtSavedPosition",
+    "sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce",
+    "sleepEndOfEpisodeRespectsMeteredBoundary",
+    "chaptersAndTimestampSeekThroughRealSession",
 }
+VIDEO_CASES = {
+    "muxedH264AacAdvancesAudioWithScreenOffAndNoVideoDecoder",
+    "videoRequestsAudioAlternateAndKeepsVideoMetadata",
+}
+CAR_CASES = {
+    "legacyBrowserListsFourRootsAndQueuedGroupTapKeepsGroupContext",
+    "legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime",
+    "legacyHardwareSkipUsesIntervalsAndEpisodeModeAdvances",
+}
+TIMER = "screenOffListeningTimerExpiresAndRestoresVolume"
+EMBEDDED = "embeddedId3NeroAndQuickTimeChaptersReachSession"
 LONG = "screenOffStreamsForThirtyMinutesAndAdvances"
 HARDENING = "hardeningUiNotificationAndColdMediaKeyStarts"
+MIN_DURATION = {LONG: 1800, TIMER: 60}
 SOAK_DEVICES = {"api34"}
 FLAVOR_FOLDERS = {"debug", "release"}
 ACCESSIBILITY_MIN_API = 34
@@ -34,8 +52,28 @@ RELEASE_SMOKE = {
         "licencesListsLibraries",
     ),
     "ch.lkmc.neutrodyne.YtxReleaseSmokeTest": ("selftestAnswersThroughYtxServiceInTheApp",),
-    CLASS: ("notificationTransportAndLocalArtwork",),
+    CLASS: (
+        "notificationTransportAndLocalArtwork",
+        "sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce",
+        "chaptersAndTimestampSeekThroughRealSession",
+    ),
+    VIDEO_CLASS: tuple(sorted(VIDEO_CASES)),
+    CAR_CLASS: tuple(sorted(CAR_CASES)),
 }
+ASSETS = {
+    "cbr_128k_2s.mp3", "vbr_xing_2s.mp3", "silence_gaps_3s.mp3",
+    "h264_aac_8s.mp4", "chapters_id3.mp3", "chapters_nero.m4b",
+    "chapters_quicktime.m4b", "chapters_both.m4b", "chapters.json",
+}
+
+
+def verify_assets(apk):
+    """The selected app test APK must carry every media fixture the cases read."""
+    with zipfile.ZipFile(apk) as archive:
+        for asset in ASSETS:
+            name = f"assets/media/{asset}"
+            if name not in archive.namelist() or archive.getinfo(name).file_size == 0:
+                raise ValueError(f"{apk}: missing or empty {name}")
 
 
 def _device_report(parts, device, flavors):
@@ -69,11 +107,14 @@ def verify(root, profile, devices):
         if profile == "release":
             expected = {classname: set(names) for classname, names in RELEASE_SMOKE.items()}
         else:
-            expected = {CLASS: set(SHORT), QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]},
+            expected = {CLASS: set(SHORT), VIDEO_CLASS: set(VIDEO_CASES), CAR_CLASS: set(CAR_CASES),
+                        QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]},
                         PLAY_JOURNEY[0]: {PLAY_JOURNEY[1]}}
             api = re.fullmatch(r"api([0-9]+)", device)
             if profile == "api37" or (api and int(api[1]) >= ACCESSIBILITY_MIN_API):
                 expected[ATF_CONTROL[0]] = {ATF_CONTROL[1]}
+            if profile in ("nightly", "api37"):
+                expected[CLASS] |= {TIMER, EMBEDDED}
             if profile == "nightly" and device in SOAK_DEVICES:
                 expected[CLASS].add(LONG)
             if profile == "api37":
@@ -99,10 +140,11 @@ def verify(root, profile, devices):
             report, case = cases[0]
             if any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
                 raise ValueError(f"{device}: {classname}#{name} did not pass in {report}")
-            if name == LONG:
+            if name in MIN_DURATION:
                 duration = float(case.get("time", "0"))
-                if not math.isfinite(duration) or duration < 1800:
-                    raise ValueError(f"{device}: {classname}#{name} has no valid 30-minute duration")
+                if not math.isfinite(duration) or duration < MIN_DURATION[name]:
+                    raise ValueError(
+                        f"{device}: {classname}#{name} has no valid {MIN_DURATION[name]}-second duration")
         print(f"{device}: {len(evidence)} expected cases passed ({profile})")
 
 
@@ -111,10 +153,13 @@ def main():
     parser.add_argument("profile", choices=("ci", "nightly", "api37", "release"))
     parser.add_argument("root", type=Path)
     parser.add_argument("--device", action="append", required=True)
+    parser.add_argument("--apk", type=Path, action="append", default=[])
     args = parser.parse_args()
     try:
+        for apk in args.apk:
+            verify_assets(apk)
         verify(args.root, args.profile, args.device)
-    except (ValueError, ET.ParseError) as error:
+    except (ValueError, ET.ParseError, OSError, zipfile.BadZipFile) as error:
         parser.exit(1, f"{error}\n")
 
 
