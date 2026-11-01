@@ -182,6 +182,22 @@ internal class SessionWriter(
             if (!session.matches(expected)) null else clear(session, departure, now)
         }
 
+    override suspend fun markBoundaryPlayed(
+        episodeId: Long,
+        expected: SessionRevision,
+        now: Long,
+    ): Boolean {
+        require(now >= 0)
+        return db.withWriteTransaction {
+            val session = db.playSessionDao().get()
+            if (session == null || !session.matches(expected) || expected.currentEpisodeId != episodeId) {
+                return@withWriteTransaction false
+            }
+            db.markEpisodesPlayed(listOf(episodeId), now)
+            true
+        }
+    }
+
     override suspend fun clearCurrent(
         departure: Departure?,
         now: Long,

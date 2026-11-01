@@ -203,6 +203,8 @@ class FakePlaybackContractsTest {
             assertEquals(2L, f.calls.last().arrivalId)
             f.goBack(QueueItem(1, QueueOrigin.CONTEXT), departure, 12)
             assertEquals(4L, f.endSession(departure, SessionRevision(1, 3), 13))
+            assertEquals(true, f.markBoundaryPlayed(1, SessionRevision(1, 4), 13))
+            assertEquals(4L, f.generation)
             f.clearCurrent(null, 14)
             f.queue = VirtualQueue(5, null, emptyList(), emptyList())
             assertEquals(FakePlaySessionStore.Operation.entries, f.calls.map { it.operation })
@@ -231,6 +233,8 @@ class FakePlaybackContractsTest {
                 f.calls.map { it.operation },
             )
             assertEquals(SessionRevision(8, 2), f.calls[1].expected)
+            assertEquals(false, f.markBoundaryPlayed(9, SessionRevision(9, 2), 13))
+            assertEquals(3L, f.generation)
         }
 
     @Test fun positionFakeHonorsSaveGuardsResetReplayAndFailure() =

@@ -121,6 +121,22 @@ class SessionWriterTest {
             }
         }
 
+    @Test fun boundaryMarkRequiresTheDecidedRevisionAndKeepsTheSession() =
+        runTest {
+            val ids = seed(2)
+            val generation = writer.commitStart(start(ids[0]), 100)
+
+            assertEquals(false, writer.markBoundaryPlayed(ids[0], SessionRevision(ids[0], generation - 1), 110))
+            assertEquals(false, writer.markBoundaryPlayed(ids[1], SessionRevision(ids[1], generation), 110))
+            assertNull(db.episodeStateDao().byEpisode(ids[0])?.playedAt)
+
+            assertEquals(true, writer.markBoundaryPlayed(ids[0], SessionRevision(ids[0], generation), 120))
+            assertEquals(120, db.episodeStateDao().byEpisode(ids[0])?.playedAt)
+            val session = writer.virtualQueue(0)
+            assertEquals(ids[0], session.current?.episodeId)
+            assertEquals(generation, session.generation)
+        }
+
     @Test fun startDeparturesUseTransitionPositionAndPlayedGuards() =
         runTest {
             val ids = seed(6)

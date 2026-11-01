@@ -19,7 +19,7 @@ class FakePlaySessionStore : PlaySessionStore {
     val calls = mutableListOf<Call>()
     val requestedWindows = mutableListOf<Int>()
 
-    enum class Operation { START, TRANSITION, BACK, END, CLEAR }
+    enum class Operation { START, TRANSITION, BACK, END, BOUNDARY, CLEAR }
 
     data class Call(
         val operation: Operation,
@@ -122,6 +122,19 @@ class FakePlaySessionStore : PlaySessionStore {
             ),
             expected,
         )
+
+    /** Records like other fenced writes, but a completed boundary never bumps the session. */
+    override suspend fun markBoundaryPlayed(
+        episodeId: Long,
+        expected: SessionRevision,
+        now: Long,
+    ): Boolean {
+        calls += Call(Operation.BOUNDARY, now, arrivalId = episodeId, expected = expected)
+        failure?.let { throw it }
+        return expected.currentEpisodeId == episodeId &&
+            expected.currentEpisodeId == queue.current?.episodeId &&
+            expected.generation == maxOf(generation, queue.generation)
+    }
 
     override suspend fun clearCurrent(
         departure: Departure?,

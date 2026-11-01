@@ -298,6 +298,9 @@ internal class RecordingPlayer(
 internal class AdapterSources : MediaSource.Factory {
     val created = mutableListOf<FakeMediaSource>()
 
+    /** Like production's progressive source: a metadata-only replacement keeps the position. */
+    var keepPositionOnMetadataUpdate = false
+
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val definition =
             FakeTimeline.TimelineWindowDefinition
@@ -305,7 +308,10 @@ internal class AdapterSources : MediaSource.Factory {
                 .setMediaItem(mediaItem)
                 .setDurationUs(AdapterFixture.DURATION_MS * 1000)
                 .build()
-        return FakeMediaSource(FakeTimeline(definition)).also { created += it }
+        return FakeMediaSource(FakeTimeline(definition)).also {
+            it.setCanUpdateMediaItems(keepPositionOnMetadataUpdate)
+            created += it
+        }
     }
 
     override fun getSupportedTypes() = intArrayOf(C.CONTENT_TYPE_OTHER)
