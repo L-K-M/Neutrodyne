@@ -43,6 +43,8 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
         access.resolver.clearPins()
         val factory = access.playerFactory()
         val player = factory.create().also { exo = it }
+        // Armed only by device tests; the callback sees the player before any prepare.
+        PlaybackTestHooks.playerCreated?.invoke(player)
         factory.bindPrefs(player, serviceScope)
         val buttons = MediaButtons(access.prefs) { player.playbackParameters.speed }
         val runtime: suspend () -> ServiceBridge = { checkNotNull(starting).await() }
