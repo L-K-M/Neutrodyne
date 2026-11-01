@@ -33,10 +33,7 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
-import ch.lkmc.neutrodyne.core.model.ChapterSource
-import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.DownloadState
-import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
@@ -44,7 +41,6 @@ import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
-import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
@@ -336,45 +332,6 @@ class EpisodeScreenTest {
         }
 
     @Test
-    fun notesTimestampReportsTheParsedPosition() =
-        runComposeUiTest {
-            val taps = mutableListOf<Long>()
-            setEpisode(
-                loadedState(
-                    notes =
-                        ShowNotes(
-                            listOf(
-                                ShowNoteBlock.Paragraph(
-                                    listOf(ShowNoteSpan.Timestamp("12:34", positionMs = 754_000)),
-                                ),
-                            ),
-                        ),
-                ),
-                onTimestamp = taps::add,
-            )
-            scrollTo(hasText("12:34")).performClick()
-            assertEquals(listOf(754_000L), taps)
-        }
-
-    @Test
-    fun chapterRowsRenderAboveTheNotesAndReportSeeks() =
-        runComposeUiTest {
-            val chapter =
-                EpisodeChapter(0, 60_000, "Opening", null, null, ChapterSource.PSC, false)
-            val current = chapter.copy(startMs = 60_000, endMs = null, title = "Interview")
-            val seeks = mutableListOf<Long>()
-            setEpisode(
-                loadedState().copy(
-                    chapters = listOf(chapter, current),
-                    currentChapter = CurrentChapter(9, 1, 2, current),
-                ),
-                onTimestamp = seeks::add,
-            )
-            scrollTo(hasText("Interview")).assertIsDisplayed().performClick()
-            assertEquals(listOf(60_000L), seeks)
-        }
-
-    @Test
     fun tapToLoadImageRowRevealsTheImage() =
         runComposeUiTest {
             setEpisode(
@@ -503,7 +460,6 @@ class EpisodeScreenTest {
             EpisodeViewModel(
                 9,
                 episodes,
-                FakeChapterRepository(),
                 FakePodcastRepository(),
                 FakeSettingsRepository(),
                 FakePlaybackController(),
@@ -560,7 +516,6 @@ class EpisodeScreenTest {
         state: EpisodeUiState,
         onAction: (EpisodeAction) -> Unit = {},
         onFavorite: (Boolean) -> Unit = {},
-        onTimestamp: (Long) -> Unit = {},
         fontScale: Float = 1f,
     ) {
         setContent {
@@ -581,7 +536,6 @@ class EpisodeScreenTest {
                             onAction = onAction,
                             onFavorite = onFavorite,
                             onOpenLink = { platformActions.urls.open(it) },
-                            onTimestamp = onTimestamp,
                         )
                     }
                 }

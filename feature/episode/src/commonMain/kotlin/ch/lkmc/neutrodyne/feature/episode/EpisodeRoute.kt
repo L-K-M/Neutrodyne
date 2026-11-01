@@ -72,7 +72,6 @@ internal fun EpisodeRoute(
             }
         },
         onFavorite = viewModel::setFavorite,
-        onTimestamp = viewModel::onTimestamp,
         onOpenLink = { url ->
             if (urls.open(url) == OpenResult.NO_HANDLER) viewModel.onLinkOpenFailed(url)
         },

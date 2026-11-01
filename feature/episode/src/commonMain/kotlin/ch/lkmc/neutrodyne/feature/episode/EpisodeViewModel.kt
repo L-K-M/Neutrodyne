@@ -11,14 +11,11 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
-import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
-import ch.lkmc.neutrodyne.core.model.CurrentChapter
-import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.model.RowLive
@@ -55,7 +52,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -78,8 +74,6 @@ public data class EpisodeUiState(
     val messages: ImmutableList<UserMessage> = persistentListOf(),
     val isNowPlaying: Boolean = false,
     val isPlaying: Boolean = false,
-    val chapters: List<EpisodeChapter> = emptyList(),
-    val currentChapter: CurrentChapter? = null,
     val downloadLive: RowLive? = null,
 ) {
     public val gone: Boolean
@@ -96,11 +90,10 @@ public class EpisodeViewModel
     constructor(
         @Assisted private val episodeId: Long,
         private val episodes: EpisodeRepository,
-        private val chapters: ChapterRepository,
         private val podcasts: PodcastRepository,
         private val settings: SettingsRepository,
         private val playbackController: PlaybackController,
-        private val playbackStates: PlaybackStateSource,
+        playbackStates: PlaybackStateSource,
         platformInfo: PlatformInfo,
         network: NetworkMonitor,
         downloadController: DownloadController,
@@ -167,18 +160,9 @@ public class EpisodeViewModel
             combine(screenState, playbackStates.nowPlaying) { state, now ->
                 val current = now?.episodeId == episodeId
                 state.copy(isNowPlaying = current, isPlaying = current && now?.isPlaying == true)
-            }.combine(chapters.observe(episodeId).catch { emit(emptyList()) }) { state, rows ->
-                state.copy(chapters = rows)
-            }.combine(playbackStates.currentChapter) { state, current ->
-                state.copy(currentChapter = current?.takeIf { it.episodeId == episodeId })
             }.combine(liveStateSource.observe(visibleDownloadIds)) { state, live ->
                 state.copy(downloadLive = live[episodeId])
             }.stateIn(viewModelScope, SHARING, EpisodeUiState())
-
-        init {
-            // Best-effort JSON enrichment; a failed load means no chapters from that source (06).
-            viewModelScope.launch { suspendRunCatching { chapters.ensureLoaded(episodeId) } }
-        }
 
         public fun onVisible() {
             visibleDownloadIds.value = setOf(episodeId)
@@ -187,14 +171,6 @@ public class EpisodeViewModel
         /** Release the window even while stateIn retains its upstream during the sharing grace. */
         public fun onHidden() {
             visibleDownloadIds.value = emptySet()
-        }
-
-        /**
-         * A show-notes timestamp or chapter tap (M5): the current item seeks in place; any other
-         * episode starts at the position through the shared consent/refusal/retry path.
-         */
-        public fun onTimestamp(positionMs: Long) {
-            playback.seekOrPlay(episodeId, positionMs, uiState.value.episode?.durationMs)
         }
 
         /** Repository-owned actions; the route owns navigation, URLs, share and clipboard. */

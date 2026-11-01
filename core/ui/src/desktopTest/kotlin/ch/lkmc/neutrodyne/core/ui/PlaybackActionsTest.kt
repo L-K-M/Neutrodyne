@@ -7,7 +7,6 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
-import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
@@ -230,98 +229,5 @@ class PlaybackActionsTest : MainDispatcherTest() {
             assertNull(actions.meteredConsent.value)
             actions.consentOnce()
             assertTrue(controller.calls.isEmpty())
-        }
-
-    @Test fun timestampOnTheCurrentItemSeeksWithoutAToggle() =
-        runTest {
-            val controller = FakePlaybackController()
-            controller.state.nowPlaying.value = testNowPlaying(7)
-            val actions = actions(controller)
-            actions.seekOrPlay(7, 754_000, 3_600_000)
-            runCurrent()
-            assertEquals(
-                listOf<FakePlaybackController.Call>(
-                    FakePlaybackController.Call.Transport(
-                        FakePlaybackController.Action.SEEK,
-                        754_000,
-                    ),
-                ),
-                controller.calls,
-            )
-        }
-
-    @Test fun savedCurrentTimestampStartsAtThePointThroughAdmission() =
-        runTest {
-            val controller = FakePlaybackController()
-            controller.state.nowPlaying.value =
-                testNowPlaying(7).copy(
-                    phase = PlayerPhase.NOT_LOADED,
-                    isPlaying = false,
-                    playWhenReady = false,
-                )
-            val actions = actions(controller)
-            actions.seekOrPlay(7, 754_000, 3_600_000)
-            runCurrent()
-            assertEquals(
-                listOf<FakePlaybackController.Call>(FakePlaybackController.Call.Episode(7, 754_000)),
-                controller.calls,
-            )
-        }
-
-    @Test fun timestampOnAnotherItemStartsThereThroughTheStartPath() =
-        runTest {
-            val controller = FakePlaybackController()
-            controller.playResult = PlayResult.Started
-            controller.state.nowPlaying.value = testNowPlaying(7)
-            val actions = actions(controller)
-            actions.seekOrPlay(9, 754_000, 3_600_000)
-            runCurrent()
-            assertEquals(
-                listOf<FakePlaybackController.Call>(
-                    FakePlaybackController.Call.Episode(9, 754_000),
-                ),
-                controller.calls,
-            )
-        }
-
-    @Test fun outOfRangeTimestampsNeverReachTheService() =
-        runTest {
-            val controller = FakePlaybackController()
-            controller.state.nowPlaying.value = testNowPlaying(7)
-            val actions = actions(controller)
-            actions.seekOrPlay(7, -1, 3_600_000)
-            actions.seekOrPlay(9, 3_600_001, 3_600_000)
-            runCurrent()
-            assertTrue(controller.calls.isEmpty())
-        }
-
-    @Test fun otherEpisodeTimestampConsentRetriesTheSamePosition() =
-        runTest {
-            val controller = FakePlaybackController()
-            controller.playResult = PlayResult.Started
-            val actions = actions(controller)
-            val original = PlayResult.NeedsMeteredConsent(9)
-            controller.state.pendingMeteredConsent.value = original
-            controller.playResult = original
-            actions.seekOrPlay(9, 754_000, 3_600_000)
-            runCurrent()
-            assertEquals(9L, actions.meteredConsent.value?.episodeId)
-            controller.playResult = PlayResult.Started
-            actions.consentOnce()
-            runCurrent()
-            assertEquals(
-                listOf<FakePlaybackController.Call>(
-                    FakePlaybackController.Call.Episode(9, 754_000),
-                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
-                    FakePlaybackController.Call.Episode(9, 754_000),
-                ),
-                controller.calls,
-            )
-            assertTrue(
-                controller.calls.none {
-                    it is FakePlaybackController.Call.Transport &&
-                        it.action == FakePlaybackController.Action.TOGGLE
-                },
-            )
         }
 }

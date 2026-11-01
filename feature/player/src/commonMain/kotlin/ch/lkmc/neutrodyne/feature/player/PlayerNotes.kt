@@ -38,7 +38,6 @@ internal fun PlayerNotes(
     durationMs: Long?,
     vm: PlayerEpisodeViewModel = metroViewModel(),
     onLink: (String) -> Unit,
-    onTimestamp: (Long) -> Unit,
 ) {
     LaunchedEffect(episodeId) { vm.showNotes(episodeId) }
     DisposableEffect(vm, episodeId) { onDispose { vm.showNotes(null) } }
@@ -76,7 +75,8 @@ internal fun PlayerNotes(
                                 },
                             durationMs = durationMs,
                             onLink = onLink,
-                            onTimestamp = onTimestamp,
+                            // Timestamp seeking arrives with M5, as on Episode detail.
+                            onTimestamp = {},
                             onLoadImages = { imagesRevealed = true },
                         )
                     }

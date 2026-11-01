@@ -56,8 +56,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
@@ -84,32 +82,24 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
 import ch.lkmc.neutrodyne.core.model.ContextType
-import ch.lkmc.neutrodyne.core.model.EpisodeChapter
-import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.PlayerTimeDisplay
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
-import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.ui.AttributionText
-import ch.lkmc.neutrodyne.core.ui.ChapterList
 import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
-import ch.lkmc.neutrodyne.core.ui.resources.chapter_number
-import ch.lkmc.neutrodyne.core.ui.resources.summary_video
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_back
 import ch.lkmc.neutrodyne.feature.player.resources.player_back_value
-import ch.lkmc.neutrodyne.feature.player.resources.player_chapter
-import ch.lkmc.neutrodyne.feature.player.resources.player_chapters
 import ch.lkmc.neutrodyne.feature.player.resources.player_collapse
 import ch.lkmc.neutrodyne.feature.player.resources.player_continue
 import ch.lkmc.neutrodyne.feature.player.resources.player_description
@@ -127,7 +117,6 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_mobile_consent
 import ch.lkmc.neutrodyne.feature.player.resources.player_more
 import ch.lkmc.neutrodyne.feature.player.resources.player_network_lost
 import ch.lkmc.neutrodyne.feature.player.resources.player_next
-import ch.lkmc.neutrodyne.feature.player.resources.player_next_chapter
 import ch.lkmc.neutrodyne.feature.player.resources.player_next_symbol
 import ch.lkmc.neutrodyne.feature.player.resources.player_not_now
 import ch.lkmc.neutrodyne.feature.player.resources.player_now
@@ -138,7 +127,6 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_playing
 import ch.lkmc.neutrodyne.feature.player.resources.player_podcast
 import ch.lkmc.neutrodyne.feature.player.resources.player_position
 import ch.lkmc.neutrodyne.feature.player.resources.player_previous
-import ch.lkmc.neutrodyne.feature.player.resources.player_previous_chapter
 import ch.lkmc.neutrodyne.feature.player.resources.player_previous_symbol
 import ch.lkmc.neutrodyne.feature.player.resources.player_queue_count
 import ch.lkmc.neutrodyne.feature.player.resources.player_rate_limited
@@ -151,9 +139,6 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_time_remaining
 import ch.lkmc.neutrodyne.feature.player.resources.player_time_total
 import ch.lkmc.neutrodyne.feature.player.resources.player_unknown_duration
 import ch.lkmc.neutrodyne.feature.player.resources.player_youtube_unavailable
-import ch.lkmc.neutrodyne.feature.player.resources.sleep_end
-import ch.lkmc.neutrodyne.feature.player.resources.sleep_minutes
-import ch.lkmc.neutrodyne.feature.player.resources.sleep_title
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import ch.lkmc.neutrodyne.playback.api.PlayerPhase
@@ -177,8 +162,6 @@ internal fun PlayerSheet(
     previous: () -> Unit,
     next: () -> Unit,
     seek: (Long) -> Unit,
-    nextEpisode: () -> Unit = next,
-    previousEpisode: () -> Unit = previous,
     dismiss: () -> Unit,
     stop: () -> Unit,
     markPlayed: () -> Unit,
@@ -203,10 +186,6 @@ internal fun PlayerSheet(
     val panelState = remember { PlayerSheetState() }
     var selectedTabName by rememberSaveable { mutableStateOf(PlayerTab.UP_NEXT.name) }
     val selectedTab = PlayerTab.entries.firstOrNull { it.name == selectedTabName } ?: PlayerTab.UP_NEXT
-    // The Chapters tab exists only while chapters do; its saved pick cannot outlive them.
-    LaunchedEffect(ui.chapters.isEmpty()) {
-        if (ui.chapters.isEmpty() && selectedTab == PlayerTab.CHAPTERS) selectedTabName = PlayerTab.UP_NEXT.name
-    }
     val expanded = state.settledExpanded && now != null
     val settled by rememberUpdatedState(slot.onExpandedSettled)
     val dismissPaused by rememberUpdatedState(dismiss)
@@ -272,21 +251,15 @@ internal fun PlayerSheet(
                 stringResource(if (now.isPlaying) Res.string.player_playing else Res.string.player_paused),
             )
         val backLabel = stringResource(Res.string.player_back, ui.skipBackMs / MILLIS_PER_SECOND)
-        val previousLabel =
-            stringResource(
-                if (ui.chapters.isEmpty()) Res.string.player_previous else Res.string.player_previous_chapter,
-            )
-        val nextLabel =
-            stringResource(
-                if (ui.chapters.isEmpty()) Res.string.player_next else Res.string.player_next_chapter,
-            )
+        val previousLabel = stringResource(Res.string.player_previous)
+        val nextLabel = stringResource(Res.string.player_next)
         val paused = !now.isPlaying && !now.playWhenReady
         val contextTitle = now.context?.takeIf { it.type != ContextType.EXTERNAL }?.title
         val nowPlayingLabel = stringResource(Res.string.player_now)
         val expand: () -> Unit = { scope.launch { state.expand(motion) } }
         val collapse: () -> Unit = { scope.launch { state.collapse(motion) } }
         val navigate: (NavKey) -> Unit = { key ->
-            if (key == SpeedKey || key == SleepTimerKey) {
+            if (key == SpeedKey) {
                 slot.navigate(key)
             } else {
                 scope.launch {
@@ -513,32 +486,6 @@ internal fun PlayerSheet(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 TextButton(onClick = { navigate(PodcastKey(now.podcastId)) }) { Text(now.podcastTitle) }
-                                if (now.isVideo) {
-                                    Text(
-                                        stringResource(UiRes.string.summary_video),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                ui.currentChapter?.let { current ->
-                                    TextButton(
-                                        onClick = {
-                                            selectedTabName = PlayerTab.CHAPTERS.name
-                                            scope.launch { panelState.expand(motion) }
-                                        },
-                                    ) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_chapter,
-                                                current.index + 1,
-                                                current.chapter.title?.takeIf { it.isNotBlank() }
-                                                    ?: stringResource(UiRes.string.chapter_number, current.index + 1),
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
                                 PlayerScrubber(
                                     position?.takeIf {
                                         it.episodeId == now.episodeId
@@ -551,7 +498,6 @@ internal fun PlayerSheet(
                                     ui.skipForwardMs,
                                     ui.timeDisplay,
                                     toggleTime,
-                                    ui.chapters,
                                 )
                                 // Share remaining width so the last action keeps its touch target.
                                 Row(
@@ -585,7 +531,7 @@ internal fun PlayerSheet(
                                     PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
                                     TextButton(
                                         onClick = next,
-                                        enabled = ui.chapters.isNotEmpty() || now.hasNext,
+                                        enabled = now.hasNext,
                                         modifier =
                                             Modifier.weight(1f, fill = false).semantics {
                                                 contentDescription =
@@ -608,26 +554,6 @@ internal fun PlayerSheet(
                                     }
                                 }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    TextButton(onClick = { navigate(SleepTimerKey) }) {
-                                        Text(
-                                            when (val timer = ui.sleepTimer) {
-                                                SleepTimerState.Off -> {
-                                                    stringResource(Res.string.sleep_title)
-                                                }
-
-                                                is SleepTimerState.Running -> {
-                                                    stringResource(
-                                                        Res.string.sleep_minutes,
-                                                        ((timer.remainingMs + MILLIS_PER_MINUTE - 1) / MILLIS_PER_MINUTE).toInt(),
-                                                    )
-                                                }
-
-                                                is SleepTimerState.EndOfEpisode -> {
-                                                    stringResource(Res.string.sleep_end)
-                                                }
-                                            },
-                                        )
-                                    }
                                     TextButton(onClick = { navigate(SpeedKey) }) {
                                         Text(
                                             stringResource(
@@ -687,9 +613,7 @@ internal fun PlayerSheet(
                             selected = selectedTab,
                             onSelect = { selectedTabName = it.name },
                             count = ui.upNextCount,
-                            chapterCount = ui.chapters.size,
                             upNext = upNext,
-                            chapters = { ChapterList(ui.chapters, ui.currentChapter, seek) },
                             notes = notes,
                             modifier =
                                 Modifier
@@ -735,15 +659,7 @@ internal fun PlayerSheet(
                                     )
                                 }
                             }
-                            PlayerMenu(
-                                now,
-                                navigate,
-                                markPlayed,
-                                stop,
-                                ui.chapters.isNotEmpty(),
-                                nextEpisode,
-                                previousEpisode,
-                            )
+                            PlayerMenu(now, navigate, markPlayed, stop)
                         }
                     }
                     CoverArt(
@@ -818,31 +734,11 @@ private fun PlayerMenu(
     navigate: (NavKey) -> Unit,
     markPlayed: () -> Unit,
     stop: () -> Unit,
-    hasChapters: Boolean,
-    nextEpisode: () -> Unit,
-    previousEpisode: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
         NdIconButton({ open = true }, NdIcons.MoreVert, stringResource(Res.string.player_more))
         DropdownMenu(open, { open = false }) {
-            if (hasChapters) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.player_previous)) },
-                    onClick = {
-                        open = false
-                        previousEpisode()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.player_next)) },
-                    enabled = now.hasNext,
-                    onClick = {
-                        open = false
-                        nextEpisode()
-                    },
-                )
-            }
             DropdownMenuItem(text = { Text(stringResource(Res.string.player_episode)) }, onClick = {
                 open = false
                 navigate(EpisodeKey(now.episodeId))
@@ -919,7 +815,6 @@ internal fun PlayerScrubber(
     forwardMs: Long,
     timeDisplay: PlayerTimeDisplay = PlayerTimeDisplay.REMAINING,
     toggleTime: () -> Unit = {},
-    chapters: List<EpisodeChapter> = emptyList(),
 ) {
     var displayed by remember(snapshot) { mutableLongStateOf(positionAt(snapshot)) }
     var dragged by remember(snapshot.episodeId) { mutableStateOf<Long?>(null) }
@@ -940,7 +835,6 @@ internal fun PlayerScrubber(
             accessiblePlayerTime(current),
             duration?.let { accessiblePlayerTime(it) } ?: durationText,
         )
-    val tickColor = MaterialTheme.colorScheme.onSurfaceVariant
     Column {
         key(snapshot.episodeId) {
             Slider(
@@ -953,36 +847,20 @@ internal fun PlayerScrubber(
                     dragged = null
                 },
                 modifier =
-                    Modifier
-                        .testTag("playerScrubber")
-                        .drawBehind {
-                            if (duration != null) {
-                                chapters.forEach { chapter ->
-                                    if (chapter.startMs in 0..duration) {
-                                        val x = size.width * chapter.startMs.toFloat() / duration
-                                        drawLine(
-                                            tickColor,
-                                            Offset(x, size.height / 2 - CHAPTER_TICK_HALF.toPx()),
-                                            Offset(x, size.height / 2 + CHAPTER_TICK_HALF.toPx()),
-                                            CHAPTER_TICK_WIDTH.toPx(),
-                                        )
-                                    }
-                                }
-                            }
-                        }.semantics {
-                            stateDescription = description
-                            customActions =
-                                listOf(
-                                    CustomAccessibilityAction(backLabel) {
-                                        back()
-                                        true
-                                    },
-                                    CustomAccessibilityAction(forwardLabel) {
-                                        forward()
-                                        true
-                                    },
-                                )
-                        },
+                    Modifier.testTag("playerScrubber").semantics {
+                        stateDescription = description
+                        customActions =
+                            listOf(
+                                CustomAccessibilityAction(backLabel) {
+                                    back()
+                                    true
+                                },
+                                CustomAccessibilityAction(forwardLabel) {
+                                    forward()
+                                    true
+                                },
+                            )
+                    },
             )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1035,10 +913,7 @@ private val MINI_TEXT_START = 64.dp
 private val DISMISS_DISTANCE = 96.dp
 private const val MILLIS_PER_SECOND = 1_000L
 private const val SECONDS_PER_MINUTE = 60L
-private const val MILLIS_PER_MINUTE = 60_000L
 private const val WIDE_ART_ASPECT = 16f / 9f
-private val CHAPTER_TICK_HALF = 5.dp
-private val CHAPTER_TICK_WIDTH = 1.dp
 private const val SETTLE_FRACTION = 0.5f
 private const val MINI_SEMANTICS_END = 0.2f
 private const val FULL_SEMANTICS_START = 0.6f

@@ -499,6 +499,7 @@ internal class QueueProjector(
                     ?.toLongOrNull()
             departedId?.let(resolver::unpin)
         }
+        if (!changed && reason == Player.DISCONTINUITY_REASON_SEEK) replayCompletedBoundary()
         if (applying || external != null || !changed) return
         val live = player ?: return
         val arrivalId = live.episodeIdOrNull() ?: return
@@ -683,6 +684,16 @@ internal class QueueProjector(
     private fun isCompletedBoundary(episodeId: Long): Boolean =
         completedBoundary == BoundaryCompletion(eventEpoch, episodeId, tracker.currentSinceMs)
 
+    /** Seeking a retained completed item starts a replay; otherwise its saves stay rejected as played. */
+    private fun replayCompletedBoundary() {
+        val live = player ?: return
+        val id = live.episodeIdOrNull() ?: return
+        if (!isCompletedBoundary(id)) return
+        completedBoundary = null
+        tracker.load(id, replay = true, durationMs = live.knownDuration())
+        tracker.startPositionApplied()
+    }
+
     /** A boundary pause completes this item, not the session or the next queued item. */
     private fun completeBoundary() {
         if (applying || external != null) return
@@ -695,8 +706,13 @@ internal class QueueProjector(
             try {
                 eventWrites.withLock {
                     if (marker.epoch != eventEpoch) return@withLock
-                    positions.markPlayed(capture.episodeId, clock.now())
-                    boundaryCompleted(capture.episodeId)
+                    // The epoch cannot see a session committed behind a deferred projection.
+                    val marked = sessions.markBoundaryPlayed(capture.episodeId, committedRevision, clock.now())
+                    if (marked) {
+                        boundaryCompleted(capture.episodeId)
+                    } else if (completedBoundary == marker) {
+                        completedBoundary = null
+                    }
                 }
             } catch (failure: Exception) {
                 if (completedBoundary == marker) completedBoundary = null
