@@ -4,10 +4,11 @@ package ch.lkmc.neutrodyne.playback.impl
 import android.content.ComponentName
 import android.content.Intent
 import android.media.AudioManager
-import android.media.browse.MediaBrowser
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.os.Bundle
 import android.os.SystemClock
+import androidx.media3.session.legacy.MediaBrowserCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -38,7 +39,13 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Platform MediaBrowser/transport bridge, including legacy unset start index/time. DHU requires separate head-unit evidence. */
+/**
+ * Legacy MediaBrowserCompat/transport bridge, including legacy unset start index/time.
+ * The platform MediaBrowser cannot browse a media3 library on API <28: its anonymous
+ * RemoteUserInfo never matches the registered controller, so every load comes back
+ * null. Compat clients (Android Auto among them) bind through a messenger and work.
+ * DHU requires separate head-unit evidence.
+ */
 @RunWith(AndroidJUnit4::class)
 class CarLibraryDeviceTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -46,7 +53,7 @@ class CarLibraryDeviceTest {
     private val graph get() = app.graph
     private val server = MockWebServer()
     private var scenario: ActivityScenario<MainActivity>? = null
-    private var browser: MediaBrowser? = null
+    private var browser: MediaBrowserCompat? = null
     private var podcast: Long? = null
     private var group: Long? = null
     private var episode = 0L
@@ -117,7 +124,7 @@ class CarLibraryDeviceTest {
             withContext(Dispatchers.Main) {
                 MediaController(
                     app,
-                    browser.sessionToken,
+                    sessionToken(),
                 ).transportControls.playFromMediaId("episode:$episode@group:$group", null)
             }
             awaitCurrent()
@@ -129,9 +136,9 @@ class CarLibraryDeviceTest {
     @Test @ReleaseSmoke
     fun legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime() =
         runBlocking {
-            val browser = connect()
+            connect()
             withContext(Dispatchers.Main) {
-                MediaController(app, browser.sessionToken).transportControls.playFromSearch(groupName, null)
+                MediaController(app, sessionToken()).transportControls.playFromSearch(groupName, null)
             }
             awaitCurrent()
             val session =
@@ -154,9 +161,9 @@ class CarLibraryDeviceTest {
                     },
                 )
             graph.queueRepository().addLast(listOf(next))
-            val browser = connect()
+            connect()
             val transport =
-                withContext(Dispatchers.Main) { MediaController(app, browser.sessionToken).transportControls }
+                withContext(Dispatchers.Main) { MediaController(app, sessionToken()).transportControls }
             try {
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.SKIP)
                 graph.settingsRepository.set(PlaybackSettingKeys.SKIP_FORWARD_MS, 10_000L)
@@ -203,14 +210,16 @@ class CarLibraryDeviceTest {
             }
         }
 
-    private suspend fun connect(): MediaBrowser {
+    private fun sessionToken() = checkNotNull(browser).sessionToken.token as MediaSession.Token
+
+    private suspend fun connect(): MediaBrowserCompat {
         val connected = CompletableDeferred<Unit>()
         val created =
             withContext(Dispatchers.Main) {
-                MediaBrowser(
+                MediaBrowserCompat(
                     app,
                     ComponentName(app, NeutrodynePlaybackService::class.java),
-                    object : MediaBrowser.ConnectionCallback() {
+                    object : MediaBrowserCompat.ConnectionCallback() {
                         override fun onConnected() {
                             connected.complete(Unit)
                         }
@@ -229,15 +238,15 @@ class CarLibraryDeviceTest {
         return created
     }
 
-    private suspend fun children(parent: String): List<MediaBrowser.MediaItem> {
-        val result = CompletableDeferred<List<MediaBrowser.MediaItem>>()
+    private suspend fun children(parent: String): List<MediaBrowserCompat.MediaItem> {
+        val result = CompletableDeferred<List<MediaBrowserCompat.MediaItem>>()
         withContext(Dispatchers.Main) {
             browser!!.subscribe(
                 parent,
-                object : MediaBrowser.SubscriptionCallback() {
+                object : MediaBrowserCompat.SubscriptionCallback() {
                     override fun onChildrenLoaded(
                         parentId: String,
-                        children: MutableList<MediaBrowser.MediaItem>,
+                        children: MutableList<MediaBrowserCompat.MediaItem>,
                     ) {
                         result.complete(children)
                     }
