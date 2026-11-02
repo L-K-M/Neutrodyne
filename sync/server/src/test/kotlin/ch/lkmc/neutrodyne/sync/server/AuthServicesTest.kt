@@ -223,7 +223,11 @@ class AuthServicesTest {
                     .summary(web)
                     .passwordSetAt,
             )
-            f.now += 30 * DAY_MS
+            // A live browser renews its session on use; the device principal
+            // previously used here was revoked by the change above.
+            f.now += 15 * DAY_MS
+            f.services.tokens.authenticate(raw, TokenKind.WEB_SESSION)
+            f.now += 16 * DAY_MS
             assertNull(
                 f.services.accounts
                     .summary(web)
