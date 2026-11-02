@@ -42,14 +42,9 @@ internal class SessionCallback(
             ConnectionResult
                 .AcceptedResultBuilder(session, controller)
                 .setAvailablePlayerCommands(Player.Commands.EMPTY)
-                .setAvailableSessionCommands(
-                    ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                        .buildUpon()
-                        .remove(SessionCommand.COMMAND_CODE_SESSION_SET_RATING)
-                        .build(),
-                )
+                .setAvailableSessionCommands(BASE_SESSION_COMMANDS)
         if (canControl(session, controller)) {
-            val custom = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+            val custom = BASE_SESSION_COMMANDS.buildUpon()
             CustomCommands.names.forEach { custom.add(CustomCommands.command(it)) }
             SleepTimerCommands.names.forEach { custom.add(CustomCommands.command(it)) }
             builder
@@ -179,6 +174,14 @@ internal class SessionCallback(
         SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putString(CustomCommands.RESULT, result.name) })
 
     companion object {
+        // No rating feature and no onSetRating override exist, so neither trust
+        // branch may offer SET_RATING; Media3's default set includes it.
+        private val BASE_SESSION_COMMANDS =
+            ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                .buildUpon()
+                .remove(SessionCommand.COMMAND_CODE_SESSION_SET_RATING)
+                .build()
+
         fun parseBrowseEpisode(id: String): Long {
             val parsed = MediaLibraryTree.parseEpisode(id)
             require(parsed.parent == null || parsed.parent == MediaLibraryTree.UP_NEXT)
