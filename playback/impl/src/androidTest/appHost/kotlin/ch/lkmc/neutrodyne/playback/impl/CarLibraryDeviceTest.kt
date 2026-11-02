@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -102,7 +103,7 @@ class CarLibraryDeviceTest {
     @After fun close() =
         runBlocking {
             withContext(Dispatchers.Main) { browser?.disconnect() }
-            graph.playbackController.dismiss()
+            dismissAfterStartSettles()
             scenario?.close()
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
             val db = graph.databaseOpener.requireDatabase()
@@ -291,6 +292,19 @@ class CarLibraryDeviceTest {
         return withTimeout(20_000) { result.await() }
     }
 
+    // A start still settling can supersede teardown's dismiss; the newer intent is right to win.
+    private suspend fun dismissAfterStartSettles() {
+        repeat(DISMISS_RETRIES) {
+            try {
+                graph.playbackController.dismiss()
+                return
+            } catch (_: CancellationException) {
+                delay(200)
+            }
+        }
+        graph.playbackController.dismiss()
+    }
+
     private suspend fun awaitPlaying(playing: Boolean) =
         withTimeout(20_000) {
             while (graph.playbackStateSource.nowPlaying.value?.let {
@@ -320,5 +334,6 @@ class CarLibraryDeviceTest {
         }
 }
 
+private const val DISMISS_RETRIES = 3
 private const val SKIP_MS = 10_000L
 private const val SKIP_TOLERANCE_MS = 1_000L

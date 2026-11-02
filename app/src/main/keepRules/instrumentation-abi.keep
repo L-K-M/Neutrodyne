@@ -655,6 +655,7 @@
 -keep class ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys {
   public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Choice getHARDWARE_BUTTONS();
   public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Int64 getSKIP_FORWARD_MS();
+  public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Bool getSMART_RESUME();
   public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Choice getSTREAM_ON_METERED();
   ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys INSTANCE;
 }
