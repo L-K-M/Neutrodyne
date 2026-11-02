@@ -145,6 +145,9 @@ internal class AndroidPlatformActions(
     // "Show in folder" is a desktop action (08 Modules).
     override val reveal: RevealInFolder? = null
 
+    override val appleLinks: AppleLinkSettings? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) AndroidAppleLinkSettings(context) else null
+
     override val notifications: NotificationPermissionRequester? =
         if (Build.VERSION.SDK_INT < NOTIFICATION_PERMISSION_SDK) {
             null
@@ -240,3 +243,21 @@ internal class PendingResult<T> {
 /** Maps the launcher's `Uri` result onto the caller's `String` continuation. */
 private fun <T, R> Continuation<R>.contramap(map: (T) -> R): Continuation<T> =
     Continuation(context) { result -> resumeWith(result.map(map)) }
+
+/** No domain approval is assumed: this opens the user's own app-link preferences. */
+internal class AndroidAppleLinkSettings(
+    private val context: Context,
+) : AppleLinkSettings {
+    override fun openSettings(): OpenResult =
+        try {
+            context.startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null),
+                ),
+            )
+            OpenResult.OPENED
+        } catch (_: ActivityNotFoundException) {
+            OpenResult.NO_HANDLER
+        }
+}
