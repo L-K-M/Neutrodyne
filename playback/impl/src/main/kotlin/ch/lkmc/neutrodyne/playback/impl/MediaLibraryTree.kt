@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.FeedQueryBuilder
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
+import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.StartMembership
@@ -74,17 +75,7 @@ internal class MediaLibraryTree(
                 }
 
                 GROUPS -> {
-                    db.groupDao().groupsInOrder().map { group ->
-                        val art =
-                            db
-                                .groupDao()
-                                .membersOf(group.id)
-                                .firstOrNull()
-                                ?.podcastId
-                                ?.let { db.podcastDao().byId(it) }
-                                ?.artworkKey
-                        folder("group:${group.id}", group.name, artworkKey = art)
-                    }
+                    db.groupDao().groupsInOrder().map { groupFolder(db, it) }
                 }
 
                 PODCASTS -> {
@@ -121,7 +112,7 @@ internal class MediaLibraryTree(
         opener.awaitOpen()
         if (mediaId.startsWith("group:")) {
             val id = positiveId(mediaId.removePrefix("group:"))
-            return database().groupDao().groupById(id)?.let { folder(mediaId, it.name) }
+            return database().groupDao().groupById(id)?.let { groupFolder(database(), it) }
         }
         if (mediaId.startsWith("podcast:")) {
             val id = positiveId(mediaId.removePrefix("podcast:"))
@@ -362,6 +353,22 @@ internal class MediaLibraryTree(
         }
 
     private fun youtubePlayable(): Boolean = capabilities.capabilities.value.inAppPlayback
+
+    /** One group folder shape for `children(GROUPS)` and `item("group:*")`: the first member's cover. */
+    private suspend fun groupFolder(
+        db: NeutrodyneDatabase,
+        group: PodcastGroupEntity,
+    ): MediaItem {
+        val art =
+            db
+                .groupDao()
+                .membersOf(group.id)
+                .firstOrNull()
+                ?.podcastId
+                ?.let { db.podcastDao().byId(it) }
+                ?.artworkKey
+        return folder("group:${group.id}", group.name, artworkKey = art)
+    }
 
     private fun podcastFolder(row: PodcastEntity): MediaItem =
         folder("podcast:${row.id}", row.customTitle ?: row.title, artworkKey = row.artworkKey)

@@ -54,7 +54,7 @@ class MediaItemFactoryTest {
     private val local = FakeLocalMediaIndex()
     private val factory = MediaItemFactory(art, local)
 
-    @Test fun downloadExtrasAreLongAndAlternateUsesItsOwnFingerprint() {
+    @Test fun downloadExtrasAreLong() {
         val row = media()
         for ((state, expected) in listOf(
             null to MediaConstants.EXTRAS_VALUE_STATUS_NOT_DOWNLOADED,
@@ -62,7 +62,8 @@ class MediaItemFactoryTest {
             DownloadState.DOWNLOADING to MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADING,
         )) {
             val extras = factory.build(row.copy(downloadState = state)).mediaMetadata.extras!!
-            assertEquals(expected, extras.getLong(MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS))
+            // getLong(key) would return 0 for a missing key, equal to NOT_DOWNLOADED.
+            assertEquals(expected, extras.getLong(MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS, -1L))
         }
     }
 

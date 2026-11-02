@@ -78,8 +78,11 @@ internal fun SleepTimerSheet(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(CHIP_GAP)) {
                     SLEEP_PRESETS.forEach { value ->
                         NdFilterChip(
-                            value == lastMinutes,
-                            { onSet(SleepTimerMode.Minutes(value)) },
+                            !custom && value == lastMinutes,
+                            {
+                                custom = false
+                                onSet(SleepTimerMode.Minutes(value))
+                            },
                             stringResource(Res.string.sleep_minutes, value),
                             enabled = available,
                         )
