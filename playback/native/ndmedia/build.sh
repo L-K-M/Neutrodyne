@@ -137,10 +137,10 @@ case "$TARGET" in
             done < "$ENV_FILE"
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
-        (cd "$BUILD_ROOT" && cl -nologo -O2 -std:c11 -c \
+        (cd "$BUILD_ROOT" && cl -nologo -O2 -std:c11 -MD -c \
             -I"$(cygpath -w "$INCLUDE_DIR")" -I"$(cygpath -w "$ROOT")" \
             "$(cygpath -w "$SRC")" -Fondmedia.obj && \
-            cl -nologo -O2 -EHsc -std:c++17 -LD -I"$(cygpath -w "$ROOT")" \
+            cl -nologo -O2 -EHsc -std:c++17 -LD -MD -I"$(cygpath -w "$ROOT")" \
             "$(cygpath -w "$ROOT/session_win.cpp")" ndmedia.obj \
             /link /OUT:ndmedia.dll ole32.lib uuid.lib advapi32.lib user32.lib shell32.lib runtimeobject.lib) ||
             die "cl failed"

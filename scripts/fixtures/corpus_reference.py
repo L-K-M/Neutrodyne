@@ -900,6 +900,8 @@ def main() -> int:
     manifest = {
         "generatedBy": "scripts/fixtures/corpus_reference.py",
         "corpus": "MD0 desktop audio engine spike (PLAN MD0 AC1)",
+        "licence": "Unlicense",
+        "provenance": "First-party synthetic sine waves from scripts/fixtures/make-engine-corpus.sh; HE-AAC from the same generated WAV; no original recordings. Encoder build versions were not retained by the initial generator run.",
         "files": entries,
     }
     if args.check:

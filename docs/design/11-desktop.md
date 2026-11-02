@@ -869,7 +869,7 @@ One script, `playback/native/ffmpeg/build.sh <target>`, run by the `buildFfmpeg`
 
 | Target | `$TARGET_FLAGS` and toolchain | Library names (FFmpeg 9.0 majors as measured: avcodec 63, avformat 63, avutil 61, swresample 7) |
 |---|---|---|
-| `windows-x64` | MSYS2 shell with MSVC (`--toolchain=msvc --target-os=win64 --arch=x86_64`), NASM | `avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll` |
+| `windows-x64` | MSYS2 shell with MSVC (`--toolchain=msvc --target-os=win64 --arch=x86_64 --extra-cflags=-MD`), NASM | `avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll` |
 | `macos-arm64` | Apple clang, `--arch=arm64 --extra-cflags=-mmacosx-version-min=13.0 --extra-ldflags=-mmacosx-version-min=13.0`, install names `@rpath/…` with `@loader_path` | `libavcodec.63.dylib`, … |
 | `linux-x64`, `linux-arm64` | gcc in `manylinux_2_28` containers (glibc 2.28 baseline, below our 2.31 floor), `-Wl,-rpath,'$ORIGIN'`, NASM on x64 | `libavcodec.so.63`, … |
 
@@ -1898,6 +1898,67 @@ transport, with real suspend ordering still open. Their API registration suite i
 ad-hoc signing, device-removal and suspend proofs. Neither session is wired
 into the production graph.
 
+Inspection of the Linux arm64 artifact from `41530910232` found GCC's
+out-of-line atomic helpers inside `ndmedia`. Their runtime exception does
+not widen D3. The new binary gate rejects them. The bounded remedy is
+`-mno-outline-atomics` on arm64, then a rebuilt binary and import/symbol
+inspection. If compiler runtime code remains, use a permissively licensed
+compiler runtime; do not waive the licence envelope or declare AC2 closed.
+
+The owner-only `:desktopApp:md0Probe` and `md0ProbeImage` tasks use test
+classes, never the production image. They are instruments, not tester
+releases. `Md0SafetyTest` injects suspend, resume, removal and default-change
+events through the real `PositionSaver` and a fake store; it cannot prove
+that an OS delivered an event in time or that a production database saved.
+
+Owner procedure, still open on each real OS:
+
+1. Check out the evidence commit, with JDK 25 and the target's native build
+   tools. Choose an audio file long enough to play for 30 minutes at the
+   selected speed with silence skipping. Use wired output first; record OS,
+   hardware, backend, output rate/period, load, commit and file hash.
+2. Run `./gradlew :desktopApp:md0Probe -Pmd0.file=/absolute/audio-file
+   -Pmd0.backend=default -Pmd0.speed=3 -Pmd0.skip=true -Pmd0.seconds=1800
+   -Pmd0.report=/absolute/new-report.jsonl` as one command. The report path
+   must not already exist. The default backend opens actual hardware;
+   `-Pmd0.backend=null` is diagnostic and supplies no audible/device proof.
+   An early EOF fails the soak. Inspect the frame and CPU samples and count
+   post-start underruns; retain the complete report, including failures.
+3. With the prototype playing and no main player window, press keyboard and
+   headset play/pause, next/previous and seek controls. Verify the corresponding
+   `command` records. Play/pause controls actual output; next/previous/seek
+   records prove transport only in this single-item instrument. Full queue
+   and seek-controller behavior remains MD1. On Windows inspect the SMTC
+   flyout identity and metadata; on Linux exercise GNOME and KDE MPRIS.
+4. For the macOS signed-app case run
+   `./gradlew --no-configuration-cache :desktopApp:md0ProbeImage` and use the
+   printed `image/Md0Probe.app` path. Run `codesign --force --deep --sign -
+   /absolute/Md0Probe.app`, then `codesign --verify --deep --strict
+   /absolute/Md0Probe.app`. Launch its `Contents/MacOS/Md0Probe` executable
+   with the six arguments `audio-file default 3 true 1800 new-report.jsonl`.
+   Confirm Now Playing metadata and physical media-key routing with the
+   app's window hidden. API registration from an unsigned test JVM does not
+   close this check. The image references the same checkout's native build;
+   it is an owner-local instrument and is never uploaded or distributed.
+5. While playing, unplug the active jack and USB device, then repeat with
+   Bluetooth disconnection. Look for `REMOVED`, output pause and a
+   `saved-to-fake-store` record. Change only the default device separately:
+   that must continue playing. Record Linux's actual sink-removal behavior;
+   automatic rerouting there is an accepted limitation. Windows monitors
+   the multimedia default endpoint; a different actual miniaudio endpoint
+   and built-in jack notification coverage still need hardware comparison.
+6. Suspend with the lid and menu while playing, then wake. Compare native
+   event/report timestamps with observed audio stop, check pause and the
+   recorded position, and verify that wake never starts output. Include a
+   Windows Modern Standby laptop and its power mode. A late/missing event
+   stays a failure/open result, with the five-second periodic save as the
+   documented loss bound; the fake-store probe does not prove disk durability.
+7. Keep the CPU trace at 3x and every underrun, routing and sleep observation.
+   No physical measurement, signed-app result or 30-minute soak is claimed
+   by the CI suites. If an OS session cannot be created, capture the exact
+   error; the in-app controls are the documented degraded mode, and AC4
+   remains open. libmpv does not resolve an OS-session or suspend failure.
+
 Native source bundles now include the actual per-target build record, lock,
 verification key and build scripts, with missing or corrupt inputs rejected.
 
@@ -1911,7 +1972,7 @@ targets. Evidence per criterion:
   manifest and `seekAndDecode` measures the first audible sample after a
   seek. Final matrix evidence is collected from run
   `41416052575` onward; earlier runs proved the build and licence legs.
-- **AC2 LGPL build — go.** `checkNativeLicences` verifies the licence
+- **AC2 LGPL build — open pending binary audit.** `checkNativeLicences` verifies the licence
   string, zero registered network protocols, the D86 component set and the
   4 MB size budget on each target from the built libraries; the source
   bundle carries the exact tarball, signature and checksum.

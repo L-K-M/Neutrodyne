@@ -18,8 +18,7 @@
 
 using namespace ABI::Windows::Media;
 using namespace ABI::Windows::Foundation;
-using Positions = ITypedEventHandler<SystemMediaTransportControls *,
-                                     PlaybackPositionChangeRequestedEventArgs *>;
+using Positions = ITypedEventHandler<SystemMediaTransportControls *, PlaybackPositionChangeRequestedEventArgs *>;
 using Buttons =
     ITypedEventHandler<SystemMediaTransportControls *, SystemMediaTransportControlsButtonPressedEventArgs *>;
 
@@ -131,9 +130,8 @@ class PositionHandler final : public Positions {
             delete this;
         return n;
     }
-    HRESULT STDMETHODCALLTYPE
-    Invoke(ISystemMediaTransportControls *,
-           IPlaybackPositionChangeRequestedEventArgs *args) override {
+    HRESULT STDMETHODCALLTYPE Invoke(ISystemMediaTransportControls *,
+                                     IPlaybackPositionChangeRequestedEventArgs *args) override {
         TimeSpan value;
         HRESULT result = args->get_RequestedPlaybackPosition(&value);
         if (SUCCEEDED(result))
@@ -290,7 +288,7 @@ void run(std::promise<int> ready) noexcept {
     HRESULT result = RoInitialize(RO_INIT_MULTITHREADED);
     const bool initialized = SUCCEEDED(result);
     if (SUCCEEDED(result))
-        result = SetCurrentProcessExplicitAppUserModelID(L"ch.lkmc.neutrodyne.md0");
+        result = SetCurrentProcessExplicitAppUserModelID(L"ch.lkmc.neutrodyne.debug");
     WNDCLASSW cls{};
     cls.lpfnWndProc = procedure;
     cls.hInstance = GetModuleHandleW(nullptr);

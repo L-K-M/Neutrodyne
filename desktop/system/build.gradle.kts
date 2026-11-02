@@ -25,6 +25,7 @@ tasks.register<Test>("systemSessionTest") {
     classpath = sourceSets["test"].runtimeClasspath
     useJUnit()
     filter.includeTestsMatching("*NativeSystemMediaSessionTest")
+    timeout.set(java.time.Duration.ofMinutes(3))
     dependsOn(":playback:native:buildNdmedia")
 }
 

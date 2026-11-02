@@ -447,6 +447,19 @@ jobs:
       # string, the protocol inventory, the enabled components and the build's
       # own configure line and toolchain. It exists even when the tests failed,
       # which is when the evidence matters most, so it is collected either way.
+      - name: Inspect native binary boundaries
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = Windows ]; then
+            vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+            [ -x "$vswhere" ] || vswhere="/c/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+            vcroot="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+            vcroot="$(cygpath -u "$vcroot")"
+            version="$(cat "$vcroot/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" | tr -d '\r\n')"
+            export PATH="$vcroot/VC/Tools/MSVC/$version/bin/Hostx64/x64:$PATH"
+          fi
+          python scripts/ci/check-native-binary.py --target "${{ matrix.target }}"
       - name: Collect the licence evidence
         if: always()
         shell: bash

@@ -41,7 +41,10 @@ class MediaCorpusTest {
 
     @Test
     fun `the manifest covers every format of MD0 AC1`() {
-        val containers = readManifest().files.map { it.container }.toSet()
+        val manifest = readManifest()
+        assertEquals("Unlicense", manifest.licence)
+        assertTrue(manifest.provenance.isNotBlank())
+        val containers = manifest.files.map { it.container }.toSet()
 
         assertEquals(
             setOf("mp3", "mp4", "ogg", "flac", "wav", "webm", "adts"),
@@ -95,6 +98,8 @@ class MediaCorpusTest {
 data class CorpusManifest(
     val generatedBy: String,
     val corpus: String,
+    val licence: String,
+    val provenance: String,
     val files: List<CorpusFile>,
 )
 

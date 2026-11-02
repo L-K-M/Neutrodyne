@@ -307,7 +307,7 @@ case "$TARGET" in
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
         command -v nasm >/dev/null 2>&1 || log "warning: NASM is not on PATH; x86 assembly is disabled"
-        TARGET_FLAGS=(--toolchain=msvc --target-os=win64 --arch=x86_64)
+        TARGET_FLAGS=(--toolchain=msvc --target-os=win64 --arch=x86_64 --extra-cflags=-MD)
         MAKE=(make)
         ;;
     macos-arm64)
@@ -537,6 +537,11 @@ size_of() { # size_of <pattern> — the real file behind a versioned symlink
 } >"$OUT/ffmpeg-sizes.txt"
 
 log "writing the build record"
+if [ "$CC_BIN" = cl ]; then
+    COMPILER_LINE="$(cl 2>&1 | head -1 || true)"
+else
+    COMPILER_LINE="$("$CC_BIN" --version 2>/dev/null | head -1 || true)"
+fi
 {
     echo "target $TARGET"
     echo "ffmpeg $FFMPEG_VERSION"
@@ -546,7 +551,7 @@ log "writing the build record"
     echo "signatureSha256 $SIGNATURE_SHA256"
     echo "signingKey $SIGNING_KEY_FINGERPRINT"
     echo "configure $CONFIGURE_LINE"
-    echo "compiler $("$CC_BIN" --version 2>/dev/null | head -1 || echo unknown)"
+    echo "compiler $COMPILER_LINE"
     echo "versions $PROBE_VERSION"
     echo "license $PROBE_LICENSE"
 } >"$OUT/ffmpeg-build.txt"
