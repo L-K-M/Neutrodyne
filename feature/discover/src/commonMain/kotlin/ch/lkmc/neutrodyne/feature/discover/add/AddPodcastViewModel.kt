@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -214,13 +215,18 @@ public class AddPodcastViewModel(
     }
 
     /**
-     * The prefill's automatic resolve (03 implementation note 2026-11-02): a shared local
-     * address is never fetched without a tap — the user sees the URL and submits it. A typed
-     * local URL still resolves on that tap through [resolve].
+     * The prefill's automatic resolve (03 implementation note 2026-11-02): a shared or
+     * deep-linked URL is fetched only in the marked pre-confirmation mode — a peer the
+     * transport reports as local leaves the field waiting for the user's tap, which then
+     * resolves the address as an explicitly submitted one.
      */
     public fun autoResolve(input: String) {
         if (resolver.isLocalDestination(input)) return
-        resolve(input)
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return
+        if (trimmed == resolvedInput && mutableState.value.step !is AddSheetStep.Input) return
+        resolvedInput = trimmed
+        runResolve(waitingForTap = true) { resolver.resolveUnconfirmed(trimmed) }
     }
 
     /** The `AuthRequired` retry (03 Basic auth): the same input, now with credentials. */
@@ -320,7 +326,10 @@ public class AddPodcastViewModel(
         }
     }
 
-    private fun runResolve(block: suspend () -> AddResolution) {
+    private fun runResolve(
+        waitingForTap: Boolean = false,
+        block: suspend () -> AddResolution,
+    ) {
         resolveJob?.cancel()
         val generation = nextGeneration { it.copy(step = AddSheetStep.Resolving) }
         resolveJob =
@@ -328,13 +337,14 @@ public class AddPodcastViewModel(
                 val resolution = block()
                 // A result of a superseded resolve is dropped: a newer operation owns the step.
                 ensureActive()
-                apply(generation, resolution)
+                apply(generation, resolution, waitingForTap)
             }
     }
 
     private fun apply(
         generation: Int,
         resolution: AddResolution,
+        waitingForTap: Boolean,
     ) {
         mutableState.update { state ->
             if (state.operationGeneration != generation) return@update state
@@ -354,11 +364,20 @@ public class AddPodcastViewModel(
                         }
 
                         is AddResolution.Failure -> {
-                            AddSheetStep.Input(
-                                error = AddPodcastText.describe(resolution.error),
-                                auth = resolution.error is AddPodcastError.AuthRequired,
-                                searchQuery = (resolution.error as? AddPodcastError.NotAUrl)?.query,
-                            )
+                            if (waitingForTap &&
+                                resolution.error ==
+                                AddPodcastError.Network(NetError.LocalNetworkUnsupported)
+                            ) {
+                                // The peer turned out local (03 note 2026-11-02): no error —
+                                // the field keeps the URL and the tap resolves it for real.
+                                AddSheetStep.Input()
+                            } else {
+                                AddSheetStep.Input(
+                                    error = AddPodcastText.describe(resolution.error),
+                                    auth = resolution.error is AddPodcastError.AuthRequired,
+                                    searchQuery = (resolution.error as? AddPodcastError.NotAUrl)?.query,
+                                )
+                            }
                         }
                     },
             )

@@ -16,6 +16,14 @@ interface AddPodcastResolver {
     /** Canonical entry: every entry point ends here; a `Choose` pick calls `resolve(candidate.url)`. */
     suspend fun resolve(input: String): AddResolution
 
+    /**
+     * The prefill/deep-link resolve (03 note 2026-11-02): the URL was never typed or tapped, so
+     * every request is marked pre-confirmation — the transport refuses a local peer at any hop,
+     * including the first. `Network(NetError.LocalNetworkUnsupported)` is the "wait for the
+     * user's tap" answer; the tap then calls [resolve].
+     */
+    suspend fun resolveUnconfirmed(input: String): AddResolution
+
     /** The retry after [AddPodcastError.AuthRequired] with the credentials the user typed. */
     suspend fun resolve(
         input: String,
