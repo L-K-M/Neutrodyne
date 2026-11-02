@@ -185,7 +185,7 @@ internal class TransferRig(
     val clock = TestClock(nowMs = 1_000_000)
     val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
     val hasher = PlatformSriHasher(roots, faults)
-    val verification = DownloadFiles(files, roots, hasher, PlatformLocalUris())
+    val verification = DownloadFiles(files, roots, hasher, PlatformLocalUris(), DeferredDeletes(JournalTestStore(), files, roots, { emptyList() }))
     var source =
         DownloadSourceRow(
             1,

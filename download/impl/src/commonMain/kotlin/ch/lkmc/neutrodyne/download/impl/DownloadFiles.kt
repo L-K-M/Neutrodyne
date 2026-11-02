@@ -13,6 +13,7 @@ internal class DownloadFiles(
     private val roots: StorageRoots,
     private val hasher: SriHasher,
     private val uris: LocalUris,
+    private val deletes: DeferredDeletes,
 ) {
     suspend fun verify(
         part: PartFile,
@@ -42,9 +43,14 @@ internal class DownloadFiles(
         if ((files.stat(row.rootId, row.tempPath ?: DownloadPaths.part(row.episodeId))?.bytes ?: 0) > 0) return null
         val folder = files.list(row.rootId, "").filter { it.directory && it.path.endsWith(" [p${source.podcastId}]") }
         val suffix = Regex(".* \\[e${row.episodeId}\\]\\.[a-z0-9]+")
+        val deferred = deferredPaths(row.rootId)
         for (directory in folder) {
             for (candidate in files.list(row.rootId, directory.path)) {
-                if (candidate.directory || candidate.bytes != total || !suffix.matches(candidate.path)) continue
+                if (candidate.directory || candidate.bytes != total || !suffix.matches(candidate.path) ||
+                    candidate.path in deferred
+                ) {
+                    continue
+                }
                 val part = files.openPart(row.rootId, candidate.path)
                 val verified =
                     try {
@@ -74,24 +80,45 @@ internal class DownloadFiles(
     ): Prepared.Adopted {
         val root = roots.resolve(part.rootId) ?: throw IOException("Download root unavailable")
         val head = head(part)
-        val path =
-            DownloadPaths.finalPath(
-                files,
-                root,
-                source.podcastId,
-                source.podcastTitle,
-                source.episodeId,
-                source.title,
-                localDate(source.sortDate),
-                MediaSniffer.extension(complete.media, head, complete.mimeType, plan.originalUrl, source.isVideo),
-                platform,
-            )
+        val extension =
+            MediaSniffer.extension(complete.media, head, complete.mimeType, plan.originalUrl, source.isVideo)
+        var ordinal = 1
+        var path = finalPath(root, source, source.title, extension, platform)
+        // A journaled destination is still deferred for the pinned rendition: the new file
+        // takes a decorated name so a reader of the old URI keeps the old bytes.
+        val deferred = deferredPaths(part.rootId)
+        while (path in deferred) {
+            ordinal += 1
+            path = finalPath(root, source, "($ordinal) ${source.title}", extension, platform)
+        }
         files.createDirectories(part.rootId, path.substringBeforeLast('/'))
         part.sync()
         part.close()
         files.atomicMove(part.rootId, part.path, path)
         return Prepared.Adopted(complete, path, uris.fileUri("${root.absolutePath}/$path"))
     }
+
+    private suspend fun finalPath(
+        root: ResolvedRoot,
+        source: DownloadSourceRow,
+        title: String,
+        extension: String,
+        platform: PathPlatform,
+    ): String =
+        DownloadPaths.finalPath(
+            files,
+            root,
+            source.podcastId,
+            source.podcastTitle,
+            source.episodeId,
+            title,
+            localDate(source.sortDate),
+            extension,
+            platform,
+        )
+
+    private suspend fun deferredPaths(rootId: String): Set<String> =
+        deletes.entries().filter { it.rootId == rootId }.mapTo(mutableSetOf()) { it.path }
 
     private suspend fun head(part: PartFile): ByteArray {
         val buffer = ByteArray(MediaSniffer.HEAD_BYTES)

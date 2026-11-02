@@ -159,6 +159,7 @@ class UidtSlotBlockedDrainTest {
                         roots,
                         PlatformSriHasher(roots, FileSystem.SYSTEM),
                         PlatformLocalUris(),
+                        deletes,
                     ),
                     object : DownloadControllerFiles {
                         override suspend fun prepareRemoval(rows: List<DownloadEntity>) = Unit

@@ -72,8 +72,8 @@ internal class DownloadComponents(
     val claimMutex = Mutex()
     private val fileSystem = OkioDownloadFileSystem(roots)
     private val uris = PlatformLocalUris()
-    private val verification = DownloadFiles(fileSystem, roots, PlatformSriHasher(roots), uris)
     val deletes = DeferredDeletes(device, fileSystem, roots, db.downloadDao()::allRows)
+    private val verification = DownloadFiles(fileSystem, roots, PlatformSriHasher(roots), uris, deletes)
     val reconciler = DownloadReconciler(db, fileSystem, roots, uris, index, deletes, claimMutex, host.liveTokens, clock)
     private val storage =
         DownloadStorage(
