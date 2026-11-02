@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.DirectoryAccess
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
+import ch.lkmc.neutrodyne.core.model.FeedCandidateSource
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.PreviewEpisode
@@ -36,10 +37,12 @@ import ch.lkmc.neutrodyne.core.model.ProviderId
 import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
 import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
+import ch.lkmc.neutrodyne.feeds.discovery.DiscoverySource
 import ch.lkmc.neutrodyne.feeds.discovery.HostAction
 import ch.lkmc.neutrodyne.feeds.discovery.HostRecognizer
 import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
+import ch.lkmc.neutrodyne.feeds.identity.LocalDestination
 import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.identity.PrivateFeedUrls
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
@@ -127,6 +130,10 @@ internal class AddPodcastResolverImpl(
             }
         }
 
+    override fun isLocalDestination(input: String): Boolean =
+        (AddInputNormalizer.normalize(input) as? NormalizedInput.Url)
+            ?.let { LocalDestination.isLocal(it.url) } == true
+
     private suspend fun resolveInner(
         input: String,
         credentials: BasicCredentials?,
@@ -167,7 +174,11 @@ internal class AddPodcastResolverImpl(
                             entry.meta.permanentUrl ?: entry.meta.requestedUrl,
                             entry.feed.title,
                             entry.feed.items.size,
-                            source,
+                            when (source) {
+                                DiscoverySource.ALTERNATE_LINK -> FeedCandidateSource.ALTERNATE_LINK
+                                DiscoverySource.APPLE_ANCHOR -> FeedCandidateSource.APPLE_ANCHOR
+                                DiscoverySource.SAME_SITE_ANCHOR -> FeedCandidateSource.SAME_SITE_ANCHOR
+                            },
                         )
                     },
                 )
@@ -628,7 +639,7 @@ internal class AddPodcastResolverImpl(
                                     DirectoryAccess.ENABLED_ONLY,
                                     DiscoveryMode.VERIFY,
                                 ) to
-                                    candidate.source.name
+                                    candidate.source
                             }
                         }
                     }.awaitAll()
@@ -694,7 +705,7 @@ internal class AddPodcastResolverImpl(
 
     private sealed interface PreviewOutcome {
         data class Choices(
-            val entries: List<Pair<PreviewEntry, String>>,
+            val entries: List<Pair<PreviewEntry, DiscoverySource>>,
         ) : PreviewOutcome
 
         data class Consent(

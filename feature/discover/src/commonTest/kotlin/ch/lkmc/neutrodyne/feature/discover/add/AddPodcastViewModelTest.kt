@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
+import ch.lkmc.neutrodyne.core.model.FeedCandidateSource
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
@@ -161,7 +162,7 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
     @Test
     fun chooseListsCandidates() =
         runTest {
-            val candidates = listOf(FeedCandidate("https://a/feed", "A", 10, "html"))
+            val candidates = listOf(FeedCandidate("https://a/feed", "A", 10, FeedCandidateSource.ALTERNATE_LINK))
             resolver.nextResolution = AddResolution.Choose(candidates)
             viewModel.resolve("https://a")
             advanceUntilIdle()

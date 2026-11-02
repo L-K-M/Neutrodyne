@@ -107,6 +107,7 @@ internal fun AddPodcastSheet(
     initialInput: String?,
     state: AddPodcastUiState,
     onResolve: (String) -> Unit,
+    onAutoResolve: (String) -> Unit = onResolve,
     onCredentials: (BasicCredentials) -> Unit,
     onCancelResolve: () -> Unit,
     onSearch: (String) -> Unit = {},
@@ -138,10 +139,10 @@ internal fun AddPodcastSheet(
     val focusRequester = remember { FocusRequester() }
 
     // A pre-filled input (deep link, restored field) resolves at once; the VM dedupes remounts.
-    val currentOnResolve by rememberUpdatedState(onResolve)
+    val currentOnAutoResolve by rememberUpdatedState(onAutoResolve)
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
-        if (input.isNotBlank()) currentOnResolve(input)
+        if (input.isNotBlank()) currentOnAutoResolve(input)
     }
 
     val step = state.step
