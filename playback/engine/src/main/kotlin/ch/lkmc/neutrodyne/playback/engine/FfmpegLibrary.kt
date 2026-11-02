@@ -396,7 +396,9 @@ class FfmpegLibrary
                 val arena = Arena.ofShared()
                 val lookups =
                     layout.libraries.entries
-                        .sortedBy { (name) -> LOAD_ORDER.indexOf(name).let { i -> if (i < 0) LOAD_ORDER.size else i } }
+                        .sortedBy { entry ->
+                            LOAD_ORDER.indexOf(entry.key).let { i -> if (i < 0) LOAD_ORDER.size else i }
+                        }
                         .associate { (name, major) ->
                         name to
                             SymbolLookup.libraryLookup(

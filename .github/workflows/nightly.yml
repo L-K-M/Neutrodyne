@@ -786,12 +786,18 @@ jobs:
         run: |
           ./gradlew :playback:native:buildFfmpeg :playback:native:buildNdmedia \
             :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+      # On Linux the MPRIS test connects to the private session bus
+      # dbus-run-session provides; the runner owns the daemon because test
+      # code may not spawn processes (01 banned-API rule 17).
       - name: Desktop engine tests on this host
         shell: bash
         run: |
-          ./gradlew :playback:engine:test :playback:engine:ffmpegTest \
-            :playback:native:test :desktop:system:test
+          tests="./gradlew :playback:engine:test :playback:engine:ffmpegTest \
+            :playback:native:test :desktop:system:test"
+          [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
+          $tests
       - name: Collect the licence evidence
+        if: always()
         shell: bash
         run: |
           mkdir -p native-evidence

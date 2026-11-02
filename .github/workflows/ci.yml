@@ -413,8 +413,10 @@ jobs:
           $tests
       # The measured evidence MD0 records per target: stripped sizes, the licence
       # string, the protocol inventory, the enabled components and the build's
-      # own configure line and toolchain.
+      # own configure line and toolchain. It exists even when the tests failed,
+      # which is when the evidence matters most, so it is collected either way.
       - name: Collect the licence evidence
+        if: always()
         shell: bash
         run: |
           mkdir -p native-evidence
