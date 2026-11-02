@@ -36,8 +36,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 internal fun PlayerNotes(
     episodeId: Long,
     durationMs: Long?,
-    vm: PlayerEpisodeViewModel = metroViewModel(),
     onLink: (String) -> Unit,
+    onTimestamp: (Long) -> Unit,
+    vm: PlayerEpisodeViewModel = metroViewModel(),
 ) {
     LaunchedEffect(episodeId) { vm.showNotes(episodeId) }
     DisposableEffect(vm, episodeId) { onDispose { vm.showNotes(null) } }
@@ -75,8 +76,7 @@ internal fun PlayerNotes(
                                 },
                             durationMs = durationMs,
                             onLink = onLink,
-                            // Timestamp seeking arrives with M5, as on Episode detail.
-                            onTimestamp = {},
+                            onTimestamp = onTimestamp,
                             onLoadImages = { imagesRevealed = true },
                         )
                     }

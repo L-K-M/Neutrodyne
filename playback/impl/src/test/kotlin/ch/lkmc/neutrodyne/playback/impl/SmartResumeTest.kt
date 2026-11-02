@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Test
@@ -129,21 +130,29 @@ class SmartResumeTest {
                 f.sessions.commitStart(SessionStart(ids[0], null, ContextRetention.REPLACE, null, null), f.clock.now())
                 f.queue.addLast(ids.drop(1))
                 f.attach()
-                awaitAdapter { f.player.episodeIdOrNull() == ids[0] && f.player.currentPosition == 75_000L }
+
+                // This test failed twice on CI at different awaits; each one reports which hop stalled.
+                fun arrived(target: Long) =
+                    runBlocking {
+                        val saved = f.db.positionDao().byEpisode(target)
+                        val state = f.db.episodeStateDao().byEpisode(target)
+                        val session = f.sessions.virtualQueue(0).current
+                        "id=${f.player.episodeIdOrNull()} position=${f.player.currentPosition} session=$session " +
+                            "policy=${f.resumePolicy} clock=${f.clock.now()} seeks=${f.player.seeks} " +
+                            "calls=${f.player.calls} failures=${f.failures} saved=$saved state=$state"
+                    }
+                awaitAdapter(diagnostics = { arrived(ids[0]) }) {
+                    f.player.episodeIdOrNull() == ids[0] && f.player.currentPosition == 75_000L
+                }
                 f.resumePolicy = SmartResumePolicy.DISABLED
                 f.player.seekToNextMediaItem()
-                awaitAdapter { f.player.episodeIdOrNull() == ids[1] && f.player.currentPosition == 80_000L }
+                awaitAdapter(diagnostics = { arrived(ids[1]) }) {
+                    f.player.episodeIdOrNull() == ids[1] && f.player.currentPosition == 80_000L
+                }
                 f.resumePolicy = SmartResumePolicy.ENABLED
                 f.player.seekToNextMediaItem()
-                try {
-                    awaitAdapter(diagnostics = {
-                        "id=${f.player.episodeIdOrNull()} position=${f.player.currentPosition} " +
-                            "policy=${f.resumePolicy} clock=${f.clock.now()} calls=${f.player.calls} failures=${f.failures}"
-                    }) { f.player.episodeIdOrNull() == ids[2] && f.player.currentPosition == 75_000L }
-                } catch (failure: AssertionError) {
-                    val saved = f.db.positionDao().byEpisode(ids[2])
-                    val state = f.db.episodeStateDao().byEpisode(ids[2])
-                    throw AssertionError("${failure.message}; saved=$saved state=$state", failure)
+                awaitAdapter(diagnostics = { arrived(ids[2]) }) {
+                    f.player.episodeIdOrNull() == ids[2] && f.player.currentPosition == 75_000L
                 }
                 assertEquals(
                     80_000L,

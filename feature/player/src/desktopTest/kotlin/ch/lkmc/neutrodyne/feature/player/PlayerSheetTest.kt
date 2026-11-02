@@ -22,8 +22,10 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -54,12 +56,17 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.ContextType
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextInfo
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.UpNextItem
 import ch.lkmc.neutrodyne.core.navigation.PaneLayout
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
@@ -622,6 +629,61 @@ class PlayerSheetTest {
             runOnIdle { fixture.collapseToken++ }
             onNodeWithTag("mini_player").assertIsDisplayed()
         }
+
+    @Test fun chaptersStayHiddenUntilRowsExistAndThenSeek() =
+        runComposeUiTest {
+            val opening = EpisodeChapter(0, 30_000, "Opening", null, null, ChapterSource.PSC, false)
+            val interview = EpisodeChapter(30_000, 60_000, "Interview", null, null, ChapterSource.PSC, false)
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            setContent { fixture.Content() }
+            onNode(hasText("Up next (0)").and(hasAnyAncestor(hasTestTag("player_tabs_panel")))).performClick()
+            onAllNodes(hasText("Chapters (")).assertCountEquals(0)
+
+            runOnIdle {
+                fixture.chapters = listOf(opening, interview)
+                fixture.currentChapter = CurrentChapter(1, 1, 2, interview)
+            }
+            onNodeWithText("Chapters (2)").performClick()
+            onNodeWithText("Interview").assertIsSelected().performClick()
+            onNodeWithText("Opening").performClick()
+            assertEquals(listOf("chapter:30000", "chapter:0"), fixture.calls)
+
+            runOnIdle { fixture.chapters = emptyList() }
+            onAllNodes(hasText("Chapters (")).assertCountEquals(0)
+            onNode(hasText("Up next (0)").and(hasAnyAncestor(hasTestTag("player_tabs_panel")))).assertIsDisplayed()
+        }
+
+    @Test fun chapterStepsTakeTheTransportWhileEpisodeStepsMoveToTheMenu() =
+        runComposeUiTest {
+            val chapter = EpisodeChapter(0, 60_000, "Opening", null, null, ChapterSource.PSC, false)
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            fixture.chapters = listOf(chapter)
+            setContent {
+                fixture.Content(
+                    nextEpisode = { fixture.calls += "nextEpisode" },
+                    previousEpisode = { fixture.calls += "previousEpisode" },
+                )
+            }
+            onNodeWithContentDescription("Previous chapter").performClick()
+            onNodeWithContentDescription("Next chapter").performClick()
+            onNodeWithContentDescription("More options").performClick()
+            onNodeWithText("Previous episode").performClick()
+            onNodeWithContentDescription("More options").performClick()
+            onNodeWithText("Next episode").performClick()
+            assertEquals(
+                listOf("previous", "next", "previousEpisode", "nextEpisode"),
+                fixture.calls,
+            )
+        }
+
+    @Test fun sleepTimerShortcutNavigatesAndSurfacesTheLiveSummary() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            fixture.sleepTimer = SleepTimerState.Running(1_740_000, 1_800_000, true, false)
+            setContent { fixture.Content() }
+            onNodeWithText("29 min").performClick()
+            assertEquals(listOf<androidx.navigation3.runtime.NavKey>(SleepTimerKey), fixture.navigated)
+        }
 }
 
 private class SheetFixture(
@@ -629,6 +691,9 @@ private class SheetFixture(
 ) {
     val state = PlayerSheetState(initial)
     var now by mutableStateOf<NowPlaying?>(sampleNow())
+    var chapters by mutableStateOf<List<EpisodeChapter>>(emptyList())
+    var currentChapter by mutableStateOf<CurrentChapter?>(null)
+    var sleepTimer by mutableStateOf<SleepTimerState>(SleepTimerState.Off)
     var pending by mutableStateOf<PlayResult.NeedsMeteredConsent?>(null)
     var expandToken by mutableIntStateOf(0)
     var collapseToken by mutableIntStateOf(0)
@@ -655,6 +720,8 @@ private class SheetFixture(
         sheetState: PlayerSheetState = state,
         upNext: @androidx.compose.runtime.Composable () -> Unit = {},
         notes: @androidx.compose.runtime.Composable () -> Unit = {},
+        nextEpisode: () -> Unit = { calls += "next" },
+        previousEpisode: () -> Unit = { calls += "previous" },
     ) {
         NeutrodyneTheme(AppearancePrefs(), systemUi) {
             BoxWithConstraints {
@@ -669,6 +736,9 @@ private class SheetFixture(
                                         .MeteredConsent(it.episodeId)
                                 },
                             miniSkip = miniSkip,
+                            sleepTimer = sleepTimer,
+                            chapters = chapters,
+                            currentChapter = currentChapter,
                         ),
                     position = now?.position,
                     slot =
@@ -689,7 +759,10 @@ private class SheetFixture(
                     forward = { calls += "forward" },
                     previous = { calls += "previous" },
                     next = { calls += "next" },
+                    previousEpisode = previousEpisode,
+                    nextEpisode = nextEpisode,
                     seek = { calls += "seek:$it" },
+                    seekChapter = { calls += "chapter:$it" },
                     dismiss = { calls += "dismiss" },
                     stop = { calls += "stop" },
                     markPlayed = { calls += "markPlayed" },

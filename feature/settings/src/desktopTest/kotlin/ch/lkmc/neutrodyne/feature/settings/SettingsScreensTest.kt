@@ -134,6 +134,18 @@ class SettingsScreensTest {
             onNodeWithText("No licence information in this build.").assertIsDisplayed()
         }
 
+    @Test fun androidInstallHelpExplainsAutoAndCloses() =
+        runComposeUiTest {
+            setSettingsRoot(buildInfo = FakeBuildInfo.copy(platform = BuildInfo.Platform.ANDROID, desktop = null))
+            openSettings()
+            onAllNodesWithText("About").onFirst().performClick()
+            onNodeWithText("Install & updates").performScrollTo().performClick()
+            onNodeWithText("Unknown sources", substring = true).assertExists()
+            onNodeWithText("10 times", substring = true).assertExists()
+            onNodeWithText("Close").performClick()
+            onNodeWithText("Unknown sources", substring = true).assertDoesNotExist()
+        }
+
     @Test
     fun licencesDisclosesEngineAbiOnEngineFreeApk() =
         runComposeUiTest {

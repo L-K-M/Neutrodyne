@@ -83,6 +83,40 @@ class SleepTimerTest {
             }
         }
 
+    @Test fun endOfEpisodeBeforeTheSavedItemProjectsArmsWhenItLoads() =
+        runTest {
+            val exo = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+            val player = RecordingPlayer(exo)
+            var pausedAtBoundary = false
+            val arbiter = EndOfItemPauseArbiter { pausedAtBoundary = it }
+            var state: SleepTimerState = SleepTimerState.Off
+            val timer =
+                SleepTimer(player, arbiter, TestClock.from(testScheduler), backgroundScope, { state = it }, {})
+            try {
+                timer.attach()
+                timer.set(SleepTimerMode.EndOfEpisode)
+                assertEquals(SleepTimerState.Off, state)
+                assertFalse(pausedAtBoundary)
+
+                player.setMediaItem(
+                    MediaItem
+                        .Builder()
+                        .setMediaId("episode:1")
+                        .setUri("https://example.org/1")
+                        .build(),
+                )
+                timer.onMediaItemTransition(
+                    player.currentMediaItem,
+                    Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED,
+                )
+                assertEquals(SleepTimerState.EndOfEpisode(1), state)
+                assertTrue(pausedAtBoundary)
+            } finally {
+                timer.detach()
+                exo.release()
+            }
+        }
+
     @Test fun replacementOffAndDestructionRestoreAndKeepMeteredReason() =
         runTest {
             val exo = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()

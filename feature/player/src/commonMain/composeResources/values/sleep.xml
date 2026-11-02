@@ -1,0 +1,12 @@
+<resources>
+    <string name="sleep_title">Sleep timer</string>
+    <string name="sleep_minutes">%1$d min</string>
+    <string name="sleep_custom">Custom…</string>
+    <string name="sleep_range">Minutes (1–240)</string>
+    <string name="sleep_start">Start timer</string>
+    <string name="sleep_end">End of episode</string>
+    <string name="sleep_end_active">Stops at the end of this episode</string>
+    <string name="sleep_waiting">Waiting while paused</string>
+    <string name="sleep_extend">+%1$d min</string>
+    <string name="sleep_off">Turn off</string>
+</resources>

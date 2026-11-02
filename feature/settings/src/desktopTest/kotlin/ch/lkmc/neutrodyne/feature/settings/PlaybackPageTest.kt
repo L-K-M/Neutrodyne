@@ -104,6 +104,8 @@ class PlaybackPageTest {
     @Test fun hardwareChoiceAndSmartResumeWriteTypedKeys() =
         runComposeUiTest {
             val settings = FakeSettingsRepository()
+            // Smart resume defaults on; seeding it off makes the switch's typed write observable.
+            runBlocking { settings.set(PlaybackSettingKeys.SMART_RESUME, false) }
             val vm = PlaybackSettingsViewModel(settings, FakePlaybackMaintenance())
             setContent {
                 CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
@@ -118,9 +120,6 @@ class PlaybackPageTest {
                 runBlocking { settings.get(PlaybackSettingKeys.HARDWARE_BUTTONS) },
             )
             onNodeWithText("Smart resume").performScrollTo().performClick()
-            waitForIdle()
-            assertEquals(false, runBlocking { settings.get(PlaybackSettingKeys.SMART_RESUME) })
-            onNodeWithText("Smart resume").performClick()
             waitForIdle()
             assertEquals(true, runBlocking { settings.get(PlaybackSettingKeys.SMART_RESUME) })
         }
