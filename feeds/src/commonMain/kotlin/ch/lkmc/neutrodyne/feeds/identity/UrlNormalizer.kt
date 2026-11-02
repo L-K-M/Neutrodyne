@@ -239,7 +239,7 @@ public object UrlNormalizer {
     }
 
     /** Parses an IPv6 address into its eight 16-bit groups, or null when the grammar is violated. */
-    private fun parseIpv6Groups(address: String): IntArray? {
+    internal fun parseIpv6Groups(address: String): IntArray? {
         val dc = address.indexOf("::")
         if (dc >= 0 && address.indexOf("::", dc + 2) >= 0) return null // `::` may appear once
         val headText = if (dc < 0) address else address.substring(0, dc)

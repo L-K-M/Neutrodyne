@@ -90,6 +90,8 @@ kotlin {
             implementation(libs.okio)
             // TestSupport builds the island stack itself (Ktor's OkHttp engine).
             implementation(libs.ktor.client.okhttp)
+            // The add flow's local-destination tests record refused fetches in-process.
+            implementation(libs.ktor.client.mock)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.kotlinx.collections.immutable)
             implementation(libs.kotlinx.serialization.json)
