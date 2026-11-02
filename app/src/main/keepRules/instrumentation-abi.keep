@@ -389,7 +389,9 @@
 -keep class androidx.media3.session.legacy.MediaBrowserCompat$SubscriptionCallback {
   public <init>();
   public void onChildrenLoaded(java.lang.String, java.util.List);
+  public void onChildrenLoaded(java.lang.String, java.util.List, android.os.Bundle);
   public void onError(java.lang.String);
+  public void onError(java.lang.String, android.os.Bundle);
 }
 -keep class androidx.media3.session.legacy.MediaBrowserCompat {
   public <init>(android.content.Context, android.content.ComponentName, androidx.media3.session.legacy.MediaBrowserCompat$ConnectionCallback, android.os.Bundle);
