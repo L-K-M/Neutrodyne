@@ -45,7 +45,12 @@ kotlin {
             implementation(libs.jna)
             implementation(libs.jna.platform)
         }
+        // The same socket-level transport suite exercises both actual island wrappers.
+        findByName("androidHostTest")?.kotlin?.srcDir("src/jvmTest/kotlin")
+        getByName("desktopTest").kotlin.srcDir("src/jvmTest/kotlin")
         findByName("androidHostTest")?.dependencies {
+            implementation(libs.okhttp.mockwebserver3)
+            implementation(libs.okhttp.tls)
             implementation(libs.robolectric)
             implementation(libs.junit4)
             implementation(libs.truth)
@@ -65,6 +70,7 @@ kotlin {
         // Wiring DataStoreBindings' providers in desktopTest mentions the DataStore type
         // (implementation deps of :core:datastore are otherwise invisible here).
         desktopTest.dependencies {
+            implementation(libs.okhttp.tls)
             implementation(libs.androidx.datastore.preferences.core)
             implementation(libs.androidx.paging.testing)
             implementation(libs.okhttp.mockwebserver3)

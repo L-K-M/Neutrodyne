@@ -74,6 +74,7 @@ class SmokeTest {
     fun settingsOpensAndBackReturnsToTheTab() {
         compose.enableAccessibilityChecks()
         openSettings()
+        clearSystemErrorDialogs()
 
         try {
             pressBack()
@@ -134,6 +135,17 @@ class SmokeTest {
         }
         compose.onAllNodesWithContentDescription(text(Res.string.settings)).onFirst().performClick()
         compose.waitForIdle()
+    }
+
+    /**
+     * Espresso waits for window focus, and an emulator's System UI ANR dialog from boot holds it
+     * (nightly release smoke, #262). With dialogs hidden the system kills an unresponsive process
+     * instead, so this app's own ANR still fails the test.
+     */
+    private fun clearSystemErrorDialogs() {
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        device.executeShellCommand("settings put global hide_error_dialogs 1")
+        device.executeShellCommand("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS")
     }
 
     private fun recordWindowFocus() {
