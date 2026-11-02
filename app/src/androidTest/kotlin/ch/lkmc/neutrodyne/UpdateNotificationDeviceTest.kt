@@ -26,11 +26,18 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assume.assumeTrue
+import org.junit.FixMethodOrder
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
 
-/** Run on API26/API37 with notification permission both granted and denied. No SystemUI needed. */
+/**
+ * Run on API26/API37 with notification permission both granted and denied. No SystemUI needed.
+ * Name order runs the denied leg first: granting is permanent for the process, because revoking a
+ * runtime permission kills the app the test runs in.
+ */
 @RunWith(AndroidJUnit4::class)
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class UpdateNotificationDeviceTest {
     private val application =
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
@@ -64,13 +71,17 @@ class UpdateNotificationDeviceTest {
 
     @Test fun notificationTapAndActionDispatchTheProtectedUpdatesRoutes() =
         runBlocking {
-            // The denied-state leg above runs without granting a permission from background work.
+            // Managed devices deny the permission by default, so this leg grants it as the user would;
+            // the app itself never requests it from background work.
             val permission = Manifest.permission.POST_NOTIFICATIONS
-            assumeTrue(
-                Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                    application.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED,
-            )
-            assumeTrue(manager.areNotificationsEnabled())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                InstrumentationRegistry
+                    .getInstrumentation()
+                    .uiAutomation
+                    .grantRuntimePermission(application.packageName, permission)
+                assertThat(application.checkSelfPermission(permission)).isEqualTo(PackageManager.PERMISSION_GRANTED)
+            }
+            assertThat(manager.areNotificationsEnabled()).isTrue()
             assertThat(adapter.post(info)).isEqualTo(UpdatePostResult.ACCEPTED)
             val notification = manager.activeNotifications.single { it.id == UPDATE_ID }.notification
             val actions =
