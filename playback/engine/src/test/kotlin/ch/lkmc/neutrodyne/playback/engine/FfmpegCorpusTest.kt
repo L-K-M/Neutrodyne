@@ -118,6 +118,35 @@ class FfmpegCorpusTest {
     }
 
     @Test
+    fun `seeks between frame boundaries stay within the accuracy budget`() {
+        for (entry in readManifest().files) {
+            FfmpegPipeline.open(MemoryByteSource(corpusFile(entry.file).readBytes()), hostFfmpegDirectory()).use { pipeline ->
+                for (target in listOf(37L, 113L, 257L, 809L)) {
+                    val actual = pipeline.seekAndDecode(target)
+                    assertTrue(
+                        "${entry.file}: seek $target returned $actual",
+                        abs(actual - target) <= SEEK_TOLERANCE_MS,
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `seeking to zero applies container priming again`() {
+        for (entry in readManifest().files) {
+            FfmpegPipeline.open(MemoryByteSource(corpusFile(entry.file).readBytes()), hostFfmpegDirectory()).use { pipeline ->
+                pipeline.decodeAll()
+                pipeline.demuxer.seekTo(0)
+                pipeline.decoder.flushBuffers()
+                pipeline.decoder.discardPendingSamples()
+                val decoded = pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels }
+                assertEquals("${entry.file}: seek-to-zero changed the decoded sample count", entry.expectedSamples, decoded)
+            }
+        }
+    }
+
+    @Test
     fun `a corrupt packet reports a decode failure instead of being skipped`() {
         val bytes = corpusFile("flac_2s.flac").readBytes()
         FfmpegPipeline.open(MemoryByteSource(bytes), hostFfmpegDirectory()).use { pipeline ->
