@@ -140,9 +140,11 @@ class AvioBridge
             descriptor: FunctionDescriptor,
         ): MemorySegment {
             val lookup = MethodHandles.lookup()
-            val parameters = descriptor.argumentLayouts().map(::carrier).toTypedArray()
+            // The List overload of methodType: spreading an array into the Java
+            // vararg does not resolve from Kotlin.
             val returnType = carrier(descriptor.returnLayout().get())
-            val target: MethodHandle = lookup.bind(this, name, MethodType.methodType(returnType, *parameters))
+            val parameters = descriptor.argumentLayouts().map(::carrier)
+            val target: MethodHandle = lookup.bind(this, name, MethodType.methodType(returnType, parameters))
             return LINKER.upcallStub(target, descriptor, arena)
         }
 

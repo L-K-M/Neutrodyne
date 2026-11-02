@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.playback.engine
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Path
+import kotlin.io.path.isRegularFile
 import kotlin.io.path.readText
 
 /**
