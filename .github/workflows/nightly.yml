@@ -945,8 +945,8 @@ jobs:
           cache-read-only: true
       - name: Enable KVM
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
-          sudo udevadm trigger --name-match=kvm || true
+          # Apply access to the existing node; udev alone left it inaccessible.
+          sudo chmod a+rw /dev/kvm
       - name: Build release and seed APKs before boot
         run: ./gradlew --max-workers=2 -PtestBuildType=release :app:assembleRelease :app:assembleReleaseAndroidTest
       - name: Inspect backup transport with completed internal and external media
