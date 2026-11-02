@@ -59,6 +59,8 @@ class FfAudioEngine(
 
     val outputDescription: String? get() = output?.describe()
 
+    val framesPlayed: Long get() = output?.framesPlayed ?: 0
+
     val underrunFrames: Long get() = output?.underrunFrames ?: 0
 
     fun play(

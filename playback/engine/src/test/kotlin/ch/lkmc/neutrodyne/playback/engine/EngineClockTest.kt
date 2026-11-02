@@ -2,6 +2,10 @@
 package ch.lkmc.neutrodyne.playback.engine
 
 import org.junit.Assume.assumeTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.int
 import java.nio.file.Path
 import kotlin.math.abs
 import kotlin.test.Test
@@ -32,6 +36,30 @@ class EngineClockTest {
                     error <= MAX_ERROR_MS,
                     "${speed}x: clock position ${position}ms is ${error}ms off the media end",
                 )
+            }
+        }
+    }
+
+    @Test
+    fun liveClockMatchesConsumedPcmBeforeTheEndAssignment() {
+        val ffmpeg = requireNotNull(ffmpegDir()) { "FFmpeg build required" }
+        val ndmedia = requireNotNull(ndmediaDir()) { "ndmedia build required" }
+        for (speed in SPEEDS) {
+            FfAudioEngine(ffmpeg, ndmedia, "null", RATE).use { engine ->
+                engine.play(mediaDir().resolve("wav_2s.wav"), speed, true)
+                val deadline = System.nanoTime() + 5_000_000_000L
+                while (engine.outputDescription == null && System.nanoTime() < deadline) Thread.sleep(5)
+                val description = Json.parseToJsonElement(requireNotNull(engine.outputDescription)).jsonObject
+                val period = requireNotNull(description["period"]).jsonPrimitive.int
+                repeat(3) {
+                    Thread.sleep(100)
+                    engine.pause()
+                    assertTrue(!engine.isEnded, "a live clock sample must precede the end assignment")
+                    val reference = ((engine.framesPlayed - period).coerceAtLeast(0) * speed * 1000 / RATE).toLong()
+                    val error = abs(engine.positionMs() - reference)
+                    assertTrue(error <= MAX_ERROR_MS, "${speed}x: live error=$error ms, reference=$reference ms")
+                    engine.resume()
+                }
             }
         }
     }
