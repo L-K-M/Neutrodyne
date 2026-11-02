@@ -193,6 +193,21 @@ class UpdateNoticesTest {
             assertNull(notices.writeError.value)
         }
 
+    @Test fun aRetryClearsTheOldErrorBeforeItsWriteFinishes() =
+        runTest {
+            val settings = FakeSettingsRepository()
+            val notices = notices(settings)
+            runCurrent()
+            settings.failNextSet = SettingsError.WriteFailed
+            notices.dismiss(Notice.FIRST_RUN_CHOICE)
+            runCurrent()
+            assertEquals(SettingsError.WriteFailed, notices.writeError.value)
+
+            // A waiter must not read the old failure as this retry's result.
+            notices.dismiss(Notice.FIRST_RUN_CHOICE)
+            assertNull(notices.writeError.value)
+        }
+
     @Test fun failedVerificationDismissalDoesNotClaimShown() =
         runTest {
             val settings = FakeSettingsRepository().also { it.set(Keys.FIRST_RUN_CHOICE_DONE, true) }

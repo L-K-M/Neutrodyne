@@ -232,6 +232,22 @@ class GitHubUpdateSourceTest {
             assertEquals(listOf("github.com"), hosts.distinct())
         }
 
+    @Test fun githubHopsStayOnThisRepositorysManifestPaths() =
+        runBlocking {
+            listOf(
+                // A valid manifest from another repository would otherwise pass the parser.
+                "https://github.com/other/project/releases/download/v1.0.0/neutrodyne-update.json",
+                "$UPDATE_REPO/releases/download/v1.0.0/other-asset.json",
+                "$UPDATE_REPO/raw/main/neutrodyne-update.json",
+                "$UPDATE_REPO/releases/download/neutrodyne-update.json",
+            ).forEach { target ->
+                server.enqueue(redirect(target))
+                val before = server.requestCount
+                assertError(CheckError.MANIFEST_INVALID)
+                assertEquals(before + 1, server.requestCount)
+            }
+        }
+
     @Test fun redirectLoopsAreBoundedAndClassifiedInvalid() {
         repeat(6) { server.enqueue(redirect("$UPDATE_REPO/releases/download/v1.0.0/neutrodyne-update.json")) }
         assertError(CheckError.MANIFEST_INVALID)
