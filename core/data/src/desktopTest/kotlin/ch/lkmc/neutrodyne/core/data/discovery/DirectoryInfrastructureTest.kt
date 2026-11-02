@@ -153,6 +153,20 @@ class DirectoryInfrastructureTest {
         assertEquals(listOf(apple, fyyd, pi), fuseDirectoryHits(answers, setOf(pi.feedUrl)))
     }
 
+    @Test fun hitsWithoutIdentityNeverMerge() {
+        val apple = hit("ftp://a.example/feed", ProviderId.APPLE, 1)
+        val fyyd = hit("ftp://b.example/feed", ProviderId.FYYD, 1)
+        assertEquals(
+            listOf(apple, fyyd),
+            fuseDirectoryHits(
+                mapOf(
+                    ProviderId.APPLE to persistentListOf(apple),
+                    ProviderId.FYYD to persistentListOf(fyyd),
+                ),
+            ),
+        )
+    }
+
     @Test fun unsafeQueriesAndUrlsAreRejectedAtTheBoundary() {
         for (query in listOf(
             "",

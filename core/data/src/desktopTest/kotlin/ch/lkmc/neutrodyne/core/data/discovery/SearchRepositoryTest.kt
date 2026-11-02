@@ -35,6 +35,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.assertSearchContract
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -310,6 +311,57 @@ class SearchRepositoryTest {
             val fallbackProvider = repo.observeProviders().first().first { it.id == ProviderId.PODCAST_INDEX }
             val fallback = fallbackProvider.keySource
             assertEquals(DirectoryKeySource.BUILD, fallback)
+        }
+
+    @Test fun disabledFyydNeverSendsAQuery() =
+        runBlocking {
+            prefs.set(Keys.FYYD_ENABLED, false)
+            val fyyd = FyydSearchProvider(DirectoryHttp(clients), settings, clock)
+            val config = settings.current()
+            assertFalse(config.fyyd)
+            assertEquals(
+                Outcome.Failure(ProviderStatus.Disabled),
+                fyyd.search("news", config),
+            )
+            assertEquals(0, server.requestCount)
+        }
+
+    @Test fun providerThrowKeepsPartialResultsAndPerProviderStatus() =
+        runBlocking {
+            val throwing =
+                object : AppleDirectoryClient {
+                    override suspend fun search(
+                        query: String,
+                        country: String,
+                    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = throw IOException("boom")
+
+                    override suspend fun lookup(
+                        ids: ImmutableList<String>,
+                        access: DirectoryAccess,
+                    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> =
+                        Outcome.Failure(ProviderStatus.Disabled)
+
+                    override suspend fun charts(
+                        genre: ChartGenre?,
+                        country: String,
+                    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> =
+                        Outcome.Failure(ProviderStatus.Disabled)
+                }
+            val service =
+                SearchRepositoryImpl(
+                    throwing,
+                    FyydSearchProvider(DirectoryHttp(clients), settings, clock),
+                    pi,
+                    settings,
+                    metadata,
+                    { secrets },
+                    { db },
+                    Dispatchers.Default,
+                )
+            val last = service.search("news").assertSearchContract("news").last()
+            assertIs<ProviderStatus.Failed>(last.statuses[ProviderId.APPLE])
+            assertEquals(ProviderStatus.Ok, last.statuses[ProviderId.FYYD])
+            assertTrue(last.hits.isNotEmpty())
         }
 
     @Test fun fixedClockAuthAndSingleSkewRetryNeverUseBasicAuth() =
