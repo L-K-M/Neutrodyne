@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
@@ -23,6 +24,7 @@ public object PodcastNavigation {
     @IntoSet
     public fun entries(): EntryProviderInstaller =
         {
+            entry<PodcastPreviewKey>(metadata = NdSceneMetadata.paneDetail()) { key -> PodcastPreviewRoute(key) }
             entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key -> PodcastRoute(key) }
             entry<PodcastSettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
                 PodcastSettingsRoute(key)
