@@ -107,7 +107,7 @@ jobs:
       # run on every nightly GMD (PLAN M7 AC4, AC7, AC8, AC10).
       - name: Require discovery cases on the nightly devices
         if: inputs.scope != 'youtube-smoke'
-        run: python3 scripts/ci/assert-discovery-tests.py nightly app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
       # TODO (M6b): release leg — :benchmark's out-of-process release smoke
       # journeys and E10's companions against :app release on api36 (09).
       - name: Report failure
@@ -227,7 +227,7 @@ jobs:
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
             python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            python3 scripts/ci/assert-discovery-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -272,7 +272,7 @@ jobs:
             # AGP uninstalls both APKs after a connected run; the reboot driver below needs them.
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true :app:connectedReleaseAndroidTest
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
-            python3 scripts/ci/assert-discovery-tests.py api37 app/build/outputs/androidTest-results/connected/release --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected
             # M5 W9: host-driven reboot evidence on the installed release app; the
             # instrumentation process exits before the host reboots the guest. Dispatch-only
             # (scope reboot) while this image's System UI builds no card after reboot (09).
@@ -364,7 +364,7 @@ jobs:
       - name: Require real release playback smoke
         run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36 --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
       - name: Require discovery cases in the release smoke
-        run: python3 scripts/ci/assert-discovery-tests.py release app/build/outputs/androidTest-results --device api36
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
