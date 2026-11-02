@@ -9,7 +9,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -79,6 +78,10 @@ import kotlin.test.assertTrue
 class DiscoveryPrivacyJourneyTest {
     @Test fun addSearchWaitsForItsRecipientsAndDirectoryKeepsThem() = journey(Entry.DISCLOSURE)
 
+    @Test fun directoryLocalPreviewDoesNotConnect() = journey(Entry.LOCAL_PREVIEW)
+
+    @Test fun directoryPreviewCannotRedirectToLocal() = journey(Entry.LOCAL_REDIRECT_PREVIEW)
+
     @Test fun encodedShareWaitsForTap() = journey(Entry.ENCODED_SHARE)
 
     @Test fun idnaShareWaitsForTap() = journey(Entry.IDNA_SHARE)
@@ -134,7 +137,8 @@ class DiscoveryPrivacyJourneyTest {
             SingletonImageLoader.setUnsafe { loader }
             var showing by mutableStateOf(true)
             try {
-                MockWebServer().use { server ->
+                val serverConnections = ConnectionCountingSocketFactory()
+                MockWebServer().apply { serverSocketFactory = serverConnections }.use { server ->
                     val lanConnections = ConnectionCountingSocketFactory()
                     MockWebServer().apply { serverSocketFactory = lanConnections }.use { lan ->
                         server.start()
@@ -155,7 +159,7 @@ class DiscoveryPrivacyJourneyTest {
                         server.dispatcher =
                             object : Dispatcher() {
                                 override fun dispatch(request: RecordedRequest): MockResponse =
-                                    if (request.target == "/redirect-art") {
+                                    if (entry == Entry.LOCAL_REDIRECT_PREVIEW || request.target == "/redirect-art") {
                                         MockResponse
                                             .Builder()
                                             .code(302)
@@ -167,9 +171,14 @@ class DiscoveryPrivacyJourneyTest {
                             }
                         val hit =
                             DirectoryHit(
-                                publicFeed,
+                                if (entry == Entry.LOCAL_PREVIEW) lan.url("/feed.xml").toString() else publicFeed,
                                 "Directory show",
-                                artworkUrl = if (entry == Entry.PREVIEW_ART) null else localArt,
+                                artworkUrl =
+                                    if (entry in listOf(Entry.PREVIEW_ART, Entry.LOCAL_PREVIEW, Entry.LOCAL_REDIRECT_PREVIEW)) {
+                                        null
+                                    } else {
+                                        localArt
+                                    },
                                 providers = persistentSetOf(ProviderId.APPLE),
                             )
                         search.searchAnswer = { query ->
@@ -182,12 +191,13 @@ class DiscoveryPrivacyJourneyTest {
                                 ),
                             )
                         }
-                        search.chartAnswer = Outcome.Success(persistentListOf(hit))
+                        search.chartAnswer =
+                            Outcome.Success(if (entry == Entry.CHART_ART) persistentListOf(hit) else persistentListOf())
                         val route =
                             when (entry) {
                                 Entry.DISCLOSURE -> shared("medical history")
-                                Entry.ENCODED_SHARE -> shared("http://%31%32%37.0.0.2:${server.port}/action")
-                                Entry.IDNA_SHARE -> shared("http://１２７.０.０.２:${server.port}/action")
+                                Entry.ENCODED_SHARE -> shared("http://%31%32%37.0.0.1:${server.port}/action")
+                                Entry.IDNA_SHARE -> shared("http://１２７.０.０.１:${server.port}/action")
                                 Entry.ADD_ART, Entry.ADD_REDIRECT_ART -> shared(publicFeed)
                                 Entry.CHART_ART -> Route.Navigate(DiscoverKey, emptyList())
                                 else -> Route.Navigate(DiscoverKey, listOf(DirectoryKey("history", null)))
@@ -211,13 +221,19 @@ class DiscoveryPrivacyJourneyTest {
                                 }
                             }
                         }
-                        if (entry == Entry.PREVIEW_ART) {
+                        if (entry in listOf(Entry.PREVIEW_ART, Entry.LOCAL_PREVIEW, Entry.LOCAL_REDIRECT_PREVIEW)) {
                             waitUntil(timeoutMillis = 10_000) {
                                 onAllNodes(hasText("Directory show")).fetchSemanticsNodes().isNotEmpty()
                             }
-                            onAllNodes(hasText("Directory show")).onFirst().performClick()
+                            onNodeWithText("Directory show").performClick()
                         }
-                        if (entry == Entry.DISCLOSURE) {
+                        if (entry == Entry.LOCAL_PREVIEW || entry == Entry.LOCAL_REDIRECT_PREVIEW) {
+                            waitUntil(timeoutMillis = 10_000) {
+                                onAllNodes(hasText("Retry")).fetchSemanticsNodes().isNotEmpty()
+                            }
+                            onNodeWithText("Subscribe").assertDoesNotExist()
+                            assertEquals(if (entry == Entry.LOCAL_PREVIEW) 0 else 1, server.requestCount)
+                        } else if (entry == Entry.DISCLOSURE) {
                             val action = "Search for ‘medical history’"
                             val disclosure = "Searches are sent to Apple, Podcast Index"
                             waitUntil(timeoutMillis = 10_000) {
@@ -241,6 +257,7 @@ class DiscoveryPrivacyJourneyTest {
                             onNodeWithText("Subscribe").assertIsDisplayed()
                             onNodeWithText("Looking up…").assertDoesNotExist()
                             assertEquals(0, server.requestCount)
+                            assertEquals(0, serverConnections.acceptedConnections)
                         } else {
                             waitUntil(timeoutMillis = 10_000) { failures.isNotEmpty() }
                             assertTrue(
@@ -284,6 +301,8 @@ class DiscoveryPrivacyJourneyTest {
 
     private enum class Entry {
         DISCLOSURE,
+        LOCAL_PREVIEW,
+        LOCAL_REDIRECT_PREVIEW,
         ENCODED_SHARE,
         IDNA_SHARE,
         ADD_ART,
