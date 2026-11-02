@@ -380,7 +380,7 @@ Recorded per the implementation rules; behaviour follows this document, the devi
 
 ### Implementation deviations (2026-10-07, M1a data half)
 
-1. `AddInputNormalizer`'s M1a subset — typed-input normalisation, the `feed:`/`pcast:`/`podcast:`/`itpc:` schemes and the YouTube/Spotify host checks — lives in `:core:data`'s `add` package, not `:feeds`' `discovery` package as [Package layout](#package-layout) lists; the shared `:feeds` normaliser and `AddInputNormalizerTest` arrive with M7, so the M1a cases run in `:core:data`'s `AddPodcastResolverTest`.
+1. `AddInputNormalizer`'s M1a subset — typed-input normalisation, the `feed:`/`pcast:`/`podcast:`/`itpc:` schemes and the YouTube/Spotify host checks — lives in `:core:data`'s `add` package, not `:feeds`' `discovery` package as [Package layout](#package-layout) lists; the shared `:feeds` normaliser and `AddInputNormalizerTest` arrive with M7, so the M1a cases run in `:core:data`'s `AddPodcastResolverTest`. **Cleared 2026-11-01 (M7):** `AddInputNormalizer`/`NormalizedInput` now live in `:feeds`' `discovery` package as [Package layout](#package-layout) lists, with the resolver consuming them from there.
 2. Credentials are preview-only in M1a: `SecretStore`, `CredentialCommitCoordinator` and the `podcast.credentialId` write are M1b's ([Basic auth and CredentialStore](#basic-auth-and-credentialstore)); the bound `CredentialLookup` stub answers every lookup and the subscribe transaction stores no credential. M1b (2026-10-14) replaced the stub: `KeystoreCredentialStore`/`DesktopSecretStore` now bind `CredentialLookup`, and subscribe and `setCredentials` persist credentials and write `podcast.credentialId` inside `CredentialCommitCoordinator.withCredentialCommit`.
 3. The subscribe transaction's artwork-pin step is deferred to M4; `artworkUrl`/`artworkKey` are stored at subscribe and nothing is pinned yet.
 4. A `RefreshScope.Podcasts` larger than `WorkManagerRefreshScheduler.MAX_SCOPE_IDS` (500) cannot fit the design's 10 KB WorkManager `Data` cap, which names no count; the scheduler persists the due marks and enqueues an `All` run.
@@ -422,7 +422,10 @@ Serves N3, N6, N9. Delivered in M1 (M1a; spike [S12](01-foundation.md#s12-ktor-f
 
 data class FeedRequest(val url: String, val etag: String?, val lastModified: String?,
                        val conditional: Boolean, val maxBytes: Long = 32L * 1024 * 1024, val sniffOnlyBytes: Int? = null,
+                       val htmlReadLimit: Long? = null,          // Add only: bound an HTML body after the sniff
+                       val purpose: FeedRequestPurpose = FeedRequestPurpose.REFRESH,
                        val credentials: BasicCredentials? = null)   // not-yet-stored credentials (add flow, setCredentials probe)
+enum class FeedRequestPurpose { REFRESH, ADD }   // ADD refuses a YouTube target at every hop (M8 continues it)
 sealed interface FetchOutcome {
     data class NotModified(val maxAgeSec: Long?, val serverDateMs: Long?) : FetchOutcome
     data class Body(val file: okio.Path, val sha256Hex: String, val requestedUrl: String, val finalUrl: String,
@@ -456,7 +459,7 @@ enum class Sniff { RSS, ATOM, RDF, OPML, HTML, JSON, OTHER }
 ### Body, hashing and sniffing
 
 1. Stream the response body (`bodyAsChannel()`) into `<cache>/feeds/{uuid}.tmp` — Android `cacheDir`, the desktop's cache directory of [11 AppDirs](11-desktop.md#appdirs), both through 01's `StoragePaths` — via Okio `HashingSink.sha256` on the injected Okio `FileSystem`, counting decompressed bytes in the copy loop; above `maxBytes` stop reading (which cancels the call), delete the file and return `TooLarge` (also bounds gzip bombs).
-2. `sniffOnlyBytes` (probes in [Autodiscovery](#fetch-sniff-and-autodiscovery)) stops after N bytes.
+2. `sniffOnlyBytes` (probes in [Autodiscovery](#fetch-sniff-and-autodiscovery)) stops after N bytes. `htmlReadLimit` (M7, add only) stops an HTML body after the sniff classifies it as HTML: [Fetch, sniff and autodiscovery](#fetch-sniff-and-autodiscovery) bounds page reads at 2 MiB while feed bodies keep their full `maxBytes` budget.
 3. `FeedSniffer` (common, byte-level) reads at most the first 64 KiB (the prolog-guard window; long comments or DOCTYPEs before the root exist): skip BOM (UTF-8/16/32), whitespace, `<?xml…?>`, comments and `<!DOCTYPE …>` (except `<!DOCTYPE html`), then classify the first element's local name — the QName part after the last `:`, matched case-insensitively like the parser's root dispatch, so a namespace-prefixed `a:feed` or `atom:feed` reads as Atom: `rss` → RSS, `feed` → ATOM, `RDF`/`rdf:RDF` → RDF, `opml` → OPML, `html` or `<!DOCTYPE html` → HTML; a first non-space byte `{` or `[` → JSON; otherwise OTHER.
 4. `FeedTempFiles` deletes each file in a `finally` after parsing; `sweep()` at every engine start deletes files older than 1 h.
 
@@ -511,6 +514,12 @@ Desktop specifics: there is no LAN guard, so LAN feeds work; after sync carries 
 - Validators are not sent when `parserVersion < FeedParser.VERSION`, when `lastParseOk = 0`, for previews, for `new-feed-url` probes, for paging requests, and for the **fortnightly full fetch**: when `lastFullFetchAt < now − 14 d` **and** the current network is unmetered (`NetworkMonitor.status.isMetered == false`; always true on the desktop, whose networks count as unmetered in v1.0, [D85](../PLAN.md#3-key-decisions)), the request is unconditional. This catches servers that answer 304 forever although the feed changed (prior-art pitfall: constant ETag / stale `Last-Modified`), while keeping the extra data on Wi-Fi.
 - A URL change (move) discards the old validators; the new URL's validators are stored from the response that was ingested.
 - Feed requests never use an HTTP cache — neither OkHttp's `Cache` nor Ktor's `HttpCache` plugin ([D10](../PLAN.md#3-key-decisions)): simplecast sends `max-age=3600` (tested), which an HTTP cache would honour on pull-to-refresh; `max-age` is used only as a lower bound for success scheduling.
+
+**Implementation note (2026-11-01, M7).** Three add-scoped rules join the table above; refresh behaviour is unchanged.
+
+- **`FeedRequestPurpose.ADD` and `ADD_YOUTUBE_REJECTED`.** For an add, `FeedFetcher` refuses a YouTube target: the loop checks `YouTubeUrlClassifier.classify(url)` and `isYouTubeHost(url)` before the first request and again at every followed hop (a publisher redirect can land on YouTube), and returns `FetchOutcome.Network(ADD_YOUTUBE_REJECTED)` — the sentinel `NetError.Other("youtube")`. The resolver maps it to `AddPodcastError.YouTubeNotYetSupported`, so before M8 no YouTube channel page is fetched as a feed and none is subscribed as `sourceType = RSS`. `REFRESH` requests are unchanged, and 04's YouTube branch still owns every YouTube resolution.
+- **`htmlReadLimit`.** Autodiscovery pages travel through the same `FeedFetcher`; once the sniff classifies the body as HTML, the read stops at `htmlReadLimit` (2 MiB, `Autodiscovery.MAX_HTML_BYTES`) and the channel is cancelled. `sniffOnlyBytes` (65,536 for probes) still bounds the sniff and `maxBytes` still bounds feed bodies, so a truncated HTML page never truncates a feed (M7 acceptance 9).
+- **`X-Neutrodyne-Directory-Origin`.** Every directory request `DirectoryHttp` sends carries this internal header with the request's own origin (`scheme://host:port`). `AuthInterceptor` (01) reads the header — or the `DirectoryAuthOrigin` request tag it leaves behind — and removes the header before the request reaches the wire; the tag survives OkHttp's redirect follow-ups, so every hop is judged again. Directory requests never borrow a publisher's stored Basic credentials, and a hop whose origin differs from the declared directory origin loses `X-Auth-Key`, `X-Auth-Date` and `Authorization`, so Podcast Index authentication headers travel only to `api.podcastindex.org`.
 
 ---
 
@@ -1519,9 +1528,13 @@ data class DirectoryHit(val feedUrl: String, val title: String, val author: Stri
 data class SearchResults(val query: String, val hits: List<DirectoryHit>, val statuses: Map<ProviderId, ProviderStatus>,
                          val complete: Boolean)
 sealed interface ProviderStatus {
-    data object Ok : ProviderStatus; data object Pending : ProviderStatus; data object RateLimited : ProviderStatus
-    data class Failed(val error: NetError?) : ProviderStatus
+    data object Ok : ProviderStatus; data object Pending : ProviderStatus; data object Disabled : ProviderStatus
+    data object RateLimited : ProviderStatus
+    /** No query, URL, credentials or raw response text may appear in this error. */
+    data class Failed(val error: NetError?, val reason: ProviderFailure = ProviderFailure.REQUEST) : ProviderStatus
 }
+enum class ProviderFailure { REQUEST, CREDENTIALS }   // CREDENTIALS: the pair was rejected (Settings › Discover wording)
+enum class DirectoryAccess { ENABLED_ONLY, ONE_TIME_LOOKUP }   // a lookup may outrank a disabled switch, once
 // :core:data commonMain (internal)
 internal interface PodcastSearchProvider {
     val id: ProviderId
@@ -1531,6 +1544,12 @@ internal interface PodcastSearchProvider {
 ```
 
 The ViewModel debounces: search fires 600 ms after typing stops with ≥ 3 characters, or immediately on the IME search action (Enter on the desktop). All providers use the Ktor client of kind API (8 s call timeout, [01](01-foundation.md#one-client-family)) and parse with kotlinx.serialization in `:feeds`' common directory parsers; no cookies are stored.
+
+**Implementation note (2026-11-01, M7).** Three details of the implemented contract:
+
+- **`ProviderFailure.CREDENTIALS`.** `ProviderStatus.Failed` carries a `reason` so Settings › Discover can tell a rejected Podcast Index pair from an ordinary transport failure without seeing raw error text; a rejected pair is reported as `Failed(null, CREDENTIALS)` and the previous key survives a failed replacement (08's key editor).
+- **`DirectoryAccess.ONE_TIME_LOOKUP` (consent).** An explicit Apple or Podcast Index lookup from the add flow ([Host recognition](#host-recognition)) may run while that provider's switch is off. The resolver answers `AddResolution.LookupRequired(input, provider)` first, the add sheet offers one consent row (08), and `AddPodcastResolver.lookupOnce(input)` re-resolves with `DirectoryAccess.ONE_TIME_LOOKUP` — scoped to that single call, never a search and never a change to the provider preference or the stored settings. Automatic search and charts stay `ENABLED_ONLY`.
+- **`PodcastDao.directorySubscriptions(keys)`.** Annotating hits with `subscribedPodcastId` ([Aggregation](#aggregation) step 4) is one bounded read: `SELECT feedKey AS url, id AS podcastId FROM podcast WHERE feedKey IN (:keys) UNION ALL SELECT url, podcastId FROM podcast_url_alias WHERE url IN (:keys)` — a projection over the existing `feedKey` and alias indexes, no schema change, ≤ 150 keys per query.
 
 ### Apple iTunes Search
 

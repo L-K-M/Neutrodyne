@@ -1327,6 +1327,21 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
 - **Design refs:** [03 Add podcast flow](design/03-feeds-and-discovery.md#add-podcast-flow), [03 Search and discovery](design/03-feeds-and-discovery.md#search-and-discovery), [03 Deep links and share targets](design/03-feeds-and-discovery.md#deep-links-and-share-targets), [08 Screens](design/08-ui-ux.md#screens).
 - **Advances:** R2.2 (groups chosen while subscribing), onboarding for R1/R2/R5, N3.
 
+**Implementation note (2026-11-01, M7).** M7 is implemented (branch `impl/m7-discovery-current`); the
+automated acceptance rows run in `ci.yml` and `nightly.yml` through
+`scripts/ci/assert-discovery-tests.py`, and device, owner and provider rows (browser Share
+delivery, TalkBack and screen readers, live Apple/fyyd/Podcast Index behaviour, BYOK) stay open
+in the [M7 evidence ledger](evidence/m7-discovery.md).
+Deliverable deltas: `AddInputNormalizer` lives in `:feeds`' `discovery` package as
+[03 Package layout](design/03-feeds-and-discovery.md#package-layout) lists, clearing the M1a
+"deviation 2026-10-07" remark about its `:core:data` location; the add pipeline refuses YouTube
+targets at every hop before M8 (`FeedRequestPurpose.ADD`,
+[03 Fetch pipeline](design/03-feeds-and-discovery.md#fetch-pipeline)); autodiscovery pages read
+through `FeedFetcher` under a 2 MiB HTML-only cap; an explicit Apple or Podcast Index lookup from
+the add sheet runs behind one-time consent (`DirectoryAccess.ONE_TIME_LOOKUP`) while that
+provider's switch stays off; the in-app "What Neutrodyne connects to" list is `PrivacyInventory`
+(`:core:ui`) and shares its 17 stable IDs with `PRIVACY.md`.
+
 #### M8: YouTube subscriptions in all builds
 
 - **Goal:** YouTube channels become podcasts in every APK (layer A); until M9 every APK treats YouTube episodes as external episodes.
