@@ -236,6 +236,30 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun directoryWaitsForItsDisclosureToBeComposed() =
+        runTest {
+            val vm = DirectoryViewModel(DirectoryKey("news", null), repository)
+            advanceUntilIdle()
+            assertEquals(repository.providers.value, vm.state.value.providers)
+            assertTrue(repository.queries.isEmpty())
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun discoverWaitsForProvidersBeforeSearching() =
+        runTest {
+            repository.providersGate = CompletableDeferred()
+            val vm = DiscoverViewModel(repository, groups)
+            vm.inputChanged("medical history")
+            advanceUntilIdle()
+            assertTrue(repository.queries.isEmpty())
+            repository.providersGate!!.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(listOf("medical history"), repository.queries)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
     fun directoryExplicitShortQueryIsNotDebouncedAndIgnoresGenre() =
         runTest {
             val vm = DirectoryViewModel(DirectoryKey("AI", "invalid"), repository)
