@@ -345,39 +345,27 @@ int main(void)
     return 0;
 }
 PROBE
-# The probe links against the four libraries this build installed. Their file
-# names carry the major version, which differs per FFmpeg release, so the
-# libraries are named by glob rather than spelled out; on Windows the linker
-# takes the import libraries from $OUT/lib and the DLLs live in $LIBDIR.
-probe_libraries() {
-    case "$TARGET" in
-        windows-x64)
-            printf '%s\n' "$OUT/lib/avcodec.lib" "$OUT/lib/avformat.lib" \
-                "$OUT/lib/avutil.lib" "$OUT/lib/swresample.lib"
-            ;;
-        *)
-            printf '%s\n' "$LIBDIR"/libavcodec.* "$LIBDIR"/libavformat.* \
-                "$LIBDIR"/libavutil.* "$LIBDIR"/libswresample.*
-            ;;
-    esac
-}
-
-PROBE_LIBS=()
-while IFS= read -r library; do
-    [ -f "$library" ] || die "the FFmpeg build installed no $library for the probe to link"
-    PROBE_LIBS+=("$library")
-done < <(probe_libraries)
-
+# The probe links against the four libraries this build installed, through the
+# linker's own search path: their file names carry the major version, which
+# differs per FFmpeg release, so `-l` with the library's base name is what stays
+# stable. FFmpeg installs the unversioned symlink the linker looks for next to
+# each versioned library.
 if [ "$CC_BIN" = "cl" ]; then
+    # MSVC takes the import libraries, which a Windows build installs in $OUT/lib.
     cl -nologo -O2 -I"$(cygpath -w "$OUT/include")" "$(cygpath -w "$BUILD/probe.c")" \
-        "${PROBE_LIBS[@]}" \
+        "$(cygpath -w "$OUT/lib/avcodec.lib")" "$(cygpath -w "$OUT/lib/avformat.lib")" \
+        "$(cygpath -w "$OUT/lib/avutil.lib")" "$(cygpath -w "$OUT/lib/swresample.lib")" \
         -Fe"$(cygpath -w "$BUILD/probe.exe")" -Fo"$(cygpath -w "$BUILD/probe.obj")" \
         >"$BUILD/probe-build.log" 2>&1 ||
         { cat "$BUILD/probe-build.log"; die "probe.c did not compile"; }
     PROBE_OUT="$(cd "$LIBDIR" && "$(cygpath -u "$BUILD")/probe.exe")" || die "probe.exe failed"
 else
-    "$CC_BIN" -O2 -I"$OUT/include" "$BUILD/probe.c" -o "$BUILD/probe" \
-        -Wl,-rpath,"$LIBDIR" "${PROBE_LIBS[@]}" || die "probe.c did not compile"
+    if ! "$CC_BIN" -O2 -I"$OUT/include" "$BUILD/probe.c" -o "$BUILD/probe" \
+        -L"$LIBDIR" -Wl,-rpath,"$LIBDIR" \
+        -lavcodec -lavformat -lavutil -lswresample 2>"$BUILD/probe-build.log"; then
+        cat "$BUILD/probe-build.log"
+        die "probe.c did not compile"
+    fi
     PROBE_OUT="$(cd "$LIBDIR" && LD_LIBRARY_PATH="$LIBDIR" "$BUILD/probe")" || die "probe failed"
 fi
 PROBE_LICENSE="$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^license //p')"
