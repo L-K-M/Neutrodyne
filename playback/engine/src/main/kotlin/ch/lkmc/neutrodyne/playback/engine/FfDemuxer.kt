@@ -14,9 +14,11 @@ import java.lang.foreign.ValueLayout
  * Open (11 Demux and decode steps 1–6):
  * 1. `avformat_alloc_context`, a custom AVIO and `AVFMT_FLAG_CUSTOM_IO`, so no
  *    FFmpeg file or network protocol is ever used.
- * 2. `avformat_open_input` with a 1-MiB probe size; `avformat_find_stream_info`
- *    only when the best audio stream lacks its sample rate or channel layout.
- * 3. `av_find_best_stream(AUDIO)`; every other stream gets `discard = AVDISCARD_ALL`
+ * 2. `avformat_open_input` with a 1-MiB probe size.
+ * 3. `av_find_best_stream(AUDIO)`; when it cannot pick a stream FFmpeg 9's
+ *    rule for an unset rate or channel layout is why, so
+ *    `avformat_find_stream_info` runs then and selection is retried. Every
+ *    other stream gets `discard = AVDISCARD_ALL`.
  *    (video plays as audio; attached pictures are ignored).
  * 4. Chapters, duration and the track's trimming information are published once.
  *
@@ -99,6 +101,17 @@ class FfDemuxer
 
             val streamCount = formatContext.readInt(layout, "AVFormatContext", "nb_streams")
             streamIndex = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
+            if (streamIndex < 0) {
+                // FFmpeg 9's av_find_best_stream skips an audio stream whose
+                // sample rate or channel count is still zero, and demuxers like
+                // mp3 and adts leave both to their parser: the probe runs only
+                // when stream selection says the header alone was not enough.
+                val found = library.findStreamInfo(formatContext)
+                require(found >= 0) {
+                    "the demuxer could not read the stream info: ${library.errorString(found)}"
+                }
+                streamIndex = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
+            }
             // The message carries what FFmpeg actually found, because a spike
             // must fail loudly and a wrong offset here is otherwise invisible.
             require(streamIndex >= 0) {
@@ -127,12 +140,6 @@ class FfDemuxer
                     layout.intConstant("AVMEDIA_TYPE_AUDIO"),
             ) {
                 "the best stream of the source is not audio"
-            }
-
-            // 11 Demux and decode step 3: probe only when the parameters are incomplete.
-            if (parameters.readInt(layout, "AVCodecParameters", "sample_rate") <= 0) {
-                val found = library.findStreamInfo(formatContext)
-                require(found >= 0) { "the demuxer could not read the stream info: ${library.errorString(found)}" }
             }
 
             for (index in 0 until streamCount) {
