@@ -10,8 +10,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -25,6 +29,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.GraphicsMode
+import kotlin.test.assertEquals
 
 /**
  * Android golden set for the M2 group visuals (09; mirrors the desktop set in
@@ -83,6 +88,25 @@ class GroupVisualsScreenshotTest {
     @Test fun mosaic4Light() = mosaicShot("groupmosaic_4_light", 4)
 
     @Test fun mosaic4Dark() = mosaicShot("groupmosaic_4_dark", 4, dark = true)
+
+    @Test
+    fun suggestedGroupsCard() {
+        var selected = emptySet<String>()
+        var dismissed = false
+        capture("suggested_groups") { SuggestedGroupsFixture({ selected = it }, { dismissed = true }) }
+        rule.onNodeWithText("News (2)").assertIsSelected()
+        rule.onNodeWithText("Technology (3)").performClick()
+        rule.onNodeWithText("Create groups").performClick()
+        assertEquals(setOf("News", "Technology"), selected)
+        rule.onNodeWithText("Not now").performClick()
+        assertEquals(true, dismissed)
+    }
+
+    @Test
+    fun noSuggestionsHideTheCard() {
+        rule.setContent { SuggestedGroupsCard(emptyList(), emptySet(), false, {}, {}, {}) }
+        rule.onNodeWithTag("suggested-groups").assertDoesNotExist()
+    }
 
     @Test
     fun mosaic0Dark() =

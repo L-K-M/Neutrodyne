@@ -10,7 +10,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -19,7 +23,9 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import coil3.test.FakeImage
 import io.github.takahirom.roborazzi.captureRoboImage
+import java.util.Locale
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 /**
  * Desktop golden set for the M2 group visuals (09 Compose UI and screenshot tests; 08's
@@ -31,6 +37,8 @@ import kotlin.test.Test
  *
  * Determinism: fixed 1× density window, `NeutrodyneTheme` with `dynamicColor = false`, and
  * `installFakeImageLoader` answering each member's `ArtworkRef` with a fixed-colour `FakeImage`.
+ * The suggested-groups card pins `Locale.ENGLISH` around its capture and labels: the desktop test
+ * JVM runs de-DE (09 Test conventions), while the card's golden records the English defaults.
  */
 @OptIn(ExperimentalTestApi::class)
 class GroupVisualsScreenshotTest {
@@ -56,6 +64,38 @@ class GroupVisualsScreenshotTest {
         waitForIdle()
         onRoot().captureRoboImage("screenshots/desktop/$name.png")
     }
+
+    @Test
+    fun suggestedGroupsCard() =
+        runDesktopComposeUiTest(width = 360, height = 560) {
+            val previous = Locale.getDefault()
+            Locale.setDefault(Locale.ENGLISH)
+            try {
+                var selected = emptySet<String>()
+                var dismissed = false
+                setContent {
+                    NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                        SuggestedGroupsFixture({ selected = it }, { dismissed = true })
+                    }
+                }
+                onRoot().captureRoboImage("screenshots/desktop/suggested_groups.png")
+                onNodeWithText("News (2)").assertIsSelected()
+                onNodeWithText("Technology (3)").performClick()
+                onNodeWithText("Create groups").performClick()
+                assertEquals(setOf("News", "Technology"), selected)
+                onNodeWithText("Not now").performClick()
+                assertEquals(true, dismissed)
+            } finally {
+                Locale.setDefault(previous)
+            }
+        }
+
+    @Test
+    fun noSuggestionsHideTheCard() =
+        runDesktopComposeUiTest(width = 360, height = 560) {
+            setContent { SuggestedGroupsCard(emptyList(), emptySet(), false, {}, {}, {}) }
+            onNodeWithTag("suggested-groups").assertDoesNotExist()
+        }
 
     @Test
     fun mosaicMembersZeroToFourLight() {

@@ -9,6 +9,8 @@ import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -47,7 +49,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
     @Test fun dragFramesOnlyPreviewAndDropCallsRepositoryOnce() =
         runTest {
             val (a, b, c, d) = seed()
-            val vm = GroupsManageViewModel(recording)
+            val vm = GroupsManageViewModel(recording, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             val keysBefore = groups.groups.value.associate { it.id to it.orderKey }
             vm.startDrag(a)
@@ -75,7 +77,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
     @Test fun cancelAndDropInTheOriginalPlaceWriteNothing() =
         runTest {
             val (a, b) = seed()
-            val vm = GroupsManageViewModel(recording)
+            val vm = GroupsManageViewModel(recording, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             val original = vm.ids()
             vm.startDrag(a)
@@ -91,7 +93,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
     @Test fun repositoryMetadataReconcilesWithoutReplacingTheDragPreview() =
         runTest {
             val (a, b, c, d) = seed()
-            val vm = GroupsManageViewModel(recording)
+            val vm = GroupsManageViewModel(recording, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.startDrag(d)
             vm.dragOver(a)
@@ -112,7 +114,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
     @Test fun unrelatedConcurrentReorderSurvivesTheDrop() =
         runTest {
             val (a, b, c, d) = seed()
-            val vm = GroupsManageViewModel(recording)
+            val vm = GroupsManageViewModel(recording, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.startDrag(d)
             vm.dragOver(a)
@@ -128,7 +130,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
     @Test fun changedMembershipOfTheListCancelsDragAndReportsIt() =
         runTest {
             val (a, b) = seed()
-            val vm = GroupsManageViewModel(recording)
+            val vm = GroupsManageViewModel(recording, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.startDrag(a)
             vm.dragOver(b)
@@ -152,7 +154,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
                         return Outcome.Failure(GroupError.NotFound)
                     }
                 }
-            val vm = GroupsManageViewModel(failing)
+            val vm = GroupsManageViewModel(failing, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.startDrag(a)
             vm.dragOver(b)
@@ -183,7 +185,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
                         return recording.reorder(groupIdsInOrder)
                     }
                 }
-            val vm = GroupsManageViewModel(delayed)
+            val vm = GroupsManageViewModel(delayed, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.startDrag(d)
             vm.dragOver(a)
@@ -213,7 +215,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
                         return groups.update(groupId, edit)
                     }
                 }
-            val vm = GroupsManageViewModel(repo)
+            val vm = GroupsManageViewModel(repo, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.move(a, GroupMove.UP)
             vm.move(d, GroupMove.DOWN)
@@ -235,7 +237,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
     @Test fun navigationEventsAreConsumedOnceAndDeletedGroupsCannotOpen() =
         runTest {
             val (a) = seed()
-            val vm = GroupsManageViewModel(recording)
+            val vm = GroupsManageViewModel(recording, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.openEditor(a)
             assertEquals(GroupEditKey(a), vm.consumeNavigation())
@@ -249,7 +251,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
     @Test fun deleteCanBeUndoneWithoutLeavingTheList() =
         runTest {
             val (a) = seed()
-            val vm = GroupsManageViewModel(recording)
+            val vm = GroupsManageViewModel(recording, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             vm.delete(a)
             advanceUntilIdle()
@@ -279,7 +281,7 @@ class GroupsManageViewModelTest : MainDispatcherTest() {
                         edit: GroupEdit,
                     ): Outcome<Unit, GroupError> = error("write failed")
                 }
-            val vm = GroupsManageViewModel(repo)
+            val vm = GroupsManageViewModel(repo, FakePodcastRepository(), FakeSettingsRepository())
             advanceUntilIdle()
             assertTrue(vm.uiState.value.loadFailed)
             fail = false
