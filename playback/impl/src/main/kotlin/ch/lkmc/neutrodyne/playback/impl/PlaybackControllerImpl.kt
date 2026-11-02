@@ -103,11 +103,15 @@ internal class PlaybackControllerImpl(
         }
     }
 
-    override fun seekTo(positionMs: Long) =
+    override fun seekTo(positionMs: Long) {
+        // The position belongs to this episode, and a rebinding can outlast it: A ends, B arrives.
+        val episodeId = hub.nowPlaying.value?.episodeId
         transport { controller ->
+            if (episodeId != null && controller.episodeIdOrNull() != episodeId) return@transport
             val duration = controller.duration.takeIf { it > 0 }
             controller.seekTo(duration?.let { positionMs.coerceIn(0, it) } ?: positionMs.coerceAtLeast(0))
         }
+    }
 
     override fun skipBack() = transport(MediaController::seekBack)
 

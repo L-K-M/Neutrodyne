@@ -116,7 +116,7 @@ internal open class LibraryCallbacks(
     ): ListenableFuture<LibraryResult<Void>> =
         scope.future {
             try {
-                val count = withContext(io) { tree.children(parentId, 0, 100, rootLimits[browser] ?: 4).size }
+                val count = withContext(io) { tree.childCount(parentId, rootLimits[browser] ?: 4) }
                 subscriptions.getOrPut(browser) { mutableSetOf() }.add(parentId)
                 session.notifyChildrenChanged(browser, parentId, count, params)
                 if (observing == null) {
@@ -128,7 +128,7 @@ internal open class LibraryCallbacks(
                                         val size =
                                             withContext(io) {
                                                 try {
-                                                    tree.children(parent, 0, 100, rootLimits[controller] ?: 4).size
+                                                    tree.childCount(parent, rootLimits[controller] ?: 4)
                                                 } catch (_: IllegalArgumentException) {
                                                     0
                                                 }

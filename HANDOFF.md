@@ -141,26 +141,28 @@ or `bmgr` transport. Old failures and new proof remain under `~/nd-wt/reviews/ev
 
 These are not blanket release approvals or completed work.
 
-### M5 foundation merged; runtime integration in progress
+### M5 runtime merged; surfaces and device proofs in review
 
 Foundation [#261](https://github.com/L-K-M/Neutrodyne/pull/261) merged as
 `dee25e7c`, preserving M4's session revisions and playback-intent fences.
 It adds chapter/sleep contracts, fakes, validated preferences,
 measured-duration writes and ranked audio-alternate metadata. Schema V2
-and migrations are unchanged. Local gates pass 4,511 cases with three
-existing environment skips. One formal review found no confirmed important
-defect; minor wording/test hardening is deferred. Both exact-head and
-[main CI](https://github.com/L-K-M/Neutrodyne/actions/runs/41239685185)
-pass all six jobs. Main artifact `13057043382` proves 98 actual device cases
-without failures, errors or skips, including one real Play journey per API26/36.
+and migrations are unchanged.
 
-Runtime work continues on `impl/m5-listening-runtime`. Sleep, hardware
-mapping, smart resume and duration adapters are committed but not yet
-accepted. Chapter support and player controls are being integrated from
-fresh-main branches. Auto, boot resumption and device proofs follow.
-Discovery and update checks are independent parallel work. None of these
-unmerged candidates is milestone or release acceptance. M4/M5 hardware
-and manual checks remain open.
+Listening runtime [#263](https://github.com/L-K-M/Neutrodyne/pull/263) merged
+as `79878073` after four formal rounds and an independent Sol validation: sleep
+timer, chapters, hardware mapping, smart resume, measured duration and audio
+alternates. Sol found three important defects (stale boundary mark, no saves
+after seeking a retained completed item, alternate change keeping the old
+pin), each fixed test-first. [Main CI](https://github.com/L-K-M/Neutrodyne/actions/runs/41351208322)
+passes on `fa8dd6fb`.
+
+Player UI, Android Auto browsing, boot resumption and the lazy runtime are the
+next PR, with device proofs after it. Discovery, update checks, sync protocol,
+manual downloads and the desktop FFmpeg build are parallel candidates on
+branches. None of these unmerged candidates is milestone or release acceptance.
+M4/M5 hardware and manual checks (DHU, AAOS, headsets, reboot, TalkBack) remain
+open.
 
 ### M4 playback, P1–P8 merged, acceptance open
 

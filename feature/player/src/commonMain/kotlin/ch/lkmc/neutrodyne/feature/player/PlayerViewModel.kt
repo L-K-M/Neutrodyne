@@ -268,7 +268,7 @@ internal class PlayerViewModel(
         if (SleepTimerMode.isValidMinutes(minutes)) controller.extendSleepTimer(minutes)
     }
 
-    /** Show-notes timestamps on the current item seek; anything else starts at the position. */
+    /** Show-notes timestamps and chapter taps seek a loaded current item; else they start at the position. */
     fun onTimestamp(positionMs: Long) {
         val now = source.nowPlaying.value ?: return
         playbackActions.seekOrPlay(now.episodeId, positionMs, now.position.durationMs)

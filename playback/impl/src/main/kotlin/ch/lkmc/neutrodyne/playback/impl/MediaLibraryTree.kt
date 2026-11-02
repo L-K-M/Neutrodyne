@@ -112,6 +112,12 @@ internal class MediaLibraryTree(
         return page(children, page, pageSize)
     }
 
+    /** The node's full size: what a subscriber pages through, whatever its page size. */
+    suspend fun childCount(
+        parentId: String,
+        rootLimit: Int,
+    ): Int = children(parentId, 0, Int.MAX_VALUE, rootLimit).size
+
     suspend fun item(mediaId: String): MediaItem? {
         if (mediaId == ROOT) return root()
         if (mediaId in listOf(UP_NEXT, GROUPS, DOWNLOADS, PODCASTS)) {
@@ -288,24 +294,34 @@ internal class MediaLibraryTree(
     private suspend fun upNext(): List<MediaItem> {
         val queue = sessions().virtualQueue(0)
         return playable(
-            (listOfNotNull(queue.current) + queue.upNext).map { it.episodeId }.distinct().take(MAX_ITEMS),
+            (listOfNotNull(queue.current) + queue.upNext).map { it.episodeId }.distinct(),
             UP_NEXT,
+            MAX_ITEMS,
         )
     }
 
+    /** [limit] counts playable results, so refused entries cannot use up the node. */
     private suspend fun playable(
         ids: List<Long>,
         parent: String?,
+        limit: Int = ids.size,
     ): List<MediaItem> =
-        ids.mapNotNull { id ->
-            val row = media().get(id) ?: return@mapNotNull null
-            if (row.refusal(capabilities.capabilities.value) != null) return@mapNotNull null
-            val position = database().positionDao().byEpisode(id)?.positionMs
-            items()
-                .build(row, position)
-                .buildUpon()
-                .setMediaId("episode:$id" + (parent?.let { "@$it" } ?: ""))
-                .build()
+        buildList {
+            for (id in ids) {
+                if (size == limit) break
+
+                val row = media().get(id) ?: continue
+                if (row.refusal(capabilities.capabilities.value) != null) continue
+
+                val position = database().positionDao().byEpisode(id)?.positionMs
+                add(
+                    items()
+                        .build(row, position)
+                        .buildUpon()
+                        .setMediaId("episode:$id" + (parent?.let { "@$it" } ?: ""))
+                        .build(),
+                )
+            }
         }
 
     /** Only committed library changes, never episode_position ticks, invalidate subscribed nodes. */
@@ -381,6 +397,7 @@ internal class MediaLibraryTree(
             require(page >= 0 && pageSize > 0)
         }
 
+        /** Playable sources cap themselves at [MAX_ITEMS]; browsable folders stay complete. */
         fun <T> page(
             items: List<T>,
             page: Int,
@@ -388,7 +405,7 @@ internal class MediaLibraryTree(
         ): List<T> {
             validatePage(page, pageSize)
             val start = (page.toLong() * pageSize).coerceAtMost(items.size.toLong()).toInt()
-            return items.drop(start).take(pageSize.coerceAtMost(MAX_ITEMS))
+            return items.drop(start).take(pageSize)
         }
 
         fun parseEpisode(value: String): BrowseEpisode {

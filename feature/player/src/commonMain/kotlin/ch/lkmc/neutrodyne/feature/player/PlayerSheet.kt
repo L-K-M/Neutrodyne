@@ -690,7 +690,7 @@ internal fun PlayerSheet(
                             count = ui.upNextCount,
                             chapterCount = ui.chapters.size,
                             upNext = upNext,
-                            chapters = { ChapterList(ui.chapters, ui.currentChapter, seek) },
+                            chapters = { ChapterList(ui.chapters, ui.currentChapter, seekChapter) },
                             notes = notes,
                             modifier =
                                 Modifier

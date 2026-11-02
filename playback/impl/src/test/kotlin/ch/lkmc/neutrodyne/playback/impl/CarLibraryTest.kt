@@ -278,7 +278,13 @@ class CarLibraryTest {
                     }
                 }
             val browser =
-                h.run { MediaBrowser.Builder(h.app, session.token).setListener(listener).buildAsync().await() }
+                h.run {
+                    MediaBrowser
+                        .Builder(h.app, session.token)
+                        .setListener(listener)
+                        .buildAsync()
+                        .await()
+                }
             try {
                 h.run {
                     suspend fun pages(size: Int): List<String> {

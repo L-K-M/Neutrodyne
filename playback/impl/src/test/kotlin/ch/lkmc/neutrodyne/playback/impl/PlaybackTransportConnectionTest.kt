@@ -109,7 +109,10 @@ class PlaybackTransportConnectionTest {
                     Dispatchers.IO,
                 )
             try {
-                pumpUntil { h.hub.nowPlaying.value?.episodeId == FIRST_ID }
+                pumpUntil {
+                    h.hub.nowPlaying.value
+                        ?.episodeId == FIRST_ID
+                }
                 controller.seekTo(TARGET_MS)
 
                 // The first episode ends while the binding is still connecting.
