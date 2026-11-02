@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.ProviderId
+import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.model.SearchResults
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
@@ -32,6 +33,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_episodes_count
 import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_busy
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disabled
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_disclosure
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_empty
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_arts
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_business
@@ -64,6 +66,27 @@ internal fun AppNavigator.openHit(hit: DirectoryHit) =
     pushDetail(
         hit.subscribedPodcastId?.let(::PodcastKey) ?: PodcastPreviewKey(hit.feedUrl),
     )
+
+/**
+ * The recipient list under every action that sends the query to the directory providers
+ * (03 privacy disclosure): Discover's search field and the add sheet's "Search for …" action
+ * (M7) share it, so the effective providers are visible before the tap transmits anything.
+ */
+@Composable
+internal fun ProviderDisclosure(
+    providers: List<ProviderInfo>,
+    modifier: Modifier = Modifier,
+) {
+    val recipients = providers.filter { it.effective }.joinToString(", ") { it.id.displayName() }
+    Text(
+        if (recipients.isEmpty()) {
+            stringResource(Res.string.discovery_disabled)
+        } else {
+            stringResource(Res.string.discovery_disclosure, recipients)
+        },
+        modifier = modifier,
+    )
+}
 
 @Composable
 internal fun DirectoryRow(

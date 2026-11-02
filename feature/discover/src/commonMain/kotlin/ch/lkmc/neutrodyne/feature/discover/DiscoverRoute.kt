@@ -68,8 +68,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.discover_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_add_link
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_categories
-import ch.lkmc.neutrodyne.core.ui.resources.discovery_disabled
-import ch.lkmc.neutrodyne.core.ui.resources.discovery_disclosure
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_import
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_more
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_popular
@@ -155,15 +153,7 @@ internal fun DiscoverScreen(
                         }
                     },
         )
-        val recipients = state.providers.filter { it.effective }.joinToString(", ") { it.id.displayName() }
-        Text(
-            if (recipients.isEmpty()) {
-                stringResource(Res.string.discovery_disabled)
-            } else {
-                stringResource(Res.string.discovery_disclosure, recipients)
-            },
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        ProviderDisclosure(state.providers, Modifier.padding(horizontal = 16.dp))
         FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             NdAssistChip(
                 onClick = { navigator.push(AddPodcastKey(null)) },

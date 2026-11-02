@@ -21,22 +21,22 @@ class LocalDestinationTest {
     @Test
     fun localIpv4RangesAreLocal() {
         for (
-            url in listOf(
-                "http://0.0.0.1/",
-                "http://0.255.255.254/",
-                "http://10.0.0.1/feed",
-                "http://10.255.255.255/",
-                "http://100.64.0.1/",
-                "http://100.127.255.254/",
-                "http://127.0.0.1:8080/feed",
-                "http://127.255.0.1/",
-                "http://169.254.0.1/",
-                "http://169.254.255.254/",
-                "http://172.16.0.1/",
-                "http://172.31.255.254/",
-                "http://192.168.1.1/action",
-                "http://192.168.255.254/",
-            )
+        url in listOf(
+            "http://0.0.0.1/",
+            "http://0.255.255.254/",
+            "http://10.0.0.1/feed",
+            "http://10.255.255.255/",
+            "http://100.64.0.1/",
+            "http://100.127.255.254/",
+            "http://127.0.0.1:8080/feed",
+            "http://127.255.0.1/",
+            "http://169.254.0.1/",
+            "http://169.254.255.254/",
+            "http://172.16.0.1/",
+            "http://172.31.255.254/",
+            "http://192.168.1.1/action",
+            "http://192.168.255.254/",
+        )
         ) {
             assertTrue(isLocal(url), "expected local: $url")
         }
@@ -45,20 +45,20 @@ class LocalDestinationTest {
     @Test
     fun localIpv6AndMappedFormsAreLocal() {
         for (
-            url in listOf(
-                "http://[::1]/",
-                "http://[::]/",
-                "http://[0:0:0:0:0:0:0:1]/feed",
-                "http://[fc00::1]/",
-                "http://[fd12:3456::1]/",
-                "http://[fe80::1]/",
-                "http://[febf::255]/",
-                "http://[fe80::1%25eth0]/",
-                "http://[::ffff:127.0.0.1]/feed",
-                "http://[::ffff:7f00:1]/",
-                "http://[::ffff:10.0.0.1]/",
-                "http://[::ffff:192.168.1.1]:8080/",
-            )
+        url in listOf(
+            "http://[::1]/",
+            "http://[::]/",
+            "http://[0:0:0:0:0:0:0:1]/feed",
+            "http://[fc00::1]/",
+            "http://[fd12:3456::1]/",
+            "http://[fe80::1]/",
+            "http://[febf::255]/",
+            "http://[fe80::1%25eth0]/",
+            "http://[::ffff:127.0.0.1]/feed",
+            "http://[::ffff:7f00:1]/",
+            "http://[::ffff:10.0.0.1]/",
+            "http://[::ffff:192.168.1.1]:8080/",
+        )
         ) {
             assertTrue(isLocal(url), "expected local: $url")
         }
@@ -68,15 +68,15 @@ class LocalDestinationTest {
     fun numericShorthandHostsAreLocal() {
         // Resolvers read these as IP addresses; the spelling cannot be verified, so they refuse.
         for (
-            url in listOf(
-                "http://2130706433/feed",
-                "http://0x7f000001/feed",
-                "http://0x7f.0.0.1/feed",
-                "http://127.1/feed",
-                "http://10.1.2/feed",
-                "http://0177.0.0.1/feed",
-                "http://1.2.3.4.5/feed",
-            )
+        url in listOf(
+            "http://2130706433/feed",
+            "http://0x7f000001/feed",
+            "http://0x7f.0.0.1/feed",
+            "http://127.1/feed",
+            "http://10.1.2/feed",
+            "http://0177.0.0.1/feed",
+            "http://1.2.3.4.5/feed",
+        )
         ) {
             assertTrue(isLocal(url), "expected local: $url")
         }
@@ -85,27 +85,27 @@ class LocalDestinationTest {
     @Test
     fun publicDestinationsAreNotLocal() {
         for (
-            url in listOf(
-                "https://example.com/feed",
-                "https://podcasts.apple.com/show",
-                "https://local.example.com/",
-                "https://127.0.0.1.evil.com/feed",
-                "http://192.168.1.1.evil.com/",
-                "http://8.8.8.8/dns",
-                "http://11.0.0.1/",
-                "http://100.63.255.255/",
-                "http://100.128.0.1/",
-                "http://128.0.0.1/",
-                "http://169.253.255.255/",
-                "http://172.15.0.1/",
-                "http://172.32.0.1/",
-                "http://192.167.1.1/",
-                "http://192.169.1.1/",
-                "http://[2001:db8::1]/feed",
-                "http://[feff::1]/",
-                "http://[fec0::1]/",
-                "http://[64:ff9b::808:808]/",
-            )
+        url in listOf(
+            "https://example.com/feed",
+            "https://podcasts.apple.com/show",
+            "https://local.example.com/",
+            "https://127.0.0.1.evil.com/feed",
+            "http://192.168.1.1.evil.com/",
+            "http://8.8.8.8/dns",
+            "http://11.0.0.1/",
+            "http://100.63.255.255/",
+            "http://100.128.0.1/",
+            "http://128.0.0.1/",
+            "http://169.253.255.255/",
+            "http://172.15.0.1/",
+            "http://172.32.0.1/",
+            "http://192.167.1.1/",
+            "http://192.169.1.1/",
+            "http://[2001:db8::1]/feed",
+            "http://[feff::1]/",
+            "http://[fec0::1]/",
+            "http://[64:ff9b::808:808]/",
+        )
         ) {
             assertFalse(isLocal(url), "expected non-local: $url")
         }

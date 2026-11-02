@@ -52,6 +52,7 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
@@ -566,8 +567,9 @@ internal fun newResolver(
     apple: AppleDirectoryClient = unusedApple,
     podcastIndex: PodcastIndexDirectoryClient = unusedPodcastIndex,
     metadata: DirectoryMetadataCache = newDirectoryMetadata(clock),
+    networkClients: NetworkClients = newNetworkClients(credentials),
 ): ResolverBundle {
-    val bundle = newFetcher(root, credentials, clock)
+    val bundle = newFetcher(root, credentials, clock, networkClients)
     val cache = PreviewCache(clock)
     val resolver =
         AddPodcastResolverImpl(

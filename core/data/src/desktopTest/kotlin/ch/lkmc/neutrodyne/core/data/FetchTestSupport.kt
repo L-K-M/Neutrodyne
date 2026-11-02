@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.collections.immutable.persistentListOf
 import mockwebserver3.MockResponse
+import okhttp3.Dns
 import okio.FileSystem
 import java.io.File
 
@@ -60,6 +61,7 @@ internal fun testUserAgent(platform: PlatformInfo = fakePlatform()): UserAgentPr
 internal fun newNetworkClients(
     credentials: CredentialLookup = CredentialLookup.None,
     platform: PlatformInfo = fakePlatform(),
+    baseDns: Dns = Dns.SYSTEM,
 ): NetworkClients =
     NetworkClients(
         CoreClients(
@@ -67,6 +69,7 @@ internal fun newNetworkClients(
             lanGuard = LocalNetworkGuard(LocalNetworkAccess(), platform),
             hints = DnsFamilyHints(),
             debugInterceptors = emptySet(),
+            baseDns = baseDns,
         ),
         AuthInterceptor { credentials },
     )

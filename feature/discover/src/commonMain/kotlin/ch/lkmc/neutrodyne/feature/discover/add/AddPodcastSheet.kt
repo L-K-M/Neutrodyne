@@ -55,6 +55,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
+import ch.lkmc.neutrodyne.core.model.FeedCandidateSource
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.asString
@@ -68,6 +69,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_auth_password
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_show
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_username
 import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_episodes
+import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_source_alternate_link
+import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_source_apple_anchor
+import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_source_same_site_anchor
 import ch.lkmc.neutrodyne.core.ui.resources.add_choose_title
 import ch.lkmc.neutrodyne.core.ui.resources.add_empty_feed
 import ch.lkmc.neutrodyne.core.ui.resources.add_episodes_count
@@ -88,6 +92,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
 import ch.lkmc.neutrodyne.core.ui.resources.membership_create
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name
 import ch.lkmc.neutrodyne.core.ui.resources.membership_new
+import ch.lkmc.neutrodyne.feature.discover.ProviderDisclosure
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -229,6 +235,9 @@ internal fun AddPodcastSheet(
                     NdTextButton(stringResource(Res.string.add_lookup_once), onLookupOnce)
                 }
                 if (step.searchQuery != null) {
+                    // The tap sends the query to every effective provider — disclose them first
+                    // (the same text Discover's search field shows, 03 note 2026-11-02).
+                    ProviderDisclosure(state.providers)
                     NdTextButton(
                         stringResource(Res.string.discovery_search_for, step.searchQuery),
                         { onSearch(step.searchQuery) },
@@ -408,6 +417,14 @@ private fun AuthFields(
     }
 }
 
+/** The chooser's localized source label — the enum name is an implementation detail (M7). */
+private fun candidateSourceLabel(source: FeedCandidateSource): StringResource =
+    when (source) {
+        FeedCandidateSource.ALTERNATE_LINK -> Res.string.add_candidate_source_alternate_link
+        FeedCandidateSource.APPLE_ANCHOR -> Res.string.add_candidate_source_apple_anchor
+        FeedCandidateSource.SAME_SITE_ANCHOR -> Res.string.add_candidate_source_same_site_anchor
+    }
+
 /** A `Choose` row: title and "N episodes · source" (08 Add podcast sheet). */
 @Composable
 private fun CandidateRow(
@@ -422,7 +439,7 @@ private fun CandidateRow(
                     candidate.episodeCount?.let {
                         pluralStringResource(Res.plurals.add_candidate_episodes, it, it)
                     },
-                    candidate.source,
+                    stringResource(candidateSourceLabel(candidate.source)),
                 ).joinToString(" · "),
             )
         },

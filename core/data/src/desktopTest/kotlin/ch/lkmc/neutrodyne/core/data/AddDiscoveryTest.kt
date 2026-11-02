@@ -32,11 +32,13 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.RecordedRequest
 import mockwebserver3.junit4.MockWebServerRule
+import okhttp3.Dns
 import okio.FileSystem
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
@@ -49,6 +51,25 @@ import kotlin.time.Duration.Companion.minutes
 class AddDiscoveryTest {
     @get:Rule val serverRule = MockWebServerRule()
     private val server get() = serverRule.server
+
+    /**
+     * Autodiscovery must never fetch a local destination (03 note 2026-11-02), so these tests
+     * cannot serve the page as `localhost`: the fake public host [TEST_HOST] rides the stub
+     * DNS below back to this MockWebServer.
+     */
+    private val testDns =
+        Dns { host ->
+            if (host == TEST_HOST || host.endsWith(".$TEST_HOST")) {
+                listOf(InetAddress.getByName("127.0.0.1"))
+            } else {
+                Dns.SYSTEM.lookup(host)
+            }
+        }
+
+    private companion object {
+        const val TEST_HOST = "page.test"
+    }
+
     private val clock = TestClock()
     private val db = newDb(clock)
     private val root =
@@ -76,7 +97,15 @@ class AddDiscoveryTest {
         }
 
     @Before fun setup() {
-        bundle = newResolver(root, db, clock, apple = apple, podcastIndex = index)
+        bundle =
+            newResolver(
+                root,
+                db,
+                clock,
+                apple = apple,
+                podcastIndex = index,
+                networkClients = newNetworkClients(baseDns = testDns),
+            )
     }
 
     @After fun cleanup() {
@@ -85,7 +114,15 @@ class AddDiscoveryTest {
         root.deleteRecursively()
     }
 
-    private fun url(path: String) = server.url(path).toString()
+    private fun url(
+        path: String,
+        host: String = TEST_HOST,
+    ) = server
+        .url(path)
+        .newBuilder()
+        .host(host)
+        .build()
+        .toString()
 
     private fun fixture(name: String) =
         checkNotNull(javaClass.getResourceAsStream("/discovery/$name")).bufferedReader().use {
@@ -231,7 +268,7 @@ class AddDiscoveryTest {
                     server.takeRequest().target
                 },
             )
-            val fetcher = newFetcher(root)
+            val fetcher = newFetcher(root, networkClients = newNetworkClients(baseDns = testDns))
             try {
                 server.enqueue(mockResponse(body = "<rss><channel>" + " ".repeat(100_000)))
                 val body =
@@ -276,7 +313,7 @@ class AddDiscoveryTest {
 
     @Test fun htmlTransportStopsAtTwoMiBBeforeDelayedTailAndFeedsKeepTheirFullLimit() =
         runBlocking {
-            val fetcher = newFetcher(root)
+            val fetcher = newFetcher(root, networkClients = newNetworkClients(baseDns = testDns))
             try {
                 server.enqueue(
                     MockResponse
@@ -326,7 +363,7 @@ class AddDiscoveryTest {
                     mockResponse(
                         body = "<html><head><link rel='alternate' type='text/xml' href='${other.url(
                             "/feed",
-                        )}'></head></html>",
+                        ).newBuilder().host("other.$TEST_HOST").build()}'></head></html>",
                     ),
                 )
                 assertIs<AddResolution.Feed>(bundle.resolver.resolve(url("/page"), BasicCredentials("u", "p")))
@@ -471,7 +508,7 @@ class AddDiscoveryTest {
                         ),
                     ),
                 )
-            server.enqueue(mockResponse(302, "", "Location" to url("/landed").replace("localhost", "127.0.0.1")))
+            server.enqueue(mockResponse(302, "", "Location" to url("/landed", "other.$TEST_HOST")))
             server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e")))))
             val preview = assertIs<AddResolution.Feed>(bundle.resolver.resolve("https://pod.link/12")).preview
             val subscribe =
@@ -487,7 +524,7 @@ class AddDiscoveryTest {
                     .podcastId,
             )
 
-            server.enqueue(mockResponse(302, "", "Location" to url("/landed").replace("localhost", "127.0.0.1")))
+            server.enqueue(mockResponse(302, "", "Location" to url("/landed", "other.$TEST_HOST")))
             server.enqueue(mockResponse(body = rssBody()))
             val credentialed =
                 assertIs<AddResolution.Feed>(

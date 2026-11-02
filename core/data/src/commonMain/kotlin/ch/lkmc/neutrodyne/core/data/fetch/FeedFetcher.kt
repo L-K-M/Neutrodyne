@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.feeds.identity.LocalDestination
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import dev.zacsweers.metro.Inject
 import io.ktor.client.request.header
@@ -52,11 +53,24 @@ internal class FeedFetcher(
         val hops = mutableListOf<RedirectHop>()
         var permanentUrl: String? = null
 
+        // A local first URL is the user's typed destination (ADD keeps it); a later local hop is
+        // only reachable by redirect, and a discovered request may never name a local address.
+        val typedLocal = LocalDestination.isLocal(req.url)
         while (true) {
-            if (req.purpose == FeedRequestPurpose.ADD &&
+            if (req.purpose != FeedRequestPurpose.REFRESH &&
                 (youTube.classify(url) != null || youTube.isYouTubeHost(url))
             ) {
                 return FetchOutcome.Network(ADD_YOUTUBE_REJECTED)
+            }
+            // A discovered URL must never fetch the LAN; a public add input must not redirect
+            // there either. Refresh keeps its existing behaviour. Known limit: a public
+            // hostname that resolves to a LAN address is only caught by the Android 37+
+            // LocalNetworkGuard's DNS check (03 note 2026-11-02).
+            if (req.purpose != FeedRequestPurpose.REFRESH &&
+                LocalDestination.isLocal(url) &&
+                (req.purpose == FeedRequestPurpose.ADD_DISCOVERED || !typedLocal)
+            ) {
+                return FetchOutcome.Network(ADD_LOCAL_REJECTED)
             }
             val result =
                 try {

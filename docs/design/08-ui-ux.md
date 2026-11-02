@@ -843,9 +843,9 @@ A list of `DirectoryHit` cards: 64 dp cover, title, author, "120 episodes · upd
 |---|---|
 | resolving | progress line "Looking up…" (cancellable) |
 | `Feed(preview)` | preview card; Subscribe disabled for `NoMedia`; "Already subscribed — Open" for exact duplicates |
-| `Choose(candidates)` | "This page has several feeds" list (title, episodes, source) |
+| `Choose(candidates)` | "This page has several feeds" list (title, episodes, the source's localized label) |
 | `YouTube(ref)` (M8) | the ViewModel continues with 04's [Subscribe flow](04-youtube.md#subscribe-flow): `YouTubeChannelResolver.resolve(ref, AVATAR)` and, in parallel, `findRssAlternative(title)` (8 s); the card shows avatar (monogram while loading or when `title == null`, then the channel ID as title), title, "Long-form uploads only — change in podcast settings"; the RSS card "This show also has a podcast feed — Subscribe to the podcast instead" appears only when a match arrives, and "Use podcast" re-runs `resolve(hit.feedUrl)` in the same sheet; resolution failures use 04's error table (Edit / Retry); Subscribe → `SubscribeUseCase.youTube(resolved, variants, groupIds)` |
-| `Failure(NotAUrl(q))` | "Search for 'q'" → `DirectoryKey(q, null)` (M7; before M7: "Enter a feed address") |
+| `Failure(NotAUrl(q))` | the provider disclosure (the same line as Discover's) above "Search for 'q'" → `DirectoryKey(q, null)` (M7; before M7: "Enter a feed address") — the tap is the informed action that transmits the query |
 | `LookupRequired(input, provider)` (M7) | one consent row "Look up once with Apple" → `lookupOnce(input)`, 03's one-time lookup consent ([03 Search and discovery](03-feeds-and-discovery.md#search-and-discovery)); nothing is requested before the tap and declining leaves the input untouched |
 | `Failure(AuthRequired)` | username/password fields → `resolve(input, credentials)` |
 | `Failure(SubscriptionList(url))` | "This is a subscription list" + "Import it" (05 `ImportRepository.create(ImportSource(url, null))` → `ImportKey(sessionId)`) |
@@ -854,6 +854,8 @@ A list of `DirectoryHit` cards: 64 dp cover, title, author, "120 episodes · upd
 | subscribed | sheet closes; snackbar "Subscribed to {title}" + "Open" → `PodcastKey` |
 
 The empty field's helper text is "Paste a podcast feed, website, Apple Podcasts or YouTube link, or a YouTube @handle" (with and without the engine; before M8 without "or a YouTube @handle"); a bare `@handle` resolves through 03's YouTube pre-check and never reaches `NotAUrl`; every "Add a YouTube channel" and "Add by URL" entry point opens this same sheet with `AddPodcastKey(null)`. The sheet's state (input, preview id, chosen groups) is `rememberSaveable`; after process death the preview is re-resolved from the saved input (previews are memory-only, D24). On the desktop the sheet also opens from Ctrl/Cmd+N, File › Add podcast…, a link handed over by the OS or a second launch, and a URL dropped on the window (11); the field takes focus at once, Enter runs Subscribe when it is enabled, and the (paste) button reads the clipboard's text.
+
+**Implementation note (2026-11-02, M7).** A prefilled input that names a local-network destination (`AddPodcastResolver.isLocalDestination`) opens with the text visible but does not auto-resolve — the field's initial effect calls `autoResolve`, which skips local inputs; the user's tap resolves it like a typed URL. Chooser rows show the localized source label of `FeedCandidateSource`, never the enum identifier.
 
 ### Import
 
