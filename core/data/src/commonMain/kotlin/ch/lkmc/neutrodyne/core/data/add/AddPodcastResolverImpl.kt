@@ -633,11 +633,6 @@ internal class AddPodcastResolverImpl(
                         }
                     }.awaitAll()
             }
-        results.firstOrNull { (r, _) -> r is PreviewOutcome.Consent }?.let { return it.first }
-        results
-            .firstOrNull { (r, _) ->
-                r is PreviewOutcome.Failed && r.error == AddPodcastError.YouTubeNotYetSupported
-            }?.let { return it.first }
         val entries =
             results
                 .mapNotNull { (result, source) ->
@@ -646,6 +641,15 @@ internal class AddPodcastResolverImpl(
                             source
                     }
                 }.distinctBy { UrlNormalizer.forIdentity(it.first.previewId) }
+        // A verified feed answers the page even when it also links a YouTube channel or an Apple
+        // show; those outcomes only explain a page whose other candidates all failed.
+        if (entries.isEmpty()) {
+            results.firstOrNull { (r, _) -> r is PreviewOutcome.Consent }?.let { return it.first }
+            results
+                .firstOrNull { (r, _) ->
+                    r is PreviewOutcome.Failed && r.error == AddPodcastError.YouTubeNotYetSupported
+                }?.let { return it.first }
+        }
         return when (entries.size) {
             0 -> PreviewOutcome.Failed(AddPodcastError.NotAFeed)
             1 -> PreviewOutcome.Done(entries.single().first)
