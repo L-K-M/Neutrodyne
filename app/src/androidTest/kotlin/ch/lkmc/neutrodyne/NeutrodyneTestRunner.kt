@@ -2,9 +2,11 @@
 package ch.lkmc.neutrodyne
 
 import android.app.Application
+import android.app.UiAutomation
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.AndroidJUnitRunner
@@ -49,5 +51,35 @@ class NeutrodyneTestRunner : AndroidJUnitRunner() {
             FirstLaunchRestoreSeed.run(app as NeutrodyneApplication)
         }
         super.callApplicationOnCreate(app)
+    }
+
+    override fun onStart() {
+        hideSystemErrorDialogs()
+        super.onStart()
+    }
+
+    /**
+     * A loaded emulator's System UI can miss its boot deadline, and its ANR dialog then holds window
+     * focus from every test activity, so Espresso times out waiting for focus (#262). With dialogs
+     * hidden the system kills an unresponsive process instead, so this app's own ANR still fails.
+     */
+    private fun hideSystemErrorDialogs() {
+        val automation =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                getUiAutomation(UiAutomation.FLAG_DONT_USE_ACCESSIBILITY)
+            } else {
+                uiAutomation
+            }
+        for (command in SYSTEM_DIALOG_COMMANDS) {
+            ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() }
+        }
+    }
+
+    private companion object {
+        val SYSTEM_DIALOG_COMMANDS =
+            listOf(
+                "settings put global hide_error_dialogs 1",
+                "am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS",
+            )
     }
 }
