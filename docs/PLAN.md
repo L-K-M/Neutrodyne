@@ -1273,7 +1273,23 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
 
 #### M6: Downloads
 
+**Implementation note (2026-11-02, M6b).** The M6b port lands on
+`impl/m6b-current` over the current M6a code, preserving its review fixes.
+The [AC-by-AC ledger](evidence/m6b-acceptance.md) names host tests and the
+unexecuted device/nightly/owner checks. AC2's E10 half and AC4/5/11/13/15
+remain open for that evidence. AC5 means eligibility at 24 h, followed by the
+next cleanup opportunity, not an exact OS wake time. AC11 retains the
+pending-job inference and its OEM Recents limitation. AC15 permits same-store
+atomic rename instead of copy/verify and keeps the playing source pending.
+W10 uses the adopted `benchmarkRelease` fallback, including its opt-in fixture
+driver; neither assembly nor that variant proves published-release APK
+acceptance. No device run or milestone completion is claimed by this work.
 
+**Implementation note (2026-11-02, M6b).** All eleven resolutions in the
+M6b plan's ambiguity table are adopted; the owning sections in 05, 07, 08 and 09
+record the individual decisions. Settings resolution, settings keys, DAO query
+contracts and planner/cleanup/mover/root/exit ports are frozen for the port.
+PO-12 defaults and PO-37 device-local sync classification apply.
 
 **Implementation note (2026-10-19, M6a).** Adopted resolutions 2, 3, 5 and 7:
 AC14's audible offline half requires MD1; transfer mechanics are independent and

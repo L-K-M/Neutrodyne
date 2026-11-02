@@ -127,6 +127,16 @@ Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`,
 
 ### Threading and coroutines
 
+**Implementation note (2026-10-19, M6b).** W1 exposes the orchestration ports
+in `ch.lkmc.neutrodyne.core.domain` so `core:testing` can supply fakes without
+an implementation-module dependency. The concrete owners remain in
+`download:impl`. Planner, cleanup and mover each own a separate single-flight
+mutex. Queue mutations coordinate with the shared claim mutex; file/network IO
+stays outside DB transactions. `DownloadMover.run(target, deadline)` takes a
+nullable monotonic elapsed-ms deadline, null on desktop, and returns
+COMPLETE, PENDING, DEADLINE or STORAGE_FULL. Scheduler lane/wake signatures stay
+unchanged; W5 extends their Android implementation to AUTO.
+
 
 | Component | Runs on | Rules |
 |---|---|---|
@@ -386,6 +396,9 @@ At `RESOLVING`, before any network request, the engine checks for a process deat
 
 #### Estimates
 
+**Implementation note (2026-10-19, M6b).** W2 shares the manual and automatic
+estimate helper: 128 kbit/s is `durationMs × 16` bytes (16,000 bytes per second).
+Duration hints are clamped before multiplication to avoid overflow.
 
 `estimatedBytes` = `enclosureLength` when ≥ 100 KB (smaller values are bogus placeholders, never used for integrity); else `durationMs × 16` (128 kbit/s) when a positive duration is known; else `null`. The free-space check then falls back to 150 MB ([Free space](#free-space-and-allocation)). 05's "Download all" confirmation uses the same rule.
 
@@ -587,6 +600,19 @@ Other states: `RESOLVING` and `VERIFYING` show an indeterminate ring; `DOWNLOADI
 
 ### Pause, cancel and Task Manager stops
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 2 keeps the
+three-condition inference rule: USER_REQUESTED, exit newer than the stale UIDT
+token, and no pending manual job. If an OEM Recents swipe also removes that job,
+AC11's Recents distinction is a named device gap, not presumed verified.
+Adopted resolution 3 freezes a dedicated
+`resetTaskManagerStoppedRunners(liveTokens, stopReason)` DAO transaction before
+generic orphan reset. Only stale active MANUAL `uidt:` owners and the unclaimed
+MANUAL queue pause; other stale rows retain generic SYSTEM recovery. No schema
+change is needed. W6 binds the Android historical-exit probe and invokes this
+transaction in `beforeRunnerReset(liveTokens)` under the shared claim mutex,
+before the generic reset. The UIDT service appends an invocation UUID to the
+shown token format (`uidt:{startedAtMs}:{UUID}`); inference reads the timestamp
+before that optional suffix and also accepts the timestamp-only form.
 
 
 **Implementation note (2026-10-19, M6a).** Adopted resolution 7: M6a handles actual
@@ -840,6 +866,11 @@ before the next foreground event.
 
 Because the delay only considers rows whose needs the request already guarantees, a wake always finds at least one runnable row or rows whose `nextAttemptAt` moved (gates, storage re-check), so wakes never spin. Rows with stricter needs than the request (e.g. Wi-Fi-only rows when another row allows mobile data) are picked up by any later runner, by the in-process `NetworkMonitor` trigger, or by the next wake; the worst case while the process is dead is the covered rows' backoff (≤ 6 h).
 
+**Implementation note (2026-10-19, M6b).** The aggregate wake constraints
+can cover no row when network and charging needs are disjoint (one row needs
+Wi-Fi without charging, another allows mobile but needs charging). Android then
+uses the earliest row's complete constraints and retry time, including the
+pre-28 portal delay. This preserves the guarantee that a wake covers a row.
 
 ### Work requests
 
@@ -1483,6 +1514,13 @@ This confirms 02's reading: a **tombstoned episode does not occupy a `keepLatest
 
 ### Planner algorithm
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 10 preserves
+network/charging values in effective policy attribution, but desktop admission
+must write `allowMetered = true`, `requireCharging = false`; neither network nor
+charging holds desktop rows or gates cleanup. Adopted resolution 11 keeps the
+full-library watermark pass, with reads/writes batched at 500 bind variables
+and no write when watermarks are unchanged. W2 measures the pass in its tests; no planner cache is added.
+
 
 `AutoDownloadPlanner.plan(podcastIds)` (single flight; `@Dispatcher(IO)`):
 
@@ -1531,6 +1569,14 @@ Serves R4.5, N6. Delivered in M6 (common planner on both platforms). [PO-12](../
 
 ### Cleanup triggers
 
+**Implementation note (2026-10-19, M6b).** W3 exposes `CleanupPlannerImpl.run`
+and a suspending `observePlayed()` collector with a 30 s debounce. W5/W7 own
+launching the collector and binding startup, policy, session and periodic
+triggers. The engine calls cleanup before committing a storage wait; if disk IO
+also prevents cleanup, it retains the storage wait and its retry. Startup/daily
+hosts verify completed rows before cleanup; cleanup itself repeats journal
+draining, the partial sweep and orphan reporting without resetting runners.
+
 
 `CleanupPlanner.run(reason)` (single flight) is called by `CleanupWorker` (`download-cleanup`, daily; on the desktop the `downloads-auto` lane's daily pass, [Desktop runners](#desktop-runners)), by the played-downloads observer (`DownloadDao.observePlayedCompletedIds()`, debounced 30 s, so "delete immediately" happens shortly after an episode is marked played — here, or on another device when sync applies the played state), when `play_session.currentEpisodeId` changes (deferred deletes, outgoing item), when `downloads.delete_after_played` or a scope override changes, and synchronously by the engine before a `STORAGE` wait for that root.
 
@@ -1552,6 +1598,16 @@ Cleanup deletes with `byUser = false`: no `downloadDismissedAt`, so an episode r
 
 ### Deferral while playing
 
+**Implementation note (2026-10-19, M6b).** Cleanup journals candidates before
+the deletion transaction, then rechecks the SQL protected set and row snapshots
+inside that transaction. Index events occur outside the transaction so a
+subscriber can read the database; skipped or rolled-back rows regain their
+index entries. The frozen W1 port comment proposed releasing the claim mutex
+before disk work. M6a's `DeferredDeletes` requires it through the ownership
+check and file deletion to prevent a new claim reusing a checked path. Cleanup
+retains that existing barrier, with all disk IO outside DB transactions. A
+file that becomes current after its row is removed stays journaled until the
+session changes.
 
 06 may hold an open `Local` pin on the current item's file and re-open it on every seek ([06 EpisodeResolver](06-playback.md#episoderesolver)); on the desktop 11's engine keeps the current file open through its `FileByteSource` ([11 Sources and SpanCache](11-desktop.md#sources-and-spancache)), and Windows refuses to delete an open file. Therefore any deletion (user, cleanup, unsubscribe, move source) of a file whose episode is `play_session.currentEpisodeId` — read through `PlaySessionDao.observeCurrentEpisodeId()` (02; `:download:impl` may not depend on `:playback:api`, [01 Dependency rules](01-foundation.md#dependency-rules)) — removes the row and the index entry at once but hands the file to `DeferredDeletes`:
 
@@ -1561,6 +1617,19 @@ Cleanup deletes with `byUser = false`: no `downloadDismissedAt`, so an episode r
 - If the file disappears anyway, 06's recovery re-pins to the stream at the same position and calls `reportFileMissing` ([06 Error recovery](06-playback.md#error-recovery)).
 
 ### Quota
+
+**Implementation note (2026-10-19, M6b).** `DownloadQuota` is the common
+AUTO admission budget. W2 calls `resetAdmission()` at the start of its
+admission pass and `admitsAuto(latestRows, estimate)` under the shared claim
+mutex before each insert. Exact fits are admitted; an unknown estimate uses
+150 binary MB. `DownloadStorage` observes the cap and rejected estimate and
+recomputes `autoBlockedByCap` as rows or settings change, so cleanup frees
+capacity without retaining a stale notice. Partials and orphans are reported
+separately and do not consume the admission budget. Manual requests never
+consult it. The integrated W2 planner and storage share the W3 quota instance;
+there is no planner-owned blocked flag or second reservation calculation.
+The notice table uses this admission result rather than completed bytes alone,
+because a candidate can be refused while completed bytes remain below the cap.
 
 
 `StorageUsage.usedBytes` = `SUM(totalBytes)` of `COMPLETED` rows ([02 Downloads](02-data-model.md#downloads)), never a file-system walk; `partialBytes` = sum of `.part` lengths of rows with a `tempPath` (cheap `stat` calls, refreshed on observation). The cap (`downloads.storage_cap_mb`: unlimited, 1 / 2 / 5 / 10 / 20 GB) only gates `AUTO` admission ([Planner algorithm](#planner-algorithm) step 7); manual downloads ignore it; reaching it shows `CAP_REACHED`.
@@ -1606,6 +1675,15 @@ Then, in `DownloadReconcileWorker` on Android (`download-reconcile`, every proce
 7. Reloads `LocalMediaIndex` if anything changed.
 8. `ensureScheduled(MANUAL)` and `ensureScheduled(AUTO)`, then a planner pass. On Android the reconcile worker runs in the background, so on API 34+ `MANUAL` usually gets `download-lane-MANUAL` here; when the user opens the app, the `ON_START` hook upgrades the lane to a UIDT job. This also re-arms work lost to a force stop. On the desktop the lanes simply continue with their drain.
 
+**Implementation note (2026-10-19, M6b).** Android's startup worker verifies
+files, schedules both lanes, runs the enabled-podcast planner pass (including
+its full-library watermark pass), then runs `CleanupPlanner.run(STARTUP)`.
+Its daily worker verifies files, runs cleanup, plans, schedules both lanes and
+records `cleanup_last_at` only after success. Both resume a persisted move target.
+The Android charging monitor supplies both scheduler and engine conditions; the
+desktop retains its unconditional charging policy. `DownloadHost.beforeRunnerReset`
+is the W6 seam under the shared claim mutex, before generic orphan reset, and
+receives the live token snapshot. W5 supplies no Task Manager inference.
 
 `CleanupWorker` (Android) and the `downloads-auto` lane's daily pass (desktop) repeat steps 3–5 daily. A full pass over 1,000 completed files is about 1,000 `stat` calls (well under a second on IO).
 
@@ -1634,6 +1712,22 @@ Desktop: installing a new MSI, DMG, DEB or RPM, or unpacking a new ZIP or tar.gz
 
 ### Moving between roots
 
+**Implementation note (2026-10-19, M6b).** W4 uses the frozen first-batch
+`rowsOnOtherRoots(target, 20)` query and a keyset continuation query after skipped
+rows, so an unavailable first batch cannot hide later available files. The
+unavailable-only terminal rule in step 5 wins over its earlier pending wording:
+the target is cleared when only unavailable sources remain; current-file and IO
+failures keep it set. The notice combines the persisted target and W3's quota
+state (`MOVE_IN_PROGRESS`, `STORAGE_LOW`); the API has no skipped-count field.
+Bulk copying remains outside the claim mutex. Final ownership checks, journaling,
+rename, guarded row publication, index update and source deletion share that
+mutex, with the publication/rollback section non-cancellable. This prevents a
+controller deletion from racing the rename, without filesystem IO inside a Room
+transaction. Same-store rollback restores the source on a rejected transaction;
+a rename surviving process death is adopted by its target path and length.
+W5/W7 own worker-factory/lane bindings, scheduling and root/session event pokes;
+W4 exposes the mover and supplies tested, unbound hosts. The existing desktop
+root provider receives device settings and lazy row access for registration.
 
 `changeRoot(rootId, moveExisting)` makes `rootId` current — Android writes `downloads.root_id`; the desktop writes 11's `desktop.downloads_dir` (null for `dir:default`, the registered path otherwise; the root must come from `storageRoots()` or `registerFolderRoot`). New rows use the new root at once, and queued or paused rows follow it at their next prepare, `.part` included ([RSS prepare](#rss-prepare) step 3; YouTube rows use the same placement step). With `moveExisting = true` (Android's settings dialog "Move {n} downloads ({2.3 GB}) to {SD card}?", the desktop's "Move {n} downloads ({size}) to {folder}?" in [11 Change folder](11-desktop.md#change-folder)), the **completed** files follow through the common `DownloadMover`, run by `DownloadMoveWorker` on Android (`download-move` with `targetRootId`, 8-min soft deadline, continuation `APPEND_OR_REPLACE`) and by `DesktopMoveLane` on the desktop (lane `downloads-move`, no deadline; the target is persisted in `downloads.move_target`, so a quit or crash continues the move at the next start, [R8.8](../PLAN.md#21-functional-requirements)). `changeRoot(…, moveExisting = false)` clears `downloads.move_target`, so files left on the old root stay there.
 
@@ -1717,7 +1811,19 @@ Auto Backup includes `getExternalFilesDir()` by default. 05's include-only rules
 
 ## Settings
 
+**Implementation note (2026-10-19, M6b).** W11 records the integrated state:
+W2–W7 now bind the planner, cleanup, root registry, mover and both platform
+hosts, including W6's historical-exit inference. Earlier W1/W4 freeze notes
+describe delivery order. The [acceptance ledger](../evidence/m6b-acceptance.md)
+separates host assertions from device behavior; neither Task Manager/Recents,
+SD-card moves nor the real 24 h cleanup clock is device-verified here.
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 1 assigns
+`desktop_roots`, `move_target`, `cleanup_last_at`, folder registration, the folder
+picker and MOVE_EXISTING to M6b. The Podcasts bmgr assertion remains M6a.
+W1 freezes keys and owner contracts only; W4/W5/W7 bind root/move and AUTO hosts.
+M6a's explicit unavailable results remain until a real owner is supplied; root
+registration and changes now have a delegation seam rather than a successful no-op.
 
 
 **Implementation note (2026-10-19, M6a).** W1 registers only MANUAL_METERED (portable), ROOT_ID,

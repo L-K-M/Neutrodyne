@@ -761,6 +761,33 @@ automatic downloads are unavailable. Queued episode buttons open the current
 wait reason's actions and Cancel; completed buttons open a delete confirmation.
 Progress is an overlay for visible IDs and never invalidates paging membership.
 
+**Implementation note (2026-10-19, M6b).** W9 is integrated with M6a's
+real Downloads screen, preserving selection, playback, visible live progress,
+manual consent and deletion confirmation. Its duplicate overview is replaced
+by shared ordered notices and the orphan-confirmation dialog on that screen.
+Settings combines M6a's manual mobile-data/root controls with W9's automatic
+policy, cleanup and cap controls. Android root rows and desktop folder changes
+use the same move-or-leave confirmation and W4's implemented controller.
+Desktop completed rows reveal their indexed file URI through RevealInFolder;
+Share file remains Android-only. Episode DownloadToggle uses M6a's real request
+handler, including the entry point used by the benchmark smoke journey.
+Bulk requests also hand notification consent to that contextual handler,
+including its blocked-permission guidance. Storage actions resolve the selected
+root instead of assuming the desktop default folder.
+`DownloadsOverview` has no move counters, so MOVE_IN_PROGRESS reads
+"Moving downloads…" without invented counts. Scoped choosers retain M2's
+"Inherit" label because ScopedSettingsView has no underlying overridden value.
+Group dependents require explicit opt-in, and external-mode cleanup remains
+editable. No YouTube transfer behavior is added. These controls supersede the
+M6a-only hiding described in the preceding historical note.
+
+W11's [acceptance ledger](../evidence/m6b-acceptance.md) records the exact
+settings, bulk-confirmation and string tests. Notice order is Data Saver,
+background restriction, notifications off, cap, low storage, unavailable root,
+YouTube paused, move, then orphan files; show at most two, with Android-only
+notices filtered on desktop. Native folder selection, settings navigation,
+accessibility and permission behavior still require device/packaged-app runs.
+
 
 `DownloadsKey`, `:feature:downloads`, M6 (empty state from M0). Data: 07's `DownloadController.observeAll(): Flow<DownloadsOverview>` (in progress, completed and failed `DownloadEntry` lists, `StorageUsage`, `notices`) with live bytes from `DownloadProgressSource` for the visible in-progress rows ([07 Engine architecture](07-downloads.md#engine-architecture), [07 Notices](07-downloads.md#notices)); texts are [`DownloadStatusText`](#download-status-text).
 
@@ -2783,6 +2810,16 @@ Denied → no repeated system dialog; the relevant screen shows an inline row "N
 ---
 
 ## Capability differences in UI
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 5 applies the
+global delete-after-played policy to completed YouTube files even while the
+channel is NotSupported; cleanup is still the user's chosen policy. External-mode
+copy must not imply that unavailable playback protects a file from cleanup.
+Adopted resolution 6 retains the M6a RevealInFolder mechanism; W9 owns the new
+Downloads-screen surface and settings row, without a second reveal mechanism.
+Adopted resolution 7 adds only the visible group/podcast "Download all unplayed…"
+action and confirmation, creating MANUAL rows; the restore offer remains M6a.
+
 
 Serves R3.7, R3.5, R3.6, R3.9 (display), R8.6, N8. Delivered in M8 (every APK and desktop build in external mode, reason `NOT_YET_AVAILABLE`), M9a (the engine on the 64-bit APKs; reason texts for `NOT_IN_THIS_APK`, `DISABLED_BY_USER`, `ENGINE_FAILED`; engine rows), M9b (engine-update rows) and MD3 (the engine on every desktop build). Honours [D2](../PLAN.md#3-key-decisions), [D51](../PLAN.md#3-key-decisions), [D77](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions), [PO-2](../PLAN.md#po-2-distribution-channels). There is one Android product (build types only, [D2](../PLAN.md#3-key-decisions)) and one desktop configuration per target, and the UI never reads the ABI, the platform, `BuildConfig` or the no-engine build switch to decide what YouTube can do (only `ExternalReasonText` picks a desktop wording through `PlatformInfo`, below): every difference is driven by 04's `YouTubeCapabilitiesSource.capabilities` (`StateFlow<YouTubeCapabilities>` from `:youtube:api`, observed by ViewModels and never snapshotted), so every APK before M9a, every desktop build before MD3, the `armeabi-v7a` APK, the emergency builds without the engine and an app whose engine is off or failed all render the same **external mode** ([04 Capability matrix](04-youtube.md#capability-matrix), [04 Capability consumers](04-youtube.md#capability-consumers)). Capabilities can flip while a screen is visible (the switch, a third failed start, "Try again"): rows, Discover and Settings re-render at once; the queue and downloads follow 06 and 07.
 
