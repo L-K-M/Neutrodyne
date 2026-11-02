@@ -185,7 +185,7 @@ class StoredRecordWriterTest {
             assertTrue(f.push().results.isEmpty())
             assertTrue(
                 f.writer
-                    .resetLibrary(f.principal, AccountResetRequest("DELETE", "library"))
+                    .resetLibrary(f.principal, AccountResetRequest("DELETE", "library", f.cursor()))
                     .isNotEmpty(),
             )
         }
@@ -221,7 +221,13 @@ class StoredRecordWriterTest {
             val raw = f.raw(setting)
             assertEquals(setOf("v"), raw.fields.keys)
             // The stored record still fits one response page.
-            assertEquals(listOf(setting), f.push().page.records.map { it.key })
+            assertEquals(
+                listOf(setting),
+                f
+                    .push()
+                    .page.records
+                    .map { it.key },
+            )
         }
 
     /** A JSON array of individually legal elements whose serialized sum reaches [target] bytes. */
