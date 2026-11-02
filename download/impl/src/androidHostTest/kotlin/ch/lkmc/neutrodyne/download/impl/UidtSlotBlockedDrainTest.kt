@@ -13,7 +13,6 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
-import ch.lkmc.neutrodyne.download.api.DownloadControllerFiles
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
 import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
@@ -29,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import org.junit.Test
@@ -253,8 +253,7 @@ class UidtSlotBlockedDrainTest {
         private val values = MutableStateFlow<Map<String, Any>>(emptyMap())
         override val file = SettingsFile.DEVICE
 
-        override fun <T : Any> observe(key: SettingKey<T>): Flow<T> =
-            values.map { (it[key.name] as? T) ?: key.default }
+        override fun <T : Any> observe(key: SettingKey<T>): Flow<T> = values.map { (it[key.name] as? T) ?: key.default }
 
         override suspend fun <T : Any> get(key: SettingKey<T>): T = (values.value[key.name] as? T) ?: key.default
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.download.impl
 
+import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
@@ -265,18 +266,19 @@ class RssCrashProofTest {
                     }
                 EngineRig(this, sourceFactory = { rss(it, http) }).use { f ->
                     val id =
-                        f.seed(
-                            enclosureUrl = http.server.url("/a").toString(),
-                            transform = {
-                                it.copy(
-                                    state = DownloadState.PAUSED,
-                                    etag = "\"1\"",
-                                    totalBytes = a.size.toLong(),
-                                    downloadedBytes = half.toLong(),
-                                    tempPath = DownloadPaths.part(it.episodeId),
-                                )
-                            },
-                        ).single()
+                        f
+                            .seed(
+                                enclosureUrl = http.server.url("/a").toString(),
+                                transform = {
+                                    it.copy(
+                                        state = DownloadState.PAUSED,
+                                        etag = "\"1\"",
+                                        totalBytes = a.size.toLong(),
+                                        downloadedBytes = half.toLong(),
+                                        tempPath = DownloadPaths.part(it.episodeId),
+                                    )
+                                },
+                            ).single()
                     f.files.openPart("old", DownloadPaths.part(id)).withOpen {
                         it.append(a.copyOfRange(0, half), half)
                         it.sync()
