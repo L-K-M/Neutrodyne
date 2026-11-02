@@ -393,6 +393,7 @@ internal class DownloadControllerImpl(
             if (rows.any { it.download.missingForStorage() } || roots.resolve(storage.rootId) == null) {
                 add(DownloadNotice.ROOT_UNAVAILABLE)
             }
+            if (storage.autoBlockedByCap) add(DownloadNotice.CAP_REACHED)
             if (storage.orphanBytes > 0) add(DownloadNotice.ORPHAN_FILES)
         }
 
