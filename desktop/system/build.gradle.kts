@@ -17,3 +17,17 @@ dependencies {
 
     testImplementation(project(":core:testing"))
 }
+
+// This suite requires the native prototype and a real OS session API.
+tasks.register<Test>("systemSessionTest") {
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnit()
+    filter.includeTestsMatching("*NativeSystemMediaSessionTest")
+    dependsOn(":playback:native:buildNdmedia")
+}
+
+tasks.named<Test>("test") {
+    filter.excludeTestsMatching("*NativeSystemMediaSessionTest")
+}

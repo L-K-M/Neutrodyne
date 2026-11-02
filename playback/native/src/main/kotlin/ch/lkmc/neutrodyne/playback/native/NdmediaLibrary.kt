@@ -47,6 +47,10 @@ class NdmediaLibrary private constructor(
 
     companion object {
         private const val MAX_C_STRING = 4096L
+        // OS services may finish native delegates after revocation. Keep code
+        // mapped for the process lifetime; close still releases every device,
+        // registration and per-instance allocation before returning.
+        private val loaded = java.util.concurrent.ConcurrentHashMap<Path, SymbolLookup>()
 
         /** Library file name per host family (11 ndmedia interface). */
         fun fileName(os: String = System.getProperty("os.name").lowercase()): String =
@@ -61,7 +65,10 @@ class NdmediaLibrary private constructor(
             val file = directory.resolve(fileName())
             require(file.toFile().isFile) { "ndmedia is not built for this target: $file does not exist" }
             val arena = Arena.ofShared()
-            return NdmediaLibrary(arena, SymbolLookup.libraryLookup(file, arena))
+            val lookup = loaded.computeIfAbsent(file.toAbsolutePath().normalize()) {
+                SymbolLookup.libraryLookup(it, Arena.global())
+            }
+            return NdmediaLibrary(arena, lookup)
         }
     }
 }

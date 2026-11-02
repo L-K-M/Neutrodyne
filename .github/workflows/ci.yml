@@ -82,6 +82,13 @@ jobs:
       # toolchain). `:playback:native:checkNativeLicences` is not a static gate:
       # it reads the four built libraries, so it runs per target in
       # `desktop-matrix` below, where each target's own toolchain exists.
+      - name: Native source formatting
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-format-18
+          clang-format-18 --dry-run --Werror playback/native/ffmpeg/ffoffsets.c \
+            playback/native/ndmedia/*.c playback/native/ndmedia/*.h \
+            playback/native/ndmedia/*.cpp playback/native/ndmedia/*.m
       - name: KGP assertion (PLAN M0 AC3)
         # The root project's buildEnvironment: plugins load through the included build, so :app's lists none (01 S1)
         run: ./gradlew -q buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'
@@ -420,7 +427,7 @@ jobs:
         shell: bash
         run: |
           tests="./gradlew :playback:engine:test :playback:engine:ffmpegTest \
-            :playback:native:test :desktop:system:test"
+            :playback:native:test :desktop:system:test :desktop:system:systemSessionTest"
           [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
           $tests
       # The measured evidence MD0 records per target: stripped sizes, the licence

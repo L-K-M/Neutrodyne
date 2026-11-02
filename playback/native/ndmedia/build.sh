@@ -83,8 +83,8 @@ case "$TARGET" in
         OUT="$BUILD_ROOT/libndmedia.dylib"
         cc $CFLAGS -fPIC -dynamiclib -arch arm64 -mmacosx-version-min=13.0 \
             -install_name "@rpath/libndmedia.dylib" \
-            "$SRC" -o "$OUT" \
-            -framework AudioToolbox -framework CoreAudio -framework CoreFoundation
+            "$SRC" "$ROOT/session_mac.m" -fobjc-arc -o "$OUT" \
+            -framework AppKit -framework MediaPlayer -framework AudioToolbox -framework CoreAudio -framework CoreFoundation
         ;;
     windows-x64)
         OUT="$BUILD_ROOT/ndmedia.dll"
@@ -137,10 +137,12 @@ case "$TARGET" in
             done < "$ENV_FILE"
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
-        (cd "$BUILD_ROOT" && cl -nologo -O2 -std:c11 -LD \
+        (cd "$BUILD_ROOT" && cl -nologo -O2 -std:c11 -c \
             -I"$(cygpath -w "$INCLUDE_DIR")" -I"$(cygpath -w "$ROOT")" \
-            "$(cygpath -w "$SRC")" \
-            /link /OUT:ndmedia.dll ole32.lib uuid.lib advapi32.lib user32.lib) ||
+            "$(cygpath -w "$SRC")" -Fondmedia.obj && \
+            cl -nologo -O2 -EHsc -std:c++17 -LD -I"$(cygpath -w "$ROOT")" \
+            "$(cygpath -w "$ROOT/session_win.cpp")" ndmedia.obj \
+            /link /OUT:ndmedia.dll ole32.lib uuid.lib advapi32.lib user32.lib shell32.lib runtimeobject.lib) ||
             die "cl failed"
         rm -f "$BUILD_ROOT/ndmedia.lib" "$BUILD_ROOT/ndmedia.exp" "$BUILD_ROOT/ndmedia.obj"
         ;;

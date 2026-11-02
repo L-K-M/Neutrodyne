@@ -22,8 +22,8 @@
 // one means adding it here, in the JSON and in FfmpegLayout.
 
 #include <errno.h>
-#include <stdio.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #include "libavcodec/avcodec.h"
 #include "libavcodec/codec_id.h"
@@ -48,15 +48,14 @@
 #define FIELD(s, f) printf("      \"%s\": %zu,\n", #f, offsetof(s, f))
 #define FIELD_LAST(s, f) printf("      \"%s\": %zu\n", #f, offsetof(s, f))
 
-static void struct_begin(const char *name, size_t size, size_t alignment)
-{
-    printf("    \"%s\": {\n      \"size\": %zu,\n      \"alignment\": %zu,\n      \"fields\": {\n", name, size, alignment);
+static void struct_begin(const char *name, size_t size, size_t alignment) {
+    printf("    \"%s\": {\n      \"size\": %zu,\n      \"alignment\": %zu,\n      \"fields\": {\n", name, size,
+           alignment);
 }
 
 static void struct_end(void) { printf("      }\n    },\n"); }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     /* The point release comes from native-components.lock, handed over as the
      * first argument by build.sh: this probe prints what the headers of this
      * build define, and a -D would have to be quoted differently for cl and
@@ -68,7 +67,7 @@ int main(int argc, char **argv)
 
     printf("{\n");
     printf("  \"ffmpegVersion\": \"%s\",\n", argv[1]);
-    printf("  \"pointerSize\": %zu,\n", sizeof(void*));
+    printf("  \"pointerSize\": %zu,\n", sizeof(void *));
     printf("  \"sizeTSize\": %zu,\n", sizeof(size_t));
     printf("  \"libraries\": {\n");
     printf("    \"avcodec\": %d,\n", LIBAVCODEC_VERSION_MAJOR);
@@ -199,10 +198,8 @@ int main(int argc, char **argv)
     printf("    \"SEEK_CUR\": %d,\n", SEEK_CUR);
     printf("    \"SEEK_END\": %d,\n", SEEK_END);
     printf("    \"AV_ERROR_MAX_STRING_SIZE\": %d,\n", AV_ERROR_MAX_STRING_SIZE);
-    printf("    \"AV_CHANNEL_LAYOUT_STEREO_MASK\": %llu,\n",
-           (unsigned long long)AV_CH_LAYOUT_STEREO);
-    printf("    \"AV_CHANNEL_LAYOUT_MONO_MASK\": %llu,\n",
-           (unsigned long long)AV_CH_LAYOUT_MONO);
+    printf("    \"AV_CHANNEL_LAYOUT_STEREO_MASK\": %llu,\n", (unsigned long long)AV_CH_LAYOUT_STEREO);
+    printf("    \"AV_CHANNEL_LAYOUT_MONO_MASK\": %llu,\n", (unsigned long long)AV_CH_LAYOUT_MONO);
     printf("    \"AV_CHANNEL_ORDER_NATIVE\": %d,\n", AV_CHANNEL_ORDER_NATIVE);
     printf("    \"AV_CHANNEL_ORDER_UNSPEC\": %d,\n", AV_CHANNEL_ORDER_UNSPEC);
     printf("    \"AV_PKT_DATA_SKIP_SAMPLES\": %d,\n", AV_PKT_DATA_SKIP_SAMPLES);

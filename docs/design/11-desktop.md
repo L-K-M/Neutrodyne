@@ -666,7 +666,7 @@ Notification clicks after the app has quit start the app (Windows and macOS) or 
 
 ### ndmedia interface
 
-`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. All functions return immediately; only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
+`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. PCM writes and the audio callback never wait; device and session lifecycle calls may wait and run away from the audio and UI threads. In the production sketch only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
 
 ```c
 /* ndmedia.h (sketch) — UTF-8 strings, int return codes (0 = ok, < 0 = ND_E_*), opaque handles */
@@ -974,7 +974,7 @@ Spike S18 = milestone MD0 ([PLAN MD0](../PLAN.md#md0-desktop-audio-engine-spike)
 | Question | Does our engine core — minimal LGPL FFmpeg through FFM, miniaudio output, the timeline clock, the DSP ports — play every podcast format with an accurate clock on all four targets, and do the hardest OS integrations work? |
 | Procedure | `build.sh` on the four runners with the `avcodec_license()` check; the FFM bindings and `ffoffsets.c`; a custom AVIO over a JVM `ByteSource`; an `ndmedia` prototype (device, ring, `framesPlayed`); the engine thread with the `SilenceSkipper` and `Sonic` ports; the corpus (CBR and VBR MP3, MP3 with ID3 `CHAP`, M4A, M4A with chapters, fragmented M4A like itag 140, WebM Opus like itag 251, Ogg Opus, Ogg Vorbis, FLAC, WAV, HE-AAC v1 and v2); prototypes of SMTC with the hidden window and AppUserModelID, Now Playing and remote commands from the ad-hoc-signed app, MPRIS over dbus-java, device removal per OS, suspend notices including a Windows Modern Standby laptop |
 | Pass criteria | PLAN MD0 AC1–AC4: corpus demux and decode with reference sample counts, chapters and ±50-ms seeks on all targets; LGPL-2.1+ separate libraries ≤ 4 MB with no network protocol; clock within 50 ms at 0.5×–3× with skip silence and a 30-min underrun-free run per OS; media keys through all three sessions with the main window hidden, headphone removal pauses on Windows and macOS, suspend notice before audio stops |
-| Results | Pending (MD0). Recorded here per item: sizes per target, sample counts, seek errors, clock error, CPU at 3× on the slowest reference laptop, OS-integration outcomes, Modern Standby behaviour, macOS media-key routing, Linux device-removal behaviour |
+| Results | See [MD0 spike findings](#md0-spike-findings-2026-11-02). Required evidence per item: sizes per target, sample counts, seek errors, clock error, CPU at 3× on the slowest reference laptop, OS-integration outcomes, Modern Standby behaviour, macOS media-key routing, Linux device-removal behaviour |
 | Fallback | `MpvAudioEngine` behind the same `AudioEngine` seam: an LGPL libmpv build (`-Dgpl=false`) with an LGPL FFmpeg, our `ByteSource` through `mpv_stream_cb_add_ro`, speed through `scaletempo2`, positions from `time-pos`, the queue window mapped to mpv's playlist with `prefetch-playlist`. Costs recorded in [D86](../PLAN.md#3-key-decisions): different time-stretch quality and skip-silence feel than Android (skip silence would need our own detection, never the GPL script), about seven native libraries per target (libplacebo, libass, FreeType, HarfBuzz, FriBidi, libavfilter, libswscale are hard dependencies of mpv 0.41, [mpv meson.build](https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/meson.build)) and their source bundles. The decision is written into this section and D86 (MD0 AC5) |
 
 ---
@@ -1884,6 +1884,18 @@ Regression run `41528771248` exposes ring saturation, clock pause and clock
 reset defects before their repairs. Custom AVIO owns its current buffer and
 context even with `AVFMT_FLAG_CUSTOM_IO`; cleanup follows
 [FFmpeg's AVIO example](https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/avio_read_callback.c).
+The OS prototype uses the Windows SDK's COM/WinRT ABI declarations directly
+in our C++ shim, with no C++/WinRT implementation copied or embedded. A
+hidden top-level HWND receives power broadcasts; SMTC delegates enqueue
+commands and timeline seeks. Core Audio endpoint notifications identify the
+active default endpoint; jack detection still needs hardware proof. The
+Objective-C prototype registers Now Playing, remote commands, NSWorkspace
+sleep/wake and Core Audio listeners on Cocoa's main queue. Their native
+queues are polled by `NativeSystemMediaSession`, so no native OS callback
+enters the JVM. Their API registration suite is separate from physical key,
+ad-hoc signing, device-removal and suspend proofs. Neither session is wired
+into the production graph.
+
 Native source bundles now include the actual per-target build record, lock,
 verification key and build scripts, with missing or corrupt inputs rejected.
 
