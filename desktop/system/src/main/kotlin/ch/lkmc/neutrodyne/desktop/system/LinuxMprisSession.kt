@@ -145,7 +145,9 @@ class LinuxMprisSession private constructor(
         return buildMap {
             put("mpris:trackid", Variant(DBusPath("$TRACK_PATH/${item.episodeId}")))
             put("xesam:title", Variant(item.title))
-            put("xesam:artist", Variant(listOf(item.podcastTitle)))
+            // Collections inside a Variant need the explicit signature; the
+            // marshaller cannot infer the element type of listOf(x).
+            put("xesam:artist", Variant(listOf(item.podcastTitle), "as"))
             put("xesam:album", Variant(item.podcastTitle))
             item.artwork.url?.let { put("mpris:artUrl", Variant(it)) }
             durationMs?.let { put("mpris:length", Variant(it * US_PER_MS)) }
