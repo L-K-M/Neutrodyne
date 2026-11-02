@@ -27,6 +27,7 @@ class FfAudioEngine(
     private val ndmediaDirectory: Path,
     private val backend: String?,
     private val deviceRate: Int,
+    private val openSource: (Path) -> ByteSource = FileByteSource::open,
 ) : AutoCloseable {
     private sealed interface Command {
         data class Play(
@@ -55,6 +56,8 @@ class FfAudioEngine(
         }
 
     val isEnded: Boolean get() = ended.get()
+
+    val outputDescription: String? get() = output?.describe()
 
     val underrunFrames: Long get() = output?.underrunFrames ?: 0
 
@@ -111,7 +114,7 @@ class FfAudioEngine(
 
     private fun playItem(command: Command.Play) {
         // The pipeline does not own the source; close the channel ourselves.
-        FileByteSource.open(command.path).use { source ->
+        openSource(command.path).use { source ->
             FfmpegPipeline.open(source, ffmpegDirectory).use { pipeline ->
                 val decoder = pipeline.decoder
                 val demuxer = pipeline.demuxer

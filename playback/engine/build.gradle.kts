@@ -38,4 +38,5 @@ tasks.register<Test>("ffmpegTest") {
 tasks.named<Test>("test") {
     filter.excludeTestsMatching("*FfmpegCorpusTest")
     filter.excludeTestsMatching("*EngineClockTest")
+    filter.excludeTestsMatching("*EngineCommandsTest")
 }
