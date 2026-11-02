@@ -23,6 +23,11 @@ object HealthCheck {
             HttpClient
                 .newBuilder()
                 .proxy(HttpClient.Builder.NO_PROXY)
+                // HTTP/1.1 only: the default HTTP/2 preference sends an h2c Upgrade header,
+                // and the server's bounded body read then waits on the upgrade stream, so the
+                // probe would time out against a healthy server (reproduced with the packaged
+                // JAR: HTTP/2 times out, HTTP/1.1 answers 200).
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(
                     Duration.ofSeconds(2),
                 ).followRedirects(HttpClient.Redirect.NEVER)

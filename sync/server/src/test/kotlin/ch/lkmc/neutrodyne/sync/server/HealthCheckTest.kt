@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.sync.server
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.cio.CIO
+import io.ktor.server.engine.embeddedServer
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -22,6 +24,23 @@ class HealthCheckTest {
             val response = client.get(HealthRoutes.HEALTH_PATH)
             assertEquals(HttpStatusCode.OK, response.status)
             assertEquals(HealthRoutes.BODY_OK, response.bodyAsText())
+        }
+
+    @Test
+    fun `probe succeeds against the real CIO server over HTTP 1_1`() =
+        authServices { f ->
+            val server =
+                embeddedServer(CIO, port = 0, host = "127.0.0.1") {
+                    f.install(this)
+                }.start(wait = false)
+            try {
+                val port = server.engine.resolvedConnectors().single().port
+                // Regression: with the default HTTP/2 preference the probe's h2c Upgrade
+                // header makes the CIO body read hang and the probe times out (exit 1).
+                assertEquals(ExitCodes.OK, HealthCheck.check(mapOf(ServerEnv.LISTEN to "127.0.0.1:$port")))
+            } finally {
+                server.stop(0, 1000)
+            }
         }
 
     @Test
