@@ -72,6 +72,11 @@ internal fun DirectoryScreen(
             actions = { SettingsGearButton() },
         )
         LazyColumn(state = list, modifier = Modifier.fillMaxSize().ndScrollbar(list, bars, ndScrollbarColor(bars))) {
+            // Every route into this key names the query's recipients before its first
+            // dispatch returns (03 note 2026-11-02, same text as Discover's field).
+            state.providers?.let { providers ->
+                item { ProviderDisclosure(providers, Modifier.padding(horizontal = 16.dp)) }
+            }
             item {
                 when {
                     state.invalid -> {

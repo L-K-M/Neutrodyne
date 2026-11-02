@@ -52,8 +52,12 @@ public data class AddPodcastUiState(
     val createdGroupId: Long? = null,
     val creatingGroup: Boolean = false,
     val groupError: UiText? = null,
-    /** Directory recipients as the settings see them; the search action's disclosure lists them. */
-    val providers: List<ProviderInfo> = emptyList(),
+    /**
+     * Directory recipients as the settings see them; the search action's disclosure lists
+     * them. `null` until the first `observeProviders` emission — the "Search for …" action
+     * stays disabled until then so a tap can never outrun the disclosure (03 note 2026-11-02).
+     */
+    val providers: List<ProviderInfo>? = null,
     /**
      * The identity of the newest resolve/subscribe attempt (UI review round 2). Completions
      * tagged with an older generation are dropped; the route closes only while [done]'s

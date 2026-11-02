@@ -555,6 +555,24 @@ class AddPodcastSheetTest {
             onNodeWithText("Search for ‘medical history’").assertIsDisplayed()
         }
 
+    /**
+     * The same action stays disabled while the provider configuration is still loading (M7
+     * disclosure race): a tap must never outrun the recipient disclosure.
+     */
+    @Test
+    fun searchActionStaysDisabledUntilProvidersLoad() =
+        runComposeUiTest {
+            setSheet(
+                stateOverride =
+                    AddPodcastUiState(
+                        step = AddSheetStep.Input(searchQuery = "medical history"),
+                        providers = null,
+                    ),
+            )
+            onNodeWithText("Search for ‘medical history’").assertIsNotEnabled()
+            onNodeWithText("Searches are sent to", substring = true).assertDoesNotExist()
+        }
+
     /** The chooser shows the localized source label, never the enum identifier (M7). */
     @Test
     fun candidateSourceIsLocalizedNotTheEnumName() =

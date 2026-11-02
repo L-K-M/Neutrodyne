@@ -39,6 +39,9 @@ class FakeSearchRepository : SearchRepository {
     var searchAnswer: ((String) -> Flow<SearchResults>)? = null
     var chartAnswer: Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = Outcome.Success(persistentListOf())
     var chartGate: CompletableDeferred<Unit>? = null
+
+    /** When set, `observeProviders` waits on it before its first emission (provider-load race). */
+    var providersGate: CompletableDeferred<Unit>? = null
     var keyVerification: Outcome<Unit, ProviderStatus> = Outcome.Success(Unit)
     var keyGate: CompletableDeferred<Unit>? = null
     var buildKeySource = DirectoryKeySource.NONE
@@ -79,10 +82,17 @@ class FakeSearchRepository : SearchRepository {
     override fun genreForGroupName(name: String): ChartGenre? = groupGenres[name]
 
     override fun observeProviders(): Flow<ImmutableList<ProviderInfo>> =
-        providers
-            .map { current ->
-                DIRECTORY_PROVIDER_ORDER.mapNotNull { id -> current.firstOrNull { it.id == id } }.toImmutableList()
-            }.distinctUntilChanged()
+        flow {
+            providersGate?.await()
+            emitAll(
+                providers
+                    .map { current ->
+                        DIRECTORY_PROVIDER_ORDER
+                            .mapNotNull { id -> current.firstOrNull { it.id == id } }
+                            .toImmutableList()
+                    }.distinctUntilChanged(),
+            )
+        }
 
     override suspend fun setPodcastIndexKey(
         key: String,
