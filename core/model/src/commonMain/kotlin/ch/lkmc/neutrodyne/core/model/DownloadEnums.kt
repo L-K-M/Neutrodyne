@@ -59,3 +59,6 @@ enum class DownloadError {
 
 /** What a `download` row downloads (02 `download.sourceKind`). */
 enum class SourceKind { RSS_ENCLOSURE, YOUTUBE }
+
+/** Manual mobile-data consent; ASK makes no writes until answered. */
+enum class ManualMeteredPolicy { ASK, ALWAYS, NEVER }
