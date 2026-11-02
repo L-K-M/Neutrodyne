@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "collectionId": 73329284,
+      "artistName": "Science Friday and WNYC Studios",
+      "collectionName": "Science Friday",
+      "feedUrl": "https://feeds.simplecast.com/h18ZIZD_",
+      "releaseDate": "2026-10-15T10:00:00Z",
+      "collectionExplicitness": "notExplicit",
+      "trackCount": 1427,
+      "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/0a/a3/e2/0aa3e2a9-dda9-a7ea-8711-490d7f6c5c55/mza_1538698271404318803.jpg/600x600bb.jpg",
+      "genres": [
+        "Life Sciences",
+        "Podcasts",
+        "Science",
+        "Natural Sciences"
+      ]
+    },
+    {
+      "collectionId": 1200361736,
+      "artistName": "The New York Times",
+      "collectionName": "The Daily",
+      "feedUrl": "https://feeds.simplecast.com/Sl5CSM3S",
+      "releaseDate": "2026-10-18T10:00:00Z",
+      "collectionExplicitness": "notExplicit",
+      "trackCount": 2753,
+      "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/ab/64/66/ab6466a9-9a7d-e20e-7a3d-bc5be37d29ce/mza_15084852813176276273.jpg/600x600bb.jpg",
+      "genres": [
+        "Daily News",
+        "Podcasts",
+        "News"
+      ]
+    }
+  ],
+  "resultCount": 2
+}

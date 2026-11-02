@@ -22,6 +22,13 @@ import kotlinx.coroutines.flow.Flow
 abstract class PodcastDao(
     private val db: NeutrodyneDatabase,
 ) {
+    /** Directory annotations use existing feed/alias indexes in one bounded read. */
+    @Query(
+        "SELECT feedKey AS url, id AS podcastId FROM podcast WHERE feedKey IN (:keys) " +
+            "UNION ALL SELECT url, podcastId FROM podcast_url_alias WHERE url IN (:keys)",
+    )
+    abstract suspend fun directorySubscriptions(keys: List<String>): List<DirectorySubscription>
+
     /**
      * Every insert path — subscribe (03), import commit (05), restore (05), sync apply (10) —
      * supplies a fresh `syncId` (UUIDv4, lowercase) on the entity (02 podcast.syncId).
@@ -513,3 +520,9 @@ abstract class PodcastDao(
                 " lastAttemptAt, lastErrorKind, guidCoverageSince"
     }
 }
+
+/** Projection only; this introduces no persistent schema. */
+data class DirectorySubscription(
+    val url: String,
+    val podcastId: Long,
+)

@@ -1,0 +1,27 @@
+{
+  "feed": {
+    "country": "us",
+    "results": [
+      {
+        "id": "1200361736",
+        "genres": [
+          {
+            "genreId": "1489",
+            "name": "News",
+            "url": "https://itunes.apple.com/us/genre/id1489"
+          }
+        ]
+      },
+      {
+        "id": "1322200189",
+        "genres": [
+          {
+            "genreId": "1488",
+            "name": "True Crime",
+            "url": "https://itunes.apple.com/us/genre/id1488"
+          }
+        ]
+      }
+    ]
+  }
+}
