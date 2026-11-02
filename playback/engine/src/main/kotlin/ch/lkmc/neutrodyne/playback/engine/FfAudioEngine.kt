@@ -55,6 +55,9 @@ class FfAudioEngine(
             start()
         }
 
+    @Volatile var durationMs: Long? = null
+        private set
+
     val isEnded: Boolean get() = ended.get()
 
     val outputDescription: String? get() = output?.describe()
@@ -118,6 +121,7 @@ class FfAudioEngine(
         // The pipeline does not own the source; close the channel ourselves.
         openSource(command.path).use { source ->
             FfmpegPipeline.open(source, ffmpegDirectory).use { pipeline ->
+                durationMs = pipeline.demuxer.durationMs
                 val decoder = pipeline.decoder
                 val demuxer = pipeline.demuxer
                 val skip =

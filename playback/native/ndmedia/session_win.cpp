@@ -248,7 +248,7 @@ HRESULT publish(ISystemMediaTransportControls *controls, ISystemMediaTransportCo
     if (SUCCEEDED(result))
         result = timelineObject->QueryInterface(__uuidof(ISystemMediaTransportControlsTimelineProperties),
                                                 reinterpret_cast<void **>(&timeline));
-    TimeSpan start{0}, end{durationMs * 10'000}, position{positionMs * 10'000};
+    TimeSpan start{0}, end{(durationMs > positionMs ? durationMs : positionMs) * 10'000}, position{positionMs * 10'000};
     if (SUCCEEDED(result))
         result = timeline->put_StartTime(start);
     if (SUCCEEDED(result))

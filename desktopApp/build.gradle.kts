@@ -139,6 +139,9 @@ dependencies {
 
     // The desktop graph test and the window-content Compose UI test (01 Testing, 11 Testing)
     testImplementation(project(":core:testing"))
+    testImplementation(project(":playback:core"))
+    testImplementation(project(":playback:engine"))
+    testImplementation(project(":playback:native"))
     testImplementation(libs.junit4)
     testImplementation(libs.truth)
     testImplementation(libs.cmp.ui.test)
@@ -262,3 +265,22 @@ extensions
     .application {
         if (smokeRun.get()) jvmArgs("-Dneutrodyne.smoke=true")
     }
+
+// Test-only MD0 instrument; no entry point or fixture enters the app image.
+tasks.register<JavaExec>("md0Probe") {
+    group = "verification"
+    dependsOn("testClasses", ":playback:native:buildFfmpeg", ":playback:native:buildNdmedia")
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("ch.lkmc.neutrodyne.desktop.Md0Probe")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    systemProperty("neutrodyne.rootDir", rootProject.layout.projectDirectory.asFile.absolutePath)
+    args(
+        providers.gradleProperty("md0.file").getOrElse(""),
+        providers.gradleProperty("md0.backend").getOrElse("default"),
+        providers.gradleProperty("md0.speed").getOrElse("1"),
+        providers.gradleProperty("md0.skip").getOrElse("true"),
+        providers.gradleProperty("md0.seconds").getOrElse("1800"),
+        providers.gradleProperty("md0.report").getOrElse(layout.buildDirectory.file("md0-probe-${System.currentTimeMillis()}.jsonl").get().asFile.absolutePath),
+    )
+}
