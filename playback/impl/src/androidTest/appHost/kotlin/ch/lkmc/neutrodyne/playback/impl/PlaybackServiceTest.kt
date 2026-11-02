@@ -262,16 +262,26 @@ class PlaybackServiceTest {
             seed()
             graph.queueRepository().addLast(ids)
             start()
-            // Shell lacks CHANGE_WIFI_STATE on API 26, so instead of dropping Wi-Fi
-            // the connected network is marked metered through a netpolicy override.
+            // On API 29+ a netpolicy override marks the connected Wi-Fi metered in
+            // place. Older levels never propagate the override into
+            // NetworkCapabilities and shell lacks CHANGE_WIFI_STATE there, so the
+            // Wi-Fi radio is toggled off through Settings and the metered
+            // cellular network takes over.
             val networkId =
-                device
-                    .executeShellCommand("cmd netpolicy list wifi-networks")
-                    .lineSequence()
-                    .map { it.substringBefore(';') }
-                    .firstOrNull { it.isNotBlank() }
-                    ?: error("No Wi-Fi network available to mark metered")
-            device.executeShellCommand("cmd netpolicy set metered-network $networkId true")
+                if (Build.VERSION.SDK_INT >= 29) {
+                    device
+                        .executeShellCommand("cmd netpolicy list wifi-networks")
+                        .lineSequence()
+                        .map { it.substringBefore(';') }
+                        .firstOrNull { it.isNotBlank() }
+                        ?: error("No Wi-Fi network available to mark metered")
+                } else {
+                    setWifiEnabled(false)
+                    null
+                }
+            if (networkId != null) {
+                device.executeShellCommand("cmd netpolicy set metered-network $networkId true")
+            }
             graph.settingsRepository.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER)
             try {
                 val connectivity = app.getSystemService(ConnectivityManager::class.java)
@@ -320,7 +330,11 @@ class PlaybackServiceTest {
                     PlaybackSettingKeys.STREAM_ON_METERED,
                     PlaybackSettingKeys.STREAM_ON_METERED.default,
                 )
-                device.executeShellCommand("cmd netpolicy set metered-network $networkId undefined")
+                if (networkId != null) {
+                    device.executeShellCommand("cmd netpolicy set metered-network $networkId undefined")
+                } else {
+                    setWifiEnabled(true)
+                }
             }
         }
 
@@ -523,12 +537,21 @@ class PlaybackServiceTest {
             phase("recreation/foreground")
             foregroundHost()
             val restored = withContext(Dispatchers.Main) { connect() }
-            // The lazy runtime keeps the queue out of the player until a runtime call;
-            // prepare() drives the non-play resumption path that loads the saved card.
-            withContext(Dispatchers.Main) { restored.prepare() }
-            await { withContext(Dispatchers.Main) { restored.mediaItemCount > 0 } }
-            withContext(Dispatchers.Main) { assertFalse(restored.playWhenReady) }
-            await { withContext(Dispatchers.Main) { restored.currentPosition >= 9_000 } }
+            // The lazy runtime keeps the queue out of the player until a runtime
+            // call; prepare() is a no-op on an empty player, so the play request
+            // drives onPlaybackResumption -> bridge resume with the saved window.
+            withContext(Dispatchers.Main) { restored.play() }
+            await {
+                withContext(Dispatchers.Main) {
+                    restored.mediaItemCount > 0 && restored.currentPosition >= 9_000
+                }
+            }
+            withContext(Dispatchers.Main) { restored.pause() }
+            await { withContext(Dispatchers.Main) { !restored.playWhenReady } }
+            withContext(Dispatchers.Main) {
+                assertFalse(restored.playWhenReady)
+                assertTrue(restored.currentPosition >= 9_000)
+            }
         }
 
     // The external background-start case moved to the external bgstart lane as
@@ -797,6 +820,30 @@ class PlaybackServiceTest {
             }
         }
         error("Notification action $label is missing")
+    }
+
+    // API <29 cannot mark the connected network metered from shell: the
+    // netpolicy override never reaches NetworkCapabilities and CHANGE_WIFI_STATE
+    // is denied, so the only real-radio path left is the Settings switch.
+    private fun setWifiEnabled(enabled: Boolean) {
+        device.executeShellCommand("am start -a android.settings.WIFI_SETTINGS")
+        try {
+            val toggle =
+                device.wait(
+                    Until.findObject(By.res("com.android.settings", "switch_widget")),
+                    WAIT_MS,
+                )
+                    ?: device.wait(
+                        Until.findObject(
+                            By.pkg("com.android.settings").clazz(".*Switch.*".toPattern()),
+                        ),
+                        5_000,
+                    )
+                    ?: error("Settings Wi-Fi switch not found")
+            if (toggle.isChecked != enabled) toggle.click()
+        } finally {
+            device.pressBack()
+        }
     }
 
     private fun runCase(block: suspend () -> Unit) =

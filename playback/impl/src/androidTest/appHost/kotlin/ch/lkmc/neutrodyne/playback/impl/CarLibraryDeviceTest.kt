@@ -41,10 +41,11 @@ import org.junit.runner.RunWith
 
 /**
  * Legacy MediaBrowserCompat/transport bridge, including legacy unset start index/time.
- * The platform MediaBrowser cannot browse a media3 library on API <28: its anonymous
- * RemoteUserInfo never matches the registered controller, so every load comes back
- * null. Compat clients (Android Auto among them) bind through a messenger and work.
- * DHU requires separate head-unit evidence.
+ * MediaBrowserCompat reports its client version in the root hints, so the service
+ * returns a messenger binder and subscriptions ride it with the real RemoteUserInfo.
+ * The framework MediaBrowser path stays anonymous on API <28 and cannot browse a
+ * media3 library; compat clients (Android Auto among them) can. DHU requires
+ * separate head-unit evidence.
  */
 @RunWith(AndroidJUnit4::class)
 class CarLibraryDeviceTest {
@@ -243,6 +244,8 @@ class CarLibraryDeviceTest {
         withContext(Dispatchers.Main) {
             browser!!.subscribe(
                 parent,
+                // Non-null options route results to the three-argument
+                // onChildrenLoaded/onError overloads; both forward below.
                 Bundle(),
                 object : MediaBrowserCompat.SubscriptionCallback() {
                     override fun onChildrenLoaded(
@@ -255,8 +258,23 @@ class CarLibraryDeviceTest {
                             )
                     }
 
+                    override fun onChildrenLoaded(
+                        parentId: String?,
+                        children: MutableList<MediaBrowserCompat.MediaItem>?,
+                        options: Bundle?,
+                    ) {
+                        onChildrenLoaded(parentId, children)
+                    }
+
                     override fun onError(parentId: String?) {
                         result.completeExceptionally(IllegalArgumentException("Legacy browse failed: $parentId"))
+                    }
+
+                    override fun onError(
+                        parentId: String?,
+                        options: Bundle?,
+                    ) {
+                        onError(parentId)
                     }
                 },
             )
