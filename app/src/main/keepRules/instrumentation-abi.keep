@@ -552,6 +552,9 @@
 -keep interface ch.lkmc.neutrodyne.core.domain.PlaySessionStore {
   public java.lang.Object virtualQueue(int, kotlin.coroutines.Continuation);
 }
+-keep interface ch.lkmc.neutrodyne.core.domain.PositionStore {
+  public kotlinx.coroutines.flow.Flow observe(long);
+}
 -keep interface ch.lkmc.neutrodyne.core.domain.QueueRepository {
   public java.lang.Object addLast(java.util.List, kotlin.coroutines.Continuation);
   public java.lang.Object addNext(java.util.List, kotlin.coroutines.Continuation);
@@ -560,6 +563,9 @@
   public java.lang.Object get(ch.lkmc.neutrodyne.core.model.settings.SettingKey, kotlin.coroutines.Continuation);
   public kotlinx.coroutines.flow.Flow observe(ch.lkmc.neutrodyne.core.model.settings.SettingKey);
   public java.lang.Object set(ch.lkmc.neutrodyne.core.model.settings.SettingKey, java.lang.Object, kotlin.coroutines.Continuation);
+}
+-keep class ch.lkmc.neutrodyne.core.domain.StoredPosition {
+  public long getPositionMs();
 }
 -keep enum ch.lkmc.neutrodyne.core.model.Availability {
   ch.lkmc.neutrodyne.core.model.Availability AVAILABLE;
@@ -699,6 +705,7 @@
   public dev.zacsweers.metro.Provider getPlaySessionStore();
   public ch.lkmc.neutrodyne.playback.api.PlaybackController getPlaybackController();
   public ch.lkmc.neutrodyne.playback.api.PlaybackStateSource getPlaybackStateSource();
+  public dev.zacsweers.metro.Provider getPositionStore();
   public dev.zacsweers.metro.Provider getQueueRepository();
   public ch.lkmc.neutrodyne.core.domain.SettingsRepository getSettingsRepository();
 }
@@ -1320,13 +1327,27 @@
 -keep class kotlin.math.MathKt__MathJVMKt {
   public static int roundToInt(float);
 }
+-keep class kotlin.ranges.IntProgression {
+  public int getFirst();
+  public int getLast();
+  public int getStep();
+}
 -keep class kotlin.ranges.IntRange {
   public <init>(int, int);
+}
+-keep class kotlin.ranges.LongProgression {
+  public long getFirst();
+  public long getLast();
+}
+-keep class kotlin.ranges.LongRange {
+  public <init>(long, long);
 }
 -keep class kotlin.ranges.RangesKt {
 }
 -keep class kotlin.ranges.RangesKt___RangesKt {
   public static int coerceAtLeast(int, int);
+  public static kotlin.ranges.IntProgression step(kotlin.ranges.IntProgression, int);
+  public static kotlin.ranges.IntRange until(int, int);
 }
 -keep interface kotlin.reflect.KClass {
   public java.lang.String getSimpleName();
@@ -1595,6 +1616,7 @@
   public java.lang.Object emit(java.lang.Object, kotlin.coroutines.Continuation);
 }
 -keep class kotlinx.coroutines.flow.FlowKt {
+  public static java.lang.Object first(kotlinx.coroutines.flow.Flow, kotlin.coroutines.Continuation);
   public static java.lang.Object first(kotlinx.coroutines.flow.Flow, kotlin.jvm.functions.Function2, kotlin.coroutines.Continuation);
 }
 -keep interface kotlinx.coroutines.flow.SharedFlow {
