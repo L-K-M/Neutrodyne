@@ -72,6 +72,14 @@ class FfDemuxer
 
         private val packetSlot: MemorySegment = library.allocPacketSlot(arena)
 
+        /**
+         * The native packet [readPacket] last decoded, valid until the next
+         * call: the decoder references it instead of copying data, so every
+         * property FFmpeg put on it reaches `avcodec_send_packet`.
+         */
+        val currentPacket: MemorySegment
+            get() = requireNotNull(packetSlot.dereference()) { "the packet was released" }
+
         /** The audio stream's `AVCodecParameters`, held while the pipeline is open. */
         private val codecParametersOf: MemorySegment
 

@@ -184,19 +184,20 @@ class FfmpegLibrary
                 it.set(ValueLayout.ADDRESS, 0L, callAddress("avcodec", "av_packet_alloc", ALLOC_PACKET))
             }
 
+        /**
+         * `av_packet_ref`: the send packet becomes a refcounted copy of the
+         * demuxer's packet — data, timestamps and the side data (skip samples,
+         * discard padding) that FFmpeg's own decoders trim by. Copying the
+         * data bytes alone would drop every one of those properties.
+         */
+        fun refPacket(
+            target: MemorySegment,
+            source: MemorySegment,
+        ): Int = callInt("avcodec", "av_packet_ref", REF_PACKET, target, source)
+
         fun freePacket(slot: MemorySegment) = callVoid("avcodec", "av_packet_free", FREE_PACKET, slot)
 
         fun unrefPacket(packet: MemorySegment) = callVoid("avcodec", "av_packet_unref", UNREF_PACKET, packet)
-
-        /**
-         * `av_new_packet`: allocates [size] bytes of packet buffer and points the
-         * packet at them, which is how a decoded block reaches the decoder without
-         * handing FFmpeg a pointer into the demuxer's own packet.
-         */
-        fun newPacket(
-            packet: MemorySegment,
-            size: Int,
-        ): Int = callInt("avcodec", "av_new_packet", NEW_PACKET, packet, size)
 
         fun allocFrameSlot(arena: Arena): MemorySegment =
             arena.allocate(ValueLayout.ADDRESS).also {
@@ -495,8 +496,8 @@ class FfmpegLibrary
                     ValueLayout.JAVA_INT,
                 )
             private val ALLOC_PACKET = FunctionDescriptor.of(ValueLayout.ADDRESS)
-            private val NEW_PACKET =
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT)
+            private val REF_PACKET =
+                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
             private val FREE_PACKET = FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)
             private val UNREF_PACKET = FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)
             private val ALLOC_FRAME = FunctionDescriptor.of(ValueLayout.ADDRESS)

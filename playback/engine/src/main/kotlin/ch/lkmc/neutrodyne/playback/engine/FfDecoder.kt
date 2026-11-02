@@ -24,7 +24,7 @@ class FfDecoder
     internal constructor(
         private val library: FfmpegLibrary,
         private val arena: Arena,
-        demuxer: FfDemuxer,
+        private val demuxer: FfDemuxer,
     ) : Decoder {
         /** The stream's decode parameters, which carry the codec's private data. */
         private val codecParameters: MemorySegment = demuxer.codecParameters
@@ -113,14 +113,11 @@ class FfDecoder
             if (remainingPriming == UNDECIDED) remainingPriming = packet.primingSamples
             val target = requireNotNull(sendSlot.dereference()) { "the send packet was released" }
             library.unrefPacket(target)
-            val allocated = library.newPacket(target, packet.size)
-            if (allocated < 0) return false
-            // A pointer read out of native memory carries no extent, so both ends of
-            // the copy are widened to the packet's own size before it is made.
-            val data = target.readAddress(layout, "AVPacket", "data").reinterpret(packet.size.toLong())
-            val source = packet.data.reinterpret(packet.size.toLong())
-            MemorySegment.copy(source, 0L, data, 0L, packet.size.toLong())
-            target.writeInt(layout, "AVPacket", "stream_index", 0)
+            // av_packet_ref hands the decoder the demuxer's packet by reference:
+            // the compressed data and every property FFmpeg carries — pts and
+            // the skip-samples side data its decoders trim by — which copying
+            // data bytes alone would silently drop.
+            if (library.refPacket(target, demuxer.currentPacket) < 0) return false
             return library.sendPacket(context, target) >= 0
         }
 
