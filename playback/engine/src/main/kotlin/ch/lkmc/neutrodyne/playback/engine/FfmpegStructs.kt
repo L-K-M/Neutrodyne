@@ -12,24 +12,41 @@ import java.lang.foreign.ValueLayout
  *
  * These are the only struct fields the design does not reach through an FFmpeg
  * function or an AVOption: FFmpeg has had no accessors for them since 4.0.
+ *
+ * A pointer returned by an FFmpeg call or read out of native memory arrives as
+ * a zero-length segment, so every accessor first widens the view to the field
+ * it is about to touch. Widening reads nothing itself; it only lets the
+ * checked access below reach the field's bytes.
  */
+private fun MemorySegment.atLeast(bytes: Long): MemorySegment =
+    if (byteSize() >= bytes) this else reinterpret(bytes)
+
 internal fun MemorySegment.readInt(
     layout: FfmpegLayout,
     struct: String,
     field: String,
-): Int = get(ValueLayout.JAVA_INT, layout.offset(struct, field))
+): Int {
+    val offset = layout.offset(struct, field)
+    return atLeast(offset + Int.SIZE_BYTES).get(ValueLayout.JAVA_INT, offset)
+}
 
 internal fun MemorySegment.readLong(
     layout: FfmpegLayout,
     struct: String,
     field: String,
-): Long = get(ValueLayout.JAVA_LONG, layout.offset(struct, field))
+): Long {
+    val offset = layout.offset(struct, field)
+    return atLeast(offset + Long.SIZE_BYTES).get(ValueLayout.JAVA_LONG, offset)
+}
 
 internal fun MemorySegment.readAddress(
     layout: FfmpegLayout,
     struct: String,
     field: String,
-): MemorySegment = get(ValueLayout.ADDRESS, layout.offset(struct, field))
+): MemorySegment {
+    val offset = layout.offset(struct, field)
+    return atLeast(offset + ValueLayout.ADDRESS.byteSize()).get(ValueLayout.ADDRESS, offset)
+}
 
 internal fun MemorySegment.writeInt(
     layout: FfmpegLayout,
@@ -37,7 +54,8 @@ internal fun MemorySegment.writeInt(
     field: String,
     value: Int,
 ) {
-    set(ValueLayout.JAVA_INT, layout.offset(struct, field), value)
+    val offset = layout.offset(struct, field)
+    atLeast(offset + Int.SIZE_BYTES).set(ValueLayout.JAVA_INT, offset, value)
 }
 
 internal fun MemorySegment.writeAddress(
@@ -46,7 +64,8 @@ internal fun MemorySegment.writeAddress(
     field: String,
     value: MemorySegment,
 ) {
-    set(ValueLayout.ADDRESS, layout.offset(struct, field), value)
+    val offset = layout.offset(struct, field)
+    atLeast(offset + ValueLayout.ADDRESS.byteSize()).set(ValueLayout.ADDRESS, offset, value)
 }
 
 /** `AVRational`: two ints at the field's offset. */
@@ -56,7 +75,9 @@ internal fun MemorySegment.readRational(
     field: String,
 ): Pair<Int, Int> {
     val base = layout.offset(struct, field)
-    return get(ValueLayout.JAVA_INT, base) to get(ValueLayout.JAVA_INT, base + Int.SIZE_BYTES)
+    val bounds = atLeast(base + 2L * Int.SIZE_BYTES)
+    return bounds.get(ValueLayout.JAVA_INT, base) to
+        bounds.get(ValueLayout.JAVA_INT, base + Int.SIZE_BYTES)
 }
 
 /**

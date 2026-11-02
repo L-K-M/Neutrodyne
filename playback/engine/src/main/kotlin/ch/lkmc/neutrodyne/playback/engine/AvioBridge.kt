@@ -77,7 +77,9 @@ class AvioBridge
                 if (aborted.get()) {
                     return library.layout.intConstant("AVERROR_EXIT")
                 }
-                when (val read = source.read(position, buffer, size)) {
+                // The buffer FFmpeg hands the upcall arrives as a zero-length
+                // segment; the source can only write into a widened view of it.
+                when (val read = source.read(position, buffer.reinterpret(size.toLong()), size)) {
                     ABORTED -> {
                         library.layout.intConstant("AVERROR_EXIT")
                     }
