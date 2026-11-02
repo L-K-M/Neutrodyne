@@ -8,6 +8,8 @@
 -keep class ch.lkmc.neutrodyne.NeutrodyneTestRunner { *; }
 -keep class ch.lkmc.neutrodyne.SmokeTest { *; }
 -keep class ch.lkmc.neutrodyne.YtxReleaseSmokeTest { *; }
+# Class-marked smoke suites are selected by the same annotation as the device runner.
+-keep @ch.lkmc.neutrodyne.core.testing.ReleaseSmoke class * { *; }
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest {
     public <init>();
     @org.junit.Before <methods>;
