@@ -371,6 +371,15 @@ class FfmpegLibrary
             private const val MAX_C_STRING = 4096L
 
             /**
+             * Dependency order: each library loads only after the libraries its
+             * NEEDED entries name. The dynamic loader satisfies a NEEDED soname
+             * from an already-loaded object before it searches RUNPATH, so this
+             * order is what keeps a load working even when a library's own
+             * RUNPATH does not name its siblings' directory.
+             */
+            private val LOAD_ORDER = listOf("avutil", "swresample", "avcodec", "avformat")
+
+            /**
              * Loads the four libraries of [directory] and checks them against the
              * layout beside them. Throws when the build is missing, incomplete or
              * of a different major.
@@ -386,7 +395,9 @@ class FfmpegLibrary
                 val libDir = if (os.startsWith("Windows")) "bin" else "lib"
                 val arena = Arena.ofShared()
                 val lookups =
-                    layout.libraries.entries.associate { (name, major) ->
+                    layout.libraries.entries
+                        .sortedBy { (name) -> LOAD_ORDER.indexOf(name).let { i -> if (i < 0) LOAD_ORDER.size else i } }
+                        .associate { (name, major) ->
                         name to
                             SymbolLookup.libraryLookup(
                                 directory
