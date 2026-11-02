@@ -24,13 +24,11 @@ public class ConnectionCountingSocketFactory : ServerSocketFactory() {
     override fun createServerSocket(
         port: Int,
         backlog: Int,
-    ): ServerSocket =
-        createServerSocket().apply { bind(InetSocketAddress(port), backlog) }
+    ): ServerSocket = createServerSocket().apply { bind(InetSocketAddress(port), backlog) }
 
     override fun createServerSocket(
         port: Int,
         backlog: Int,
         ifAddress: InetAddress?,
-    ): ServerSocket =
-        createServerSocket().apply { bind(InetSocketAddress(ifAddress, port), backlog) }
+    ): ServerSocket = createServerSocket().apply { bind(InetSocketAddress(ifAddress, port), backlog) }
 }

@@ -156,7 +156,10 @@ class PreConfirmationPeerGuardTest {
                 .host("mixed.test")
                 .build()
         assertFailsWith<LocalNetworkUnsupportedException> {
-            clients.image.newCall(marked(target)).execute().use { }
+            clients.image
+                .newCall(marked(target))
+                .execute()
+                .use { }
         }
         assertEquals(0, server.requestCount)
         assertEquals(0, lan.requestCount)
@@ -180,7 +183,10 @@ class PreConfirmationPeerGuardTest {
                 .host("rebound.test")
                 .build()
         assertFailsWith<LocalNetworkUnsupportedException> {
-            clients.image.newCall(marked(target)).execute().use { }
+            clients.image
+                .newCall(marked(target))
+                .execute()
+                .use { }
         }
         assertEquals(0, server.requestCount)
         assertEquals(0, lan.requestCount)
@@ -231,7 +237,10 @@ class PreConfirmationPeerGuardTest {
                 .host("local-peer.test")
                 .build()
         assertFailsWith<LocalNetworkUnsupportedException> {
-            clients.image.newCall(marked(target)).execute().use { }
+            clients.image
+                .newCall(marked(target))
+                .execute()
+                .use { }
         }
         server.enqueue(mockResponse(body = "explicit"))
         clients.image.newCall(Request.Builder().url(target).build()).execute().use {
@@ -262,7 +271,10 @@ class PreConfirmationPeerGuardTest {
             assertEquals("explicit", it.body.string())
         }
         assertFailsWith<LocalNetworkUnsupportedException> {
-            clients.image.newCall(marked(target)).execute().use { }
+            clients.image
+                .newCall(marked(target))
+                .execute()
+                .use { }
         }
         assertEquals(1, lan.requestCount)
         assertEquals(0, server.requestCount)

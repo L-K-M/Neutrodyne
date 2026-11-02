@@ -174,7 +174,9 @@ class DiscoveryPrivacyJourneyTest {
                                 if (entry == Entry.LOCAL_PREVIEW) lan.url("/feed.xml").toString() else publicFeed,
                                 "Directory show",
                                 artworkUrl =
-                                    if (entry in listOf(Entry.PREVIEW_ART, Entry.LOCAL_PREVIEW, Entry.LOCAL_REDIRECT_PREVIEW)) {
+                                    if (entry in
+                                        listOf(Entry.PREVIEW_ART, Entry.LOCAL_PREVIEW, Entry.LOCAL_REDIRECT_PREVIEW)
+                                    ) {
                                         null
                                     } else {
                                         localArt
@@ -281,7 +283,9 @@ class DiscoveryPrivacyJourneyTest {
                 original.shutdown()
                 scope.cancel()
                 db.close()
-                dirs.data.parent.toFile().deleteRecursively()
+                dirs.data.parent
+                    .toFile()
+                    .deleteRecursively()
                 Locale.setDefault(previous)
             }
         }
