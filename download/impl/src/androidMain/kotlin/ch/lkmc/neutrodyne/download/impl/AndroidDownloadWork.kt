@@ -7,13 +7,17 @@ import android.net.NetworkRequest
 import android.os.Build
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
+import androidx.work.PeriodicWorkRequest
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.await
+import ch.lkmc.neutrodyne.core.model.DownloadLane
 import java.util.concurrent.TimeUnit
 
 internal object AndroidDownloadWork {
@@ -21,9 +25,23 @@ internal object AndroidDownloadWork {
     const val MANUAL = "MANUAL"
     const val LANE = "download-lane-MANUAL"
     const val WAKE = "download-wake-MANUAL"
+    const val CLEANUP = "download-cleanup"
     const val RECONCILE = "download-reconcile"
     const val TAG = "download"
     const val BACKOFF_MS = 30_000L
+
+    fun laneName(lane: DownloadLane): String = "download-lane-${lane.name}"
+
+    fun wakeName(lane: DownloadLane): String = "download-wake-${lane.name}"
+
+    fun inputLane(data: androidx.work.Data): DownloadLane? =
+        DownloadLane.entries.firstOrNull { it.name == data.getString(KEY_LANE) }
+
+    fun cleanup(): PeriodicWorkRequest =
+        PeriodicWorkRequestBuilder<CleanupWorker>(24, TimeUnit.HOURS, 6, TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
+            .addTag(TAG)
+            .build()
 
     fun network(unmetered: Boolean): NetworkRequest =
         NetworkRequest
@@ -33,7 +51,11 @@ internal object AndroidDownloadWork {
             .apply { if (unmetered) addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) }
             .build()
 
-    fun constraints(unmetered: Boolean = false): Constraints {
+    private fun constraints(
+        unmetered: Boolean = false,
+        lane: DownloadLane = DownloadLane.MANUAL,
+        charging: Boolean = false,
+    ): Constraints.Builder {
         val fallback = if (unmetered) NetworkType.UNMETERED else NetworkType.CONNECTED
         val builder = Constraints.Builder()
         // WorkManager falls back below 28; never call the platform NetworkRequest path there.
@@ -42,17 +64,23 @@ internal object AndroidDownloadWork {
         } else {
             builder.setRequiredNetworkType(fallback)
         }
-        return builder.build()
+        if (lane == DownloadLane.AUTO) {
+            builder.setRequiresBatteryNotLow(true).setRequiresCharging(charging)
+        }
+        return builder
     }
 
-    fun lane(visible: Boolean): OneTimeWorkRequest {
+    fun lane(
+        visible: Boolean,
+        lane: DownloadLane = DownloadLane.MANUAL,
+    ): OneTimeWorkRequest {
         val builder =
             OneTimeWorkRequestBuilder<DownloadLaneWorker>()
-                .setInputData(androidx.work.workDataOf(KEY_LANE to MANUAL))
-                .setConstraints(constraints())
+                .setInputData(androidx.work.workDataOf(KEY_LANE to lane.name))
+                .setConstraints(constraints(lane = lane).setRequiresStorageNotLow(lane == DownloadLane.AUTO).build())
                 .addTag(TAG)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_MS, TimeUnit.MILLISECONDS)
-        if (Build.VERSION.SDK_INT >= 31 || (Build.VERSION.SDK_INT < 31 && visible)) {
+        if (lane == DownloadLane.MANUAL && (Build.VERSION.SDK_INT >= 31 || visible)) {
             builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         }
         return builder.build()
@@ -61,10 +89,12 @@ internal object AndroidDownloadWork {
     fun wake(
         delayMs: Long,
         unmetered: Boolean,
+        lane: DownloadLane = DownloadLane.MANUAL,
+        charging: Boolean = false,
     ): OneTimeWorkRequest =
         OneTimeWorkRequestBuilder<DownloadWakeWorker>()
-            .setInputData(androidx.work.workDataOf(KEY_LANE to MANUAL))
-            .setConstraints(constraints(unmetered))
+            .setInputData(androidx.work.workDataOf(KEY_LANE to lane.name))
+            .setConstraints(constraints(unmetered, lane, charging).build())
             .setInitialDelay(delayMs.coerceAtLeast(0), TimeUnit.MILLISECONDS)
             .addTag(TAG)
             .build()
@@ -80,16 +110,35 @@ internal class DownloadWorkQueue(
         policy: ExistingWorkPolicy,
         request: OneTimeWorkRequest,
     ) {
-        manager.enqueueUniqueWork(AndroidDownloadWork.LANE, policy, request).await()
+        manager
+            .enqueueUniqueWork(
+                AndroidDownloadWork.laneName(checkNotNull(AndroidDownloadWork.inputLane(request.workSpec.input))),
+                policy,
+                request,
+            ).await()
     }
 
-    suspend fun wake(request: OneTimeWorkRequest) {
-        manager.enqueueUniqueWork(AndroidDownloadWork.WAKE, ExistingWorkPolicy.REPLACE, request).await()
+    suspend fun wake(
+        lane: DownloadLane,
+        request: OneTimeWorkRequest,
+    ) {
+        manager.enqueueUniqueWork(AndroidDownloadWork.wakeName(lane), ExistingWorkPolicy.REPLACE, request).await()
     }
 
-    suspend fun cancelWake() {
-        manager.cancelUniqueWork(AndroidDownloadWork.WAKE).await()
+    suspend fun cancelWake(lane: DownloadLane) {
+        manager.cancelUniqueWork(AndroidDownloadWork.wakeName(lane)).await()
     }
+
+    suspend fun cleanup() {
+        manager
+            .enqueueUniquePeriodicWork(
+                AndroidDownloadWork.CLEANUP,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                AndroidDownloadWork.cleanup(),
+            ).await()
+    }
+
+    suspend fun move(target: String) = DownloadMoveWorker.enqueue(context, target)
 
     suspend fun reconcile() {
         manager
