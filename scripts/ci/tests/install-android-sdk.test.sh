@@ -539,8 +539,11 @@ def run_text(step):
             return body
     return None
 
-for wf, jobs in (('.github/workflows/nightly.yml', ('desktop-matrix',)),
-                 ('.github/workflows/release.yml', ('desktop',))):
+# MD0 lands the four-target desktop matrix in ci.yml (dispatch-only) and
+# nightly.yml (the overnight schedule); release.yml's `desktop` packaging job is
+# M0b's and is asserted when it lands.
+for wf, jobs in (('.github/workflows/ci.yml', ('desktop-matrix',)),
+                 ('.github/workflows/nightly.yml', ('desktop-matrix',))):
     lines = open(root + '/' + wf).read().splitlines()
     for job in jobs:
         for s in steps(job_block(lines, job)):
