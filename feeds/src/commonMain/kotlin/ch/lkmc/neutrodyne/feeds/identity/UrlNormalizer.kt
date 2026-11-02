@@ -41,6 +41,18 @@ public object UrlNormalizer {
     /** The weak enclosure-match form: [forIdentity] without the query (03 Diff algorithm step 1). */
     public fun forIdentityNoQuery(url: String): String? = identity(url, keepQuery = false)
 
+    /**
+     * The host the fetch stack dials for [url] (03 note 2026-11-02): percent-decoded,
+     * IDNA-mapped and lowercased — fullwidth digits and ideographic stops become ASCII — with
+     * numeric spellings ("127.1", "2130706433") canonicalised to a dotted quad, exactly like
+     * [normaliseHost]. `LocalDestination` classifies this host so prefill and add decisions
+     * match the peer the request would reach. Null when the URL has no usable host.
+     */
+    public fun transportHost(url: String): String? {
+        val parts = splitLenient(url)
+        return parts.host?.let { normaliseHost(parts) }
+    }
+
     /** `scheme://host[:port]` with the default port omitted, the `credential.origin` form; null if not http(s). */
     public fun origin(url: String): String? {
         val parts = splitLenient(url)
