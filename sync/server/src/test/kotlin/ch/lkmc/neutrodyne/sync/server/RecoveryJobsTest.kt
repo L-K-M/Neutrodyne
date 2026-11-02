@@ -287,12 +287,24 @@ class RecoveryJobsTest {
             f.services.records.push(principal, SyncRequest(null, listOf(fixture.podcast())))
             f.services.records.push(
                 principal,
-                SyncRequest(null, listOf(fixture.write(podcastA, "subscribed", JsonPrimitive(false), fixture.clock(1)))),
+                SyncRequest(
+                    null,
+                    listOf(fixture.write(podcastA, "subscribed", JsonPrimitive(false), fixture.clock(1))),
+                ),
             )
             // A played episode written after the unsubscribe sequences past the parent's death.
             f.services.records.push(
                 principal,
-                SyncRequest(null, listOf(fixture.write(episode(), "played", JsonPrimitive(true), fixture.clock(2)))),
+                SyncRequest(
+                    null,
+                    listOf(
+                        fixture.change(
+                            episode(),
+                            mapOf("played" to JsonPrimitive(true), "playedAt" to JsonPrimitive(1_000L)),
+                            fixture.clock(2),
+                        ),
+                    ),
+                ),
             )
             val parentSeq = f.store.read(account.id) { checkNotNull(record(podcastA)).seq }
             val episodeSeq = f.store.read(account.id) { checkNotNull(record(episode())).seq }
