@@ -18,8 +18,9 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
         target.pluginManager.apply("neutrodyne.desktop.library")
         with(target) {
             val nativeTarget = nativeTargetOf()
-            val lockFile = layout.projectDirectory.file("native-components.lock")
-            val ffmpegOutput = layout.buildDirectory.dir("ffmpeg/$nativeTarget")
+            val nativeLock = layout.projectDirectory.file("native-components.lock")
+            val ffmpegOutputDir = layout.buildDirectory.dir("ffmpeg/$nativeTarget")
+            val sourceCacheDir = layout.buildDirectory.dir("ffmpeg-cache")
 
             val buildFfmpeg =
                 tasks.register<BuildFfmpegTask>("buildFfmpeg") {
@@ -27,8 +28,8 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                     description = "Build the minimal FFmpeg libraries of D86 for $nativeTarget (11 FFmpeg build)."
                     workingDir = layout.projectDirectory.asFile
                     commandLine("bash", "ffmpeg/build.sh", nativeTarget)
-                    outputDirectory.set(ffmpegOutput)
-                    lockFile.set(lockFile)
+                    outputDirectory.set(ffmpegOutputDir)
+                    lockFile.set(nativeLock)
                     // build.sh, foffsets.c and the signing key: a change to any of them
                     // rebuilds, which the Exec task's own inputs would not notice.
                     inputs.files("ffmpeg")
@@ -38,32 +39,31 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                 group = "verification"
                 description = "Apply D3's licence envelope to the native components (01 Native components)."
                 dependsOn(buildFfmpeg)
-                this.lockFile.set(lockFile)
-                ffmpegOutput.set(ffmpegOutput)
+                this.lockFile.set(nativeLock)
+                ffmpegOutput.set(ffmpegOutputDir)
                 this.target.set(nativeTarget)
                 // PLAN MD0 AC2's budget, counted conservatively in bytes (11 FFmpeg build).
                 maxStrippedBytes.set(4_000_000L)
             }
 
-            val ffmpegVersion = ffmpegVersionOf(lockFile.get().asFile)
-            val sourceCache = layout.buildDirectory.dir("ffmpeg-cache")
+            val ffmpegVersion = ffmpegVersionOf(nativeLock.get().asFile)
             tasks.register<AssembleFfmpegSourceTask>("assembleFfmpegSource") {
                 group = "build"
                 description = "Assemble the LGPL source bundle of the built FFmpeg (11 FFmpeg LGPL obligations)."
                 dependsOn(buildFfmpeg)
-                this.lockFile.set(lockFile)
-                this.cache.set(sourceCache)
+                this.lockFile.set(nativeLock)
+                this.cache.set(sourceCacheDir)
                 sourceInputs.setFrom(
-                    sourceCache.file("ffmpeg-$ffmpegVersion.tar.xz"),
-                    sourceCache.file("ffmpeg-$ffmpegVersion.tar.xz.asc"),
-                    sourceCache.file("ffmpeg-$ffmpegVersion/ffmpeg-build.txt"),
-                    sourceCache.file("ffmpeg-$ffmpegVersion/COPYING.LGPLv2.1"),
-                    sourceCache.file("ffmpeg-$ffmpegVersion/LICENSE.md"),
+                    sourceCacheDir.get().file("ffmpeg-$ffmpegVersion.tar.xz"),
+                    sourceCacheDir.get().file("ffmpeg-$ffmpegVersion.tar.xz.asc"),
+                    sourceCacheDir.get().file("ffmpeg-$ffmpegVersion/ffmpeg-build.txt"),
+                    sourceCacheDir.get().file("ffmpeg-$ffmpegVersion/COPYING.LGPLv2.1"),
+                    sourceCacheDir.get().file("ffmpeg-$ffmpegVersion/LICENSE.md"),
                 )
                 outputFile.set(
                     layout.buildDirectory.file("ffmpeg-source/${ffmpegSourceBundleName(ffmpegVersion)}"),
                 )
-                target.set(nativeTarget)
+                this.target.set(nativeTarget)
             }
         }
     }
