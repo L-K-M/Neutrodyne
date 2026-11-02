@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
+        description: "full | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
         default: full
 
 permissions:
@@ -129,7 +129,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    if: inputs.scope == '' || inputs.scope == 'full'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'reboot'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,6 +173,7 @@ jobs:
           test -n "$(find app/build/outputs/apk/debug -name 'app-*-debug.apk' -print -quit)" || { echo "::error::debug app APKs missing"; exit 1; }
           test -n "$(find app/build/outputs/apk/release -name 'app-*-release.apk' -print -quit)" || { echo "::error::release app APKs missing"; exit 1; }
       - name: Debug suite on the API 37 16 KB image
+        if: inputs.scope != 'reboot'
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: "37.0"

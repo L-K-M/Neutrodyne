@@ -57,6 +57,8 @@ class _SliceReader:
 
 
 CLASS = "ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest"
+SYSTEM_UI_DUMP = ("shell", "dumpsys", "activity", "service", "com.android.systemui/.SystemUIService")
+SYSTEM_UI_SETTLE_SECONDS = 20
 # android.media.session.PlaybackState: STATE_PLAYING and STATE_BUFFERING.
 AUTOPLAY_STATES = (3, 6)
 PHASES = (
@@ -69,6 +71,11 @@ PHASES = (
 def require_one_pass(output):
     if not re.search(r"OK \(1 test\)", output) or re.search(r"INSTRUMENTATION_STATUS_CODE: -(?:2|3|4)", output):
         raise ValueError("Expected exactly one passing, non-skipped host phase")
+
+
+def media_lines(dump):
+    """System UI's dump runs to many megabytes; the evidence only needs its media sections."""
+    return "".join(line for line in dump.splitlines(keepends=True) if "media" in line.lower() or "resum" in line.lower())
 
 
 def require_no_autoplay(sessions, package):
@@ -144,6 +151,10 @@ def main():
             adb("shell", "cmd", "audio", "set-enable-hardening", "throw")
         if adb("shell", "settings", "get", "global", "airplane_mode_on").strip() != "1":
             raise ValueError("Offline card phase requires airplane mode after reboot")
+        # System UI loads resumption cards after boot; its own view separates a card it never built
+        # from one this phase cannot find.
+        time.sleep(SYSTEM_UI_SETTLE_SECONDS)
+        (args.output / "system-ui-after-boot.txt").write_text(media_lines(adb(*SYSTEM_UI_DUMP, timeout=120)))
         # am instrument restarts the app, which would hide playback the boot itself started.
         sessions = adb("shell", "dumpsys", "media_session")
         (args.output / "media-session-after-boot.txt").write_text(sessions)
@@ -172,6 +183,9 @@ def main():
                 print(f"Cleanup step failed: {' '.join(command)}: {failure}")
                 return None
 
+        final_dump = best_effort(*SYSTEM_UI_DUMP)
+        if final_dump is not None:
+            (args.output / "system-ui-final.txt").write_text(media_lines(final_dump))
         for name, command in {
             "logcat.txt": ("logcat", "-d", "-v", "threadtime"),
             "media-session.txt": ("shell", "dumpsys", "media_session"),

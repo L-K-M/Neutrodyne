@@ -105,6 +105,11 @@ class RebootResumptionTest {
                         controller.pause()
                     }
                     await { (db.positionDao().byEpisode(id)?.positionMs ?: 0) >= SAVED_POSITION_MS }
+                    // Evidence only: a card here and none after boot points at resumption, not at the shade.
+                    device.openQuickSettings()
+                    device.wait(Until.findObject(By.text(TITLE)), QUICK_SETTINGS_POLL_MS)
+                    record("seed-quick-settings")
+                    device.pressBack()
                     check(
                         saved
                             .edit()

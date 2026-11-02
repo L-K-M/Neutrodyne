@@ -25,6 +25,12 @@ class RebootEvidenceTest(unittest.TestCase):
                 reboot.require_one_pass(output)
 
 
+class SystemUiEvidenceTest(unittest.TestCase):
+    def test_keeps_only_media_lines(self):
+        dump = "QS tiles\nMediaDataManager: entries=1\nnothing\nresumption enabled\n"
+        self.assertEqual("MediaDataManager: entries=1\nresumption enabled\n", reboot.media_lines(dump))
+
+
 class AutoplayEvidenceTest(unittest.TestCase):
     SESSION = "      package=ch.lkmc.neutrodyne\n      active=true\n      state=PlaybackState {{state={state}, position=0}}\n"
     OTHER = "      package=com.other\n      state=PlaybackState {state=PLAYING(3), position=0}\n"
