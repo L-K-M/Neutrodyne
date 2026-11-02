@@ -18,11 +18,33 @@ import kotlin.io.path.readText
 @Serializable
 data class FfmpegLayout(
     val ffmpegVersion: String,
+    val pointerSize: Int,
+    val sizeTSize: Int,
     val libraries: Map<String, Int>,
     val structs: Map<String, StructLayout>,
     val codecIds: Map<String, Int>,
     val constants: Map<String, Long>,
 ) {
+    internal fun validate() {
+        require(pointerSize == java.lang.foreign.ValueLayout.ADDRESS.byteSize().toInt() && sizeTSize == pointerSize) {
+            "FFmpeg layout has incompatible pointer or size_t width"
+        }
+        require(libraries.keys == setOf("avutil", "swresample", "avcodec", "avformat")) {
+            "FFmpeg layout must name all four libraries"
+        }
+        for ((name, struct) in structs) {
+            require(struct.size > 0 && struct.alignment > 0 && (struct.alignment and (struct.alignment - 1)) == 0L) {
+                "invalid size or alignment for $name"
+            }
+            require(struct.size % struct.alignment == 0L) { "misaligned struct size for $name" }
+            require(struct.fields.values.all { it >= 0 && it < struct.size }) { "invalid field offset for $name" }
+        }
+    }
+
+    internal fun verifyMajors(actual: Map<String, Int>) {
+        require(actual == libraries) { "the loaded FFmpeg libraries are $actual, the layout expects $libraries" }
+    }
+
     val avcodecMajor: Int get() = majorOf("avcodec")
 
     val avformatMajor: Int get() = majorOf("avformat")
@@ -72,6 +94,7 @@ data class FfmpegLayout(
 @Serializable
 data class StructLayout(
     val size: Long,
+    val alignment: Long,
     // Opaque structs (AVIOContext) ship only a size; field reads still error.
     val fields: Map<String, Long> = emptyMap(),
 ) {

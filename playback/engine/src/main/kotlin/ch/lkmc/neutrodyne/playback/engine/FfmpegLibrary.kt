@@ -400,6 +400,7 @@ class FfmpegLibrary
                 val layout =
                     FfmpegLayout.readOrNull(directory)
                         ?: error("no ${FfmpegLayout.FILE_NAME} in $directory: run buildFfmpeg")
+                layout.validate()
                 val os = System.getProperty("os.name")
                 // FFmpeg installs shared libs under $prefix/lib, its Windows
                 // DLLs under $prefix/bin (configure's shlibdir_default).
@@ -572,11 +573,7 @@ class FfmpegLibrary
                         "avutil" to avutilVersion.major(),
                         "swresample" to swresampleVersion.major(),
                     )
-                val expected = layout.libraries
-                val mismatch = actual.filter { (library, major) -> expected[library] != major }
-                require(mismatch.isEmpty()) {
-                    "the loaded FFmpeg libraries are $actual, the layout expects $expected"
-                }
+                layout.verifyMajors(actual)
             }
 
             /** The library major out of FFmpeg's packed `LIB*_VERSION_INT`. */

@@ -37,14 +37,20 @@
 #include "libavutil/samplefmt.h"
 #include "libswresample/swresample.h"
 
+#ifdef _MSC_VER
+#define ND_ALIGNOF(t) __alignof(t)
+#else
+#define ND_ALIGNOF(t) _Alignof(t)
+#endif
+
 /** One struct field: printed as `"name": offset`. The last field of a struct
  *  uses FIELD_LAST so the JSON object stays valid (no trailing comma). */
 #define FIELD(s, f) printf("      \"%s\": %zu,\n", #f, offsetof(s, f))
 #define FIELD_LAST(s, f) printf("      \"%s\": %zu\n", #f, offsetof(s, f))
 
-static void struct_begin(const char *name, size_t size)
+static void struct_begin(const char *name, size_t size, size_t alignment)
 {
-    printf("    \"%s\": {\n      \"size\": %zu,\n      \"fields\": {\n", name, size);
+    printf("    \"%s\": {\n      \"size\": %zu,\n      \"alignment\": %zu,\n      \"fields\": {\n", name, size, alignment);
 }
 
 static void struct_end(void) { printf("      }\n    },\n"); }
@@ -62,6 +68,8 @@ int main(int argc, char **argv)
 
     printf("{\n");
     printf("  \"ffmpegVersion\": \"%s\",\n", argv[1]);
+    printf("  \"pointerSize\": %zu,\n", sizeof(void*));
+    printf("  \"sizeTSize\": %zu,\n", sizeof(size_t));
     printf("  \"libraries\": {\n");
     printf("    \"avcodec\": %d,\n", LIBAVCODEC_VERSION_MAJOR);
     printf("    \"avformat\": %d,\n", LIBAVFORMAT_VERSION_MAJOR);
@@ -71,7 +79,7 @@ int main(int argc, char **argv)
 
     printf("  \"structs\": {\n");
 
-    struct_begin("AVFormatContext", sizeof(AVFormatContext));
+    struct_begin("AVFormatContext", sizeof(AVFormatContext), ND_ALIGNOF(AVFormatContext));
     FIELD(AVFormatContext, pb);
     FIELD(AVFormatContext, iformat);
     FIELD(AVFormatContext, ctx_flags);
@@ -86,17 +94,17 @@ int main(int argc, char **argv)
 
     /* The demuxer that claimed this source, by its own name: the engine records
      * it in the evidence and the AAC priming rule of the demuxer reads it. */
-    struct_begin("AVInputFormat", sizeof(AVInputFormat));
+    struct_begin("AVInputFormat", sizeof(AVInputFormat), ND_ALIGNOF(AVInputFormat));
     FIELD_LAST(AVInputFormat, name);
     struct_end();
 
-    struct_begin("AVStream", sizeof(AVStream));
+    struct_begin("AVStream", sizeof(AVStream), ND_ALIGNOF(AVStream));
     FIELD(AVStream, codecpar);
     FIELD(AVStream, time_base);
     FIELD_LAST(AVStream, discard);
     struct_end();
 
-    struct_begin("AVCodecParameters", sizeof(AVCodecParameters));
+    struct_begin("AVCodecParameters", sizeof(AVCodecParameters), ND_ALIGNOF(AVCodecParameters));
     FIELD(AVCodecParameters, codec_type);
     FIELD(AVCodecParameters, codec_id);
     FIELD(AVCodecParameters, sample_rate);
@@ -106,7 +114,7 @@ int main(int argc, char **argv)
     FIELD_LAST(AVCodecParameters, seek_preroll);
     struct_end();
 
-    struct_begin("AVPacket", sizeof(AVPacket));
+    struct_begin("AVPacket", sizeof(AVPacket), ND_ALIGNOF(AVPacket));
     FIELD(AVPacket, stream_index);
     FIELD(AVPacket, pts);
     FIELD(AVPacket, data);
@@ -115,7 +123,7 @@ int main(int argc, char **argv)
     FIELD_LAST(AVPacket, side_data_elems);
     struct_end();
 
-    struct_begin("AVFrame", sizeof(AVFrame));
+    struct_begin("AVFrame", sizeof(AVFrame), ND_ALIGNOF(AVFrame));
     FIELD(AVFrame, nb_samples);
     FIELD(AVFrame, format);
     FIELD(AVFrame, sample_rate);
@@ -130,25 +138,25 @@ int main(int argc, char **argv)
     FIELD_LAST(AVFrame, linesize);
     struct_end();
 
-    struct_begin("AVChapter", sizeof(AVChapter));
+    struct_begin("AVChapter", sizeof(AVChapter), ND_ALIGNOF(AVChapter));
     FIELD(AVChapter, time_base);
     FIELD(AVChapter, start);
     FIELD(AVChapter, end);
     FIELD_LAST(AVChapter, metadata);
     struct_end();
 
-    struct_begin("AVRational", sizeof(AVRational));
+    struct_begin("AVRational", sizeof(AVRational), ND_ALIGNOF(AVRational));
     FIELD(AVRational, num);
     FIELD_LAST(AVRational, den);
     struct_end();
 
-    struct_begin("AVChannelLayout", sizeof(AVChannelLayout));
+    struct_begin("AVChannelLayout", sizeof(AVChannelLayout), ND_ALIGNOF(AVChannelLayout));
     FIELD(AVChannelLayout, order);
     FIELD(AVChannelLayout, nb_channels);
     FIELD_LAST(AVChannelLayout, u);
     struct_end();
 
-    struct_begin("AVPacketSideData", sizeof(AVPacketSideData));
+    struct_begin("AVPacketSideData", sizeof(AVPacketSideData), ND_ALIGNOF(AVPacketSideData));
     FIELD(AVPacketSideData, data);
     FIELD(AVPacketSideData, size);
     FIELD_LAST(AVPacketSideData, type);
@@ -156,13 +164,13 @@ int main(int argc, char **argv)
 
     /* `av_dict_get` returns one of these; the bindings read its two C strings
      * for chapter titles. */
-    struct_begin("AVDictionaryEntry", sizeof(AVDictionaryEntry));
+    struct_begin("AVDictionaryEntry", sizeof(AVDictionaryEntry), ND_ALIGNOF(AVDictionaryEntry));
     FIELD(AVDictionaryEntry, key);
     FIELD_LAST(AVDictionaryEntry, value);
     struct_end();
 
-    printf("    \"AVIOContext\": { \"size\": %zu, \"fields\": { \"buffer\": %zu } }\n",
-           sizeof(AVIOContext), offsetof(AVIOContext, buffer));
+    printf("    \"AVIOContext\": { \"size\": %zu, \"alignment\": %zu, \"fields\": { \"buffer\": %zu } }\n",
+           sizeof(AVIOContext), ND_ALIGNOF(AVIOContext), offsetof(AVIOContext, buffer));
     printf("  },\n");
 
     printf("  \"codecIds\": {\n");
