@@ -423,6 +423,29 @@ class AppUpdateCheckerTest {
             assertEquals(1000095L, h.settings.get(Keys.NOTIFIED_VERSION_CODE))
         }
 
+    @Test fun leavingAJoinedManualCheckKeepsTheScheduledFetchAndItsNotification() =
+        runTest {
+            val h = Harness(this)
+            h.due()
+            val gate = CompletableDeferred<Unit>()
+            h.source.action = {
+                gate.await()
+                Outcome.Success(manifest())
+            }
+            val scheduled = async { h.checker.execute(UpdateInvocation.SCHEDULED) }
+            runCurrent()
+            val manual = launch { h.checker.checkNow() }
+            runCurrent()
+            manual.cancelAndJoin()
+            runCurrent()
+            gate.complete(Unit)
+
+            assertIs<CheckState.Available>(scheduled.await())
+            assertEquals(1, h.source.calls)
+            assertEquals(1, h.notifications.posted.size)
+            assertEquals(0, h.runner.cancelled)
+        }
+
     @Test fun scheduledJoiningManualFetchDoesNotDuplicateIt() =
         runTest {
             val h = Harness(this)
