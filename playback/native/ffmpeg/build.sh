@@ -50,9 +50,11 @@ die() { echo "build.sh[$TARGET]: $*" >&2; exit 1; }
 # ---------------------------------------------------------------- lock reading
 
 lock_value() { # lock_value <section> <key>
+    # `index` rather than a regex with `\[`: some awks (MSYS2's) reject the
+    # escape and read `[ffmpeg]` as a character class, which matches no section.
     awk -v section="$1" -v key="$2" '
         /^[[:space:]]*#/ { next }
-        /^[[:space:]]*\[/ { in_section = ($0 ~ "^[[:space:]]*\\[" section "\\][[:space:]]*$"); next }
+        /^[[:space:]]*\[/ { in_section = (index($0, "[" section "]") > 0); next }
         in_section && $1 == key {
             sub(/^[^=]*=[[:space:]]*"/, ""); sub(/"[[:space:]]*$/, ""); print; exit
         }
@@ -360,13 +362,21 @@ if [ "$CC_BIN" = "cl" ]; then
         { cat "$BUILD/probe-build.log"; die "probe.c did not compile"; }
     PROBE_OUT="$(cd "$LIBDIR" && "$(cygpath -u "$BUILD")/probe.exe")" || die "probe.exe failed"
 else
-    if ! "$CC_BIN" -O2 -I"$OUT/include" "$BUILD/probe.c" -o "$BUILD/probe" \
+    log "linking the probe against $LIBDIR"
+    set +e
+    "$CC_BIN" -O2 -I"$OUT/include" "$BUILD/probe.c" -o "$BUILD/probe" \
         -L"$LIBDIR" -Wl,-rpath,"$LIBDIR" \
-        -lavcodec -lavformat -lavutil -lswresample 2>"$BUILD/probe-build.log"; then
+        -lavcodec -lavformat -lavutil -lswresample >"$BUILD/probe-build.log" 2>&1
+    PROBE_STATUS=$?
+    set -e
+    log "the probe linked with status $PROBE_STATUS"
+    if [ "$PROBE_STATUS" -ne 0 ]; then
         cat "$BUILD/probe-build.log"
         die "probe.c did not compile"
     fi
-    PROBE_OUT="$(cd "$LIBDIR" && LD_LIBRARY_PATH="$LIBDIR" "$BUILD/probe")" || die "probe failed"
+    PROBE_OUT="$(cd "$LIBDIR" && LD_LIBRARY_PATH="$LIBDIR" "$BUILD/probe")" ||
+        die "probe failed (status $?)"
+    log "the probe reported: $(printf '%s' "$PROBE_OUT" | tr '\n' '|')"
 fi
 PROBE_LICENSE="$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^license //p')"
 PROBE_VERSION="$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^version //p')"
@@ -378,6 +388,7 @@ printf '%s\n' "$PROBE_PROTOCOLS" >"$OUT/ffmpeg-protocols.txt"
 # the image scan can read it from the install tree without the build directory.
 cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h"
 
+log "collecting the enabled-component inventory"
 # The enabled-component inventory, read from the build's own config.h.
 {
     echo "# enabled components of the $TARGET build (from config.h)"
@@ -385,6 +396,7 @@ cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h"
         "$SOURCE_DIR/config.h" | sed 's/^#define CONFIG_//; s/ 1$//' | sort
 } >"$OUT/ffmpeg-components.txt"
 
+log "measuring the four libraries"
 # Sizes: the four shared libraries only, symlink targets counted once.
 size_of() { # size_of <pattern> — the real file behind a versioned symlink
     local file
@@ -407,6 +419,7 @@ size_of() { # size_of <pattern> — the real file behind a versioned symlink
     done
 } >"$OUT/ffmpeg-sizes.txt"
 
+log "writing the build record"
 {
     echo "target $TARGET"
     echo "ffmpeg $FFMPEG_VERSION"
