@@ -33,6 +33,10 @@
     "server": [
       "neutrodyne-server-{v}.jar",
       "neutrodyne-server-image-sources-{v}.tar.xz"
+    ],
+    "server-sources": [
+      "{server_runtime_source}",
+      "RUNTIME-SOURCES.md"
     ]
   },
   "milestones": {
@@ -40,6 +44,7 @@
     "android": "M0a",
     "desktop": "M0b",
     "sources": "M0b",
-    "server": "MS1"
+    "server": "MS1",
+    "server-sources": "MS1"
   }
 }

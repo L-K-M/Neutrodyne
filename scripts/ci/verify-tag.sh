@@ -134,11 +134,13 @@ if [ "$MAJOR" -ge 1 ]; then MAC_KIND=dmg; else MAC_KIND=mac-zip; fi
 EXPECTED="$(PRODUCTS="$PRODUCTS" MAC_EXT="$([ "$MAC_KIND" = dmg ] && echo dmg || echo zip)" \
     python3 - "$REPO_ROOT/release-assets.json" "$VERSION" <<'PYEOF'
 import json, os, sys
+from pathlib import Path
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
 version = sys.argv[2]
 products = set(os.environ["PRODUCTS"].split(","))
 mac_ext = os.environ["MAC_EXT"]
+server_source = json.loads(Path("sync/server/deploy/image-sources.lock.json").read_text())["runtime"]["name"]
 
 names = list(doc["always"])
 for group in products:
@@ -147,7 +149,7 @@ for group in products:
         sys.exit(f"verify-tag: release-assets.json has no group '{group}'")
     names += files
 for n in names:
-    print(n.replace("{v}", version).replace("{mac_ext}", mac_ext))
+    print(n.replace("{v}", version).replace("{mac_ext}", mac_ext).replace("{server_runtime_source}", server_source))
 PYEOF
 )" || exit 1
 
