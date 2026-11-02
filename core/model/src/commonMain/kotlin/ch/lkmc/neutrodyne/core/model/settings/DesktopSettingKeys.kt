@@ -16,8 +16,12 @@ object DesktopSettingKeys {
     val LAST_IMPORT_CLEANUP_AT: SettingKey.Int64 =
         SettingKey.Int64(name = "desktop.import_cleanup_at", default = 0L, file = SettingsFile.DEVICE)
 
+    /** Empty text represents the default Downloads folder. */
+    val DOWNLOADS_DIR = SettingKey.Text("desktop.downloads_dir", "", SettingsFile.DEVICE)
+
     val ALL: List<SettingKey<*>> =
         listOf(
             LAST_IMPORT_CLEANUP_AT,
+            DOWNLOADS_DIR,
         )
 }

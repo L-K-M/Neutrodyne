@@ -150,3 +150,9 @@ internal actual class PlatformLocalUris actual constructor() : LocalUris {
 internal actual fun platformPartialDirectory(path: String) = Unit
 
 internal actual fun pathPlatform(): PathPlatform = PathPlatform.PORTABLE
+
+// DocumentProvider roots share no rename-capable file store; every root pair reports distinct.
+internal actual fun platformSameStore(
+    source: String,
+    target: String,
+): Boolean = false
