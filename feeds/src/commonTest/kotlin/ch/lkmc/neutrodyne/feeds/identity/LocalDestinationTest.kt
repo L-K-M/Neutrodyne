@@ -83,6 +83,42 @@ class LocalDestinationTest {
     }
 
     @Test
+    fun encodedAndIdnaHostsAreLocal() {
+        // The transport decodes and IDNA-maps the host before it dials (03 note 2026-11-02):
+        // these spellings reach loopback/RFC 1918 peers exactly like their plain forms, so the
+        // string check must classify them the same way.
+        for (
+        url in listOf(
+            "http://%31%32%37.0.0.1:8080/feed",
+            "http://%31%32%37.0.0.1/",
+            "http://local%68ost/feed",
+            "http://LOCA%4CHOST:8080/",
+            "http://192.168.%30.%30.%31/",
+            "http://１２７.０.０.１/feed",
+            "http://１２７．０．０．１/feed",
+            "http://ｌｏｃａｌｈｏｓｔ/feed",
+            "http://１９２.１６８.０.１/action",
+            "http://user:pass@%31%32%37.0.0.1/feed",
+        )
+        ) {
+            assertTrue(isLocal(url), "expected local: $url")
+        }
+    }
+
+    @Test
+    fun encodedPublicHostsAreNotLocal() {
+        for (
+        url in listOf(
+            "https://%65xample.com/feed",
+            "http://127.0.0.1.e%76il.com/",
+            "https://podcasts.%61pple.com/show",
+        )
+        ) {
+            assertFalse(isLocal(url), "expected non-local: $url")
+        }
+    }
+
+    @Test
     fun publicDestinationsAreNotLocal() {
         for (
         url in listOf(

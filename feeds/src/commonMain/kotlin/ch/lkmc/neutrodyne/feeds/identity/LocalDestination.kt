@@ -33,8 +33,16 @@ public object LocalDestination {
      * public dotted quads are not local, and neither is input without `scheme://`.
      */
     public fun isLocal(url: String): Boolean {
-        val host = authorityHost(url) ?: return false
-        val lowered = host.removeSuffix(".").lowercase()
+        if (schemeWithAuthority.find(url) == null) return false
+        // Classify the host the transport will actually dial: percent-decoded, IDNA-mapped,
+        // numeric spellings canonicalised (03 note 2026-11-02). `http://%31%32%37.0.0.1/` and
+        // `http://１２７.０.０.１/` both come back as `127.0.0.1`.
+        UrlNormalizer.transportHost(url)?.let { return isLocalHost(it) }
+        // The normaliser only refuses spellings the transport rejects or whose numeric grammar
+        // is ambiguous (0x… parts, >4 groups, bad ports); those still get the conservative
+        // authority-host pass so an unreadable numeric spelling stays local.
+        val raw = authorityHost(url) ?: return false
+        val lowered = raw.removeSuffix(".").lowercase()
         if (lowered == "localhost" || lowered.endsWith(".localhost") || lowered.endsWith(".local")) {
             return true
         }
@@ -51,6 +59,25 @@ public object LocalDestination {
         // A numeric host that is not a plain dotted quad — resolvers may still read it as an
         // address (127.1 → 127.0.0.1, 0x7f.0.0.1, 2130706433), and the spelling cannot be trusted.
         return true
+    }
+
+    /**
+     * The local-destination classification of a host already run through the transport's own
+     * normalisation: lowercased, decoded, IDNA-mapped, numeric forms canonicalised to a dotted
+     * quad; IPv6 literals keep their brackets.
+     */
+    private fun isLocalHost(host: String): Boolean {
+        if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true
+        if (host.startsWith("[")) {
+            val literal = host.substring(1, host.lastIndex).substringBefore('%')
+            val groups = UrlNormalizer.parseIpv6Groups(literal) ?: return false
+            return isLocalIpv6(groups)
+        }
+        val parts = host.split('.')
+        if (parts.size == IPV4_PARTS && parts.all { it.isNotEmpty() && it.all { c -> c in '0'..'9' } }) {
+            return isLocalIpv4(parts.map(String::toInt))
+        }
+        return false
     }
 
     /**
