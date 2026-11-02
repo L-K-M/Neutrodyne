@@ -211,6 +211,10 @@ internal class DownloadEngine(
                     val withinHorizon = retryDelay != null && retryDelay <= request.waitHorizonMs
                     if (own.isEmpty() && !withinHorizon) {
                         if (request.exit.tryClose(request.runnerToken, outcome)) return@coroutineScope outcome
+                        // A refused close means runnable rows exist. When another runner holds
+                        // the slots admitting them, rescanning would re-read the same queue;
+                        // every release, wake and stop reaches us through `changes` instead.
+                        changes.first { it != revision }
                         continue
                     }
                     val untilDeadline = deadline?.let { (it - clock.elapsedRealtime()).coerceAtLeast(0) }
