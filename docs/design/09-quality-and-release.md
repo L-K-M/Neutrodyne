@@ -567,6 +567,55 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
 
 ### Out-of-process system tests
 
+**Implementation note (2026-10-19, M6b).** W11 preserves W10's fallback and
+records current workflow selection: `system-tests` runs E10 only for full
+nightlies; `instrumented-full` runs benchmark smoke on API36 (also for the
+downloads scope); `api37-16k` runs connected smoke. These are wired jobs, not
+executed evidence in this local worktree. The current workflows have no
+`desktop-matrix` job, so Windows/macOS/ARM lane and move coverage remains open.
+The [ledger](../evidence/m6b-acceptance.md) names tasks, receipts and gaps.
+Assembly does not close E10 or published-release acceptance. The release mapping
+below is the design target; current code enables only `benchmarkRelease`.
+
+**Implementation note (2026-10-19, M6b).** W10's self-instrumenting
+`:benchmark` producer uses the recorded `benchmarkRelease` fallback; published
+`release` mapping remains Unverified. `scripts/ci/system-tests.sh` runs E10 on
+full-image `bench34`, smoke on ATD `api36` and connected API 37. It records
+SHA/device/variant metadata, removes old XML, and requires one named, non-skipped
+pass from that variant/device. Empty, failed, skipped and duplicate results fail.
+Nightly `system-tests`, `instrumented-full` and API 37 enforce this gate.
+
+E10's test-APK server supplies a strong-ETag WAV. Assertions cover PID death and
+restart, the real reconciler's `QUEUED(SYSTEM)` reset and cleared token, matching
+server-observed `Range`/`If-Range` from actual `.part` length, and the final hash.
+`-Pneutrodyne.systemTests=true` adds a DUMP-protected fixture initializer to
+`download:impl` and disables all app variants except `benchmarkRelease`. It
+accepts only loopback seed URLs and calls the real engine without an FGS so
+`am kill` can kill the cached process. A test-APK activity backgrounds it without
+SystemUI. Startup records the real reset before parking the row until resume.
+UIDT/WorkManager lifecycle coverage stays with their device suites. Normal
+builds exclude the hook; `check-apk.sh --published` rejects its classes.
+
+Smoke uses the real UI and normal scheduling: five destinations, subscribe,
+ten seconds of actual playing state, download and back. Both suites clear data;
+connected runs uninstall both APKs, while GMD owns its disposable installation.
+Reports and variant metadata are always uploaded. Host CI builds the test APK
+and opted-in driver, and checks dependency policy and graph boundaries; Licensee
+stays on shipped shells. No schema, domain-interface or licence exceptions.
+
+Device execution is Unverified. I2 integrates M6a's real episode DownloadToggle
+and feed/podcast request handlers with W9's controls; smoke exercises that UI
+entry point instead of bypassing it. M6a's E4/downloads selectors and bmgr job
+coexist with the system-tests job and benchmark smoke legs. W11 must not record
+host compilation or passing host tests as device acceptance.
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 9 permits
+W10 to use `benchmarkRelease` if AGP 9.4 does not offer the required `release`
+test variant. The fallback differs only by profileability. Record the actual
+variant and device evidence; benchmarkRelease coverage must never be described
+as release-APK coverage. W1 performs no system-test or variant verification.
+
+
 Instrumented tests run inside the app's process, so killing the process (`am kill`, `ProcessDeathResumeTest`) or reinstalling the app kills the test. Such tests live in `:benchmark` (`com.android.test` with the `androidx.baselineprofile` 1.5.0 producer plugin, self-instrumenting, `targetProjectPath = ":app"`), drive the app with UI Automator 2.4.0 and `UiAutomation.executeShellCommand`, and are created in **M6b** (system tests); Macrobenchmarks follow in M10 and the baseline-profile generator in M11b ([Macrobenchmark and profiles](#macrobenchmark-and-profiles)). A test module builds and tests the app variant with the same build-type name ([Macrobenchmark overview](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-overview)), so `:benchmark`'s variants map one to one: **`release`** — the system tests (E10 on `bench34`) and the release smoke journeys `ReleaseSmokeJourneyTest` (on `api36` and the API 37 16 KB image: start, five destinations, "Add by URL" with a feed from a MockWebServer inside the `:benchmark` process on `127.0.0.1`, which the app reaches over loopback, play 10 s, download one episode, back) against the published `release` build type; **`benchmarkRelease`** — Macrobenchmarks; **`nonMinifiedRelease`** — `BaselineProfileGenerator`. Compose nodes are found by resource ID through `Modifier.semantics { testTagsAsResourceId = true }` on `NeutrodyneRoot` and 08's test tags ([08 Performance journeys](08-ui-ux.md#performance-journeys)). Unverified: that `com.android.test` with the producer plugin under AGP 9.4 offers a `release` variant matching `:app`'s `release` (M6b check, with S19's throwaway module as the first evidence; fallback: the system tests and smoke journeys run against `benchmarkRelease`, which differs from `release` only in being profileable and in its own source set).
 
 ### Recorded responses
@@ -2058,7 +2107,7 @@ Settings › Privacy page content (09, both apps): crash-reports switch; "What N
 | [M3](../PLAN.md#m3-import-export-and-backup) | OPML/backup mutation providers; E5, E6, E9; nightly `bmgr` job on the release APK; `RecordingAppNavigator` in `:core:testing` |
 | [M4](../PLAN.md#m4-playback-core) | Media3 test-utils forcing verified; `:playback:core` tests in `commonTest`; `api34` device; 06's `PlaybackServiceTest` in nightly (incl. API 37 hardening); E3 |
 | [M5](../PLAN.md#m5-playback-features-and-system-surfaces) | manual device-matrix template in the release issue |
-| [M6](../PLAN.md#m6-downloads) | M6a: E4; `api33` device; the desktop download lanes' tests in `desktopTest`. M6b: `:benchmark` (`com.android.test` + baseline-profile producer) with its `release` variant for system tests and the release smoke journeys, `bench34`, `system-tests` job, E10, the `instrumented-full` release leg; `bmgr` assertion for `Podcasts/` |
+| [M6](../PLAN.md#m6-downloads) | M6a: E4; `api33` device; the desktop download lanes' tests in `desktopTest`; `bmgr` assertion for `Podcasts/`. M6b: `:benchmark` (`com.android.test` + baseline-profile producer) with its `release` variant for system tests and the release smoke journeys, `bench34`, `system-tests` job, E10, the `instrumented-full` release leg |
 | [M7](../PLAN.md#m7-discovery) | `PRIVACY.md` and the in-app inventory gain `apple`, `fyyd`, `podcastindex` and the autodiscovery probes of `add-input`; `PrivacyInventoryParityTest`; E1 deep-link case |
 | [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) | E8 (`ExternalYouTubeModeTest`) in `instrumented` and its desktop variant in `:desktopApp`'s JVM tests (every build is in external mode until M9a on Android and MD3 on the desktop); YouTube import-parser mutation providers; inventory `youtube-subscriptions` |
 | [M9](../PLAN.md#m9-youtube-playback-and-downloads-via-the-embedded-yt-dlp-engine) (M9a) | E7 through `:ytx` on the debug APK and the release APK (`ReplayRH` hook, `ytxReplay` argument, `ReleaseSmoke` filter); `shimTest` in `unit`; `check-apk.sh` content scan and ELF alignment check against the real engine stack; nightly `no-engine-build` (blocking), `youtube-canary` and `engine-nightly-canary`; `FakeYouTubeEngine`; PB18–PB21 from the spike on the release APK; inventory `youtube-streams` rewritten for the engine; YouTube engine lines in diagnostics and `CrashKey.YOUTUBE_HEALTH` |
