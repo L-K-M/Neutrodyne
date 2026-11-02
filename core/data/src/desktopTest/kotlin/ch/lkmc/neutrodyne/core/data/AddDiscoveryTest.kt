@@ -346,6 +346,27 @@ class AddDiscoveryTest {
             }
         }
 
+    @Test fun verifiedFeedWinsOverYouTubeAndConsentCandidatesOnTheSamePage() =
+        runBlocking {
+            // A podcast site may also advertise its YouTube channel or an Apple link: the verified
+            // RSS feed is the answer; those candidates only decide when nothing else verified.
+            server.enqueue(
+                mockResponse(
+                    body =
+                        "<html><head>" +
+                            "<link rel='alternate' type='application/atom+xml' " +
+                            "href='https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ'>" +
+                            "<link rel='alternate' type='application/rss+xml' href='https://pod.link/73329284'>" +
+                            "<link rel='alternate' type='application/rss+xml' href='${url("/feed.xml")}'>" +
+                            "</head></html>",
+                ),
+            )
+            server.enqueue(mockResponse(body = rssBody()))
+            assertIs<AddResolution.Feed>(bundle.resolver.resolve(url("/page")))
+            assertEquals(2, server.requestCount)
+            assertTempFilesEmpty()
+        }
+
     @Test fun youtubeIsCheckedForRawTokensLookupCandidatesAndRedirects() =
         runBlocking {
             for (raw in listOf(
