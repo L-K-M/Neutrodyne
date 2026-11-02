@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryAccess
+import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.ProviderFailure
@@ -338,14 +339,12 @@ class SearchRepositoryTest {
                     override suspend fun lookup(
                         ids: ImmutableList<String>,
                         access: DirectoryAccess,
-                    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> =
-                        Outcome.Failure(ProviderStatus.Disabled)
+                    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = Outcome.Failure(ProviderStatus.Disabled)
 
                     override suspend fun charts(
                         genre: ChartGenre?,
                         country: String,
-                    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> =
-                        Outcome.Failure(ProviderStatus.Disabled)
+                    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = Outcome.Failure(ProviderStatus.Disabled)
                 }
             val service =
                 SearchRepositoryImpl(
