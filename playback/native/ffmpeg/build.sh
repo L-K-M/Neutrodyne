@@ -63,8 +63,10 @@ lock_value() { # lock_value <section> <key>
 
 FFMPEG_VERSION="$(lock_value ffmpeg version)"
 SOURCE_URL="$(lock_value ffmpeg sourceUrl)"
+SOURCE_URL_FALLBACK="$(lock_value ffmpeg sourceUrlFallback)"
 SOURCE_SHA256="$(lock_value ffmpeg sha256)"
 SIGNATURE_URL="$(lock_value ffmpeg signatureUrl)"
+SIGNATURE_URL_FALLBACK="$(lock_value ffmpeg signatureUrlFallback)"
 SIGNATURE_SHA256="$(lock_value ffmpeg signatureSha256)"
 SIGNING_KEY="$(lock_value ffmpeg signingKey)"
 SIGNING_KEY_FINGERPRINT="$(lock_value ffmpeg signingKeyFingerprint)"
@@ -98,14 +100,21 @@ verify_checksum() { # verify_checksum <file> <expected>
     [ "$actual" = "$2" ] || die "checksum mismatch for $1: expected $2, got $actual"
 }
 
-download() { # download <url> <file>
-    if [ -s "$2" ]; then
-        log "reusing $2"
+download() { # download <file> <url> [fallback-url]
+    if [ -s "$1" ]; then
+        log "reusing $1"
         return 0
     fi
-    log "downloading $1"
-    curl -fsSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$2" "$1" ||
-        die "download failed: $1"
+    log "downloading $2"
+    if curl -fsSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$1" "$2"; then
+        return 0
+    fi
+    [ -n "${3:-}" ] || die "download failed: $2"
+    # ffmpeg.org serves from a single host with no official mirror; the lock's
+    # fallback serves identical bytes, which verify_checksum pins exactly.
+    log "download failed, trying the lock's fallback $3"
+    curl -fsSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$1" "$3" ||
+        die "download failed: $2 and $3"
 }
 
 # bounded <seconds> <command...> — `timeout` is GNU coreutils: macOS has neither
@@ -154,10 +163,10 @@ verify_signature() {
 }
 
 if [ ! -d "$SOURCE_DIR" ]; then
-    download "$SOURCE_URL" "$SOURCE_TARBALL"
+    download "$SOURCE_TARBALL" "$SOURCE_URL" "$SOURCE_URL_FALLBACK"
     verify_checksum "$SOURCE_TARBALL" "$SOURCE_SHA256"
     if [ -n "$SIGNATURE_URL" ]; then
-        download "$SIGNATURE_URL" "$SOURCE_SIGNATURE"
+        download "$SOURCE_SIGNATURE" "$SIGNATURE_URL" "$SIGNATURE_URL_FALLBACK"
         if [ -n "$SIGNATURE_SHA256" ]; then
             verify_checksum "$SOURCE_SIGNATURE" "$SIGNATURE_SHA256"
         fi

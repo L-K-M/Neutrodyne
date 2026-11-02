@@ -17,6 +17,10 @@ sourceUrl = "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz"
 sha256 = "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
 signatureUrl = "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc"
 signatureSha256 = "d617fd94ea354dadd2a8bb16243d37c44e1e9729b06b6ad58fe30bfb0fa943f2"
+# ffmpeg.org has no official mirror; the Wayback Machine serves the same
+# bytes, which the two checksums and the signature still verify exactly.
+sourceUrlFallback = "https://web.archive.org/web/2id_/https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz"
+signatureUrlFallback = "https://web.archive.org/web/2id_/https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz.asc"
 signingKey = "playback/native/ffmpeg/ffmpeg-release-signing-key.asc"
 signingKeyFingerprint = "FCF986EA15E6E293A5644F10B4322F04D67658D8"
 aboutLibrariesId = "neutrodyne:ffmpeg"
