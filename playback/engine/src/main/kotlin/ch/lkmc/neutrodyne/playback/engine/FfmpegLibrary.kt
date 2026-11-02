@@ -405,16 +405,16 @@ class FfmpegLibrary
                             LOAD_ORDER.indexOf(entry.key).let { i -> if (i < 0) LOAD_ORDER.size else i }
                         }
                         .associate { (name, major) ->
-                        name to
-                            SymbolLookup.libraryLookup(
-                                directory
-                                    .resolve(libDir)
-                                    .resolve(libraryFileName(name, major, os))
-                                    .toAbsolutePath()
-                                    .toString(),
-                                arena,
-                            )
-                    }
+                            name to
+                                SymbolLookup.libraryLookup(
+                                    directory
+                                        .resolve(libDir)
+                                        .resolve(libraryFileName(name, major, os))
+                                        .toAbsolutePath()
+                                        .toString(),
+                                    arena,
+                                )
+                        }
                 val library = FfmpegLibrary(layout, arena, lookups)
                 library.verifyMajors()
                 library.setQuietLogging()
