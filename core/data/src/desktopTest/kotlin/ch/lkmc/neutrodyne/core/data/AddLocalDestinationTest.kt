@@ -20,6 +20,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
@@ -99,6 +100,56 @@ class AddLocalDestinationTest {
         .toString()
 
     private fun notFound(request: RecordedRequest) = mockResponse(404, "no ${request.target}")
+
+    @Test fun wordpressFallbackCannotReuseConsentForAnotherLocalUrl() =
+        runBlocking {
+            lan.enqueue(mockResponse(body = rssBody(items = arrayOf("<item><title>Blog post</title></item>"))))
+            lan.enqueue(mockResponse(body = rssBody(title = "LAN honeypot", items = arrayOf(rssItem("e")))))
+            val result = bundle.resolver.resolve(lan.url("/feed").toString())
+            assertEquals(1, lan.requestCount, "Only the exact submitted local URL may be requested")
+            assertEquals(1, lanConnections.acceptedConnections)
+            assertEquals("/feed", lan.takeRequest().target)
+            assertEquals(
+                AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                assertIs<AddResolution.Failure>(result).error,
+            )
+        }
+
+    @Test fun wordpressFallbackCannotReachAReboundLocalPeer() =
+        runBlocking {
+            val lookups = AtomicInteger()
+            val rebindDns =
+                Dns {
+                    listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR))
+                }
+            // The inferred URL must choose a fresh route after the public feed closes its socket.
+            server.enqueue(
+                mockResponse(
+                    body = rssBody(items = arrayOf("<item><title>Blog post</title></item>")),
+                    headers = arrayOf("Connection" to "close"),
+                ),
+            )
+            lan.enqueue(mockResponse(body = rssBody(title = "LAN honeypot", items = arrayOf(rssItem("e")))))
+            newResolver(
+                root,
+                db,
+                clock,
+                networkClients =
+                    newNetworkClients(
+                        baseDns = rebindDns,
+                        isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                    ),
+            ).use { rebound ->
+                val result = rebound.resolver.resolve(url("/feed"))
+                assertEquals(1, server.requestCount)
+                assertEquals(0, lan.requestCount, "The inferred WordPress URL must not be requested locally")
+                assertEquals(0, lanConnections.acceptedConnections)
+                assertEquals(
+                    AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                    assertIs<AddResolution.Failure>(result).error,
+                )
+            }
+        }
 
     @Test fun discoveredLanAlternateIsNeverRequested() =
         runBlocking {
