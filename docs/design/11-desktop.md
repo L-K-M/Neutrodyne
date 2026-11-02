@@ -888,8 +888,8 @@ Open (on `nd-prepare`, or `nd-engine` for the first item):
 
 1. Resolve the item (`attempt` 0) and open its `ByteSource`.
 2. `AvioBridge`: `avio_alloc_context` with a 64-KiB buffer and the read and seek upcalls (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`, `AVSEEK_SIZE` → `length` or −1); `AVFMT_FLAG_CUSTOM_IO`; interrupt callback bound to the pipeline's abort flag.
-3. `avformat_open_input` with `probesize` 1 MiB; `avformat_find_stream_info` only when the best audio stream lacks its sample rate or channel layout.
-4. `av_find_best_stream(AUDIO)`; every other stream gets `discard = AVDISCARD_ALL` (video plays as audio; attached pictures are ignored).
+3. `avformat_open_input` with `probesize` 1 MiB.
+4. `av_find_best_stream(AUDIO)`; when it cannot pick a stream, `avformat_find_stream_info` runs and selection is retried (FFmpeg 9 refuses an audio stream whose rate or channel layout is still unset, and demuxers such as mp3 and adts leave both to their parser — MD0 finding, 2026-11-02); every other stream gets `discard = AVDISCARD_ALL` (video plays as audio; attached pictures are ignored).
 5. Open the decoder from `codecpar`; create the input resampler (decoder format → interleaved s16 stereo at the source rate; mono duplicated, more channels downmixed with swresample's default matrix).
 6. Emit `TracksKnown`: duration (stream, else container), chapters, gapless data (`initial_padding`, `trailing_padding`, skip-samples side data present).
 
