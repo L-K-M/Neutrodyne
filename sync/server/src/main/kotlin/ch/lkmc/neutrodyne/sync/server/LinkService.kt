@@ -162,12 +162,20 @@ internal class LinkService(
         val hash = AuthSecrets.hash(deviceCode)
         val raw = secrets.secret(if (purpose == LinkPurpose.DEVICE) "nds_" else "ndw_")
         // Polls inside the advertised interval are rejected from a read transaction so an
-        // impatient caller cannot queue durable writes on the single shared writer.
+        // impatient caller cannot queue durable writes on the single shared writer. The
+        // interval escalation is kept in memory for the same reason; the write path still
+        // persists it for the rare race where the pre-check passes concurrently.
         val throttled =
             store.readAuth {
                 val link = link(hash) ?: return@readAuth null
+                if (!link.pollable(now) || link.purpose != purpose) {
+                    forgetInterval(hash)
+                    return@readAuth null
+                }
+                val interval = effectiveInterval(hash, link.intervalSeconds)
                 val last = link.lastPollAt
-                if (last != null && now - last < link.intervalSeconds * 1000L) {
+                if (last != null && now - last < interval * 1000L) {
+                    escalateInterval(hash, interval)
                     LinkPoll.Error("slow_down")
                 } else {
                     null
@@ -183,8 +191,10 @@ internal class LinkService(
                 return@writeAuth LinkPoll.Error("expired_token")
             }
             if (link.deniedAt != null) return@writeAuth LinkPoll.Error("access_denied")
+            val interval = effectiveInterval(hash, link.intervalSeconds)
             val last = link.lastPollAt
-            if (last != null && now - last < link.intervalSeconds * 1000L) {
+            if (last != null && now - last < interval * 1000L) {
+                save(link.copy(lastPollAt = now, intervalSeconds = escalateInterval(hash, interval)))
                 return@writeAuth LinkPoll.Error("slow_down")
             }
             save(link.copy(lastPollAt = now))
@@ -199,6 +209,7 @@ internal class LinkService(
                 }.getOrNull()
             if (principal == null || principal.accountId != link.accountId) {
                 save(link.copy(consumedAt = now))
+                forgetInterval(hash)
                 return@writeAuth LinkPoll.Error("access_denied")
             }
             val account = checkNotNull(account(principal.accountId))
@@ -209,9 +220,35 @@ internal class LinkService(
                     LinkPoll.Web(issueWeb(account, raw, now, "Web browser"))
                 }
             save(link.copy(lastPollAt = now, consumedAt = now))
+            forgetInterval(hash)
             audit(account.id, "link_redeemed", now)
             result
         }
+    }
+
+    // In-memory interval escalation: the OAuth penalty grows on every in-interval
+    // poll, which the read path must apply without reaching the durable writer.
+    private val escalatedIntervals = LinkedHashMap<String, Int>()
+
+    @Synchronized private fun effectiveInterval(
+        hash: String,
+        stored: Int,
+    ): Int = maxOf(escalatedIntervals[hash] ?: stored, stored)
+
+    @Synchronized private fun escalateInterval(
+        hash: String,
+        interval: Int,
+    ): Int {
+        val next = (interval + 5).coerceAtMost(600)
+        escalatedIntervals[hash] = next
+        while (escalatedIntervals.size > MAX_TRACKED_INTERVALS) {
+            escalatedIntervals.remove(escalatedIntervals.keys.first())
+        }
+        return next
+    }
+
+    @Synchronized private fun forgetInterval(hash: String) {
+        escalatedIntervals.remove(hash)
     }
 
     @Synchronized private fun approvalAttempt(accountId: Long) {
@@ -231,8 +268,13 @@ internal class LinkService(
     private fun AuthLink.pending(now: Long): Boolean =
         now < expiresAt && consumedAt == null && deniedAt == null && approvedAt == null && lookups < MAX_LOOKUPS
 
+    /** Links still able to reach the interval gate; terminal states keep their own errors. */
+    private fun AuthLink.pollable(now: Long): Boolean =
+        now < expiresAt && consumedAt == null && deniedAt == null && lookups < MAX_LOOKUPS
+
     private companion object {
         const val MAX_PENDING = 1000
+        const val MAX_TRACKED_INTERVALS = 4_096
         const val MAX_LOOKUPS = 5
         const val CODE_ATTEMPTS = 8
         const val LINK_MS = 600_000L

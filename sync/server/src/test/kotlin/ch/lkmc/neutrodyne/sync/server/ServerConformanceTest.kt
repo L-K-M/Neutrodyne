@@ -49,8 +49,7 @@ class ServerConformanceTest(
             }
             val scenario = vector.getValue("scenario").jsonObject
             val real = AuthFixture().also { backing = it }
-            real.account()
-            val f = WriterFixture(real.store)
+            val f = WriterFixture(real.store, real.principal(real.grant(real.account())))
             val id = vector.getValue("id").jsonPrimitive.content
             val podcast = key(SyncCollection.fromWire(vector.getValue("collection").jsonPrimitive.content), id)
             when (scenario.getValue("operation").jsonPrimitive.content) {

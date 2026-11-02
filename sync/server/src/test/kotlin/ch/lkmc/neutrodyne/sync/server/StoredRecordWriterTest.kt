@@ -183,7 +183,11 @@ class StoredRecordWriterTest {
             tx.failOnRecords = true
             // The quota check must aggregate in SQL, never load the record set.
             assertTrue(f.push().results.isEmpty())
-            f.writer.resetLibrary(f.principal, AccountResetRequest("DELETE", "library"))
+            assertTrue(
+                f.writer
+                    .resetLibrary(f.principal, AccountResetRequest("DELETE", "library"))
+                    .isNotEmpty(),
+            )
         }
 
     @Test
@@ -203,7 +207,14 @@ class StoredRecordWriterTest {
             val f = WriterFixture()
             // Each single write stays under the aggregate cap; merged together they exceed it.
             val big = oversizedValue(ProtocolLimits.MAX_VALUE_BYTES * 3 / 4)
-            assertEquals("applied", f.push(f.write(setting, "v", big)).results.single().status)
+            assertEquals(
+                "applied",
+                f
+                    .push(f.write(setting, "v", big))
+                    .results
+                    .single()
+                    .status,
+            )
             val result = f.push(f.write(setting, "extra", big, f.clock(1)))
             assertEquals("rejected", result.results.single().status)
             assertEquals("payload_too_large", result.results.single().code)

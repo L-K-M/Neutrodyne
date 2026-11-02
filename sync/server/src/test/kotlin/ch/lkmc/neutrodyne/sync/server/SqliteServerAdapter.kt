@@ -38,6 +38,18 @@ internal class SqliteServerAdapter(
                     "INSERT INTO account(id,username,role,epoch,created_at) VALUES (1,'convergence','user','1234abcd',?)",
                     inputs.wallMs(),
                 )
+                // The writer re-verifies the credential inside the record transaction, so the
+                // synthetic principal needs real device and token rows backing its hash.
+                update(
+                    "INSERT INTO device(id,account_id,name,platform,node_id,created_at) VALUES (?,1,'convergence','test','node',?)",
+                    DEVICE,
+                    inputs.wallMs(),
+                )
+                update(
+                    "INSERT INTO token(hash,account_id,device_id,kind,created_at) VALUES ('test-only',1,?,'device',?)",
+                    DEVICE,
+                    inputs.wallMs(),
+                )
             }
         }
     }

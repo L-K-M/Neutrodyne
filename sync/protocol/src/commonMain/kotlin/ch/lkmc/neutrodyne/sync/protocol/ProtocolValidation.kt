@@ -247,14 +247,35 @@ object ProtocolValidation {
     /** Serialized wire bytes of every value the record carries; the cap counts what a page carries. */
     private fun valueBytes(record: RecordState): Long {
         var total = 0L
-        record.fields.values.forEach { total += it.v.toString().encodeToByteArray().size.toLong() }
+        record.fields.values.forEach {
+            total +=
+                it.v
+                    .toString()
+                    .encodeToByteArray()
+                    .size
+                    .toLong()
+        }
         record.growSets.values.forEach { set ->
-            set.forEach { total += JsonPrimitive(it).toString().encodeToByteArray().size.toLong() }
+            set.forEach {
+                total +=
+                    JsonPrimitive(it)
+                        .toString()
+                        .encodeToByteArray()
+                        .size
+                        .toLong()
+            }
         }
         record.match
             ?.values()
             ?.values
-            ?.forEach { total += it.toString().encodeToByteArray().size.toLong() }
+            ?.forEach {
+                total +=
+                    it
+                        .toString()
+                        .encodeToByteArray()
+                        .size
+                        .toLong()
+            }
         return total
     }
 

@@ -15,11 +15,11 @@ import kotlinx.serialization.json.JsonPrimitive
 
 internal class WriterFixture(
     val store: SyncStore = FakeSyncStore().apply { accounts[1] = FakeSyncTransaction() },
+    val principal: AccountPrincipal = AccountPrincipal(1, AccountRole.USER, TokenKind.DEVICE, "hash", DEVICE),
 ) {
     var now = 1_791_072_000_000L
     val inputs = ServerInputs({ now }, { ByteArray(it) })
     val writer = StoredRecordWriter(store, inputs)
-    val principal = AccountPrincipal(1, AccountRole.USER, TokenKind.DEVICE, "hash", DEVICE)
 
     fun clock(
         offset: Long = 0,
