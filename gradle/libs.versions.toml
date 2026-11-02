@@ -285,3 +285,5 @@ neutrodyne-server-application = { id = "neutrodyne.server.application" }
 neutrodyne-metro = { id = "neutrodyne.metro" }
 neutrodyne-room = { id = "neutrodyne.room" }
 neutrodyne-quality = { id = "neutrodyne.quality" }
+
+neutrodyne-android-systemtest = { id = "neutrodyne.android.systemtest" }
