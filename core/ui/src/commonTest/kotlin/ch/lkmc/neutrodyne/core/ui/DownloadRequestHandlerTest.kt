@@ -294,6 +294,33 @@ class DownloadRequestHandlerTest {
             }
         }
 
+    @Test fun selectedDesktopStorageFolderIsUsedAfterRootChange() =
+        runTest {
+            val controller = FakeDownloadController()
+            controller.roots =
+                listOf(
+                    ch.lkmc.neutrodyne.download.api.StorageRootInfo(
+                        "dir:default",
+                        ch.lkmc.neutrodyne.download.api.RootKind.DESKTOP_DEFAULT,
+                        null,
+                        999,
+                        true,
+                        "/default",
+                    ),
+                    ch.lkmc.neutrodyne.download.api.StorageRootInfo(
+                        "dir:custom",
+                        ch.lkmc.neutrodyne.download.api.RootKind.DESKTOP_FOLDER,
+                        null,
+                        999,
+                        true,
+                        "/custom",
+                    ),
+                )
+            controller.storage.value = controller.storage.value.copy(rootId = "dir:custom")
+            val handler = DownloadRequestHandler(backgroundScope, controller, UserMessages(), {}, {}, { throw it })
+            assertEquals("/custom", handler.storageFolder())
+        }
+
     @Test fun sizeFormattingHandlesUnknownZeroAndLargeFilesWithoutJvmApis() {
         assertEquals("0 B", downloadSize(0))
         assertEquals("999 B", downloadSize(999))

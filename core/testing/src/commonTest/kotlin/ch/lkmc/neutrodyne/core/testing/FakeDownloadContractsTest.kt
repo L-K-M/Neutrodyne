@@ -35,7 +35,7 @@ class FakeDownloadContractsTest {
             val queued = assertIs<RequestResult.Queued>(fake.request(listOf(1, 2), DownloadLane.MANUAL))
             assertEquals(0, queued.queued)
             assertEquals(mapOf(1L to RejectReason.UNAVAILABLE, 2L to RejectReason.UNAVAILABLE), queued.rejected)
-            assertEquals(RootChangeResult.Unsupported, fake.changeRoot("int", RootChangeMode.MOVE_EXISTING))
+            assertEquals(RootChangeResult.Unavailable, fake.changeRoot("int", RootChangeMode.MOVE_EXISTING))
             assertEquals(FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED), fake.registerFolderRoot("/folder"))
             assertEquals(OrphanDeleteResult.Unavailable, fake.deleteOrphanFiles())
             assertFalse(fake.observeBusy().first())

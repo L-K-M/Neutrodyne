@@ -30,6 +30,7 @@ internal fun GroupSettingsRoute(
         state,
         viewModel::setRefreshIntervalMinutes,
         { viewModel.setNotifyNewEpisodes(it, requester) },
+        onDownloadEdit = viewModel::editDownload,
         onClose = { navigator.pop() },
     )
     ShowUserMessages(state.messages, viewModel::onMessageShown)

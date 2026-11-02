@@ -6,9 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -16,25 +13,20 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
 import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
-import ch.lkmc.neutrodyne.core.ui.downloadSize
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.SystemSettingsTarget
-import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
-import ch.lkmc.neutrodyne.core.ui.resources.action_delete_download
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_delete_orphans
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_delete_orphans_body
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
-import org.jetbrains.compose.resources.stringResource
 
 @Composable
 internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val live by viewModel.live.collectAsStateWithLifecycle()
     val orphans by viewModel.orphanConfirmation.collectAsStateWithLifecycle()
+    val orphanWorking by viewModel.orphanWorking.collectAsStateWithLifecycle()
+    val orphanError by viewModel.orphanError.collectAsStateWithLifecycle()
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val platform = LocalPlatformActions.current
@@ -74,6 +66,7 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
                     Unit
                 }
             },
+        onReveal = platform.reveal?.let { reveal -> { id -> viewModel.revealFile(id, reveal) } },
         onPauseAll = viewModel::pauseAll,
         onResumeAll = viewModel::resumeAll,
         onRetryAll = viewModel::retryAll,
@@ -91,7 +84,9 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
                 DownloadNotice.NOTIFICATIONS_OFF -> viewModel.downloads.askNotifications()
                 DownloadNotice.STORAGE_LOW -> manageStorage()
                 DownloadNotice.ORPHAN_FILES -> viewModel.askDeleteOrphans()
-                else -> settings()
+                DownloadNotice.ROOT_UNAVAILABLE -> navigator.pushDetail(SettingsKey(SettingsPage.DESKTOP))
+                DownloadNotice.CAP_REACHED -> settings()
+                DownloadNotice.MOVE_IN_PROGRESS, DownloadNotice.YOUTUBE_PAUSED -> Unit
             }
         },
     )
@@ -106,17 +101,12 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
         )
     }
     orphans?.let { bytes ->
-        NdDialog(
-            onDismissRequest = viewModel::dismissOrphans,
-            title = stringResource(Res.string.downloads_delete_orphans, downloadSize(bytes)),
-            text = stringResource(Res.string.downloads_delete_orphans_body),
-            confirm =
-                NdDialogAction(
-                    stringResource(Res.string.action_delete_download),
-                    role = NdActionRole.DESTRUCTIVE,
-                    onClick = viewModel::deleteOrphans,
-                ),
-            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = viewModel::dismissOrphans),
+        ch.lkmc.neutrodyne.core.ui.OrphanFilesDialog(
+            bytes,
+            orphanWorking,
+            viewModel::deleteOrphans,
+            viewModel::dismissOrphans,
+            error = orphanError,
         )
     }
     ShowUserMessages(state.messages, viewModel::onMessageShown, onMessageAction = { id ->

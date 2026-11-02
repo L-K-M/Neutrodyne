@@ -25,12 +25,13 @@ internal fun SettingsRoute(
 ) {
     when (key.page) {
         SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform)
-        SettingsPage.DOWNLOADS -> DownloadsPage(platform)
         SettingsPage.FEEDS -> FeedsPage(platform)
         SettingsPage.PLAYBACK -> PlaybackPage(platform)
+        SettingsPage.DOWNLOADS -> DownloadsSettingsPage(platform)
         SettingsPage.UPDATES -> UpdatesPage(buildInfo, updateTarget, key.openRelease)
         SettingsPage.DISCOVER -> DiscoverPage()
         SettingsPage.PRIVACY -> PrivacyPage()
+        SettingsPage.DESKTOP -> DownloadsSettingsPage(platform, page = SettingsPage.DESKTOP)
         SettingsPage.ABOUT -> AboutPage(buildInfo)
         else -> AppearancePage(settings, dynamicColorSupport, platform)
     }
