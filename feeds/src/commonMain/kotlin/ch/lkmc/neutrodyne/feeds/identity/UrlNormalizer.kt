@@ -48,7 +48,7 @@ public object UrlNormalizer {
      * [normaliseHost]. `LocalDestination` classifies this host so prefill and add decisions
      * match the peer the request would reach. Null when the URL has no usable host.
      */
-    public fun transportHost(url: String): String? {
+    internal fun transportHost(url: String): String? {
         val parts = splitLenient(url)
         return parts.host?.let { normaliseHost(parts) }
     }

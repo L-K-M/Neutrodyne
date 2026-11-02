@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.network.okhttp
 
+import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.model.PRE_CONFIRMATION_HEADER
 import mockwebserver3.MockWebServer
 import okhttp3.Dns
@@ -43,6 +44,13 @@ class PreConfirmationPeerGuardTest {
             isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
         )
 
+    private fun publicUrl(path: String): okhttp3.HttpUrl =
+        server
+            .url(path)
+            .newBuilder()
+            .host("public.test")
+            .build()
+
     private fun marked(url: okhttp3.HttpUrl): Request =
         Request
             .Builder()
@@ -68,7 +76,7 @@ class PreConfirmationPeerGuardTest {
     @Test fun markedFollowUpToLocalPeerIsRefused() {
         server.enqueue(mockResponse(302, "", "Location" to lan.url("/").toString()))
         assertFailsWith<LocalNetworkUnsupportedException> {
-            clients().image.newCall(marked(server.url("/page"))).execute()
+            clients().image.newCall(marked(publicUrl("/page"))).execute()
         }
         assertEquals(1, server.requestCount)
         assertEquals(0, lan.requestCount)
@@ -77,7 +85,7 @@ class PreConfirmationPeerGuardTest {
     @Test fun markedNonCanonicalLocalUrlsAreRefusedOnFeedAndImageClients() {
         val clients = newNetworkClients()
         for (client in listOf(clients.feed, clients.image)) {
-            for (prefix in listOf("http:/", "http:\\\\", "http:")) {
+            for (prefix in listOf("http:/", "http:\\", "http:\\\\", "http:")) {
                 val request =
                     Request
                         .Builder()
@@ -154,7 +162,7 @@ class PreConfirmationPeerGuardTest {
         assertEquals(0, lan.requestCount)
     }
 
-    @Test fun connectedPeerStillWinsWhenDnsChangesAfterPreflight() {
+    @Test fun routeDnsRejectsAnAnswerChangedAfterPreflight() {
         val lookups = AtomicInteger()
         val clients =
             newNetworkClients(
@@ -179,25 +187,36 @@ class PreConfirmationPeerGuardTest {
     }
 
     @Test fun rebindingBetweenPreflightAndConnectOpensNoSocket() {
-        MockWebServer().use { public ->
-            public.start()
-            ServerSocket(public.port, 1, InetAddress.getByName(LAN_ADDR)).use { recorder ->
-                for (kind in listOf("feed", "image")) {
+        MockWebServer().use { publicServer ->
+            publicServer.start()
+            ServerSocket(publicServer.port, 1, InetAddress.getByName(LAN_ADDR)).use { recorder ->
+                for (kind in listOf(HttpClientKind.FEED, HttpClientKind.IMAGE)) {
                     val lookups = AtomicInteger()
-                    val clients = newNetworkClients(
-                        baseDns = Dns {
-                            listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR))
-                        },
-                        isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
-                    )
-                    val client = if (kind == "feed") clients.feed else clients.image
-                    public.enqueue(mockResponse(body = "public stand-in"))
-                    val target = public.url("/feed").newBuilder().host("rebound.test").build()
+                    val clients =
+                        newNetworkClients(
+                            baseDns =
+                                Dns {
+                                    listOf(
+                                        InetAddress.getByName(
+                                            if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR,
+                                        ),
+                                    )
+                                },
+                            isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                        )
+                    val client = clients[kind]
+                    publicServer.enqueue(mockResponse(body = "public stand-in"))
+                    val target =
+                        publicServer
+                            .url("/feed")
+                            .newBuilder()
+                            .host("rebound.test")
+                            .build()
                     assertFailsWith<LocalNetworkUnsupportedException> {
                         client.newCall(marked(target)).execute().use { }
                     }
                 }
-                assertEquals(0, public.requestCount)
+                assertEquals(0, publicServer.requestCount)
                 assertZeroConnections(recorder)
             }
         }
@@ -205,7 +224,12 @@ class PreConfirmationPeerGuardTest {
 
     @Test fun markedFailureDoesNotRestrictTheNextExplicitCall() {
         val clients = newNetworkClients(baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1")) })
-        val target = server.url("/feed").newBuilder().host("local-peer.test").build()
+        val target =
+            server
+                .url("/feed")
+                .newBuilder()
+                .host("local-peer.test")
+                .build()
         assertFailsWith<LocalNetworkUnsupportedException> {
             clients.image.newCall(marked(target)).execute().use { }
         }
@@ -214,6 +238,34 @@ class PreConfirmationPeerGuardTest {
             assertEquals(200, it.code)
         }
         assertEquals(1, server.requestCount)
+    }
+
+    @Test fun pooledLocalPeerIsStillRefusedAfterPublicPreflight() {
+        val lookups = AtomicInteger()
+        val clients =
+            newNetworkClients(
+                baseDns =
+                    Dns {
+                        listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) LAN_ADDR else "127.0.0.1"))
+                    },
+                isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+            )
+        val target =
+            server
+                .url("/feed")
+                .newBuilder()
+                .host("pooled.test")
+                .build()
+        lan.enqueue(mockResponse(body = "explicit"))
+        lan.enqueue(mockResponse(body = "must not be requested"))
+        clients.image.newCall(Request.Builder().url(target).build()).execute().use {
+            assertEquals("explicit", it.body.string())
+        }
+        assertFailsWith<LocalNetworkUnsupportedException> {
+            clients.image.newCall(marked(target)).execute().use { }
+        }
+        assertEquals(1, lan.requestCount)
+        assertEquals(0, server.requestCount)
     }
 
     private fun assertZeroConnections(recorder: ServerSocket) {
@@ -231,7 +283,7 @@ class PreConfirmationPeerGuardTest {
 
     @Test fun markerNeverReachesTheWire() {
         server.enqueue(mockResponse(body = "public"))
-        clients().image.newCall(marked(server.url("/feed"))).execute().use {
+        clients().image.newCall(marked(publicUrl("/feed"))).execute().use {
             assertEquals(200, it.code)
         }
         val recorded = server.takeRequest()

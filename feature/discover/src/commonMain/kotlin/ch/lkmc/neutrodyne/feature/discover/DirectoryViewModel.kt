@@ -47,37 +47,45 @@ internal class DirectoryViewModel
         private val mutableState = MutableStateFlow(DirectoryState())
         val state = mutableState.asStateFlow()
         private var job: Job? = null
+        private var disclosedProviders: List<ProviderInfo>? = null
 
         init {
             viewModelScope.launch {
                 repository
                     .observeProviders()
                     .collect { rows ->
-                        // The recipients are state before they dispatch (03 note 2026-11-02):
-                        // whatever the route, the screen's disclosure is written before the
-                        // first search/charts request leaves.
-                        val signature =
-                            rows.map { Triple(it.id, it.effective, it.configurationVersion) }
-                        val previous =
-                            mutableState.value.providers?.map {
-                                Triple(it.id, it.effective, it.configurationVersion)
-                            }
+                        val changed = mutableState.value.providers?.configuration() != rows.configuration()
+                        if (changed) {
+                            job?.cancel()
+                            disclosedProviders = null
+                        }
                         mutableState.update { it.copy(providers = rows) }
-                        if (signature != previous) retry()
                     }
             }
         }
 
+        /** Called after the screen composes the current disclosure, never from provider loading. */
+        fun onProvidersVisible(providers: List<ProviderInfo>) {
+            val current = mutableState.value.providers ?: return
+            if (providers.configuration() != current.configuration() ||
+                disclosedProviders?.configuration() == current.configuration()
+            ) {
+                return
+            }
+            disclosedProviders = current
+            retry()
+        }
+
         fun retry() {
-            // No dispatch before the effective recipients are known (03 note 2026-11-02).
-            if (mutableState.value.providers == null) return
+            val providers = mutableState.value.providers ?: return
+            if (disclosedProviders?.configuration() != providers.configuration()) return
             job?.cancel()
             val query = key.query.trim()
             val genre = key.genreId?.let(ChartGenre::fromId)
             if ((query.isNotEmpty() && isLinkInput(query)) ||
                 (query.isEmpty() && key.genreId != null && genre == null)
             ) {
-                mutableState.value = DirectoryState(loading = false, invalid = true)
+                mutableState.update { it.copy(loading = false, invalid = true) }
                 return
             }
             mutableState.update { it.copy(loading = true, chartError = null) }
@@ -86,16 +94,19 @@ internal class DirectoryViewModel
                     if (query.isNotEmpty()) {
                         repository.search(query).collect { results ->
                             ensureActive()
-                            mutableState.value = DirectoryState(!results.complete, results, results.hits)
+                            mutableState.update {
+                                it.copy(loading = !results.complete, results = results, hits = results.hits)
+                            }
                         }
                     } else {
                         val result = repository.charts(genre)
                         ensureActive()
-                        mutableState.value =
+                        mutableState.update { state ->
                             when (result) {
-                                is Outcome.Success -> DirectoryState(loading = false, hits = result.value)
-                                is Outcome.Failure -> DirectoryState(loading = false, chartError = result.error)
+                                is Outcome.Success -> state.copy(loading = false, hits = result.value)
+                                is Outcome.Failure -> state.copy(loading = false, chartError = result.error)
                             }
+                        }
                     }
                 }
         }

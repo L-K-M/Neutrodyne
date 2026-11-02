@@ -7,11 +7,10 @@ package ch.lkmc.neutrodyne.feeds.identity
  * the automatic fetches into LAN requests. Pure string classification — no JVM or Android APIs,
  * no DNS — so it behaves identically on every target.
  *
- * Known limit: a public hostname that *resolves* to a LAN address is not visible to this
- * predicate; only the Android 37+ `LocalNetworkGuard`'s DNS check covers that case.
+ * DNS answers are checked separately by the marked-request transport guard on both platforms;
+ * this predicate only supplies the early prefill/fetch decision.
  */
 public object LocalDestination {
-    private val schemeWithAuthority = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""")
     private val hexDigits = "0123456789abcdefABCDEF".toSet()
 
     private const val IPV4_PARTS = 4
@@ -24,16 +23,19 @@ public object LocalDestination {
     private const val LINK_LOCAL_PREFIX = 0xFE80
 
     /**
-     * True when [url] is an absolute `scheme://…` URL whose host names a local destination:
+     * True when [url] is an absolute URL whose host names a local destination:
      * `localhost`, `*.localhost` and `*.local`; the IPv4 literals of 0/8, 10/8, 100.64/10, 127/8,
      * 169.254/16, 172.16/12 and 192.168/16; the IPv6 literals `::`, `::1`, fc00::/7 and fe80::/10
-     * including their `::ffff:` IPv4-mapped forms; and any numeric host that is not a plain
-     * four-part decimal address (`2130706433`, `0x7f.0.0.1`, `127.1`), because resolvers read
-     * such spellings as IP addresses whose value cannot be verified here. Public hostnames and
-     * public dotted quads are not local, and neither is input without `scheme://`.
+     * including their `::ffff:` IPv4-mapped forms; and ambiguous numeric hosts that cannot be
+     * normalized safely. Valid decimal shorthands are classified after normalization.
+     * Public hostnames and
+     * public dotted quads are not local. HTTP authorities use the same lenient splitter as
+     * normalization, including `http:/host`, `http:\\host` and `http:host`.
      */
     public fun isLocal(url: String): Boolean {
-        if (schemeWithAuthority.find(url) == null) return false
+        val parsed = splitLenient(url)
+        if (parsed.scheme == null) return false
+        val raw = parsed.host ?: return false
         // Classify the host the transport will actually dial: percent-decoded, IDNA-mapped,
         // numeric spellings canonicalised (03 note 2026-11-02). `http://%31%32%37.0.0.1/` and
         // `http://１２７.０.０.１/` both come back as `127.0.0.1`.
@@ -41,7 +43,6 @@ public object LocalDestination {
         // The normaliser only refuses spellings the transport rejects or whose numeric grammar
         // is ambiguous (0x… parts, >4 groups, bad ports); those still get the conservative
         // authority-host pass so an unreadable numeric spelling stays local.
-        val raw = authorityHost(url) ?: return false
         val lowered = raw.removeSuffix(".").lowercase()
         if (lowered == "localhost" || lowered.endsWith(".localhost") || lowered.endsWith(".local")) {
             return true
@@ -78,27 +79,6 @@ public object LocalDestination {
             return isLocalIpv4(parts.map(String::toInt))
         }
         return false
-    }
-
-    /**
-     * The URL's authority host: userinfo stripped at the last `@`, the port at `:`, and the
-     * authority itself at the first `/`, `?`, `#` or `\` (the fetch stack reads `\` as a path
-     * separator). IPv6 literals keep their brackets; `null` when there is no `scheme://`.
-     */
-    private fun authorityHost(url: String): String? {
-        val match = schemeWithAuthority.find(url) ?: return null
-        val authority =
-            url
-                .substring(match.range.last + 1)
-                .substringBefore('/')
-                .substringBefore('?')
-                .substringBefore('#')
-                .substringBefore('\\')
-                .substringAfterLast('@')
-        return when {
-            authority.startsWith("[") -> authority.substringBefore(']') + "]"
-            else -> authority.substringBefore(':').takeIf { it.isNotEmpty() }
-        }
     }
 
     /** A numeric host: every dot-part is decimal digits or `0x`+hex, never a DNS name (WHATWG). */

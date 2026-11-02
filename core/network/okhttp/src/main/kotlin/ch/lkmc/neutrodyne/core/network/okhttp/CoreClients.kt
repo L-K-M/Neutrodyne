@@ -66,23 +66,30 @@ class CoreClients(
         }
     private val pool = ConnectionPool(POOL_MAX_IDLE, POOL_KEEP_ALIVE_MINUTES, TimeUnit.MINUTES)
 
-    private fun coreBuilder(mode: LocalNetworkGuard.Mode): OkHttpClient.Builder =
-        OkHttpClient
+    private fun coreBuilder(mode: LocalNetworkGuard.Mode): OkHttpClient.Builder {
+        val dns =
+            PreConfirmationDns(
+                lanGuard.dns(FamilyHintDns(Dns { hostname -> baseDns.lookup(hostname) }, hints), mode),
+            ) { peer -> isLocalPeer(peer) }
+        val destinations = PreConfirmationDestinations(dns) { peer -> isLocalPeer(peer) }
+        return OkHttpClient
             .Builder()
             .dispatcher(dispatcher)
             .connectionPool(pool)
-            .dns(lanGuard.dns(FamilyHintDns(Dns { hostname -> baseDns.lookup(hostname) }, hints), mode))
+            .dns(dns)
             .addInterceptor(lanGuard.interceptor(mode))
+            .addInterceptor(PreConfirmationRequestGuard(destinations))
             .addInterceptor(ua)
             // The M7 actual-peer guard (03 note 2026-11-02): a network interceptor, so it runs
             // after the connection exists — on every follow-up hop — and only for requests
             // carrying the pre-confirmation marker. On `core` so feed, image and the other
             // derivatives all get it.
-            .addNetworkInterceptor(PreConfirmationPeerGuard { peer -> isLocalPeer(peer) })
+            .addNetworkInterceptor(PreConfirmationPeerGuard({ peer -> isLocalPeer(peer) }, destinations))
             .apply { debugInterceptors.forEach(::addInterceptor) }
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    }
 
     val core: OkHttpClient = coreBuilder(LocalNetworkGuard.Mode.STRICT).build()
 

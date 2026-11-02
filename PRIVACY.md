@@ -38,10 +38,12 @@ The inventory below uses the same stable IDs as Settings › Privacy. Provider
 switches stop automatic directory requests. An explicit Apple-link lookup asks
 for one-time consent when Apple is off; Podcast Index lookups require its
 switch and an effective key. URLs are never automatically sent as searches.
-Before you confirm an add or preview, nothing the app fetches on its own —
-feed candidates, directory hits, redirects or preview artwork — may connect to
+**Add and previews (updated 2026-11-02).** Before you confirm, automatic fetches
+(feed candidates, directory hits, redirects and preview artwork) may not send a request to
 a loopback or private-network address; only a URL you submit yourself may
 reach one (a local feed stays possible on the desktop).
+Directory search actions wait until their recipients can be named; loading
+provider settings never implies that directories are disabled.
 Searches, charts and previews remain in memory until eviction or app exit.
 
 | ID | Destination and what it receives |

@@ -9,6 +9,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -35,6 +37,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_busy
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disabled
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disclosure
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_providers_loading
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_empty
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_arts
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_business
@@ -75,9 +78,18 @@ internal fun AppNavigator.openHit(hit: DirectoryHit) =
  */
 @Composable
 internal fun ProviderDisclosure(
-    providers: List<ProviderInfo>,
+    providers: List<ProviderInfo>?,
     modifier: Modifier = Modifier,
+    onVisible: (List<ProviderInfo>) -> Unit = {},
 ) {
+    if (providers == null) {
+        Text(stringResource(Res.string.discovery_providers_loading), modifier)
+        return
+    }
+    LaunchedEffect(providers.configuration()) {
+        withFrameNanos { }
+        onVisible(providers)
+    }
     val recipients = providers.filter { it.effective }.joinToString(", ") { it.id.displayName() }
     Text(
         if (recipients.isEmpty()) {

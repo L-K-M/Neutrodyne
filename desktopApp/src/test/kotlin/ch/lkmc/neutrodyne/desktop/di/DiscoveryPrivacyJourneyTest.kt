@@ -9,6 +9,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -26,6 +27,7 @@ import ch.lkmc.neutrodyne.core.navigation.IntentRouter
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.RouteInput
 import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkUnsupportedException
+import ch.lkmc.neutrodyne.core.testing.ConnectionCountingSocketFactory
 import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -133,7 +135,8 @@ class DiscoveryPrivacyJourneyTest {
             var showing by mutableStateOf(true)
             try {
                 MockWebServer().use { server ->
-                    MockWebServer().use { lan ->
+                    val lanConnections = ConnectionCountingSocketFactory()
+                    MockWebServer().apply { serverSocketFactory = lanConnections }.use { lan ->
                         server.start()
                         lan.start(InetAddress.getByName("127.0.0.2"), server.port)
                         lan.enqueue(MockResponse.Builder().body("LAN honeypot").build())
@@ -212,7 +215,7 @@ class DiscoveryPrivacyJourneyTest {
                             waitUntil(timeoutMillis = 10_000) {
                                 onAllNodes(hasText("Directory show")).fetchSemanticsNodes().isNotEmpty()
                             }
-                            onNodeWithText("Directory show").performClick()
+                            onAllNodes(hasText("Directory show")).onFirst().performClick()
                         }
                         if (entry == Entry.DISCLOSURE) {
                             val action = "Search for ‘medical history’"
@@ -249,6 +252,7 @@ class DiscoveryPrivacyJourneyTest {
                             if (entry == Entry.ADD_REDIRECT_ART) assertEquals(2, server.requestCount)
                         }
                         assertEquals(0, lan.requestCount)
+                        assertEquals(0, lanConnections.acceptedConnections)
                         assertTrue(runBlocking { db.podcastDao().allForExport().isEmpty() })
                     }
                 }
