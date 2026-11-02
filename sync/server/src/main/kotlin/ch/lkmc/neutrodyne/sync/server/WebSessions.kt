@@ -29,7 +29,7 @@ internal class WebSessions(
         route.install(CSRF) {
             originMatchesHost()
             onFailure { forbidden() }
-            config.publicUrl?.let { allowOrigin(URI(it.scheme, null, it.host, it.port, null, null, null).toString()) }
+            config.publicUrl?.let { allowOrigin(authority(it)) }
         }
     }
 
@@ -72,9 +72,25 @@ internal class WebSessions(
             forbidden()
         }
         val allowed =
-            config.publicUrl?.let { URI(it.scheme, null, it.host, it.port, null, null, null).toString() }
-                ?: "${call.request.local.scheme}://${call.request.headers[HttpHeaders.Host]}"
-        if (origin != allowed) forbidden()
+            config.publicUrl?.let { authority(it) }
+                ?: runCatching {
+                    authority(URI("${call.request.local.scheme}://${call.request.headers[HttpHeaders.Host]}"))
+                }.getOrNull() ?: forbidden()
+        if (authority(parsed) != allowed) forbidden()
+    }
+
+    // Origins equal under the URL spec can carry or omit a scheme's default port
+    // (443/https, 80/http); a configured public URL with an explicit :443 must still
+    // match the bare origin browsers send. Other ports stay significant.
+    private fun authority(uri: URI): String {
+        val default =
+            when (uri.scheme?.lowercase()) {
+                "https" -> 443
+                "http" -> 80
+                else -> -1
+            }
+        val port = if (uri.port == default) -1 else uri.port
+        return URI(uri.scheme, null, uri.host, port, null, null, null).toString()
     }
 
     suspend fun requireAdmin(call: ApplicationCall): AccountPrincipal =
