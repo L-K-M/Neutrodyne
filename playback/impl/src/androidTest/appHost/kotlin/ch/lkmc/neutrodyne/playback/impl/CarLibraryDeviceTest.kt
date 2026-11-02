@@ -167,7 +167,7 @@ class CarLibraryDeviceTest {
                 withContext(Dispatchers.Main) { MediaController(app, sessionToken()).transportControls }
             try {
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.SKIP)
-                graph.settingsRepository.set(PlaybackSettingKeys.SKIP_FORWARD_MS, 10_000L)
+                graph.settingsRepository.set(PlaybackSettingKeys.SKIP_FORWARD_MS, SKIP_MS)
                 // The service-side prefs collector trails the durable write; confirm
                 // the value is observable before the transport call consumes it.
                 graph.settingsRepository
@@ -175,16 +175,25 @@ class CarLibraryDeviceTest {
                     .first { it == HardwareButtons.SKIP }
                 withContext(Dispatchers.Main) { transport.playFromMediaId("episode:$episode@upnext", null) }
                 awaitCurrent()
+                awaitPlaying(true)
+
+                // Paused, so ordinary playback cannot stand in for the skip: a no-op stays put.
+                withContext(Dispatchers.Main) { transport.pause() }
+                awaitPlaying(false)
+                val before = checkNotNull(currentPosition())
                 withContext(Dispatchers.Main) { transport.skipToNext() }
+                val expected = (before + SKIP_MS - SKIP_TOLERANCE_MS)..(before + SKIP_MS + SKIP_TOLERANCE_MS)
                 withTimeout(20_000) {
-                    while (graph.playbackStateSource.nowPlaying.value?.let {
-                            it.episodeId == episode &&
-                                it.position.positionAt(SystemClock.elapsedRealtime()) >= 10_000
-                        } != true
-                    ) {
-                        delay(50)
-                    }
+                    while (currentPosition()?.let { it in expected } != true) delay(50)
                 }
+                assertEquals(
+                    false,
+                    graph.playbackStateSource.nowPlaying.value
+                        ?.isPlaying,
+                )
+
+                withContext(Dispatchers.Main) { transport.play() }
+                awaitPlaying(true)
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.EPISODE)
                 graph.settingsRepository
                     .observe(PlaybackSettingKeys.HARDWARE_BUTTONS)
@@ -282,6 +291,22 @@ class CarLibraryDeviceTest {
         return withTimeout(20_000) { result.await() }
     }
 
+    private suspend fun awaitPlaying(playing: Boolean) =
+        withTimeout(20_000) {
+            while (graph.playbackStateSource.nowPlaying.value?.let {
+                    it.episodeId == episode && it.isPlaying == playing
+                } != true
+            ) {
+                delay(50)
+            }
+        }
+
+    private fun currentPosition(): Long? =
+        graph.playbackStateSource.nowPlaying.value
+            ?.takeIf { it.episodeId == episode }
+            ?.position
+            ?.positionAt(SystemClock.elapsedRealtime())
+
     private suspend fun awaitCurrent() =
         withTimeout(20_000) {
             while (graph.databaseOpener
@@ -294,3 +319,6 @@ class CarLibraryDeviceTest {
             }
         }
 }
+
+private const val SKIP_MS = 10_000L
+private const val SKIP_TOLERANCE_MS = 1_000L

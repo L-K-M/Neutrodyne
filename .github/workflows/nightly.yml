@@ -262,7 +262,8 @@ jobs:
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
             test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
-            ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
+            # AGP uninstalls both APKs after a connected run; the reboot driver below needs them.
+            ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true :app:connectedReleaseAndroidTest
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
             # M5 W9: host-driven reboot evidence on the installed release app; the
             # instrumentation process exits before the host reboots the guest.

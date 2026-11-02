@@ -28,6 +28,11 @@
     @org.junit.After <methods>;
     @org.junit.Test <methods>;
 }
+# Host-driven reboot phases: separately compiled clients of the same optimized release APK.
+-keep class ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest {
+    public <init>();
+    @org.junit.Test <methods>;
+}
 -keep class androidx.test.runner.** { *; }
 -keep class androidx.test.ext.junit.runners.** { *; }
 -keep class org.junit.** { *; }

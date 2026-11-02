@@ -24,20 +24,20 @@ class RangeHandler(SimpleHTTPRequestHandler):
             return super().send_head()
         start = int(match[1])
         size = path.stat().st_size
-        if start >= size:
+        end = min(int(match[2]), size - 1) if match[2] else size - 1
+        if start > end:
             self.send_error(416)
             return None
-        end = int(match[2]) if match[2] else size - 1
-        end = min(end, size - 1)
         self.send_response(206)
         self.send_header("Content-Type", "audio/mpeg")
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.send_header("Content-Length", str(end - start + 1))
         self.end_headers()
-        with path.open("rb") as body:
-            body.seek(start)
-            return _SliceReader(body, end - start + 1)
+        # The handler copies this body after returning and then closes it, so the reader owns the file.
+        body = path.open("rb")
+        body.seek(start)
+        return _SliceReader(body, end - start + 1)
 
 
 class _SliceReader:
@@ -51,6 +51,10 @@ class _SliceReader:
         data = self.body.read(min(self.remaining, 8192 if size < 0 else size))
         self.remaining -= len(data)
         return data
+
+    def close(self):
+        self.body.close()
+
 
 CLASS = "ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest"
 PHASES = (
