@@ -52,6 +52,7 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                 description = "Assemble the LGPL source bundle of the built FFmpeg (11 FFmpeg LGPL obligations)."
                 dependsOn(buildFfmpeg)
                 this.lockFile.set(lockFile)
+                this.cache.set(sourceCache)
                 sourceInputs.setFrom(
                     sourceCache.file("ffmpeg-$ffmpegVersion.tar.xz"),
                     sourceCache.file("ffmpeg-$ffmpegVersion.tar.xz.asc"),

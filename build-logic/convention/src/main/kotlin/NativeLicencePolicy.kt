@@ -11,7 +11,9 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import org.gradle.process.Exec
+// The task type, not org.gradle.process.Exec: buildFfmpeg is an Exec task, and the
+// process-level interface exposes neither workingDir nor commandLine.
+import org.gradle.api.tasks.Exec
 import org.tomlj.Toml
 import org.tomlj.TomlArray
 import org.tomlj.TomlParseResult
@@ -73,7 +75,7 @@ object NativeLicencePolicy {
         if (parsed.hasErrors()) {
             throw GradleException(
                 "native-components.lock is not valid TOML: " +
-                    parsed.errors().joinToString("; ") { "${it.position()}: ${it.message()}" },
+                    parsed.errors().joinToString("; ") { "${it.position()}: ${it.message}" },
             )
         }
         val schema =

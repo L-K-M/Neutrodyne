@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
@@ -38,6 +39,11 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val sourceInputs: ConfigurableFileCollection
 
+    /** `buildFfmpeg`'s download cache, where the extracted source tree lives. */
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val cache: DirectoryProperty
+
     /** Where the bundle is written; the file name is the one D89 names. */
     @get:OutputFile
     abstract val outputFile: RegularFileProperty
@@ -56,7 +62,7 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
                 ?: error("native-components.lock: no ffmpeg.sourceUrl")
         val signatureUrl = parsed.getString("ffmpeg.signatureUrl")
         val configure = parsed.getString("ffmpeg.configure")
-        val cache = sourceInputs.singleFile.parentFile
+        val cache = this.cache.get().asFile
         val tarball = cache.resolve("ffmpeg-$version.tar.xz")
         val signature = cache.resolve("ffmpeg-$version.tar.xz.asc")
         val buildTree = cache.resolve("ffmpeg-$version")
@@ -128,7 +134,7 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
             appendLine()
             appendLine("```sh")
             appendLine("./configure $configure \\")
-            appendLine("    $TARGET_FLAGS   # never --enable-gpl, --enable-version3 or --enable-nonfree")
+            appendLine("    \$TARGET_FLAGS   # never --enable-gpl, --enable-version3 or --enable-nonfree")
             appendLine("```")
             appendLine()
             appendLine("## Per-target flags and toolchains")
@@ -145,7 +151,7 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
                     "--extra-ldflags=-mmacosx-version-min=13.0 -Wl,-rpath,@loader_path` | Apple clang |",
             )
             appendLine(
-                "| `linux-x64`, `linux-arm64` | `--cc=gcc -Wl,-rpath,'\\$ORIGIN'` | " +
+                "| `linux-x64`, `linux-arm64` | `--cc=gcc -Wl,-rpath,'\\\$ORIGIN'` | " +
                     "gcc inside `manylinux_2_28` (glibc 2.28 baseline, below the app's 2.31 floor) |",
             )
             appendLine()
