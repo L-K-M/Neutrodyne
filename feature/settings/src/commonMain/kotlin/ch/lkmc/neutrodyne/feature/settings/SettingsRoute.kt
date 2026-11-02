@@ -28,6 +28,8 @@ internal fun SettingsRoute(
         SettingsPage.FEEDS -> FeedsPage(platform)
         SettingsPage.PLAYBACK -> PlaybackPage(platform)
         SettingsPage.UPDATES -> UpdatesPage(buildInfo, updateTarget, key.openRelease)
+        SettingsPage.DISCOVER -> DiscoverPage()
+        SettingsPage.PRIVACY -> PrivacyPage()
         SettingsPage.ABOUT -> AboutPage(buildInfo)
         else -> AppearancePage(settings, dynamicColorSupport, platform)
     }

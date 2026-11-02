@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="discover_title">Entdecken</string>
+    <string name="privacy_title">Datenschutz</string>
+    <string name="privacy_inventory">Womit Neutrodyne sich verbindet</string>
+    <string name="discover_summary">Verzeichnisse, Land und Podcast-Index-Zugangsdaten wählen</string>
+    <string name="privacy_summary">Netzwerkziele und was sie erhalten</string>
+    <string name="discover_country_hint">Zweibuchstabiger Ländercode; leer lassen für die Systemregion (%1$s).</string>
+    <string name="discover_country_edit">Ländercode</string>
+    <string name="discover_save">Speichern</string>
+    <string name="discover_cancel">Abbrechen</string>
+    <string name="discover_no_key">Kein Schlüssel. Podcast Index erhält keine Anfragen. Gib deinen eigenen Schlüssel ein, um es zu nutzen.</string>
+    <string name="discover_user_key">Dein Schlüssel wird auf diesem Gerät gespeichert. Er ersetzt einen Build-Schlüssel.</string>
+    <string name="discover_build_key">Es werden mit diesem Build gebündelte Zugangsdaten verwendet; sie können aus der App extrahiert werden. Das Entfernen deines eigenen Schlüssels fällt auf sie zurück.</string>
+    <string name="discover_disabled">Aus. Keine automatischen Anfragen. Explizite Apple-Links fragen vor einem einmaligen Lookup.</string>
+    <string name="discover_pi_disabled">Aus. Es werden keine Suchen oder ID-Lookups an Podcast Index gesendet.</string>
+    <string name="discover_key_rejected">Die Zugangsdaten wurden abgelehnt. Gib ein funktionierendes Paar erneut ein oder entferne deinen eigenen Schlüssel.</string>
+    <string name="discover_provider_failed">Die letzte Anfrage ist fehlgeschlagen. Versuche es erneut, wenn du verbunden bist.</string>
+    <string name="discover_provider_busy">Der Anbieter ist ausgelastet. Versuche es später erneut.</string>
+    <string name="discover_key_entry">Meinen eigenen Podcast-Index-API-Schlüssel verwenden</string>
+    <string name="discover_key_remove">Meinen Podcast-Index-Schlüssel entfernen</string>
+    <string name="discover_key">API-Schlüssel</string>
+    <string name="discover_secret">API-Secret</string>
+    <string name="discover_verify">Verifizieren und speichern</string>
+    <string name="discover_verifying">Podcast-Index-Zugangsdaten werden aktualisiert…</string>
+    <string name="discover_key_help">Die Verifizierung sendet eine Testabfrage „podcast“ und Authentifizierungs-Header an api.podcastindex.org. Ein fehlgeschlagener oder abgebrochener Ersatz behält deinen bisherigen Schlüssel. Felder werden nach dem Absenden geleert; gib sie erneut ein, um es zu wiederholen.</string>
+    <string name="discover_storage">Dein eingegebener Schlüssel und dein Secret bleiben aus Einstellungs-Sicherungen und Sync heraus. Android verschlüsselt das eingegebene API-Secret mit dem Keystore; Windows schützt die Secret-Datei mit nutzergebundenem DPAPI. macOS und Linux nutzen eine Datei, die durch 0600-Berechtigungen geschützt ist, ohne Verschlüsselung. Deine API-Schlüssel-Kennung wird außerdem unverschlüsselt in lokalen Zugangsdaten-Metadaten gespeichert.</string>
+    <string name="discover_apple_links">Einstellungen „Standardmäßig öffnen“</string>
+    <string name="discover_apple_links_help">Unterstützte Apple-Podcasts-Links in den Android-Einstellungen erlauben. Browser- und Geräteauswahl können weiterhin beeinflussen, welche App sie öffnet.</string>
+    <string name="discover_open_failed">Keine App kann diese Einstellungen öffnen.</string>
+    <string name="discover_saved">Zugangsdaten verifiziert und gespeichert.</string>
+    <string name="discover_removed">Dein Schlüssel wurde entfernt. Ein Build-Schlüssel wird verwendet, falls verfügbar.</string>
+    <string name="discover_invalid_country">Gib zwei ASCII-Buchstaben ein oder lasse das Land für die Systemregion leer.</string>
+    <string name="discover_save_failed">Konnte nicht speichern. Versuche es erneut; deine bisherigen Einstellungen oder dein Schlüssel bleiben erhalten.</string>
+    <string name="discover_key_failed">Das Paar konnte nicht verifiziert werden. Prüfe beide Felder und deine Verbindung und gib sie dann erneut ein. Dein bisheriger Schlüssel bleibt erhalten.</string>
+    <string name="discover_key_busy">Podcast Index ist ausgelastet. Warte und gib das Paar dann erneut ein, um es zu versuchen.</string>
+    <string name="discover_key_invalid">Gib sowohl den API-Schlüssel als auch das API-Secret ein.</string>
+    <string name="privacy_providers">Entdecken-Anbieter</string>
+    <string name="privacy_notes_images">Shownotes-Bilder</string>
+    <string name="privacy_intro">Anfragen von Neutrodyne legen deine IP-Adresse und den User-Agent der App (Version und Plattform) offen. Neutrodyne fügt keine Tracking-Kennung hinzu und speichert keine Verzeichnis-Cookies. Anbieter-Schalter steuern automatische Anfragen; URLs werden nie automatisch gesucht.</string>
+    <string name="privacy_on">An</string>
+    <string name="privacy_off">Aus</string>
+    <string name="privacy_keyless">Aus: kein wirksamer Schlüssel</string>
+</resources>

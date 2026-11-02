@@ -137,3 +137,30 @@ private fun DrawScope.drawThumb(
         cornerRadius = CornerRadius(style.cornerRadius.toPx()),
     )
 }
+
+/** Horizontal overlay scrollbar for lazy Discover chart rows. */
+public fun Modifier.ndHorizontalScrollbar(
+    state: LazyListState,
+    style: NdScrollbarStyle?,
+    thumbColor: Color,
+): Modifier =
+    drawWithContent {
+        drawContent()
+        if (style == null || !style.enabled) return@drawWithContent
+        val info = state.layoutInfo
+        val total = info.totalItemsCount
+        val visible = info.visibleItemsInfo.size
+        if (total <= visible || total == 0) return@drawWithContent
+        val first = info.visibleItemsInfo.firstOrNull() ?: return@drawWithContent
+        val progress = first.index + if (first.size > 0) -first.offset / first.size.toFloat() else 0f
+        val track = size.width
+        val thumb = (track * visible / total).coerceAtLeast(style.minThumb.toPx()).coerceAtMost(track)
+        val travel = track - thumb
+        val offset = (progress / (total - visible).coerceAtLeast(1) * travel).coerceIn(0f, travel)
+        drawRoundRect(
+            color = thumbColor,
+            topLeft = Offset(offset, size.height - style.thickness.toPx()),
+            size = Size(thumb, style.thickness.toPx()),
+            cornerRadius = CornerRadius(style.cornerRadius.toPx()),
+        )
+    }
