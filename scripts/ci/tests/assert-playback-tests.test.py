@@ -20,7 +20,13 @@ RELEASE_SMOKE = {
         "licencesListsLibraries",
     ),
     "ch.lkmc.neutrodyne.YtxReleaseSmokeTest": ("selftestAnswersThroughYtxServiceInTheApp",),
-    "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest": ("notificationTransportAndLocalArtwork",),
+    "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest": (
+        "notificationTransportAndLocalArtwork",
+        "sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce",
+        "chaptersAndTimestampSeekThroughRealSession",
+    ),
+    "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest": tuple(sorted(gate.VIDEO_CASES)),
+    "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest": tuple(sorted(gate.CAR_CASES)),
 }
 
 
@@ -46,6 +52,10 @@ class PlaybackEvidenceTest(unittest.TestCase):
             case = ET.SubElement(suite, "testcase", classname=gate.CLASS, name=name, time="1801")
             if name == skipped:
                 ET.SubElement(case, "skipped")
+        for classname, cases in ((gate.VIDEO_CLASS, gate.VIDEO_CASES),
+                                 (gate.CAR_CLASS, gate.CAR_CASES)):
+            for name in cases:
+                ET.SubElement(suite, "testcase", classname=classname, name=name, time="1")
         ui = [QUEUE_JOURNEY, PLAY_JOURNEY]
         if device in ("api34", "api36", "api37"):
             ui.append(ATF_CONTROL)
@@ -127,7 +137,7 @@ class PlaybackEvidenceTest(unittest.TestCase):
             gate.verify(self.root, "ci", ["api26"])
 
     def test_nightly_requires_full_duration(self):
-        self.report("api34", gate.SHORT | {gate.LONG})
+        self.report("api34", gate.SHORT | {gate.LONG, gate.TIMER, gate.EMBEDDED})
         gate.verify(self.root, "nightly", ["api34"])
         path = self.root / "api34DebugAndroidTest" / "TEST-playback.xml"
         original = path.read_text()
@@ -135,6 +145,33 @@ class PlaybackEvidenceTest(unittest.TestCase):
             path.write_text(original.replace('time="1801"', f'time="{duration}"'))
             with self.assertRaises(ValueError):
                 gate.verify(self.root, "nightly", ["api34"])
+
+    def test_nightly_requires_timer_and_embedded_cases(self):
+        for name in (gate.TIMER, gate.EMBEDDED):
+            with self.subTest(case=name):
+                self.report("api26", gate.SHORT | ({gate.TIMER, gate.EMBEDDED} - {name}))
+                with self.assertRaisesRegex(ValueError, name):
+                    gate.verify(self.root, "nightly", ["api26"])
+        self.report("api26", gate.SHORT | {gate.TIMER, gate.EMBEDDED})
+        gate.verify(self.root, "nightly", ["api26"])
+
+    def test_ci_requires_video_and_car_cases(self):
+        for classname, name in (
+            (gate.VIDEO_CLASS, next(iter(gate.VIDEO_CASES))),
+            (gate.CAR_CLASS, next(iter(gate.CAR_CASES))),
+        ):
+            with self.subTest(case=name):
+                self.report("api26", gate.SHORT)
+                path = self.root / "api26DebugAndroidTest" / "TEST-playback.xml"
+                tree = ET.parse(path)
+                case = next(
+                    c for c in tree.getroot()
+                    if c.get("classname") == classname and c.get("name") == name
+                )
+                tree.getroot().remove(case)
+                tree.write(path)
+                with self.assertRaisesRegex(ValueError, name):
+                    gate.verify(self.root, "ci", ["api26"])
 
     def test_api37_requires_hardening_and_release_requires_smoke(self):
         self.report("connected", gate.SHORT)
@@ -145,9 +182,9 @@ class PlaybackEvidenceTest(unittest.TestCase):
 
     def test_release_smoke_abi_is_fixed(self):
         self.assertEqual(RELEASE_SMOKE, gate.RELEASE_SMOKE)
-        self.assertEqual(7, sum(map(len, gate.RELEASE_SMOKE.values())))
+        self.assertEqual(14, sum(map(len, gate.RELEASE_SMOKE.values())))
 
-    def test_release_requires_the_full_seven_case_suite(self):
+    def test_release_requires_the_full_smoke_suite(self):
         for names in RELEASE_SMOKE.values():
             for name in names:
                 with self.subTest(case=name):
@@ -228,6 +265,25 @@ class PlaybackEvidenceTest(unittest.TestCase):
         gate.verify(self.root, "ci", ["api26"])
         (folder / "manifest-fragment.xml").write_text("<manifest/>")
         gate.verify(self.root, "ci", ["api26"])
+
+    def test_apk_fixture_check_rejects_missing_and_empty_assets(self):
+        import zipfile
+        apk = self.root / "app-debug-androidTest.apk"
+        with zipfile.ZipFile(apk, "w") as archive:
+            for asset in gate.ASSETS:
+                archive.writestr(f"assets/media/{asset}", "x")
+        gate.verify_assets(apk)
+        with zipfile.ZipFile(apk, "w") as archive:
+            missing = sorted(gate.ASSETS)[:-1]
+            for asset in missing:
+                archive.writestr(f"assets/media/{asset}", "x")
+        with self.assertRaises(ValueError):
+            gate.verify_assets(apk)
+        with zipfile.ZipFile(apk, "w") as archive:
+            for asset in gate.ASSETS:
+                archive.writestr(f"assets/media/{asset}", "")
+        with self.assertRaises(ValueError):
+            gate.verify_assets(apk)
 
     def test_failures_and_duplicate_evidence_are_rejected(self):
         self.report("api26", gate.SHORT)

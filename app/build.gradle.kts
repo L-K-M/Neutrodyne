@@ -151,6 +151,8 @@ dependencies {
     debugImplementation(libs.lifecycle.viewmodel.compose)
 
     androidTestImplementation(libs.androidx.media3.common)
+    // Decoder counters and the analytics listener live in media3-exoplayer.
+    androidTestImplementation(libs.androidx.media3.exoplayer)
     androidTestImplementation(libs.androidx.media3.session)
     androidTestImplementation(libs.kotlinx.coroutines.guava)
     androidTestImplementation(platform(libs.okhttp.bom))

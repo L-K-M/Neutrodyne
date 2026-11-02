@@ -392,6 +392,23 @@ class PlaybackServiceTest {
         }
     }
 
+    @Test fun aDismissQueuedBehindTeardownClearsDurablyWithoutTheReleasedPlayer() {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent()
+            install(h)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            h.run { activate(service.get(), h).await() }
+            pumpUntil { h.hub.bridge != null }
+            val bridge = assertNotNull(h.hub.bridge)
+            service.destroy()
+
+            // Teardown detached the projector before this command took the lock.
+            h.run { bridge.dismiss() }
+
+            assertNull(h.store.queue.current)
+        }
+    }
+
     @Test fun dismissWithoutACommandAnswerDegradesToTheDurableFallback() {
         // The service's open() hangs on the gated settings read, so the connected controller's
         // DISMISS command is never answered; the caller must still clear persisted state.

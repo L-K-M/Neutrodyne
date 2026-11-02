@@ -43,6 +43,8 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
         access.resolver.clearPins()
         val factory = access.playerFactory()
         val player = factory.create().also { exo = it }
+        // Armed only by device tests; the callback sees the player before any prepare.
+        PlaybackTestHooks.playerCreated?.invoke(player)
         factory.bindPrefs(player, serviceScope)
         val buttons = MediaButtons(access.prefs) { player.playbackParameters.speed }
         val runtime: suspend () -> ServiceBridge = { checkNotNull(starting).await() }
@@ -209,4 +211,10 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
 @androidx.annotation.VisibleForTesting
 public object PlaybackTestHooks {
     @Volatile public var foregroundServiceTimeoutMs: Long? = null
+
+    /**
+     * Device tests attach Media3 analytics before the first prepare, so decoder counts include
+     * every initialization; production never sets it and the field stays a no-op callback.
+     */
+    @Volatile public var playerCreated: ((ExoPlayer) -> Unit)? = null
 }

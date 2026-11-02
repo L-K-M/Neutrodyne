@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Unlicense
 # Release instrumentation is a separately compiled client of the shipped APK.
 # Preserve its exact call surface in every build, not a test-only variant.
-# Traced with R8 9.4.24 from the seven smoke cases, runner and test framework.
+# Traced with R8 9.4.24 from the release smoke cases, runner and test framework.
 # Other code remains eligible for shrinking and optimization.
 -keep class androidx.activity.ComponentActivity {
   public androidx.lifecycle.Lifecycle getLifecycle();
@@ -321,25 +321,88 @@
 -keep class androidx.lifecycle.ViewTreeLifecycleOwner {
   public static androidx.lifecycle.LifecycleOwner get(android.view.View);
 }
+-keep class androidx.media3.common.MediaItem$Builder {
+  public <init>();
+  public androidx.media3.common.MediaItem build();
+  public androidx.media3.common.MediaItem$Builder setMediaId(java.lang.String);
+}
+-keep class androidx.media3.common.MediaItem {
+  java.lang.String mediaId;
+}
 -keep class androidx.media3.common.MediaMetadata {
   android.net.Uri artworkUri;
+}
+-keep class androidx.media3.common.Tracks$Group {
+  public int getType();
+  public boolean isSupported();
+}
+-keep class androidx.media3.common.Tracks {
+  public com.google.common.collect.ImmutableList getGroups();
+}
+-keep class androidx.media3.exoplayer.DecoderCounters {
+  public void ensureUpdated();
+  int renderedOutputBufferCount;
+}
+-keep interface androidx.media3.exoplayer.ExoPlayer {
+  public void addAnalyticsListener(androidx.media3.exoplayer.analytics.AnalyticsListener);
+}
+-keep class androidx.media3.exoplayer.analytics.AnalyticsListener$EventTime {
+}
+-keep interface androidx.media3.exoplayer.analytics.AnalyticsListener {
+  public void onAudioDecoderInitialized(androidx.media3.exoplayer.analytics.AnalyticsListener$EventTime, java.lang.String, long, long);
+  public void onAudioEnabled(androidx.media3.exoplayer.analytics.AnalyticsListener$EventTime, androidx.media3.exoplayer.DecoderCounters);
+  public void onVideoDecoderInitialized(androidx.media3.exoplayer.analytics.AnalyticsListener$EventTime, java.lang.String, long, long);
 }
 -keep class androidx.media3.session.MediaController$Builder {
   public <init>(android.content.Context, androidx.media3.session.SessionToken);
   public com.google.common.util.concurrent.ListenableFuture buildAsync();
 }
 -keep class androidx.media3.session.MediaController {
+  public androidx.media3.common.MediaItem getCurrentMediaItem();
   public long getCurrentPosition();
+  public androidx.media3.common.Tracks getCurrentTracks();
+  public long getDuration();
   public int getMediaItemCount();
   public androidx.media3.common.MediaMetadata getMediaMetadata();
   public boolean getPlayWhenReady();
+  public float getVolume();
+  public boolean isPlaying();
   public void pause();
   public void play();
+  public void prepare();
   public void release();
+  public void seekTo(long);
+  public void setMediaItem(androidx.media3.common.MediaItem);
   public void stop();
 }
 -keep class androidx.media3.session.SessionToken {
   public <init>(android.content.Context, android.content.ComponentName);
+}
+-keep class androidx.media3.session.legacy.MediaBrowserCompat$ConnectionCallback {
+  public <init>();
+  public void onConnected();
+  public void onConnectionFailed();
+}
+-keep class androidx.media3.session.legacy.MediaBrowserCompat$MediaItem {
+  public java.lang.String getMediaId();
+}
+-keep class androidx.media3.session.legacy.MediaBrowserCompat$SubscriptionCallback {
+  public <init>();
+  public void onChildrenLoaded(java.lang.String, java.util.List);
+  public void onError(java.lang.String);
+}
+-keep class androidx.media3.session.legacy.MediaBrowserCompat {
+  public <init>(android.content.Context, android.content.ComponentName, androidx.media3.session.legacy.MediaBrowserCompat$ConnectionCallback, android.os.Bundle);
+  public void connect();
+  public void disconnect();
+  public java.lang.String getRoot();
+  public androidx.media3.session.legacy.MediaSessionCompat$Token getSessionToken();
+  public void subscribe(java.lang.String, android.os.Bundle, androidx.media3.session.legacy.MediaBrowserCompat$SubscriptionCallback);
+}
+-keep class androidx.media3.session.legacy.MediaSessionCompat$Token {
+  public android.media.session.MediaSession$Token getToken();
+}
+-keep class androidx.media3.session.legacy.MediaSessionCompat {
 }
 -keep class androidx.room3.RoomDatabase {
   public void close();
@@ -379,6 +442,12 @@
 -keep class ch.lkmc.neutrodyne.core.database.ArtworkEntity {
   public <init>(java.lang.String, java.lang.String, java.lang.String, java.lang.Integer, java.lang.Integer, java.lang.Integer, java.lang.Integer, int, java.lang.Long, int, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
 }
+-keep class ch.lkmc.neutrodyne.core.database.ChapterDao {
+  public java.lang.Object replace(long, ch.lkmc.neutrodyne.core.model.ChapterSource, java.util.List, kotlin.coroutines.Continuation);
+}
+-keep class ch.lkmc.neutrodyne.core.database.ChapterEntity {
+  public <init>(long, ch.lkmc.neutrodyne.core.model.ChapterSource, int, long, java.lang.Long, java.lang.String, java.lang.String, java.lang.String, boolean, int, kotlin.jvm.internal.DefaultConstructorMarker);
+}
 -keep class ch.lkmc.neutrodyne.core.database.DatabaseOpenState$Pending {
 }
 -keep class ch.lkmc.neutrodyne.core.database.DatabaseOpener {
@@ -386,32 +455,43 @@
   public kotlinx.coroutines.flow.StateFlow getOpenState();
   public ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase requireDatabase();
 }
+-keep class ch.lkmc.neutrodyne.core.database.EpisodeAltEnclosureEntity {
+  public <init>(long, int, java.lang.String, java.lang.Long, java.lang.Long, java.lang.Integer, java.lang.String, java.lang.String, java.lang.String, java.lang.String, boolean, java.lang.String, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
+}
 -keep interface ch.lkmc.neutrodyne.core.database.EpisodeDao {
+  public java.lang.Object byId(long, kotlin.coroutines.Continuation);
   public java.lang.Object insertStub(ch.lkmc.neutrodyne.core.database.EpisodeEntity, kotlin.coroutines.Continuation);
 }
 -keep class ch.lkmc.neutrodyne.core.database.EpisodeEntity {
   public <init>(long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.Long, java.lang.String, long, int, long, long, boolean, boolean, java.lang.String, java.lang.String, java.lang.Long, java.lang.String, boolean, java.lang.Long, java.lang.Integer, java.lang.String, java.lang.String, java.lang.String, ch.lkmc.neutrodyne.core.model.EpisodeType, java.lang.Boolean, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, long, ch.lkmc.neutrodyne.core.model.Availability, boolean, java.lang.String, int, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public static ch.lkmc.neutrodyne.core.database.EpisodeEntity copy$default(ch.lkmc.neutrodyne.core.database.EpisodeEntity, long, long, java.lang.String, java.lang.String, java.lang.String, java.lang.Long, java.lang.String, long, int, long, long, boolean, boolean, java.lang.String, java.lang.String, java.lang.Long, java.lang.String, boolean, java.lang.Long, java.lang.Integer, java.lang.String, java.lang.String, java.lang.String, ch.lkmc.neutrodyne.core.model.EpisodeType, java.lang.Boolean, java.lang.String, java.lang.String, java.lang.String, java.lang.String, java.lang.String, long, ch.lkmc.neutrodyne.core.model.Availability, boolean, java.lang.String, int, int, java.lang.Object);
+  public boolean isVideo();
 }
 -keep class ch.lkmc.neutrodyne.core.database.EpisodePositionEntity {
   public <init>(long, long, java.lang.Long, ch.lkmc.neutrodyne.core.model.PositionSource, long);
   public long getPositionMs();
 }
 -keep interface ch.lkmc.neutrodyne.core.database.EpisodeStateDao {
+  public java.lang.Object byEpisode(long, kotlin.coroutines.Continuation);
   public java.lang.Object upsert(ch.lkmc.neutrodyne.core.database.EpisodeStateEntity, kotlin.coroutines.Continuation);
 }
 -keep class ch.lkmc.neutrodyne.core.database.EpisodeStateEntity {
   public <init>(long, java.lang.Long, java.lang.Long, int, java.lang.Long, boolean, java.lang.Long, java.lang.Long, long, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public java.lang.Long getPlayedAt();
 }
 -keep class ch.lkmc.neutrodyne.core.database.GroupDao {
+  public java.lang.Object deleteGroup(long, kotlin.coroutines.Continuation);
   public java.lang.Object insert(ch.lkmc.neutrodyne.core.database.PodcastGroupEntity, kotlin.coroutines.Continuation);
+  public java.lang.Object insertGroupOrIgnore(ch.lkmc.neutrodyne.core.database.PodcastGroupEntity, kotlin.coroutines.Continuation);
   public java.lang.Object insertMember(ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity, kotlin.coroutines.Continuation);
 }
 -keep class ch.lkmc.neutrodyne.core.database.IngestDao {
   public java.lang.Object insertEpisodes(java.util.List, kotlin.coroutines.Continuation);
+  public java.lang.Object replaceChildren(long, byte[], java.util.List, java.util.List, java.util.List, java.util.List, java.util.List, kotlin.coroutines.Continuation);
 }
 -keep class ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase {
   public ch.lkmc.neutrodyne.core.database.ArtworkDao artworkDao();
+  public ch.lkmc.neutrodyne.core.database.ChapterDao chapterDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeDao episodeDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeStateDao episodeStateDao();
   public ch.lkmc.neutrodyne.core.database.GroupDao groupDao();
@@ -426,9 +506,17 @@
 }
 -keep interface ch.lkmc.neutrodyne.core.database.PlaySessionDao {
   public java.lang.Object ensureNow(long, kotlin.coroutines.Continuation);
+  public java.lang.Object get(kotlin.coroutines.Continuation);
   public java.lang.Object restoreSession(java.lang.Long, ch.lkmc.neutrodyne.core.model.ContextType, java.lang.Long, ch.lkmc.neutrodyne.core.model.FeedOrder, int, ch.lkmc.neutrodyne.core.model.MediaFilter, java.lang.Long, java.lang.Long, java.lang.Long, boolean, long, kotlin.coroutines.Continuation);
 }
+-keep class ch.lkmc.neutrodyne.core.database.PlaySessionEntity {
+  public java.lang.Long getContextId();
+  public ch.lkmc.neutrodyne.core.model.ContextType getContextType();
+  public java.lang.Long getCurrentEpisodeId();
+  public long getGeneration();
+}
 -keep class ch.lkmc.neutrodyne.core.database.PodcastDao {
+  public java.lang.Object deleteCascade(long, long, kotlin.coroutines.Continuation);
   public java.lang.Object insertPodcast(ch.lkmc.neutrodyne.core.database.PodcastEntity, kotlin.coroutines.Continuation);
 }
 -keep class ch.lkmc.neutrodyne.core.database.PodcastEntity {
@@ -464,16 +552,33 @@
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.QueueRepository {
   public java.lang.Object addLast(java.util.List, kotlin.coroutines.Continuation);
+  public java.lang.Object addNext(java.util.List, kotlin.coroutines.Continuation);
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.SettingsRepository {
   public java.lang.Object get(ch.lkmc.neutrodyne.core.model.settings.SettingKey, kotlin.coroutines.Continuation);
+  public kotlinx.coroutines.flow.Flow observe(ch.lkmc.neutrodyne.core.model.settings.SettingKey);
   public java.lang.Object set(ch.lkmc.neutrodyne.core.model.settings.SettingKey, java.lang.Object, kotlin.coroutines.Continuation);
 }
 -keep enum ch.lkmc.neutrodyne.core.model.Availability {
   ch.lkmc.neutrodyne.core.model.Availability AVAILABLE;
 }
+-keep enum ch.lkmc.neutrodyne.core.model.ChapterSource {
+  ch.lkmc.neutrodyne.core.model.ChapterSource ID3;
+  ch.lkmc.neutrodyne.core.model.ChapterSource MP4;
+  ch.lkmc.neutrodyne.core.model.ChapterSource PSC;
+}
 -keep enum ch.lkmc.neutrodyne.core.model.ContextType {
   ch.lkmc.neutrodyne.core.model.ContextType GROUP;
+}
+-keep class ch.lkmc.neutrodyne.core.model.CurrentChapter {
+  public ch.lkmc.neutrodyne.core.model.EpisodeChapter getChapter();
+  public int getCount();
+  public long getEpisodeId();
+  public int getIndex();
+}
+-keep class ch.lkmc.neutrodyne.core.model.EpisodeChapter {
+  public ch.lkmc.neutrodyne.core.model.ChapterSource getSource();
+  public java.lang.String getTitle();
 }
 -keep enum ch.lkmc.neutrodyne.core.model.EpisodeType {
 }
@@ -504,6 +609,24 @@
 }
 -keep enum ch.lkmc.neutrodyne.core.model.ShowType {
 }
+-keep class ch.lkmc.neutrodyne.core.model.SleepTimerMode$EndOfEpisode {
+  ch.lkmc.neutrodyne.core.model.SleepTimerMode$EndOfEpisode INSTANCE;
+}
+-keep class ch.lkmc.neutrodyne.core.model.SleepTimerMode$Minutes {
+  public <init>(int);
+}
+-keep interface ch.lkmc.neutrodyne.core.model.SleepTimerMode {
+}
+-keep class ch.lkmc.neutrodyne.core.model.SleepTimerState$EndOfEpisode {
+  public <init>(long);
+}
+-keep class ch.lkmc.neutrodyne.core.model.SleepTimerState$Off {
+  ch.lkmc.neutrodyne.core.model.SleepTimerState$Off INSTANCE;
+}
+-keep class ch.lkmc.neutrodyne.core.model.SleepTimerState$Running {
+}
+-keep interface ch.lkmc.neutrodyne.core.model.SleepTimerState {
+}
 -keep enum ch.lkmc.neutrodyne.core.model.SourceType {
   ch.lkmc.neutrodyne.core.model.SourceType RSS;
 }
@@ -517,18 +640,34 @@
   public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Choice getOPML_LAYOUT();
   ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys INSTANCE;
 }
+-keep enum ch.lkmc.neutrodyne.core.model.settings.HardwareButtons {
+  ch.lkmc.neutrodyne.core.model.settings.HardwareButtons EPISODE;
+  ch.lkmc.neutrodyne.core.model.settings.HardwareButtons SKIP;
+}
+-keep class ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys {
+  public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Choice getHARDWARE_BUTTONS();
+  public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Int64 getSKIP_FORWARD_MS();
+  public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Choice getSTREAM_ON_METERED();
+  ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys INSTANCE;
+}
 -keep class ch.lkmc.neutrodyne.core.model.settings.SettingKey$Bool {
 }
 -keep class ch.lkmc.neutrodyne.core.model.settings.SettingKey$Choice {
 }
+-keep class ch.lkmc.neutrodyne.core.model.settings.SettingKey$Int64 {
+}
 -keep class ch.lkmc.neutrodyne.core.model.settings.SettingKey$Text {
 }
 -keep class ch.lkmc.neutrodyne.core.model.settings.SettingKey {
+  public java.lang.Object getDefault();
 }
 -keep enum ch.lkmc.neutrodyne.core.model.settings.SettingsFile {
   public java.lang.String getStoreName();
   ch.lkmc.neutrodyne.core.model.settings.SettingsFile DEVICE;
   ch.lkmc.neutrodyne.core.model.settings.SettingsFile PORTABLE;
+}
+-keep enum ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered {
+  ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered NEVER;
 }
 -keep class ch.lkmc.neutrodyne.core.ui.resources.Res$string {
   ch.lkmc.neutrodyne.core.ui.resources.Res$string INSTANCE;
@@ -596,6 +735,7 @@
   public long getEpisodeId();
   public ch.lkmc.neutrodyne.playback.api.PlaybackIssue getIssue();
   public boolean getPlayWhenReady();
+  public ch.lkmc.neutrodyne.playback.api.PositionSnapshot getPosition();
   public ch.lkmc.neutrodyne.playback.api.StreamKind getStream();
   public boolean isPlaying();
 }
@@ -606,20 +746,44 @@
 }
 -keep interface ch.lkmc.neutrodyne.playback.api.PlaybackController {
   public java.lang.Object dismiss(kotlin.coroutines.Continuation);
+  public void nextChapter();
   public void pause();
   public java.lang.Object play(kotlin.coroutines.Continuation);
+  public java.lang.Object playEpisode(long, kotlin.coroutines.Continuation);
+  public java.lang.Object playEpisodeAt(long, long, kotlin.coroutines.Continuation);
+  public void previousChapter();
   public void seekTo(long);
+  public void setSleepTimer(ch.lkmc.neutrodyne.core.model.SleepTimerMode);
   public void skipToNext();
 }
+-keep class ch.lkmc.neutrodyne.playback.api.PlaybackEvent$MarkedPlayed {
+  public <init>(long);
+}
+-keep class ch.lkmc.neutrodyne.playback.api.PlaybackEvent$SleepTimerFired {
+  ch.lkmc.neutrodyne.playback.api.PlaybackEvent$SleepTimerFired INSTANCE;
+}
+-keep interface ch.lkmc.neutrodyne.playback.api.PlaybackEvent {
+}
 -keep enum ch.lkmc.neutrodyne.playback.api.PlaybackIssue {
+  ch.lkmc.neutrodyne.playback.api.PlaybackIssue METERED_PAUSE;
 }
 -keep interface ch.lkmc.neutrodyne.playback.api.PlaybackStateSource {
+  public kotlinx.coroutines.flow.StateFlow getCurrentChapter();
+  public kotlinx.coroutines.flow.Flow getEvents();
   public kotlinx.coroutines.flow.StateFlow getNowPlaying();
+  public kotlinx.coroutines.flow.StateFlow getSleepTimer();
+}
+-keep class ch.lkmc.neutrodyne.playback.api.PositionSnapshot {
+  public long positionAt(long);
 }
 -keep enum ch.lkmc.neutrodyne.playback.api.StreamKind {
   ch.lkmc.neutrodyne.playback.api.StreamKind STREAM;
 }
 -keep class ch.lkmc.neutrodyne.playback.impl.NeutrodynePlaybackService {
+}
+-keep class ch.lkmc.neutrodyne.playback.impl.PlaybackTestHooks {
+  public void setPlayerCreated(kotlin.jvm.functions.Function1);
+  ch.lkmc.neutrodyne.playback.impl.PlaybackTestHooks INSTANCE;
 }
 -keep class ch.lkmc.neutrodyne.sync.protocol.OrderKey {
   public java.lang.String after(java.lang.String);
@@ -943,6 +1107,7 @@
   public static java.util.List emptyList();
   public static java.util.List listOf(java.lang.Object[]);
   public static java.util.List listOfNotNull(java.lang.Object);
+  public static void throwCountOverflow();
   public static void throwIndexOverflow();
 }
 -keep class kotlin.collections.CollectionsKt__IterablesKt {
@@ -1053,6 +1218,7 @@
 }
 -keep class kotlin.coroutines.jvm.internal.Boxing {
   public static java.lang.Boolean boxBoolean(boolean);
+  public static java.lang.Float boxFloat(float);
   public static java.lang.Integer boxInt(int);
   public static java.lang.Long boxLong(long);
 }
@@ -1170,6 +1336,7 @@
 }
 -keep class kotlin.sequences.SequencesKt___SequencesKt {
   public static kotlin.sequences.Sequence filter(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
+  public static kotlin.sequences.Sequence map(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
   public static java.util.List toList(kotlin.sequences.Sequence);
 }
 -keep class kotlin.text.CharsKt {
@@ -1187,12 +1354,14 @@
   public static java.lang.Integer toIntOrNull(java.lang.String);
 }
 -keep class kotlin.text.StringsKt__StringsJVMKt {
+  public static boolean endsWith$default(java.lang.String, java.lang.String, boolean, int, java.lang.Object);
   public static boolean equals(java.lang.String, java.lang.String, boolean);
   public static boolean startsWith$default(java.lang.String, java.lang.String, boolean, int, java.lang.Object);
 }
 -keep class kotlin.text.StringsKt__StringsKt {
   public static boolean contains$default(java.lang.CharSequence, java.lang.CharSequence, boolean, int, java.lang.Object);
   public static boolean contains(java.lang.CharSequence, java.lang.CharSequence, boolean);
+  public static boolean isBlank(java.lang.CharSequence);
   public static kotlin.sequences.Sequence lineSequence(java.lang.CharSequence);
   public static java.lang.String removePrefix(java.lang.String, java.lang.CharSequence);
   public static java.util.List split$default(java.lang.CharSequence, char[], boolean, int, int, java.lang.Object);
@@ -1266,6 +1435,13 @@
 -keep class kotlinx.coroutines.CancellableContinuationKt {
   public static void disposeOnCancellation(kotlinx.coroutines.CancellableContinuation, kotlinx.coroutines.DisposableHandle);
 }
+-keep interface kotlinx.coroutines.CompletableDeferred {
+  public boolean complete(java.lang.Object);
+  public boolean completeExceptionally(java.lang.Throwable);
+}
+-keep class kotlinx.coroutines.CompletableDeferredKt {
+  public static kotlinx.coroutines.CompletableDeferred CompletableDeferred$default(kotlinx.coroutines.Job, int, java.lang.Object);
+}
 -keep interface kotlinx.coroutines.CompletableJob {
   public boolean complete();
 }
@@ -1314,6 +1490,9 @@
 -keep class kotlinx.coroutines.DefaultExecutorKt {
   public static kotlinx.coroutines.Delay getDefaultDelay();
 }
+-keep interface kotlinx.coroutines.Deferred {
+  public java.lang.Object await(kotlin.coroutines.Continuation);
+}
 -keep interface kotlinx.coroutines.Delay {
   public java.lang.Object delay(long, kotlin.coroutines.Continuation);
   public kotlinx.coroutines.DisposableHandle invokeOnTimeout(long, java.lang.Runnable, kotlin.coroutines.CoroutineContext);
@@ -1341,6 +1520,7 @@
 -keep class kotlinx.coroutines.Job$Key {
 }
 -keep interface kotlinx.coroutines.Job {
+  public static void cancel$default(kotlinx.coroutines.Job, java.util.concurrent.CancellationException, int, java.lang.Object);
   public void cancel(java.util.concurrent.CancellationException);
   public static kotlinx.coroutines.DisposableHandle invokeOnCompletion$default(kotlinx.coroutines.Job, boolean, boolean, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public boolean isActive();
@@ -1406,8 +1586,14 @@
   public void uninstall$kotlinx_coroutines_core();
   kotlinx.coroutines.debug.internal.DebugProbesImpl INSTANCE;
 }
+-keep interface kotlinx.coroutines.flow.Flow {
+  public java.lang.Object collect(kotlinx.coroutines.flow.FlowCollector, kotlin.coroutines.Continuation);
+}
 -keep interface kotlinx.coroutines.flow.FlowCollector {
   public java.lang.Object emit(java.lang.Object, kotlin.coroutines.Continuation);
+}
+-keep class kotlinx.coroutines.flow.FlowKt {
+  public static java.lang.Object first(kotlinx.coroutines.flow.Flow, kotlin.jvm.functions.Function2, kotlin.coroutines.Continuation);
 }
 -keep interface kotlinx.coroutines.flow.SharedFlow {
   public java.lang.Object collect(kotlinx.coroutines.flow.FlowCollector, kotlin.coroutines.Continuation);

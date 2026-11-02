@@ -102,7 +102,7 @@ jobs:
           fi
       - name: Require short playback and the API 34 screen-off case
         if: inputs.scope != 'youtube-smoke'
-        run: python3 scripts/ci/assert-playback-tests.py nightly app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
+        run: python3 scripts/ci/assert-playback-tests.py nightly app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       # TODO (M6b): release leg — :benchmark's out-of-process release smoke
       # journeys and E10's companions against :app release on api36 (09).
       - name: Report failure
@@ -220,7 +220,7 @@ jobs:
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
-            python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected
+            python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -263,7 +263,10 @@ jobs:
             test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
-            python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected
+            python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+            # M5 W9: host-driven reboot evidence on the installed release app; the
+            # instrumentation process exits before the host reboots the guest.
+            python3 scripts/ci/playback-reboot.py --hardening
             sha256sum "$RELEASE_ABI_TARGET_APK" > "$RELEASE_ABI_TARGET_SHA"
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
       # The device log of both emulator steps, for diagnosing a failed run (system_server state).
@@ -282,6 +285,7 @@ jobs:
           path: |
             app/build/outputs/androidTest-results/
             app/build/reports/androidTests/
+            app/build/reports/playback-reboot/
             ${{ runner.temp }}/logcat-api37-*.txt
             ${{ env.RELEASE_ABI_TARGET_SHA }}
           if-no-files-found: error
@@ -348,7 +352,7 @@ jobs:
           sha256sum "$RELEASE_ABI_TARGET_APK"
           sha256sum --check "$RELEASE_ABI_TARGET_SHA"
       - name: Require real release playback smoke
-        run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36
+        run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36 --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

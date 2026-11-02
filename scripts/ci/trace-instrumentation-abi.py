@@ -25,7 +25,7 @@ CLASS_KEEP_PREFIX = "-keep class "
 HEADER = """# SPDX-License-Identifier: Unlicense
 # Release instrumentation is a separately compiled client of the shipped APK.
 # Preserve its exact call surface in every build, not a test-only variant.
-# Traced with R8 {version} from the seven smoke cases, runner and test framework.
+# Traced with R8 {version} from the release smoke cases, runner and test framework.
 # Other code remains eligible for shrinking and optimization.
 """
 

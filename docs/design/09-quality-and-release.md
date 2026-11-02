@@ -510,14 +510,47 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   actual API36 and API37 release lanes before accepting a linkage repair.
   Fast assemble CI regenerates the focused ABI in check-only mode using
   [01's maintenance commands](01-foundation.md#release-build-and-baseline-profiles).
-  Presence fixtures pin the literal seven cases and reject each omission
+  Presence fixtures pin the literal smoke cases and reject each omission
   independently; the source check does not replace runtime linkage proof.
 
 - **M4 debug journey presence.** Non-release profiles of
   `assert-playback-tests.py` require both `UpNextJourneyTest` and
   `PlayJourneyTest` on each requested device, rejecting absent, skipped,
   failed, foreign or duplicate cases. E3 stays debug-only; the release
-  profile's seven-case smoke ABI is unchanged.
+  profile's then-seven-case smoke ABI was unchanged (M5 grows it to 14).
+
+- **M5 device evidence (2026-11-01).** The app-hosted playback gate
+  (`assert-playback-tests.py`) additionally requires, on each requested
+  device: sleep end-of-episode (queued tail, exactly-once played mark),
+  its metered-boundary collision variant (debug lanes), chapter and
+  754,000 ms timestamp seeks through the real session, both
+  `VideoAsAudioTest` decoder journeys (zero video decoders, rendered
+  audio, screen-off advance; alternate-audio routing keeps `isVideo`
+  metadata) and all three `CarLibraryDeviceTest` legacy browse/search/
+  hardware-skip cases. Release smoke adds the new `@ReleaseSmoke` cases,
+  growing the pinned smoke set to 14. Nightly and API 37 lanes also
+  require the one-minute screen-off listening timer (with a ≥ 60 s
+  duration check) and real ID3/Nero/QuickTime embedded-chapter
+  extraction; API 34 retains its 30-minute continuity case. The gate's
+  `--apk` option verifies every synthetic media/chapter fixture is
+  present and nonempty inside the selected app test APK. Longer streams
+  are assembled from the short fixture at runtime; the muxed
+  `h264_aac_8s.mp4` joins the committed fixtures.
+
+  The API 37 release leg additionally runs `scripts/ci/playback-reboot.py`:
+  three independent instrumentation processes seed and pause a real
+  episode with pinned local artwork, end normally, then the host reboots
+  and unlocks the guest, disables networking, inspects the real SystemUI
+  resumption card, and taps its play action with the loopback source
+  restored. It enables audio hardening `throw` after reboot and archives
+  phase output, screenshots, hierarchy dumps, package fingerprint and
+  logs under `app/build/reports/playback-reboot` (artifact:
+  `api37-playback-results`). These host-only phases skip in ordinary
+  suites and are not counted among the required cases; the host rejects
+  any phase without exactly one non-skipped pass. An instrumentation
+  process never outlives the reboot. Audible fade/listening, DHU,
+  Bluetooth/AVRCP, and physical-headset checks remain manual acceptance
+  evidence and are never claimed by this wiring.
 
 - **Instrumented hygiene:** orchestrator with `clearPackageData`. Locally, `connectedDebugAndroidTest` installs `ch.lkmc.neutrodyne.debug` beside the published app and never touches it; release-type runs and `:benchmark` install the published application ID and key, clear it after each test and uninstall it after the run, so they run only on an emulator or a device whose Neutrodyne holds nothing worth keeping ([01 Debug build type](01-foundation.md#debug-build-type); `CONTRIBUTING.md`'s testing section repeats it). In `debug` builds ACRA is not installed (its mailbox is forced empty, [D62](../PLAN.md#3-key-decisions)), and 01's `DebugToolsInitializer` turns LeakCanary's automatic heap dumps off while the system property below is set, so dumps never stall a device test. ACRA is **on** in the release build, so release-type runs switch it off: the runner `NeutrodyneTestRunner` (`:app/src/androidTest`, an `AndroidJUnitRunner`) sets the system property `neutrodyne.instrumentedTest=true` in `newApplication` before calling `super`, which instantiates the application and calls `attach`, and with it `attachBaseContext` ([AOSP Instrumentation](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/app/Instrumentation.java)); 01's call site skips `installAcra` while the property is set ([ACRA configuration](#acra-configuration)). **One exception, `YtxIsolationTest`** ([04 Testing](04-youtube.md#testing), PLAN M9 AC5, in the debug suite): its "no ACRA dialog" assertion needs ACRA as users have it, so its `@BeforeClass` calls `installAcra(application, mailTo = "ytx-isolation-test@invalid")` itself on the main thread — a test-only, non-empty address, so the assertion depends neither on PO-10 nor on the build type — and after each `:ytx` failure asserts that ACRA's `ACRA-unapproved` report directory ([ACRA `ReportLocator`](https://github.com/ACRA/acra/blob/master/acra-core/src/main/java/org/acra/file/ReportLocator.kt)) stays empty and that no `:acra` process runs. Unverified: that ACRA installed after `Application.onCreate` (its setup guide installs it in `attachBaseContext`, [ACRA BasicSetup](https://github.com/ACRA/acra/wiki/BasicSetup)) catches a later main-process crash fully (M9a check by hand; fallback: the assertion moves to `:benchmark`'s out-of-process system tests against a build with `-Pneutrodyne.acraMailto=ytx-isolation-test@invalid`). That ACRA is never installed in `:ytx` itself is `YtxProcessStartTest`'s probe (01), which is meaningful only where ACRA is installed: it is tagged `ReleaseSmoke` and runs in the release-type runs once PO-10 names the mailbox. The property is inert unless an instrumentation sets it inside the app's process (PLAN 7.2's test-hook rule), and R8 cannot remove a system-property read, so `release` needs no keep rule for it. Unverified: that the orchestrator calls `newApplication` in every test process (M0a check with a deliberate crash in a test). Library modules' device tests run no `NeutrodyneApplication`; `:benchmark`'s out-of-process tests leave ACRA on, and a crash fails them anyway.
 
