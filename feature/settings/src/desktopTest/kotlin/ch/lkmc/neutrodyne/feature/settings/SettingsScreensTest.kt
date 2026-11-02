@@ -12,6 +12,8 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -108,6 +110,19 @@ class SettingsScreensTest {
             onNodeWithText("Source code and releases").performScrollTo().assertIsDisplayed()
         }
 
+    @Test fun androidInstallHelpExplainsAutoAndCloses() =
+        runComposeUiTest {
+            setSettingsRoot(buildInfo = FakeBuildInfo.copy(platform = BuildInfo.Platform.ANDROID, desktop = null))
+            openSettings()
+            onAllNodesWithText("About").onFirst().performClick()
+            onNodeWithText("Install & updates").performScrollTo().performClick()
+            onNodeWithText("Android Auto", substring = false).performScrollTo().performClick()
+            onNodeWithText("Unknown sources", substring = true).assertExists()
+            onNodeWithText("10 times", substring = true).assertExists()
+            onAllNodesWithContentDescription("Back").onLast().performClick()
+            onNodeWithText("Unknown sources", substring = true).assertDoesNotExist()
+        }
+
     @Test
     fun licencesListsLibrariesFromSource() =
         runComposeUiTest {
@@ -132,18 +147,6 @@ class SettingsScreensTest {
             onAllNodesWithText("Licences").onFirst().performClick()
 
             onNodeWithText("No licence information in this build.").assertIsDisplayed()
-        }
-
-    @Test fun androidInstallHelpExplainsAutoAndCloses() =
-        runComposeUiTest {
-            setSettingsRoot(buildInfo = FakeBuildInfo.copy(platform = BuildInfo.Platform.ANDROID, desktop = null))
-            openSettings()
-            onAllNodesWithText("About").onFirst().performClick()
-            onNodeWithText("Install & updates").performScrollTo().performClick()
-            onNodeWithText("Unknown sources", substring = true).assertExists()
-            onNodeWithText("10 times", substring = true).assertExists()
-            onNodeWithText("Close").performClick()
-            onNodeWithText("Unknown sources", substring = true).assertDoesNotExist()
         }
 
     @Test
@@ -308,6 +311,14 @@ class SettingsScreensTest {
                                 licencesSource,
                                 settingsRepository,
                                 platformInfo,
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeAppUpdateChecker(),
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeUpdateNotices(),
+                                ch.lkmc.neutrodyne.core.testing.FakeUpdateRuntimeInputs(
+                                    ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
+                                        .Android("arm64-v8a", 34),
+                                ),
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )

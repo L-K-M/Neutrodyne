@@ -1731,6 +1731,8 @@ Covered in [Backups](#backups). The README's "Run the server" section (09 owns t
 
 `ServerUpdateNotice` (on unless `NEUTRODYNE_SERVER_UPDATE_CHECK=false`) fetches `https://github.com/{owner}/Neutrodyne/releases/latest/download/neutrodyne-update.json` once a day (jittered, JDK `HttpClient`, redirects followed only to GitHub's release-asset hosts), reads `versionName`, the release page URL and the additive `server` entry (`jar`, `image`, `minJava`) of the update manifest ([D78](../PLAN.md#3-key-decisions), [09 Update check](09-quality-and-release.md#update-check)), and shows "Neutrodyne Sync X.Y.Z is available" with the release link on `/admin/server`. It never downloads or installs anything. This is the server's only outbound request (network inventory ID `server-updates`, [09 Network inventory](09-quality-and-release.md#network-inventory)); the nightly `server-image-smoke` capture shows no other.
 
+**Implementation note (2026-11-01, M11a).** MS1 owns the server notice's delivery, scheduler, `update.check` configuration and its `/admin/server` display; the current server base carries only the health and discovery routes. The M11a app port validates the manifest's optional `server` entry and defers the server-side notice to MS1, which changes no D-id.
+
 ### Image sources and the runtime exception
 
 The image bundles an unmodified OpenJDK runtime and Debian base layers under [D3](../PLAN.md#3-key-decisions)'s runtime exception (risk L5):

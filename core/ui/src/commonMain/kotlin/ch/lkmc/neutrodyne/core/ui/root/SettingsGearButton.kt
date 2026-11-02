@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings_badge
+import ch.lkmc.neutrodyne.core.ui.resources.settings_update_available
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -30,7 +31,12 @@ public fun SettingsGearButton(
     onClick: (() -> Unit)? = null,
 ) {
     val navigator = LocalAppNavigator.current
-    val tooltip = stringResource(Res.string.settings)
+    val tooltip =
+        if (badge) {
+            stringResource(Res.string.settings_update_available)
+        } else {
+            stringResource(Res.string.settings)
+        }
     BadgedBox(
         badge = {
             if (badge) {
