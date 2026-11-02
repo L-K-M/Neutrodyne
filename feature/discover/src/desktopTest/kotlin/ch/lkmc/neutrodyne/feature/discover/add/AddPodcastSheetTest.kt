@@ -165,7 +165,7 @@ class AddPodcastSheetTest {
 
             // The preview card carries the title and "author · N episodes" line (08).
             onNodeWithText("A Show").assertIsDisplayed()
-            assertEquals(listOf("https://example.com/feed"), resolver.unconfirmedInputs)
+            assertEquals(listOf("https://example.com/feed"), resolver.inputs)
 
             onNodeWithText("Subscribe").performClick()
             waitForIdle()
@@ -185,7 +185,7 @@ class AddPodcastSheetTest {
             waitForIdle()
 
             onNodeWithText("A Show").assertIsDisplayed()
-            assertEquals(listOf("https://example.com/feed"), resolver.inputs)
+            assertEquals(listOf("https://example.com/feed"), resolver.unconfirmedInputs)
         }
 
     @Test
