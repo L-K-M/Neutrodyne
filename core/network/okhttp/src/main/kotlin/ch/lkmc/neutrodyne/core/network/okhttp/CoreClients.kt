@@ -24,23 +24,32 @@ import java.util.concurrent.TimeUnit
  * `@Provides @SingleIn(…)` container in `NetworkIslandBindings`/`NetworkIslandYtxBindings`
  * (per-process singletons, S8 question 6) — one class cannot be `@SingleIn` two scopes.
  */
-class CoreClients(
-    private val ua: UserAgentInterceptor,
-    private val lanGuard: LocalNetworkGuard,
-    private val hints: DnsFamilyHints,
-    private val debugInterceptors: Set<Interceptor>,
-    // The desktop-test seam (03 note 2026-11-02): the add pipeline's LAN refusal is syntactic,
-    // so discovery tests serve their MockWebServer under a fake public host that `baseDns`
-    // maps to loopback. Production callers leave the default.
-    private val baseDns: Dns = Dns.SYSTEM,
-) : ConnectionPoolEvictor {
+class CoreClients
     @Inject
+    constructor(
+        private val ua: UserAgentInterceptor,
+        private val lanGuard: LocalNetworkGuard,
+        private val hints: DnsFamilyHints,
+        @param:DebugInterceptors private val debugInterceptors: Set<Interceptor>,
+    ) : ConnectionPoolEvictor {
+    /**
+     * The desktop-test seam (03 note 2026-11-02): the add pipeline's LAN refusal is syntactic,
+     * so discovery tests serve their MockWebServer under a fake public host that [baseDns] maps
+     * to loopback. The clients build during this delegation, so the Dns wrapper in `coreBuilder`
+     * reads [baseDns] per lookup — assigning it here still lands before the first request.
+     */
     constructor(
         ua: UserAgentInterceptor,
         lanGuard: LocalNetworkGuard,
         hints: DnsFamilyHints,
-        @param:DebugInterceptors debugInterceptors: Set<Interceptor>,
-    ) : this(ua, lanGuard, hints, debugInterceptors)
+        @DebugInterceptors debugInterceptors: Set<Interceptor>,
+        baseDns: Dns,
+    ) : this(ua, lanGuard, hints, debugInterceptors) {
+        this.baseDns = baseDns
+    }
+
+    /** `Dns.SYSTEM` in production; only the test seam rewrites it, before any lookup can run. */
+    private var baseDns: Dns = Dns.SYSTEM
 
     // Declared before the clients: property initializers run in order, and `coreBuilder` reads them.
     private val dispatcher =
@@ -55,7 +64,7 @@ class CoreClients(
             .Builder()
             .dispatcher(dispatcher)
             .connectionPool(pool)
-            .dns(lanGuard.dns(FamilyHintDns(baseDns, hints), mode))
+            .dns(lanGuard.dns(FamilyHintDns(Dns { hostname -> baseDns.lookup(hostname) }, hints), mode))
             .addInterceptor(lanGuard.interceptor(mode))
             .addInterceptor(ua)
             .apply { debugInterceptors.forEach(::addInterceptor) }
