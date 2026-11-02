@@ -104,24 +104,31 @@ class DiscoveryPrivacyJourneyTest {
             val search = FakeSearchRepository()
             if (entry == Entry.DISCLOSURE) {
                 search.providersGate = CompletableDeferred()
-                search.providers.value = listOf(
-                    ProviderInfo(ProviderId.APPLE, true),
-                    ProviderInfo(ProviderId.PODCAST_INDEX, true, keySource = DirectoryKeySource.USER),
-                    ProviderInfo(ProviderId.FYYD, false),
-                ).toImmutableList()
+                search.providers.value =
+                    listOf(
+                        ProviderInfo(ProviderId.APPLE, true),
+                        ProviderInfo(ProviderId.PODCAST_INDEX, true, keySource = DirectoryKeySource.USER),
+                        ProviderInfo(ProviderId.FYYD, false),
+                    ).toImmutableList()
             }
             val graph =
                 createDynamicGraphFactory<M2JourneyGraph.Factory>(DiscoveryJourneyBindings(db, clock, scope, search))
                     .create(dirs, build, reporter)
             val failures = ConcurrentLinkedQueue<Throwable>()
             val original = graph.imageLoaderFactory.newImageLoader(PlatformContext.INSTANCE)
-            val loader = original.newBuilder().eventListenerFactory {
-                object : EventListener() {
-                    override fun onError(request: ImageRequest, result: ErrorResult) {
-                        failures.add(result.throwable)
-                    }
-                }
-            }.build()
+            val loader =
+                original
+                    .newBuilder()
+                    .eventListenerFactory {
+                        object : EventListener() {
+                            override fun onError(
+                                request: ImageRequest,
+                                result: ErrorResult,
+                            ) {
+                                failures.add(result.throwable)
+                            }
+                        }
+                    }.build()
             SingletonImageLoader.setUnsafe { loader }
             var showing by mutableStateOf(true)
             try {
@@ -130,41 +137,58 @@ class DiscoveryPrivacyJourneyTest {
                         server.start()
                         lan.start(InetAddress.getByName("127.0.0.2"), server.port)
                         lan.enqueue(MockResponse.Builder().body("LAN honeypot").build())
-                        val publicFeed = server.url("/feed.xml").newBuilder().host("journey.test").build().toString()
+                        val publicFeed = publicUrl(server, "/feed.xml")
                         val localArt = lan.url("/private-art.png").toString()
-                        val art = if (entry == Entry.ADD_REDIRECT_ART) {
-                            server.url("/redirect-art").newBuilder().host("journey.test").build().toString()
-                        } else {
-                            localArt
-                        }
-                        val feed = File("../feeds/src/test/resources/discovery/journey-feed.xml").readText()
-                            .replace("</channel>", "<image><url>$art</url></image></channel>")
-                        server.dispatcher = object : Dispatcher() {
-                            override fun dispatch(request: RecordedRequest): MockResponse =
-                                if (request.target == "/redirect-art") {
-                                    MockResponse.Builder().code(302).addHeader("Location", localArt).build()
-                                } else {
-                                    MockResponse.Builder().body(feed).build()
-                                }
-                        }
-                        val hit = DirectoryHit(
-                            publicFeed,
-                            "Directory show",
-                            artworkUrl = if (entry == Entry.PREVIEW_ART) null else localArt,
-                            providers = persistentSetOf(ProviderId.APPLE),
-                        )
+                        val art =
+                            if (entry == Entry.ADD_REDIRECT_ART) {
+                                publicUrl(server, "/redirect-art")
+                            } else {
+                                localArt
+                            }
+                        val feed =
+                            File("../feeds/src/test/resources/discovery/journey-feed.xml")
+                                .readText()
+                                .replace("</channel>", "<image><url>$art</url></image></channel>")
+                        server.dispatcher =
+                            object : Dispatcher() {
+                                override fun dispatch(request: RecordedRequest): MockResponse =
+                                    if (request.target == "/redirect-art") {
+                                        MockResponse
+                                            .Builder()
+                                            .code(302)
+                                            .addHeader("Location", localArt)
+                                            .build()
+                                    } else {
+                                        MockResponse.Builder().body(feed).build()
+                                    }
+                            }
+                        val hit =
+                            DirectoryHit(
+                                publicFeed,
+                                "Directory show",
+                                artworkUrl = if (entry == Entry.PREVIEW_ART) null else localArt,
+                                providers = persistentSetOf(ProviderId.APPLE),
+                            )
                         search.searchAnswer = { query ->
-                            flowOf(SearchResults(query, persistentListOf(hit), persistentMapOf(ProviderId.APPLE to ProviderStatus.Ok), true))
+                            flowOf(
+                                SearchResults(
+                                    query,
+                                    persistentListOf(hit),
+                                    persistentMapOf(ProviderId.APPLE to ProviderStatus.Ok),
+                                    true,
+                                ),
+                            )
                         }
                         search.chartAnswer = Outcome.Success(persistentListOf(hit))
-                        val route = when (entry) {
-                            Entry.DISCLOSURE -> shared("medical history")
-                            Entry.ENCODED_SHARE -> shared("http://%31%32%37.0.0.2:${server.port}/action")
-                            Entry.IDNA_SHARE -> shared("http://１２７.０.０.２:${server.port}/action")
-                            Entry.ADD_ART, Entry.ADD_REDIRECT_ART -> shared(publicFeed)
-                            Entry.CHART_ART -> Route.Navigate(DiscoverKey, emptyList())
-                            else -> Route.Navigate(DiscoverKey, listOf(DirectoryKey("history", null)))
-                        }
+                        val route =
+                            when (entry) {
+                                Entry.DISCLOSURE -> shared("medical history")
+                                Entry.ENCODED_SHARE -> shared("http://%31%32%37.0.0.2:${server.port}/action")
+                                Entry.IDNA_SHARE -> shared("http://１２７.０.０.２:${server.port}/action")
+                                Entry.ADD_ART, Entry.ADD_REDIRECT_ART -> shared(publicFeed)
+                                Entry.CHART_ART -> Route.Navigate(DiscoverKey, emptyList())
+                                else -> Route.Navigate(DiscoverKey, listOf(DirectoryKey("history", null)))
+                            }
                         setContent {
                             if (showing) {
                                 CompositionLocalProvider(
@@ -185,18 +209,24 @@ class DiscoveryPrivacyJourneyTest {
                             }
                         }
                         if (entry == Entry.PREVIEW_ART) {
-                            waitUntil(timeoutMillis = 10_000) { onAllNodes(hasText("Directory show")).fetchSemanticsNodes().isNotEmpty() }
+                            waitUntil(timeoutMillis = 10_000) {
+                                onAllNodes(hasText("Directory show")).fetchSemanticsNodes().isNotEmpty()
+                            }
                             onNodeWithText("Directory show").performClick()
                         }
                         if (entry == Entry.DISCLOSURE) {
                             val action = "Search for ‘medical history’"
                             val disclosure = "Searches are sent to Apple, Podcast Index"
-                            waitUntil(timeoutMillis = 10_000) { onAllNodes(hasText(action)).fetchSemanticsNodes().isNotEmpty() }
+                            waitUntil(timeoutMillis = 10_000) {
+                                onAllNodes(hasText(action)).fetchSemanticsNodes().isNotEmpty()
+                            }
                             onNodeWithText(action).assertIsNotEnabled().performClick()
                             onNodeWithText("Enable a directory in Discover settings").assertDoesNotExist()
                             assertTrue(search.queries.isEmpty())
                             runOnIdle { search.providersGate!!.complete(Unit) }
-                            waitUntil(timeoutMillis = 10_000) { onAllNodes(hasText(disclosure)).fetchSemanticsNodes().isNotEmpty() }
+                            waitUntil(timeoutMillis = 10_000) {
+                                onAllNodes(hasText(disclosure)).fetchSemanticsNodes().isNotEmpty()
+                            }
                             onNodeWithText(disclosure).assertIsDisplayed()
                             onNodeWithText(action).performClick()
                             waitUntil(timeoutMillis = 10_000) { search.queries.isNotEmpty() }
@@ -210,9 +240,12 @@ class DiscoveryPrivacyJourneyTest {
                             assertEquals(0, server.requestCount)
                         } else {
                             waitUntil(timeoutMillis = 10_000) { failures.isNotEmpty() }
-                            assertTrue(failures.all { error ->
-                                generateSequence(error) { it.cause }.any { it is LocalNetworkUnsupportedException }
-                            }, failures.toString())
+                            assertTrue(
+                                failures.all { error ->
+                                    generateSequence(error) { it.cause }.any { it is LocalNetworkUnsupportedException }
+                                },
+                                failures.toString(),
+                            )
                             if (entry == Entry.ADD_REDIRECT_ART) assertEquals(2, server.requestCount)
                         }
                         assertEquals(0, lan.requestCount)
@@ -234,5 +267,25 @@ class DiscoveryPrivacyJourneyTest {
 
     private fun shared(text: String): Route = IntentRouter.route(RouteInput(RouteInput.Action.SEND, text = text))
 
-    private enum class Entry { DISCLOSURE, ENCODED_SHARE, IDNA_SHARE, ADD_ART, ADD_REDIRECT_ART, DIRECTORY_ART, CHART_ART, PREVIEW_ART }
+    private fun publicUrl(
+        server: MockWebServer,
+        path: String,
+    ): String =
+        server
+            .url(path)
+            .newBuilder()
+            .host("journey.test")
+            .build()
+            .toString()
+
+    private enum class Entry {
+        DISCLOSURE,
+        ENCODED_SHARE,
+        IDNA_SHARE,
+        ADD_ART,
+        ADD_REDIRECT_ART,
+        DIRECTORY_ART,
+        CHART_ART,
+        PREVIEW_ART,
+    }
 }
