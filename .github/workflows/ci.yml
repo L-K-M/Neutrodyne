@@ -140,6 +140,7 @@ jobs:
           python3 scripts/ci/tests/preserve-emulator-crashes.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
+          python3 scripts/ci/tests/native-msys-reexec.test.py
       - name: Preserve a formatting repair patch
         if: failure()
         run: |

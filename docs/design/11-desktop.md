@@ -1970,51 +1970,34 @@ test compares native/shared counts and reads the retained counter after close.
 Native source bundles now include the actual per-target build record, lock,
 verification key and build scripts, with missing or corrupt inputs rejected.
 
-The spike ran on branch `impl/md0-current`; the desktop matrix
-(`workflow_dispatch` and the nightly schedule) built and tested all four
-targets. Evidence per criterion:
+The spike runs on `impl/md0-current`. The production graph still binds
+`DesktopUnavailablePlayback`; MD0 creates no tester build. Dispatch and
+nightly workflows select Windows x64, macOS arm64 and both Linux targets.
+The following ledger distinguishes a candidate implementation from a closed
+acceptance criterion. A successful endpoint assignment cannot prove drift.
 
-- **AC1 corpus decode — open.** Fifteen corpus fixtures including the added
-  HE-AAC v1/v2 ADTS files decode through the custom AVIO and FFM bindings;
-  `FfmpegCorpusTest` checks decoded sample counts against the independent
-  manifest and `seekAndDecode` measures the first audible sample after a
-  seek. Final matrix evidence is collected from run
-  `41416052575` onward; earlier runs proved the build and licence legs.
-- **AC2 LGPL build — open pending binary audit.** `checkNativeLicences` verifies the licence
-  string, zero registered network protocols, the D86 component set and the
-  4 MB size budget on each target from the built libraries; the source
-  bundle carries the exact tarball, signature and checksum.
-- **AC3 null-backend clock — open, prototype green locally.** ndmedia's
-  callback advances `frames_played` only for media frames and counts
-  underrun silence separately; `EngineClockTest` drives
-  decode → SilenceSkipper → Sonic → GainStage → f32 → ring → null device
-  at 0.5×/1×/2×/3× and asserts the clock lands within 50 ms of the media
-  end. The DSP ports keep Media3 semantics; sample-exact parity against
-  Media3-generated goldens is not yet in CI (MD1 work). A 30-minute
-  real-device underrun soak is an owner/hardware check: run the app 30 min
-  per OS and read `nd_out_underrun_frames`.
-- **AC4 OS integration — MPRIS proved on CI; SMTC and Now Playing open.**
-  `LinuxMprisSession` in `:desktop:system` exports
-  `org.mpris.MediaPlayer2.neutrodyne` over dbus-java 5.2.2 and translates
-  the MPRIS Player methods into `RemoteCommand`s posted to a flow (the bus
-  worker thread never runs playback work). `LinuxMprisSessionTest` starts a
-  private `dbus-daemon --session` on the Linux desktop-matrix legs and
-  proves bus-name ownership, `Properties` Get/Set/GetAll (`PlaybackStatus`,
-  `Metadata` with `mpris:trackid`/`xesam:*`, `Position`, `Rate` clamped to
-  the 0.5×–3.0× band) and PlayPause/Next/Seek/SeekTo command delivery; the
-  test skips on hosts without `dbus-daemon`. Spike scope, not the MD2
-  matrix row: `Raise`/`Quit`/`OpenUri` are no-ops, `Stop` maps to Pause,
-  and `Seeked`/`SetPosition` track-id checks are MD2 work. On Windows run
-  the app and check the SMTC flyout responds to play/pause/seek; on macOS
-  check Now Playing metadata and remote commands with the ad-hoc-signed
-  app. Headphone removal on Windows/macOS and suspend (incl. Windows
-  Modern Standby) need real hardware: unplug during playback and
-  suspend/resume mid-episode, expecting pause-before-stop.
+| Criterion | Evidence and present result | Decision or fallback |
+|---|---|---|
+| AC1 corpus, chapters and seeks | Sixteen first-party synthetic fixtures, including HE-AAC v1/v2, AAC fragmentation, unindexed VBR MP3 and silence gaps. Counts come from the independent container parser, not the decoder. Native matrix tests check counts, chapters, quarter/start/middle/near-end timestamped seeks. Final four-target validation is pending. | Retain the custom AVIO/FFM candidate. A codec/container failure requires a corrected minimal FFmpeg build or an LGPL libmpv evaluation; do not omit the fixture. |
+| AC2 licence, size and replaceability | Four separate upstream-named LGPL FFmpeg libraries, no network protocols; licence/configuration/component/size checks and verified exact-source bundle. Binary inspection also checks deployment floors, imports and embedded atomic helpers. Final four-target audit is pending. | Open. Reject forbidden code or an oversized build. Reduce the component set only within D86, or evaluate an LGPL fallback with its own notices/source/size evidence. |
+| AC3 clock and playback | `TimelineClockTest` checks pause/reset/underruns. `EngineClockTest` samples the live null-device clock at all four speeds before EOF, separately from endpoint checks. The first live test failed by 112 ms on macOS; markers and measured period were repaired, with final validation pending. No 30-minute real-device run or reference-laptop CPU measurement ran. | Open. Keep the candidate instrument; passing short/null tests cannot close the soak or drift through actual skipped gaps. If the clock cannot meet the budget, repair its DSP span accounting or evaluate libmpv before MD1 playback is enabled. |
+| AC4 media sessions and safety | Private-bus MPRIS and logind tests exercise transport; macOS API registration passed in run `41541772367`. Windows registration is pending. Injected safety tests use the actual saver with a fake store. Physical keys, hidden-window routing, active headphone removal, signed macOS routing and suspend/Modern Standby ordering remain owner checks above. | Open. In-app controls and periodic saves are documented degraded behavior, not AC4 acceptance. A libmpv decoder does not fix OS-session or power delivery. |
+| AC5 engine decision | The custom engine remains the candidate behind the `AudioEngine` seam. The single-local-item instrument is not the production controller and does not implement queue transition or remote seek execution. | Conditional continuation only. MD0 has no unconditional go until required CI and hardware evidence is recorded. The LGPL libmpv option remains available under the same licence envelope; it has not been built or measured by this spike. |
 
-The engine decision stays with the custom engine behind the
-`AudioEngine` seam; libmpv remains the documented fallback. No spike
-failure lacked a fallback, so no blocker is recorded. Manual checks
-above are open until an owner runs them on real desktops.
+Implementation note (2026-11-01): Android's pinned Media3 processors now
+produce independent PCM reference hashes in `Md0DspReferenceTest`. The desktop
+suite compares 45 Sonic and nine silence-skipping configurations across input
+chunk sizes. Sonic passed all configurations in run `41541772367`; silence
+skipping exposed two byte/frame-unit defects. Their repairs require a new
+matrix run. The original statement that parity was deferred to MD1 was wrong.
+
+The MPRIS prototype validates track identity for absolute seeks. `Raise`,
+`Quit` and `OpenUri` remain transport stubs, and `Stop` maps to Pause. Full
+production controller behavior belongs to MD1/MD2; private-bus results do not
+prove GNOME/KDE physical-key routing. A missing real audio device selects the
+actual miniaudio null backend explicitly, with all device-dependent results
+left open. No audible, manual, signed-release or physical-device proof is
+claimed here.
 
 ---
 

@@ -237,10 +237,10 @@ COMMON_CONFIGURE=(
 # whichever bash it finds first, which on a Windows runner is Git Bash and has
 # none of the three, so the script re-execs itself under MSYS2 when it can. A
 # developer without MSYS2 keeps their own bash and must provide the tools.
-# `uname -s` is MINGW* under Git Bash and MSYS* under MSYS2 itself, which is how
-# the two are told apart.
-case "$(uname -s 2>/dev/null || echo unknown)" in
-    MINGW*)
+# MSYS2 can retain MSYSTEM=MINGW64 and also report MINGW*. The explicit
+# marker prevents repeated source verification/extraction and re-exec forever.
+case "$(uname -s 2>/dev/null || echo unknown):${MSYS_IS_REEXEC:-}" in
+    MINGW*:)
         for candidate in /c/msys64/usr/bin/bash.exe \
             "/c/Program Files/MSYS2/usr/bin/bash.exe" \
             "${MSYS2_ROOT:+$MSYS2_ROOT/usr/bin/bash.exe}"; do
