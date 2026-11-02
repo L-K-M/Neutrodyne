@@ -209,14 +209,12 @@ public class DownloadsViewModel(
     }
 
     public fun retryAll() {
-        run {
-            controller.retry(
-                overview.value
-                    ?.failed
-                    .orEmpty()
-                    .map { it.status.episodeId },
-            )
-        }
+        val failed = overview.value?.failed.orEmpty().map { it.status }
+        // MISSING rows have no file to resume: they re-enter through the request path,
+        // which keeps the metered-consent gate instead of skipping it.
+        val missing = failed.filter { it.state == DownloadState.MISSING }.map { it.episodeId }
+        run { controller.retry(failed.filter { it.state != DownloadState.MISSING }.map { it.episodeId }) }
+        if (missing.isNotEmpty()) downloads.request(missing)
     }
 
     public fun retry(id: Long) {
