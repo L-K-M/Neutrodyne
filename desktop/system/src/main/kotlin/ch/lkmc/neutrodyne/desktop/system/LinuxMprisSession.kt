@@ -33,6 +33,9 @@ class LinuxMprisSession private constructor(
 
     override val commands: Flow<RemoteCommand> = commandSink
 
+    /** The path [open] exports this object under. */
+    override fun getObjectPath() = MprisNames.PATH
+
     @Volatile private var current: NowPlaying? = null
     @Volatile private var rate = 1.0
     @Volatile private var positionMs = 0L
