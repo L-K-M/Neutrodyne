@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "title": "NPR News Now",
+      "id": 82691,
+      "xmlURL": "https://feeds.npr.org/500005/podcast.xml",
+      "imgURL": "https://media.npr.org/assets/img/2023/01/24/npr-news-now_tile_sq-2334a5fd44563fa94cdcdb27384b0f05987c2d15.jpg?s=1400&c=66&f=jpg",
+      "status": 200,
+      "lastpub": "2026-10-19T05:10:09+02:00"
+    },
+    {
+      "title": "BBC News",
+      "id": 82251,
+      "xmlURL": "https://podcast.voice.api.bbci.co.uk/rss/audio/p002vsmz?api_key=Wbek5zSqxz0Hk1blo5IBqbd9SCWIfNbT",
+      "imgURL": "https://ichef.bbci.co.uk/images/ic/raw/p0839r65.jpg",
+      "status": 200,
+      "lastpub": "2026-10-19T05:06:00+02:00"
+    }
+  ],
+  "status": 1
+}
