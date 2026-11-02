@@ -39,6 +39,20 @@ common=(-hide_banner -loglevel error -y -flags +bitexact -fflags +bitexact)
   -map_metadata -1 -ac 2 -c:a libmp3lame -q:a 5 -write_xing 1 -id3v2_version 0 \
   "$out/vbr_xing_2s.mp3"
 
+# VBR without any usable index: remove only the Xing/LAME metadata frame.
+# The audio frame sequence remains unchanged; the independent parser derives
+# the untrimmed sample count from the remaining MPEG frame headers.
+python3 - "$root" "$out" <<'PY_NO_TOC'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]) / "scripts/fixtures"))
+from corpus_reference import id3_size, mp3_frames
+output = Path(sys.argv[2])
+data = (output / "vbr_xing_2s.mp3").read_bytes()
+frames = mp3_frames(data, id3_size(data))
+(output / "vbr_no_toc_2s.mp3").write_bytes(data[frames[1][0]:])
+PY_NO_TOC
+
 # 3. MP3 with ID3v2.3 CHAP frames: three chapters with titles and start times,
 #    the ID3 chapter form Android's MediaItem metadata also reads.
 cat > "$out/id3chap_3s.chapters" <<'META'

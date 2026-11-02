@@ -100,6 +100,19 @@ class FfmpegCorpusTest {
     }
 
     @Test
+    fun `seeks at the start middle and near the end produce timestamped audio`() {
+        for (entry in readManifest().files) {
+            val duration = entry.expectedSamples * 1000 / entry.sampleRate
+            FfmpegPipeline.open(MemoryByteSource(corpusFile(entry.file).readBytes()), hostFfmpegDirectory()).use { pipeline ->
+                for (target in listOf(0L, duration / 2, (duration - 100).coerceAtLeast(0))) {
+                    val actual = pipeline.seekAndDecode(target)
+                    assertTrue("${entry.file}: seek $target returned $actual", abs(actual - target) <= SEEK_TOLERANCE_MS)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `the AAC priming of a fragmented MP4 is trimmed once`() {
         val manifest = readManifest()
         val trimmed = manifest.files.single { it.trimRule == AAC_PRIMING_RULE }
