@@ -144,6 +144,19 @@ class BackupStagerTest {
         }
 
     @Test
+    fun serverExportPassesTheBackupCapsThroughTheRealGuard() =
+        runTest {
+            // The real server writer produces this archive; its repetitive lines arm the
+            // 16 MiB ratio floor, so ZipGuard must accept what the server publishes.
+            val archive = checkNotNull(System.getProperty("neutrodyne.serverExportScaleFixture")).toPath()
+            assertSuccess(stager.inspect(archive, stage)).use {
+                // 20_000 seeded scale lines plus the shared fixture's three episode lines.
+                assertEquals(20_003, it.episodeLines)
+                assertEquals(0, it.skippedLines)
+            }
+        }
+
+    @Test
     fun snapshotArchiveInspectsAsAutomatic() =
         runTest {
             seedPodcast("https://example.com/show.xml")
