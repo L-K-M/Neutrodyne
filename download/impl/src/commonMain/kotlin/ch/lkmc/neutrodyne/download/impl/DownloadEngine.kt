@@ -497,7 +497,13 @@ internal class DownloadEngine(
                         handle.close()
                         part = fileSystem.openPart(next.rootId, next.tempPath)
                     }
-                    row = row.copy(rootId = next.rootId, tempPath = next.tempPath, lastStopReason = null)
+                    row =
+                        row.copy(
+                            rootId = next.rootId,
+                            tempPath = next.tempPath,
+                            sourceRef = next.sourceRef,
+                            lastStopReason = null,
+                        )
                     val plan = if (retryUrl == null) next.plan else next.plan.copy(url = retryUrl)
                     source.transfer(plan, checkNotNull(part), this)
                 }

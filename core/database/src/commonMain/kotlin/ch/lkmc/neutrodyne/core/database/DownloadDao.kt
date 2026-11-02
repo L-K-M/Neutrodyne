@@ -241,14 +241,16 @@ abstract class DownloadDao : DownloadQueries {
         val current = byEpisode(row.episodeId) ?: return 0
         if (current.state != expectedState || current.runnerToken != token) return 0
 
-        // A runner snapshot must not undo controller consent or persist a resolved CDN URL.
+        // A runner snapshot must not undo controller consent. sourceRef is the durable feed
+        // identity the source declared at prepare, so a refresh persists while the resolved
+        // CDN retry URL never reaches the row.
         val checkpoint =
             row.copy(
                 lane = current.lane,
                 priority = current.priority,
                 requestedAt = current.requestedAt,
                 sourceKind = current.sourceKind,
-                sourceRef = current.sourceRef,
+                sourceRef = row.sourceRef,
                 allowMetered = current.allowMetered,
                 requireCharging = current.requireCharging,
                 runnerToken = if (row.state in OWNED_STATES) token else null,

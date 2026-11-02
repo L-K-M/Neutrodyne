@@ -70,7 +70,9 @@ internal class RssTransferSource(
                 part.truncate(offset)
             }
             val validator = reliableValidator(row.etag, row.lastModified)
-            if (offset > 0 && validator == null) {
+            if (offset > 0 && (validator == null || media.url != row.sourceRef)) {
+                // The persisted prefix is tied to the resource that supplied it: a changed
+                // enclosure URL must never splice old bytes under the new representation.
                 part.truncate(0)
                 offset = 0
             }
