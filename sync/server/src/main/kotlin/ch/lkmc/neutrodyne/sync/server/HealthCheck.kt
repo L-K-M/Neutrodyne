@@ -15,7 +15,9 @@ object HealthCheck {
     }
 
     internal fun check(environment: Map<String, String>): Int {
-        val listen = ListenAddress.parse(environment[ServerEnv.LISTEN] ?: "127.0.0.1:8787") ?: return fail("invalid listen address")
+        val listen =
+            ListenAddress.parse(environment[ServerEnv.LISTEN] ?: "127.0.0.1:8787")
+                ?: return fail("invalid listen address")
         val host = if (listen.host.contains(':')) "::1" else "127.0.0.1"
         return try {
             HttpClient
