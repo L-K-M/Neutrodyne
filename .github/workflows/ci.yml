@@ -299,7 +299,7 @@ jobs:
       # M7 evidence gate: the four share/deep-link journeys and the five shared
       # replay cases must pass on each CI device (PLAN M7 AC4, AC7, AC8, AC10).
       - name: Require discovery cases on both CI devices
-        run: python3 scripts/ci/assert-discovery-tests.py ci app/build/outputs/androidTest-results --device api26 --device api36
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # Always upload, not only on failure: instrumented-device proofs on reviewable PRs are
         # verified from the per-device result XML, which only exists if success uploads too.

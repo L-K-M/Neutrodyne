@@ -107,7 +107,7 @@ jobs:
       # run on every nightly GMD (PLAN M7 AC4, AC7, AC8, AC10).
       - name: Require discovery cases on the nightly devices
         if: inputs.scope != 'youtube-smoke'
-        run: python3 scripts/ci/assert-discovery-tests.py nightly app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
       # TODO (M6b): release leg — :benchmark's out-of-process release smoke
       # journeys and E10's companions against :app release on api36 (09).
       - name: Report failure
@@ -226,7 +226,7 @@ jobs:
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
             python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected
-            python3 scripts/ci/assert-discovery-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -270,7 +270,7 @@ jobs:
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected
-            python3 scripts/ci/assert-discovery-tests.py api37 app/build/outputs/androidTest-results/connected/release --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected
             sha256sum "$RELEASE_ABI_TARGET_APK" > "$RELEASE_ABI_TARGET_SHA"
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
       # The device log of both emulator steps, for diagnosing a failed run (system_server state).
@@ -357,7 +357,7 @@ jobs:
       - name: Require real release playback smoke
         run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36
       - name: Require discovery cases in the release smoke
-        run: python3 scripts/ci/assert-discovery-tests.py release app/build/outputs/androidTest-results --device api36
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
