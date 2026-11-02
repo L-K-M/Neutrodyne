@@ -535,14 +535,14 @@
 }
 -keep class ch.lkmc.neutrodyne.core.ui.resources.Res {
 }
--keep class ch.lkmc.neutrodyne.core.ui.resources.String4_commonMainKt {
+-keep class ch.lkmc.neutrodyne.core.ui.resources.String5_commonMainKt {
   public static org.jetbrains.compose.resources.StringResource getNav_discover(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_downloads(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_feeds(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_library(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_up_next(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
--keep class ch.lkmc.neutrodyne.core.ui.resources.String6_commonMainKt {
+-keep class ch.lkmc.neutrodyne.core.ui.resources.String7_commonMainKt {
   public static org.jetbrains.compose.resources.StringResource getSettings(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
 -keep class ch.lkmc.neutrodyne.di.AndroidAppGraph$Factory$Impl {
