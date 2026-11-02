@@ -434,7 +434,7 @@ class DownloadControllerImplTest {
             fixture { f ->
                 f.insert(f.episode(), State.COMPLETED)
                 f.noticeSources = NoticeSources(notificationsDenied = true)
-                assertEquals(emptySet(), f.controller.observeAll().first().notices)
+                assertEquals(emptySet(), notices(f))
                 val waiting = f.episode()
                 f.insert(waiting, State.QUEUED)
                 f.dao.updateUnclaimed(
@@ -443,18 +443,18 @@ class DownloadControllerImplTest {
                 )
                 assertEquals(
                     setOf(DownloadNotice.NOTIFICATIONS_OFF, DownloadNotice.STORAGE_LOW),
-                    f.controller.observeAll().first().notices,
+                    notices(f),
                 )
                 f.network.setStatus(FakeNetworkMonitor.ONLINE.copy(isMetered = true))
                 f.noticeSources = NoticeSources(dataSaver = true)
                 assertEquals(
                     setOf(DownloadNotice.STORAGE_LOW, DownloadNotice.DATA_SAVER),
-                    f.controller.observeAll().first().notices,
+                    notices(f),
                 )
                 f.noticeSources = NoticeSources(backgroundRestricted = true)
                 assertEquals(
                     setOf(DownloadNotice.STORAGE_LOW, DownloadNotice.BACKGROUND_RESTRICTED),
-                    f.controller.observeAll().first().notices,
+                    notices(f),
                 )
                 f.noticeSources = NoticeSources()
                 val missing = f.episode()
@@ -465,16 +465,19 @@ class DownloadControllerImplTest {
                 )
                 assertEquals(
                     setOf(DownloadNotice.STORAGE_LOW, DownloadNotice.ROOT_UNAVAILABLE),
-                    f.controller.observeAll().first().notices,
+                    notices(f),
                 )
                 f.dao.updateUnclaimed(
                     f.row(waiting).copy(waitReason = Wait.NONE, lastError = null),
                     State.QUEUED,
                 )
                 f.rootAvailable = false
-                assertEquals(setOf(DownloadNotice.ROOT_UNAVAILABLE), f.controller.observeAll().first().notices)
+                assertEquals(setOf(DownloadNotice.ROOT_UNAVAILABLE), notices(f))
             }
         }
+
+    private suspend fun notices(f: Fixture): Set<DownloadNotice> =
+        f.controller.observeAll().first().notices
 
     private suspend fun fixture(block: suspend (Fixture) -> Unit) {
         val db = TestDb.inMemory()
