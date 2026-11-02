@@ -4,12 +4,17 @@ package ch.lkmc.neutrodyne.download.impl
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.JobLanePoker
+import ch.lkmc.neutrodyne.core.datastore.SettingStore
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -25,12 +30,12 @@ internal class DesktopDownloadActivity :
     private val lock = Any()
     private val tokens = mutableSetOf<String>()
     private val revision = MutableStateFlow(0L)
-    private val activeEpisodes = MutableStateFlow<Set<Long>>(emptySet())
+    private val activeEpisodes = MutableStateFlow<Map<DownloadLane, Set<Long>>>(emptyMap())
     val changes = revision.asStateFlow()
 
     fun liveTokens(): Set<String> = synchronized(lock) { tokens.toSet() }
 
-    fun hasActiveTransfers(): Boolean = activeEpisodes.value.isNotEmpty()
+    fun hasActiveTransfers(): Boolean = activeEpisodes.value.values.any { it.isNotEmpty() }
 
     fun changed() {
         revision.update { it + 1 }
@@ -56,10 +61,30 @@ internal class DesktopDownloadActivity :
         changed()
     }
 
-    override fun active(episodeIds: Set<Long>) {
-        activeEpisodes.value = episodeIds.toSet()
+    override fun active(episodeIds: Set<Long>) = active(DownloadLane.MANUAL, episodeIds)
+
+    private fun active(
+        lane: DownloadLane,
+        episodeIds: Set<Long>,
+    ) {
+        activeEpisodes.update { it + (lane to episodeIds.toSet()) }
         changed()
     }
+
+    fun reporter(lane: DownloadLane): DrainReporter =
+        object : DrainReporter {
+            override fun active(episodeIds: Set<Long>) = active(lane, episodeIds)
+
+            override fun bytes(
+                downloaded: Long,
+                total: Long?,
+            ) = Unit
+        }
+
+    fun observeBusy(settings: SettingStore): Flow<Boolean> =
+        combine(activeEpisodes, settings.observe(DownloadSettingKeys.MOVE_TARGET)) { episodes, target ->
+            episodes.values.any { it.isNotEmpty() } || target.isNotEmpty()
+        }.distinctUntilChanged()
 
     override fun bytes(
         downloaded: Long,
@@ -72,13 +97,12 @@ internal class DesktopDownloadScheduler(
     private val wakeEngine: (DownloadLane) -> Unit,
 ) : DownloadScheduler {
     override suspend fun ensureScheduled(lane: DownloadLane) {
-        require(lane == DownloadLane.MANUAL) { "AUTO scheduling belongs to M6b" }
         wake(lane)
-        poker().poke(DesktopDownloadLane.NAME)
+        poker().poke(DesktopDownloadLane.name(lane))
     }
 
     override fun wake(lane: DownloadLane) {
-        if (lane == DownloadLane.MANUAL) wakeEngine(lane)
+        wakeEngine(lane)
     }
 
     override suspend fun scheduleWake(
@@ -91,30 +115,44 @@ internal class DesktopDownloadScheduler(
     }
 }
 
+/** Both lanes share the gate, so AUTO cannot claim before crash recovery and the watermark pass. */
+internal class DesktopDownloadStartup(
+    private val pass: suspend () -> Unit,
+) {
+    private val mutex = Mutex()
+    private var complete = false
+
+    suspend fun ensureStarted() =
+        mutex.withLock {
+            if (complete) return@withLock
+            pass()
+            complete = true
+        }
+}
+
 internal class DesktopDownloadLane(
-    private val reconcile: suspend () -> Unit,
+    private val lane: DownloadLane,
+    private val startup: DesktopDownloadStartup,
+    private val daily: suspend (Instant) -> Unit,
+    private val connected: () -> Boolean,
     private val drain: suspend (DrainRequest) -> DrainOutcome,
     private val activity: DesktopDownloadActivity,
 ) : JobLane {
-    override val name = NAME
-    private val startup = Mutex()
-    private var reconciled = false
+    override val name = name(lane)
 
     override suspend fun run(now: Instant) {
-        startup.withLock {
-            if (!reconciled) {
-                reconcile()
-                reconciled = true
-            }
-        }
+        startup.ensureStarted()
+        if (lane == DownloadLane.AUTO) daily(now)
+        if (!connected()) return
+
         try {
             drain(
                 DrainRequest(
-                    setOf(DownloadLane.MANUAL),
-                    RunnerToken("desk:MANUAL:${UUID.randomUUID()}"),
+                    setOf(lane),
+                    RunnerToken("desk:$lane:${UUID.randomUUID()}"),
                     softDeadlineElapsed = null,
                     waitHorizonMs = WAIT_HORIZON_MS,
-                    reporter = activity,
+                    reporter = activity.reporter(lane),
                     exit = activity,
                     cancellationIntent = { StopIntent.RunnerStopped(DownloadStopReasons.APP_QUIT) },
                 ),
@@ -126,6 +164,31 @@ internal class DesktopDownloadLane(
 
     companion object {
         const val NAME = "downloads-manual"
+        const val AUTO_NAME = "downloads-auto"
+
+        fun name(lane: DownloadLane) = if (lane == DownloadLane.MANUAL) NAME else AUTO_NAME
+
         private const val WAIT_HORIZON_MS = 60_000L
+    }
+}
+
+/** Persist only a completed pass: failures and cancellation remain due on the next tick. */
+internal class DesktopDownloadDaily(
+    private val settings: SettingStore,
+    private val pass: suspend () -> Unit,
+) {
+    private val mutex = Mutex()
+
+    suspend fun run(now: Instant) =
+        mutex.withLock {
+            val at = now.toEpochMilliseconds()
+            val last = settings.get(DownloadSettingKeys.CLEANUP_LAST_AT)
+            if (last != 0L && at - last < DAILY_INTERVAL_MS) return@withLock
+            pass()
+            settings.set(DownloadSettingKeys.CLEANUP_LAST_AT, at)
+        }
+
+    companion object {
+        const val DAILY_INTERVAL_MS = 24L * 60 * 60 * 1000
     }
 }
