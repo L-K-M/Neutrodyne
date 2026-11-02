@@ -24,14 +24,13 @@ import java.util.concurrent.TimeUnit
  * `@Provides @SingleIn(…)` container in `NetworkIslandBindings`/`NetworkIslandYtxBindings`
  * (per-process singletons, S8 question 6) — one class cannot be `@SingleIn` two scopes.
  */
-class CoreClients
-    @Inject
-    constructor(
-        private val ua: UserAgentInterceptor,
-        private val lanGuard: LocalNetworkGuard,
-        private val hints: DnsFamilyHints,
-        @param:DebugInterceptors private val debugInterceptors: Set<Interceptor>,
-    ) : ConnectionPoolEvictor {
+@Inject
+class CoreClients(
+    private val ua: UserAgentInterceptor,
+    private val lanGuard: LocalNetworkGuard,
+    private val hints: DnsFamilyHints,
+    @param:DebugInterceptors private val debugInterceptors: Set<Interceptor>,
+) : ConnectionPoolEvictor {
     /**
      * The desktop-test seam (03 note 2026-11-02): the add pipeline's LAN refusal is syntactic,
      * so discovery tests serve their MockWebServer under a fake public host that [baseDns] maps
