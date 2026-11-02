@@ -12,6 +12,7 @@ import org.junit.Test
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
@@ -118,6 +119,37 @@ class PreConfirmationPeerGuardTest {
             assertEquals(1, server.requestCount)
             assertZeroConnections(recorder)
         }
+    }
+
+    @Test fun mixedDnsAnswersCannotOpenTheLocalRecorder() {
+        val clients = newNetworkClients(
+            baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1"), InetAddress.getByName(LAN_ADDR)) },
+            isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+        )
+        server.enqueue(mockResponse(body = "public stand-in"))
+        val target = server.url("/feed").newBuilder().host("mixed.test").build()
+        assertFailsWith<LocalNetworkUnsupportedException> {
+            clients.image.newCall(marked(target)).execute().use { }
+        }
+        assertEquals(0, server.requestCount)
+        assertEquals(0, lan.requestCount)
+    }
+
+    @Test fun connectedPeerStillWinsWhenDnsChangesAfterPreflight() {
+        val lookups = AtomicInteger()
+        val clients = newNetworkClients(
+            baseDns = Dns {
+                listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR))
+            },
+            isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+        )
+        server.enqueue(mockResponse(body = "public stand-in"))
+        val target = server.url("/feed").newBuilder().host("rebound.test").build()
+        assertFailsWith<LocalNetworkUnsupportedException> {
+            clients.image.newCall(marked(target)).execute().use { }
+        }
+        assertEquals(0, server.requestCount)
+        assertEquals(0, lan.requestCount)
     }
 
     private fun assertZeroConnections(recorder: ServerSocket) {
