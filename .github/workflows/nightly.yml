@@ -906,11 +906,11 @@ jobs:
         if: always()
         with:
           name: bmgr-legacy-negative-api${{ matrix.api }}
-          path: build/bmgr-api29-probe/
-          if-no-files-found: error
-
+          path: |
+            build/bmgr-api29-probe/
             **/build/reports/tests/
             **/build/test-results/
+          if-no-files-found: error
 
   server-convergence:
     runs-on: ubuntu-24.04
