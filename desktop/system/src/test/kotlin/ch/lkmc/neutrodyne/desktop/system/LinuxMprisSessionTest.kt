@@ -3,6 +3,9 @@ package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
@@ -94,6 +97,16 @@ class LinuxMprisSessionTest {
                     RATE_EPSILON,
                 )
             }
+        }
+    }
+
+    @Test
+    fun wrongTrackCannotSeekTheCurrentEpisode() = runBlocking {
+        assumeTrue("private session bus required", System.getenv("DBUS_SESSION_BUS_ADDRESS") != null)
+        LinuxMprisSession.open().use { session ->
+            session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
+            session.SetPosition(DBusPath("/not/the/current/track"), 1_000_000)
+            kotlin.test.assertNull(withTimeoutOrNull(100) { session.commands.first() })
         }
     }
 
