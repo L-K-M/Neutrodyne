@@ -82,9 +82,18 @@ class MediaLibraryTreeTest {
                 val podcast = db.podcastDao().insertPodcast(podcastEntity(artworkKey = "first-member-art"))
                 val group = db.groupDao().insertGroupOrIgnore(groupEntity(orderKey = "a0"))
                 db.groupDao().insertMember(PodcastGroupMemberEntity(group, podcast, "a0", 0))
-                val folderArt = h.tree.children("groups", 0, 100).single().mediaMetadata.artworkUri
+                val folderArt =
+                    h.tree
+                        .children("groups", 0, 100)
+                        .single()
+                        .mediaMetadata.artworkUri
                 assertNotNull(folderArt)
-                assertEquals(folderArt, h.tree.item("group:$group")!!.mediaMetadata.artworkUri)
+                assertEquals(
+                    folderArt,
+                    h.tree
+                        .item("group:$group")!!
+                        .mediaMetadata.artworkUri,
+                )
             }
         }
     }
