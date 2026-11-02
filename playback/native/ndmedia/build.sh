@@ -98,20 +98,25 @@ case "$TARGET" in
             [ -n "$VS_PATH" ] || die "vswhere found no MSVC x64 toolchain"
             VCVARS="$VS_PATH/VC/Auxiliary/Build/vcvars64.bat"
             [ -f "$VCVARS" ] || die "vcvars64.bat not found at $VCVARS"
-            ENV_FILE="$(mktemp)"
-            # cmd's argument quoting turns a quoted vcvars path into a literal
-            # command name under MSYS2; a wrapper .bat sidesteps the parse.
-            BAT_FILE="$ENV_FILE.bat"
-            printf 'call "%s" >NUL 2>&1\r\nset > "%s"\r\n' \
-                "$(cygpath -w "$VCVARS")" "$(cygpath -w "$ENV_FILE")" > "$BAT_FILE"
-            cmd //c "$(cygpath -w "$BAT_FILE")" || die "vcvars64.bat failed"
-            rm -f "$BAT_FILE"
+            # The wrapper .bat and its env dump live in the build tree, and cmd
+            # runs the .bat by bare name from its own directory: no temp path
+            # crosses the MSYS2/cmd boundary (the mktemp-based .bat reached cmd
+            # as a path it could not find). vcvars may change the directory, so
+            # the .bat restores it before dumping the environment.
+            VCVARS_WORK="$NATIVE_ROOT/build/ndmedia/vcvars-$TARGET"
+            mkdir -p "$VCVARS_WORK"
+            printf '@set "OLDCD=%%CD%%"\r\ncall "%s" >NUL 2>&1\r\n@cd /d "%%OLDCD%%"\r\nset > "env.txt"\r\n' \
+                "$(cygpath -w "$VCVARS")" > "$VCVARS_WORK/vcvars-env.bat"
+            (cd "$VCVARS_WORK" && cmd //c vcvars-env.bat) ||
+                die "vcvars64.bat failed"
+            rm -f "$VCVARS_WORK/vcvars-env.bat"
+            ENV_FILE="$VCVARS_WORK/env.txt"
+            [ -s "$ENV_FILE" ] || die "vcvars64.bat produced no environment"
             while IFS= read -r line; do
                 case "$line" in
                     [A-Za-z_]*=*) export "${line%%=*}=${line#*=}" ;;
                 esac
             done < "$ENV_FILE"
-            rm -f "$ENV_FILE"
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
         (cd "$BUILD_ROOT" && cl -nologo -O2 -LD \

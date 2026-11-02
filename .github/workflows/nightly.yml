@@ -715,6 +715,9 @@ jobs:
         include:
           - target: windows-x64
             runs-on: windows-2025
+            # The MSVC FFmpeg compile is the slowest leg; the shared 90-minute
+            # ceiling once cut it off mid-build, so the leg gets its own.
+            timeout-minutes: 150
           - target: macos-arm64
             runs-on: macos-15
           - target: linux-x64
@@ -722,7 +725,7 @@ jobs:
           - target: linux-arm64
             runs-on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.timeout-minutes || 90 }}
     permissions:
       contents: read
       issues: write
@@ -762,7 +765,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update -qq
-          pkgs="binutils xvfb dbus-x11"
+          pkgs="binutils xvfb dbus-x11 dbus-daemon"
           [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
           sudo apt-get install -y -qq $pkgs
       # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell

@@ -100,23 +100,6 @@ verify_checksum() { # verify_checksum <file> <expected>
     [ "$actual" = "$2" ] || die "checksum mismatch for $1: expected $2, got $actual"
 }
 
-download() { # download <file> <url> [fallback-url]
-    if [ -s "$1" ]; then
-        log "reusing $1"
-        return 0
-    fi
-    log "downloading $2"
-    if curl -fsSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$1" "$2"; then
-        return 0
-    fi
-    [ -n "${3:-}" ] || die "download failed: $2"
-    # ffmpeg.org serves from a single host with no official mirror; the lock's
-    # fallback serves identical bytes, which verify_checksum pins exactly.
-    log "download failed, trying the lock's fallback $3"
-    curl -fsSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$1" "$3" ||
-        die "download failed: $2 and $3"
-}
-
 # bounded <seconds> <command...> — `timeout` is GNU coreutils: macOS has neither
 # it nor `gtimeout` without a Homebrew coreutils, so a bound that names it would
 # fail there before gpg ever runs. The watchdog kills the command when it
@@ -133,6 +116,32 @@ bounded() {
     kill "$watchdog" 2>/dev/null
     wait "$watchdog" 2>/dev/null || true
     return "$status"
+}
+
+download() { # download <file> <url> [fallback-url]
+    if [ -s "$1" ]; then
+        log "reusing $1"
+        return 0
+    fi
+    log "downloading $2"
+    # A dying ffmpeg.org accepts connections and then trickles nothing, which
+    # curl's own retry loop would sit through for hours. --speed-limit aborts a
+    # stalled transfer within the stall window, and the outer watchdog bounds
+    # the whole call so the lock's fallback stays reachable well inside the
+    # job's timeout.
+    if
+        bounded 600 curl -fsSL --retry 1 --connect-timeout 20 --max-time 480 \
+            --speed-limit 1024 --speed-time 60 -o "$1" "$2"
+    then
+        return 0
+    fi
+    [ -n "${3:-}" ] || die "download failed: $2"
+    # ffmpeg.org serves from a single host with no official mirror; the lock's
+    # fallback serves identical bytes, which verify_checksum pins exactly.
+    log "download failed, trying the lock's fallback $3"
+    bounded 600 curl -fsSL --retry 1 --connect-timeout 20 --max-time 480 \
+        --speed-limit 1024 --speed-time 60 -o "$1" "$3" ||
+        die "download failed: $2 and $3"
 }
 
 verify_signature() {
@@ -246,20 +255,26 @@ case "$TARGET" in
             VCVARS="$VS_PATH/VC/Auxiliary/Build/vcvars64.bat"
             [ -f "$VCVARS" ] || die "vcvars64.bat not found at $VCVARS"
             log "loading the MSVC x64 environment from vcvars64.bat"
-            ENV_FILE="$(mktemp)"
-            # cmd's argument quoting turns a quoted vcvars path into a literal
-            # command name under MSYS2; a wrapper .bat sidesteps the parse.
-            BAT_FILE="$ENV_FILE.bat"
-            printf 'call "%s" >NUL 2>&1\r\nset > "%s"\r\n' \
-                "$(cygpath -w "$VCVARS")" "$(cygpath -w "$ENV_FILE")" > "$BAT_FILE"
-            cmd //c "$(cygpath -w "$BAT_FILE")" || die "vcvars64.bat failed"
-            rm -f "$BAT_FILE"
+            # The wrapper .bat and its env dump live in the build tree, and cmd
+            # runs the .bat by bare name from its own directory: no temp path
+            # crosses the MSYS2/cmd boundary. (The earlier mktemp-based .bat
+            # reached cmd as a path it could not find, because the runner's
+            # TMPDIR form is not under MSYS2's control; a quoted vcvars path
+            # reached it as a literal command name for the same reason.)
+            VCVARS_WORK="$CACHE/vcvars-$TARGET"
+            mkdir -p "$VCVARS_WORK"
+            printf '@set "OLDCD=%%CD%%"\r\ncall "%s" >NUL 2>&1\r\n@cd /d "%%OLDCD%%"\r\nset > "env.txt"\r\n' \
+                "$(cygpath -w "$VCVARS")" > "$VCVARS_WORK/vcvars-env.bat"
+            (cd "$VCVARS_WORK" && cmd //c vcvars-env.bat) ||
+                die "vcvars64.bat failed"
+            rm -f "$VCVARS_WORK/vcvars-env.bat"
+            ENV_FILE="$VCVARS_WORK/env.txt"
+            [ -s "$ENV_FILE" ] || die "vcvars64.bat produced no environment"
             while IFS= read -r line; do
                 case "$line" in
                     [A-Za-z_]*=*) export "${line%%=*}=${line#*=}" ;;
                 esac
             done < "$ENV_FILE"
-            rm -f "$ENV_FILE"
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
         command -v nasm >/dev/null 2>&1 || log "warning: NASM is not on PATH; x86 assembly is disabled"
