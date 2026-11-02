@@ -57,6 +57,8 @@ class _SliceReader:
 
 
 CLASS = "ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest"
+# android.media.session.PlaybackState: STATE_PLAYING and STATE_BUFFERING.
+AUTOPLAY_STATES = (3, 6)
 PHASES = (
     "seedPausedEpisodeWithLocalArtwork",
     "offlineSystemUiCardHasLocalArtworkWithoutAutoplay",
@@ -67,6 +69,14 @@ PHASES = (
 def require_one_pass(output):
     if not re.search(r"OK \(1 test\)", output) or re.search(r"INSTRUMENTATION_STATUS_CODE: -(?:2|3|4)", output):
         raise ValueError("Expected exactly one passing, non-skipped host phase")
+
+
+def require_no_autoplay(sessions, package):
+    """After reboot the app has no session, or one that is neither playing nor buffering toward play."""
+    for block in sessions.split(f"package={package}\n")[1:]:
+        state = re.search(r"state=PlaybackState \{state=(?:\w+\()?(\d+)", block.split("package=", 1)[0])
+        if state and int(state[1]) in AUTOPLAY_STATES:
+            raise ValueError(f"The app started playback by itself after reboot: state {state[1]}")
 
 
 def main():
@@ -134,6 +144,10 @@ def main():
             adb("shell", "cmd", "audio", "set-enable-hardening", "throw")
         if adb("shell", "settings", "get", "global", "airplane_mode_on").strip() != "1":
             raise ValueError("Offline card phase requires airplane mode after reboot")
+        # am instrument restarts the app, which would hide playback the boot itself started.
+        sessions = adb("shell", "dumpsys", "media_session")
+        (args.output / "media-session-after-boot.txt").write_text(sessions)
+        require_no_autoplay(sessions, args.package)
         phase(PHASES[1])
         adb("shell", "cmd", "connectivity", "airplane-mode", "disable")
         adb("shell", "svc", "wifi", "enable")

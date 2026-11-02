@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.NeutrodyneApplication
 import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.testing.Nightly
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -63,6 +64,8 @@ class RebootResumptionTest {
             }
             graph.databaseOpener.awaitOpen()
             graph.playbackController.dismiss()
+            // Smart resume would rewind by a stale-dependent amount; the proof wants the saved position.
+            graph.settingsRepository.set(PlaybackSettingKeys.SMART_RESUME, false)
             val url = checkNotNull(InstrumentationRegistry.getArguments().getString("sourceUrl"))
             val key = ArtworkKeys.forUrl("https://reboot.invalid/local-cover.png")
             val image = File(app.filesDir, "artwork/$key.png")
@@ -174,15 +177,16 @@ class RebootResumptionTest {
             play.click()
             val controller = connect()
             try {
-                await {
-                    withContext(Dispatchers.Main) {
-                        controller.isPlaying &&
-                            controller.currentPosition >= SAVED_POSITION_MS
-                    }
-                }
+                // The first playing sample: waiting for the saved position would also fit a restart at zero.
+                await { withContext(Dispatchers.Main) { controller.isPlaying } }
+                val resumedAt = withContext(Dispatchers.Main) { controller.currentPosition }
+                val savedAt = saved.getLong("position", -1)
+                assertTrue(
+                    "Resumed at $resumedAt from saved $savedAt",
+                    resumedAt in (savedAt - SEEK_TOLERANCE_MS)..(savedAt + 10_000),
+                )
                 withContext(Dispatchers.Main) {
                     assertEquals("episode:${saved.getLong("episode", -1)}", controller.currentMediaItem?.mediaId)
-                    assertTrue(controller.currentPosition < SAVED_POSITION_MS + 10_000)
                 }
                 val before = withContext(Dispatchers.Main) { controller.currentPosition }
                 await { withContext(Dispatchers.Main) { controller.currentPosition > before + 200 } }
@@ -225,6 +229,7 @@ class RebootResumptionTest {
     private companion object {
         const val TITLE = "M5 reboot evidence"
         const val SAVED_POSITION_MS = 9_000L
+        const val SEEK_TOLERANCE_MS = 500L
         const val WAIT_MS = 60_000L
     }
 }

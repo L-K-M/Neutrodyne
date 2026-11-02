@@ -233,6 +233,7 @@ class VideoAsAudioTest {
         }
         assertTrue(db.episodeDao().byId(id)!!.isVideo)
         device.sleep()
+        await { !device.isScreenOn }
         val before = withContext(Dispatchers.Main) { connected.currentPosition }
         await { withContext(Dispatchers.Main) { connected.currentPosition > before + 1_000 } }
         assertTrue(app.getSystemService(AudioManager::class.java).activePlaybackConfigurations.isNotEmpty())

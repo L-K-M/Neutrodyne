@@ -25,6 +25,20 @@ class RebootEvidenceTest(unittest.TestCase):
                 reboot.require_one_pass(output)
 
 
+class AutoplayEvidenceTest(unittest.TestCase):
+    SESSION = "      package=ch.lkmc.neutrodyne\n      active=true\n      state=PlaybackState {{state={state}, position=0}}\n"
+    OTHER = "      package=com.other\n      state=PlaybackState {state=PLAYING(3), position=0}\n"
+
+    def test_a_paused_or_absent_session_passes(self):
+        for dump in ("", self.OTHER, self.SESSION.format(state="PAUSED(2)") + self.OTHER, self.SESSION.format(state="2")):
+            reboot.require_no_autoplay(dump, "ch.lkmc.neutrodyne")
+
+    def test_playing_or_buffering_is_refused(self):
+        for state in ("PLAYING(3)", "3", "BUFFERING(6)", "6"):
+            with self.assertRaises(ValueError):
+                reboot.require_no_autoplay(self.SESSION.format(state=state), "ch.lkmc.neutrodyne")
+
+
 class RangeHandlerTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

@@ -540,9 +540,9 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   The API 37 release leg additionally runs `scripts/ci/playback-reboot.py`:
   three independent instrumentation processes seed and pause a real
   episode with pinned local artwork, end normally, then the host reboots
-  and unlocks the guest, disables networking, inspects the real SystemUI
-  resumption card, and taps its play action with the loopback source
-  restored. It enables audio hardening `throw` after reboot and archives
+  and unlocks the guest, disables networking, refuses a media session that
+  is playing or buffering, inspects the real SystemUI resumption card, and
+  taps its play action with the loopback source restored. It enables audio hardening `throw` after reboot and archives
   phase output, screenshots, hierarchy dumps, package fingerprint and
   logs under `app/build/reports/playback-reboot` (artifact:
   `api37-playback-results`). These host-only phases skip in ordinary

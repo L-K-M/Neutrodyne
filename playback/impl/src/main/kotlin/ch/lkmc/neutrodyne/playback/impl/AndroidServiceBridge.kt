@@ -544,6 +544,7 @@ internal class AndroidServiceBridge(
             // must not be touched.
             if (detached) {
                 ports.sessions.clearCurrent(null, access.clock.now())
+                access.gate.clearPending()
                 return@withLock
             }
             cancelPending()

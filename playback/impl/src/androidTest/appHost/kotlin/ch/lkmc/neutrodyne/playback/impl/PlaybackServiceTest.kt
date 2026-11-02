@@ -282,8 +282,8 @@ class PlaybackServiceTest {
             if (networkId != null) {
                 device.executeShellCommand("cmd netpolicy set metered-network $networkId true")
             }
-            graph.settingsRepository.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER)
             try {
+                graph.settingsRepository.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER)
                 val connectivity = app.getSystemService(ConnectivityManager::class.java)
                 phase("metered/await-metered")
                 await {
@@ -326,15 +326,15 @@ class PlaybackServiceTest {
                     collecting.cancel()
                 }
             } finally {
-                graph.settingsRepository.set(
-                    PlaybackSettingKeys.STREAM_ON_METERED,
-                    PlaybackSettingKeys.STREAM_ON_METERED.default,
-                )
                 if (networkId != null) {
                     device.executeShellCommand("cmd netpolicy set metered-network $networkId undefined")
                 } else {
                     setWifiEnabled(true)
                 }
+                graph.settingsRepository.set(
+                    PlaybackSettingKeys.STREAM_ON_METERED,
+                    PlaybackSettingKeys.STREAM_ON_METERED.default,
+                )
             }
         }
 
