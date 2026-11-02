@@ -92,7 +92,10 @@ class SmokeTest {
     fun aboutShowsVersionAndAbi() {
         compose.enableAccessibilityChecks()
         openSettings()
-        compose.onNodeWithText("About").performClick()
+        // The About row sits at the bottom of the settings list; on the small API 37
+        // window it is below the fold, so it is scrolled into view first, as the
+        // Licences row below is.
+        compose.onNodeWithText("About").performScrollTo().performClick()
         compose.waitForIdle()
 
         compose

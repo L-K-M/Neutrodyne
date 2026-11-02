@@ -4,11 +4,13 @@ package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -18,6 +20,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -94,6 +98,33 @@ class SettingsScreensTest {
             onNodeWithText("Theme, dynamic colour and contrast").assertExists()
             onNodeWithText("About").assertExists()
             onNodeWithText("Licences").assertExists()
+        }
+
+    /** Diagnostic for the nightly TouchTargetSizeCheck miss: every clickable node on the
+     * scrolled 320x640 settings home must keep a 48dp target. */
+    @Test
+    fun settingsHomeSmallTargetsDump() =
+        runDesktopComposeUiTest(width = 320, height = 640) {
+            setSettingsRoot()
+            openSettings()
+            onNodeWithText("Licences").performScrollTo()
+            waitForIdle()
+            val min = 48.dp.value
+            val offenders = mutableListOf<String>()
+            onAllNodes(hasClickAction(), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .forEach { node ->
+                    val b = node.boundsInRoot
+                    val line =
+                        "bounds=$b w=${b.width} h=${b.height} " +
+                            "role=${node.config.getOrNull(SemanticsProperties.Role)} " +
+                            "cd=${node.config.getOrNull(SemanticsProperties.ContentDescription)} " +
+                            "text=${node.config.getOrNull(SemanticsProperties.Text)} " +
+                            "tag=${node.config.getOrNull(SemanticsProperties.TestTag)}"
+                    println("CLICKABLE $line")
+                    if (b.width < min || b.height < min) offenders += line
+                }
+            kotlin.test.assertTrue(offenders.isEmpty(), "sub-48dp targets:\n" + offenders.joinToString("\n"))
         }
 
     @Test
