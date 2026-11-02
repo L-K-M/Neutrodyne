@@ -3,15 +3,16 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.Outcome
-import ch.lkmc.neutrodyne.core.data.add.AddInputNormalizer
-import ch.lkmc.neutrodyne.core.data.add.NormalizedInput
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
+import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
@@ -327,8 +328,9 @@ class AddPodcastResolverTest {
 
     @Test
     fun sniffedNonFeedsFailWithTheRightError() =
-        runTest {
+        runBlocking {
             server.enqueue(mockResponse(body = "<!DOCTYPE html><html><body>hi</body></html>"))
+            repeat(5) { server.enqueue(mockResponse(404, "no feed")) }
             assertEquals(
                 AddPodcastError.NotAFeed,
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(feedUrl())).error,

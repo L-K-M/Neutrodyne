@@ -22,11 +22,19 @@ interface AddPodcastResolver {
         credentials: BasicCredentials,
     ): AddResolution
 
+    /** Explicit one-call consent, without changing the Apple preference. */
+    suspend fun lookupOnce(input: String): AddResolution
+
     /** `PodcastPreviewKey(feedUrl)` (directory results): reuses a cached entry or fetches anew. */
     suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError>
 }
 
 sealed interface AddResolution {
+    data class LookupRequired(
+        val input: String,
+        val provider: ch.lkmc.neutrodyne.core.model.ProviderId,
+    ) : AddResolution
+
     data class Feed(
         val preview: FeedPreview,
     ) : AddResolution
