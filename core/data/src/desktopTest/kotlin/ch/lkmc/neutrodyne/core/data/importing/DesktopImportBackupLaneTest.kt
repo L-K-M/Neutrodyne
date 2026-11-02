@@ -50,6 +50,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -152,6 +153,10 @@ class DesktopImportBackupLaneTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
     private val episodeMerger =
         RestoreEpisodeMerger(
