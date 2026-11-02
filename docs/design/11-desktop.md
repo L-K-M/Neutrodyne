@@ -1892,7 +1892,9 @@ active default endpoint; jack detection still needs hardware proof. The
 Objective-C prototype registers Now Playing, remote commands, NSWorkspace
 sleep/wake and Core Audio listeners on Cocoa's main queue. Their native
 queues are polled by `NativeSystemMediaSession`, so no native OS callback
-enters the JVM. Their API registration suite is separate from physical key,
+enters the JVM. `LinuxSuspendMonitor` subscribes to logind's
+`PrepareForSleep` on the system bus; its private-bus test proves signal
+transport, with real suspend ordering still open. Their API registration suite is separate from physical key,
 ad-hoc signing, device-removal and suspend proofs. Neither session is wired
 into the production graph.
 
