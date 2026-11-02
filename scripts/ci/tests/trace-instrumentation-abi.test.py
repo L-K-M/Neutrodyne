@@ -72,6 +72,7 @@ ANALYSIS_ROOT_ENTRIES = {
         "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
         "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
         "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
+        "ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest",
         "androidx.test.runner.AndroidJUnitRunner",
         "androidx.test.ext.junit.runners.AndroidJUnit4",
         "org.junit.Test",
