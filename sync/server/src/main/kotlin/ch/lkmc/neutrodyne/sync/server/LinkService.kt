@@ -161,6 +161,19 @@ internal class LinkService(
         val now = inputs.wallMs()
         val hash = AuthSecrets.hash(deviceCode)
         val raw = secrets.secret(if (purpose == LinkPurpose.DEVICE) "nds_" else "ndw_")
+        // Polls inside the advertised interval are rejected from a read transaction so an
+        // impatient caller cannot queue durable writes on the single shared writer.
+        val throttled =
+            store.readAuth {
+                val link = link(hash) ?: return@readAuth null
+                val last = link.lastPollAt
+                if (last != null && now - last < link.intervalSeconds * 1000L) {
+                    LinkPoll.Error("slow_down")
+                } else {
+                    null
+                }
+            }
+        if (throttled != null) return throttled
         return store.writeAuth {
             val link = link(hash) ?: return@writeAuth LinkPoll.Error("expired_token")
             if (!AuthSecrets.same(hash, link.deviceHash) || link.purpose != purpose || link.consumedAt != null ||
@@ -172,7 +185,6 @@ internal class LinkService(
             if (link.deniedAt != null) return@writeAuth LinkPoll.Error("access_denied")
             val last = link.lastPollAt
             if (last != null && now - last < link.intervalSeconds * 1000L) {
-                save(link.copy(lastPollAt = now, intervalSeconds = (link.intervalSeconds + 5).coerceAtMost(600)))
                 return@writeAuth LinkPoll.Error("slow_down")
             }
             save(link.copy(lastPollAt = now))

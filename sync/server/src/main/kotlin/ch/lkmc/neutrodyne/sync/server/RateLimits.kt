@@ -35,6 +35,11 @@ internal class RateLimits(
                 rateLimiter(20, 1.hours)
                 requestKey { address(it) }
             }
+            // Link token polls reach the shared writer; cap each IP before that.
+            register(LINK_TOKEN) {
+                rateLimiter(30, 1.minutes)
+                requestKey { address(it) }
+            }
             register(LINK_APPROVE) {
                 rateLimiter(5, 15.minutes)
                 requestKey { account(it) }
@@ -78,6 +83,7 @@ internal class RateLimits(
         val WEB = RateLimitName("web")
         val LOGIN = RateLimitName("login")
         val LINK_START = RateLimitName("link-start")
+        val LINK_TOKEN = RateLimitName("link-token")
         val LINK_APPROVE = RateLimitName("link-approve")
         val SYNC_IP = RateLimitName("sync-ip")
         val SYNC_ACCOUNT = RateLimitName("sync-account")

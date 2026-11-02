@@ -57,11 +57,13 @@ internal class AuthRoutes(
                 call.respond(services.links.start(call.receive<LinkStartRequest>().device, call.clientIp(config)))
             }
         }
-        route.post("/api/v1/auth/link/token") {
-            when (val result = services.links.pollDevice(call.receive<LinkTokenRequest>().deviceCode)) {
-                is LinkPoll.Device -> call.respond(result.response)
-                is LinkPoll.Error -> call.respond(HttpStatusCode.BadRequest, OAuthErrorDto(result.code))
-                is LinkPoll.Web -> error("Device endpoint returned a browser credential")
+        route.rateLimit(RateLimits.LINK_TOKEN) {
+            post("/api/v1/auth/link/token") {
+                when (val result = services.links.pollDevice(call.receive<LinkTokenRequest>().deviceCode)) {
+                    is LinkPoll.Device -> call.respond(result.response)
+                    is LinkPoll.Error -> call.respond(HttpStatusCode.BadRequest, OAuthErrorDto(result.code))
+                    is LinkPoll.Web -> error("Device endpoint returned a browser credential")
+                }
             }
         }
         // Only failed entries consume the approval budget; successful preview/confirm pairs do not.
