@@ -4,6 +4,7 @@
 package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.sync.protocol.RecordMerger
+import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -82,7 +83,23 @@ internal class ServerRecovery(
                             }
                             original.forEach { row ->
                                 val target = changes.resolve(row.key)
-                                if (target != row.key) changes.move(row.key, target)
+                                if (target == row.key) return@forEach
+                                if (changes.hasRedirect(row.key)) {
+                                    // A carried multi-hop chain (B->A->C) already routes this
+                                    // key to its terminal; asserting the terminal again would
+                                    // falsely conflict. Fold the record into it and let the
+                                    // ledger pass below restore the first-hop mark.
+                                    val raw =
+                                        changes.record(row.key)?.raw ?: RecordState(row.key.collection)
+                                    changes.save(
+                                        target,
+                                        RecordMerger
+                                            .merge(changes.record(target)?.raw, raw.copy(mergedInto = null))
+                                            .record,
+                                    )
+                                } else {
+                                    changes.move(row.key, target)
+                                }
                             }
                             redirects().forEach { (from, to) -> changes.redirect(from, to) }
                             changes.commit(0)
