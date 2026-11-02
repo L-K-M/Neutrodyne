@@ -64,9 +64,13 @@ case "$TARGET" in
         if [ -n "${ND_IN_MANYLINUX:-}" ]; then
             cc $CFLAGS -fPIC -shared "$SRC" -o "$OUT" -lpthread -lm -ldl
         elif command -v docker >/dev/null 2>&1; then
+            # ffmpeg/build.sh's convention: everything after the container
+            # exec happens inside it, so the host never writes beside the
+            # container's root-owned outputs.
             docker run --rm -e ND_IN_MANYLINUX=1 -e ND_CACHE=/cache \
                 -v "$NATIVE_ROOT":/src -v "$CACHE":/cache -w /src \
                 "$IMAGE" bash ndmedia/build.sh "$TARGET"
+            exit 0
         else
             # Without docker the host compiler still proves the code; the
             # manylinux floor is asserted by the desktop-matrix runners.
