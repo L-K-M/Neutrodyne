@@ -45,10 +45,11 @@ internal class StoredRecordWriter(
             }
         val (results, pending) =
             store.write(principal.accountId) {
+                requirePrincipal(principal, now)
                 val after = account.cursor.validate(request.since)
                 val firstSequence = account.cursor.seq
                 val seed = maximumClock()
-                var liveCount = records().count { !RecordMerger.isDead(it.raw) }.toLong()
+                var live = liveCount()
                 val extraKeys = linkedSetOf<RecordKey>()
                 val results =
                     admitted.mapIndexed { index, admission ->
@@ -57,7 +58,7 @@ internal class StoredRecordWriter(
                             val mutation = RecordChanges(this, inputs.clock(account, seed), now, principal.deviceId)
                             val changeExtras = linkedSetOf<RecordKey>()
                             val result = applyChange(mutation, change, index, now, changeExtras)
-                            liveCount = mutation.commit(liveCount)
+                            live = mutation.commit(live)
                             extraKeys += changeExtras
                             result
                         } catch (failure: ProtocolException) {
@@ -142,6 +143,7 @@ internal class StoredRecordWriter(
     ): RecordPage =
         store
             .write(principal.accountId) {
+                requirePrincipal(principal, inputs.wallMs())
                 val after = account.cursor.validate(since)
                 principal.deviceId?.let { acknowledge(it, since, inputs.wallMs()) }
                 candidates(after, limit = limit.coerceIn(1, ProtocolLimits.MAX_RECORDS))
@@ -155,23 +157,24 @@ internal class StoredRecordWriter(
         if (request.confirm != "DELETE" || request.mode != "library") invalidChange("invalid library reset")
         val now = inputs.wallMs()
         return store.write(principal.accountId) {
+            requirePrincipal(principal, now)
             val cutoff = account.cursor.validate(request.beforeCursor, CursorPurpose.RESET)
             val firstSequence = account.cursor.seq
             val mutation = RecordChanges(this, inputs.clock(account, maximumClock()), now, principal.deviceId)
             // Snapshot eligibility before any write. Reset does not run unsubscribe cascades: a
             // newer queue item must survive even when its older parent falls inside the cutoff.
-            records().filter { it.seq <= cutoff && !RecordMerger.isDead(it.raw) }.toList().forEach { record ->
+            liveKeys(cutoff).forEach { key ->
                 val removal =
-                    when (record.key.collection) {
+                    when (key.collection) {
                         SyncCollection.PODCAST -> "subscribed" to JsonPrimitive(false)
                         SyncCollection.GROUP -> "deleted" to JsonPrimitive(true)
                         SyncCollection.MEMBER, SyncCollection.UPNEXT -> "in" to JsonPrimitive(false)
                         SyncCollection.SESSION -> "episode" to JsonNull
                         else -> null
                     }
-                removal?.let { (name, value) -> mutation.stamp(record.key, name, value) }
+                removal?.let { (name, value) -> mutation.stamp(key, name, value) }
             }
-            mutation.commit(records().count { !RecordMerger.isDead(it.raw) }.toLong())
+            mutation.commit(liveCount())
             if (account.cursor.seq != firstSequence) {
                 emit(ServerEvent.Changed(principal.accountId, account.cursor.wire(), principal.deviceId))
             }

@@ -55,7 +55,11 @@ internal class AccountService(
     }
 
     private suspend fun purgeRecords(principal: AccountPrincipal) {
-        val oldEpoch = store.read(principal.accountId) { account.cursor.epoch }
+        val oldEpoch =
+            store.read(principal.accountId) {
+                requirePrincipal(principal, inputs.wallMs())
+                account.cursor.epoch
+            }
         var epoch = secrets.epoch()
         while (epoch == oldEpoch) epoch = secrets.epoch()
         val now = inputs.wallMs()

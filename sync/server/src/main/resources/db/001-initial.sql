@@ -2,7 +2,7 @@
 -- Initial server schema; independent of the client Room schema.
 CREATE TABLE schema_version (version INTEGER NOT NULL);
 CREATE TABLE account (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
   display_name TEXT,
   role TEXT NOT NULL CHECK (role IN ('admin','user')),

@@ -52,6 +52,9 @@ object ProtocolValidation {
                 invalid("invalid write operation")
             }
             val state = readState(coll, dto.fields, dto.match, dto.matchClocks, null, serverTimeMs)
+            if (valueBytes(state) > ProtocolLimits.MAX_VALUE_BYTES) {
+                throw ProtocolException(SyncErrorCode.PAYLOAD_TOO_LARGE, "record values exceed aggregate cap")
+            }
             ValidatedChange.Write(id, state)
         }
 
@@ -78,6 +81,12 @@ object ProtocolValidation {
         if (record.matchClocks.keys.any { it !in record.match?.values().orEmpty() }) invalid("orphan hint clock")
         record.mergedInto?.let {
             if (RecordId.fromWire(record.coll, it.toWire()) != it) invalid("redirect collection mismatch")
+        }
+        // Stored-record bound: admission caps a single change at MAX_VALUE_BYTES; merged writes
+        // get slack so internal stamps and cascades on a cap-sized record still commit. The sum
+        // stays under MAX_PAGE_BYTES, so an accepted record always fits a response page.
+        if (valueBytes(record) > ProtocolLimits.MAX_VALUE_BYTES + ProtocolLimits.MAX_VALUE_SLACK_BYTES) {
+            throw ProtocolException(SyncErrorCode.PAYLOAD_TOO_LARGE, "record values exceed stored bound")
         }
     }
 
@@ -233,6 +242,20 @@ object ProtocolValidation {
         val record = RecordState(coll, states.toMap(), sets.toMap(), match, redirect, clocks)
         state(record)
         return record
+    }
+
+    /** Serialized wire bytes of every value the record carries; the cap counts what a page carries. */
+    private fun valueBytes(record: RecordState): Long {
+        var total = 0L
+        record.fields.values.forEach { total += it.v.toString().encodeToByteArray().size.toLong() }
+        record.growSets.values.forEach { set ->
+            set.forEach { total += JsonPrimitive(it).toString().encodeToByteArray().size.toLong() }
+        }
+        record.match
+            ?.values()
+            ?.values
+            ?.forEach { total += it.toString().encodeToByteArray().size.toLong() }
+        return total
     }
 
     private fun playedPair(
