@@ -39,7 +39,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_busy
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disabled
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disclosure
-import ch.lkmc.neutrodyne.core.ui.resources.discovery_providers_loading
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_empty
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_arts
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_business
@@ -61,6 +60,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_technology
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_true_crime
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_tv_film
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_partial
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_providers_loading
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.net_offline
