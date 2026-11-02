@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.di
 
 import android.app.Application
+import androidx.core.content.FileProvider
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.work.testing.TestListenableWorkerBuilder
@@ -45,6 +46,7 @@ import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -62,6 +64,33 @@ import java.io.File
 @Config(application = Application::class, sdk = [34])
 class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
+
+    @Before
+    fun resetFileProviderCache() {
+        // `FileProvider` keeps parsed roots in a static map keyed by authority; Robolectric
+        // runs each test in a new sandbox under a different cacheDir, so a root cached by an
+        // earlier test would point at a dead dir and fail this class' share-URI lookups.
+        FileProvider::class.java.getDeclaredField("sCache").apply {
+            isAccessible = true
+            (get(null) as MutableMap<*, *>).clear()
+        }
+    }
+
+    @Test
+    fun downloadComponentsInjectBeforeDatabaseOpen() {
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .ManualDownloadJobService(),
+        )
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .DownloadActionReceiver(),
+        )
+        assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
+        assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+        assertThat(graph.initializers.map { it.order }).containsAtLeast(10, 130, 210, 310)
+    }
 
     @Test
     fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
@@ -396,6 +425,11 @@ class AndroidAppGraphTest {
                 // PlaybackChannels order 10 (before the DB), PlayerConnection 300 (after prefs).
                 "PlaybackChannels" to 10..10,
                 "PlayerConnectionInitializer" to 300..300,
+                "DownloadChannelsInitializer" to 10..10,
+                "DownloadIndexInitializer" to 130..130,
+                "DeferredDeletesInitializer" to 310..310,
+                "DownloadReconcileInitializer" to 210..210,
+                "DownloadObserversInitializer" to 310..310,
             )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */

@@ -94,6 +94,14 @@ class MainActivity : AppCompatActivity() {
         setContent {
             val opener = graph.databaseOpener
             val openState by opener.openState.collectAsStateWithLifecycle()
+
+            val failedDownloads =
+                androidx.compose.runtime.remember(graph) {
+                    kotlinx.coroutines.flow.flow {
+                        opener.awaitOpen()
+                        graph.downloadController().observeFailedCount().collect { emit(it) }
+                    }
+                }
             val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
 
             val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
@@ -127,6 +135,7 @@ class MainActivity : AppCompatActivity() {
                 LocalMetroViewModelFactory provides graph.metroViewModelFactory,
             ) {
                 NeutrodyneRoot(
+                    failedDownloads = failedDownloads,
                     state =
                         ROOT_STATE_BASE.copy(
                             startup = openState.toGateState(),

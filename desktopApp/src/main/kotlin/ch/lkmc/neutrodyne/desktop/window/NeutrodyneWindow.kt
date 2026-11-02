@@ -104,6 +104,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     playbackState: PlaybackStateSource,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
@@ -143,6 +144,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 playbackController = playbackController,
                 playbackState = playbackState,
                 openHandler = openHandler,
+                failedDownloads = failedDownloads,
                 updateChecker = updateChecker,
                 updateNotices = updateNotices,
                 settings = settings,
@@ -304,6 +306,7 @@ internal fun NeutrodyneWindowContent(
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
     openHandler: DesktopOpenHandler? = null,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
@@ -363,6 +366,7 @@ internal fun NeutrodyneWindowContent(
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
+            failedDownloads = failedDownloads,
             state =
                 RootUiState.READY.copy(
                     startup = startup,

@@ -25,6 +25,7 @@ internal fun SettingsRoute(
 ) {
     when (key.page) {
         SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform)
+        SettingsPage.DOWNLOADS -> DownloadsPage(platform)
         SettingsPage.FEEDS -> FeedsPage(platform)
         SettingsPage.PLAYBACK -> PlaybackPage(platform)
         SettingsPage.UPDATES -> UpdatesPage(buildInfo, updateTarget, key.openRelease)

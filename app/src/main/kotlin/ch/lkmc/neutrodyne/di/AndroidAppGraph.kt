@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
@@ -30,6 +31,7 @@ import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.impl.DownloadComponentsInjector
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -49,7 +51,7 @@ import kotlinx.coroutines.CoroutineScope
  * (D73): `:ytx` builds [YtxGraph], `:acra` builds nothing.
  */
 @DependencyGraph(AppScope::class, bindingContainers = [YouTubeBindingsModule::class])
-interface AndroidAppGraph {
+interface AndroidAppGraph : DownloadComponentsInjector {
     val application: Application
 
     @ApplicationScope
@@ -70,6 +72,9 @@ interface AndroidAppGraph {
     val playSessionStore: Provider<PlaySessionStore>
     val positionStore: Provider<PositionStore>
     val playbackMediaLookup: Provider<PlaybackMediaLookup>
+    val chapterRepository: Provider<ChapterRepository>
+
+    val downloadController: Provider<ch.lkmc.neutrodyne.download.api.DownloadController>
 
     val workerFactory: WorkerFactory
 
