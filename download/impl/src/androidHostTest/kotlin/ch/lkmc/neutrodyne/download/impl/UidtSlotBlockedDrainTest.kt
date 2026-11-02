@@ -175,7 +175,7 @@ class UidtSlotBlockedDrainTest {
                         override suspend fun changeRoot(
                             rootId: String,
                             mode: RootChangeMode,
-                        ) = RootChangeResult.Unsupported
+                        ) = RootChangeResult.Unavailable
 
                         override suspend fun deleteOrphanFiles() = OrphanDeleteResult.Unavailable
 

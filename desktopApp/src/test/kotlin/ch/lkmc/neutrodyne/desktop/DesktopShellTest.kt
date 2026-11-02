@@ -153,6 +153,31 @@ class DesktopShellTest {
         assertThat(appScope.coroutineContext.job.isCancelled).isTrue()
     }
 
+    @Test
+    fun `lane table includes both download lanes and move in documented order`() {
+        val names = listOf("downloads-manual", "downloads-auto", "downloads-move")
+        val lanes =
+            names
+                .reversed()
+                .map { laneName ->
+                    object : JobLane {
+                        override val name = laneName
+
+                        override suspend fun run(now: Instant) = Unit
+                    }
+                }.toSet()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val runner = DesktopJobRunner(lanes, TestClock(), NoPower, FakeNetworkMonitor(), NoopPoolEvictor, scope)
+        try {
+            assertThat(
+                runner.status.value.keys
+                    .toList(),
+            ).containsExactlyElementsIn(names).inOrder()
+        } finally {
+            scope.coroutineContext.job.cancel()
+        }
+    }
+
     private object NoPower : PowerMonitor {
         override val events: Flow<PowerEvent> = emptyFlow()
     }

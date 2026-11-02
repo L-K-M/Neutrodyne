@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import app.cash.turbine.test
+import ch.lkmc.neutrodyne.core.model.DownloadAllEstimate
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
@@ -72,6 +73,17 @@ class FakeFeedRepositoryTest {
                 repo.markVisited(FeedSource.All, 99)
                 assertEquals(99, awaitItem().lastViewedAt)
             }
+        }
+
+    @Test fun downloadAllReturnsConfiguredSnapshotAndRecordsSources() =
+        runTest {
+            val repo = FakeFeedRepository()
+            val group = FeedSource.Group(7)
+            val estimate = DownloadAllEstimate(listOf(42, 41), 250, 123_456, 1, true)
+            repo.downloadAllEstimates[group] = estimate
+            assertEquals(estimate, repo.downloadAllEstimate(group))
+            assertEquals(DownloadAllEstimate(emptyList(), 0, 0, 0, false), repo.downloadAllEstimate(FeedSource.All))
+            assertEquals(listOf(group, FeedSource.All), repo.downloadAllRequests)
         }
 
     private companion object {

@@ -255,7 +255,6 @@ internal class DownloadsSettingsViewModel(
                 }
 
                 RootChangeResult.Unavailable,
-                RootChangeResult.Unsupported,
                 -> {
                     fail()
                 }
