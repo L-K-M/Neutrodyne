@@ -57,6 +57,7 @@ class EngineClockTest {
                     assertTrue(!engine.isEnded, "a live clock sample must precede the end assignment")
                     val reference = ((engine.framesPlayed - period).coerceAtLeast(0) * speed * 1000 / RATE).toLong()
                     val error = abs(engine.positionMs() - reference)
+                    println("MD0 clock: speed=$speed referenceMs=$reference actualMs=${engine.positionMs()} errorMs=$error device=$description")
                     assertTrue(error <= MAX_ERROR_MS, "${speed}x: live error=$error ms, reference=$reference ms")
                     engine.resume()
                 }

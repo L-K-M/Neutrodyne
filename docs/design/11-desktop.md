@@ -1959,6 +1959,14 @@ Owner procedure, still open on each real OS:
    error; the in-app controls are the documented degraded mode, and AC4
    remains open. libmpv does not resolve an OS-session or suspend failure.
 
+Clock lifetime note (2026-11-01): the callback publishes two counters into
+aligned caller-owned storage. `NdOutput` pins it while the device can write;
+clock readers retain the automatic arena after device close. Reads never
+call a freed device and remain lock-free. Device operations serialize with
+close, and temporary description buffers are released per call. An old
+freed-handle read is not a safe deterministic regression; the new null-device
+test compares native/shared counts and reads the retained counter after close.
+
 Native source bundles now include the actual per-target build record, lock,
 verification key and build scripts, with missing or corrupt inputs rejected.
 

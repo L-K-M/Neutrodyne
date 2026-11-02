@@ -10,9 +10,7 @@
  * Writer side: the engine thread calls nd_out_write; reader side: the audio
  * callback. The ring is lock-free SPSC: the writer owns `w`, the reader owns
  * `r`, each publishes with release and samples the other index with acquire.
- * nd_out_clear races with the callback by design: the callback re-reads the
- * indices for every block, so a clear mid-block can at worst play the tail of
- * the old audio for that one block.
+ * Clear is allowed only after stop has quiesced the callback.
  *
  * Start/stop run a 5 ms linear ramp inside the callback to avoid clicks; stop
  * defers the real device stop until the ramp has drained, waiting at most a
@@ -53,6 +51,7 @@ struct nd_out {
     float *ring;
     atomic_llong frames_played;
     atomic_llong underrun_frames;
+    atomic_llong *clock_mirror; /* caller-owned, pinned until device close */
     atomic_int started;
     atomic_int stopping;
     atomic_int stopped;
@@ -60,6 +59,28 @@ struct nd_out {
     size_t ramp_frames;
     char device_name[256];
 };
+
+static void nd_publish_clock(nd_out *o) {
+    if (o->clock_mirror == NULL)
+        return;
+    atomic_store_explicit(&o->clock_mirror[0], atomic_load_explicit(&o->frames_played, memory_order_relaxed),
+                          memory_order_release);
+    atomic_store_explicit(&o->clock_mirror[1], atomic_load_explicit(&o->underrun_frames, memory_order_relaxed),
+                          memory_order_release);
+}
+
+ND_API int nd_out_attach_clock(nd_out *o, int64_t *counters) {
+    _Static_assert(sizeof(atomic_llong) == sizeof(int64_t), "clock ABI requires 64-bit atomics");
+    if (o == NULL || counters == NULL || (uintptr_t)counters % _Alignof(atomic_llong) != 0)
+        return ND_E_ARG;
+    if (atomic_load_explicit(&o->started, memory_order_acquire))
+        return ND_E_STATE;
+    o->clock_mirror = (atomic_llong *)counters;
+    atomic_init(&o->clock_mirror[0], 0);
+    atomic_init(&o->clock_mirror[1], 0);
+    nd_publish_clock(o);
+    return 0;
+}
 
 static ma_backend nd_backend(const char *name) {
     if (name == NULL || name[0] == '\0')
@@ -127,6 +148,7 @@ static void nd_data_callback(ma_device *dev, void *out, const void *in, ma_uint3
         atomic_fetch_add_explicit(&o->frames_played, (long long)media, memory_order_relaxed);
         atomic_fetch_add_explicit(&o->underrun_frames, (long long)((frames < remaining ? frames : remaining) - media),
                                   memory_order_relaxed);
+        nd_publish_clock(o);
         if (pos >= o->ramp_frames)
             atomic_store_explicit(&o->stopped, 1, memory_order_release);
         return;
@@ -155,6 +177,7 @@ static void nd_data_callback(ma_device *dev, void *out, const void *in, ma_uint3
     atomic_fetch_add_explicit(&o->frames_played, (long long)(take / (size_t)o->channels), memory_order_relaxed);
     atomic_fetch_add_explicit(&o->underrun_frames, (long long)(frames - take / (size_t)o->channels),
                               memory_order_relaxed);
+    nd_publish_clock(o);
 }
 
 ND_API int nd_out_open(const nd_out_config *cfg, nd_out **out) {

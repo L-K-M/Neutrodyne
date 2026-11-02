@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.core.common.PowerEvent
 import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
@@ -19,10 +20,11 @@ class LinuxSuspendMonitor private constructor(
 ) : PowerMonitor, AutoCloseable {
     private val channel = Channel<PowerEvent>(64)
     override val events = channel.receiveAsFlow()
-    val failure = MutableStateFlow<String?>(null)
+    private val lastFailure = MutableStateFlow<String?>(null)
+    val failure: StateFlow<String?> = lastFailure
     private val handler = DBusSigHandler<LogindManager.PrepareForSleep> { signal ->
         val event = if (signal.sleeping) PowerEvent.Suspending else PowerEvent.Resumed
-        if (channel.trySend(event).isFailure) failure.value = "logind event queue is full or closed"
+        if (channel.trySend(event).isFailure) lastFailure.value = "logind event queue is full or closed"
     }
 
     init {

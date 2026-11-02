@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.playback.core.PositionSaveResult
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.engine.FfAudioEngine
 import ch.lkmc.neutrodyne.playback.native.NativeSessionEventKind
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -50,7 +51,7 @@ object Md0Probe {
         val ndmedia = root.resolve("playback/native/build/ndmedia/$target")
         PrintWriter(Files.newBufferedWriter(report, StandardOpenOption.CREATE_NEW), true).use { output ->
             fun log(kind: String, detail: String) {
-                val line = "{\"monoNs\":${System.nanoTime()},\"kind\":\"$kind\",\"detail\":\"${escape(detail)}\"}"
+                val line = "{\"monoNs\":${System.nanoTime()},\"kind\":\"$kind\",\"detail\":${JsonPrimitive(detail)}}"
                 output.println(line)
                 println(line)
             }
@@ -138,7 +139,6 @@ object Md0Probe {
         println("MD0 evidence: $report")
     }
 
-    private fun escape(value: String): String = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
 }
 
 /** Harness policy, deliberately outside the production controller until MD1. */

@@ -92,6 +92,28 @@ class NdOutputTest {
     }
 
     @Test
+    fun aClockReaderRemainsValidAfterTheDeviceCloses() {
+        val directory = ndmediaDir() ?: return assumeTrue("native build required", false)
+        val out = NdOutput.open(directory, "null", RATE, CHANNELS, RING_MS)
+        val reader = out.clockReader()
+        try {
+            Arena.ofConfined().use { arena ->
+                assertEquals(RATE / 10, out.write(arena.allocate(RATE / 10L * CHANNELS * 4), RATE / 10))
+            }
+            out.start()
+            val deadline = System.nanoTime() + PLAY_WAIT_NS
+            while (reader() < RATE / 10 && System.nanoTime() < deadline) Thread.sleep(5)
+            out.stop()
+            assertEquals(out.nativeFramesPlayed(), reader())
+        } finally {
+            out.close()
+        }
+        val final = reader()
+        assertTrue(final >= RATE / 10)
+        repeat(1_000) { assertEquals(final, reader()) }
+    }
+
+    @Test
     fun unknownBackendIsRejected() {
         val directory =
             ndmediaDir() ?: run {

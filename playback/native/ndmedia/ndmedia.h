@@ -2,8 +2,8 @@
 /*
  * ndmedia.h — the flat C ABI of :playback:native's ndmedia library (11 ndmedia
  * interface). Kotlin binds these symbols with hand-written FFM downcalls in
- * NdmediaLibrary/NdOutput. All functions return immediately; nothing calls into
- * the JVM from the audio callback.
+ * NdmediaLibrary/NdOutput. PCM writes never block; lifecycle waits stay away
+ * from the audio thread. The callback never enters the JVM.
  */
 #ifndef NDMEDIA_H
 #define NDMEDIA_H
@@ -38,6 +38,9 @@ ND_API int nd_out_open(const nd_out_config *cfg, nd_out **out);
 /* frames accepted, never blocks; < 0 on error */
 ND_API int nd_out_write(nd_out *o, const float *interleaved, int frames);
 ND_API int nd_out_free_frames(nd_out *o);
+/* Before start only: two caller-owned aligned int64 counters (played, underrun).
+   Their storage must remain alive until close quiesces every callback. */
+ND_API int nd_out_attach_clock(nd_out *o, int64_t *counters);
 /* media frames consumed by the device callback; silence on underrun does not
    count, so a stalled ring never advances the clock */
 ND_API int64_t nd_out_frames_played(nd_out *o);

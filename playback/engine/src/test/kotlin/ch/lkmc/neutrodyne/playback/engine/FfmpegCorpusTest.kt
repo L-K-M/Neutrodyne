@@ -75,6 +75,8 @@ class FfmpegCorpusTest {
             }
         }
 
+        measurements.forEach { println("MD0 corpus: ${it.describe()}") }
+
         val failures =
             measurements.mapNotNull { measurement ->
                 val problems = mutableListOf<String>()
@@ -120,6 +122,7 @@ class FfmpegCorpusTest {
             packet.data.reinterpret(packet.size.toLong()).fill(0)
             val failed = runCatching {
                 if (pipeline.decoder.send(packet)) pipeline.decoder.receive()
+                Unit
             }.isFailure
             assertTrue("a corrupt FLAC packet was silently discarded", failed)
         }
