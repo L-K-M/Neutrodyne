@@ -1900,14 +1900,23 @@ targets. Evidence per criterion:
   Media3-generated goldens is not yet in CI (MD1 work). A 30-minute
   real-device underrun soak is an owner/hardware check: run the app 30 min
   per OS and read `nd_out_underrun_frames`.
-- **AC4 OS integration — open.** MPRIS over dbus-java, SMTC and Now Playing
-  prototypes are not yet implemented; manual steps: on Windows run the app
-  and check the SMTC flyout responds to play/pause/seek; on macOS check
-  Now Playing metadata and remote commands with the ad-hoc-signed app; on
-  Linux run under `dbus-run-session` and drive `org.mpris.MediaPlayer2`
-  over `dbus-send`. Headphone removal on Windows/macOS and suspend
-  (incl. Windows Modern Standby) need real hardware: unplug during
-  playback and suspend/resume mid-episode, expecting pause-before-stop.
+- **AC4 OS integration — MPRIS proved on CI; SMTC and Now Playing open.**
+  `LinuxMprisSession` in `:desktop:system` exports
+  `org.mpris.MediaPlayer2.neutrodyne` over dbus-java 5.2.2 and translates
+  the MPRIS Player methods into `RemoteCommand`s posted to a flow (the bus
+  worker thread never runs playback work). `LinuxMprisSessionTest` starts a
+  private `dbus-daemon --session` on the Linux desktop-matrix legs and
+  proves bus-name ownership, `Properties` Get/Set/GetAll (`PlaybackStatus`,
+  `Metadata` with `mpris:trackid`/`xesam:*`, `Position`, `Rate` clamped to
+  the 0.5×–3.0× band) and PlayPause/Next/Seek/SeekTo command delivery; the
+  test skips on hosts without `dbus-daemon`. Spike scope, not the MD2
+  matrix row: `Raise`/`Quit`/`OpenUri` are no-ops, `Stop` maps to Pause,
+  and `Seeked`/`SetPosition` track-id checks are MD2 work. On Windows run
+  the app and check the SMTC flyout responds to play/pause/seek; on macOS
+  check Now Playing metadata and remote commands with the ad-hoc-signed
+  app. Headphone removal on Windows/macOS and suspend (incl. Windows
+  Modern Standby) need real hardware: unplug during playback and
+  suspend/resume mid-episode, expecting pause-before-stop.
 
 The engine decision stays with the custom engine behind the
 `AudioEngine` seam; libmpv remains the documented fallback. No spike
