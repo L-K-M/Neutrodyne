@@ -116,18 +116,30 @@ class SubscribeJourneyTest {
                 )
                 server.start()
                 val url = server.url("/feed.xml").toString()
+                // 03 note 2026-11-02: a directory-named feed URL is a discovered destination and
+                // may never be loopback — Apple's hit names a fake public host the replay answers.
+                val feedUrl = if (entry == Entry.APPLE) APPLE_FEED_URL else url
                 val lookup =
                     instrumentation.context.assets
                         .open(
                             "discovery/apple-lookup.json",
                         ).bufferedReader()
                         .use { it.readText() }
-                        .replace("https://feeds.simplecast.com/h18ZIZD_", url)
+                        .replace("https://feeds.simplecast.com/h18ZIZD_", feedUrl)
                 val replay =
                     Interceptor { chain ->
                         val request = chain.request()
                         if (request.url.host == "localhost" || request.url.host == "127.0.0.1") {
                             chain.proceed(request)
+                        } else if (request.url.host == APPLE_FEED_HOST) {
+                            Response
+                                .Builder()
+                                .request(request)
+                                .protocol(Protocol.HTTP_1_1)
+                                .code(200)
+                                .message("OK")
+                                .body(feed.toResponseBody("application/rss+xml".toMediaType()))
+                                .build()
                         } else {
                             check(request.url.host == "itunes.apple.com" && request.url.encodedPath == "/lookup")
                             lookups.incrementAndGet()
@@ -202,6 +214,14 @@ class SubscribeJourneyTest {
                         }
                     }
                 }
+                // 03 note 2026-11-02: a prefilled LAN URL does not auto-resolve — the user's
+                // tap on Subscribe is the informed action that fetches it.
+                if (entry != Entry.APPLE) {
+                    compose.waitUntil(PREVIEW_TIMEOUT_MS) {
+                        compose.onAllNodes(hasText(subscribeLabel)).fetchSemanticsNodes().isNotEmpty()
+                    }
+                    compose.onNodeWithText(subscribeLabel).performScrollTo().performClick()
+                }
                 compose.awaitPreviewTitle(entry, lookups.get())
                 compose.onNodeWithText("M7 Subscribe Journey").assertIsDisplayed()
                 assertTrue(runBlocking { db.podcastDao().allForExport().isEmpty() })
@@ -212,7 +232,7 @@ class SubscribeJourneyTest {
                 subscribe.performScrollTo().performClick()
                 compose.awaitSubscribeWrite(entry, subscribe, db)
                 val row = runBlocking { db.podcastDao().allForExport().single() }
-                assertEquals(url, row.feedUrl)
+                assertEquals(feedUrl, row.feedUrl)
                 assertEquals(1, runBlocking { db.podcastDao().episodeCount(row.id) })
                 assertTrue(
                     runBlocking {
@@ -286,6 +306,8 @@ class SubscribeJourneyTest {
         const val PREVIEW_TIMEOUT_MS = 20_000L
         const val SUBSCRIBE_TIMEOUT_MS = 20_000L
         const val SHOWN_TEXTS = 12
+        const val APPLE_FEED_HOST = "feeds.example"
+        const val APPLE_FEED_URL = "https://$APPLE_FEED_HOST/feed.xml"
     }
 }
 
