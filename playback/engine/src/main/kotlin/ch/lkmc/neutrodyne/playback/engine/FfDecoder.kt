@@ -187,14 +187,15 @@ class FfDecoder
             rate: Int,
         ) {
             library.freeResampler(resamplerSlot)
-            val created = library.setResamplerOptions(
-                library.allocResampler(),
-                layout.constant("AV_CHANNEL_LAYOUT_STEREO_MASK"),
-                sampleRate,
-                mask,
-                format,
-                rate,
-            )
+            val created =
+                library.setResamplerOptions(
+                    library.allocResampler(),
+                    layout.constant("AV_CHANNEL_LAYOUT_STEREO_MASK"),
+                    sampleRate,
+                    mask,
+                    format,
+                    rate,
+                )
             resamplerSlot.set(ValueLayout.ADDRESS, 0L, created)
             val initialised = library.initResampler(created)
             require(initialised >= 0) { "the resampler would not initialise: ${library.errorString(initialised)}" }
@@ -214,19 +215,21 @@ class FfDecoder
             pts: Long = NO_TIMESTAMP,
         ): AudioFrame {
             var samples = written - dropped
+            var leading = dropped
             if (remainingPriming > 0) {
                 val trim = minOf(remainingPriming, samples)
                 remainingPriming -= trim
                 samples -= trim
-                dropped += trim
+                leading += trim
             }
             decodedSamples += samples
             val total = samples * STEREO_CHANNELS
             if (total <= 0) return AudioFrame(ShortArray(0), STEREO_CHANNELS, sampleRate, null)
             val pcm = ShortArray(total)
-            val source = outputBuffer.reinterpret(total.toLong() * Short.SIZE_BYTES)
+            val source = outputBuffer.reinterpret((leading + total).toLong() * Short.SIZE_BYTES)
             for (index in 0 until total) {
-                pcm[index] = source.get(ValueLayout.JAVA_SHORT, index.toLong() * Short.SIZE_BYTES)
+                pcm[index] =
+                    source.get(ValueLayout.JAVA_SHORT, (leading + index).toLong() * Short.SIZE_BYTES)
             }
             val ptsUs =
                 if (pts == NO_TIMESTAMP) null else pts * timeBaseNum * MICROS_PER_SECOND / timeBaseDen
@@ -259,12 +262,13 @@ class FfDecoder
 
             /**
              * The mask swresample assumes for a channel count when a frame reports
-             * no native layout: FFmpeg's own default order.
+             * no native layout: FFmpeg's own default order, `AV_CH_FRONT_CENTER`
+             * for one channel and `AV_CH_FRONT_LEFT | AV_CH_FRONT_RIGHT` otherwise.
              */
             fun defaultMaskFor(channels: Int): Long =
                 when (channels) {
-                    1 -> 0x4L // AV_CH_FRONT_CENTER
-                    else -> 0x3L // AV_CH_FRONT_LEFT | AV_CH_FRONT_RIGHT
+                    1 -> 0x4L
+                    else -> 0x3L
                 }
         }
     }

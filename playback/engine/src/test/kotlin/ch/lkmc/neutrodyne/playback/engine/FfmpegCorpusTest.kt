@@ -89,13 +89,12 @@ class FfmpegCorpusTest {
                 if (problems.isEmpty()) null else "${measurement.file}: ${problems.joinToString("; ")}"
             }
 
-        assertTrue(
+        val report =
             "the corpus did not decode as the manifest expects:\n" +
                 failures.joinToString("\n") +
                 "\n" +
-                measurements.joinToString("\n") { it.describe() },
-            failures.isEmpty(),
-        )
+                measurements.joinToString("\n") { it.describe() }
+        assertTrue(report, failures.isEmpty())
         assertEquals(manifest.files.size, measurements.size)
     }
 

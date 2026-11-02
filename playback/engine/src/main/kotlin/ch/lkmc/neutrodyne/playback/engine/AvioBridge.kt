@@ -78,8 +78,14 @@ class AvioBridge
                     return library.layout.intConstant("AVERROR_EXIT")
                 }
                 when (val read = source.read(position, buffer, size)) {
-                    ABORTED -> library.layout.intConstant("AVERROR_EXIT")
-                    END_OF_FILE -> library.layout.intConstant("AVERROR_EOF")
+                    ABORTED -> {
+                        library.layout.intConstant("AVERROR_EXIT")
+                    }
+
+                    END_OF_FILE -> {
+                        library.layout.intConstant("AVERROR_EOF")
+                    }
+
                     else -> {
                         position += read
                         read
@@ -201,5 +207,11 @@ class AvioBridge
                     ValueLayout.JAVA_LONG -> Long::class.javaPrimitiveType!!
                     else -> MemorySegment::class.java
                 }
+
+            /** Opens a read-only AVIO over [source], with its own arena for the upcall stubs. */
+            fun open(
+                library: FfmpegLibrary,
+                source: ByteSource,
+            ): AvioBridge = AvioBridge(library, Arena.ofShared(), source)
         }
     }

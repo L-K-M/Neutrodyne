@@ -16,18 +16,16 @@ dependencies {
     implementation(libs.okio)
 }
 
-/**
- * `ffmpegTest`: the corpus suite that loads the built FFmpeg libraries (11 Testing,
- * MD0 AC1). It runs on its own task rather than inside `test`, because it needs
- * the four shared libraries of the host it runs on: `buildFfmpeg` produces them
- * for the target this machine serves, so the suite runs on each of the four
- * desktop runners and never where no build exists. `test` therefore excludes it
- * instead of letting it fail on a host without a native build.
- *
- * The task is depended on by path, not by provider: `:playback:engine` is
- * configured before `:playback:native`, and a task provider from a project that
- * has not been evaluated yet cannot be resolved.
- */
+// `ffmpegTest` runs the corpus suite that loads the built FFmpeg libraries
+// (11 Testing, MD0 AC1) on its own task rather than inside `test`, because the
+// suite needs the four shared libraries of the host it runs on: buildFfmpeg
+// produces them for the target this machine serves, so the suite runs on each
+// of the four desktop runners and never where no build exists. `test`
+// therefore excludes it instead of letting it fail on a host with no build.
+//
+// The task is depended on by path, not by provider: `:playback:engine` is
+// configured before `:playback:native`, and a task provider from a project
+// that has not been evaluated yet cannot be resolved.
 tasks.register<Test>("ffmpegTest") {
     group = "verification"
     description = "Decode the MD0 corpus through the FFM bindings on this host's FFmpeg build."

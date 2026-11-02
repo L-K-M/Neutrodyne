@@ -116,9 +116,15 @@ class FfDemuxer
             }
 
             timeBase =
-                stream.readRational(layout, "AVStream", "time_base").let { (num, den) ->
-                    if (den > 0) num to den else 1 to AV_TIME_BASE
-                }
+                stream
+                    .readRational(layout, "AVStream", "time_base")
+                    .let { (num, den) ->
+                        if (den > 0) {
+                            num to den
+                        } else {
+                            1 to AV_TIME_BASE
+                        }
+                    }
             codecParametersOf = stream.readAddress(layout, "AVStream", "codecpar")
             audioTrack = AudioTrackInfo(
                 codec = codecOf(parameters.readInt(layout, "AVCodecParameters", "codec_id")),
@@ -160,7 +166,9 @@ class FfDemuxer
                 val title =
                     library
                         .dictGet(chapter.readAddress(layout, "AVChapter", "metadata"), titleKey)
-                        ?.let { library.readCString(it.readAddress(layout, "AVDictionaryEntry", "value")) }
+                        ?.let { entry ->
+                            library.readCString(entry.readAddress(layout, "AVDictionaryEntry", "value"))
+                        }
                 EngineChapter(
                     startMs = start * num * MILLIS_PER_SECOND / den,
                     endMs = end * num * MILLIS_PER_SECOND / den,

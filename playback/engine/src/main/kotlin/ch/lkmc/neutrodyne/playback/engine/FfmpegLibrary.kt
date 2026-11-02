@@ -302,7 +302,7 @@ class FfmpegLibrary
             resampler: MemorySegment,
             out: MemorySegment,
             outSamplesPerChannel: Int,
-            in: MemorySegment?,
+            input: MemorySegment?,
             inSamplesPerChannel: Int,
         ): Int =
             callInt(
@@ -312,7 +312,7 @@ class FfmpegLibrary
                 resampler,
                 out,
                 outSamplesPerChannel,
-                in ?: MemorySegment.NULL,
+                input ?: MemorySegment.NULL,
                 inSamplesPerChannel,
             )
 
@@ -371,13 +371,12 @@ class FfmpegLibrary
                 val os = System.getProperty("os.name")
                 val arena = Arena.ofShared()
                 val lookups =
-                    layout.libraries.map { (name, major) ->
-                        name to
-                            SymbolLookup.libraryLookup(
-                                directory.resolve(libraryFileName(name, major, os)).absolutePathString(),
-                                arena,
-                            )
-                    }.toMap()
+                    layout.libraries.entries.associateWith { (name, major) ->
+                        SymbolLookup.libraryLookup(
+                            directory.resolve(libraryFileName(name, major, os)).absolutePathString(),
+                            arena,
+                        )
+                    }
                 val library = FfmpegLibrary(layout, arena, lookups)
                 library.verifyMajors()
                 library.setQuietLogging()
