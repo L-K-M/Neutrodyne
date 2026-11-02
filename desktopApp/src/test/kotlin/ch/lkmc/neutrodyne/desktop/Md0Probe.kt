@@ -55,7 +55,11 @@ object Md0Probe {
                 output.println(line)
                 println(line)
             }
-            log("start", "target=$target backend=${backend ?: "default"} speed=$speed skip=$skip file=${file.name}; position store is an in-memory fake")
+            log(
+                "start",
+                "target=$target backend=${backend ?: "default"} speed=$speed skip=$skip " +
+                    "file=${file.name}; position store is an in-memory fake",
+            )
             log("build", Files.readString(ffmpeg.resolve("ffmpeg-build.txt")))
             FfAudioEngine(ffmpeg, ndmedia, backend, 44_100).use { engine ->
                 val clock = TestClock(nowMs = System.currentTimeMillis())
@@ -76,7 +80,11 @@ object Md0Probe {
                             log("command", command.toString())
                             when (command) {
                                 RemoteCommand.Play -> { engine.resume(); paused = false }
-                                RemoteCommand.Pause -> { engine.pause(); paused = true; saver.onPause(engine.positionMs(), null) }
+                                RemoteCommand.Pause -> {
+                                    engine.pause()
+                                    paused = true
+                                    saver.onPause(engine.positionMs(), null)
+                                }
                                 RemoteCommand.Toggle -> {
                                     if (paused) engine.resume() else engine.pause()
                                     paused = !paused

@@ -108,7 +108,10 @@ class FfmpegCorpusTest {
             FfmpegPipeline.open(MemoryByteSource(corpusFile(entry.file).readBytes()), hostFfmpegDirectory()).use { pipeline ->
                 for (target in listOf(0L, duration / 2, (duration - 100).coerceAtLeast(0))) {
                     val actual = pipeline.seekAndDecode(target)
-                    assertTrue("${entry.file}: seek $target returned $actual", abs(actual - target) <= SEEK_TOLERANCE_MS)
+                    assertTrue(
+                        "${entry.file}: seek $target returned $actual",
+                        abs(actual - target) <= SEEK_TOLERANCE_MS,
+                    )
                 }
             }
         }
