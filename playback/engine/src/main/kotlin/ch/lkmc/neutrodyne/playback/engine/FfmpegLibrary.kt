@@ -403,8 +403,7 @@ class FfmpegLibrary
                     layout.libraries.entries
                         .sortedBy { entry ->
                             LOAD_ORDER.indexOf(entry.key).let { i -> if (i < 0) LOAD_ORDER.size else i }
-                        }
-                        .associate { (name, major) ->
+                        }.associate { (name, major) ->
                             name to
                                 SymbolLookup.libraryLookup(
                                     directory

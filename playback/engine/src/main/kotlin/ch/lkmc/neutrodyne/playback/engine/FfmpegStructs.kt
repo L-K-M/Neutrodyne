@@ -18,8 +18,7 @@ import java.lang.foreign.ValueLayout
  * it is about to touch. Widening reads nothing itself; it only lets the
  * checked access below reach the field's bytes.
  */
-private fun MemorySegment.atLeast(bytes: Long): MemorySegment =
-    if (byteSize() >= bytes) this else reinterpret(bytes)
+private fun MemorySegment.atLeast(bytes: Long): MemorySegment = if (byteSize() >= bytes) this else reinterpret(bytes)
 
 internal fun MemorySegment.readInt(
     layout: FfmpegLayout,
