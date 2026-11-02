@@ -242,10 +242,16 @@ internal class RecordingPlayer(
     player: androidx.media3.common.Player,
 ) : ForwardingPlayer(player) {
     val calls = mutableListOf<String>()
+    val seeks = mutableListOf<Long>()
     var beforePrepare: () -> Unit = {}
     var advancing: Boolean? = null
 
     override fun isPlaying(): Boolean = advancing ?: super.isPlaying()
+
+    override fun seekTo(positionMs: Long) {
+        seeks += positionMs
+        super.seekTo(positionMs)
+    }
 
     override fun setMediaItems(
         mediaItems: List<MediaItem>,
