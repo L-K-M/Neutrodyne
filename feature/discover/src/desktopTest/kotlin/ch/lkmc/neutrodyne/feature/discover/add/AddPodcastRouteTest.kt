@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.core.model.AlreadySubscribed
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
+import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -57,7 +58,8 @@ class AddPodcastRouteTest {
         ch.lkmc.neutrodyne.core.testing
             .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
+    private val search = FakeSearchRepository()
+    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups, search) }
     private val navigator = RecordingAppNavigator()
     private val host = SnackbarHostState()
 

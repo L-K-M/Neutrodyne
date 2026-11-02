@@ -4,7 +4,7 @@ package ch.lkmc.neutrodyne.feeds.identity
 /**
  * The local-network destination classes the add pipeline must never reach on its own (03
  * implementation note 2026-11-02): a shared page or a discovered candidate could otherwise turn
- * the automatic fetches into LAN requests. Pure string classification — no `java.*`/`android.*`,
+ * the automatic fetches into LAN requests. Pure string classification — no JVM or Android APIs,
  * no DNS — so it behaves identically on every target.
  *
  * Known limit: a public hostname that *resolves* to a LAN address is not visible to this
@@ -75,13 +75,11 @@ public object LocalDestination {
     }
 
     /** A numeric host: every dot-part is decimal digits or `0x`+hex, never a DNS name (WHATWG). */
-    private fun isNumericHost(host: String): Boolean =
-        host.split('.').all { it.isDecimalPart() || it.isHexPart() }
+    private fun isNumericHost(host: String): Boolean = host.split('.').all { it.isDecimalPart() || it.isHexPart() }
 
     private fun String.isDecimalPart(): Boolean = isNotEmpty() && all { it in '0'..'9' }
 
-    private fun String.isHexPart(): Boolean =
-        length > 2 && startsWith("0x") && drop(2).all { it in hexDigits }
+    private fun String.isHexPart(): Boolean = length > 2 && startsWith("0x") && drop(2).all { it in hexDigits }
 
     /** A plain decimal octet — no leading zero, whose spelling would invite an octal/hex read. */
     private fun isPlainOctet(part: String): Boolean =
@@ -93,22 +91,48 @@ public object LocalDestination {
 
     private fun isLocalIpv4(octets: List<Int>): Boolean =
         when {
+            // 0/8, 10/8, 127/8
             octets[0] == 0 || octets[0] == 10 || octets[0] == 127 -> true
-            octets[0] == 100 && octets[1] in 64..127 -> true // CGNAT 100.64/10
-            octets[0] == 169 && octets[1] == 254 -> true // link-local 169.254/16
-            octets[0] == 172 && octets[1] in 16..31 -> true // 172.16/12
-            octets[0] == 192 && octets[1] == 168 -> true // 192.168/16
+
+            // CGNAT 100.64/10
+            octets[0] == 100 && octets[1] in 64..127 -> true
+
+            // link-local 169.254/16
+            octets[0] == 169 && octets[1] == 254 -> true
+
+            // 172.16/12
+            octets[0] == 172 && octets[1] in 16..31 -> true
+
+            // 192.168/16
+            octets[0] == 192 && octets[1] == 168 -> true
+
             else -> false
         }
 
     private fun isLocalIpv6(groups: IntArray): Boolean =
         when {
-            groups.all { it == 0 } -> true // :: unspecified
-            groups.dropLast(1).all { it == 0 } && groups.last() == 1 -> true // ::1 loopback
-            groups[0] and ULA_MASK == ULA_PREFIX -> true // fc00::/7 unique-local
-            groups[0] and LINK_LOCAL_MASK == LINK_LOCAL_PREFIX -> true // fe80::/10 link-local
+            // :: unspecified
+            groups.all { it == 0 } -> {
+                true
+            }
+
+            // ::1 loopback
+            groups.dropLast(1).all { it == 0 } && groups.last() == 1 -> {
+                true
+            }
+
+            // fc00::/7 unique-local
+            groups[0] and ULA_MASK == ULA_PREFIX -> {
+                true
+            }
+
+            // fe80::/10 link-local
+            groups[0] and LINK_LOCAL_MASK == LINK_LOCAL_PREFIX -> {
+                true
+            }
+
             // ::ffff:a.b.c.d — the IPv4-mapped spelling gets the IPv4 ranges.
-            groups.take(IPV4_MAPPED_PREFIX_GROUPS).all { it == 0 } && groups[5] == IPV4_MAPPED_MARKER ->
+            groups.take(IPV4_MAPPED_PREFIX_GROUPS).all { it == 0 } && groups[5] == IPV4_MAPPED_MARKER -> {
                 isLocalIpv4(
                     listOf(
                         groups[6] shr 8,
@@ -117,7 +141,10 @@ public object LocalDestination {
                         groups[7] and BYTE_MASK,
                     ),
                 )
+            }
 
-            else -> false
+            else -> {
+                false
+            }
         }
 }

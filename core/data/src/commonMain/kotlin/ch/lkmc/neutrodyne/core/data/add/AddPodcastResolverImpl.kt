@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.discovery.AppleDirectoryClient
 import ch.lkmc.neutrodyne.core.data.discovery.DirectoryMetadataCache
 import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexDirectoryClient
+import ch.lkmc.neutrodyne.core.data.fetch.ADD_LOCAL_REJECTED
 import ch.lkmc.neutrodyne.core.data.fetch.ADD_YOUTUBE_REJECTED
 import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedRequest
@@ -262,7 +263,9 @@ internal class AddPodcastResolverImpl(
         // An ID lookup does not grant consent to transmit publisher credentials elsewhere.
         val scoped = credentials.takeIf { UrlNormalizer.origin(hit.feedUrl) == UrlNormalizer.origin(credentialUrl) }
         if (HostChecks.isYouTube(hit.feedUrl)) return PreviewOutcome.Failed(AddPodcastError.YouTubeNotYetSupported)
-        val result = fetchAndParse(hit.feedUrl, inputUrl, scoped, false)
+        // The directory names the feed URL, not the user: a LAN hit must never fetch.
+        val result =
+            fetchAndParse(hit.feedUrl, inputUrl, scoped, false, purpose = FeedRequestPurpose.ADD_DISCOVERED)
         if (result !is PreviewOutcome.Done) return result
         val entry = result.entry
         val feed = entry.feed.withDirectoryMetadata(hit)
@@ -327,13 +330,18 @@ internal class AddPodcastResolverImpl(
         credentials: BasicCredentials?,
         schemeGuessed: Boolean,
         mode: DiscoveryMode = DiscoveryMode.DIRECT,
+        purpose: FeedRequestPurpose? = null,
     ): PreviewOutcome {
         if (HostChecks.isYouTube(url)) return PreviewOutcome.Failed(AddPodcastError.YouTubeNotYetSupported)
+        // A verified candidate or probe may never fetch the LAN (03 note 2026-11-02): VERIFY
+        // implies ADD_DISCOVERED; an explicit purpose covers DIRECT-mode probe fetches.
+        val requestPurpose =
+            purpose ?: if (mode == DiscoveryMode.VERIFY) FeedRequestPurpose.ADD_DISCOVERED else FeedRequestPurpose.ADD
         var outcome =
             fetcher.fetch(
                 FeedRequest(
                     url,
-                    purpose = FeedRequestPurpose.ADD,
+                    purpose = requestPurpose,
                     etag = null,
                     lastModified = null,
                     conditional = false,
@@ -352,7 +360,7 @@ internal class AddPodcastResolverImpl(
                         null,
                         conditional = false,
                         credentials = credentials,
-                        purpose = FeedRequestPurpose.ADD,
+                        purpose = requestPurpose,
                         htmlReadLimit = Autodiscovery.MAX_HTML_BYTES,
                     ),
                 )
@@ -360,12 +368,14 @@ internal class AddPodcastResolverImpl(
         return when (outcome) {
             is FetchOutcome.Network -> {
                 PreviewOutcome.Failed(
-                    if (outcome.error ==
-                        ADD_YOUTUBE_REJECTED
-                    ) {
-                        AddPodcastError.YouTubeNotYetSupported
-                    } else {
-                        AddPodcastError.Network(outcome.error)
+                    when (outcome.error) {
+                        ADD_YOUTUBE_REJECTED -> AddPodcastError.YouTubeNotYetSupported
+
+                        // A refused LAN hop reports the LAN error (net_lan's copy); a discovered
+                        // candidate carrying it simply drops out of the pool → NotAFeed.
+                        ADD_LOCAL_REJECTED -> AddPodcastError.Network(NetError.LocalNetworkUnsupported)
+
+                        else -> AddPodcastError.Network(outcome.error)
                     },
                 )
             }
@@ -424,6 +434,7 @@ internal class AddPodcastResolverImpl(
                                     UrlNormalizer.origin(url)
                             },
                             false,
+                            purpose = requestPurpose,
                         )
                     } else {
                         parsed
@@ -675,6 +686,7 @@ internal class AddPodcastResolverImpl(
             for (path in PROBE_PATHS) {
                 val url = root + path
                 val scoped = credentials.takeIf { UrlNormalizer.origin(url) == UrlNormalizer.origin(credentialUrl) }
+                // Probes are discovered destinations too: ADD_DISCOVERED keeps them off the LAN.
                 val body =
                     fetcher.fetch(
                         FeedRequest(
@@ -682,7 +694,7 @@ internal class AddPodcastResolverImpl(
                             null,
                             null,
                             false,
-                            purpose = FeedRequestPurpose.ADD,
+                            purpose = FeedRequestPurpose.ADD_DISCOVERED,
                             sniffOnlyBytes = Autodiscovery.PROBE_BYTES.toInt(),
                             credentials = scoped,
                         ),
@@ -695,7 +707,15 @@ internal class AddPodcastResolverImpl(
                 val youtube = HostChecks.isYouTube(body.finalUrl)
                 tempFiles.delete(body.file)
                 if (youtube) return@withTimeoutOrNull PreviewOutcome.Failed(AddPodcastError.YouTubeNotYetSupported)
-                if (feed) return@withTimeoutOrNull fetchAndParse(url, inputUrl, scoped, false)
+                if (feed) {
+                    return@withTimeoutOrNull fetchAndParse(
+                        url,
+                        inputUrl,
+                        scoped,
+                        false,
+                        purpose = FeedRequestPurpose.ADD_DISCOVERED,
+                    )
+                }
             }
             PreviewOutcome.Failed(AddPodcastError.NotAFeed)
         } ?: PreviewOutcome.Failed(AddPodcastError.NotAFeed)

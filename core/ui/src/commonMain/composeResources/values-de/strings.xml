@@ -349,6 +349,9 @@
         <item quantity="one">%1$d Folge</item>
         <item quantity="other">%1$d Folgen</item>
     </plurals>
+    <string name="add_candidate_source_alternate_link">Verlinkter Feed</string>
+    <string name="add_candidate_source_apple_anchor">Apple-Podcasts-Link</string>
+    <string name="add_candidate_source_same_site_anchor">Auf der Seite gefunden</string>
     <string name="add_subscription_list">Das ist eine Abonnementliste — eine Datei mit Feeds, die alle auf einmal abonniert werden.</string>
     <string name="add_import_later">Der Import kommt mit einem späteren Meilenstein — nutze solange eine einzelne Feed-Adresse.</string>
     <string name="add_error_not_a_url">Gib eine Feed-Adresse ein</string>

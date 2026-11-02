@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -115,6 +116,7 @@ public class AddPodcastViewModel(
     private val resolver: AddPodcastResolver,
     private val subscribeUseCase: SubscribeUseCase,
     private val groups: GroupRepository,
+    search: SearchRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AddPodcastUiState())
     public val uiState: StateFlow<AddPodcastUiState> = mutableState.asStateFlow()
@@ -122,6 +124,11 @@ public class AddPodcastViewModel(
     init {
         viewModelScope.launch {
             groups.observeGroups().collect { rows -> mutableState.update { it.copy(groups = rows) } }
+        }
+        // The "Search for …" action's recipient disclosure (M7): the tap sends the query to
+        // every effective provider, so the recipient list must already be on screen.
+        viewModelScope.launch {
+            search.observeProviders().collect { list -> mutableState.update { it.copy(providers = list) } }
         }
     }
 
@@ -212,6 +219,7 @@ public class AddPodcastViewModel(
      * local URL still resolves on that tap through [resolve].
      */
     public fun autoResolve(input: String) {
+        if (resolver.isLocalDestination(input)) return
         resolve(input)
     }
 
