@@ -25,6 +25,8 @@ internal fun SettingsRoute(
         SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform)
         SettingsPage.FEEDS -> FeedsPage(platform)
         SettingsPage.PLAYBACK -> PlaybackPage(platform)
+        SettingsPage.DISCOVER -> DiscoverPage()
+        SettingsPage.PRIVACY -> PrivacyPage()
         SettingsPage.ABOUT -> AboutPage(buildInfo)
         else -> AppearancePage(settings, dynamicColorSupport, platform)
     }

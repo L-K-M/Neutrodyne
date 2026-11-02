@@ -27,6 +27,9 @@ public interface PlatformActions {
     /** Desktop only: "Show in Explorer / Finder / Files". */
     public val reveal: RevealInFolder?
 
+    /** Android 31+ app link preferences; null on older Android and desktop. */
+    public val appleLinks: AppleLinkSettings? get() = null
+
     /** Android 13+ only; `null` on the desktop and on API < 33. */
     public val notifications: NotificationPermissionRequester?
 }
@@ -105,3 +108,8 @@ public interface NotificationPermissionRequester {
 /** Provided by `NeutrodyneRoot` from the shell's platform implementation. */
 public val LocalPlatformActions: androidx.compose.runtime.ProvidableCompositionLocal<PlatformActions> =
     staticCompositionLocalOf { error("LocalPlatformActions not provided by the shell") }
+
+/** Opens Android's app-specific Open by default preferences after an explicit tap. */
+public fun interface AppleLinkSettings {
+    public fun openSettings(): OpenResult
+}

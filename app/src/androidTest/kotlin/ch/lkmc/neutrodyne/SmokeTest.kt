@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -106,7 +107,10 @@ class SmokeTest {
     fun licencesListsLibraries() {
         compose.enableAccessibilityChecks()
         openSettings()
-        compose.onNodeWithText("Licences").performClick()
+        // M7's Discover and Privacy rows put the Licences row near the bottom of the small
+        // API 26 window, where a click on an out-of-view row does nothing (device runs); the
+        // row is scrolled into view first, as the other screen tests do.
+        compose.onNodeWithText("Licences").performScrollTo().performClick()
         compose.waitForIdle()
 
         // A non-empty list shows its section headers (a default build always has both).
