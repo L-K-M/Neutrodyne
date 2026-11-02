@@ -53,6 +53,11 @@ import ch.lkmc.neutrodyne.core.ui.resources.back
 import ch.lkmc.neutrodyne.core.ui.resources.restore_action
 import ch.lkmc.neutrodyne.core.ui.resources.restore_choose_another
 import ch.lkmc.neutrodyne.core.ui.resources.restore_credentials
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_allow
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_cancel
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_failed
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_metered
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_wifi
 import ch.lkmc.neutrodyne.core.ui.resources.restore_history
 import ch.lkmc.neutrodyne.core.ui.resources.restore_linked
 import ch.lkmc.neutrodyne.core.ui.resources.restore_merge
@@ -63,6 +68,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.restore_phase_validate
 import ch.lkmc.neutrodyne.core.ui.resources.restore_preview
 import ch.lkmc.neutrodyne.core.ui.resources.restore_progress
 import ch.lkmc.neutrodyne.core.ui.resources.restore_queue
+import ch.lkmc.neutrodyne.core.ui.resources.restore_redownload
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace_effect
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace_title
@@ -102,7 +108,37 @@ internal fun RestoreSessionRoute(
     val restoreError = state.error ?: (progress as? RestoreProgress.Failed)?.error?.takeIf { failed }
     // Persisted committed work already belongs to the report, even after progress-flow loss.
     if (!preview && !failed) {
-        report()
+        Column {
+            if (state.redownloadIds.isNotEmpty()) {
+                NdButton(
+                    label = stringResource(Res.string.restore_redownload, state.redownloadIds.size),
+                    onClick = { scope.launch { viewModel.redownload(requester = actions.notifications) } },
+                    enabled = !state.busy,
+                )
+            }
+            if (state.downloadFailed) Text(stringResource(Res.string.restore_download_failed))
+            report()
+            if (state.meteredDownload) {
+                NdDialog(
+                    title = stringResource(Res.string.restore_download_metered),
+                    onDismissRequest = viewModel::dismissMeteredDownload,
+                    confirm =
+                        NdDialogAction(stringResource(Res.string.restore_download_allow)) {
+                            scope.launch { viewModel.redownload(true, actions.notifications) }
+                        },
+                    dismiss =
+                        NdDialogAction(
+                            stringResource(Res.string.restore_download_cancel),
+                            onClick = viewModel::dismissMeteredDownload,
+                        ),
+                ) {
+                    NdTextButton(
+                        label = stringResource(Res.string.restore_download_wifi),
+                        onClick = { scope.launch { viewModel.redownload(false, actions.notifications) } },
+                    )
+                }
+            }
+        }
         return
     }
     Scaffold(topBar = {

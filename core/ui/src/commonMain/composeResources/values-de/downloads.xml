@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="downloads_in_progress">Läuft · %1$d</string>
+    <string name="downloads_failed">Fehlgeschlagen · %1$d</string>
+    <string name="downloads_completed">Abgeschlossen · %1$d · %2$s</string>
+    <string name="downloads_pause_all">Alle pausieren</string>
+    <string name="downloads_resume_all">Alle fortsetzen</string>
+    <string name="downloads_retry_all">Alle wiederholen</string>
+    <string name="downloads_play_all">Alle abspielen</string>
+    <string name="downloads_select_all">Alle Abgeschlossenen auswählen</string>
+    <string name="downloads_select_played">Gespielte auswählen</string>
+    <string name="downloads_selected">%1$d ausgewählt</string>
+    <plurals name="downloads_delete_confirm">
+        <item quantity="one">%1$d Download (%2$s) löschen?</item>
+        <item quantity="other">%1$d Downloads (%2$s) löschen?</item>
+    </plurals>
+    <string name="downloads_delete_body">Die heruntergeladenen Dateien werden entfernt. Du kannst sie erneut herunterladen.</string>
+    <string name="downloads_delete_orphans">Verwaiste Dateien (%1$s) löschen?</string>
+    <string name="downloads_delete_orphans_body">Diese Dateien gehören nicht mehr zu einer Episode in deiner Bibliothek.</string>
+    <string name="downloads_storage">%1$s belegt · %2$s frei</string>
+    <string name="downloads_partial">%1$s teilweise · %2$s verwaist</string>
+    <string name="downloads_unknown">Größe unbekannt</string>
+    <string name="downloads_about">ca. %1$s</string>
+    <string name="downloads_bytes">%1$s von %2$s</string>
+    <string name="downloads_speed">%1$s · %2$s/s</string>
+    <string name="downloads_now">Jetzt herunterladen</string>
+    <string name="downloads_mobile">Mobile Daten verwenden</string>
+    <string name="downloads_wifi">Auf WLAN warten</string>
+    <string name="downloads_retry_now">Jetzt wiederholen</string>
+    <string name="downloads_manage">Speicher verwalten</string>
+    <string name="downloads_folder">Ordner anzeigen</string>
+    <string name="downloads_share">Datei teilen</string>
+    <string name="downloads_settings">Download-Einstellungen</string>
+    <string name="downloads_root">Speicherort</string>
+    <string name="downloads_root_new">Neue Downloads landen hier. Bestehende Dateien bleiben, wo sie sind.</string>
+    <string name="downloads_root_external">Gerätespeicher</string>
+    <string name="downloads_root_internal">Interner Speicher</string>
+    <string name="downloads_root_removable">SD-Karte</string>
+    <string name="downloads_root_desktop">Standard-Download-Ordner</string>
+    <string name="downloads_root_unavailable">Der Speicherort ist nicht verfügbar</string>
+    <string name="downloads_manual_metered">Mobile Daten für manuelle Downloads</string>
+    <string name="downloads_metered_ask">Jedes Mal fragen</string>
+    <string name="downloads_metered_always">Immer mobile Daten nutzen</string>
+    <string name="downloads_metered_never">Auf WLAN warten</string>
+    <string name="downloads_metered_title">Über mobile Daten herunterladen?</string>
+    <plurals name="downloads_metered_body">
+        <item quantity="one">%1$d Episode (ca. %2$s) über mobile Daten herunterladen?</item>
+        <item quantity="other">%1$d Episoden (ca. %2$s) über mobile Daten herunterladen?</item>
+    </plurals>
+    <plurals name="downloads_metered_unknown">
+        <item quantity="one">Die Größe von %1$d Episode ist unbekannt.</item>
+        <item quantity="other">Die Größe von %1$d Episoden ist unbekannt.</item>
+    </plurals>
+    <string name="downloads_notification_title">Download-Fortschritt sehen</string>
+    <string name="downloads_notification_body">Erlaube Benachrichtigungen, um den Download-Fortschritt außerhalb der App zu sehen. Downloads funktionieren auch ohne sie.</string>
+    <string name="downloads_allow">Erlauben</string>
+    <string name="downloads_not_now">Nicht jetzt</string>
+    <string name="downloads_data_saver">Der Datensparmodus ist aktiv. Downloads über mobile Daten können pausieren, solange Neutrodyne im Hintergrund ist.</string>
+    <string name="downloads_background">Hintergrundaktivität ist für Neutrodyne eingeschränkt. Downloads können pausieren, solange die App im Hintergrund ist.</string>
+    <string name="downloads_storage_low">Nicht genügend Speicher. %1$d Downloads warten.</string>
+    <string name="downloads_root_missing">Die SD-Karte ist nicht verfügbar.</string>
+    <string name="downloads_folder_missing">Der Download-Ordner ist nicht verfügbar.</string>
+    <string name="downloads_orphans">%1$s Dateien, die Neutrodyne nicht mehr zugeordnet sind.</string>
+    <plurals name="downloads_failed_badge">
+        <item quantity="one">%1$d fehlgeschlagener Download</item>
+        <item quantity="other">%1$d fehlgeschlagene Downloads</item>
+    </plurals>
+    <string name="dl_interrupted">Unterbrochen, wird automatisch fortgesetzt</string>
+    <string name="downloads_loading">Downloads werden geladen</string>
+    <string name="downloads_empty_manual">Heruntergeladene Episoden spielen offline</string>
+    <string name="downloads_dismiss">Verwerfen</string>
+    <string name="downloads_open_episode">Zur Episode</string>
+    <string name="downloads_select">Auswählen</string>
+    <string name="downloads_cancel_selection">Auswahl aufheben</string>
+    <string name="downloads_working">Arbeite …</string>
+    <string name="downloads_file_unavailable">Die heruntergeladene Datei ist nicht verfügbar</string>
+    <string name="downloads_server_error">Serverfehler (%1$d)</string>
+    <string name="downloads_reject_gone">Diese Episode ist nicht mehr verfügbar</string>
+    <string name="downloads_reject_no_file">Diese Episode hat keine Datei zum Herunterladen</string>
+    <string name="downloads_reject_stream">Diese Episode kann nur gestreamt werden</string>
+    <plurals name="downloads_skipped">
+        <item quantity="one">%1$d Episode übersprungen: %2$s</item>
+        <item quantity="other">%1$d Episoden übersprungen: %2$s</item>
+    </plurals>
+    <string name="downloads_too_large">Diese Datei ist zu groß für den gewählten Speicher</string>
+    <string name="downloads_options">Download-Aktionen</string>
+</resources>

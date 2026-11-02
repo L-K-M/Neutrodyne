@@ -166,7 +166,18 @@ class NeutrodyneRootTest {
         }
 
     @Test
-    fun restoredExpandedPlayerMeasuresBeforeHidingNavigation() =
+    fun downloadsBadgeTracksOnlyTheFailureCountFlow() =
+        runComposeUiTest {
+            val count = kotlinx.coroutines.flow.MutableStateFlow(3)
+            setContent { TestRoot(failedDownloads = count) }
+            onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
+            count.value = 0
+            waitForIdle()
+            onAllNodesWithContentDescription("3 failed downloads").assertCountEquals(0)
+        }
+
+    @Test
+    fun restoredExpandedPlayerMeasuresBeforeHidingSuite() =
         runComposeUiTest {
             var slot: PlayerSlotState? = null
             setContent {
@@ -896,10 +907,12 @@ private fun TestRoot(
     selectFeedSource: suspend (String?) -> Boolean = { true },
     slots: RootSlots = TestSlots,
     state: RootUiState = RootUiState.READY.copy(startup = startup),
+    failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
             state = state,
+            failedDownloads = failedDownloads,
             routes = routes,
             actions = testActions(selectFeedSource),
             slots = slots,
