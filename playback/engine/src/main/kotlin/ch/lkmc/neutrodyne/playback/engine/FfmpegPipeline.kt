@@ -55,12 +55,25 @@ class FfmpegPipeline
             demuxer.seekTo(positionMs)
             decoder.flushBuffers()
             decoder.discardPendingSamples()
+            val targetUs = positionMs * MICROS_PER_MS
             while (true) {
                 val packet = demuxer.readPacket() ?: break
                 if (!decoder.send(packet)) continue
-                val frame = decoder.receive() ?: continue
-                if (frame.samples.isEmpty()) continue
-                return frame.ptsUs?.div(1000) ?: positionMs
+                while (true) {
+                    val frame = decoder.receive() ?: break
+                    if (frame.samples.isEmpty()) continue
+                    val ptsUs = frame.ptsUs ?: return positionMs
+                    // Ogg seeks by page boundary: the demuxer's first packets
+                    // after a seek belong to the page it landed on and can
+                    // precede the target by the whole page duration. Whole
+                    // frames that end before the target are dropped, as the
+                    // consuming engine would drop them before output.
+                    val endUs =
+                        ptsUs + frame.samples.size.toLong() * MICROS_PER_MS /
+                            (frame.channels.toLong() * frame.sampleRate)
+                    if (endUs <= targetUs) continue
+                    return ptsUs / 1000
+                }
             }
             return positionMs
         }
@@ -88,5 +101,7 @@ class FfmpegPipeline
                 val decoder = FfDecoder(library, arena, demuxer)
                 return FfmpegPipeline(library, arena, demuxer, decoder)
             }
+
+            private const val MICROS_PER_MS = 1_000L
         }
     }

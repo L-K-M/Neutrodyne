@@ -300,6 +300,9 @@ class FfDemuxer
             if (!firstPacket) return 0
             firstPacket = false
             if (skipSamples > 0) return 0
+            // initial_padding reaches the decoder through codecpar and is
+            // trimmed inside avcodec: our own trim on top would double it.
+            if (audioTrack.initialPadding > 0) return 0
             if (audioTrack.codec != AudioCodec.AAC) return 0
             if (!containerName.contains(MP4_MARKER)) return 0
             return AAC_PRIMING_SAMPLES
