@@ -178,6 +178,44 @@ class PreConfirmationPeerGuardTest {
         assertEquals(0, lan.requestCount)
     }
 
+    @Test fun rebindingBetweenPreflightAndConnectOpensNoSocket() {
+        MockWebServer().use { public ->
+            public.start()
+            ServerSocket(public.port, 1, InetAddress.getByName(LAN_ADDR)).use { recorder ->
+                for (kind in listOf("feed", "image")) {
+                    val lookups = AtomicInteger()
+                    val clients = newNetworkClients(
+                        baseDns = Dns {
+                            listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR))
+                        },
+                        isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                    )
+                    val client = if (kind == "feed") clients.feed else clients.image
+                    public.enqueue(mockResponse(body = "public stand-in"))
+                    val target = public.url("/feed").newBuilder().host("rebound.test").build()
+                    assertFailsWith<LocalNetworkUnsupportedException> {
+                        client.newCall(marked(target)).execute().use { }
+                    }
+                }
+                assertEquals(0, public.requestCount)
+                assertZeroConnections(recorder)
+            }
+        }
+    }
+
+    @Test fun markedFailureDoesNotRestrictTheNextExplicitCall() {
+        val clients = newNetworkClients(baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1")) })
+        val target = server.url("/feed").newBuilder().host("local-peer.test").build()
+        assertFailsWith<LocalNetworkUnsupportedException> {
+            clients.image.newCall(marked(target)).execute().use { }
+        }
+        server.enqueue(mockResponse(body = "explicit"))
+        clients.image.newCall(Request.Builder().url(target).build()).execute().use {
+            assertEquals(200, it.code)
+        }
+        assertEquals(1, server.requestCount)
+    }
+
     private fun assertZeroConnections(recorder: ServerSocket) {
         recorder.soTimeout = 100
         var count = 0
