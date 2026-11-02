@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.discover
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
@@ -25,6 +26,7 @@ public object DiscoverNavigation {
     @IntoSet
     public fun entries(): EntryProviderInstaller =
         {
+            entry<DirectoryKey>(metadata = NdSceneMetadata.paneDetail()) { key -> DirectoryRoute(key) }
             entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) { DiscoverRoute() }
             entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { key ->
                 AddPodcastRoute(key)

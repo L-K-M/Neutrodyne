@@ -40,6 +40,30 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
     private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
 
     @Test
+    fun directoryConsentIsExplicitAndNotAUrlKeepsTheSearchQuery() =
+        runTest {
+            resolver.nextResolution =
+                AddResolution.LookupRequired(
+                    "https://podcasts.apple.com/id1",
+                    ch.lkmc.neutrodyne.core.model.ProviderId.APPLE,
+                )
+            viewModel.resolve("https://podcasts.apple.com/id1")
+            advanceUntilIdle()
+            assertTrue(resolver.oneTimeInputs.isEmpty())
+            assertTrue(assertIs<AddSheetStep.Input>(viewModel.uiState.value.step).lookupRequired != null)
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.lookupOnce()
+            advanceUntilIdle()
+            assertEquals(listOf("https://podcasts.apple.com/id1"), resolver.oneTimeInputs)
+            assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step)
+            viewModel.onInputChanged("history")
+            resolver.nextResolution = AddResolution.Failure(AddPodcastError.NotAUrl("history"))
+            viewModel.resolve("history")
+            advanceUntilIdle()
+            assertEquals("history", assertIs<AddSheetStep.Input>(viewModel.uiState.value.step).searchQuery)
+        }
+
+    @Test
     fun chosenGroupsArePassedToSubscribe() =
         runTest {
             resolver.nextResolution = AddResolution.Feed(Preview)
