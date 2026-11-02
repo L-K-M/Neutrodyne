@@ -180,7 +180,9 @@ abstract class VerifyDependencyPolicyTask : DefaultTask() {
                 )
         }
         val lower = configuration.lowercase()
-        if ((lower.contains("androidtest") || lower.contains("devicetest")) && lower.endsWith("runtimeclasspath")) {
+        if ((path == ":benchmark" || lower.contains("androidtest") || lower.contains("devicetest")) &&
+            lower.endsWith("runtimeclasspath")
+        ) {
             rules += BannedCoordinate("io.mockk", "*", "no MockK on devices (09 Test infrastructure)")
         }
         return rules
@@ -337,6 +339,7 @@ internal fun Project.registerDependencyPolicy() {
             val isShellRuntime =
                 when (path) {
                     ":app" -> name == "releaseRuntimeClasspath" || name == "benchmarkReleaseRuntimeClasspath"
+                    ":benchmark" -> name == "benchmarkReleaseRuntimeClasspath"
                     ":desktopApp", ":sync:server" -> name == "runtimeClasspath"
                     else -> false
                 }

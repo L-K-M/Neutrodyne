@@ -49,6 +49,7 @@ gradlePlugin {
         }
         register("neutrodyne.android.application", "AndroidApplicationConventionPlugin")
         register("neutrodyne.android.library", "AndroidLibraryConventionPlugin")
+        register("neutrodyne.android.systemtest", "AndroidSystemTestConventionPlugin")
         register("neutrodyne.android.testing", "AndroidTestingConventionPlugin")
         register("neutrodyne.android.lint", "AndroidLintConventionPlugin")
         register("neutrodyne.kmp.library", "KmpLibraryConventionPlugin")
