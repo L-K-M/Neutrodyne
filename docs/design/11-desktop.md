@@ -1875,6 +1875,47 @@ Names fixed by PLAN and the change brief (`desktop.*` keys, `-Dneutrodyne.smoke`
 
 ---
 
+## MD0 spike findings (2026-11-02)
+
+The spike ran on branch `impl/md0-current`; the desktop matrix
+(`workflow_dispatch` and the nightly schedule) built and tested all four
+targets. Evidence per criterion:
+
+- **AC1 corpus decode — open.** Fifteen corpus fixtures including the added
+  HE-AAC v1/v2 ADTS files decode through the custom AVIO and FFM bindings;
+  `FfmpegCorpusTest` checks decoded sample counts against the independent
+  manifest and `seekAndDecode` measures the first audible sample after a
+  seek. Final matrix evidence is collected from run
+  `41416052575` onward; earlier runs proved the build and licence legs.
+- **AC2 LGPL build — go.** `checkNativeLicences` verifies the licence
+  string, zero registered network protocols, the D86 component set and the
+  4 MB size budget on each target from the built libraries; the source
+  bundle carries the exact tarball, signature and checksum.
+- **AC3 null-backend clock — open, prototype green locally.** ndmedia's
+  callback advances `frames_played` only for media frames and counts
+  underrun silence separately; `EngineClockTest` drives
+  decode → SilenceSkipper → Sonic → GainStage → f32 → ring → null device
+  at 0.5×/1×/2×/3× and asserts the clock lands within 50 ms of the media
+  end. The DSP ports keep Media3 semantics; sample-exact parity against
+  Media3-generated goldens is not yet in CI (MD1 work). A 30-minute
+  real-device underrun soak is an owner/hardware check: run the app 30 min
+  per OS and read `nd_out_underrun_frames`.
+- **AC4 OS integration — open.** MPRIS over dbus-java, SMTC and Now Playing
+  prototypes are not yet implemented; manual steps: on Windows run the app
+  and check the SMTC flyout responds to play/pause/seek; on macOS check
+  Now Playing metadata and remote commands with the ad-hoc-signed app; on
+  Linux run under `dbus-run-session` and drive `org.mpris.MediaPlayer2`
+  over `dbus-send`. Headphone removal on Windows/macOS and suspend
+  (incl. Windows Modern Standby) need real hardware: unplug during
+  playback and suspend/resume mid-episode, expecting pause-before-stop.
+
+The engine decision stays with the custom engine behind the
+`AudioEngine` seam; libmpv remains the documented fallback. No spike
+failure lacked a fallback, so no blocker is recorded. Manual checks
+above are open until an owner runs them on real desktops.
+
+---
+
 ## Sources
 
 Checked 2026-10-05 unless noted.
