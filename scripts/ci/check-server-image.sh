@@ -31,21 +31,29 @@ python3 "$root/scripts/ci/server-image.py" check-rootfs --directory "$work/rootf
 docker rm -fv "$container" >/dev/null
 container=''
 # Exercise the actual JAR, JNI extraction, read-only root, noexec /tmp and nonroot volume.
+# Every exec'd JVM is bounded: it shares the 320m cgroup with serve, and an unbounded
+# default heap (25 % of the limit) can OOM-kill the server during the health loop.
+probe_jvm=(/usr/bin/java -Xmx32m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
+cli_jvm=(/usr/bin/java -Xmx64m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
 container="$(docker run -d --read-only --tmpfs /tmp:noexec,nosuid,nodev,size=16m \
     --cap-drop ALL --security-opt no-new-privileges:true --memory 320m \
     -e NEUTRODYNE_SERVER_UPDATE_CHECK=false -e NEUTRODYNE_SERVER_LISTEN=127.0.0.1:8787 \
     "$image" serve)"
 ready=false
 for _ in $(seq 1 60); do
-    if docker exec "$container" /usr/bin/java -cp /app/neutrodyne-server.jar \
+    if docker exec "$container" "${probe_jvm[@]}" -cp /app/neutrodyne-server.jar \
         ch.lkmc.neutrodyne.sync.server.HealthCheck; then ready=true; break; fi
     sleep 1
 done
-[[ "$ready" == true ]] || { docker logs "$container"; exit 1; }
-docker exec "$container" /usr/bin/java -jar /app/neutrodyne-server.jar doctor
-docker exec "$container" /usr/bin/java -jar /app/neutrodyne-server.jar backup /data/image-check.db
+if [[ "$ready" != true ]]; then
+    docker inspect -f 'container state: status={{.State.Status}} exit={{.State.ExitCode}} oomKilled={{.State.OOMKilled}}' "$container" || true
+    docker logs "$container"
+    exit 1
+fi
+docker exec "$container" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar doctor
+docker exec "$container" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar backup /data/image-check.db
 # The exclusive restore lease must refuse while serve is running.
-if docker exec "$container" /usr/bin/java -jar /app/neutrodyne-server.jar restore /data/image-check.db; then
+if docker exec "$container" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar restore /data/image-check.db; then
     echo 'restore accepted a live server' >&2
     exit 1
 fi

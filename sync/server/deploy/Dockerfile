@@ -17,6 +17,8 @@ LABEL org.opencontainers.image.source="https://github.com/${REPOSITORY}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.description="Neutrodyne Sync server" \
       ch.lkmc.neutrodyne.sources="${IMAGE_REPOSITORY}:${VERSION}-sources https://github.com/${REPOSITORY}/releases/tag/v${VERSION}"
-HEALTHCHECK --interval=30s --timeout=5s CMD ["/usr/bin/java", "-cp", "/app/neutrodyne-server.jar", "ch.lkmc.neutrodyne.sync.server.HealthCheck"]
+# The probe JVM is bounded: it runs inside the same 320 MiB cgroup as serve, and an
+# unbounded default heap (25 % of the limit) can OOM-kill the server process.
+HEALTHCHECK --interval=30s --timeout=5s CMD ["/usr/bin/java", "-Xmx32m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-cp", "/app/neutrodyne-server.jar", "ch.lkmc.neutrodyne.sync.server.HealthCheck"]
 ENTRYPOINT ["/usr/bin/java", "-Xmx96m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-jar", "/app/neutrodyne-server.jar"]
 CMD ["serve"]

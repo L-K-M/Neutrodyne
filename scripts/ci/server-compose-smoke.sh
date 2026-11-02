@@ -43,11 +43,14 @@ mkdir "$work/certs"
 "${compose[@]}" up -d neutrodyne-server caddy
 server="$("${compose[@]}" ps -q neutrodyne-server)"
 caddy="$("${compose[@]}" ps -q caddy)"
+# Exec'd JVMs are bounded: they share the compose mem_limit (320m) with serve.
+probe_jvm=(/usr/bin/java -Xmx32m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
+cli_jvm=(/usr/bin/java -Xmx64m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
 for _ in $(seq 1 90); do
-    if docker exec "$server" /usr/bin/java -cp /app/neutrodyne-server.jar ch.lkmc.neutrodyne.sync.server.HealthCheck; then break; fi
+    if docker exec "$server" "${probe_jvm[@]}" -cp /app/neutrodyne-server.jar ch.lkmc.neutrodyne.sync.server.HealthCheck; then break; fi
     sleep 1
 done
-docker exec "$server" /usr/bin/java -jar /app/neutrodyne-server.jar doctor
+docker exec "$server" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar doctor
 for _ in $(seq 1 60); do
     if docker cp "$caddy:/data/caddy/pki/authorities/local/root.crt" "$work/certs/ca.crt" 2>/dev/null; then break; fi
     sleep 1
@@ -73,7 +76,7 @@ server_pid="$(docker inspect -f '{{.State.Pid}}' "$server")"
 sudo nsenter -t "$server_pid" -n tcpdump -nn -l -i any \
     "(tcp or udp) and ((src host $server_ip and not src port 8787) or dst port 53)" > "$work/egress.txt" 2> "$work/capture.log" &
 capture=$!
-invite_output="$(docker exec "$server" /usr/bin/java -jar /app/neutrodyne-server.jar admin create smoke)"
+invite_output="$(docker exec "$server" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar admin create smoke)"
 export SMOKE_INVITE="${invite_output##*shown once): }"
 python3 scripts/ci/server-smoke.py exercise --url https://sync.local:9443 --ca "$work/certs/ca.crt" --state "$work/state.json"
 # Both five-minute streams run concurrently; this job never substitutes the MS3 two-hour gate.
@@ -83,7 +86,7 @@ python3 scripts/ci/server-smoke.py events --url https://sync.local:9444 --ca "$w
 nginx_stream=$!
 wait "$caddy_stream"
 wait "$nginx_stream"
-docker exec "$server" /usr/bin/java -jar /app/neutrodyne-server.jar backup /data/smoke.db
+docker exec "$server" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar backup /data/smoke.db
 python3 scripts/ci/server-smoke.py mutate --url https://sync.local:9443 --ca "$work/certs/ca.crt" --state "$work/state.json"
 # Revoke AFTER the backup; restore must carry this revocation forward.
 python3 - "$work/state.json" "$work/certs/ca.crt" <<'PY'
@@ -110,7 +113,7 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 server="$("${compose[@]}" ps -q neutrodyne-server)"
-invite_output="$(docker exec "$server" /usr/bin/java -jar /app/neutrodyne-server.jar user invite smoke)"
+invite_output="$(docker exec "$server" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar user invite smoke)"
 export SMOKE_INVITE="${invite_output##*shown once): }"
 python3 scripts/ci/server-smoke.py after-restore --url https://sync.local:9443 --ca "$work/certs/ca.crt" --state "$work/state.json"
 echo 'Reference compose, Caddy/nginx SSE, noexec native loading, backup/restore and egress checks passed'
