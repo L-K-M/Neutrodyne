@@ -8,13 +8,16 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.media.AudioManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.NeutrodyneApplication
@@ -122,14 +125,12 @@ class RebootResumptionTest {
         runBlocking {
             hostOnly()
             graph.databaseOpener.awaitOpen()
-            device.openQuickSettings()
-            val card =
-                checkNotNull(device.wait(Until.findObject(By.text(TITLE)), WAIT_MS)) { "System UI recent card missing" }
+            val card = awaitInQuickSettings(By.text(TITLE), "recent-card")
             assertTrue(card.visibleBounds.width() > 0)
-            record("offline-card")
-            val art =
-                checkNotNull(device.findObject(By.res("com.android.systemui", "album_art"))) { "Card artwork missing" }
+            val art = awaitInQuickSettings(By.res("com.android.systemui", "album_art"), "card-artwork")
             val bounds = art.visibleBounds
+            // Artwork can attach after the title is laid out, so capture once its view exists.
+            record("offline-card")
             val screenshot = checkNotNull(BitmapFactory.decodeFile(File(evidence, "offline-card.png").path))
             var blue = 0
             var pixels = 0
@@ -169,12 +170,7 @@ class RebootResumptionTest {
         runBlocking {
             hostOnly()
             graph.databaseOpener.awaitOpen()
-            device.openQuickSettings()
-            val play =
-                checkNotNull(device.wait(Until.findObject(By.descContains("Play")), WAIT_MS)) {
-                    "System UI recent card play action missing"
-                }
-            play.click()
+            awaitInQuickSettings(By.descContains("Play"), "card-play-action").click()
             val controller = connect()
             try {
                 // The first playing sample: waiting for the saved position would also fit a restart at zero.
@@ -214,8 +210,22 @@ class RebootResumptionTest {
                 .await()
         }
 
+    /** System UI is still starting just after boot and can drop an expand request, so ask again. */
+    private fun awaitInQuickSettings(
+        selector: BySelector,
+        name: String,
+    ): UiObject2 {
+        val deadline = SystemClock.uptimeMillis() + WAIT_MS
+        while (SystemClock.uptimeMillis() < deadline) {
+            device.openQuickSettings()
+            device.wait(Until.findObject(selector), QUICK_SETTINGS_POLL_MS)?.let { return it }
+        }
+        record("$name-missing")
+        error("System UI $name missing")
+    }
+
     private fun record(phase: String) {
-        device.takeScreenshot(File(evidence, "$phase.png"))
+        check(device.takeScreenshot(File(evidence, "$phase.png"))) { "Screenshot failed for $phase" }
         device.dumpWindowHierarchy(File(evidence, "$phase.xml"))
         File(evidence, "$phase.txt").writeText(
             "episode=${saved.getLong("episode", -1)} position=${saved.getLong("position", -1)} " +
@@ -231,5 +241,6 @@ class RebootResumptionTest {
         const val SAVED_POSITION_MS = 9_000L
         const val SEEK_TOLERANCE_MS = 500L
         const val WAIT_MS = 60_000L
+        const val QUICK_SETTINGS_POLL_MS = 5_000L
     }
 }

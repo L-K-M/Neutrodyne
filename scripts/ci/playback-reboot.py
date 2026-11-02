@@ -162,23 +162,33 @@ def main():
     finally:
         record["tests"] = len(record["passed"])
         (args.output / "evidence.json").write_text(json.dumps(record, indent=2) + "\n")
-        try:
-            for name, command in {
-                "logcat.txt": ("logcat", "-d", "-v", "threadtime"),
-                "media-session.txt": ("shell", "dumpsys", "media_session"),
-                "connectivity.txt": ("shell", "dumpsys", "connectivity"),
-            }.items():
-                (args.output / name).write_text(adb(*command))
-            adb("pull", f"/sdcard/Android/data/{args.package}/files/m5-reboot", str(args.output))
-        finally:
-            server.shutdown()
-            server.server_close()
-            adb("shell", "cmd", "connectivity", "airplane-mode", "disable")
-            adb("shell", "svc", "wifi", "enable")
-            adb("shell", "svc", "data", "enable")
-            adb("reverse", "--remove", f"tcp:{port}")
-            if args.hardening:
-                adb("shell", "cmd", "audio", "set-enable-hardening", "enable")
+
+        # Best effort: a failed cleanup step must not hide the phase failure or skip the others.
+        # For example, `reverse --remove` fails when a failed phase left no forward in place.
+        def best_effort(*command):
+            try:
+                return adb(*command)
+            except (subprocess.SubprocessError, OSError) as failure:
+                print(f"Cleanup step failed: {' '.join(command)}: {failure}")
+                return None
+
+        for name, command in {
+            "logcat.txt": ("logcat", "-d", "-v", "threadtime"),
+            "media-session.txt": ("shell", "dumpsys", "media_session"),
+            "connectivity.txt": ("shell", "dumpsys", "connectivity"),
+        }.items():
+            output = best_effort(*command)
+            if output is not None:
+                (args.output / name).write_text(output)
+        best_effort("pull", f"/sdcard/Android/data/{args.package}/files/m5-reboot", str(args.output))
+        server.shutdown()
+        server.server_close()
+        best_effort("shell", "cmd", "connectivity", "airplane-mode", "disable")
+        best_effort("shell", "svc", "wifi", "enable")
+        best_effort("shell", "svc", "data", "enable")
+        best_effort("reverse", "--remove", f"tcp:{port}")
+        if args.hardening:
+            best_effort("shell", "cmd", "audio", "set-enable-hardening", "enable")
 
 
 if __name__ == "__main__":
