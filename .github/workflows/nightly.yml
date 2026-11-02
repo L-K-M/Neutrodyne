@@ -806,12 +806,14 @@ jobs:
           mkdir -p native-evidence
           for f in ffmpeg-build.txt ffmpeg-sizes.txt ffmpeg-license.txt \
                    ffmpeg-protocols.txt ffmpeg-components.txt ffmpeg-config.h; do
-            cp "playback/native/build/ffmpeg/${{ matrix.target }}/$f" native-evidence/
+            source="playback/native/build/ffmpeg/${{ matrix.target }}/$f"
+            [ ! -f "$source" ] || cp "$source" native-evidence/
           done
           cp playback/native/build/ffmpeg-source/*.tar.xz native-evidence/ 2>/dev/null || true
           # A native crash writes its report into the engine module's directory;
           # it is the only stack a segfault leaves, so it rides along too.
           cp playback/engine/hs_err_pid*.log native-evidence/ 2>/dev/null || true
+          printf '%s\n' "${{ github.sha }}" > native-evidence/commit.txt
           ls -l native-evidence
       - name: Report failure
         if: failure()
@@ -829,7 +831,20 @@ jobs:
         if: always()
         with:
           name: desktop-native-${{ matrix.target }}
-          path: native-evidence/
+          path: |
+            native-evidence/
+            playback/native/build/ffmpeg/${{ matrix.target }}/lib/
+            playback/native/build/ffmpeg/${{ matrix.target }}/bin/
+            playback/native/build/ndmedia/${{ matrix.target }}/*ndmedia*
+            desktopApp/config/licenses/MIT-0-miniaudio.json
+            desktopApp/config/licenses/LGPL-2.1-or-later.json
+            playback/native/build/ffmpeg/${{ matrix.target }}/ffmpeg-layout.json
+            playback/native/build/ffmpeg-cache/build-${{ matrix.target }}/*.log
+            playback/native/build/ndmedia/${{ matrix.target }}/ndmedia-build.txt
+            playback/engine/build/test-results/
+            playback/engine/build/reports/tests/
+            playback/native/build/test-results/
+            desktop/system/build/test-results/
           retention-days: 14
 
   repro:

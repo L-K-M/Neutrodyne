@@ -29,7 +29,7 @@ internal class TimelineClock(
 
     private val markers = AtomicReferenceArray<Marker?>(MARKER_COUNT)
     private val writeIndex = AtomicInteger(0)
-    private val pausedPositionUs = AtomicLong(0)
+    private val pausedPositionUs = AtomicLong(-1)
 
     // -1 while playing; the item's end position once the source is consumed.
     private val endPositionUs = AtomicLong(-1)
@@ -42,6 +42,8 @@ internal class TimelineClock(
     fun positionMs(): Long {
         // Once the item ended, position is its consumed media time: skipped
         // silence writes no markers, so nothing anchors the tail otherwise.
+        val paused = pausedPositionUs.get()
+        if (paused >= 0) return paused / 1000
         val end = endPositionUs.get()
         if (end >= 0) return end / 1000
         val played = framesPlayed() - latencyFrames
@@ -50,7 +52,7 @@ internal class TimelineClock(
             val m = markers.get(i) ?: continue
             if (m.outFrame <= played && (best == null || m.outFrame > best.outFrame)) best = m
         }
-        val anchor = best ?: return pausedPositionUs.get() / 1000
+        val anchor = best ?: return 0
         val delta =
             (
                 (played - anchor.outFrame).coerceAtLeast(0) *
@@ -63,6 +65,10 @@ internal class TimelineClock(
         pausedPositionUs.set(positionMs() * 1000)
     }
 
+    fun resume() {
+        pausedPositionUs.set(-1)
+    }
+
     /** Pins the position to [endUs]: the consumed media time at end of stream. */
     fun finish(endUs: Long) {
         endPositionUs.set(endUs)
@@ -72,6 +78,7 @@ internal class TimelineClock(
         for (i in 0 until MARKER_COUNT) markers.set(i, null)
         writeIndex.set(0)
         endPositionUs.set(-1)
+        pausedPositionUs.set(-1)
     }
 
     private companion object {

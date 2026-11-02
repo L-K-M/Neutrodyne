@@ -43,7 +43,7 @@ mkdir -p "$INCLUDE_DIR"
 if [ ! -f "$HEADER" ]; then
     fetch_ok=0
     for try in 1 2 3; do
-        if curl -fsSL --retry 3 --connect-timeout 20 -o "$HEADER.part" "$MINIAUDIO_URL" && \
+        if curl -fsSL --retry 2 --connect-timeout 20 --max-time 120 -o "$HEADER.part" "$MINIAUDIO_URL" && \
            [ "$(sha256_of "$HEADER.part")" = "$MINIAUDIO_SHA256" ]; then
             mv "$HEADER.part" "$HEADER"; fetch_ok=1; break
         fi
@@ -51,6 +51,8 @@ if [ ! -f "$HEADER" ]; then
     done
     [ "$fetch_ok" = 1 ] || die "could not fetch $MINIAUDIO_URL with sha256 $MINIAUDIO_SHA256"
 fi
+
+[ "$(sha256_of "$HEADER")" = "$MINIAUDIO_SHA256" ] || die "cached miniaudio checksum mismatch"
 
 SRC="$ROOT/ndmedia.c"
 CFLAGS="-O2 -fvisibility=hidden -I$INCLUDE_DIR -I$ROOT"
@@ -105,10 +107,10 @@ case "$TARGET" in
             # the .bat restores it before dumping the environment.
             VCVARS_WORK="$NATIVE_ROOT/build/ndmedia/vcvars-$TARGET"
             mkdir -p "$VCVARS_WORK"
-            printf '@set "OLDCD=%%CD%%"\r\ncall "%s" >NUL 2>&1\r\n@cd /d "%%OLDCD%%"\r\nset > "env.txt"\r\n' \
+            printf '@set "OLDCD=%%CD%%"\r\ncall "%s" >vcvars.log 2>&1\r\n@if errorlevel 1 exit /b 1\r\n@cd /d "%%OLDCD%%"\r\nset > "env.txt"\r\n' \
                 "$(cygpath -w "$VCVARS")" > "$VCVARS_WORK/vcvars-env.bat"
             (cd "$VCVARS_WORK" && cmd //c vcvars-env.bat) ||
-                die "vcvars64.bat failed"
+                { cat "$VCVARS_WORK/vcvars.log"; die "vcvars64.bat failed"; }
             rm -f "$VCVARS_WORK/vcvars-env.bat"
             ENV_FILE="$VCVARS_WORK/env.txt"
             [ -s "$ENV_FILE" ] || die "vcvars64.bat produced no environment"
@@ -128,15 +130,11 @@ case "$TARGET" in
                 case "$env_name" in
                     *[!A-Za-z0-9_]*) continue ;;
                 esac
-                export "$env_name=${line#*=}"
+                case "$env_name" in
+                    [Pp][Aa][Tt][Hh]) export PATH="$(cygpath -up "${line#*=}")" ;;
+                    *) export "$env_name=${line#*=}" ;;
+                esac
             done < "$ENV_FILE"
-            # cmd dumped PATH in Windows form; bash's own command lookup needs
-            # the POSIX form of the list (cl keeps reading its Windows form
-            # through the variables it uses itself).
-            if command -v cygpath >/dev/null 2>&1; then
-                posix_path="$(cygpath -up "$PATH")" &&
-                    export PATH="$posix_path"
-            fi
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
         (cd "$BUILD_ROOT" && cl -nologo -O2 -LD \

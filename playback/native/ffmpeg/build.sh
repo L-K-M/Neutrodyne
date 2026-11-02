@@ -105,26 +105,12 @@ verify_checksum() { # verify_checksum <file> <expected>
 # instead of sitting silent until the job's timeout. Both Windows legs that
 # died in silence (runs 41479793169 and 41500707088) produced no output for
 # the rest of the job somewhere in the download → gpg window. GNU timeout
-# (coreutils: MSYS2, the manylinux containers) is the bound wherever it
-# exists, because a foreground timeout cannot share the MSYS pathology where
-# bash's `wait` on a watchdog-killed job never returns; the in-shell watchdog
-# remains only where no timeout exists (macOS ships none).
+# (coreutils on MSYS2 and manylinux); macOS uses Perl's alarm before exec,
+# avoiding a watchdog child that keeps Gradle's output pipe open after failure.
 if command -v timeout >/dev/null 2>&1 && timeout --version >/dev/null 2>&1; then
     bounded() { timeout --kill-after=5 "$1" "${@:2}"; }
 else
-    bounded() {
-        local seconds="$1" pid watchdog status
-        shift
-        "$@" &
-        pid=$!
-        ( sleep "$seconds"; kill -KILL "$pid" 2>/dev/null ) &
-        watchdog=$!
-        status=0
-        wait "$pid" || status=$?
-        kill "$watchdog" 2>/dev/null || true
-        wait "$watchdog" 2>/dev/null || true
-        return "$status"
-    }
+    bounded() { perl -e 'alarm shift; exec @ARGV or die $!;' "$@"; }
 fi
 
 download() { # download <file> <url> [fallback-url]
@@ -155,56 +141,65 @@ download() { # download <file> <url> [fallback-url]
 
 verify_signature() {
     command -v gpg >/dev/null 2>&1 || die "gpg is required to verify the FFmpeg source signature"
-    # The home stays in POSIX form on purpose: this script runs under MSYS2's
-    # own bash and gpg (both msys-linked), for which a POSIX home is the native
-    # case — pacman verifies every package signature through exactly this
-    # combination. A Windows-form home is what both silently-hung Windows legs
-    # ran with; gpg's agent socket handling on a converted path is the prime
-    # suspect for those hangs, so the conversion is gone and every gpg call is
-    # bounded so a regression fails in minutes, not hours.
-    local home keyring
+    command -v gpgv >/dev/null 2>&1 || die "gpgv is required to verify the FFmpeg source signature"
+    # Verification needs no secret keys or agent. Importing a public key starts
+    # gpg-agent on some runners, whose Unix socket cannot fit a long checkout
+    # path on macOS and whose MSYS2 startup can hang on Windows.
+    local home keyring fingerprint
     home="$CACHE/gnupg-home"
-    rm -rf "$home"
     mkdir -p "$home"
-    chmod 700 "$home" 2>/dev/null || true
-    keyring="$home/ffmpeg-release-signing-key.asc"
-    cp "$REPO_ROOT/$SIGNING_KEY" "$keyring"
-    # Every gpg call is bounded and logged around, so a hang is attributable to
-    # one call from the CI log instead of a two-hour silence.
-    GNUPGHOME="$home" bounded 120 gpg --quiet --batch --import "$keyring" >/dev/null 2>&1 ||
-        die "could not import the FFmpeg release signing key"
-    log "imported the FFmpeg release signing key"
-    local fingerprint
-    fingerprint="$(GNUPGHOME="$home" bounded 120 gpg --quiet --with-colons --show-keys "$keyring" |
-        awk -F: '$1 == "fpr" { print $10; exit }')" ||
+    chmod 700 "$home"
+    keyring="$home/ffmpeg-release.gpg"
+    GNUPGHOME="$home" bounded 120 gpg --no-options --batch --yes --no-autostart \
+        --dearmor --output "$keyring" "$NATIVE_DIR/${SIGNING_KEY#playback/native/}" ||
+        die "could not dearmor the FFmpeg release signing key"
+    fingerprint="$(GNUPGHOME="$home" bounded 120 gpg --no-options --batch --no-autostart \
+        --with-colons --show-keys "$keyring" | awk -F: '$1 == "fpr" { print $10; exit }')" ||
         die "could not read the FFmpeg signing key's fingerprint"
     [ "$fingerprint" = "$SIGNING_KEY_FINGERPRINT" ] ||
         die "the FFmpeg signing key is $fingerprint, expected $SIGNING_KEY_FINGERPRINT"
-    log "the signing key's fingerprint matches $SIGNING_KEY_FINGERPRINT"
-    GNUPGHOME="$home" bounded 120 gpg --quiet --batch --verify "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
+    GNUPGHOME="$home" bounded 120 gpgv --keyring "$keyring" "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
         die "the FFmpeg source signature did not verify"
-    rm -rf "$home"
+
     log "verified the FFmpeg source signature with $SIGNING_KEY_FINGERPRINT"
 }
 
-if [ ! -d "$SOURCE_DIR" ]; then
-    download "$SOURCE_TARBALL" "$SOURCE_URL" "$SOURCE_URL_FALLBACK"
-    verify_checksum "$SOURCE_TARBALL" "$SOURCE_SHA256"
-    log "checksum verified: $(basename "$SOURCE_TARBALL")"
-    if [ -n "$SIGNATURE_URL" ]; then
-        download "$SOURCE_SIGNATURE" "$SIGNATURE_URL" "$SIGNATURE_URL_FALLBACK"
-        if [ -n "$SIGNATURE_SHA256" ]; then
-            verify_checksum "$SOURCE_SIGNATURE" "$SIGNATURE_SHA256"
-            log "checksum verified: $(basename "$SOURCE_SIGNATURE")"
+# Download and extract inside the Linux target container too, so every build
+# verifies its cached archive rather than trusting a previously extracted tree.
+case "$TARGET" in
+    linux-x64 | linux-arm64)
+        if [ "${MANYLINUX_CONTAINER:-}" != "1" ]; then
+            command -v docker >/dev/null 2>&1 ||
+                die "docker is required for the Linux FFmpeg build; run inside the manylinux_2_28 container instead"
+            IMAGE="quay.io/pypa/manylinux_2_28_$([ "$TARGET" = linux-x64 ] && echo x86_64 || echo aarch64)"
+            log "re-running inside $IMAGE"
+            docker run --rm \
+                -e MANYLINUX_CONTAINER=1 \
+                -v "$NATIVE_DIR:/native" \
+                -w /native \
+                "$IMAGE" \
+                bash ffmpeg/build.sh "$TARGET" || die "the container build failed"
+            exit 0
         fi
-        verify_signature
+        ;;
+esac
+
+download "$SOURCE_TARBALL" "$SOURCE_URL" "$SOURCE_URL_FALLBACK"
+verify_checksum "$SOURCE_TARBALL" "$SOURCE_SHA256"
+log "checksum verified: $(basename "$SOURCE_TARBALL")"
+if [ -n "$SIGNATURE_URL" ]; then
+    download "$SOURCE_SIGNATURE" "$SIGNATURE_URL" "$SIGNATURE_URL_FALLBACK"
+    if [ -n "$SIGNATURE_SHA256" ]; then
+        verify_checksum "$SOURCE_SIGNATURE" "$SIGNATURE_SHA256"
+        log "checksum verified: $(basename "$SOURCE_SIGNATURE")"
     fi
-    log "extracting FFmpeg $FFMPEG_VERSION"
-    rm -rf "$SOURCE_DIR" "$SOURCE_DIR.tmp"
-    mkdir -p "$SOURCE_DIR.tmp"
-    tar -xJf "$SOURCE_TARBALL" -C "$SOURCE_DIR.tmp" --strip-components=1
-    mv "$SOURCE_DIR.tmp" "$SOURCE_DIR"
+    verify_signature
 fi
+log "extracting FFmpeg $FFMPEG_VERSION"
+rm -rf "$SOURCE_DIR" "$SOURCE_DIR.tmp"
+mkdir -p "$SOURCE_DIR.tmp"
+tar -xJf "$SOURCE_TARBALL" -C "$SOURCE_DIR.tmp" --strip-components=1
+mv "$SOURCE_DIR.tmp" "$SOURCE_DIR"
 
 # ------------------------------------------------------------------- toolchain
 
@@ -281,10 +276,10 @@ case "$TARGET" in
             # reached it as a literal command name for the same reason.)
             VCVARS_WORK="$CACHE/vcvars-$TARGET"
             mkdir -p "$VCVARS_WORK"
-            printf '@set "OLDCD=%%CD%%"\r\ncall "%s" >NUL 2>&1\r\n@cd /d "%%OLDCD%%"\r\nset > "env.txt"\r\n' \
+            printf '@set "OLDCD=%%CD%%"\r\ncall "%s" >vcvars.log 2>&1\r\n@if errorlevel 1 exit /b 1\r\n@cd /d "%%OLDCD%%"\r\nset > "env.txt"\r\n' \
                 "$(cygpath -w "$VCVARS")" > "$VCVARS_WORK/vcvars-env.bat"
             (cd "$VCVARS_WORK" && cmd //c vcvars-env.bat) ||
-                die "vcvars64.bat failed"
+                { cat "$VCVARS_WORK/vcvars.log"; die "vcvars64.bat failed"; }
             rm -f "$VCVARS_WORK/vcvars-env.bat"
             ENV_FILE="$VCVARS_WORK/env.txt"
             [ -s "$ENV_FILE" ] || die "vcvars64.bat produced no environment"
@@ -304,15 +299,11 @@ case "$TARGET" in
                 case "$env_name" in
                     *[!A-Za-z0-9_]*) continue ;;
                 esac
-                export "$env_name=${line#*=}"
+                case "$env_name" in
+                    [Pp][Aa][Tt][Hh]) export PATH="$(cygpath -up "${line#*=}")" ;;
+                    *) export "$env_name=${line#*=}" ;;
+                esac
             done < "$ENV_FILE"
-            # cmd dumped PATH in Windows form; bash's own command lookup needs
-            # the POSIX form of the list (cl and the other native tools keep
-            # reading their Windows form through the variables they use).
-            if command -v cygpath >/dev/null 2>&1; then
-                posix_path="$(cygpath -up "$PATH")" &&
-                    export PATH="$posix_path"
-            fi
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
         command -v nasm >/dev/null 2>&1 || log "warning: NASM is not on PATH; x86 assembly is disabled"
@@ -336,19 +327,6 @@ case "$TARGET" in
         # The build runs inside the manylinux_2_28 container (glibc 2.28, below
         # D88's 2.31 floor). build.sh re-execs itself in the container when it is
         # not already inside one, so `buildFfmpeg` needs no container knowledge.
-        if [ "${MANYLINUX_CONTAINER:-}" != "1" ]; then
-            command -v docker >/dev/null 2>&1 ||
-                die "docker is required for the Linux FFmpeg build; run inside the manylinux_2_28 container instead"
-            IMAGE="quay.io/pypa/manylinux_2_28_$([ "$TARGET" = linux-x64 ] && echo x86_64 || echo aarch64)"
-            log "re-running inside $IMAGE"
-            docker run --rm \
-                -e MANYLINUX_CONTAINER=1 \
-                -v "$NATIVE_DIR:/native" \
-                -w /native \
-                "$IMAGE" \
-                bash ffmpeg/build.sh "$TARGET" || die "the container build failed"
-            exit 0
-        fi
         if ! command -v nasm >/dev/null 2>&1; then
             log "installing NASM into the container"
             (microdnf install -y nasm || dnf install -y nasm || yum install -y nasm) >/dev/null 2>&1 ||

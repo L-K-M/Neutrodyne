@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Ported from androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
- * (Media3 1.11.1, Apache-2.0). Copyright 2026 The Android Open Source Project.
+ * Copyright (C) 2018 The Android Open Source Project
  *
- * Faithful translation of the state machine: noisy input passes through; a
- * run of samples under the silence threshold fills a circular buffer of half
- * the minimum silence duration and is then output shortened by
- * silenceRetentionRatio (faded down rather than muted to zero), capped by
- * maxSilenceToKeepDurationUs. Skipped frames are counted for position
- * bookkeeping — the engine's clock needs the dropped media time.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+// Modified by Neutrodyne, 2026: Kotlin PCM16 port for the MD0 spike.
 package ch.lkmc.neutrodyne.playback.engine
 
 import java.nio.ByteBuffer

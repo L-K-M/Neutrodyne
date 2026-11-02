@@ -94,10 +94,8 @@ class NativeLicencePolicyTest {
 
     @Test
     fun `the configure line and the library list are read from the lock`() {
-        val parsed = NativeLicencePolicy.parse(lockText())
-
-        assertTrue(parsed.configureLine().contains("--disable-everything"))
-        assertEquals(listOf("avcodec", "avformat", "avutil", "swresample"), parsed.ffmpegLibraries())
+        assertTrue(NativeLicencePolicy.configureLine(org.tomlj.Toml.parse(lockText())).contains("--disable-everything"))
+        assertEquals(listOf("avcodec", "avformat", "avutil", "swresample"), NativeLicencePolicy.ffmpegLibraries(org.tomlj.Toml.parse(lockText())))
     }
 
     @Test
@@ -131,6 +129,29 @@ class NativeLicencePolicyTest {
 
         assertEquals("9.0.2", ffmpegVersionOf(lock))
         assertEquals("ffmpeg-9.0.2-neutrodyne-src.tar.xz", ffmpegSourceBundleName(ffmpegVersionOf(lock)))
+    }
+
+    @Test
+    fun `size records reject missing zero duplicate and malformed libraries`() {
+        val valid = "avcodec 1\navformat 2\navutil 3\nswresample 4\n"
+        assertEquals(10L, parseNativeLibrarySizes(valid).values.sum())
+        for (invalid in listOf("", valid.replace("avcodec 1", "avcodec 0"), valid + "avcodec 5\n", valid.replace("avutil 3", "avutil nope"))) {
+            assertFails { parseNativeLibrarySizes(invalid) }
+        }
+    }
+
+    @Test
+    fun `source bundle rejects missing and corrupt source`() {
+        val file = kotlin.io.path.createTempFile().toFile()
+        try {
+            file.writeText("abc")
+            verifyNativeSourceHash(file, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+            assertFails { verifyNativeSourceHash(file, "0".repeat(64)) }
+            file.delete()
+            assertFails { verifyNativeSourceHash(file, "0".repeat(64)) }
+        } finally {
+            file.delete()
+        }
     }
 
     private fun lockText(): String =

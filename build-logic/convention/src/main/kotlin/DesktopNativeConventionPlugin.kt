@@ -43,7 +43,7 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                     "Build libndmedia (miniaudio device + SPSC ring) for $nativeTarget (11 ndmedia interface)."
                 workingDir = layout.projectDirectory.asFile
                 commandLine(bashExecutable(), "ndmedia/build.sh", nativeTarget)
-                inputs.files("ndmedia")
+                inputs.files("ndmedia", "native-components.lock")
                 outputs.dir(ndmediaOutputDir)
             }
 
@@ -66,12 +66,14 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                 dependsOn(buildFfmpeg)
                 this.lockFile.set(nativeLock)
                 this.cache.set(sourceCacheDir)
+                buildOutput.set(ffmpegOutputDir)
                 sourceInputs.setFrom(
                     sourceCacheDir.get().file("ffmpeg-$ffmpegVersion.tar.xz"),
                     sourceCacheDir.get().file("ffmpeg-$ffmpegVersion.tar.xz.asc"),
-                    sourceCacheDir.get().file("ffmpeg-$ffmpegVersion/ffmpeg-build.txt"),
+                    ffmpegOutputDir.get().file("ffmpeg-build.txt"),
                     sourceCacheDir.get().file("ffmpeg-$ffmpegVersion/COPYING.LGPLv2.1"),
                     sourceCacheDir.get().file("ffmpeg-$ffmpegVersion/LICENSE.md"),
+                    layout.projectDirectory.dir("ffmpeg"),
                 )
                 outputFile.set(
                     layout.buildDirectory.file("ffmpeg-source/${ffmpegSourceBundleName(ffmpegVersion)}"),

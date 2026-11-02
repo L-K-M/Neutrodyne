@@ -90,23 +90,28 @@ class FfDecoder
             }
 
         init {
-            require(demuxer.audioTrack.sampleRate > 0) { "the track has no sample rate" }
-            val created = library.allocCodecContext(codec)
-            contextSlot.set(ValueLayout.ADDRESS, 0L, created)
-            context = created
-            // The stream's parameters carry the codec's private data — the AAC
-            // config, the Vorbis headers — without which the decoder will not open.
-            require(library.parametersToContext(context, codecParameters) >= 0) {
-                "the decoder would not take the stream's parameters"
+            try {
+                require(demuxer.audioTrack.sampleRate > 0) { "the track has no sample rate" }
+                val created = library.allocCodecContext(codec)
+                contextSlot.set(ValueLayout.ADDRESS, 0L, created)
+                context = created
+                // The stream's parameters carry the codec's private data — the AAC
+                // config, the Vorbis headers — without which the decoder will not open.
+                require(library.parametersToContext(context, codecParameters) >= 0) {
+                    "the decoder would not take the stream's parameters"
+                }
+                require(library.setDecoderThreads(context, SINGLE_THREAD) >= 0) {
+                    "the decoder refused a single thread"
+                }
+                val opened = library.openCodec(context, codec)
+                require(opened >= 0) {
+                    "the ${demuxer.audioTrack.codec} decoder would not open: ${library.errorString(opened)}"
+                }
+                resamplerSlot.set(ValueLayout.ADDRESS, 0L, library.allocResampler())
+            } catch (failure: Throwable) {
+                close()
+                throw failure
             }
-            require(library.setDecoderThreads(context, SINGLE_THREAD) >= 0) {
-                "the decoder refused a single thread"
-            }
-            val opened = library.openCodec(context, codec)
-            require(opened >= 0) {
-                "the ${demuxer.audioTrack.codec} decoder would not open: ${library.errorString(opened)}"
-            }
-            resamplerSlot.set(ValueLayout.ADDRESS, 0L, library.allocResampler())
         }
 
         override fun send(packet: AudioPacket): Boolean {

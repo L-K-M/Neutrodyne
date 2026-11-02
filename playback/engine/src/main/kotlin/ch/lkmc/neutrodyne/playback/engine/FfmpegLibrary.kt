@@ -88,6 +88,12 @@ class FfmpegLibrary
          */
         fun malloc(size: Long): MemorySegment = callAddress("avutil", "av_malloc", MALLOC, size)
 
+        internal fun free(pointer: MemorySegment) =
+            callVoid("avutil", "av_free", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), pointer)
+
+        internal fun freeAvio(slot: MemorySegment) =
+            callVoid("avformat", "avio_context_free", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS), slot)
+
         /** The C strings the bindings pass as option and dictionary keys. */
         fun cString(value: String): MemorySegment = arena.allocateFrom(value)
 
@@ -399,25 +405,30 @@ class FfmpegLibrary
                 // DLLs under $prefix/bin (configure's shlibdir_default).
                 val libDir = if (os.startsWith("Windows")) "bin" else "lib"
                 val arena = Arena.ofShared()
-                val lookups =
-                    layout.libraries.entries
-                        .sortedBy { entry ->
-                            LOAD_ORDER.indexOf(entry.key).let { i -> if (i < 0) LOAD_ORDER.size else i }
-                        }.associate { (name, major) ->
-                            name to
-                                SymbolLookup.libraryLookup(
-                                    directory
-                                        .resolve(libDir)
-                                        .resolve(libraryFileName(name, major, os))
-                                        .toAbsolutePath()
-                                        .toString(),
-                                    arena,
-                                )
-                        }
-                val library = FfmpegLibrary(layout, arena, lookups)
-                library.verifyMajors()
-                library.setQuietLogging()
-                return library
+                try {
+                    val lookups =
+                        layout.libraries.entries
+                            .sortedBy { entry ->
+                                LOAD_ORDER.indexOf(entry.key).let { i -> if (i < 0) LOAD_ORDER.size else i }
+                            }.associate { (name, major) ->
+                                name to
+                                    SymbolLookup.libraryLookup(
+                                        directory
+                                            .resolve(libDir)
+                                            .resolve(libraryFileName(name, major, os))
+                                            .toAbsolutePath()
+                                            .toString(),
+                                        arena,
+                                    )
+                            }
+                    val library = FfmpegLibrary(layout, arena, lookups)
+                    library.verifyMajors()
+                    library.setQuietLogging()
+                    return library
+                } catch (failure: Throwable) {
+                    arena.close()
+                    throw failure
+                }
             }
 
             /**

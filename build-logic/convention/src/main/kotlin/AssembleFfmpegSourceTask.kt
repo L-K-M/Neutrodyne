@@ -8,6 +8,7 @@ import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
@@ -41,9 +42,13 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
     abstract val sourceInputs: ConfigurableFileCollection
 
     /** `buildFfmpeg`'s download cache, where the extracted source tree lives. */
-    @get:InputDirectory
-    @get:PathSensitive(PathSensitivity.NONE)
+    @get:Internal
     abstract val cache: DirectoryProperty
+
+    /** The actual target build record, not the download cache. */
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val buildOutput: DirectoryProperty
 
     /** Where the bundle is written; the file name is the one D89 names. */
     @get:OutputFile
@@ -69,6 +74,14 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
         val buildTree = cache.resolve("ffmpeg-$version")
         require(tarball.isFile) { "the FFmpeg source tarball is missing: run buildFfmpeg first" }
 
+        verifyNativeSourceHash(tarball, requireNotNull(parsed.getString("ffmpeg.sha256")))
+        require(signature.isFile) { "the FFmpeg source signature is missing" }
+        verifyNativeSourceHash(signature, requireNotNull(parsed.getString("ffmpeg.signatureSha256")))
+        require(buildTree.resolve("COPYING.LGPLv2.1").isFile) { "the FFmpeg LGPL text is missing" }
+        require(buildTree.resolve("LICENSE.md").isFile) { "the FFmpeg licence inventory is missing" }
+        val record = buildOutput.get().asFile.resolve("ffmpeg-build.txt")
+        require(record.isFile) { "the target's FFmpeg build record is missing" }
+
         val stage = cache.resolve("ffmpeg-source-$version")
         stage.deleteRecursively()
         stage.mkdirs()
@@ -77,21 +90,15 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
             signature.copyTo(stage.resolve("ffmpeg-$version.tar.xz.asc"))
         }
         stage.resolve("changes.diff").writeText("")
-        stage.resolve("BUILD.md").writeText(buildMarkdown(version, sourceUrl, signatureUrl, configure, buildTree))
-        val script = stage.resolve("script")
-        script.mkdirs()
-        lockFile
-            .get()
-            .asFile.parentFile
-            .resolve("ffmpeg/build.sh")
-            .copyTo(script.resolve("build.sh"))
-        lockFile
-            .get()
-            .asFile.parentFile
-            .resolve("ffmpeg/ffoffsets.c")
-            .copyTo(script.resolve("ffoffsets.c"))
-        buildTree.resolve("COPYING.LGPLv2.1").takeIf { it.isFile }?.copyTo(stage.resolve("COPYING.LGPLv2.1"))
-        buildTree.resolve("LICENSE.md").takeIf { it.isFile }?.copyTo(stage.resolve("LICENSE.md"))
+        stage.resolve("BUILD.md").writeText(buildMarkdown(version, sourceUrl, signatureUrl, configure, record))
+        val nativeRoot = lockFile.get().asFile.parentFile
+        val bundledNative = stage.resolve("playback/native")
+        bundledNative.mkdirs()
+        lockFile.get().asFile.copyTo(bundledNative.resolve("native-components.lock"))
+        nativeRoot.resolve("ffmpeg").copyRecursively(bundledNative.resolve("ffmpeg"))
+        record.copyTo(stage.resolve("ffmpeg-build.txt"))
+        buildTree.resolve("COPYING.LGPLv2.1").copyTo(stage.resolve("COPYING.LGPLv2.1"))
+        buildTree.resolve("LICENSE.md").copyTo(stage.resolve("LICENSE.md"))
 
         val out = outputFile.get().asFile
         out.parentFile.mkdirs()
@@ -119,10 +126,9 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
         sourceUrl: String,
         signatureUrl: String?,
         configure: String?,
-        buildTree: java.io.File,
+        buildRecord: java.io.File,
     ): String {
-        val buildTxt = buildTree.resolve("ffmpeg-build.txt")
-        val recorded = if (buildTxt.isFile) buildTxt.readText() else ""
+        val recorded = buildRecord.readText()
         val compiler = recorded.lineSequence().firstOrNull { it.startsWith("compiler ") }?.removePrefix("compiler ")
         return buildString {
             appendLine("# FFmpeg $version as built for Neutrodyne")
@@ -167,7 +173,9 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
             appendLine("## Build")
             appendLine()
             appendLine("```sh")
-            appendLine("bash script/build.sh <target>   # downloads, verifies, configures, builds, installs")
+            appendLine("mkdir -p playback/native/build/ffmpeg-cache")
+            appendLine("cp ffmpeg-$version.tar.xz* playback/native/build/ffmpeg-cache/")
+            appendLine("bash playback/native/ffmpeg/build.sh ${target.get()}")
             appendLine("```")
             appendLine()
             if (compiler != null) {
@@ -186,3 +194,19 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
 
 /** The one place the bundle's name is spelled (D89). */
 internal fun ffmpegSourceBundleName(version: String): String = "ffmpeg-$version-neutrodyne-src.tar.xz"
+
+/** Source offers must bind to the archive that the native lock approved. */
+internal fun verifyNativeSourceHash(file: java.io.File, expected: String) {
+    require(file.isFile) { "native source is missing: $file" }
+    val digest = java.security.MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(8_192)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    val actual = digest.digest().joinToString("") { "%02x".format(it) }
+    require(actual == expected) { "native source checksum mismatch for $file" }
+}

@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Ported from androidx.media3.common.audio.Sonic (Media3 1.11.1, Apache-2.0),
- * itself a Java port of Bill Cox's Sonic library. Copyright 2026 The Android
- * Open Source Project.
+ * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2010 Bill Cox, Sonic Library
  *
- * Faithful translation of the 16-bit PCM path (SonicShortImpl): speed/pitch
- * change via pitch-period skipping and insertion with AMDF period finding,
- * plus output resampling via adjustRate when the output rate differs.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+// Modified by Neutrodyne, 2026: Kotlin PCM16 port for the MD0 spike.
 package ch.lkmc.neutrodyne.playback.engine
 
 import java.nio.ByteBuffer

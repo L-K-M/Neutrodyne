@@ -80,7 +80,8 @@ int main(int argc, char **argv)
     FIELD(AVFormatContext, nb_chapters);
     FIELD(AVFormatContext, chapters);
     FIELD(AVFormatContext, duration);
-    FIELD_LAST(AVFormatContext, flags);
+    FIELD(AVFormatContext, flags);
+    FIELD_LAST(AVFormatContext, interrupt_callback.callback);
     struct_end();
 
     /* The demuxer that claimed this source, by its own name: the engine records
@@ -160,7 +161,8 @@ int main(int argc, char **argv)
     FIELD_LAST(AVDictionaryEntry, value);
     struct_end();
 
-    printf("    \"AVIOContext\": { \"size\": %zu }\n", sizeof(AVIOContext));
+    printf("    \"AVIOContext\": { \"size\": %zu, \"fields\": { \"buffer\": %zu } }\n",
+           sizeof(AVIOContext), offsetof(AVIOContext, buffer));
     printf("  },\n");
 
     printf("  \"codecIds\": {\n");

@@ -111,9 +111,16 @@ source is the `python-build-standalone-<tag>-src.tar.gz` asset attached to the r
 
 ## Native components
 
-None yet. MD0 records the FFmpeg build (LGPL-2.1, dynamically linked, notices + corresponding
-source attached to each release) and miniaudio in `playback/native/native-components.lock`, and the
-C++/WinRT headers under `playback/native/src/`.
+- **FFmpeg 9.0.2**: LGPL-2.1-or-later, built from the verified upstream
+  archive as four separate, replaceable shared libraries. MD0 publishes only
+  spike evidence, paired with `ffmpeg-9.0.2-neutrodyne-src.tar.xz` and its
+  LGPL text; no native library is added to the production app. AAC and HE-AAC
+  may be covered by patents in your jurisdiction. The build enables no GPL,
+  version3 or nonfree components and no network protocol.
+- **miniaudio 0.11.22**: MIT-0 elected from its dual licence. Copyright 2025
+  David Reid. Its unchanged header is checksum-verified at build time and
+  compiled into the spike's `ndmedia`, never into FFmpeg. The desktop
+  AboutLibraries root carries the upstream licence text.
 
 ## Bundled runtimes
 
@@ -142,9 +149,16 @@ C++/WinRT headers under `playback/native/src/`.
 
 ## Copied or ported code
 
-None yet. Files copied or ported under the contribution rule (permissive or Unlicense sources only)
-are listed here as `- \`path/in/repo\`: origin and licence`; `checkSpdxHeaders` requires each listed
-file to keep its original SPDX line or credit header.
+- `playback/engine/src/main/kotlin/ch/lkmc/neutrodyne/playback/engine/Sonic.kt`:
+  Media3 1.11.1 `androidx.media3.common.audio.Sonic`, Apache-2.0; copyright
+  2017 The Android Open Source Project and 2010 Bill Cox, Sonic Library.
+- `playback/engine/src/main/kotlin/ch/lkmc/neutrodyne/playback/engine/SilenceSkipper.kt`:
+  Media3 1.11.1 `SilenceSkippingAudioProcessor`, Apache-2.0; copyright
+  2018 The Android Open Source Project.
+
+Both files are modified Kotlin ports for the desktop. Their source headers
+and desktop AboutLibraries entries retain the original licence and credits.
+The Media3 source archives contain no separate NOTICE file.
 
 ## Data
 

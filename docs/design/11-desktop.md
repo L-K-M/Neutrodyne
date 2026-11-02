@@ -1877,6 +1877,16 @@ Names fixed by PLAN and the change brief (`desktop.*` keys, `-Dneutrodyne.smoke`
 
 ## MD0 spike findings (2026-11-02)
 
+Implementation note (2026-11-01, continuation verified 2026-11-02): the
+initial prototype's end-position assertion did not establish a live clock
+accuracy result. AC3 remains open until live reference comparisons pass.
+Regression run `41528771248` exposes ring saturation, clock pause and clock
+reset defects before their repairs. Custom AVIO owns its current buffer and
+context even with `AVFMT_FLAG_CUSTOM_IO`; cleanup follows
+[FFmpeg's AVIO example](https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/avio_read_callback.c).
+Native source bundles now include the actual per-target build record, lock,
+verification key and build scripts, with missing or corrupt inputs rejected.
+
 The spike ran on branch `impl/md0-current`; the desktop matrix
 (`workflow_dispatch` and the nightly schedule) built and tested all four
 targets. Evidence per criterion:

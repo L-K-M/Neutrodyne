@@ -87,104 +87,112 @@ class FfDemuxer
         private var firstPacket = true
 
         init {
-            val allocated = library.allocFormatContext()
-            contextSlot.set(ValueLayout.ADDRESS, 0L, allocated)
-            allocated.writeInt(
-                layout,
-                "AVFormatContext",
-                "flags",
-                allocated.readInt(layout, "AVFormatContext", "flags") or layout.intConstant("AVFMT_FLAG_CUSTOM_IO"),
-            )
-            allocated.writeAddress(layout, "AVFormatContext", "pb", avio.context)
-
-            val opened = library.openInput(contextSlot, library.cString(SOURCE_NAME))
-            require(opened >= 0) { "the demuxer could not open the source: ${library.errorString(opened)}" }
-            formatContext = requireNotNull(contextSlot.dereference()) { "avformat_open_input released the context" }
-            containerName =
-                formatContext
-                    .readAddress(layout, "AVFormatContext", "iformat")
-                    .takeIf { it.address() != 0L }
-                    ?.let { library.readCString(it.readAddress(layout, "AVInputFormat", "name")) }
-                    .orEmpty()
-
-            val streamCount = formatContext.readInt(layout, "AVFormatContext", "nb_streams")
-            val picked = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
-            streamIndex =
-                if (picked < 0) {
-                    // FFmpeg 9's av_find_best_stream skips an audio stream whose
-                    // sample rate or channel count is still zero, and demuxers
-                    // like mp3 and adts leave both to their parser: the probe
-                    // runs only when stream selection says the header alone
-                    // was not enough.
-                    val found = library.findStreamInfo(formatContext)
-                    require(found >= 0) {
-                        "the demuxer could not read the stream info: ${library.errorString(found)}"
-                    }
-                    library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
-                } else {
-                    picked
-                }
-            // The message carries what FFmpeg actually found, because a spike
-            // must fail loudly and a wrong offset here is otherwise invisible.
-            require(streamIndex >= 0) {
-                val streams = formatContext.readAddress(layout, "AVFormatContext", "streams")
-                val types =
-                    if (streams.isNull()) {
-                        "null"
-                    } else {
-                        (0 until minOf(streamCount, MAX_REPORTED_STREAMS)).joinToString(",") { index ->
-                            streams
-                                .elementAt(index)
-                                .readAddress(layout, "AVStream", "codecpar")
-                                .readInt(layout, "AVCodecParameters", "codec_type")
-                                .toString()
-                        }
-                    }
-                "the source has no audio stream " +
-                    "(container=$containerName, streams=$streamCount, types=[$types], " +
-                    "findBestStream=${library.errorString(streamIndex)})"
-            }
-
-            val stream = formatContext.readAddress(layout, "AVFormatContext", "streams").elementAt(streamIndex)
-            val parameters = stream.readAddress(layout, "AVStream", "codecpar")
-            require(
-                parameters.readInt(layout, "AVCodecParameters", "codec_type") ==
-                    layout.intConstant("AVMEDIA_TYPE_AUDIO"),
-            ) {
-                "the best stream of the source is not audio"
-            }
-
-            for (index in 0 until streamCount) {
-                if (index == streamIndex) continue
-                formatContext
-                    .readAddress(layout, "AVFormatContext", "streams")
-                    .elementAt(index)
-                    .writeInt(layout, "AVStream", "discard", layout.intConstant("AVDISCARD_ALL"))
-            }
-
-            timeBase =
-                stream
-                    .readRational(layout, "AVStream", "time_base")
-                    .let { (num, den) ->
-                        if (den > 0) {
-                            num to den
-                        } else {
-                            1 to AV_TIME_BASE
-                        }
-                    }
-            codecParametersOf = stream.readAddress(layout, "AVStream", "codecpar")
-            audioTrack =
-                AudioTrackInfo(
-                    codec = codecOf(parameters.readInt(layout, "AVCodecParameters", "codec_id")),
-                    sampleRate = parameters.readInt(layout, "AVCodecParameters", "sample_rate"),
-                    channels = parameters.readChannelCount(layout, "AVCodecParameters"),
-                    initialPadding = parameters.readInt(layout, "AVCodecParameters", "initial_padding"),
-                    trailingPadding = parameters.readInt(layout, "AVCodecParameters", "trailing_padding"),
-                    seekPreroll = parameters.readInt(layout, "AVCodecParameters", "seek_preroll"),
-                    skipSamplesPresent = false,
+            try {
+                val allocated = library.allocFormatContext()
+                contextSlot.set(ValueLayout.ADDRESS, 0L, allocated)
+                allocated.writeInt(
+                    layout,
+                    "AVFormatContext",
+                    "flags",
+                    allocated.readInt(layout, "AVFormatContext", "flags") or layout.intConstant("AVFMT_FLAG_CUSTOM_IO"),
                 )
-            durationMs = durationOf()
-            chapters = chaptersOf()
+                allocated.writeAddress(layout, "AVFormatContext", "pb", avio.context)
+                allocated.writeAddress(layout, "AVFormatContext", "interrupt_callback.callback", avio.interruptStub)
+
+                val opened = library.openInput(contextSlot, library.cString(SOURCE_NAME))
+                require(opened >= 0) { "the demuxer could not open the source: ${library.errorString(opened)}" }
+                formatContext = requireNotNull(contextSlot.dereference()) { "avformat_open_input released the context" }
+                containerName =
+                    formatContext
+                        .readAddress(layout, "AVFormatContext", "iformat")
+                        .takeIf { it.address() != 0L }
+                        ?.let { library.readCString(it.readAddress(layout, "AVInputFormat", "name")) }
+                        .orEmpty()
+
+                val streamCount = formatContext.readInt(layout, "AVFormatContext", "nb_streams")
+                val picked = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
+                streamIndex =
+                    if (picked < 0) {
+                        // FFmpeg 9's av_find_best_stream skips an audio stream whose
+                        // sample rate or channel count is still zero, and demuxers
+                        // like mp3 and adts leave both to their parser: the probe
+                        // runs only when stream selection says the header alone
+                        // was not enough.
+                        val found = library.findStreamInfo(formatContext)
+                        require(found >= 0) {
+                            "the demuxer could not read the stream info: ${library.errorString(found)}"
+                        }
+                        library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
+                    } else {
+                        picked
+                    }
+                // The message carries what FFmpeg actually found, because a spike
+                // must fail loudly and a wrong offset here is otherwise invisible.
+                require(streamIndex >= 0) {
+                    val streams = formatContext.readAddress(layout, "AVFormatContext", "streams")
+                    val types =
+                        if (streams.isNull()) {
+                            "null"
+                        } else {
+                            (0 until minOf(streamCount, MAX_REPORTED_STREAMS)).joinToString(",") { index ->
+                                streams
+                                    .elementAt(index)
+                                    .readAddress(layout, "AVStream", "codecpar")
+                                    .readInt(layout, "AVCodecParameters", "codec_type")
+                                    .toString()
+                            }
+                        }
+                    "the source has no audio stream " +
+                        "(container=$containerName, streams=$streamCount, types=[$types], " +
+                        "findBestStream=${library.errorString(streamIndex)})"
+                }
+
+                val stream = formatContext.readAddress(layout, "AVFormatContext", "streams").elementAt(streamIndex)
+                val parameters = stream.readAddress(layout, "AVStream", "codecpar")
+                require(
+                    parameters.readInt(layout, "AVCodecParameters", "codec_type") ==
+                        layout.intConstant("AVMEDIA_TYPE_AUDIO"),
+                ) {
+                    "the best stream of the source is not audio"
+                }
+
+                for (index in 0 until streamCount) {
+                    if (index == streamIndex) continue
+                    formatContext
+                        .readAddress(layout, "AVFormatContext", "streams")
+                        .elementAt(index)
+                        .writeInt(layout, "AVStream", "discard", layout.intConstant("AVDISCARD_ALL"))
+                }
+
+                timeBase =
+                    stream
+                        .readRational(layout, "AVStream", "time_base")
+                        .let { (num, den) ->
+                            if (den > 0) {
+                                num to den
+                            } else {
+                                1 to AV_TIME_BASE
+                            }
+                        }
+                codecParametersOf = stream.readAddress(layout, "AVStream", "codecpar")
+                audioTrack =
+                    AudioTrackInfo(
+                        codec = codecOf(parameters.readInt(layout, "AVCodecParameters", "codec_id")),
+                        sampleRate = parameters.readInt(layout, "AVCodecParameters", "sample_rate"),
+                        channels = parameters.readChannelCount(layout, "AVCodecParameters"),
+                        initialPadding = parameters.readInt(layout, "AVCodecParameters", "initial_padding"),
+                        trailingPadding = parameters.readInt(layout, "AVCodecParameters", "trailing_padding"),
+                        seekPreroll = parameters.readInt(layout, "AVCodecParameters", "seek_preroll"),
+                        skipSamplesPresent = false,
+                    )
+                durationMs = durationOf()
+                chapters = chaptersOf()
+            } catch (failure: Throwable) {
+                library.freePacket(packetSlot)
+                library.closeInput(contextSlot)
+                avio.close()
+                throw failure
+            }
         }
 
         private fun codecOf(codecId: Int): AudioCodec {
@@ -228,7 +236,8 @@ class FfDemuxer
         }
 
         override fun seekTo(positionMs: Long) {
-            avio.abort()
+            require(positionMs >= 0) { "seek position must be non-negative" }
+            avio.resumeReads()
             val (num, den) = timeBase
             val target = positionMs * den / (MILLIS_PER_SECOND * num)
             val result = library.seekFile(formatContext, streamIndex, Long.MIN_VALUE, target, Long.MAX_VALUE, 0)
@@ -315,8 +324,7 @@ class FfDemuxer
          */
         override fun close() {
             library.freePacket(packetSlot)
-            // The format context owns the custom AVIOContext and its buffer and
-            // releases both here, which is why the bridge is closed after it.
+            // CUSTOM_IO keeps the AVIO context alive until our bridge closes it.
             library.closeInput(contextSlot)
             avio.close()
         }

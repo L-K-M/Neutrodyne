@@ -35,6 +35,9 @@ class AvioBridge
 
         private val seekStub: MemorySegment = upcall("onSeek", SEEK_DESCRIPTOR)
 
+        internal val interruptStub: MemorySegment =
+            upcall("onInterrupt", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS))
+
         /** Reads only: FFmpeg never writes through this context. */
         private val writeStub: MemorySegment = upcall("onWrite", WRITE_DESCRIPTOR)
 
@@ -46,6 +49,8 @@ class AvioBridge
                 .downcall("avformat", "avio_alloc_context", AVIO_ALLOC)
                 .callAddress(arrayOf(buffer, AVIO_BUFFER_BYTES, 0, MemorySegment.NULL, readStub, writeStub, seekStub))
 
+        private val contextSlot = arena.allocate(ValueLayout.ADDRESS).also { it.set(ValueLayout.ADDRESS, 0L, context) }
+        private var closed = false
         private var position = 0L
         private val aborted = AtomicBoolean(false)
 
@@ -129,6 +134,9 @@ class AvioBridge
                 -1L
             }
 
+        private fun onInterrupt(@Suppress("UNUSED_PARAMETER") opaque: MemorySegment): Int =
+            if (aborted.get()) 1 else 0
+
         private fun onWrite(
             @Suppress("UNUSED_PARAMETER") opaque: MemorySegment,
             @Suppress("UNUSED_PARAMETER") buffer: MemorySegment,
@@ -136,9 +144,13 @@ class AvioBridge
         ): Int = library.layout.intConstant("AVERROR_EIO")
 
         override fun close() {
-            // The format context owns the AVIOContext and its buffer and releases
-            // both when it is closed, so only the upcall stubs are released here.
-            // The bridge owns its own arena, so closing it twice is impossible.
+            if (closed) return
+            closed = true
+            // CUSTOM_IO leaves both allocations with us. FFmpeg may have
+            // replaced the original buffer while probing, so free the current
+            // AVIOContext.buffer, as upstream's avio_read_callback example does.
+            library.free(context.readAddress(library.layout, "AVIOContext", "buffer"))
+            library.freeAvio(contextSlot)
             arena.close()
         }
 
@@ -214,6 +226,14 @@ class AvioBridge
             fun open(
                 library: FfmpegLibrary,
                 source: ByteSource,
-            ): AvioBridge = AvioBridge(library, Arena.ofShared(), source)
+            ): AvioBridge {
+                val arena = Arena.ofShared()
+                try {
+                    return AvioBridge(library, arena, source)
+                } catch (failure: Throwable) {
+                    arena.close()
+                    throw failure
+                }
+            }
         }
     }

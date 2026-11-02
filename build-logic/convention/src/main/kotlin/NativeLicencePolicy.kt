@@ -86,6 +86,15 @@ object NativeLicencePolicy {
         for (section in listOf("ffmpeg", "miniaudio")) {
             val table: TomlTable = parsed.getTable(section) ?: continue
             components += component(table)
+            if (section == "ffmpeg") {
+                val flags = configureLine(parsed).split(Regex("\\s+"))
+                require(flags.none { it in setOf("--enable-gpl", "--enable-version3", "--enable-nonfree") }) {
+                    "native-components.lock: prohibited FFmpeg configure flag"
+                }
+                require(ffmpegLibraries(parsed).toSet() == FFMPEG_LIBRARIES) {
+                    "native-components.lock: expected the four separate FFmpeg libraries"
+                }
+            }
         }
         if (components.isEmpty()) {
             throw GradleException("native-components.lock: no components recorded")
@@ -98,6 +107,9 @@ object NativeLicencePolicy {
             table.getString(key) ?: throw GradleException("native-components.lock: `$key` is missing")
 
         val spdx = required("spdx")
+        require(Regex("[0-9a-f]{64}").matches(required("sha256"))) {
+            "native-components.lock: invalid SHA-256"
+        }
         return Component(
             name = required("name"),
             version = required("version"),
@@ -211,24 +223,25 @@ abstract class CheckNativeLicencesTask : DefaultTask() {
         if (!sizes.isFile) {
             problems += "no ffmpeg-sizes.txt in $out: run buildFfmpeg first"
         } else {
-            var total = 0L
-            var libraries = 0
-            for (line in sizes.readText().lines().filter { it.isNotBlank() }) {
-                val parts = line.trim().split(' ')
-                if (parts.size != 2) {
-                    problems += "ffmpeg-sizes.txt line '$line' is not '<library> <bytes>'"
-                    continue
+            try {
+                val recorded = parseNativeLibrarySizes(sizes.readText())
+                val directory = out.resolve(if (target.get() == "windows-x64") "bin" else "lib")
+                for ((name, bytes) in recorded) {
+                    val binaries = directory.listFiles().orEmpty()
+                        .filter { it.isFile && isFfmpegLibrary(it.name, name) }
+                        .distinctBy { it.canonicalPath }
+                    require(binaries.size == 1 && binaries.single().length() == bytes) {
+                        "size record for $name does not match one installed shared library"
+                    }
                 }
-                total += parts[1].toLongOrNull() ?: 0L
-                libraries += 1
+                val total = recorded.values.sum()
+                require(total <= maxStrippedBytes.get()) {
+                    "the four libraries total $total bytes, over the ${maxStrippedBytes.get()} budget"
+                }
+                logger.lifecycle("checkNativeLicences: $total bytes for four libraries (${target.get()})")
+            } catch (failure: IllegalArgumentException) {
+                problems += requireNotNull(failure.message)
             }
-            if (libraries != 4) {
-                problems += "ffmpeg-sizes.txt records $libraries libraries, expected the four of D86"
-            }
-            if (total > maxStrippedBytes.get()) {
-                problems += "the four libraries total $total bytes, over the ${maxStrippedBytes.get()} budget"
-            }
-            logger.lifecycle("checkNativeLicences: $total bytes for $libraries libraries ($target)")
         }
 
         val components = out.resolve("ffmpeg-components.txt")
@@ -295,3 +308,21 @@ abstract class CheckNativeLicencesTask : DefaultTask() {
             )
     }
 }
+
+private val FFMPEG_LIBRARIES = setOf("avcodec", "avformat", "avutil", "swresample")
+
+internal fun parseNativeLibrarySizes(text: String): Map<String, Long> {
+    val sizes = linkedMapOf<String, Long>()
+    for (line in text.lineSequence().filter { it.isNotBlank() }) {
+        val fields = line.trim().split(Regex("\\s+"))
+        require(fields.size == 2) { "invalid FFmpeg size record: $line" }
+        val size = fields[1].toLongOrNull()
+        require(fields[0] in FFMPEG_LIBRARIES && size != null && size > 0) { "invalid FFmpeg size record: $line" }
+        require(sizes.put(fields[0], size) == null) { "duplicate FFmpeg size: ${fields[0]}" }
+    }
+    require(sizes.keys == FFMPEG_LIBRARIES) { "missing FFmpeg size records" }
+    return sizes
+}
+
+private fun isFfmpegLibrary(file: String, name: String): Boolean =
+    Regex("(?:$name-[0-9]+\\.dll|lib$name\\.so(?:\\.[0-9]+)+|lib$name(?:\\.[0-9]+)+\\.dylib)").matches(file)

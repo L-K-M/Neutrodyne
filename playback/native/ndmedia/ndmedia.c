@@ -104,7 +104,10 @@ static void nd_data_callback(ma_device* dev, void* out, const void* in, ma_uint3
            queued audio; then silence until nd_out_stop calls ma_device_stop. */
         size_t pos = atomic_load_explicit(&o->ramp_pos, memory_order_relaxed);
         size_t fr, k;
+        size_t remaining = pos < o->ramp_frames ? o->ramp_frames - pos : 0;
+        size_t ramp_samples = remaining * (size_t)o->channels;
         size_t media = 0;
+        if (take > ramp_samples) take = ramp_samples;
         for (fr = 0; fr < frames; ++fr) {
             float gain = pos < o->ramp_frames ? 1.0f - (float)pos / (float)o->ramp_frames : 0.0f;
             for (k = 0; k < (size_t)o->channels; ++k) {
@@ -117,7 +120,7 @@ static void nd_data_callback(ma_device* dev, void* out, const void* in, ma_uint3
         atomic_store_explicit(&o->ramp_pos, pos, memory_order_relaxed);
         atomic_store_explicit(&o->r, (r + take) % o->capacity, memory_order_release);
         atomic_fetch_add_explicit(&o->frames_played, (long long)media, memory_order_relaxed);
-        atomic_fetch_add_explicit(&o->underrun_frames, (long long)(frames - media), memory_order_relaxed);
+        atomic_fetch_add_explicit(&o->underrun_frames, (long long)((frames < remaining ? frames : remaining) - media), memory_order_relaxed);
         if (pos >= o->ramp_frames) atomic_store_explicit(&o->stopped, 1, memory_order_release);
         return;
     }
@@ -154,6 +157,8 @@ ND_API int nd_out_open(const nd_out_config* cfg, nd_out** out)
     size_t capacity;
 
     if (out == NULL || cfg == NULL) return ND_E_ARG;
+    if (cfg->sample_rate < 0 || cfg->ring_ms < 0 || (cfg->channels != 0 && cfg->channels != ND_DEFAULT_CHANNELS))
+        return ND_E_ARG;
     *out = NULL;
     o = (nd_out*)calloc(1, sizeof(*o));
     if (o == NULL) return ND_E_DEVICE;
@@ -194,9 +199,16 @@ ND_API int nd_out_open(const nd_out_config* cfg, nd_out** out)
     o->rate = (int)o->device.sampleRate;
     o->ramp_frames = (size_t)o->rate * ND_RAMP_MS / 1000;
     if (o->ramp_frames == 0) o->ramp_frames = 1;
-    capacity = (size_t)o->rate * (size_t)ring_ms / 1000 * (size_t)o->channels;
+    /* Leave one physical frame unused so equal read/write cursors always
+       mean empty, including immediately after a maximum-sized write. */
+    capacity = ((size_t)o->rate * (size_t)ring_ms / 1000 + 1) * (size_t)o->channels;
     o->ring = (float*)calloc(capacity, sizeof(float));
-    if (o->ring == NULL) { ma_device_uninit(&o->device); free(o); return ND_E_DEVICE; }
+    if (o->ring == NULL) {
+        ma_device_uninit(&o->device);
+        if (o->owned_ctx != NULL) { ma_context_uninit(o->owned_ctx); free(o->owned_ctx); }
+        free(o);
+        return ND_E_DEVICE;
+    }
     o->capacity = capacity;
     snprintf(o->device_name, sizeof(o->device_name), "%s", o->device.playback.name);
 
@@ -220,7 +232,7 @@ ND_API int nd_out_write(nd_out* o, const float* interleaved, int frames)
     r = atomic_load_explicit(&o->r, memory_order_acquire);
     w = atomic_load_explicit(&o->w, memory_order_relaxed);
     used = (w >= r) ? (w - r) : (o->capacity - r + w);
-    free_n = o->capacity - used;
+    free_n = o->capacity - used - (size_t)o->channels;
     want = (size_t)frames * (size_t)o->channels;
     n = want < free_n ? want : free_n;
     for (i = 0; i < n; ++i) o->ring[(w + i) % o->capacity] = interleaved[i];
@@ -235,7 +247,7 @@ ND_API int nd_out_free_frames(nd_out* o)
     r = atomic_load_explicit(&o->r, memory_order_acquire);
     w = atomic_load_explicit(&o->w, memory_order_relaxed);
     used = (w >= r) ? (w - r) : (o->capacity - r + w);
-    return (int)((o->capacity - used) / (size_t)o->channels);
+    return (int)((o->capacity - used) / (size_t)o->channels) - 1;
 }
 
 ND_API int64_t nd_out_frames_played(nd_out* o)
@@ -267,6 +279,7 @@ ND_API int nd_out_stop(nd_out* o)
     int waited = 0;
     if (o == NULL) return ND_E_ARG;
     if (!atomic_load_explicit(&o->started, memory_order_relaxed)) return 0;
+    atomic_store_explicit(&o->ramp_pos, 0, memory_order_relaxed);
     atomic_store_explicit(&o->stopping, 1, memory_order_release);
     while (!atomic_load_explicit(&o->stopped, memory_order_acquire) && waited < ND_STOP_WAIT_MS) {
         nd_sleep_ms(1);
@@ -282,6 +295,8 @@ ND_API int nd_out_clear(nd_out* o)
 {
     size_t r, w;
     if (o == NULL) return ND_E_ARG;
+    /* The producer may replace the consumer cursor only after stop joins it. */
+    if (atomic_load_explicit(&o->started, memory_order_acquire)) return ND_E_STATE;
     r = atomic_load_explicit(&o->r, memory_order_acquire);
     w = atomic_load_explicit(&o->w, memory_order_relaxed);
     atomic_store_explicit(&o->r, w, memory_order_release);

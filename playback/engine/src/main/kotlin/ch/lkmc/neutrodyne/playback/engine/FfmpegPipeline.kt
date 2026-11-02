@@ -62,7 +62,7 @@ class FfmpegPipeline
                 while (true) {
                     val frame = decoder.receive() ?: break
                     if (frame.samples.isEmpty()) continue
-                    val ptsUs = frame.ptsUs ?: return positionMs
+                    val ptsUs = requireNotNull(frame.ptsUs) { "the seek produced audio without a timestamp" }
                     // Ogg seeks by page boundary: the demuxer's first packets
                     // after a seek belong to the page it landed on and can
                     // precede the target by the whole page duration. Whole
@@ -75,7 +75,7 @@ class FfmpegPipeline
                     return ptsUs / 1000
                 }
             }
-            return positionMs
+            error("the seek to $positionMs ms produced no audio")
         }
 
         override fun close() {
@@ -97,9 +97,20 @@ class FfmpegPipeline
             ): FfmpegPipeline {
                 val library = FfmpegLibrary.load(directory)
                 val arena = Arena.ofShared()
-                val demuxer = FfDemuxer(library, arena, source)
-                val decoder = FfDecoder(library, arena, demuxer)
-                return FfmpegPipeline(library, arena, demuxer, decoder)
+                try {
+                    val demuxer = FfDemuxer(library, arena, source)
+                    try {
+                        val decoder = FfDecoder(library, arena, demuxer)
+                        return FfmpegPipeline(library, arena, demuxer, decoder)
+                    } catch (failure: Throwable) {
+                        demuxer.close()
+                        throw failure
+                    }
+                } catch (failure: Throwable) {
+                    arena.close()
+                    library.close()
+                    throw failure
+                }
             }
 
             private const val MICROS_PER_MS = 1_000L
