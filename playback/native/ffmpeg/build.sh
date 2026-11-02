@@ -108,6 +108,24 @@ download() { # download <url> <file>
         die "download failed: $1"
 }
 
+# bounded <seconds> <command...> — `timeout` is GNU coreutils: macOS has neither
+# it nor `gtimeout` without a Homebrew coreutils, so a bound that names it would
+# fail there before gpg ever runs. The watchdog kills the command when it
+# overruns; `wait` then reports the command's own status (143 when killed).
+bounded() {
+    local seconds="$1" pid watchdog status
+    shift
+    "$@" &
+    pid=$!
+    ( sleep "$seconds"; kill "$pid" 2>/dev/null ) &
+    watchdog=$!
+    status=0
+    wait "$pid" || status=$?
+    kill "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null || true
+    return "$status"
+}
+
 verify_signature() {
     command -v gpg >/dev/null 2>&1 || die "gpg is required to verify the FFmpeg source signature"
     local keyring home
@@ -122,14 +140,14 @@ verify_signature() {
     cp "$REPO_ROOT/$SIGNING_KEY" "$keyring"
     # Every gpg call is bounded, so a build that cannot verify fails instead of
     # running until the job's timeout.
-    GNUPGHOME="$home" timeout 120 gpg --quiet --batch --import "$keyring" >/dev/null 2>&1 ||
+    GNUPGHOME="$home" bounded 120 gpg --quiet --batch --import "$keyring" >/dev/null 2>&1 ||
         die "could not import the FFmpeg release signing key"
     local fingerprint
-    fingerprint="$(GNUPGHOME="$home" timeout 120 gpg --quiet --with-colons --show-keys "$keyring" |
+    fingerprint="$(GNUPGHOME="$home" bounded 120 gpg --quiet --with-colons --show-keys "$keyring" |
         awk -F: '$1 == "fpr" { print $10; exit }')"
     [ "$fingerprint" = "$SIGNING_KEY_FINGERPRINT" ] ||
         die "the FFmpeg signing key is $fingerprint, expected $SIGNING_KEY_FINGERPRINT"
-    GNUPGHOME="$home" timeout 120 gpg --quiet --batch --verify "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
+    GNUPGHOME="$home" bounded 120 gpg --quiet --batch --verify "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
         die "the FFmpeg source signature did not verify"
     rm -rf "$home"
     log "verified the FFmpeg source signature with $SIGNING_KEY_FINGERPRINT"
@@ -395,26 +413,31 @@ printf '%s\n' "$PROBE_PROTOCOLS" >"$OUT/ffmpeg-protocols.txt"
 
 # The build's own config.h, copied next to the libraries so the licence check and
 # the image scan can read it from the install tree without the build directory.
-cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h"
+cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h" || die "config.h was not produced by configure"
 
 log "collecting the enabled-component inventory"
-# The enabled-component inventory, read from the build's own config.h. A grep
-# with no match exits 1, which under `pipefail` and `set -e` would end the build
-# without a word, so the inventory is collected first and its size is logged.
-log "config.h defines $(grep -c '^#define' "$SOURCE_DIR/config.h" || true) macros, "\
-    "$(grep -c 'DEMUXER' "$SOURCE_DIR/config.h" || true) of them naming a demuxer"
-log "a demuxer define reads: $(grep -m1 'DEMUXER' "$SOURCE_DIR/config.h" || true)"
-COMPONENTS="$(grep -E '^#define CONFIG_[A-Z0-9_]+_(DEMUXER|DECODER|PARSER|BSF|MUXER|ENCODER) 1' \
-    "$SOURCE_DIR/config.h" | sed 's/^#define CONFIG_//; s/ 1$//' | sort || true)"
+# The enabled-component inventory, read from the build's own headers. Since
+# FFmpeg 5.1 configure splits the component defines (demuxers, decoders,
+# parsers, bitstream filters) into config_components.h; config.h keeps the
+# arch, toolchain and external-library macros the licence probe reads. A grep
+# with no match exits 1, which under `pipefail` and `set -e` would end the
+# build without a word, so the inventory is collected first and its size is
+# logged.
+CONFIG_HEADERS=("$SOURCE_DIR/config.h")
+if [ -f "$SOURCE_DIR/config_components.h" ]; then
+    CONFIG_HEADERS+=("$SOURCE_DIR/config_components.h")
+fi
+DEMUXER_DEFINES="$(grep -h 'DEMUXER' "${CONFIG_HEADERS[@]}" || true)"
+log "config.h defines $(grep -c '^#define' "$SOURCE_DIR/config.h" || true) macros; the headers name "\
+    "$(printf '%s\n' "$DEMUXER_DEFINES" | grep -c '[^[:space:]]' || true) demuxer defines"
+log "a demuxer define reads: $(printf '%s\n' "$DEMUXER_DEFINES" | grep -m1 . || true)"
+COMPONENTS="$(grep -hE '^#define CONFIG_[A-Z0-9_]+_(DEMUXER|DECODER|PARSER|BSF|MUXER|ENCODER) 1' \
+    "${CONFIG_HEADERS[@]}" | sed 's/^#define CONFIG_//; s/ 1$//' | sort -u || true)"
 log "the build enabled $(printf '%s\n' "$COMPONENTS" | grep -c '[^[:space:]]') components"
 {
-    echo "# enabled components of the $TARGET build (from config.h)"
+    echo "# enabled components of the $TARGET build (from config_components.h and config.h)"
     printf '%s\n' "$COMPONENTS"
 } >"$OUT/ffmpeg-components.txt"
-
-# The build's own config.h, copied next to the libraries so the licence check and
-# the image scan can read it from the install tree without the build directory.
-cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h" || die "config.h was not produced by configure"
 
 log "measuring the four libraries"
 # Sizes: the four shared libraries only, symlink targets counted once.
