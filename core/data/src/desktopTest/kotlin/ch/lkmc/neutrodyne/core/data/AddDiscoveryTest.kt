@@ -104,7 +104,7 @@ class AddDiscoveryTest {
                 clock,
                 apple = apple,
                 podcastIndex = index,
-                networkClients = newNetworkClients(baseDns = testDns),
+                networkClients = newNetworkClients(baseDns = testDns, isLocalPeer = NO_LOCAL_PEER),
             )
     }
 
@@ -268,7 +268,7 @@ class AddDiscoveryTest {
                     server.takeRequest().target
                 },
             )
-            val fetcher = newFetcher(root, networkClients = newNetworkClients(baseDns = testDns))
+            val fetcher = newFetcher(root, networkClients = newNetworkClients(baseDns = testDns, isLocalPeer = NO_LOCAL_PEER))
             try {
                 server.enqueue(mockResponse(body = "<rss><channel>" + " ".repeat(100_000)))
                 val body =
@@ -313,7 +313,7 @@ class AddDiscoveryTest {
 
     @Test fun htmlTransportStopsAtTwoMiBBeforeDelayedTailAndFeedsKeepTheirFullLimit() =
         runBlocking {
-            val fetcher = newFetcher(root, networkClients = newNetworkClients(baseDns = testDns))
+            val fetcher = newFetcher(root, networkClients = newNetworkClients(baseDns = testDns, isLocalPeer = NO_LOCAL_PEER))
             try {
                 server.enqueue(
                     MockResponse

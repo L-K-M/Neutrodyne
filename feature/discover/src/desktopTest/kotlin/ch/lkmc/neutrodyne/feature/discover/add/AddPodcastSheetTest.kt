@@ -499,11 +499,33 @@ class AddPodcastSheetTest {
             resolver.nextResolution = AddResolution.Feed(testFeedPreview())
             setSheet(initialInput = "http://192.168.1.1/feed")
             waitForIdle()
-            assertEquals(emptyList(), resolver.inputs)
+            assertEquals(emptyList(), resolver.inputs + resolver.unconfirmedInputs)
 
             onNodeWithText("Subscribe").performClick()
             waitForIdle()
             assertEquals(listOf("http://192.168.1.1/feed"), resolver.inputs)
+        }
+
+    /**
+     * The same wait-for-tap rule applies to spellings the transport normalizes to loopback:
+     * percent-encoded octets and IDNA full-width digits (03 note 2026-11-02).
+     */
+    @Test
+    fun encodedLocalPrefillDoesNotAutoResolve() =
+        runComposeUiTest {
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview())
+            setSheet(initialInput = "http://%31%32%37.0.0.1/feed")
+            waitForIdle()
+            assertEquals(emptyList(), resolver.inputs + resolver.unconfirmedInputs)
+        }
+
+    @Test
+    fun fullwidthLocalPrefillDoesNotAutoResolve() =
+        runComposeUiTest {
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview())
+            setSheet(initialInput = "http://１２７.０.０.１/feed")
+            waitForIdle()
+            assertEquals(emptyList(), resolver.inputs + resolver.unconfirmedInputs)
         }
 
     /**

@@ -9,7 +9,9 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.fakePlatform
 import ch.lkmc.neutrodyne.core.data.mockResponse
+import ch.lkmc.neutrodyne.core.data.NO_LOCAL_PEER
 import ch.lkmc.neutrodyne.core.data.newDb
+import ch.lkmc.neutrodyne.core.data.newNetworkClients
 import ch.lkmc.neutrodyne.core.data.newResolver
 import ch.lkmc.neutrodyne.core.data.newSubscribe
 import ch.lkmc.neutrodyne.core.data.rssBody
@@ -61,12 +63,14 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okio.ByteString.Companion.encodeUtf8
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import java.net.InetAddress
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -85,6 +89,14 @@ import ch.lkmc.neutrodyne.core.model.settings.DiscoverSettingKeys as Keys
 class SearchRepositoryTest {
     private val server = MockWebServer()
     private val clock = TestClock()
+    private val pubDns =
+        Dns { host ->
+            if (host == "pub.test" || host.endsWith(".pub.test")) {
+                listOf(InetAddress.getByName("127.0.0.1"))
+            } else {
+                Dns.SYSTEM.lookup(host)
+            }
+        }
     private val prefs = FakeSettingsRepository()
     private val secrets = FakeSecretStore()
     private val db = newDb()
@@ -541,7 +553,15 @@ class SearchRepositoryTest {
     @Test fun searchArtworkReachesPreviewRefetchAndSubscribeWithoutStaleProviderReplay() =
         runBlocking {
             prefs.set(Keys.FYYD_ENABLED, false)
-            val feedUrl = server.url("/publisher").toString()
+            // `preview()` of a directory hit is a discovered fetch: a public spelling keeps the
+            // string check off while the stub DNS still lands on this server.
+            val feedUrl =
+                server
+                    .url("/publisher")
+                    .newBuilder()
+                    .host("pub.test")
+                    .build()
+                    .toString()
             route = { request ->
                 if (request.target == "/publisher") {
                     mockResponse(body = rssBody(title = "Publisher"))
@@ -560,7 +580,17 @@ class SearchRepositoryTest {
                     .createTempDirectory("nd-directory-preview")
                     .toFile()
             try {
-                newResolver(root, db, clock, metadata = metadata).use { bundle ->
+                newResolver(
+                    root,
+                    db,
+                    clock,
+                    metadata = metadata,
+                    // `preview()` is a discovered fetch (03 note 2026-11-02): `pub.test` rides
+                    // the stub DNS to this server while the peer seam leaves the guard's
+                    // coverage to AddLocalDestinationTest.
+                    networkClients =
+                        newNetworkClients(baseDns = pubDns, isLocalPeer = NO_LOCAL_PEER),
+                ).use { bundle ->
                     val preview = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl)).value
                     assertEquals("Publisher", preview.title)
                     assertEquals("https://art.example/cover", preview.artworkUrl)
