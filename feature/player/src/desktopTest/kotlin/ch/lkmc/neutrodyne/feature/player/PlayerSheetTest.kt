@@ -24,7 +24,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -674,6 +676,26 @@ class PlayerSheetTest {
                 listOf("previous", "next", "previousEpisode", "nextEpisode"),
                 fixture.calls,
             )
+        }
+
+    @Test fun nextChapterDisablesOnTheLastChapterAndANullCurrentEnables() =
+        runComposeUiTest {
+            val opening = EpisodeChapter(0, 30_000, "Opening", null, null, ChapterSource.PSC, false)
+            val interview = EpisodeChapter(30_000, 60_000, "Interview", null, null, ChapterSource.PSC, false)
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            fixture.chapters = listOf(opening, interview)
+            fixture.currentChapter = CurrentChapter(1, 0, 2, opening)
+            setContent { fixture.Content() }
+            onNodeWithContentDescription("Next chapter").assertIsEnabled()
+            runOnIdle { fixture.currentChapter = CurrentChapter(1, 1, 2, interview) }
+            onNodeWithContentDescription("Next chapter").assertIsNotEnabled()
+            runOnIdle { fixture.currentChapter = null }
+            onNodeWithContentDescription("Next chapter").assertIsEnabled()
+            runOnIdle {
+                fixture.chapters = emptyList()
+                fixture.now = sampleNow().copy(hasNext = false)
+            }
+            onNodeWithContentDescription("Next episode").assertIsNotEnabled()
         }
 
     @Test fun sleepTimerShortcutNavigatesAndSurfacesTheLiveSummary() =

@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -65,6 +66,24 @@ class SleepTimerSheetTest {
                 ),
                 calls,
             )
+        }
+
+    @Test fun customEntryDeselectsTheMatchingPreset() =
+        runComposeUiTest {
+            val calls = mutableListOf<SleepTimerMode>()
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    SleepTimerSheet(SleepTimerState.Off, 30, true, calls::add, {}, {})
+                }
+            }
+            onNodeWithText("30 min").assertIsSelected()
+            onNodeWithText("Custom…").performClick()
+            onNodeWithText("Custom…").assertIsSelected()
+            onNodeWithText("30 min").assertIsNotSelected()
+            onNodeWithText("15 min").performClick()
+            onNodeWithText("15 min").assertIsSelected()
+            onNodeWithText("Custom…").assertIsNotSelected()
+            assertEquals(listOf(SleepTimerMode.Minutes(15)), calls)
         }
 
     @Test fun runningPausedExtensionLiveStateAndServiceLoss() =
