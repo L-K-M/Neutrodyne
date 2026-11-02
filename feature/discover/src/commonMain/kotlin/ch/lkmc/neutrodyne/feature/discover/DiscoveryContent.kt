@@ -10,6 +10,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -86,9 +88,10 @@ internal fun ProviderDisclosure(
         Text(stringResource(Res.string.discovery_providers_loading), modifier)
         return
     }
+    val currentOnVisible by rememberUpdatedState(onVisible)
     LaunchedEffect(providers.configuration()) {
         withFrameNanos { }
-        onVisible(providers)
+        currentOnVisible(providers)
     }
     val recipients = providers.filter { it.effective }.joinToString(", ") { it.id.displayName() }
     Text(
