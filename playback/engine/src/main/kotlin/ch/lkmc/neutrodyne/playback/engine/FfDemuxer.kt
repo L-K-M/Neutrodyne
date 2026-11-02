@@ -99,7 +99,26 @@ class FfDemuxer
 
             val streamCount = formatContext.readInt(layout, "AVFormatContext", "nb_streams")
             streamIndex = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
-            require(streamIndex >= 0) { "the source has no audio stream" }
+            // The message carries what FFmpeg actually found, because a spike
+            // must fail loudly and a wrong offset here is otherwise invisible.
+            require(streamIndex >= 0) {
+                val streams = formatContext.readAddress(layout, "AVFormatContext", "streams")
+                val types =
+                    if (streams.isNull()) {
+                        "null"
+                    } else {
+                        (0 until minOf(streamCount, MAX_REPORTED_STREAMS)).joinToString(",") { index ->
+                            streams
+                                .elementAt(index)
+                                .readAddress(layout, "AVStream", "codecpar")
+                                .readInt(layout, "AVCodecParameters", "codec_type")
+                                .toString()
+                        }
+                    }
+                "the source has no audio stream " +
+                    "(container=$containerName, streams=$streamCount, types=[$types], " +
+                    "findBestStream=${library.errorString(streamIndex)})"
+            }
 
             val stream = formatContext.readAddress(layout, "AVFormatContext", "streams").elementAt(streamIndex)
             val parameters = stream.readAddress(layout, "AVStream", "codecpar")
@@ -300,5 +319,8 @@ class FfDemuxer
              * whose container carries no edit list.
              */
             const val AAC_PRIMING_SAMPLES = 1024
+
+            /** How many streams the no-audio-stream message names; enough to diagnose. */
+            const val MAX_REPORTED_STREAMS = 8
         }
     }
