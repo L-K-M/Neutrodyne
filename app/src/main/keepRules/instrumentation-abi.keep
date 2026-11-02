@@ -378,6 +378,32 @@
 -keep class androidx.media3.session.SessionToken {
   public <init>(android.content.Context, android.content.ComponentName);
 }
+-keep class androidx.media3.session.legacy.MediaBrowserCompat$ConnectionCallback {
+  public <init>();
+  public void onConnected();
+  public void onConnectionFailed();
+}
+-keep class androidx.media3.session.legacy.MediaBrowserCompat$MediaItem {
+  public java.lang.String getMediaId();
+}
+-keep class androidx.media3.session.legacy.MediaBrowserCompat$SubscriptionCallback {
+  public <init>();
+  public void onChildrenLoaded(java.lang.String, java.util.List);
+  public void onError(java.lang.String);
+}
+-keep class androidx.media3.session.legacy.MediaBrowserCompat {
+  public <init>(android.content.Context, android.content.ComponentName, androidx.media3.session.legacy.MediaBrowserCompat$ConnectionCallback, android.os.Bundle);
+  public void connect();
+  public void disconnect();
+  public java.lang.String getRoot();
+  public androidx.media3.session.legacy.MediaSessionCompat$Token getSessionToken();
+  public void subscribe(java.lang.String, android.os.Bundle, androidx.media3.session.legacy.MediaBrowserCompat$SubscriptionCallback);
+}
+-keep class androidx.media3.session.legacy.MediaSessionCompat$Token {
+  public android.media.session.MediaSession$Token getToken();
+}
+-keep class androidx.media3.session.legacy.MediaSessionCompat {
+}
 -keep class androidx.room3.RoomDatabase {
   public void close();
 }
@@ -1310,6 +1336,7 @@
 }
 -keep class kotlin.sequences.SequencesKt___SequencesKt {
   public static kotlin.sequences.Sequence filter(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
+  public static kotlin.sequences.Sequence map(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
   public static java.util.List toList(kotlin.sequences.Sequence);
 }
 -keep class kotlin.text.CharsKt {
@@ -1334,6 +1361,7 @@
 -keep class kotlin.text.StringsKt__StringsKt {
   public static boolean contains$default(java.lang.CharSequence, java.lang.CharSequence, boolean, int, java.lang.Object);
   public static boolean contains(java.lang.CharSequence, java.lang.CharSequence, boolean);
+  public static boolean isBlank(java.lang.CharSequence);
   public static kotlin.sequences.Sequence lineSequence(java.lang.CharSequence);
   public static java.lang.String removePrefix(java.lang.String, java.lang.CharSequence);
   public static java.util.List split$default(java.lang.CharSequence, char[], boolean, int, int, java.lang.Object);
