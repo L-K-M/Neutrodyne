@@ -2,9 +2,12 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.app.Application
+import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -12,6 +15,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -67,6 +71,30 @@ class MediaLibraryTreeTest {
                 listOf("episode:101@upnext"),
                 h.run { h.tree.children("upnext", 0, 100) }.map { it.mediaId },
             )
+        }
+    }
+
+    @Test fun groupItemCarriesTheSameFirstMemberArtworkAsItsFolder() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            h.run {
+                h.opener.awaitOpen()
+                val db = h.opener.requireDatabase()
+                val podcast = db.podcastDao().insertPodcast(podcastEntity(artworkKey = "first-member-art"))
+                val group = db.groupDao().insertGroupOrIgnore(groupEntity(orderKey = "a0"))
+                db.groupDao().insertMember(PodcastGroupMemberEntity(group, podcast, "a0", 0))
+                val folderArt =
+                    h.tree
+                        .children("groups", 0, 100)
+                        .single()
+                        .mediaMetadata.artworkUri
+                assertNotNull(folderArt)
+                assertEquals(
+                    folderArt,
+                    h.tree
+                        .item("group:$group")!!
+                        .mediaMetadata.artworkUri,
+                )
+            }
         }
     }
 

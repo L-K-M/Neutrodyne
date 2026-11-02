@@ -449,6 +449,8 @@ flowchart LR
 | Android Auto / AAOS | `session.isAutoCompanionController(c)` or `session.isAutomotiveController(c)` **and** `ControllerHostIdentity` authentication (below); the Media3 helpers compare package names only and perform no security validation | full, set explicitly: Auto is not necessarily `isTrusted`, and the builder's untrusted default would make the car read-only | full |
 | Anything else | — | builder default for untrusted controllers: read-only ([PO-16](../PLAN.md#48-further-product-owner-decisions)) | builder default (no `nd.*`) |
 
+**Implementation note (2026-11-02).** "Full" session commands are one shared base set: `DEFAULT_SESSION_AND_LIBRARY_COMMANDS` without `COMMAND_CODE_SESSION_SET_RATING` — Neutrodyne has no rating feature and no `onSetRating` override, so neither branch offers it.
+
 **Auto authentication** (`ControllerHostIdentity`) requires package ownership by the calling UID and:
 
 - AAOS: `FLAG_SYSTEM` or `FLAG_UPDATED_SYSTEM_APP` for `com.android.car.media` or `com.android.car.carlauncher`.
