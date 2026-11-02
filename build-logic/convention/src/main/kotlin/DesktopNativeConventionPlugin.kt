@@ -25,7 +25,7 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                 tasks.register<BuildFfmpegTask>("buildFfmpeg") {
                     group = "build"
                     description = "Build the minimal FFmpeg libraries of D86 for $nativeTarget (11 FFmpeg build)."
-                    workingDir = layout.projectDirectory
+                    workingDir = layout.projectDirectory.asFile
                     commandLine("bash", "ffmpeg/build.sh", nativeTarget)
                     outputDirectory.set(ffmpegOutput)
                     lockFile.set(lockFile)
