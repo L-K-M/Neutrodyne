@@ -276,6 +276,37 @@ class AddLocalDestinationTest {
             assertEquals(0, lan.requestCount)
         }
 
+    @Test fun directoryLiteralLocalPreviewIsRefused() =
+        runBlocking {
+            assertEquals(
+                AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                assertIs<Outcome.Failure<AddPodcastError>>(
+                    bundle.resolver.preview(lan.url("/feed").toString()),
+                ).error,
+            )
+            assertEquals(0, lan.requestCount)
+        }
+
+    @Test fun directoryPreviewCannotRedirectToLocal() =
+        runBlocking {
+            server.enqueue(mockResponse(302, "", "Location" to lanPeerUrl("/feed")))
+            assertEquals(
+                AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                assertIs<Outcome.Failure<AddPodcastError>>(bundle.resolver.preview(url("/redirect"))).error,
+            )
+            assertEquals(1, server.requestCount)
+            assertEquals(0, lan.requestCount)
+        }
+
+    @Test fun unconfirmedFirstHostResolvingLocalIsRefused() =
+        runBlocking {
+            assertEquals(
+                AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                assertIs<AddResolution.Failure>(bundle.resolver.resolveUnconfirmed(lanPeerUrl("/feed"))).error,
+            )
+            assertEquals(0, lan.requestCount)
+        }
+
     @Test fun encodedLanAlternateIsNeverRequested() =
         runBlocking {
             lan.enqueue(mockResponse(body = rssBody(title = "LAN honeypot")))
