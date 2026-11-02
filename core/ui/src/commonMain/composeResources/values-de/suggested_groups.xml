@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="suggested_groups_title">Podcasts in Feeds gruppieren</string>
+    <string name="suggested_groups_chip">%1$s (%2$d)</string>
+    <string name="suggested_groups_create">Gruppen erstellen</string>
+    <string name="suggested_groups_dismiss">Nicht jetzt</string>
+    <plurals name="suggested_groups_result">
+        <item quantity="one">%1$d Gruppe erstellt</item>
+        <item quantity="other">%1$d Gruppen erstellt</item>
+    </plurals>
+    <string name="suggested_groups_partial">Gruppen erstellt: %1$d; fehlgeschlagene Aktionen: %2$d. Erneut versuchen.</string>
+    <string name="suggested_groups_open">Öffnen</string>
+</resources>

@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useWriterConnection
+import app.cash.turbine.test
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
 import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
@@ -27,6 +28,8 @@ import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import dev.zacsweers.metro.Provider
@@ -92,6 +95,74 @@ class PodcastRepositoryTest {
                     FileSystem.SYSTEM,
                 ),
     )
+
+    @Test
+    fun categorySuggestionsUseDistinctNormalizedTopLevels() =
+        runTest {
+            db.podcastDao().insertPodcast(
+                podcastEntity(
+                    feedUrl = "https://one.example/feed",
+                ).copy(categoriesJson = "[[\"Technology\",\"Gadgets\"],[\" technology \"],[\"News\"],[]]"),
+            )
+            db.podcastDao().insertPodcast(
+                podcastEntity(
+                    feedUrl = "https://two.example/feed",
+                ).copy(categoriesJson = "[[\"Technology\"],[\"News\"],[\"Solo\"]]"),
+            )
+            db.podcastDao().insertPodcast(
+                podcastEntity(feedUrl = "https://bad.example/feed").copy(categoriesJson = "broken"),
+            )
+
+            val counts = repo().observeCategoryCounts().first()
+            assertEquals(listOf("News", "Technology"), counts.map { it.category })
+            assertTrue(counts.all { it.podcastIds.size == 2 && it.podcastIds.distinct().size == 2 })
+            db.close()
+        }
+
+    @Test
+    fun categorySuggestionsReactToGroupCreationAndDeletion() =
+        runTest {
+            repeat(2) { index ->
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedUrl = "https://category$index.example/feed")
+                        .copy(categoriesJson = "[[\"Café\"],[\"News\"]]"),
+                )
+            }
+            val repository = repo()
+            repository.observeCategoryCounts().test {
+                assertEquals(listOf("Café", "News"), awaitItem().map { it.category })
+                val id = db.groupDao().insert(groupEntity(name = "CAFÉ", orderKey = "0.5").copy(nameKey = "café"))
+                var names = awaitItem().map { it.category }
+                while ("Café" in names) names = awaitItem().map { it.category }
+                assertEquals(listOf("News"), names)
+                db.groupDao().deleteGroup(id)
+                names = awaitItem().map { it.category }
+                while ("Café" !in names) names = awaitItem().map { it.category }
+                assertEquals(listOf("Café", "News"), names)
+            }
+            db.close()
+        }
+
+    @Test
+    fun categorySuggestionsCapTiesAndRejectInvalidNames() =
+        runTest {
+            val categories = "[[\"Z\"],[\"F\"],[\"C\"],[\"B\"],[\"A\"],[\"D\"],[\"E\"],[\"   \"],[\"${"x".repeat(
+                41,
+            )}\"]]"
+            repeat(2) { index ->
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedUrl = "https://ties$index.example/feed").copy(categoriesJson = categories),
+                )
+            }
+            db.podcastDao().insertPodcast(
+                podcastEntity(feedUrl = "https://third.example/feed")
+                    .copy(categoriesJson = "[[\"Z\"]]"),
+            )
+            val counts = repo().observeCategoryCounts().first()
+            assertEquals(listOf("Z", "A", "B", "C", "D"), counts.map { it.category })
+            assertEquals(3, counts.first().podcastIds.size)
+            db.close()
+        }
 
     @Test
     fun aFeedMoveCarriesTheIdentityFormHost() =
