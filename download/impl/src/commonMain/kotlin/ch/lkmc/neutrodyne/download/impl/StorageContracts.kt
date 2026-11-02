@@ -2,11 +2,30 @@
 
 package ch.lkmc.neutrodyne.download.impl
 
+import ch.lkmc.neutrodyne.core.datastore.SettingStore
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.download.api.FolderRejectReason
+import ch.lkmc.neutrodyne.download.api.FolderRootResult
 import ch.lkmc.neutrodyne.download.api.StorageRootInfo
 
 /** Platform implementations do all probing/allocation on IO. No FD preallocation. */
 internal interface StorageRoots {
+    suspend fun prune(usedRoots: Set<String>) = Unit
+
+    fun observeCurrent(settings: SettingStore): kotlinx.coroutines.flow.Flow<String> =
+        settings.observe(DownloadSettingKeys.ROOT_ID)
+
     suspend fun current(): String
+
+    suspend fun setCurrent(
+        rootId: String,
+        settings: SettingStore,
+    ) {
+        settings.set(DownloadSettingKeys.ROOT_ID, rootId)
+    }
+
+    suspend fun registerFolderRoot(absolutePath: String): FolderRootResult =
+        FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
 
     suspend fun list(): List<StorageRootInfo>
 
@@ -89,6 +108,18 @@ internal interface DownloadFileSystem {
         rootId: String,
         path: String,
     )
+
+    suspend fun sameStore(
+        sourceRoot: String,
+        targetRoot: String,
+    ): Boolean = false
+
+    suspend fun moveBetweenRoots(
+        sourceRoot: String,
+        from: String,
+        targetRoot: String,
+        to: String,
+    ): Unit = throw UnsupportedOperationException("Cross-root rename is unavailable")
 
     /** Same-volume atomic rename; caller syncs/closes part first, commits COMPLETED afterwards. */
     suspend fun atomicMove(
