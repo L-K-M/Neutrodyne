@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -100,8 +101,10 @@ class SettingsScreensTest {
             onNodeWithText("Licences").assertExists()
         }
 
-    /** Diagnostic for the nightly TouchTargetSizeCheck miss: every clickable node on the
-     * scrolled 320x640 settings home must keep a 48dp target. */
+    /**
+     * Diagnostic for the nightly TouchTargetSizeCheck miss: every clickable node on the
+     * scrolled 320x640 settings home must keep a 48dp target.
+     */
     @Test
     fun settingsHomeSmallTargetsDump() =
         runDesktopComposeUiTest(width = 320, height = 640) {
