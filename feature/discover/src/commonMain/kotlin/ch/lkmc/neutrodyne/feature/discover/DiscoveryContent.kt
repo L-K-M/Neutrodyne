@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
+import ch.lkmc.neutrodyne.core.designsystem.components.CoverNetworkPolicy
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ChartGenre
@@ -126,6 +127,8 @@ internal fun DirectoryCover(
         monogram = rememberMonogram(hit.title),
         title = hit.title,
         modifier = modifier,
+        // Directory art is provider-supplied, pre-confirmation (03 note 2026-11-02).
+        networkPolicy = CoverNetworkPolicy.UNCONFIRMED,
     )
 }
 
