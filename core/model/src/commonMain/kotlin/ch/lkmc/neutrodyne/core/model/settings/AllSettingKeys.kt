@@ -22,7 +22,8 @@ object AllSettingKeys {
             GroupsSettingKeys.ALL +
             PlaybackSettingKeys.ALL +
             BackupSettingKeys.ALL +
-            DesktopSettingKeys.ALL
+            DesktopSettingKeys.ALL +
+            UpdateSettingKeys.ALL
 
     /**
      * The shared write-side validation (05 Rules 4): [value]'s stored type must match the
@@ -37,6 +38,7 @@ object AllSettingKeys {
     ): Boolean =
         acceptsStoredType(key, value) &&
             PlaybackSettingKeys.acceptsRange(key, value) &&
+            UpdateSettingKeys.acceptsRange(key, value) &&
             DiscoverSettingKeys.acceptsValue(key, value)
 }
 

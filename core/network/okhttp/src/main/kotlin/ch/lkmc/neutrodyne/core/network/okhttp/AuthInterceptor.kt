@@ -36,6 +36,7 @@ class AuthInterceptor(
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         var request = chain.request()
+        if (request.tag(UpdateManifestCall::class.java) != null) return chain.proceed(request)
         val directoryOrigin =
             request.header(DIRECTORY_ORIGIN_HEADER)
                 ?: request.tag(DirectoryAuthOrigin::class.java)?.value

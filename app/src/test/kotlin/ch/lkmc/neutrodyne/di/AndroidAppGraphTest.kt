@@ -41,6 +41,7 @@ import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -153,6 +154,22 @@ class AndroidAppGraphTest {
             .build()
 
         assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+    }
+
+    @Test
+    fun updateWorkerFactoryAndStartupStayLazyBeforeDatabaseOpen() {
+        val app: Application = RuntimeEnvironment.getApplication()
+        val worker =
+            TestListenableWorkerBuilder<ch.lkmc.neutrodyne.core.data.update.UpdateCheckWorker>(
+                app,
+            ).setWorkerFactory(graph.workerFactory)
+                .build()
+        assertThat(worker).isNotNull()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+        val orders = graph.initializers.associate { it::class.simpleName to it.order }
+        assertThat(orders["UpdateCheckInitializer"]).isEqualTo(200)
+        assertThat(orders["UpdateChannelsInitializer"]).isEqualTo(10)
+        graph.appScope.cancel()
     }
 
     @Test
@@ -336,6 +353,8 @@ class AndroidAppGraphTest {
                 "DebugToolsInitializer" to 0..99,
                 "NewEpisodeChannelsInitializer" to 10..10,
                 "ImportBackupChannelsInitializer" to 10..10,
+                "UpdateChannelsInitializer" to 10..10,
+                "UpdateCheckInitializer" to 200..200,
                 "GroupChannelsInitializer" to 140..140,
                 "DatabaseOpenInitializer" to 100..119,
                 // 05 First-launch restore: order 110, inside the database band.
