@@ -15,7 +15,7 @@ object HealthCheck {
     }
 
     internal fun check(environment: Map<String, String>): Int {
-        val listen = ListenAddress.parse(environment[ServerEnv.LISTEN] ?: "127.0.0.1:8787") ?: return ExitCodes.ERROR
+        val listen = ListenAddress.parse(environment[ServerEnv.LISTEN] ?: "127.0.0.1:8787") ?: return fail("invalid listen address")
         val host = if (listen.host.contains(':')) "::1" else "127.0.0.1"
         return try {
             HttpClient
@@ -36,10 +36,16 @@ object HealthCheck {
                                 .build(),
                             HttpResponse.BodyHandlers.discarding(),
                         )
-                    if (response.statusCode() == 200) ExitCodes.OK else ExitCodes.ERROR
+                    if (response.statusCode() == 200) ExitCodes.OK else fail("readyz answered ${response.statusCode()}")
                 }
-        } catch (_: Exception) {
-            ExitCodes.ERROR
+        } catch (failure: Exception) {
+            // One line, no secrets: container healthcheck logs show it via docker inspect.
+            fail("${failure.javaClass.simpleName}: ${failure.message ?: "no detail"}")
         }
+    }
+
+    private fun fail(reason: String): Int {
+        System.err.println("healthcheck failed: $reason")
+        return ExitCodes.ERROR
     }
 }

@@ -47,6 +47,13 @@ for _ in $(seq 1 60); do
 done
 if [[ "$ready" != true ]]; then
     docker inspect -f 'container state: status={{.State.Status}} exit={{.State.ExitCode}} oomKilled={{.State.OOMKilled}}' "$container" || true
+    echo '--- exec JVM sanity'
+    docker exec "$container" "${probe_jvm[@]}" -version 2>&1 || true
+    echo '--- healthcheck with reason'
+    docker exec "$container" "${probe_jvm[@]}" -cp /app/neutrodyne-server.jar \
+        ch.lkmc.neutrodyne.sync.server.HealthCheck || echo "healthcheck exit=$?"
+    echo '--- doctor'
+    docker exec "$container" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar doctor || true
     docker logs "$container"
     exit 1
 fi
