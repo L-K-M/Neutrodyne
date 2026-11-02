@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.datastore.SettingStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
 import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
@@ -52,7 +53,8 @@ internal class DownloadStorage(
             reconciler.orphanBytes,
             quota.capMb,
             quota.refusedEstimate,
-        ) { entries, orphans, capMb, _ ->
+            roots.observeCurrent(settings),
+        ) { entries, orphans, capMb, _, _ ->
             val rows = entries.map { it.download }
             val root = roots.current()
             var partial = 0L
@@ -78,15 +80,32 @@ internal class DownloadStorage(
             )
         }
 
+    override fun observeNotices() =
+        combine(
+            settings.observe(DownloadSettingKeys.MOVE_TARGET),
+            quota.moveStorageLow,
+            quota.moveUnavailableSources,
+        ) { target, low, missing ->
+            buildSet {
+                if (target.isNotEmpty()) add(DownloadNotice.MOVE_IN_PROGRESS)
+                if (low) add(DownloadNotice.STORAGE_LOW)
+                if (missing > 0) add(DownloadNotice.ROOT_UNAVAILABLE)
+            }
+        }
+
     override suspend fun changeRoot(
         rootId: String,
         mode: RootChangeMode,
-    ): RootChangeResult {
-        if (mode != RootChangeMode.NEW_DOWNLOADS_ONLY) return RootChangeResult.Unsupported
-        if (roots.resolve(rootId) == null) return RootChangeResult.Unavailable
-        settings.set(DownloadSettingKeys.ROOT_ID, rootId)
-        return RootChangeResult.Applied
-    }
+    ): RootChangeResult =
+        claimMutex.withLock {
+            if (roots.resolve(rootId) == null) return@withLock RootChangeResult.Unavailable
+            // Persist intent first: a crash cannot lose an accepted move before scheduling it.
+            settings.set(DownloadSettingKeys.MOVE_TARGET, if (mode == RootChangeMode.MOVE_EXISTING) rootId else "")
+            roots.setCurrent(rootId, settings)
+            quota.moveStorageLow.value = false
+            quota.moveUnavailableSources.value = 0
+            RootChangeResult.Applied
+        }
 
     override suspend fun deleteOrphanFiles(): OrphanDeleteResult =
         claimMutex.withLock {
