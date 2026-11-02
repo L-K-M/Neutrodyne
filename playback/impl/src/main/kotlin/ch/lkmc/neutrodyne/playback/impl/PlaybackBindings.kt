@@ -34,7 +34,7 @@ public object PlaybackBindings {
     @Provides internal fun unsubscribe(value: PlaybackUnsubscribeGuard): PlaybackBeforeUnsubscribe = value
 
     // The nullable key is what ChapterRepositoryImpl asks for; the reader lives on Android only.
-    @Provides internal fun embeddedChapters(value: MetadataRetrieverChapterReader): EmbeddedChapterReader? = value
+    @Provides internal fun embeddedChapters(value: EmbeddedChapterReader): EmbeddedChapterReader? = value
 }
 
 @ContributesIntoSet(AppScope::class)
