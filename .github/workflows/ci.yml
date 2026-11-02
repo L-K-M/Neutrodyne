@@ -425,6 +425,9 @@ jobs:
             cp "playback/native/build/ffmpeg/${{ matrix.target }}/$f" native-evidence/
           done
           cp playback/native/build/ffmpeg-source/*.tar.xz native-evidence/ 2>/dev/null || true
+          # A native crash writes its report into the engine module's directory;
+          # it is the only stack a segfault leaves, so it rides along too.
+          cp playback/engine/hs_err_pid*.log native-evidence/ 2>/dev/null || true
           ls -l native-evidence
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

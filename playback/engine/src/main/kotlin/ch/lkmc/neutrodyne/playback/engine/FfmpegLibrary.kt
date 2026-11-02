@@ -74,8 +74,9 @@ class FfmpegLibrary
 
         /** `av_strerror`, for a message that names the failure instead of a number. */
         fun errorString(code: Int): String {
-            val buffer = arena.allocate(layout.intConstant("AV_ERROR_MAX_STRING_SIZE").toLong())
-            val written = callInt("avutil", "av_strerror", STRERROR, code, buffer)
+            val size = layout.intConstant("AV_ERROR_MAX_STRING_SIZE").toLong()
+            val buffer = arena.allocate(size)
+            val written = callInt("avutil", "av_strerror", STRERROR, code, buffer, size)
             return if (written < 0) "FFmpeg error $code" else readCString(buffer)
         }
 
@@ -173,6 +174,7 @@ class FfmpegLibrary
                 -1,
                 -1,
                 MemorySegment.NULL,
+                0,
             )
 
         // ------------------------------------------------------------ packets and frames
@@ -238,7 +240,7 @@ class FfmpegLibrary
         fun openCodec(
             context: MemorySegment,
             codec: MemorySegment,
-        ): Int = callInt("avcodec", "avcodec_open2", OPEN_CODEC, context, codec, MemorySegment.NULL, MemorySegment.NULL)
+        ): Int = callInt("avcodec", "avcodec_open2", OPEN_CODEC, context, codec, MemorySegment.NULL)
 
         fun freeCodecContext(slot: MemorySegment) =
             callVoid("avcodec", "avcodec_free_context", FREE_CODEC_CONTEXT, slot)
@@ -288,9 +290,11 @@ class FfmpegLibrary
         fun initResampler(resampler: MemorySegment): Int = callInt("swresample", "swr_init", SWR_INIT, resampler)
 
         /**
-         * `swr_convert` into a caller-owned buffer. The frame's `extended_data`
-         * is passed straight through, so the bindings never dereference a plane
-         * pointer themselves.
+         * `swr_convert` into a caller-owned buffer. Both sample-pointer
+         * arguments are `uint8_t **`: [out] is a slot that holds the output
+         * buffer's address, [input] is the frame's `extended_data` passed
+         * straight through, so the bindings never dereference a plane pointer
+         * themselves.
          */
         fun convert(
             resampler: MemorySegment,
@@ -488,6 +492,7 @@ class FfmpegLibrary
                     ValueLayout.JAVA_INT,
                     ValueLayout.JAVA_INT,
                     ValueLayout.ADDRESS,
+                    ValueLayout.JAVA_INT,
                 )
             private val ALLOC_PACKET = FunctionDescriptor.of(ValueLayout.ADDRESS)
             private val NEW_PACKET =
@@ -504,7 +509,6 @@ class FfmpegLibrary
             private val OPEN_CODEC =
                 FunctionDescriptor.of(
                     ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS,
                     ValueLayout.ADDRESS,
                     ValueLayout.ADDRESS,
                     ValueLayout.ADDRESS,

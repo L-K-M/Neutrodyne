@@ -78,6 +78,17 @@ class FfDecoder
         private val outputBuffer: MemorySegment =
             arena.allocate(OUTPUT_BUFFER_SAMPLES.toLong() * STEREO_CHANNELS * Short.SIZE_BYTES)
 
+        /**
+         * `swr_convert`'s out argument is `uint8_t **` — an array of plane
+         * pointers — so this slot holds [outputBuffer]'s address; passing the
+         * buffer itself would have swresample read its first PCM bytes as the
+         * plane pointer.
+         */
+        private val outputSlot: MemorySegment =
+            arena.allocate(ValueLayout.ADDRESS).also {
+                it.set(ValueLayout.ADDRESS, 0L, outputBuffer)
+            }
+
         init {
             require(demuxer.audioTrack.sampleRate > 0) { "the track has no sample rate" }
             val created = library.allocCodecContext(codec)
@@ -146,7 +157,11 @@ class FfDecoder
          */
         fun discardPendingSamples() {
             val resampler = resamplerSlot.dereference() ?: return
-            while (library.convert(resampler, outputBuffer, OUTPUT_BUFFER_SAMPLES, null, 0) > 0) {
+            // inputRate is set only by reconfigure: an allocated resampler that
+            // was never initialised has nothing buffered, and swr_convert on it
+            // would dereference a resample function that does not exist yet.
+            if (inputRate <= 0) return
+            while (library.convert(resampler, outputSlot, OUTPUT_BUFFER_SAMPLES, null, 0) > 0) {
                 // Draining: each call returns what was buffered, until nothing is left.
             }
         }
@@ -155,7 +170,7 @@ class FfDecoder
         fun drainResampler(): AudioFrame? {
             val resampler = resamplerSlot.dereference() ?: return null
             if (inputRate <= 0) return null
-            val written = library.convert(resampler, outputBuffer, OUTPUT_BUFFER_SAMPLES, null, 0)
+            val written = library.convert(resampler, outputSlot, OUTPUT_BUFFER_SAMPLES, null, 0)
             if (written <= 0) return null
             return pcmOf(written, 0)
         }
@@ -178,7 +193,7 @@ class FfDecoder
             val written =
                 library.convert(
                     resampler,
-                    outputBuffer,
+                    outputSlot,
                     OUTPUT_BUFFER_SAMPLES,
                     frame.readExtendedData(layout),
                     samples,
