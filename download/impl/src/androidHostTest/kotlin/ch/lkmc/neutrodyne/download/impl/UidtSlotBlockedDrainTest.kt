@@ -139,7 +139,7 @@ class UidtSlotBlockedDrainTest {
                     backgroundLimited = { false },
                     scheduleUidt = { true },
                     enqueue = { _, _ -> },
-                    armWake = {},
+                    armWake = { _, _ -> },
                     runtimeWake = { engine.wake(it) },
                     waitingNotice = {},
                     clock = clock,

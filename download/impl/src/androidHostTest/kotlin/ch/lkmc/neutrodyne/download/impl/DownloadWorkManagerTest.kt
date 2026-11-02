@@ -51,7 +51,7 @@ class DownloadWorkManagerTest {
             backgroundLimited = { false },
             scheduleUidt = { error("Invisible UIDT scheduling") },
             enqueue = queue::lane,
-            armWake = { if (it == null) queue.cancelWake() else queue.wake(it) },
+            armWake = { lane, request -> if (request == null) queue.cancelWake(lane) else queue.wake(lane, request) },
             runtimeWake = {},
             waitingNotice = {},
             clock = clock,

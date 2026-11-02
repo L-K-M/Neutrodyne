@@ -16,10 +16,13 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
+import ch.lkmc.neutrodyne.core.domain.CleanupReason
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -43,6 +46,16 @@ internal class DownloadChannelsInitializer(
 
 @ContributesIntoSet(AppScope::class)
 @Inject
+internal class DownloadCleanupInitializer(
+    private val queue: Lazy<DownloadWorkQueue>,
+) : AppInitializer {
+    override val order = 200
+
+    override suspend fun run() = queue.value.cleanup()
+}
+
+@ContributesIntoSet(AppScope::class)
+@Inject
 internal class DownloadReconcileInitializer(
     private val queue: Lazy<DownloadWorkQueue>,
 ) : AppInitializer {
@@ -56,6 +69,10 @@ internal class DownloadReconcileInitializer(
 internal class DownloadObserversInitializer(
     private val application: Application,
     private val visibility: DownloadAppVisibility,
+    private val charging: DownloadChargingMonitor,
+    private val triggers: Lazy<AndroidDownloadTriggers>,
+    private val components: Lazy<DownloadComponents>,
+    private val device: DeviceSettingsStore,
     private val scheduler: Lazy<AndroidDownloadScheduler>,
     private val queue: Lazy<DownloadWorkQueue>,
     private val network: NetworkMonitor,
@@ -69,6 +86,25 @@ internal class DownloadObserversInitializer(
 
     override suspend fun run() {
         // Band310 only launches; database readiness and collectors never hold startup open.
+        scope.launch { charging.observe() }
+        scope.launch { charging.charging.collect { schedule() } }
+        scope.launch {
+            awaitDownloadDatabase(opener)
+            triggers.value.observe()
+        }
+        scope.launch {
+            awaitDownloadDatabase(opener)
+            components.value.cleanup.observePlayed()
+        }
+        scope.launch {
+            awaitDownloadDatabase(opener)
+            device.observe(DownloadSettingKeys.MOVE_TARGET).collect { target ->
+                if (target.isNotEmpty()) {
+                    suspendRunCatching { queue.value.move(target) }
+                        .onFailure { Log.e("Downloads", it) { "Could not schedule download move" } }
+                }
+            }
+        }
         scope.launch(Dispatchers.Main) {
             val lifecycle = ProcessLifecycleOwner.get().lifecycle
             val observer =
@@ -117,7 +153,7 @@ internal class DownloadObserversInitializer(
     private fun schedule() {
         scope.launch {
             suspendRunCatching {
-                scheduler.value.ensureScheduled(DownloadLane.MANUAL)
+                for (lane in DownloadLane.entries) scheduler.value.ensureScheduled(lane)
             }.onFailure { Log.e("Downloads", it) { "Download scheduling failed" } }
         }
     }
@@ -156,6 +192,8 @@ internal class DownloadIndexInitializer(
 internal class DeferredDeletesInitializer(
     private val components: Lazy<DownloadComponents>,
     private val db: Lazy<NeutrodyneDatabase>,
+    private val device: DeviceSettingsStore,
+    private val queue: Lazy<DownloadWorkQueue>,
     @param:ApplicationScope private val scope: CoroutineScope,
 ) : AppInitializer {
     override val order = 310
@@ -166,6 +204,9 @@ internal class DeferredDeletesInitializer(
                 val downloads = components.value
                 suspendRunCatching {
                     downloads.claimMutex.withLock { downloads.deletes.drain(it) }
+                    downloads.cleanup.run(CleanupReason.PLAYED)
+                    val target = device.get(DownloadSettingKeys.MOVE_TARGET)
+                    if (target.isNotEmpty()) queue.value.move(target)
                 }.onFailure { Log.e("Downloads", it) { "Deferred download deletion failed" } }
             }
         }

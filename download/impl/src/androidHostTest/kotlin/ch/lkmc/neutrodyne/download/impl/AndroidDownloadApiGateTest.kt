@@ -14,11 +14,36 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34, 36])
 class AndroidDownloadApiGateTest {
+    @Test fun pendingManualJobLooksUpTheManualId() {
+        val context = RuntimeEnvironment.getApplication()
+        val scheduler = context.getSystemService(JobScheduler::class.java).forNamespace(JobSchedulerFacade.NAMESPACE)
+        scheduler.cancelAll()
+        // Robolectric keeps pending jobs on each wrapper rather than sharing a namespace registry.
+        val facade = JobSchedulerFacade(context) { scheduler }
+        assertNull(facade.pendingManualJob())
+        val info =
+            JobInfo
+                .Builder(JobSchedulerFacade.JOB_ID, ComponentName(context, ManualDownloadJobService::class.java))
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .build()
+        assertEquals(JobScheduler.RESULT_SUCCESS, scheduler.schedule(info))
+        assertEquals(info.id, scheduler.getPendingJob(JobSchedulerFacade.JOB_ID)?.id)
+        assertEquals(info.id, facade.pendingManualJob()?.id)
+        scheduler.cancelAll()
+    }
+
+    @Test
+    @Config(sdk = [33])
+    fun pendingManualJobIsAbsentBeforeUidt() {
+        assertNull(JobSchedulerFacade(RuntimeEnvironment.getApplication()).pendingManualJob())
+    }
+
     @Test fun persistedUidtAcceptsNetworkAndBackoff() {
         val context = RuntimeEnvironment.getApplication()
         val network =

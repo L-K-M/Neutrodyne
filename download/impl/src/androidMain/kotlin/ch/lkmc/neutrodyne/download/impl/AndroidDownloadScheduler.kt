@@ -12,7 +12,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.yield
 
-/** Queue/exit decisions share one mutex; synchronous framework startup never waits for Room. */
+/** Queue/exit decisions share a mutex per lane; synchronous framework startup never waits for Room. */
 internal class AndroidDownloadScheduler(
     private val rows: suspend () -> List<DownloadEntity>,
     private val markForeground: suspend (List<Long>, WaitReason) -> Unit,
@@ -21,29 +21,35 @@ internal class AndroidDownloadScheduler(
     private val backgroundLimited: () -> Boolean,
     private val scheduleUidt: (List<DownloadEntity>) -> Boolean,
     private val enqueue: suspend (ExistingWorkPolicy, OneTimeWorkRequest) -> Unit,
-    private val armWake: suspend (OneTimeWorkRequest?) -> Unit,
+    private val armWake: suspend (DownloadLane, OneTimeWorkRequest?) -> Unit,
     private val runtimeWake: (DownloadLane) -> Unit,
     private val waitingNotice: (Boolean) -> Unit,
     private val clock: Clock,
     val registry: LaneRegistry,
     private val sdk: Int,
 ) : DownloadScheduler {
-    private val mutex = Mutex()
+    private val mutexes = DownloadLane.entries.associateWith { Mutex() }
+    private val autoRegistry = LaneRegistry()
+
+    internal fun registry(lane: DownloadLane): LaneRegistry =
+        if (lane == DownloadLane.MANUAL) registry else autoRegistry
+
+    fun liveTokens(): Set<String> = registry.liveTokens() + autoRegistry.liveTokens()
 
     override suspend fun ensureScheduled(lane: DownloadLane) {
-        require(lane == DownloadLane.MANUAL) { "AUTO scheduling belongs to M6b" }
-        mutex.withLock { ensureLocked() }
+        mutexes.getValue(lane).withLock { ensureLocked(lane) }
     }
 
-    private suspend fun ensureLocked() {
-        val queued = queued()
+    private suspend fun ensureLocked(lane: DownloadLane) {
+        val registry = registry(lane)
+        val queued = queued(lane)
         if (queued.isEmpty()) {
-            waitingNotice(false)
-            armWake(null)
+            if (lane == DownloadLane.MANUAL) waitingNotice(false)
+            armWake(lane, null)
             return
         }
         val foreground = visible()
-        if (foreground) {
+        if (lane == DownloadLane.MANUAL && foreground) {
             val held = queued.filter { it.waitReason == WaitReason.NEEDS_FOREGROUND }.map { it.episodeId }
             if (held.isNotEmpty()) markForeground(held, WaitReason.NONE)
             waitingNotice(false)
@@ -51,19 +57,21 @@ internal class AndroidDownloadScheduler(
         val due = queued.filter { due(it) }
         // A running job must never be replaced: schedule(job1001) would stop its transfers.
         val uidt =
-            registry.uidtRunning() ||
-                (sdk >= 34 && foreground && due.isNotEmpty() && scheduleUidt(due))
-        if (!uidt && !foreground && backgroundLimited() &&
+            lane == DownloadLane.MANUAL && (
+                registry.uidtRunning() ||
+                    (sdk >= 34 && foreground && due.isNotEmpty() && scheduleUidt(due))
+            )
+        if (lane == DownloadLane.MANUAL && !uidt && !foreground && backgroundLimited() &&
             registry.phase() in setOf(LaneRegistry.Phase.IDLE, LaneRegistry.Phase.PENDING)
         ) {
             markForeground(due.map { it.episodeId }, WaitReason.NEEDS_FOREGROUND)
             waitingNotice(true)
-            armWaiting(queued.filter { !due(it) })
+            armWaiting(lane, queued.filter { !due(it) })
             return
         }
         when (registry.phase()) {
             LaneRegistry.Phase.ACTIVE -> {
-                wake(DownloadLane.MANUAL)
+                wake(lane)
             }
 
             LaneRegistry.Phase.CLOSING -> {
@@ -71,16 +79,16 @@ internal class AndroidDownloadScheduler(
             }
 
             LaneRegistry.Phase.PENDING -> {
-                if (sdk < 31 && foreground && !registry.pendingExpedited()) {
-                    enqueueLocked(ExistingWorkPolicy.REPLACE)
+                if (lane == DownloadLane.MANUAL && sdk < 31 && foreground && !registry.pendingExpedited()) {
+                    enqueueLocked(lane, ExistingWorkPolicy.REPLACE)
                 }
             }
 
             LaneRegistry.Phase.IDLE -> {
-                if (!uidt && queued.any { runnable(it) }) enqueueLocked()
+                if (!uidt && queued.any { runnable(it) }) enqueueLocked(lane)
             }
         }
-        armWaiting(queued.filter { if (uidt) !due(it) else !runnable(it) })
+        armWaiting(lane, queued.filter { if (uidt) !due(it) else !runnable(it) })
     }
 
     override fun wake(lane: DownloadLane) {
@@ -92,29 +100,25 @@ internal class AndroidDownloadScheduler(
         earliestAt: Long?,
         reason: WaitReason,
     ) {
-        require(lane == DownloadLane.MANUAL)
-        mutex.withLock {
-            val waiting = queued().filter { !runnable(it) }
-            if (waiting.isNotEmpty()) {
-                armWaiting(waiting)
-            } else if (earliestAt !=
-                null
-            ) {
-                armWake(AndroidDownloadWork.wake(earliestAt - clock.now(), reason == WaitReason.UNMETERED_NETWORK))
-            } else {
-                armWake(null)
-            }
+        mutexes.getValue(lane).withLock {
+            // Re-read committed rows: a completed/cancelled lane must never leave ghost wake work.
+            armWaiting(lane, queued(lane).filter { !runnable(it) })
         }
     }
 
     /** Engine owns register/tryClose/unregister. UIDT completion runs inside the exit mutex. */
-    fun exit(finish: () -> Unit = {}): DrainExit =
-        object : DrainExit {
+    fun exit(
+        lane: DownloadLane = DownloadLane.MANUAL,
+        finish: () -> Unit = {},
+    ): DrainExit {
+        val mutex = mutexes.getValue(lane)
+        val registry = registry(lane)
+        return object : DrainExit {
             override suspend fun register(
                 token: RunnerToken,
                 lanes: Set<DownloadLane>,
             ) {
-                require(lanes == setOf(DownloadLane.MANUAL))
+                require(lanes == setOf(lane))
                 mutex.withLock { registry.register(token) }
             }
 
@@ -123,8 +127,8 @@ internal class AndroidDownloadScheduler(
                 outcome: DrainOutcome,
             ): Boolean {
                 mutex.withLock {
-                    if (!yieldToUidt(token) && outcome != DrainOutcome.DeadlineReached &&
-                        queued().any { runnable(it) }
+                    if (!yieldToUidt(lane, token) && outcome != DrainOutcome.DeadlineReached &&
+                        queued(lane).any { runnable(it) }
                     ) {
                         return false
                     }
@@ -134,19 +138,19 @@ internal class AndroidDownloadScheduler(
                 yield()
                 return mutex.withLock {
                     if (registry.consumeReopen(token)) return@withLock false
-                    val waiting = queued()
-                    if (!yieldToUidt(token) && outcome != DrainOutcome.DeadlineReached &&
+                    val waiting = queued(lane)
+                    if (!yieldToUidt(lane, token) && outcome != DrainOutcome.DeadlineReached &&
                         waiting.any { runnable(it) }
                     ) {
                         registry.reopen()
                         registry.consumeReopen(token)
                         return@withLock false
                     }
-                    armWaiting(waiting.filter { !runnable(it) })
-                    if (!yieldToUidt(token) &&
+                    armWaiting(lane, waiting.filter { !runnable(it) })
+                    if (!yieldToUidt(lane, token) &&
                         waiting.any { runnable(it) }
                     ) {
-                        enqueueLocked(ExistingWorkPolicy.APPEND_OR_REPLACE)
+                        enqueueLocked(lane, ExistingWorkPolicy.APPEND_OR_REPLACE)
                     }
                     finish()
                     registry.unregister(token)
@@ -158,9 +162,14 @@ internal class AndroidDownloadScheduler(
                 mutex.withLock { registry.unregister(token) }
             }
         }
+    }
 
-    suspend fun workerStarted(token: RunnerToken) {
-        mutex.withLock {
+    suspend fun workerStarted(
+        token: RunnerToken,
+        lane: DownloadLane = DownloadLane.MANUAL,
+    ) {
+        val registry = registry(lane)
+        mutexes.getValue(lane).withLock {
             registry.workerStarted()
             registry.register(token)
         }
@@ -170,16 +179,23 @@ internal class AndroidDownloadScheduler(
         token: RunnerToken,
         finish: () -> Unit,
     ) {
-        mutex.withLock {
+        mutexes.getValue(DownloadLane.MANUAL).withLock {
             finish()
             registry.unregister(token)
         }
     }
 
-    private fun yieldToUidt(token: RunnerToken): Boolean = registry.uidtRunning() && !registry.isUidt(token)
+    private fun yieldToUidt(
+        lane: DownloadLane,
+        token: RunnerToken,
+    ): Boolean = lane == DownloadLane.MANUAL && registry.uidtRunning() && !registry.isUidt(token)
 
-    private suspend fun enqueueLocked(policy: ExistingWorkPolicy? = null) {
-        val request = AndroidDownloadWork.lane(visible())
+    private suspend fun enqueueLocked(
+        lane: DownloadLane,
+        policy: ExistingWorkPolicy? = null,
+    ) {
+        val registry = registry(lane)
+        val request = AndroidDownloadWork.lane(visible(), lane)
         val chosen =
             policy ?: if (registry.hasStartedWorker()) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP
         registry.pending(request.id, request.workSpec.expedited)
@@ -191,9 +207,9 @@ internal class AndroidDownloadScheduler(
         }
     }
 
-    private suspend fun queued(): List<DownloadEntity> =
+    private suspend fun queued(lane: DownloadLane): List<DownloadEntity> =
         rows().filter {
-            it.lane == DownloadLane.MANUAL && it.state == DownloadState.QUEUED && it.runnerToken == null &&
+            it.lane == lane && it.state == DownloadState.QUEUED && it.runnerToken == null &&
                 it.sourceKind == ch.lkmc.neutrodyne.core.model.SourceKind.RSS_ENCLOSURE
         }
 
@@ -201,24 +217,37 @@ internal class AndroidDownloadScheduler(
 
     private fun runnable(row: DownloadEntity): Boolean {
         val c = conditions()
-        return due(row) && c.connected && c.validated && (row.allowMetered || c.unmetered)
+        return due(row) && c.connected && c.validated && (row.allowMetered || c.unmetered) &&
+            (!row.requireCharging || c.charging)
     }
 
     private companion object {
         const val PORTAL_RECHECK_MS = 60_000L
     }
 
-    private suspend fun armWaiting(waiting: List<DownloadEntity>) {
+    private suspend fun armWaiting(
+        lane: DownloadLane,
+        waiting: List<DownloadEntity>,
+    ) {
         if (waiting.isEmpty()) {
-            armWake(null)
+            armWake(lane, null)
             return
         }
-        val unmetered = waiting.none { it.allowMetered }
-        val covered = waiting.filter { unmetered || it.allowMetered }
+        var unmetered = waiting.none { it.allowMetered }
+        var charging = waiting.all { it.requireCharging }
+        var covered = waiting.filter { (unmetered || it.allowMetered) && (charging || !it.requireCharging) }
+        // Orthogonal needs (Wi-Fi without charging, mobile with charging) cover no row with
+        // the aggregate request. Pick one row's complete constraints instead of spinning.
+        if (covered.isEmpty()) {
+            val row = waiting.minBy { it.nextAttemptAt ?: clock.now() }
+            unmetered = !row.allowMetered
+            charging = row.requireCharging
+            covered = listOf(row)
+        }
         val earliest = covered.minOf { it.nextAttemptAt ?: clock.now() }
         val c = conditions()
         // The pre-28 CONNECTED fallback cannot express VALIDATED; avoid an immediate wake loop.
         val minimumDelay = if (sdk < 28 && c.connected && !c.validated) PORTAL_RECHECK_MS else 0L
-        armWake(AndroidDownloadWork.wake(maxOf(earliest - clock.now(), minimumDelay), unmetered))
+        armWake(lane, AndroidDownloadWork.wake(maxOf(earliest - clock.now(), minimumDelay), unmetered, lane, charging))
     }
 }

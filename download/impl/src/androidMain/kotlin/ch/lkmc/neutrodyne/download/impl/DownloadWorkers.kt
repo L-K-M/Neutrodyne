@@ -38,20 +38,18 @@ class DownloadLaneWorker
         }
 
         override suspend fun doWork(): Result {
+            val lane = AndroidDownloadWork.inputLane(inputData) ?: return Result.failure()
             val token =
                 RunnerToken("work:$id:${clock.now()}:${java.util.UUID.randomUUID()}").also {
-                    scheduler.value.workerStarted(it)
+                    scheduler.value.workerStarted(it, lane)
                 }
-            val exit = scheduler.value.exit()
+            val exit = scheduler.value.exit(lane)
             try {
-                if (inputData.getString(AndroidDownloadWork.KEY_LANE) !=
-                    AndroidDownloadWork.MANUAL
+                exit.register(token, setOf(lane))
+                var foreground = lane == DownloadLane.MANUAL && expeditedForeground
+                if (lane == DownloadLane.MANUAL && !foreground && Build.VERSION.SDK_INT < 34 &&
+                    visibility.isVisible()
                 ) {
-                    return Result.failure()
-                }
-                exit.register(token, setOf(DownloadLane.MANUAL))
-                var foreground = expeditedForeground
-                if (!foreground && Build.VERSION.SDK_INT < 34 && visibility.isVisible()) {
                     foreground =
                         try {
                             promote(notifications.value.foregroundInfo())
@@ -70,15 +68,19 @@ class DownloadLaneWorker
                 runtime.value.reconcile()
                 runtime.value.drain(
                     DrainRequest(
-                        setOf(DownloadLane.MANUAL),
+                        setOf(lane),
                         token,
                         deadline,
                         WORK_HORIZON_MS,
-                        notifications.value.reporter { notification, _, _, _ ->
-                            if (foreground) promoteNotification(notification)
+                        if (lane == DownloadLane.MANUAL) {
+                            notifications.value.reporter { notification, _, _, _ ->
+                                if (foreground) promoteNotification(notification)
+                            }
+                        } else {
+                            SilentReporter
                         },
                         exit,
-                        claimsAllowed = { !scheduler.value.registry.uidtRunning() },
+                        claimsAllowed = { lane == DownloadLane.AUTO || !scheduler.value.registry.uidtRunning() },
                         cancellationIntent = { StopIntent.RunnerStopped(stopReason) },
                     ),
                 )
@@ -103,12 +105,22 @@ class DownloadLaneWorker
         }
 
         override suspend fun getForegroundInfo(): ForegroundInfo {
+            check(AndroidDownloadWork.inputLane(inputData) == DownloadLane.MANUAL) { "AUTO cannot run in foreground" }
             val info = notifications.value.foregroundInfo()
             expeditedForeground = true
             return info
         }
 
         internal companion object {
+            private val SilentReporter =
+                object : DrainReporter {
+                    override fun active(episodeIds: Set<Long>) {}
+
+                    override fun bytes(
+                        downloaded: Long,
+                        total: Long?,
+                    ) {}
+                }
             const val SOFT_DEADLINE_MS = 8 * 60_000L
             const val WORK_HORIZON_MS = 60_000L
         }
@@ -131,7 +143,8 @@ class DownloadWakeWorker
         override suspend fun doWork(): Result =
             withContext(NonCancellable) {
                 try {
-                    scheduler.value.ensureScheduled(DownloadLane.MANUAL)
+                    val lane = AndroidDownloadWork.inputLane(inputData) ?: return@withContext Result.failure()
+                    scheduler.value.ensureScheduled(lane)
                     Result.success()
                 } catch (failure: Exception) {
                     Log.e("Downloads", failure) { "Download wake failed" }
@@ -157,8 +170,7 @@ class DownloadReconcileWorker
 
         override suspend fun doWork(): Result {
             try {
-                runtime.value.reconcile()
-                scheduler.value.ensureScheduled(DownloadLane.MANUAL)
+                runtime.value.startup()
                 return Result.success()
             } catch (cancelled: CancellationException) {
                 throw cancelled
