@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.download.api.DeleteReason
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadEntry
+import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.DownloadStatus
 import ch.lkmc.neutrodyne.download.api.DownloadsOverview
 import ch.lkmc.neutrodyne.download.api.FolderRejectReason
@@ -352,7 +353,7 @@ internal class DownloadControllerImpl(
                             )
                     }.map { it.entry() },
                 storage,
-                emptySet(),
+                if (storage.orphanBytes > 0) setOf(DownloadNotice.ORPHAN_FILES) else emptySet(),
             )
         }.distinctUntilChanged()
 
