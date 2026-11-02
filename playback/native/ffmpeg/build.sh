@@ -318,6 +318,32 @@ log "building (this takes a few minutes)"
 "${MAKE[@]}" install >"$BUILD/install.log" 2>&1 ||
     { tail -40 "$BUILD/install.log"; die "make install failed (full log in $BUILD/install.log)"; }
 
+# The libraries' RUNPATH must hold $ORIGIN so each one finds its FFmpeg
+# siblings in its own directory. The configure flag that asks for it crosses
+# one eval in configure and one expansion in make, so what the linker actually
+# recorded is verified here and repaired with patchelf when it is wrong.
+case "$TARGET" in
+    linux-x64 | linux-arm64)
+        if ! command -v patchelf >/dev/null 2>&1; then
+            log "installing patchelf for the RUNPATH check"
+            (microdnf install -y patchelf || dnf install -y patchelf || yum install -y patchelf) >/dev/null 2>&1 || true
+        fi
+        for lib in "$LIBDIR"/*.so.*; do
+            [ -f "$lib" ] || continue
+            if command -v patchelf >/dev/null 2>&1; then
+                patchelf --set-rpath '$ORIGIN' "$lib"
+            fi
+            log "$(basename "$lib"): $(readelf -d "$lib" | grep -E 'NEEDED|RPATH|RUNPATH' | tr '\n' ';')"
+        done
+        ;;
+    macos-arm64)
+        for lib in "$LIBDIR"/*.dylib; do
+            [ -f "$lib" ] || continue
+            log "$(basename "$lib"): $(otool -l "$lib" | grep -A2 -E 'LC_RPATH|LC_LOAD_DYLIB' | grep -E 'name|path' | tr '\n' ';')"
+        done
+        ;;
+esac
+
 # ------------------------------------------------------------------ artefacts
 
 # The layout probe: compiled against the very headers this build installed, and
