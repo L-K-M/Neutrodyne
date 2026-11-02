@@ -148,11 +148,10 @@ class DownloadJourneyTest {
             // The publisher disappears before local chapter enrichment and the first playback start.
             server.close()
             serverClosed = true
-            graph.chapterRepository.get().ensureLocalLoaded(id, checkNotNull(row.finalUri))
+            graph.chapterRepository().ensureLocalLoaded(id, checkNotNull(row.finalUri))
             assertTrue(
                 graph
-                    .chapterRepository
-                    .get()
+                    .chapterRepository()
                     .observe(id)
                     .first()
                     .isNotEmpty(),
