@@ -30,6 +30,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+SCRIPT_PATH="$SCRIPT_DIR/build.sh"
 NATIVE_DIR="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
 LOCK="$NATIVE_DIR/native-components.lock"
 CACHE="$NATIVE_DIR/build/ffmpeg-cache"
@@ -101,23 +102,6 @@ download() { # download <url> <file>
     curl -fsSL --retry 3 --connect-timeout 30 -o "$2" "$1" || die "download failed: $1"
 }
 
-if [ ! -d "$SOURCE_DIR" ]; then
-    download "$SOURCE_URL" "$SOURCE_TARBALL"
-    verify_checksum "$SOURCE_TARBALL" "$SOURCE_SHA256"
-    if [ -n "$SIGNATURE_URL" ]; then
-        download "$SIGNATURE_URL" "$SOURCE_SIGNATURE"
-        if [ -n "$SIGNATURE_SHA256" ]; then
-            verify_checksum "$SOURCE_SIGNATURE" "$SIGNATURE_SHA256"
-        fi
-        verify_signature
-    fi
-    log "extracting FFmpeg $FFMPEG_VERSION"
-    rm -rf "$SOURCE_DIR" "$SOURCE_DIR.tmp"
-    mkdir -p "$SOURCE_DIR.tmp"
-    tar -xJf "$SOURCE_TARBALL" -C "$SOURCE_DIR.tmp" --strip-components=1
-    mv "$SOURCE_DIR.tmp" "$SOURCE_DIR"
-fi
-
 verify_signature() {
     command -v gpg >/dev/null 2>&1 || die "gpg is required to verify the FFmpeg source signature"
     local keyring home
@@ -137,7 +121,30 @@ verify_signature() {
     log "verified the FFmpeg source signature with $SIGNING_KEY_FINGERPRINT"
 }
 
+if [ ! -d "$SOURCE_DIR" ]; then
+    download "$SOURCE_URL" "$SOURCE_TARBALL"
+    verify_checksum "$SOURCE_TARBALL" "$SOURCE_SHA256"
+    if [ -n "$SIGNATURE_URL" ]; then
+        download "$SIGNATURE_URL" "$SOURCE_SIGNATURE"
+        if [ -n "$SIGNATURE_SHA256" ]; then
+            verify_checksum "$SOURCE_SIGNATURE" "$SIGNATURE_SHA256"
+        fi
+        verify_signature
+    fi
+    log "extracting FFmpeg $FFMPEG_VERSION"
+    rm -rf "$SOURCE_DIR" "$SOURCE_DIR.tmp"
+    mkdir -p "$SOURCE_DIR.tmp"
+    tar -xJf "$SOURCE_TARBALL" -C "$SOURCE_DIR.tmp" --strip-components=1
+    mv "$SOURCE_DIR.tmp" "$SOURCE_DIR"
+fi
+
 # ------------------------------------------------------------------- toolchain
+
+# Where the target's shared libraries land. FFmpeg's configure puts a Windows
+# build's DLLs in $prefix/bin and every other target's in $prefix/lib
+# (configure: `win32|win64) ... shlibdir_default="$bindir_default"`), so the
+# probes and the size inventory have to look in the target's own directory.
+LIBDIR="$OUT/lib"
 
 # The shared configure line of 11 FFmpeg build: four libraries, no programs, no
 # network, no autodetection, and only the demuxers, decoders, parsers and the one
@@ -162,8 +169,30 @@ COMMON_CONFIGURE=(
     --enable-bsf=aac_adtstoasc
 )
 
+# FFmpeg's documented MSVC environment is an MSYS2 shell with GNU make, NASM and
+# gpg (doc/platform.texi, "Microsoft Visual C++ ... for Windows"). Gradle invokes
+# whichever bash it finds first, which on a Windows runner is Git Bash and has
+# none of the three, so the script re-execs itself under MSYS2 when it can. A
+# developer without MSYS2 keeps their own bash and must provide the tools.
+# `uname -s` is MINGW* under Git Bash and MSYS* under MSYS2 itself, which is how
+# the two are told apart.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*)
+        for candidate in /c/msys64/usr/bin/bash.exe \
+            "/c/Program Files/MSYS2/usr/bin/bash.exe" \
+            "${MSYS2_ROOT:+$MSYS2_ROOT/usr/bin/bash.exe}"; do
+            if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+                log "re-running under $candidate (FFmpeg's documented MSVC shell)"
+                MSYS_IS_REEXEC=1 exec "$candidate" -euo pipefail "$SCRIPT_PATH" "$@"
+            fi
+        done
+        log "warning: MSYS2 not found; make, nasm and gpg must already be on PATH"
+        ;;
+esac
+
 case "$TARGET" in
     windows-x64)
+        LIBDIR="$OUT/bin"
         # MSVC from the runner's Visual Studio, driven through the MSYS2 shell.
         if ! command -v cl >/dev/null 2>&1; then
             VSWHERE="${PROGRAMFILES:-/c/Program Files} (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
@@ -269,13 +298,16 @@ if [ "$CC_BIN" = "cl" ]; then
         -Fe"$(cygpath -w "$BUILD/ffoffsets.exe")" -Fo"$(cygpath -w "$BUILD/ffoffsets.obj")" \
         >"$BUILD/ffoffsets-build.log" 2>&1 ||
         { cat "$BUILD/ffoffsets-build.log"; die "ffoffsets.c did not compile"; }
-    (cd "$OUT/lib" && "$(cygpath -u "$BUILD")/ffoffsets.exe" >"$(cygpath -u "$OUT")/ffmpeg-layout.json")
+    (cd "$LIBDIR" && "$(cygpath -u "$BUILD")/ffoffsets.exe" >"$(cygpath -u "$OUT")/ffmpeg-layout.json")
 else
     "$CC_BIN" -O2 -I"$OUT/include" "$SCRIPT_DIR/ffoffsets.c" -o "$BUILD/ffoffsets" ||
         die "ffoffsets.c did not compile"
-    (cd "$OUT/lib" && "$BUILD/ffoffsets" >"$OUT/ffmpeg-layout.json")
+    (cd "$LIBDIR" && "$BUILD/ffoffsets" >"$OUT/ffmpeg-layout.json")
 fi
-python3 - "$OUT/ffmpeg-layout.json" <<'PY' || die "ffmpeg-layout.json is not valid JSON"
+# The Windows runner reaches python as `python`, MSYS2 as `python3`.
+PYTHON="$(command -v python3 || command -v python || true)"
+[ -n "$PYTHON" ] || die "python3 is required to validate ffmpeg-layout.json"
+"$PYTHON" - "$OUT/ffmpeg-layout.json" <<'PY' || die "ffmpeg-layout.json is not valid JSON"
 import json, sys
 json.load(open(sys.argv[1]))
 PY
@@ -312,11 +344,11 @@ if [ "$CC_BIN" = "cl" ]; then
         -Fe"$(cygpath -w "$BUILD/probe.exe")" -Fo"$(cygpath -w "$BUILD/probe.obj")" \
         >"$BUILD/probe-build.log" 2>&1 ||
         { cat "$BUILD/probe-build.log"; die "probe.c did not compile"; }
-    PROBE_OUT="$(cd "$OUT/lib" && "$(cygpath -u "$BUILD")/probe.exe")" || die "probe.exe failed"
+    PROBE_OUT="$(cd "$LIBDIR" && "$(cygpath -u "$BUILD")/probe.exe")" || die "probe.exe failed"
 else
-    "$CC_BIN" -O2 -I"$OUT/include" "$BUILD/probe.c" -o "$BUILD/probe" -L"$OUT/lib" \
-        -Wl,-rpath,"$OUT/lib" || die "probe.c did not compile"
-    PROBE_OUT="$(cd "$OUT/lib" && LD_LIBRARY_PATH="$OUT/lib" "$BUILD/probe")" || die "probe failed"
+    "$CC_BIN" -O2 -I"$OUT/include" "$BUILD/probe.c" -o "$BUILD/probe" -L"$LIBDIR" \
+        -Wl,-rpath,"$LIBDIR" || die "probe.c did not compile"
+    PROBE_OUT="$(cd "$LIBDIR" && LD_LIBRARY_PATH="$LIBDIR" "$BUILD/probe")" || die "probe failed"
 fi
 PROBE_LICENSE="$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^license //p')"
 PROBE_VERSION="$(printf '%s\n' "$PROBE_OUT" | sed -n 's/^version //p')"
@@ -338,7 +370,7 @@ cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h"
 # Sizes: the four shared libraries only, symlink targets counted once.
 size_of() { # size_of <pattern> — the real file behind a versioned symlink
     local file
-    for file in "$OUT/lib/"$1; do
+    for file in "$LIBDIR/"$1; do
         [ -e "$file" ] || continue
         if [ -L "$file" ]; then continue; fi
         stat -c '%s' "$file" 2>/dev/null || stat -f '%z' "$file"
