@@ -1046,7 +1046,7 @@ sealed interface TransferResult {
 
 ### RSS prepare
 
-1. Refresh the source from the episode: `sourceRef` = current `episode.enclosureUrl` (or its first audio alternate for `isVideo` episodes). A changed URL is accepted silently — tracking prefixes rotate ([03 Column rules on update](03-feeds-and-discovery.md#column-rules-on-update)) — and the existing `.part` is kept only when step 5 yields a reliable validator; otherwise the `.part` is truncated to 0 and stored validators are dropped (safe restart, same attempt). A sent `If-Range` and the `Content-Range` total check protect against splicing different files; without a reliable validator the engine never resumes, so same-length changes never splice.
+1. Refresh the source from the episode: `sourceRef` = current `episode.enclosureUrl` (or its first audio alternate for `isVideo` episodes). The persisted prefix belongs to the URL that supplied it: when the refreshed URL differs from the row's `sourceRef`, the `.part` is truncated to 0 and the download restarts (safe restart, same attempt) — equal ETags across URLs do not establish byte identity. The `sourceRef` checkpoint follows the new URL on the first `DOWNLOADING` write, so a later resume compares against the resource that produced the bytes.
 2. [Completed-file adoption and torn-tail rule](#transfer-lifecycle-recovery) on the row's current root.
 3. Place the transfer on the current root `StorageRoots.current()` ([Roots](#roots)). If that root is unavailable: `Wait(STORAGE, STORAGE_UNAVAILABLE, now + 30 min)`. If the row's `rootId` differs:
    - no `.part` → reassign `rootId`;
@@ -1075,7 +1075,7 @@ Client: `NeutrodyneHttpClients.client(HttpClientKind.DOWNLOAD)` (connect 15 s, r
 |---|---|
 | `200`, offset 0 | accept; `total = Content-Length` (absent → unknown) |
 | `200`, offset > 0 | server ignored `Range` or the validator changed: truncate `.part` to 0, drop stored validators, accept as a fresh download (sniffing applies) |
-| `206` | parse `Content-Range: bytes a-b/total`; require `a == offset` **and** that this request sent `If-Range` (prepare never sends `Range` without one; a `206` to a validator-less `Range` → `Restart`); if `total` is known and the row's `totalBytes` is known and they differ → `Restart` (DAI re-stitch or new file); same-length changes are caught by the validator match, not the total — without a reliable validator the engine never resumes, so it never splices same-length bytes; missing or unparseable `Content-Range` (incl. `*/n`) → `Restart` |
+| `206` | parse `Content-Range: bytes a-b/total`; require `a == offset` **and** that this request sent `If-Range` (prepare never sends `Range` without one; a `206` to a validator-less `Range` → `Restart`); if `total` is known and the row's `totalBytes` is known and they differ → `Restart` (DAI re-stitch or new file); same-length changes are caught by the validator match, not the total — without a reliable validator the engine never resumes, so it never splices same-length bytes; missing or unparseable `Content-Range` (incl. `*/n`) → `Restart`; an unknown `total` (`bytes a-b/*`) → `Restart`, because nothing proves the resource end and the range must not be promoted to completion |
 | `416` | `offset == totalBytes` (known) → complete; otherwise `Restart` once per attempt, then `Permanent(HTTP_CLIENT)` |
 | `401`, `403` | if the request went to a cached final URL, retry once with the original URL; then `Permanent(HTTP_AUTH)` |
 | `404`, `410` | same final-URL fallback; then `Permanent(HTTP_NOT_FOUND / HTTP_GONE)` |
@@ -1084,6 +1084,12 @@ Client: `NeutrodyneHttpClients.client(HttpClientKind.DOWNLOAD)` (connect 15 s, r
 | other `4xx`, unfollowed `3xx`, redirect loop (Ktor's `SendCountExceedException` after 20 sends, [HttpSend](https://github.com/ktorio/ktor/blob/main/ktor-client/ktor-client-core/common/src/io/ktor/client/plugins/HttpSend.kt)) | `Permanent(HTTP_CLIENT)` |
 
 `Retry-After` (delta seconds or HTTP date): ≤ 30 s → wait in the runner and retry (counts as one in-runner retry); longer → `Wait(BACKOFF)` with `nextAttemptAt = now + min(Retry-After, 6 h)`, counted as an attempt.
+
+**Implementation note (2026-11-02, M6a).** A `206` whose `Content-Range`
+carries `*` for the total is rejected with `Restart`: the range proves a
+prefix position, nothing about the resource end, so verifying it would
+promote a truncated file. The engine falls back to a whole-resource
+`200` on the same attempt.
 
 ### Sniffing
 
@@ -1153,7 +1159,7 @@ Never `response.body<ByteArray>()`, `bodyAsText()` or `readRemaining()` for medi
 4. Final path from [Naming](#directory-layout-and-naming); create the podcast directory if needed.
 5. `part.sync()` already ran; `DownloadFileSystem.atomicMove(part, final)` (same volume, atomic, replaces a stale file of the same name: Okio's NIO file system calls `Files.move(…, ATOMIC_MOVE, REPLACE_EXISTING)` on the desktop JVM and on Android API 26+, [NioSystemFileSystem](https://github.com/square/okio/blob/master/okio/src/jvmMain/kotlin/okio/NioSystemFileSystem.kt)). Unverified: directory fsync is not available from Java; journaling file systems make the rename durable in practice; on network shares the move may not be atomic ([11 Removable and network drives](11-desktop.md#removable-and-network-drives)).
 6. One write transaction: `COMPLETED` columns ([Persisted transitions](#persisted-transitions)).
-7. After the commit: `LocalMediaIndexImpl.put(id, finalUri)`; `ArtworkStore.pin(episodeArtworkRef, PinReason.DOWNLOAD, ownerId = id)` when the episode has its own `imageUrl` (podcast art is already pinned for the subscription; [R5.3](../PLAN.md#21-functional-requirements)); `ChapterRepository.ensureLoaded(id, finalUri)` on `@ApplicationScope`, best effort ([06 Chapters](06-playback.md#chapters)); progress hub and notification update; if `DeferredDeletes` held an entry for the same path (re-download of the current item), the entry is dropped because the path now belongs to the new file.
+7. After the commit: `LocalMediaIndexImpl.put(id, finalUri)`; `ArtworkStore.pin(episodeArtworkRef, PinReason.DOWNLOAD, ownerId = id)` when the episode has its own `imageUrl` (podcast art is already pinned for the subscription; [R5.3](../PLAN.md#21-functional-requirements)); `ChapterRepository.ensureLoaded(id, finalUri)` on `@ApplicationScope`, best effort ([06 Chapters](06-playback.md#chapters)); progress hub and notification update; if `DeferredDeletes` held an entry for the committed path, the entry is dropped because the path now belongs to the new file.
 
 `finalUri = LocalUris.fileUri(final)` (percent-encoded `file:` URI: `Uri.fromFile(File(path))` on Android, `Path.toUri()` on the desktop, which gives `file:///C:/…` on Windows). Files are never renamed after completion (a podcast rename does not move files); only a root move or a re-pointed desktop root rewrites `finalUri` ([Moving between roots](#moving-between-roots), [Roots](#roots)).
 
@@ -1548,7 +1554,7 @@ Cleanup deletes with `byUser = false`: no `downloadDismissedAt`, so an episode r
 06 may hold an open `Local` pin on the current item's file and re-open it on every seek ([06 EpisodeResolver](06-playback.md#episoderesolver)); on the desktop 11's engine keeps the current file open through its `FileByteSource` ([11 Sources and SpanCache](11-desktop.md#sources-and-spancache)), and Windows refuses to delete an open file. Therefore any deletion (user, cleanup, unsubscribe, move source) of a file whose episode is `play_session.currentEpisodeId` — read through `PlaySessionDao.observeCurrentEpisodeId()` (02; `:download:impl` may not depend on `:playback:api`, [01 Dependency rules](01-foundation.md#dependency-rules)) — removes the row and the index entry at once but hands the file to `DeferredDeletes`:
 
 - `DeferredDeletes` persists `"{episodeId}|{rootId}|{path}"` entries in `downloads.deferred_deletes` (`device_settings`) and deletes a file when `currentEpisodeId` changes away from its episode. The same set is the crash journal of every deletion ([Deleting a download](#deleting-a-download)).
-- At process start no pin can exist, so reconcile deletes every listed file whose root is available, unless a live row references the same path (`pathsByRoot()`). A re-download of the same episode writes the same `[e…]` name. An entry for a path that a new `COMPLETED` row now owns is dropped at that commit ([Verification and finalisation](#verification-and-finalisation)).
+- At process start no pin can exist, so reconcile deletes every listed file whose root is available, unless a live row references the same path (`pathsByRoot()`). While a destination path is still journaled, a re-download of the same episode completes under a decorated name (`"1970-01-01 (2) Episode [e1].mp3"`) instead of replacing the pinned rendition: the old URI keeps reading the old bytes until the durable current episode changes and the drain deletes the file. Adoption skips journaled paths for the same reason. An entry for a path that a new `COMPLETED` row now owns is dropped at that commit ([Verification and finalisation](#verification-and-finalisation)).
 - Files on unavailable roots are deferred the same way until the root returns.
 - If the file disappears anyway, 06's recovery re-pins to the stream at the same position and calls `reportFileMissing` ([06 Error recovery](06-playback.md#error-recovery)).
 
