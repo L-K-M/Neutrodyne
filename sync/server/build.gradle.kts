@@ -51,6 +51,8 @@ dependencies {
     runtimeOnly(libs.slf4j.simple)
 
     testImplementation(project(":core:testing"))
+    // The exported-settings coverage test compares against the declared synced keys.
+    testImplementation(project(":core:model"))
     testImplementation(libs.kotlin.test)
     testImplementation(libs.junit4)
     testImplementation(platform(libs.ktor.bom))
@@ -81,8 +83,9 @@ val exportTestFixture =
         classpath = serverTestRuntime
         mainClass.set("ch.lkmc.neutrodyne.sync.server.ServerExportFixture")
         val output = layout.buildDirectory.file("interop/server-export.zip")
-        args(output.get().asFile.absolutePath)
-        outputs.file(output)
+        val scale = layout.buildDirectory.file("interop/server-export-scale.zip")
+        args(output.get().asFile.absolutePath, scale.get().asFile.absolutePath)
+        outputs.files(output, scale)
     }
 
 tasks.register<JavaExec>("syncLoad") {

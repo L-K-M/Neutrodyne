@@ -6,10 +6,15 @@ import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 /** Scripted domain ports. Real SQLite tests own concurrency and durable rollback evidence. */
 internal class FakeAuthStore : AuthStore {
     val data = FakeAuthTransaction()
+    var writes = 0
+        private set
 
     override suspend fun <T> readAuth(block: AuthRead.() -> T): T = data.block()
 
-    override suspend fun <T> writeAuth(block: AuthWrite.() -> T): T = data.block()
+    override suspend fun <T> writeAuth(block: AuthWrite.() -> T): T {
+        writes++
+        return data.block()
+    }
 }
 
 internal class FakeAuthTransaction : AuthWrite {

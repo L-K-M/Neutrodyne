@@ -21,6 +21,7 @@ import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -40,9 +41,14 @@ internal class BoundaryException(
 /** Count actual channel bytes even without Content-Length. Never ask Ktor to decompress requests.
  * The capped wire buffer also prevents gzip read-ahead/trailing bytes from evading the sent cap.
  */
-internal class RequestGuards {
+internal class RequestGuards(
+    private val bodyReadTimeoutMs: Long = BODY_READ_TIMEOUT_MS,
+) {
     fun install(application: Application) {
         application.intercept(ApplicationCallPipeline.Plugins) {
+            // Health probes never read or budget a body: they must answer even while
+            // unauthenticated uploads hold the buffer budget.
+            if (call.request.path() in HealthRoutes.PATHS) return@intercept
             val lengths =
                 call.request.headers
                     .getAll(HttpHeaders.ContentLength)
@@ -62,7 +68,9 @@ internal class RequestGuards {
                     encoding.size == 1 && encoding.single().trim().equals("gzip", true) -> RequestEncoding.GZIP
                     else -> throw BoundaryException(HttpStatusCode.UnsupportedMediaType, "invalid")
                 }
-            val wire = readCapped(call.request.receiveChannel())
+            val wire =
+                withTimeoutOrNull(bodyReadTimeoutMs) { readCapped(call.request.receiveChannel()) }
+                    ?: throw BoundaryException(HttpStatusCode.RequestTimeout, "request_timeout")
             val decoded = decode(wire, bodyEncoding)
             val contentType =
                 call.request.headers[HttpHeaders.ContentType]
@@ -100,6 +108,7 @@ internal class RequestGuards {
 
     companion object {
         const val PROTOCOL_HEADER = "Neutrodyne-Sync-Protocol"
+        const val BODY_READ_TIMEOUT_MS = 30_000L
         private val SYNC_REQUEST = AttributeKey<SyncRequest>("bounded-sync-request")
         private val BODY = AttributeKey<ByteArray>("bounded-request-body")
         private const val BUFFER_BYTES = 8_192

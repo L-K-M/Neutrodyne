@@ -435,7 +435,7 @@ internal class AccountArchiveWriter(
         )
     }
 
-    private companion object {
+    internal companion object {
         val SYNCED_SETTINGS =
             mapOf(
                 "playback.speed" to "Float32",

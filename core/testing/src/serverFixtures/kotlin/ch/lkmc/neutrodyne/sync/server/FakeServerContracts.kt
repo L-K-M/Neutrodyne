@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
+import ch.lkmc.neutrodyne.sync.protocol.RecordMerger
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncRequest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -47,9 +48,33 @@ internal class FakeSyncTransaction : SyncWrite {
     val events = mutableListOf<ServerEvent>()
     val acknowledgements = mutableMapOf<String, Pair<String?, Long>>()
 
+    /** Token hashes the transaction re-check must reject, as a revoked credential would. */
+    val invalidCredentials = mutableSetOf<String>()
+
+    /** Set to fail any full-account record iteration; proves quota checks never materialize. */
+    var failOnRecords = false
+
+    override fun requirePrincipal(
+        principal: AccountPrincipal,
+        now: Long,
+    ) {
+        if (principal.tokenHash in invalidCredentials) unauthorized()
+    }
+
+    override fun liveCount(): Long = raw.values.count { !RecordMerger.isDead(it.raw) }.toLong()
+
+    override fun liveKeys(maxSeq: Long): List<RecordKey> =
+        raw.values
+            .filter { it.seq <= maxSeq && !RecordMerger.isDead(it.raw) }
+            .sortedBy { it.seq }
+            .map { it.key }
+
     override fun record(key: RecordKey): StoredRecord? = raw[key]
 
-    override fun records(): Sequence<StoredRecord> = raw.values.asSequence()
+    override fun records(): Sequence<StoredRecord> {
+        check(!failOnRecords) { "Unbounded record materialization" }
+        return raw.values.asSequence()
+    }
 
     override fun maximumClock(): Hlc? = raw.values.mapNotNull { it.maxClock }.maxOrNull()
 

@@ -38,6 +38,18 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class AuthHttpTest {
+    @Test fun `link token polling is rate limited per ip before the shared writer`() =
+        authApplication { f ->
+            val body = LinkTokenRequest("dead-device-code")
+            repeat(30) {
+                val response = client.postApi("/api/v1/auth/link/token", body)
+                response.expect(HttpStatusCode.BadRequest)
+            }
+            client
+                .postApi("/api/v1/auth/link/token", body)
+                .expect(HttpStatusCode.TooManyRequests)
+        }
+
     @Test fun `concurrent HTTP invite redemption is single use and stores only hashes`() =
         authApplication { f ->
             val owner = f.account()

@@ -15,7 +15,7 @@ import java.nio.file.Path
 object ServerExportFixture {
     @JvmStatic fun main(args: Array<String>) =
         runBlocking {
-            val output = Path.of(args.single())
+            val output = Path.of(args[0])
             Files.createDirectories(output.parent)
             AuthFixture().use { f ->
                 val account = f.account()
@@ -41,14 +41,23 @@ object ServerExportFixture {
                                 fixture.write(member(), "in", JsonPrimitive(true)),
                                 history,
                                 // Deliberately no matching episode row: the server must export a sparse stub.
-                                fixture.write(
-                                    episode(
-                                        episode = "g:queued",
-                                        coll = ch.lkmc.neutrodyne.sync.protocol.SyncCollection.UPNEXT,
+                                fixture
+                                    .write(
+                                        episode(
+                                            episode = "g:queued",
+                                            coll = ch.lkmc.neutrodyne.sync.protocol.SyncCollection.UPNEXT,
+                                        ),
+                                        "in",
+                                        JsonPrimitive(true),
+                                    ).copy(
+                                        match =
+                                            MatchHints(
+                                                guid = "queued-guid",
+                                                title = "Queued episode",
+                                                enc = "https://cdn.example.com/queued.mp3",
+                                                ytId = "vid123",
+                                            ),
                                     ),
-                                    "in",
-                                    JsonPrimitive(true),
-                                ),
                                 fixture
                                     .write(
                                         episode(episode = "g:queue-known"),
@@ -86,7 +95,24 @@ object ServerExportFixture {
                     )
                 check(result.results.none { it.status == "rejected" })
                 f.store.snapshot(account.id).use { AccountArchiveWriter(f.inputs).export(it, output) }
+                if (args.size > 1) {
+                    val scale = Path.of(args[1])
+                    Files.createDirectories(scale.parent)
+                    // Repetitive lines past the app's 16 MiB ratio floor arm the ZipGuard check.
+                    val raw =
+                        fixture
+                            .state(episode(), "fav", JsonPrimitive(true))
+                            .copy(match = MatchHints(title = "T".repeat(900)))
+                    f.store.write(account.id) {
+                        repeat(SCALE_EPISODES) { index ->
+                            put(StoredRecord(episode(episode = "g:scale-$index"), raw, nextSequence(), null, f.now, null))
+                        }
+                    }
+                    f.store.snapshot(account.id).use { AccountArchiveWriter(f.inputs).export(it, scale) }
+                }
             }
             println("Generated real server export fixture")
         }
+
+    private const val SCALE_EPISODES = 20_000
 }

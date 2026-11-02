@@ -215,7 +215,7 @@ class RestoreRunnerTest {
         check(fileSystem.exists(archive)) { "Real server export fixture is missing" }
         val sessionId = session(archive, mode)
         val completed = assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
-        assertEquals(1, completed.summary.unmatched)
+        assertEquals(0, completed.summary.unmatched)
         val podcast = checkNotNull(db.podcastDao().byFeedKey(feedKey("https://example.com/feed")))
         assertEquals("Untitled podcast", podcast.title)
         val history = checkNotNull(db.episodeDao().byIdentityKey(podcast.id, "g:ep"))
@@ -224,10 +224,15 @@ class RestoreRunnerTest {
         assertEquals(12000L, db.positionDao().byEpisode(history.id)?.positionMs)
         assertEquals(60000L, db.positionDao().byEpisode(history.id)?.durationMs)
         val queued = checkNotNull(db.episodeDao().byIdentityKey(podcast.id, "g:queue-known"))
-        assertEquals(listOf(queued.id), db.queueDao().entries().map { it.episodeId })
+        // The sparse queue record carries its media hints, so 05 can stub the episode.
+        val stubbed = checkNotNull(db.episodeDao().byIdentityKey(podcast.id, "g:queued"))
+        assertEquals("queued-guid", stubbed.guid)
+        assertEquals("https://cdn.example.com/queued.mp3", stubbed.enclosureUrl)
+        assertEquals(
+            setOf(queued.id, stubbed.id),
+            db.queueDao().entries().map { it.episodeId }.toSet(),
+        )
         assertEquals(1.5f, settings.get(PlaybackSettingKeys.SPEED))
-        // 05 permits a new stub only with media evidence. An opaque queue key stays unmatched.
-        assertNull(db.episodeDao().byIdentityKey(podcast.id, "g:queued"))
         assertNull(queued.guid)
     }
 

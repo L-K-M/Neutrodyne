@@ -333,6 +333,33 @@ private open class JdbcRead(
                 )
             }.singleOrNull() ?: error("Account does not exist")
 
+    override fun requirePrincipal(
+        principal: AccountPrincipal,
+        now: Long,
+    ) {
+        val auth = JdbcAuthRead(connection)
+        try {
+            val verified = auth.requireToken(principal.tokenHash, principal.tokenKind, now)
+            if (verified.accountId != accountId || verified.deviceId != principal.deviceId) unauthorized()
+        } finally {
+            auth.end()
+        }
+    }
+
+    override fun liveCount(): Long =
+        connection
+            .query("SELECT COUNT(*) FROM record WHERE account_id = ? AND dead = 0", accountId) {
+                it.getLong(1)
+            }.single()
+
+    override fun liveKeys(maxSeq: Long): List<RecordKey> =
+        connection
+            .query(
+                "SELECT coll, rid FROM record WHERE account_id = ? AND dead = 0 AND seq <= ? ORDER BY seq",
+                accountId,
+                maxSeq,
+            ) { key(SyncCollection.fromWire(it.getString(1)), it.getString(2)) }
+
     override fun record(key: RecordKey): StoredRecord? =
         connection
             .query(

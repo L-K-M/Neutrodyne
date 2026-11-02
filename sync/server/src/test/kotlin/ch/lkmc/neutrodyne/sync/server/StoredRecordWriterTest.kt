@@ -3,18 +3,24 @@ package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
+import ch.lkmc.neutrodyne.sync.protocol.dto.AccountResetRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
 import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class StoredRecordWriterTest {
@@ -148,4 +154,68 @@ class StoredRecordWriterTest {
                     .status,
             )
         }
+
+    @Test
+    fun aPausedRequestCannotActAfterItsCredentialDies() =
+        runBlocking {
+            val f = WriterFixture()
+            f.push(f.podcast())
+            val tx = (f.store as FakeSyncStore).accounts.getValue(1)
+            tx.invalidCredentials += f.principal.tokenHash
+            val push =
+                assertFailsWith<ProtocolException> {
+                    f.push(f.write(setting, "v", JsonPrimitive(1)))
+                }
+            assertEquals(SyncErrorCode.UNAUTHORIZED, push.code)
+            assertFailsWith<ProtocolException> { f.writer.changes(f.principal, null) }
+            assertFailsWith<ProtocolException> {
+                f.writer.resetLibrary(f.principal, AccountResetRequest("DELETE", "library"))
+            }
+            assertNull(tx.raw[setting])
+        }
+
+    @Test
+    fun pushAndResetNeverMaterializeTheAccount() =
+        runBlocking {
+            val f = WriterFixture()
+            f.push(f.podcast(), f.write(setting, "v", JsonPrimitive(1)))
+            val tx = (f.store as FakeSyncStore).accounts.getValue(1)
+            tx.failOnRecords = true
+            // The quota check must aggregate in SQL, never load the record set.
+            assertTrue(f.push().results.isEmpty())
+            f.writer.resetLibrary(f.principal, AccountResetRequest("DELETE", "library"))
+        }
+
+    @Test
+    fun aValueBeyondTheAggregateCapIsRejectedAtAdmission() =
+        runBlocking {
+            val f = WriterFixture()
+            val huge = oversizedValue(ProtocolLimits.MAX_VALUE_BYTES + 65_536)
+            val result = f.push(f.write(setting, "v", huge))
+            assertEquals("rejected", result.results.single().status)
+            assertEquals("payload_too_large", result.results.single().code)
+            assertNull((f.store as FakeSyncStore).accounts.getValue(1).raw[setting])
+        }
+
+    @Test
+    fun aMergedRecordBeyondTheValueCapIsRejectedAndNeverPoisonsPages() =
+        runBlocking {
+            val f = WriterFixture()
+            // Each single write stays under the aggregate cap; merged together they exceed it.
+            val big = oversizedValue(ProtocolLimits.MAX_VALUE_BYTES * 3 / 4)
+            assertEquals("applied", f.push(f.write(setting, "v", big)).results.single().status)
+            val result = f.push(f.write(setting, "extra", big, f.clock(1)))
+            assertEquals("rejected", result.results.single().status)
+            assertEquals("payload_too_large", result.results.single().code)
+            val raw = f.raw(setting)
+            assertEquals(setOf("v"), raw.fields.keys)
+            // The stored record still fits one response page.
+            assertEquals(listOf(setting), f.push().page.records.map { it.key })
+        }
+
+    /** A JSON array of individually legal elements whose serialized sum reaches [target] bytes. */
+    private fun oversizedValue(target: Long) =
+        JsonArray(List((target / (ProtocolLimits.MAX_STRING - 90) + 1).toInt()) {
+            JsonPrimitive("y".repeat(ProtocolLimits.MAX_STRING - 96))
+        })
 }

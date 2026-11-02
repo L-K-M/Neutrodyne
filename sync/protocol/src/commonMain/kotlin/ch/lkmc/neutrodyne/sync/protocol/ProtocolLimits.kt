@@ -8,6 +8,15 @@ object ProtocolLimits {
     const val MAX_DECOMPRESSED_BYTES = 16L shl 20
     const val MAX_RESPONSE_DECOMPRESSED_BYTES = 32L shl 20
     const val MAX_PAGE_BYTES = 8L shl 20
+
+    /**
+     * Aggregate serialized bytes of one record's values (field values, grow-set elements and match
+     * hints), enforced at change admission so a single accepted record always fits a response page.
+     */
+    const val MAX_VALUE_BYTES = 4L shl 20
+
+    /** Internal-write headroom above [MAX_VALUE_BYTES]: server stamps never lose to the cap. */
+    const val MAX_VALUE_SLACK_BYTES = 64L shl 10
     const val MAX_JSON_DEPTH = 16
     const val MAX_STRING = 4_096
     const val MAX_URL = 4_096

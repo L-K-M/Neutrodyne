@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
+import ch.lkmc.neutrodyne.sync.protocol.dto.SyncRequest
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -19,6 +20,42 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AuthServicesTest {
+    @Test fun `a deleted account id is never reused`() =
+        authServices { f ->
+            val alice = f.account()
+            f.store.writeAuth { deleteAccount(alice.id) }
+            assertNotEquals(alice.id, f.account("bob").id)
+        }
+
+    @Test fun `a paused push cannot reach a replacement account`() =
+        authServices { f ->
+            val alice = f.account()
+            val actor = f.principal(f.grant(alice))
+            f.store.writeAuth { deleteAccount(alice.id) }
+            val bob = f.account("bob")
+            val failure =
+                assertFailsWith<ProtocolException> {
+                    f.services.records.push(actor, SyncRequest(null, listOf(WriterFixture().podcast())))
+                }
+            assertEquals(SyncErrorCode.UNAUTHORIZED, failure.code)
+            f.store.read(bob.id) { assertEquals(0L, liveCount()) }
+        }
+
+    @Test fun `a paused push cannot recreate records after purge`() =
+        authServices { f ->
+            val alice = f.account()
+            val actor = f.principal(f.grant(alice))
+            val fixture = WriterFixture()
+            f.services.records.push(actor, SyncRequest(null, listOf(fixture.podcast())))
+            f.services.accounts.purge(actor, "DELETE")
+            val failure =
+                assertFailsWith<ProtocolException> {
+                    f.services.records.push(actor, SyncRequest(null, listOf(fixture.podcast())))
+                }
+            assertEquals(SyncErrorCode.UNAUTHORIZED, failure.code)
+            f.store.read(alice.id) { assertEquals(0L, liveCount()) }
+        }
+
     @Test fun `administrator creation through account service removes setup file`() =
         authServices { f ->
             val path = f.services.setup.initialize()!!

@@ -18,6 +18,10 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
+import io.ktor.server.cio.CIO
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.response.respond
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.writeFully
@@ -29,6 +33,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.ByteArrayOutputStream
+import java.net.Socket
 import java.util.zip.GZIPOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -37,6 +42,62 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class RequestGuardsTest {
+    @Test fun `a stalled unauthenticated body is cut by the read deadline`() =
+        runBlocking {
+            val server =
+                embeddedServer(CIO, port = 0, host = "127.0.0.1") {
+                    RequestGuards(bodyReadTimeoutMs = 150).install(this)
+                    install(StatusPages) {
+                        exception<BoundaryException> { call, failure -> call.respond(failure.status) }
+                    }
+                    routing { post("/echo") { call.respondText("ok") } }
+                }.start(wait = false)
+            try {
+                val port = server.engine.resolvedConnectors().single().port
+                val socket = stalledPost(port)
+                try {
+                    assertTrue(statusLine(socket).contains("408"))
+                } finally {
+                    socket.close()
+                }
+            } finally {
+                server.stop(0, 1000)
+            }
+        }
+
+    @Test fun `held unauthenticated bodies cannot exhaust the buffer budget and health answers`() =
+        authServices { f ->
+            val server =
+                embeddedServer(CIO, port = 0, host = "127.0.0.1") {
+                    f.install(this)
+                }.start(wait = false)
+            try {
+                val port = server.engine.resolvedConnectors().single().port
+                // Each held upload reserves its declared 2 MiB; the budget admits at most
+                // 24 MiB, so the 13th must be rejected explicitly instead of buffered.
+                val held = (1..12).map { stalledPost(port) }
+                Thread.sleep(500)
+                try {
+                    val rejected = stalledPost(port)
+                    try {
+                        assertTrue(statusLine(rejected).contains("429"))
+                    } finally {
+                        rejected.close()
+                    }
+                    Socket("127.0.0.1", port).use { health ->
+                        health.soTimeout = 10_000
+                        health.getOutputStream().write("GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n".toByteArray())
+                        health.getOutputStream().flush()
+                        assertTrue(statusLine(health).contains("200"))
+                    }
+                } finally {
+                    held.forEach { it.close() }
+                }
+            } finally {
+                server.stop(0, 1000)
+            }
+        }
+
     @Test fun `exact sent cap accepted and cap plus one rejected with or without length`() =
         testApplication {
             application {
@@ -299,6 +360,35 @@ class RequestGuardsTest {
         val output = ByteArrayOutputStream()
         GZIPOutputStream(output).use { it.write(bytes) }
         return output.toByteArray()
+    }
+
+    /** A POST that declares a full body, sends a prefix and then never finishes. */
+    private fun stalledPost(port: Int): Socket {
+        val socket = Socket("127.0.0.1", port)
+        socket.soTimeout = 15_000
+        val out = socket.getOutputStream()
+        out.write(
+            (
+                "POST /api/v1/sync HTTP/1.1\r\n" +
+                    "Host: 127.0.0.1\r\n" +
+                    "Content-Length: ${ProtocolLimits.MAX_REQUEST_BYTES}\r\n" +
+                    "Content-Type: application/json\r\n\r\n"
+            ).toByteArray(),
+        )
+        out.write(ByteArray(64))
+        out.flush()
+        return socket
+    }
+
+    private fun statusLine(socket: Socket): String {
+        val input = socket.getInputStream()
+        val line = StringBuilder()
+        while (true) {
+            val char = input.read()
+            if (char < 0 || char == '\n'.code) break
+            if (char != '\r'.code) line.append(char.toChar())
+        }
+        return line.toString()
     }
 
     private fun streaming(bytes: ByteArray) =

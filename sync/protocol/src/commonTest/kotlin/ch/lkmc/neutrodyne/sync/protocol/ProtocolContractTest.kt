@@ -561,6 +561,23 @@ class ProtocolContractTest {
 
     private fun fv(value: JsonElement): FieldValue = FieldValue(v = value, c = clock.toString())
 
+    @Test
+    fun aggregateValueCapRejectsOversizedValuesAtAdmission() {
+        val key = RecordId.Setting("playback.speed").toWire()
+        // Every element is individually legal; only their aggregate crosses the value cap.
+        val element = JsonPrimitive("y".repeat(ProtocolLimits.MAX_STRING - 96))
+        val count = ProtocolLimits.MAX_VALUE_BYTES.toInt() / (ProtocolLimits.MAX_STRING - 90) + 1
+        val oversized = JsonArray(List(count) { element })
+        assertCode(SyncErrorCode.PAYLOAD_TOO_LARGE) {
+            ProtocolValidation.change(ChangeDto("setting", key, fields = mapOf("v" to fv(oversized))))
+        }
+        // A single-aggregate value well under the cap is still admitted.
+        assertTrue(
+            ProtocolValidation.change(ChangeDto("setting", key, fields = mapOf("v" to fv(JsonArray(listOf(element))))))
+                is ValidatedChange.Write,
+        )
+    }
+
     private fun assertInvalid(block: () -> Unit) = assertCode(SyncErrorCode.INVALID, block)
 
     private fun assertCode(

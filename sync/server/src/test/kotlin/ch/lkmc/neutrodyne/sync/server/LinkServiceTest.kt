@@ -13,6 +13,28 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LinkServiceTest {
+    @Test fun `a poll inside the interval never reaches the writer`() =
+        runBlocking {
+            val store = FakeAuthStore()
+            val inputs = ServerInputs({ 1_000L }, { ByteArray(it) })
+            val service = LinkService(store, inputs, "https://sync.test/link")
+            val code = "dead-device-code"
+            store.data.requests[AuthSecrets.hash(code)] =
+                AuthLink(
+                    AuthSecrets.hash(code),
+                    AuthSecrets.hash("USER-CODE"),
+                    deviceInfo(),
+                    LinkPurpose.DEVICE,
+                    "192.0.2.1",
+                    createdAt = 0,
+                    expiresAt = 600_000,
+                    lastPollAt = 900,
+                )
+            val writes = store.writes
+            assertEquals(LinkPoll.Error("slow_down"), service.pollDevice(code))
+            assertEquals(writes, store.writes)
+        }
+
     @Test fun `concurrent failed approvals cannot bypass the account budget`() =
         authServices { f ->
             val approver = f.principal(f.grant(f.account()))

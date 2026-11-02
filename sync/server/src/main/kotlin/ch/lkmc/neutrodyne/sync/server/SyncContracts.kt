@@ -102,6 +102,19 @@ internal interface SyncStore : AutoCloseable {
 internal interface SyncRead {
     val account: AccountSyncState
 
+    /** Re-verify the request credential inside this transaction so a paused request cannot
+     * reach a replacement account or act after purge. Throws `unauthorized` when it died. */
+    fun requirePrincipal(
+        principal: AccountPrincipal,
+        now: Long,
+    )
+
+    /** Live-record count via SQL aggregation; the quota check must never materialize records. */
+    fun liveCount(): Long
+
+    /** Keys of live records at or below [maxSeq], ordered by sequence. */
+    fun liveKeys(maxSeq: Long): List<RecordKey>
+
     fun record(key: RecordKey): StoredRecord?
 
     fun records(): Sequence<StoredRecord>
