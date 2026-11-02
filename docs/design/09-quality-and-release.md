@@ -1601,7 +1601,7 @@ Removed 2026-10-05 (scope revision): the item about debuggable published builds 
 
 ### Network inventory
 
-IDs are stable; the in-app "What Neutrodyne connects to" list (Settings › Privacy, both apps) uses the same IDs and `PrivacyInventoryParityTest` (`:feature:settings`, `desktopTest`) fails when the IDs in `PRIVACY.md` and the in-app list differ. The Builds column says which artefacts make the connection: "all" (every APK and desktop build), "with engine" or "server".
+IDs are stable; the in-app "What Neutrodyne connects to" list (Settings › Privacy, both apps) is `PrivacyInventory` (`:core:ui`) and renders the 17 rows below from the same IDs, which `PRIVACY.md` carries as its table; `PrivacyInventoryParityTest` (`:feature:settings`, `desktopTest`) fails when the IDs in `PRIVACY.md` and the in-app list differ. The Builds column says which artefacts make the connection: "all" (every APK and desktop build), "with engine" or "server".
 
 | ID | Destination | Purpose | When | Builds | Default |
 |---|---|---|---|---|---|

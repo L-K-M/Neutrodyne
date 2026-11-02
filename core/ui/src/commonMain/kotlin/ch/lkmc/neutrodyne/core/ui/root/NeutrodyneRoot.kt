@@ -341,8 +341,10 @@ private fun ReadyRoot(
     }
 
     val importContentFocus = remember { FocusRequester() }
+    val discoverSearchFocus = remember { DiscoverSearchFocus() }
     val miniInset = if (!layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
+        LocalDiscoverSearchFocus provides discoverSearchFocus,
         LocalPaneLayout provides layout,
         LocalMiniPlayerInset provides miniInset,
     ) {
@@ -353,19 +355,28 @@ private fun ReadyRoot(
                     .testTagsAsResourceId()
                     .onGloballyPositioned { viewportBottomPx = it.boundsInRoot().bottom }
                     .onKeyEvent { event ->
-                        dispatchRootKey(
-                            event = event,
-                            platform = platform,
-                            navigation = navigation,
-                            desktopBack = {
-                                if (eventDispatcher != null && backInput.hasEnabledHandlers) {
-                                    backInput.triggerBack()
-                                } else {
-                                    navigation.pop()
-                                }
-                            },
-                            dispatch = actions.playbackKey,
-                        )
+                        if (platform == BuildInfo.Platform.DESKTOP && navigation.selectedTab == DiscoverKey &&
+                            event.type == KeyEventType.KeyDown && event.key == Key.F &&
+                            (event.isCtrlPressed || event.isMetaPressed) &&
+                            !event.isAltPressed && !event.isShiftPressed &&
+                            discoverSearchFocus.request()
+                        ) {
+                            true
+                        } else {
+                            dispatchRootKey(
+                                event = event,
+                                platform = platform,
+                                navigation = navigation,
+                                desktopBack = {
+                                    if (eventDispatcher != null && backInput.hasEnabledHandlers) {
+                                        backInput.triggerBack()
+                                    } else {
+                                        navigation.pop()
+                                    }
+                                },
+                                dispatch = actions.playbackKey,
+                            )
+                        }
                     },
         ) {
             NdNavigationSuiteScaffold(

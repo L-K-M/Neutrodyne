@@ -20,23 +20,55 @@ diagnostics.
 ## What stays on the device
 
 Your library, groups, history, positions, Up next, downloads and settings stay
-on the device. Credentials — private-feed passwords, the sync token — are
-stored encrypted with an Android Keystore key on Android; on Windows protected
-with DPAPI for the user; on macOS and Linux in a file only you can read
-(PO-44).
+on the device. Secrets — private-feed passwords, Podcast Index API secrets and the sync token —
+are encrypted with an Android Keystore key on Android; on Windows the secrets
+file is protected with user-bound DPAPI; on macOS and Linux it is a file only
+you can read (PO-44). Your Podcast Index API key identifier is also stored
+unencrypted as a username in local credential metadata.
 
 ## Where the apps connect
 
-The full network inventory is maintained in 09's
-[network inventory](docs/design/09-quality-and-release.md) (IDs `feeds`,
-`add-input`, `media`, `artwork`, `chapters`, `notes-images`, `apple`, `fyyd`,
-`podcastindex`, `youtube-subscriptions`, `youtube-streams`, `youtube-engine`,
-`app-updates`). In short: subscribed feeds and their enclosures, artwork and
-chapter hosts, the search directories you enabled, `www.youtube.com` and its
-media hosts when you use YouTube channels, and `github.com` /
-`{owner}.github.io` for the update check and engine updates. A connection
-carries the app's version and a standard user agent; no identifier, cookie or
-token leaves the device for it.
+Every app request exposes your IP address and the User-Agent (app version,
+platform and project URL), without a tracking identifier. Directory cookies
+are not stored. Authentication is separate from tracking: private feeds can
+receive Basic credentials, Podcast Index receives authentication headers, and
+your linked sync server receives its device token.
+
+The inventory below uses the same stable IDs as Settings › Privacy. Provider
+switches stop automatic directory requests. An explicit Apple-link lookup asks
+for one-time consent when Apple is off; Podcast Index lookups require its
+switch and an effective key. URLs are never automatically sent as searches.
+Searches, charts and previews remain in memory until eviction or app exit.
+
+| ID | Destination and what it receives |
+|---|---|
+| `feeds` | **Feeds and publishers.** Subscribed feeds, preview feeds and redirect targets receive the requested URL path and query, conditional cache headers, and Basic credentials only for the matching origin. |
+| `add-input` | **Pages and feed candidates.** The page you enter or share, up to five well-known feed paths on that site, and publisher candidates receive their requested URL path and query. Candidates can use other hosts. Neutrodyne verifies up to five candidates; it does not send them to a directory. |
+| `media` | **Audio hosts.** Enclosure hosts and publisher measurement redirects receive the media URL, range requests, and matching-origin credentials when needed. They can measure playback or downloads by IP and User-Agent. |
+| `artwork` | **Artwork hosts.** Feed and directory artwork hosts, including Apple image CDNs, fyyd image hosts and Podcast Index artwork URLs, receive the requested image path when a cover is displayed. Directory switches do not block images already returned. |
+| `chapters` | **Chapter hosts.** Hosts referenced by episode chapters receive the chapter-file URL when chapters are loaded. |
+| `notes-images` | **Show-notes image hosts.** Image hosts receive the image URL when images are allowed or you choose to load them. Change this in Feeds settings. |
+| `apple` | **Apple.** itunes.apple.com receives search text, country and search parameters; explicit Apple, pod.link or Overcast lookups send Apple podcast IDs. rss.marketingtools.apple.com receives the country for overall charts. Genre charts send country and genre ID to itunes.apple.com; chart resolution sends podcast IDs there. Apple receives no subscriptions, feed URLs or Podcast Index credentials. |
+| `fyyd` | **fyyd.** api.fyyd.de receives search text and result-count parameters. It receives no country, subscriptions, feed URLs or API credentials. A fyyd page entered in Add is fetched as a web page. |
+| `podcastindex` | **Podcast Index.** api.podcastindex.org receives search text and result-count parameters, or an explicit Podcast Index feed ID. Every request includes X-Auth-Key (API key), X-Auth-Date (timestamp), and Authorization (SHA-1 of key, secret and timestamp); the secret itself is not sent. Verifying a pair sends the fixed query “podcast”. No country, subscriptions or feed URLs are sent. |
+| `youtube-subscriptions` | **YouTube subscriptions.** When you add or refresh a YouTube channel, www.youtube.com receives channel IDs and page/feed requests. YouTube thumbnail hosts (i.ytimg.com, yt3.googleusercontent.com, yt3.ggpht.com) receive image paths. |
+| `youtube-streams` | **YouTube playback and channel search.** With the engine, www.youtube.com receives video/channel IDs, explicit channel searches, locale, client headers and an in-memory consent cookie. googlevideo.com hosts receive media requests. Podcast search text is not sent to YouTube. |
+| `youtube-engine` | **YouTube engine updates.** When enabled, the project GitHub Pages host receives approved-manifest requests; github.com and release-assets.githubusercontent.com receive engine download paths. |
+| `app-updates` | **App updates.** When enabled, github.com and release-assets.githubusercontent.com receive update-manifest requests with the app User-Agent. Tapping a release or download opens your browser. |
+| `sync-server` | **Your sync server.** Only after linking: your server receives its device token, device name, platform/version and synced library state, including private feed URLs. Feed passwords are shared only when enabled. It receives no audio or feed contents. The server operator can read stored data. |
+| `links` | **Links you open.** Your browser or chosen app receives a link you tap, including release/download links. Its own privacy settings apply. |
+| `issue-tracker` | **Issue tracker.** Reporting a problem opens github.com in your browser. Review any report before sending it. |
+| `server-updates` | **Sync server updates.** The optional sync server, rather than this app, checks github.com and release-assets.githubusercontent.com for updates when its operator enables the check. |
+
+Provider choices and country travel in explicit settings backups, never sync.
+API keys and secrets stay in SecretStore, outside settings backups and sync.
+A user pair overrides any build pair; removing it falls back to a build pair
+if present. Builds remain keyless by default; any build-supplied pair is
+extractable from the app. Android encrypts your entered API secret with
+Keystore; Windows protects the secrets file with user-bound DPAPI; macOS/Linux
+protect a file with 0600 permissions, without encryption. Your API key identifier
+also appears unencrypted in local credential metadata. See the full [design network
+inventory](docs/design/09-quality-and-release.md#network-inventory).
 
 ## Sync (optional)
 
