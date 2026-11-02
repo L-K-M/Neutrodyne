@@ -330,7 +330,8 @@ class AddPodcastResolverTest {
     fun sniffedNonFeedsFailWithTheRightError() =
         runBlocking {
             server.enqueue(mockResponse(body = "<!DOCTYPE html><html><body>hi</body></html>"))
-            repeat(5) { server.enqueue(mockResponse(404, "no feed")) }
+            // The well-known probes are discovered destinations and never reach this
+            // localhost server (03 note 2026-11-02) — no responses are enqueued for them.
             assertEquals(
                 AddPodcastError.NotAFeed,
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(feedUrl())).error,

@@ -177,6 +177,16 @@ class DiscoveryJourneyTest {
                             ).fetchSemanticsNodes().isNotEmpty()
                         }
                         onNodeWithText("Directory show").performClick()
+                    } else {
+                        // 03 note 2026-11-02: a prefilled LAN URL does not auto-resolve —
+                        // the tap on Subscribe is the informed action that fetches it.
+                        waitUntil(timeoutMillis = 10_000) {
+                            onAllNodes(
+                                androidx.compose.ui.test
+                                    .hasText("Subscribe"),
+                            ).fetchSemanticsNodes().isNotEmpty()
+                        }
+                        onNodeWithText("Subscribe").performClick()
                     }
                     waitUntil(timeoutMillis = 10_000) {
                         onAllNodes(
