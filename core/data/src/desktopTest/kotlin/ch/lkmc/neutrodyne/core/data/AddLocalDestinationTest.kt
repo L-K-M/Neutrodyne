@@ -271,7 +271,7 @@ class AddLocalDestinationTest {
             lan.enqueue(mockResponse(body = rssBody(title = "LAN honeypot")))
             assertEquals(
                 AddPodcastError.Network(NetError.LocalNetworkUnsupported),
-                assertIs<Outcome.Failure>(bundle.resolver.preview(lanPeerUrl("/feed"))).error,
+                assertIs<Outcome.Failure<AddPodcastError>>(bundle.resolver.preview(lanPeerUrl("/feed"))).error,
             )
             assertEquals(0, lan.requestCount)
         }

@@ -63,12 +63,28 @@ class PreConfirmationPeerGuardTest {
     }
 
     @Test fun markedFollowUpToLocalPeerIsRefused() {
-        server.enqueue(mockResponse(302, "", "Location" to lan.url("/")))
+        server.enqueue(mockResponse(302, "", "Location" to lan.url("/").toString()))
         assertFailsWith<LocalNetworkUnsupportedException> {
             clients().image.newCall(marked(server.url("/page"))).execute()
         }
         assertEquals(1, server.requestCount)
         assertEquals(0, lan.requestCount)
+    }
+
+    @Test fun markedNonCanonicalLocalUrlsAreRefusedOnFeedAndImageClients() {
+        val clients = newNetworkClients()
+        for (client in listOf(clients.feed, clients.image)) {
+            for (prefix in listOf("http:/", "http:\\\\", "http:")) {
+                val request = Request.Builder()
+                    .url("${prefix}127.0.0.1:${server.port}/action")
+                    .header(PRE_CONFIRMATION_HEADER, "1")
+                    .build()
+                assertFailsWith<LocalNetworkUnsupportedException> {
+                    client.newCall(request).execute()
+                }
+            }
+        }
+        assertEquals(0, server.requestCount)
     }
 
     @Test fun markerNeverReachesTheWire() {

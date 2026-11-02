@@ -93,7 +93,7 @@ class LocalDestinationTest {
             "http://%31%32%37.0.0.1/",
             "http://local%68ost/feed",
             "http://LOCA%4CHOST:8080/",
-            "http://192.168.%30.%30.%31/",
+            "http://192.168.%30.%31/",
             "http://１２７.０.０.１/feed",
             "http://１２７．０．０．１/feed",
             "http://ｌｏｃａｌｈｏｓｔ/feed",
@@ -102,6 +102,13 @@ class LocalDestinationTest {
         )
         ) {
             assertTrue(isLocal(url), "expected local: $url")
+        }
+    }
+
+    @Test
+    fun nonCanonicalHttpAuthoritiesAreLocal() {
+        for (prefix in listOf("http:/", "http:\\\\", "http:", "https:/")) {
+            assertTrue(isLocal("${prefix}127.0.0.1/feed"), "expected local: $prefix")
         }
     }
 

@@ -6,6 +6,7 @@ import androidx.compose.ui.unit.Density
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.PRE_CONFIRMATION_HEADER
 import coil3.PlatformContext
+import coil3.network.httpHeaders
 import coil3.request.crossfadeMillis
 import coil3.size.Size
 import kotlinx.coroutines.test.runTest
