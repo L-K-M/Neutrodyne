@@ -231,6 +231,19 @@ abstract class DownloadDao : DownloadQueries {
     )
     protected abstract suspend fun requeueChanged(ids: List<Long>): Int
 
+    /** Persists the URL the source declared at prepare: it is the identity of the resource
+     * that owns the current .part prefix, which runner snapshots must not carry through
+     * the checkpoint (a resolved retry URL would otherwise clobber the durable ref). */
+    @Query(
+        "UPDATE download SET sourceRef = :sourceRef" +
+            " WHERE episodeId = :episodeId AND runnerToken = :token",
+    )
+    abstract suspend fun updateSourceRef(
+        episodeId: Long,
+        sourceRef: String,
+        token: String,
+    ): Int
+
     /** The ownership read and replacement share one serialised write transaction. */
     @Transaction
     override suspend fun transition(
@@ -241,16 +254,14 @@ abstract class DownloadDao : DownloadQueries {
         val current = byEpisode(row.episodeId) ?: return 0
         if (current.state != expectedState || current.runnerToken != token) return 0
 
-        // A runner snapshot must not undo controller consent. sourceRef is the durable feed
-        // identity the source declared at prepare, so a refresh persists while the resolved
-        // CDN retry URL never reaches the row.
+        // A runner snapshot must not undo controller consent or persist a resolved CDN URL.
         val checkpoint =
             row.copy(
                 lane = current.lane,
                 priority = current.priority,
                 requestedAt = current.requestedAt,
                 sourceKind = current.sourceKind,
-                sourceRef = row.sourceRef,
+                sourceRef = current.sourceRef,
                 allowMetered = current.allowMetered,
                 requireCharging = current.requireCharging,
                 runnerToken = if (row.state in OWNED_STATES) token else null,

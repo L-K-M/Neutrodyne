@@ -501,6 +501,13 @@ internal class DownloadEngine(
                         handle.close()
                         part = fileSystem.openPart(next.rootId, next.tempPath)
                     }
+                    if (next.sourceRef != row.sourceRef) {
+                        // The prefix now belongs to the URL the source just declared; persist
+                        // it so a later resume compares against the bytes' real origin. The
+                        // checkpoint itself never carries sourceRef (runner snapshots could
+                        // hold a resolved retry URL), so it takes its own guarded write.
+                        dao.updateSourceRef(row.episodeId, next.sourceRef, token)
+                    }
                     row =
                         row.copy(
                             rootId = next.rootId,
