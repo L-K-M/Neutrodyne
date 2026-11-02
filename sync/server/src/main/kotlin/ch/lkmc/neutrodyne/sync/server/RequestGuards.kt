@@ -28,6 +28,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
+import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.GZIPInputStream
 import kotlin.coroutines.coroutineContext
 
@@ -43,7 +44,10 @@ internal class BoundaryException(
  */
 internal class RequestGuards(
     private val bodyReadTimeoutMs: Long = BODY_READ_TIMEOUT_MS,
+    private val bufferBudgetBytes: Long = BUFFER_BUDGET_BYTES,
 ) {
+    private val bufferedBytes = AtomicLong()
+
     fun install(application: Application) {
         application.intercept(ApplicationCallPipeline.Plugins) {
             // Health probes never read or budget a body: they must answer even while
@@ -53,10 +57,11 @@ internal class RequestGuards(
                 call.request.headers
                     .getAll(HttpHeaders.ContentLength)
                     .orEmpty()
+            var declared: Long? = null
             if (lengths.isNotEmpty()) {
-                val length = lengths.singleOrNull()?.toLongOrNull()
-                if (length == null || length < 0) invalidBody()
-                if (length > ProtocolLimits.MAX_REQUEST_BYTES) tooLarge()
+                declared = lengths.singleOrNull()?.toLongOrNull()
+                if (declared == null || declared < 0) invalidBody()
+                if (declared > ProtocolLimits.MAX_REQUEST_BYTES) tooLarge()
             }
             val encoding =
                 call.request.headers
@@ -68,9 +73,17 @@ internal class RequestGuards(
                     encoding.size == 1 && encoding.single().trim().equals("gzip", true) -> RequestEncoding.GZIP
                     else -> throw BoundaryException(HttpStatusCode.UnsupportedMediaType, "invalid")
                 }
+            // Reserve the declared body size before reading so that stalled unauthenticated
+            // uploads cannot hold more than bufferBudgetBytes of heap across connections.
+            // Undeclared bodies charge the wire cap; a fast read releases the slot.
+            reserve(declared ?: ProtocolLimits.MAX_REQUEST_BYTES)
             val wire =
-                withTimeoutOrNull(bodyReadTimeoutMs) { readCapped(call.request.receiveChannel()) }
-                    ?: throw BoundaryException(HttpStatusCode.RequestTimeout, "request_timeout")
+                try {
+                    withTimeoutOrNull(bodyReadTimeoutMs) { readCapped(call.request.receiveChannel()) }
+                        ?: throw BoundaryException(HttpStatusCode.RequestTimeout, "request_timeout")
+                } finally {
+                    bufferedBytes.addAndGet(-(declared ?: ProtocolLimits.MAX_REQUEST_BYTES))
+                }
             val decoded = decode(wire, bodyEncoding)
             val contentType =
                 call.request.headers[HttpHeaders.ContentType]
@@ -106,9 +119,22 @@ internal class RequestGuards(
         }
     }
 
+    private fun reserve(bytes: Long) {
+        while (true) {
+            val held = bufferedBytes.get()
+            if (bytes > bufferBudgetBytes - held) {
+                throw BoundaryException(HttpStatusCode.TooManyRequests, "too_many_requests")
+            }
+            if (bufferedBytes.compareAndSet(held, held + bytes)) return
+        }
+    }
+
     companion object {
         const val PROTOCOL_HEADER = "Neutrodyne-Sync-Protocol"
         const val BODY_READ_TIMEOUT_MS = 30_000L
+
+        /** Total body bytes concurrent requests may hold before authentication. */
+        const val BUFFER_BUDGET_BYTES = 24L shl 20
         private val SYNC_REQUEST = AttributeKey<SyncRequest>("bounded-sync-request")
         private val BODY = AttributeKey<ByteArray>("bounded-request-body")
         private const val BUFFER_BYTES = 8_192
