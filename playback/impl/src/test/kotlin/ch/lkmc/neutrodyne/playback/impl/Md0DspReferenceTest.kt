@@ -17,6 +17,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 
 /** Independent reference producer: these are the pinned Android processors, never the ports. */
 @RunWith(RobolectricTestRunner::class)
@@ -47,6 +48,10 @@ class Md0DspReferenceTest {
         Files.writeString(directory.resolve("dsp-reference.tsv"), text)
         println(text)
         assertTrue(rows.size > 50)
+        val root = Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")))
+        val expected = Files.readAllLines(root.resolve("playback/engine/src/test/resources/dsp-reference.tsv"))
+            .filterNot { it.startsWith("#") || it.isBlank() }
+        assertEquals(expected, rows.filterNot { it.startsWith("#") }, "the pinned Android reference changed")
     }
 
     private fun process(processor: AudioProcessor, input: ByteArray, chunkFrames: Int): ByteArray {
