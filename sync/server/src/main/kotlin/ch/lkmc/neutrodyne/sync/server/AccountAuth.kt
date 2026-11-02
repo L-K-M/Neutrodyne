@@ -146,10 +146,15 @@ internal class AccountAuth(
             val current = checkNotNull(account(principal.accountId))
             if (current.passwordHash != account.passwordHash) unauthorized()
             save(current.copy(passwordHash = hash, passwordSetAt = current.passwordSetAt ?: now))
-            tokens(current.id, TokenKind.WEB_SESSION)
-                .filter {
-                    it.hash != principal.tokenHash && it.active(now)
-                }.forEach { revoke(it, now) }
+            // A leaked password's remediation must also kill credentials minted from it:
+            // like disable and reset, every token of the account dies except the caller's
+            // own web session. Devices then get 401 and offer "Link again"; data stays.
+            TokenKind.entries.forEach { kind ->
+                tokens(current.id, kind)
+                    .filter { it.hash != principal.tokenHash && it.active(now) }
+                    .forEach { revoke(it, now) }
+            }
+            emit(ServerEvent.Revoked(current.id))
             audit(current.id, "password_changed", now)
         }
     }
