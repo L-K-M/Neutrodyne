@@ -26,7 +26,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
-import ch.lkmc.neutrodyne.core.ui.AttributionText
+import ch.lkmc.neutrodyne.core.ui.SettingAttribution
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
@@ -145,25 +145,11 @@ private fun EffectiveSummary(
     source: SettingSource,
     invalid: Boolean,
 ) {
-    var showGroups by rememberSaveable { mutableStateOf(false) }
     Column {
         Text(value)
-        if (source is SettingSource.Groups && source.groups.size >= GROUP_LIST_THRESHOLD) {
-            TextButton(onClick = { showGroups = true }) { Text(AttributionText.describe(source).asString()) }
-        } else {
-            Text(AttributionText.describe(source).asString())
-        }
+        SettingAttribution(source)
         if (invalid) {
             Text(stringResource(Res.string.setting_invalid_value), color = MaterialTheme.colorScheme.error)
         }
     }
-    if (showGroups && source is SettingSource.Groups) {
-        NdDialog(onDismissRequest = { showGroups = false }, title = stringResource(Res.string.setting_groups_title)) {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                source.groups.forEach { Text(it.name, modifier = Modifier.padding(16.dp)) }
-            }
-        }
-    }
 }
-
-private const val GROUP_LIST_THRESHOLD = 3
