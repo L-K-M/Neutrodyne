@@ -107,7 +107,7 @@ class RebootResumptionTest {
                     await { (db.positionDao().byEpisode(id)?.positionMs ?: 0) >= SAVED_POSITION_MS }
                     // Evidence only: a card here and none after boot points at resumption, not at the shade.
                     device.openQuickSettings()
-                    device.wait(Until.findObject(By.text(TITLE)), QUICK_SETTINGS_POLL_MS)
+                    device.wait(Until.findObject(By.res(SYSTEM_UI, "qs_media_controls")), QUICK_SETTINGS_POLL_MS)
                     record("seed-quick-settings")
                     device.pressBack()
                     check(
@@ -130,24 +130,7 @@ class RebootResumptionTest {
         runBlocking {
             hostOnly()
             graph.databaseOpener.awaitOpen()
-            val card = awaitInQuickSettings(By.text(TITLE), "recent-card")
-            assertTrue(card.visibleBounds.width() > 0)
-            val art = awaitInQuickSettings(By.res("com.android.systemui", "album_art"), "card-artwork")
-            val bounds = art.visibleBounds
-            // Artwork can attach after the title is laid out, so capture once its view exists.
-            record("offline-card")
-            val screenshot = checkNotNull(BitmapFactory.decodeFile(File(evidence, "offline-card.png").path))
-            var blue = 0
-            var pixels = 0
-            for (y in bounds.top until bounds.bottom step 4) {
-                for (x in bounds.left until bounds.right step 4) {
-                    val color = screenshot.getPixel(x, y)
-                    if (Color.blue(color) > 100 && Color.red(color) < 80 && Color.green(color) < 80) blue++
-                    pixels++
-                }
-            }
-            screenshot.recycle()
-            assertTrue("System UI must display the seeded local blue cover", pixels > 0 && blue > pixels / 10)
+            // The app's own state first, so a missing card cannot hide a lost session or position.
             assertEquals(
                 saved.getLong("episode", -1),
                 graph
@@ -169,13 +152,32 @@ class RebootResumptionTest {
                     ?.isPlaying == true,
             )
             assertTrue(app.getSystemService(AudioManager::class.java).activePlaybackConfigurations.isEmpty())
+            val card = awaitInQuickSettings(By.res(SYSTEM_UI, "qs_media_controls").descContains(TITLE), "recent-card")
+            assertTrue(card.visibleBounds.width() > 0)
+            val art = awaitInQuickSettings(By.res(SYSTEM_UI, "album_art"), "card-artwork")
+            val bounds = art.visibleBounds
+            // Artwork can attach after the title is laid out, so capture once its view exists.
+            record("offline-card")
+            val screenshot = checkNotNull(BitmapFactory.decodeFile(File(evidence, "offline-card.png").path))
+            var blue = 0
+            var pixels = 0
+            for (y in bounds.top until bounds.bottom step 4) {
+                for (x in bounds.left until bounds.right step 4) {
+                    val color = screenshot.getPixel(x, y)
+                    if (Color.blue(color) > 100 && Color.red(color) < 80 && Color.green(color) < 80) blue++
+                    pixels++
+                }
+            }
+            screenshot.recycle()
+            assertTrue("System UI must display the seeded local blue cover", pixels > 0 && blue > pixels / 10)
         }
 
     @Test fun tapSystemUiCardResumesSavedPosition() =
         runBlocking {
             hostOnly()
             graph.databaseOpener.awaitOpen()
-            awaitInQuickSettings(By.descContains("Play"), "card-play-action").click()
+            // The card exposes its title only in its content description; its play button is "Play".
+            awaitInQuickSettings(By.pkg(SYSTEM_UI).desc("Play"), "card-play-action").click()
             val controller = connect()
             try {
                 // The first playing sample: waiting for the saved position would also fit a restart at zero.
@@ -243,6 +245,7 @@ class RebootResumptionTest {
 
     private companion object {
         const val TITLE = "M5 reboot evidence"
+        const val SYSTEM_UI = "com.android.systemui"
         const val SAVED_POSITION_MS = 9_000L
         const val SEEK_TOLERANCE_MS = 500L
         const val WAIT_MS = 60_000L
