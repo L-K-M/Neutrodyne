@@ -151,6 +151,7 @@ class EffectivePlaybackSettings(
                 is SettingSource.Group -> SettingScope.GROUP
                 SettingSource.AppDefault -> SettingScope.GLOBAL
                 is SettingSource.Groups -> error("Playback resolution cannot merge context groups")
+                SettingSource.NotSupported -> error("Playback resolution cannot be unsupported")
             }
         return writeScope(target, PlaybackSettingChange.Speed(next), scope)
     }

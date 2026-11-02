@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.core.model.NetworkPolicy
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.feeds.backup.CredentialV1
 import ch.lkmc.neutrodyne.feeds.backup.GroupV1
@@ -661,7 +662,25 @@ internal class RestoreMerger(
         local = scopeDao.forGroup(groupId)?.o,
         staged = staged,
         policy = policy,
-        upsert = { scopeDao.upsertGroup(PodcastGroupSettingsEntity(groupId, it)) },
+        upsert = { row ->
+            // Restores obey the same dependent-field invariant as interactive group writes.
+            val next =
+                if (row.autoDownload == true) {
+                    row
+                } else {
+                    row.copy(
+                        autoDownloadKeepLatest = null,
+                        autoDownloadNetwork = null,
+                        autoDownloadRequireCharging = null,
+                        includeVideoInAutoDownload = null,
+                    )
+                }
+            if (next == ScopeOverrides()) {
+                scopeDao.deleteGroup(groupId)
+            } else {
+                scopeDao.upsertGroup(PodcastGroupSettingsEntity(groupId, next))
+            }
+        },
         delete = { scopeDao.deleteGroup(groupId) },
     )
 
@@ -883,7 +902,7 @@ private fun OverridesV1.toScopeOverrides(): ScopeOverrides =
         introSkipMs = introSkipMs,
         outroSkipMs = outroSkipMs,
         autoDownload = autoDownload,
-        autoDownloadKeepLatest = autoDownloadKeepLatest,
+        autoDownloadKeepLatest = autoDownloadKeepLatest?.takeIf { it in DownloadSettingKeys.KEEP_LATEST_RANGE },
         autoDownloadNetwork = enumNamed<NetworkPolicy>(autoDownloadNetwork),
         autoDownloadRequireCharging = autoDownloadRequireCharging,
         deleteAfterPlayed = enumNamed<DeleteAfter>(deleteAfterPlayed),
