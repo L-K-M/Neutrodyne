@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.datastore.SettingStore
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.DownloadError
+import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
@@ -15,6 +16,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.download.api.DeleteReason
+import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -29,9 +31,11 @@ import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -425,6 +429,59 @@ class DownloadReconcilerTest {
                 runner.join()
             }
         }
+
+    @Test fun redownloadedCurrentEpisodeKeepsPinnedFileUntilDeparture() =
+        runTest {
+            EngineRig(this).use { f ->
+                val id = f.seed().single()
+                f.engine.drain(drainRequest())
+                val pathA = assertNotNull(f.row(id).relativePath)
+                val a = f.files.openPart("old", pathA).withOpen { it.contents() }
+                f.db.playSessionDao().ensureNow(f.clock.now())
+                f.db.playSessionDao().write(checkNotNull(f.db.playSessionDao().get()).copy(currentEpisodeId = id))
+                val rig = ReconcileRig(f, deletes = f.deletes)
+                rig.controller.delete(listOf(id), DeleteReason.USER)
+                assertNull(f.dao.byEpisode(id))
+                assertNotNull(f.files.stat("old", pathA))
+                // The re-request produces the same title, date and extension, hence the same name.
+                val b = mediaBytes(8192)
+                f.source.action = { plan, part, sink ->
+                    sink.started(TransferMetadata(plan.offset, b.size.toLong(), "audio/mpeg", "\"b\"", null))
+                    part.append(b, b.size)
+                    sink.bytes(b.size.toLong(), b.size.toLong())
+                    TransferResult.Complete(b.size.toLong(), "audio/mpeg", "\"b\"", null, MediaKind.MP3)
+                }
+                rig.controller.request(listOf(id), DownloadLane.MANUAL, true)
+                f.engine.drain(drainRequest("desk:again"))
+                val again = f.row(id)
+                assertEquals(DownloadState.COMPLETED, again.state)
+                val pathB = assertNotNull(again.relativePath)
+                assertNotEquals(pathA, pathB)
+                f.files.openPart("old", pathA).withOpen { assertContentEquals(a, it.contents()) }
+                assertTrue(f.deletes.entries().any { it.path == pathA })
+                f.db.playSessionDao().write(checkNotNull(f.db.playSessionDao().get()).copy(currentEpisodeId = null))
+                f.deletes.drain(null)
+                assertNull(f.files.stat("old", pathA))
+                f.files.openPart("old", pathB).withOpen { assertContentEquals(b, it.contents()) }
+            }
+        }
+
+    @Test fun orphanBytesPublishNoticeUntilConfirmedDeletionClearsIt() =
+        runTest {
+            EngineRig(this).use { f ->
+                val rig = ReconcileRig(f)
+                rig.write("Podcast [p1]/Orphan [e99].mp3")
+                rig.reconciler.reconcile()
+                assertEquals(4096L, rig.reconciler.orphanBytes.value)
+                val overview = rig.controller.observeAll().first()
+                assertTrue(DownloadNotice.ORPHAN_FILES in overview.notices)
+                assertEquals(4096L, overview.storage.orphanBytes)
+                assertEquals(OrphanDeleteResult.Deleted(4096), rig.controller.deleteOrphanFiles())
+                val cleared = rig.controller.observeAll().first()
+                assertEquals(0L, cleared.storage.orphanBytes)
+                assertTrue(DownloadNotice.ORPHAN_FILES !in cleared.notices)
+            }
+        }
 }
 
 internal class JournalTestStore : SettingStore {
@@ -460,13 +517,13 @@ internal class ReconcileRig(
     val index: LocalMediaIndexImpl = LocalMediaIndexImpl(),
     val store: JournalTestStore = JournalTestStore(),
     live: () -> Set<String> = { emptySet() },
+    val deletes: DeferredDeletes = DeferredDeletes(store, engine.files, engine.roots, engine.dao::allRows),
 ) {
     var ageMs = 0L
     private val clock =
         object : Clock by engine.clock {
             override fun now() = engine.clock.now() + ageMs
         }
-    val deletes = DeferredDeletes(store, engine.files, engine.roots, engine.dao::allRows)
     val reconciler =
         DownloadReconciler(
             engine.db,

@@ -275,6 +275,30 @@ class RssTransferSourceTest {
         }
 
     @Test
+    fun unknownTotalRangeRestartsBeforeAnyPromotion() =
+        transferTest { part ->
+            val body = mediaBytes(12_288)
+            part.append(body, 4096)
+            server.enqueue(
+                response(
+                    body.copyOfRange(4096, 8192),
+                    206,
+                    "Content-Range" to "bytes 4096-8191/*",
+                    "ETag" to "\"one\"",
+                ),
+            )
+            assertIs<TransferResult.Restart>(
+                transfer.transfer(plan(part, row.copy(etag = "\"one\"", totalBytes = null)), part, sink),
+            )
+            part.truncate(0)
+            server.enqueue(response(body, 200, "ETag" to "\"one\""))
+            assertIs<TransferResult.Complete>(
+                transfer.transfer(plan(part, row.copy(totalBytes = null)), part, sink),
+            )
+            assertContentEquals(body, part.contents())
+        }
+
+    @Test
     fun changedStrongValidatorRejectsSameLengthSplice() =
         transferTest { part ->
             part.append(mediaBytes(), 2048)

@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.testing.testDownloadEntry
 import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.LiveProgress
+import ch.lkmc.neutrodyne.download.api.RequestResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -224,6 +225,45 @@ class DownloadsViewModelTest : MainDispatcherTest() {
             runCurrent()
             assertEquals(FakeDownloadController.Action.ORPHANS, downloads.calls.single().action)
             assertEquals(1, vm.uiState.value.messages.size)
+        }
+
+    @Test fun retryAllRoutesMissingRowsThroughTheRequestPath() =
+        test {
+            downloads.overview.value =
+                downloads.overview.value.copy(
+                    failed =
+                        listOf(
+                            testDownloadEntry(1, DownloadState.FAILED),
+                            testDownloadEntry(2, DownloadState.MISSING),
+                        ),
+                )
+            val vm = model()
+            runCurrent()
+            vm.retryAll()
+            runCurrent()
+            assertEquals(
+                listOf(
+                    FakeDownloadController.Action.RETRY,
+                    FakeDownloadController.Action.REQUEST,
+                ),
+                downloads.calls.map { it.action },
+            )
+            assertEquals(listOf(1L), downloads.calls[0].ids)
+            assertEquals(listOf(2L), downloads.calls[1].ids)
+            assertEquals(ch.lkmc.neutrodyne.core.model.DownloadLane.MANUAL, downloads.calls[1].lane)
+        }
+
+    @Test fun retryAllMissingRowsAskForMeteredConsent() =
+        test {
+            downloads.requestResult = RequestResult.NeedsMeteredDecision(1, 0, 1)
+            downloads.overview.value =
+                downloads.overview.value.copy(failed = listOf(testDownloadEntry(2, DownloadState.MISSING)))
+            val vm = model()
+            runCurrent()
+            vm.retryAll()
+            runCurrent()
+            assertNotNull(vm.downloads.consent.value)
+            assertEquals(listOf(FakeDownloadController.Action.REQUEST), downloads.calls.map { it.action })
         }
 
     @Test fun noticesAreBoundedAndOrderedWithM6bControlsHidden() {

@@ -242,6 +242,65 @@ class RssCrashProofTest {
             }
         }
 
+    @Test fun changedEnclosureUrlRestartsWithoutSplicingOldPrefix() =
+        runTest {
+            TransferRig().use { http ->
+                val a = mediaBytes(262_144)
+                val b = a.copyOf().also { it.fill(7, 10) }
+                val half = 131_072
+                http.server.dispatcher =
+                    object : Dispatcher() {
+                        override fun dispatch(request: RecordedRequest): MockResponse =
+                            if (request.headers["Range"] == null) {
+                                response(b, 200, "ETag" to "\"1\"", "Content-Type" to "audio/mpeg")
+                            } else {
+                                response(
+                                    b.copyOfRange(half, b.size),
+                                    206,
+                                    "ETag" to "\"1\"",
+                                    "Content-Type" to "audio/mpeg",
+                                    "Content-Range" to "bytes $half-${b.lastIndex}/${b.size}",
+                                )
+                            }
+                    }
+                EngineRig(this, sourceFactory = { rss(it, http) }).use { f ->
+                    val id =
+                        f.seed(
+                            enclosureUrl = http.server.url("/a").toString(),
+                            transform = {
+                                it.copy(
+                                    state = DownloadState.PAUSED,
+                                    etag = "\"1\"",
+                                    totalBytes = a.size.toLong(),
+                                    downloadedBytes = half.toLong(),
+                                    tempPath = DownloadPaths.part(it.episodeId),
+                                )
+                            },
+                        ).single()
+                    f.files.openPart("old", DownloadPaths.part(id)).withOpen {
+                        it.append(a.copyOfRange(0, half), half)
+                        it.sync()
+                    }
+                    f.db.useWriterConnection { connection ->
+                        connection.usePrepared("UPDATE episode SET enclosureUrl = ? WHERE id = ?") {
+                            it.bindText(1, http.server.url("/b").toString())
+                            it.bindLong(2, id)
+                            it.step()
+                        }
+                    }
+                    f.controller.resume(listOf(id))
+                    f.engine.drain(drainRequest())
+                    val row = f.row(id)
+                    assertEquals(DownloadState.COMPLETED, row.state)
+                    assertEquals(http.server.url("/b").toString(), row.sourceRef)
+                    f.files.openPart(row.rootId, assertNotNull(row.relativePath)).withOpen {
+                        assertContentEquals(b, it.contents())
+                    }
+                    assertNull(http.server.takeRequest().headers["Range"])
+                }
+            }
+        }
+
     private fun heldBody(
         bytes: ByteArray,
         prefix: Int,

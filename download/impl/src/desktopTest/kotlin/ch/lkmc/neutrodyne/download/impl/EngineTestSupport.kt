@@ -57,6 +57,7 @@ internal class EngineRig(
     val roots = TestRoots()
     val faults = FaultFiles()
     val files = OkioDownloadFileSystem(roots, faults, dispatcher)
+    val deletes = DeferredDeletes(JournalTestStore(), files, roots, dao::allRows)
     val verification = DownloadFiles(files, roots, PlatformSriHasher(roots, faults), PlatformLocalUris())
     val progress = DownloadProgressHub(scope.backgroundScope, clock)
     val source = FakeTransferSource(SourceKind.RSS_ENCLOSURE)
