@@ -214,8 +214,8 @@ class StoredRecordWriterTest {
         }
 
     /** A JSON array of individually legal elements whose serialized sum reaches [target] bytes. */
-    private fun oversizedValue(target: Long) =
-        JsonArray(List((target / (ProtocolLimits.MAX_STRING - 90) + 1).toInt()) {
-            JsonPrimitive("y".repeat(ProtocolLimits.MAX_STRING - 96))
-        })
+    private fun oversizedValue(target: Long): JsonArray {
+        val element = JsonPrimitive("y".repeat(ProtocolLimits.MAX_STRING - 96))
+        return JsonArray(List((target / (ProtocolLimits.MAX_STRING - 90) + 1).toInt()) { element })
+    }
 }

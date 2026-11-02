@@ -105,7 +105,16 @@ object ServerExportFixture {
                             .copy(match = MatchHints(title = "T".repeat(900)))
                     f.store.write(account.id) {
                         repeat(SCALE_EPISODES) { index ->
-                            put(StoredRecord(episode(episode = "g:scale-$index"), raw, nextSequence(), null, f.now, null))
+                            put(
+                                StoredRecord(
+                                    episode(episode = "g:scale-$index"),
+                                    raw,
+                                    nextSequence(),
+                                    null,
+                                    f.now,
+                                    null,
+                                ),
+                            )
                         }
                     }
                     f.store.snapshot(account.id).use { AccountArchiveWriter(f.inputs).export(it, scale) }

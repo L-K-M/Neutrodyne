@@ -580,8 +580,9 @@ Content-Type: application/problem+json
 | 401 | `unauthorized` | Missing, unknown, expired or revoked token | `SyncProblem.Revoked`: stop all sync work and SSE; keep local data and `sync_state`; Settings › Sync offers "Link again" |
 | 403 | `forbidden` | Disabled account, admin-only route, insecure transport refused | Error status naming the cause |
 | 404 | `not_found` | Unknown device ID in `PATCH`/`DELETE` | Refresh the device list |
+| 408 | `request_timeout` | The body did not complete within the 30-s read deadline (2026-11-01, MS1) | Resend the request |
 | 410 | `cursor_expired` | `since` is older than the account's `min_cursor`, or its epoch differs (server restore, purge) | Full resync ([Cursor semantics and resync](#cursor-semantics-and-resync)) |
-| 413 | `payload_too_large` | > 2 MiB compressed or > 16 MiB decompressed, or > 1,000 changes | Halve the batch and retry |
+| 413 | `payload_too_large` | > 2 MiB compressed or > 16 MiB decompressed, > 1,000 changes, or a record's aggregate values > 4 MiB | Halve the batch and retry |
 | 421 | `insecure_transport` | A non-TLS request reached a server configured with an `https://` public URL through an untrusted path | `SyncProblem.Server(421)` with the help link |
 | 426 | `protocol_too_old` | `Neutrodyne-Sync-Protocol` below the server's `min` | `SyncProblem.AppTooOld`: "Update Neutrodyne to keep syncing" (links to Settings › Updates) |
 | 429 | `rate_limited` | A limiter of [Rate limits](#rate-limits) | Wait `Retry-After` seconds (Ktor's RateLimit plugin sends it, [docs](https://ktor.io/docs/server-rate-limit.html)) |
@@ -596,6 +597,7 @@ Content-Type: application/problem+json
 | Response body (client side) | ≤ 32 MiB after decoding | `SyncClient` |
 | JSON nesting | ≤ 16 levels | server pre-scan; client typed decoding plus a depth check of field values |
 | Strings / URLs / titles | ≤ 4 KiB / ≤ 4 KiB / ≤ 1 KiB (UTF-8 bytes) | both sides; oversize → `invalid` (server), record skipped (client) |
+| Value bytes per record | ≤ 4 MiB serialized (2026-11-01, MS1; +64 KiB slack for internal merge stamps) | both sides (`ProtocolValidation`); oversize → `payload_too_large`, so one record always fits an 8-MiB page |
 | Fields per record / grow-set entries | ≤ 64 / ≤ 64 | both sides |
 | Records per account | 500,000 by default (`quota.records`) | server (`quota`) |
 | Clock admission | ≤ 5 min ahead of server time; ≥ 2020-01-01 | server (`clock_skew`) |
@@ -1110,7 +1112,7 @@ sequenceDiagram
 ```
 
 - On a linked device: Settings › Sync › "Link another device" → enter the code → the approval sheet names the new device ("Pixel 8 · Android · Neutrodyne 1.0.0") and asks "Link this device to your library?" — the code alone never links anything. On the web page: sign in, open "Approve a device" (`/link`), enter the code, confirm.
-- `slow_down` adds 5 s to the polling interval (RFC 8628 §3.5); `expired_token` after 10 min ends the flow ("The code expired — start again"); `access_denied` after a denial.
+- `slow_down` adds 5 s to the polling interval on the client (RFC 8628 §3.5); `expired_token` after 10 min ends the flow ("The code expired — start again"); `access_denied` after a denial. Implementation note (2026-11-01, MS1): a poll inside the advertised interval is answered `slow_down` from a read transaction without a durable write, and the endpoint is capped per IP before the shared writer; the server no longer ratchets the stored interval because that write was the finding's amplification path.
 
 **Invite** (the account's first device, created by the administrator): the admin creates an invite in the web UI or with `user invite <name>` and passes the 16-character code (and the server address) to the user; the app calls `POST /api/v1/auth/invite/redeem`. One use, 24 h.
 
@@ -1310,7 +1312,7 @@ Reset is inclusive: cutoff 20 removes 19/20, keeps 21. W4 tests absent/bad/expir
 future cursors before mutation and concurrent writes.
 
 1. `ClientAddress` resolves the client IP and scheme. When the public URL is `https://` and a request arrives over plain HTTP from a peer that is neither loopback nor a trusted proxy reporting `https`, the API and web routes answer `421 insecure_transport` (health routes still answer).
-2. `RequestGuards`: `Content-Length` > 2 MiB → 413; the body is read through a counting stream (2 MiB) and, with `Content-Encoding: gzip`, a counting `GZIPInputStream` (16 MiB decoded) → 413 beyond; unsupported encodings → 415; a pre-scan of the JSON rejects nesting deeper than 16 (outside strings) → 400.
+2. `RequestGuards`: `Content-Length` > 2 MiB → 413; the body is read through a counting stream (2 MiB) and, with `Content-Encoding: gzip`, a counting `GZIPInputStream` (16 MiB decoded) → 413 beyond; unsupported encodings → 415; a pre-scan of the JSON rejects nesting deeper than 16 (outside strings) → 400. Implementation note (2026-11-01, MS1): body reads also carry a 30 s deadline (→ `408 request_timeout`) and a 24 MiB concurrent pre-auth buffer budget charged on the declared length (→ `429 too_many_requests`), so stalled unauthenticated uploads cannot hold the documented heap; health routes bypass the budget.
 3. Authentication; rate limits; `Neutrodyne-Sync-Protocol` check (missing or below `min` → 426 on `/api/v1/*`).
 4. Typed decoding with `SyncJson`; per-change validation against `SyncCollection` specs (ID shape, field names `[A-Za-z0-9_.~]{1,64}`, value types, byte caps, URL schemes `http`/`https` for `feedUrl`, `artworkUrl`, `link` and `enc`).
 5. The route; `StatusPages` maps failures to problems.
@@ -1349,13 +1351,21 @@ no recoverable secret stored; anonymous forms use pre-auth cookies.
 no self-edges, survives GC, no FK to collectible records. W2 tests populated SQL
 upgrade/rollback, pre-upgrade backup and newer-schema refusal, never Room.
 
+**Implementation note (2026-11-01, MS1).** `account.id` is `AUTOINCREMENT` so a
+deleted ID is never re-issued; record transactions (`push`, `changes`,
+`resetLibrary`, record purge) re-verify the principal's credential, account and
+device inside the same transaction, so a request paused after route
+authentication can neither reach a replacement account nor recreate records
+after purge. Quota and reset bounds use SQL live counts/keys instead of
+materializing the account's records.
+
 `SyncStore` hides SQL from routes; `SqliteSyncStore` uses sqlite-jdbc 3.53.4.0 ([xerial/sqlite-jdbc](https://github.com/xerial/sqlite-jdbc), Apache-2.0, natives for Linux x86-64 and aarch64 among others) and plain JDBC, with SQL kept to the subset that SQLite ≥ 3.35 and PostgreSQL ≥ 13 share (`INSERT … ON CONFLICT … DO UPDATE`, [SQLite UPSERT](https://www.sqlite.org/lang_upsert.html); `RETURNING`, [SQLite RETURNING](https://www.sqlite.org/lang_returning.html)), so a PostgreSQL store stays possible on demand (v1.x, M16). Connection settings: `journal_mode = WAL`, `synchronous = FULL`, `foreign_keys = ON`, `busy_timeout = 5000`; one write connection behind the writer dispatcher, four read connections. **Durability (2026-10-05):** not `NORMAL` — "a transaction committed in WAL mode with synchronous=NORMAL might roll back following a power loss or system crash" ([PRAGMA synchronous](https://www.sqlite.org/pragma.html#pragma_synchronous)), but a client deletes its outbox rows once a push is `applied`, and a rolled-back `seq` would be re-used under a cursor that still looks valid, so a device would silently skip the re-used range. `FULL` costs one extra sync per commit, negligible at household write rates. Defence in depth for storage that does not honour flushes (SD cards): `serve` deletes `<data>/clean-shutdown` at start and writes it after a clean stop; when the database exists and the marker does not, the start runs `PRAGMA quick_check`, rotates every account's `epoch` in one transaction and audit-logs `unclean_start`, so every device gets `410` and re-asserts what the server may have lost ([Cursor semantics and resync](#cursor-semantics-and-resync); [D94](../PLAN.md#3-key-decisions)). Database file `<data>/neutrodyne-server.db`; `PRAGMA auto_vacuum = INCREMENTAL` is set by `Migrator` before the first table exists (SQLite ignores a later change without a full `VACUUM`, [PRAGMA auto_vacuum](https://www.sqlite.org/pragma.html#pragma_auto_vacuum)), so GC's `incremental_vacuum` works. sqlite-jdbc extracts its native library to `org.sqlite.tmpdir` (default `java.io.tmpdir`, [loader](https://github.com/xerial/sqlite-jdbc/blob/master/src/main/java/org/sqlite/SQLiteJDBCLoader.java)); `ServerConfig` sets it to `<data>/native` (`0700`) before the first connection unless the administrator set it, because systemd's `PrivateTmp` inherits a host `/tmp` that may be `noexec` and Docker mounts `tmpfs` `noexec` by default ([Container image](#container-image)).
 
 ```sql
 -- schema version 1 (sync/server/src/main/resources/db/001-initial.sql)
 CREATE TABLE schema_version (version INTEGER NOT NULL);
 CREATE TABLE account (
-  id INTEGER PRIMARY KEY,                       -- BIGINT GENERATED ALWAYS AS IDENTITY on PostgreSQL
+  id INTEGER PRIMARY KEY AUTOINCREMENT,         -- BIGINT GENERATED ALWAYS AS IDENTITY on PostgreSQL
   username TEXT NOT NULL UNIQUE,                -- NFC + lowercase, 1–40 chars, [a-z0-9._-]
   display_name TEXT,
   role TEXT NOT NULL CHECK (role IN ('admin','user')),
@@ -1523,7 +1533,7 @@ detached snapshots, Merge step 2 clocks, synced overrides only, no credentials/
 local fields/`fc` or feed/audio fetching. Prove real M3 staging and Merge/Replace.
 
 - **Server database:** `BackupJob` runs nightly at `backup.time` (default 03:30 server local time) `VACUUM INTO '<data>/backups/neutrodyne-server-YYYY-MM-DD.db'` ([SQLite VACUUM INTO](https://www.sqlite.org/lang_vacuum.html): a consistent copy of a live database), keeps 7, and records the result for the status page and `/metrics`. The CLI's `backup <file>` does the same on demand. Every migration is preceded by `neutrodyne-server-pre-migration-v{from}-{yyyyMMddHHmm}.db` (kept until the next successful nightly backup after 7 days).
-- **Per account:** `AccountBackupWriter` writes a Neutrodyne backup ZIP (05 format v1, `EpisodeLineV1.ts` mapped as in [Merge](#merge) step 2 — the newest of the record's non-`pos` state clocks, 0 when it has none — and no `fc`: `manifest.json` with `app.abi = "server"`, `library.json`, `episodes.jsonl`, `queue.json`, `settings.json`, `subscriptions.opml` through `:feeds`' `OpmlWriter`) to `<data>/account-backups/<accountId>/neutrodyne-backup-YYYY-MM-DD.zip`, keeps 14, and serves the latest through the web UI's "Download my data" and `GET /api/v1/account/export`. Feed passwords are never included. The app restores it like any backup, so a user can recover even if the server is gone.
+- **Per account:** `AccountBackupWriter` writes a Neutrodyne backup ZIP (05 format v1, `EpisodeLineV1.ts` mapped as in [Merge](#merge) step 2 — the newest of the record's non-`pos` state clocks, 0 when it has none — and no `fc`: `manifest.json` with `app.abi = "server"`, `library.json`, `episodes.jsonl`, `queue.json`, `settings.json`, `subscriptions.opml` through `:feeds`' `OpmlWriter`) to `<data>/account-backups/<accountId>/neutrodyne-backup-YYYY-MM-DD.zip`, keeps 14, and serves the latest through the web UI's "Download my data" and `GET /api/v1/account/export`. Feed passwords are never included. The app restores it like any backup, so a user can recover even if the server is gone. Implementation note (2026-11-01, MS1): a queue record without an `episode` record exports its own `match` hints on the episode line so `RestoreEpisodeMerger.canStub` accepts it; the finished archive is checked against `ArchiveCaps.BACKUP` (entries, sizes, ratio) before publication and rewritten uncompressed when only the ratio trips, so every served export survives the app's `ZipGuard`.
 - **Restore (`restore <file>`, server stopped):** checks `PRAGMA integrity_check` and `schema_version ≤` supported, moves the current database to `neutrodyne-server-replaced-<ts>.db`, installs the copy, **carries the authentication state over** and **rotates every account's `epoch`**. Carry-over (2026-10-05), when the replaced database opens and passes `quick_check`: `account` credentials and status (`password_hash`, `role`, `disabled_at`; accounts created after the backup are copied without records), every `device` row (with `revoked_at`; devices linked after the backup are copied), every `token` row (device tokens, revocations, web sessions, invites, app passwords) and the `audit` table; pending `link_request` rows are dropped. A revocation, password change or account disable made after the backup therefore stays in force — a stolen phone revoked yesterday stays revoked (N13). When the replaced database is unreadable, the restore revokes every web session and invite and prints the account's devices whose revocation or link state may be stale for the administrator to re-check; devices linked after the backup then get `401` ([Relinking, reconnecting and copied installations](#relinking-reconnecting-and-copied-installations)). The restore is audit-logged. Every device then gets `410` and resyncs, re-asserting with their original clocks the changes the restored copy lacks ([Cursor semantics and resync](#cursor-semantics-and-resync)).
 
 ### Event bus and SSE

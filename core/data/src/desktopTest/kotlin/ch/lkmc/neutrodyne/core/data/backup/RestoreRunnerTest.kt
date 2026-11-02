@@ -230,7 +230,11 @@ class RestoreRunnerTest {
         assertEquals("https://cdn.example.com/queued.mp3", stubbed.enclosureUrl)
         assertEquals(
             setOf(queued.id, stubbed.id),
-            db.queueDao().entries().map { it.episodeId }.toSet(),
+            db
+                .queueDao()
+                .entries()
+                .map { it.episodeId }
+                .toSet(),
         )
         assertEquals(1.5f, settings.get(PlaybackSettingKeys.SPEED))
         assertNull(queued.guid)

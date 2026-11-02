@@ -13,15 +13,17 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
+import io.ktor.server.application.install
+import io.ktor.server.cio.CIO
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.plugins.statuspages.exception
 import io.ktor.server.request.receive
+import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
-import io.ktor.server.cio.CIO
-import io.ktor.server.engine.embeddedServer
-import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.response.respond
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.writeFully
@@ -53,7 +55,11 @@ class RequestGuardsTest {
                     routing { post("/echo") { call.respondText("ok") } }
                 }.start(wait = false)
             try {
-                val port = server.engine.resolvedConnectors().single().port
+                val port =
+                    server.engine
+                        .resolvedConnectors()
+                        .single()
+                        .port
                 val socket = stalledPost(port)
                 try {
                     assertTrue(statusLine(socket).contains("408"))
@@ -72,7 +78,11 @@ class RequestGuardsTest {
                     f.install(this)
                 }.start(wait = false)
             try {
-                val port = server.engine.resolvedConnectors().single().port
+                val port =
+                    server.engine
+                        .resolvedConnectors()
+                        .single()
+                        .port
                 // Each held upload reserves its declared 2 MiB; the budget admits at most
                 // 24 MiB, so the 13th must be rejected explicitly instead of buffered.
                 val held = (1..12).map { stalledPost(port) }
