@@ -46,7 +46,8 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                 maxStrippedBytes.set(4_000_000L)
             }
 
-            val ffmpegVersion = ffmpegVersionOf(nativeLock.get().asFile)
+            // `Directory.file(String)` returns the RegularFile itself, not a provider.
+            val ffmpegVersion = ffmpegVersionOf(nativeLock.asFile)
             tasks.register<AssembleFfmpegSourceTask>("assembleFfmpegSource") {
                 group = "build"
                 description = "Assemble the LGPL source bundle of the built FFmpeg (11 FFmpeg LGPL obligations)."
