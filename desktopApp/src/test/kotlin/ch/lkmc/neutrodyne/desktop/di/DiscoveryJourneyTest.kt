@@ -283,7 +283,7 @@ class DiscoveryJourneyTest {
 }
 
 @BindingContainer
-private class DiscoveryJourneyBindings(
+internal class DiscoveryJourneyBindings(
     private val db: NeutrodyneDatabase,
     private val clock: Clock,
     private val scope: CoroutineScope,
@@ -314,13 +314,15 @@ private class DiscoveryJourneyBindings(
             debugInterceptors,
             baseDns =
                 Dns { host ->
-                    if (host == "journey.test" || host.endsWith(".journey.test")) {
+                    if (host == "lan.journey.test") {
+                        listOf(InetAddress.getByName("127.0.0.2"))
+                    } else if (host == "journey.test" || host.endsWith(".journey.test")) {
                         listOf(InetAddress.getByName("127.0.0.1"))
                     } else {
                         Dns.SYSTEM.lookup(host)
                     }
                 },
-            isLocalPeer = { false },
+            isLocalPeer = { peer -> peer.address?.hostAddress == "127.0.0.2" },
         )
 
     @Provides @ApplicationScope
@@ -333,7 +335,7 @@ private class DiscoveryJourneyBindings(
     @Provides fun network(): NetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
 }
 
-private val DiscoveryJourneyPlatformActions =
+internal val DiscoveryJourneyPlatformActions =
     object : PlatformActions {
         override val urls = ExternalUrlOpener { OpenResult.OPENED }
         override val share = null
