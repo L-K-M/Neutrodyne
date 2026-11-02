@@ -8,7 +8,9 @@ import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.UserAgentProvider
 import mockwebserver3.MockResponse
+import okhttp3.Dns
 import okhttp3.Interceptor
+import java.net.InetSocketAddress
 
 internal fun fakePlatform(
     kind: PlatformKind = PlatformKind.DESKTOP,
@@ -29,12 +31,18 @@ internal fun newCoreClients(
     platform: PlatformInfo = fakePlatform(),
     hints: DnsFamilyHints = DnsFamilyHints(),
     debug: Set<Interceptor> = emptySet(),
+    baseDns: Dns = Dns.SYSTEM,
+    isLocalPeer: (InetSocketAddress) -> Boolean = { peer ->
+        peer.address == null || isLocalPeerAddress(peer.address)
+    },
 ): CoreClients =
     CoreClients(
         ua = UserAgentInterceptor(testUserAgent(platform)),
         lanGuard = LocalNetworkGuard(access, platform),
         hints = hints,
         debugInterceptors = debug,
+        baseDns = baseDns,
+        isLocalPeer = isLocalPeer,
     )
 
 internal fun newNetworkClients(
@@ -42,7 +50,15 @@ internal fun newNetworkClients(
     access: LocalNetworkAccess = LocalNetworkAccess(),
     platform: PlatformInfo = fakePlatform(),
     hints: DnsFamilyHints = DnsFamilyHints(),
-): NetworkClients = NetworkClients(newCoreClients(access, platform, hints), AuthInterceptor { credentials })
+    baseDns: Dns = Dns.SYSTEM,
+    isLocalPeer: (InetSocketAddress) -> Boolean = { peer ->
+        peer.address == null || isLocalPeerAddress(peer.address)
+    },
+): NetworkClients =
+    NetworkClients(
+        newCoreClients(access, platform, hints, baseDns = baseDns, isLocalPeer = isLocalPeer),
+        AuthInterceptor { credentials },
+    )
 
 internal fun mockResponse(
     code: Int = 200,

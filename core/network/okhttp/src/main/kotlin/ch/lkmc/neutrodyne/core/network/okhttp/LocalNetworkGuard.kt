@@ -152,6 +152,47 @@ private fun isLanV6(b: ByteArray): Boolean {
 }
 
 /**
+ * The M7 pre-confirmation peer ranges (03 note 2026-11-02), wider than [isLanAddress]:
+ * loopback and unspecified join RFC 1918, CGNAT `100.64/10`, link-local, ULA and the
+ * IPv4-mapped forms. `PreConfirmationPeerGuard` judges the connected peer's `InetAddress`,
+ * so DNS answers and redirect targets cannot launder a local destination — and only marked
+ * calls pay for it, so a typed LAN feed still fetches.
+ */
+fun isLocalPeerAddress(address: InetAddress): Boolean {
+    if (address.isAnyLocalAddress || address.isLoopbackAddress) return true
+    val bytes = address.address ?: return false
+    return when (bytes.size) {
+        IPV4_BYTES -> isLocalPeerV4(bytes, 0)
+        IPV6_BYTES -> isLocalPeerV6(bytes)
+        else -> false
+    }
+}
+
+private fun isLocalPeerV4(
+    b: ByteArray,
+    offset: Int,
+): Boolean {
+    val b0 = b[offset].toInt() and 0xFF
+    val b1 = b[offset + 1].toInt() and 0xFF
+    return b0 == 0 || b0 == 10 || b0 == 127 ||
+        (b0 == 100 && b1 in 64..127) ||
+        (b0 == 169 && b1 == 254) ||
+        (b0 == 172 && b1 in 16..31) ||
+        (b0 == 192 && b1 == 168)
+}
+
+private fun isLocalPeerV6(b: ByteArray): Boolean {
+    val v4Mapped =
+        (0 until V4_MAPPED_PREFIX_BYTES).all { b[it].toInt() == 0 } &&
+            b[V4_MAPPED_PREFIX_BYTES].toInt() == 0xFF && b[V4_MAPPED_PREFIX_BYTES + 1].toInt() == 0xFF
+    if (v4Mapped) return isLocalPeerV4(b, V4_MAPPED_PREFIX_BYTES + 2)
+
+    val b0 = b[0].toInt() and 0xFF
+    val b1 = b[1].toInt() and 0xFF
+    return (b0 and 0xFE) == 0xFC || (b0 == 0xFE && (b1 and 0xC0) == 0x80)
+}
+
+/**
  * Parses an IP literal without a DNS lookup: `InetAddress.getByName` never leaves the machine for
  * a syntactically valid literal. `HttpUrl` hands us the normalized host (IPv6 uncompressed and
  * bracket-free, a `%zone` suffix possible).
