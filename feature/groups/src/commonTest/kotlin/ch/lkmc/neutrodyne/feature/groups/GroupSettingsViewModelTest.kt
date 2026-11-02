@@ -5,7 +5,9 @@ package ch.lkmc.neutrodyne.feature.groups
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.DeleteAfter
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.NetworkPolicy
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
@@ -60,7 +62,19 @@ class GroupSettingsViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             val scoped = vm.uiState.value.scoped!!
             assertEquals(SettingOverrides(120, true), scoped.own)
-            assertEquals(scoped.own.copy(playbackSpeed = 1f, skipSilence = false), scoped.effective)
+            assertEquals(
+                scoped.own.copy(
+                    playbackSpeed = 1f,
+                    skipSilence = false,
+                    autoDownload = false,
+                    autoDownloadKeepLatest = 3,
+                    autoDownloadNetwork = NetworkPolicy.UNMETERED,
+                    autoDownloadRequireCharging = false,
+                    includeVideoInAutoDownload = false,
+                    deleteAfterPlayed = DeleteAfter.AFTER_24H,
+                ),
+                scoped.effective,
+            )
             assertEquals(ownSource, scoped.sources[SettingField.REFRESH_INTERVAL_MINUTES])
             assertEquals(ownSource, scoped.sources[SettingField.NOTIFY_NEW_EPISODES])
             assertTrue(settings.calls.isEmpty(), "Group overrides must not write global settings")

@@ -34,7 +34,9 @@ object AllSettingKeys {
     fun acceptsValue(
         key: SettingKey<*>,
         value: Any,
-    ): Boolean = acceptsStoredType(key, value) && PlaybackSettingKeys.acceptsRange(key, value)
+    ): Boolean =
+        acceptsStoredType(key, value) && PlaybackSettingKeys.acceptsRange(key, value) &&
+            DownloadSettingKeys.acceptsRange(key, value)
 }
 
 /** The stored-type half of [AllSettingKeys.acceptsValue]; one branch per [SettingKey] subclass. */

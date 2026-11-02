@@ -229,6 +229,7 @@ class GroupSettingsScreenTest {
                                 SettingField.NOTIFY_NEW_EPISODES -> own.notifyNewEpisodes != null
                                 SettingField.PLAYBACK_SPEED -> own.playbackSpeed != null
                                 SettingField.SKIP_SILENCE -> own.skipSilence != null
+                                else -> false
                             }
                         if (hasOwn) SettingSource.Group(group.uuid, group.name) else SettingSource.AppDefault
                     },
