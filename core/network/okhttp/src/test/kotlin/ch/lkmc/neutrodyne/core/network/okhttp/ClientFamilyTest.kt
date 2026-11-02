@@ -88,6 +88,8 @@ class ClientFamilyTest {
         for (client in allKinds(clients)) {
             assertThat(client.interceptors[0]).isInstanceOf(LocalNetworkGuardInterceptor::class.java)
             assertThat(client.interceptors[1]).isInstanceOf(UserAgentInterceptor::class.java)
+            assertThat(client.interceptors[2]).isInstanceOf(PreConfirmationRequestGuard::class.java)
+            assertThat(client.networkInterceptors.any { it is PreConfirmationPeerGuard }).isTrue()
         }
         // On the desktop the guard is a pass-through but still sits in slot 0.
         val desktop = newNetworkClients()
@@ -100,8 +102,8 @@ class ClientFamilyTest {
         val clients = newNetworkClients(access = access, platform = fakePlatform(PlatformKind.ANDROID, 37))
         assertThat(clients[HttpClientKind.SYNC].dns).isInstanceOf(LocalNetworkGuardDns::class.java)
         assertThat(clients.feed.dns).isInstanceOf(LocalNetworkGuardDns::class.java)
-        // On desktop the dns chain is just FamilyHintDns — no guard wrapper.
-        assertThat(newNetworkClients().feed.dns).isInstanceOf(FamilyHintDns::class.java)
+        // Desktop has the pre-confirmation DNS wrapper; unmarked calls retain normal resolution.
+        assertThat(newNetworkClients().feed.dns).isInstanceOf(PreConfirmationDns::class.java)
     }
 
     @Test

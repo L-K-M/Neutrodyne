@@ -65,6 +65,10 @@ class EditFeedUrlTest {
         kotlin.io.path
             .createTempDirectory("nd-edit-feed")
             .toFile()
+    private val testDns =
+        Dns { host ->
+            if (host == EDIT_HOST) listOf(InetAddress.getByName("127.0.0.1")) else Dns.SYSTEM.lookup(host)
+        }
     private val resolver =
         newResolver(
             root,
@@ -72,9 +76,7 @@ class EditFeedUrlTest {
             clock,
             networkClients =
                 newNetworkClients(
-                    baseDns = Dns { host ->
-                        if (host == EDIT_HOST) listOf(InetAddress.getByName("127.0.0.1")) else Dns.SYSTEM.lookup(host)
-                    },
+                    baseDns = testDns,
                     isLocalPeer = NO_LOCAL_PEER,
                 ),
         )
@@ -548,7 +550,12 @@ class EditFeedUrlTest {
 
             // The refresh run's fetcher resolves the credential by the feed's request origin.
             server.enqueue(mockResponse(body = rssBody(title = "Refreshed")))
-            newRssAdapter(root, clock, credentials = store).use { bundle ->
+            newRssAdapter(
+                root,
+                clock,
+                credentials = store,
+                networkClients = newNetworkClients(credentials = store, baseDns = testDns),
+            ).use { bundle ->
                 val refreshEngine =
                     newRefresher(
                         db,

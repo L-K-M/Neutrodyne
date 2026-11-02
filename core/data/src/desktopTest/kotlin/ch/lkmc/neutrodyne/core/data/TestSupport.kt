@@ -532,8 +532,9 @@ internal fun newRssAdapter(
     credentials: CredentialLookup = CredentialLookup.None,
     io: CoroutineDispatcher = Dispatchers.IO,
     parser: FeedParser = XmlPullFeedParser.discovered(),
+    networkClients: NetworkClients = newNetworkClients(credentials),
 ): RssAdapterBundle {
-    val bundle = newFetcher(root, credentials, clock)
+    val bundle = newFetcher(root, credentials, clock, networkClients)
     val adapter =
         RssSourceAdapter(
             fetcher = bundle.fetcher,

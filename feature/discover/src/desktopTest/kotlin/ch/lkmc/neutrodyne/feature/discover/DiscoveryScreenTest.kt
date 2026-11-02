@@ -69,8 +69,10 @@ class DiscoveryScreenTest {
     fun unknownProvidersDoNotClaimDirectoriesAreDisabled() =
         runComposeUiTest {
             setContent {
-                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                    DiscoverScreen(DiscoverState(), {}, {}, navigator)
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DiscoverScreen(DiscoverState(), {}, {}, navigator)
+                    }
                 }
             }
             onNodeWithText("Enable a directory in Discover settings").assertDoesNotExist()

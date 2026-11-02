@@ -68,9 +68,12 @@ class CoreClients(
 
     private fun coreBuilder(mode: LocalNetworkGuard.Mode): OkHttpClient.Builder {
         val dns =
-            PreConfirmationDns(
-                lanGuard.dns(FamilyHintDns(Dns { hostname -> baseDns.lookup(hostname) }, hints), mode),
-            ) { peer -> isLocalPeer(peer) }
+            lanGuard.dns(
+                PreConfirmationDns(FamilyHintDns(Dns { hostname -> baseDns.lookup(hostname) }, hints)) { peer ->
+                    isLocalPeer(peer)
+                },
+                mode,
+            )
         val destinations = PreConfirmationDestinations(dns) { peer -> isLocalPeer(peer) }
         return OkHttpClient
             .Builder()
@@ -78,8 +81,8 @@ class CoreClients(
             .connectionPool(pool)
             .dns(dns)
             .addInterceptor(lanGuard.interceptor(mode))
-            .addInterceptor(PreConfirmationRequestGuard(destinations))
             .addInterceptor(ua)
+            .addInterceptor(PreConfirmationRequestGuard(destinations))
             // The M7 actual-peer guard (03 note 2026-11-02): a network interceptor, so it runs
             // after the connection exists — on every follow-up hop — and only for requests
             // carrying the pre-confirmation marker. On `core` so feed, image and the other
