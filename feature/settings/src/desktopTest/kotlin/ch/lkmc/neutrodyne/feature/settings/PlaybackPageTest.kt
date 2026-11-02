@@ -119,6 +119,9 @@ class PlaybackPageTest {
             )
             onNodeWithText("Smart resume").performScrollTo().performClick()
             waitForIdle()
+            assertEquals(false, runBlocking { settings.get(PlaybackSettingKeys.SMART_RESUME) })
+            onNodeWithText("Smart resume").performClick()
+            waitForIdle()
             assertEquals(true, runBlocking { settings.get(PlaybackSettingKeys.SMART_RESUME) })
         }
 

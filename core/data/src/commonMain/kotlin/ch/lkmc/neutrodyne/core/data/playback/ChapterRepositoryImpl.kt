@@ -98,7 +98,9 @@ internal class ChapterRepositoryImpl(
             require(result.chapters.all { it.source == ChapterSource.ID3 || it.source == ChapterSource.MP4 })
             db.withWriteTransaction {
                 // Revalidate ownership: deletion or re-download can overtake the inspector.
-                if (db.downloadDao().byEpisode(episodeId) != original) {
+                // A benign row write (progress flush, notify mark) must not abort the commit.
+                val current = db.downloadDao().byEpisode(episodeId)
+                if (current?.state != DownloadState.COMPLETED || current.finalUri != fileUri) {
                     return@withWriteTransaction
                 }
                 for (source in listOf(ChapterSource.ID3, ChapterSource.MP4)) {

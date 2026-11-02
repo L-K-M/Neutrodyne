@@ -148,8 +148,9 @@ class DownloadJourneyTest {
             // The publisher disappears before local chapter enrichment and the first playback start.
             server.close()
             serverClosed = true
-            graph.chapterRepository().ensureLocalLoaded(id, checkNotNull(row.finalUri))
+            val local = graph.chapterRepository().ensureLocalLoaded(id, checkNotNull(row.finalUri))
             assertTrue(
+                "local chapter read: $local",
                 graph
                     .chapterRepository()
                     .observe(id)
