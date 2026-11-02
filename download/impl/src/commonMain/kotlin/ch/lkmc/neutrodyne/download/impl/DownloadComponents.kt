@@ -160,6 +160,22 @@ internal class DownloadComponents(
             },
             cleanup,
         )
+    val planner =
+        AutoDownloadPlannerImpl(
+            db,
+            resolver,
+            quota,
+            device,
+            clock,
+            roots,
+            scheduler,
+            claimMutex,
+            engine::stopTransfer,
+            storage,
+            media,
+            platform.kind,
+            io,
+        )
     val controller =
         DownloadControllerImpl(
             db,
