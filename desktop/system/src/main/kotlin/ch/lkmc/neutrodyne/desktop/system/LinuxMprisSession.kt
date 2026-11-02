@@ -2,8 +2,9 @@
 package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
@@ -31,9 +32,12 @@ class LinuxMprisSession private constructor(
 ) : SystemMediaSession,
     MprisRoot,
     MprisPlayer {
-    private val commandSink = MutableSharedFlow<RemoteCommand>(extraBufferCapacity = COMMAND_BUFFER)
+    // A Channel, not a SharedFlow: queued commands must survive until a
+    // collector attaches, while replay=0 drops every emit that lands before
+    // subscription.
+    private val commandChannel = Channel<RemoteCommand>(COMMAND_BUFFER)
 
-    override val commands: Flow<RemoteCommand> = commandSink
+    override val commands: Flow<RemoteCommand> = commandChannel.receiveAsFlow()
 
     /** The path [open] exports this object under. */
     override fun getObjectPath() = MprisNames.PATH
@@ -189,7 +193,7 @@ class LinuxMprisSession private constructor(
     override fun getCanControl() = true
 
     private fun emit(command: RemoteCommand) {
-        commandSink.tryEmit(command)
+        commandChannel.trySend(command)
     }
 
     private fun emitSeeked(positionMs: Long) {
