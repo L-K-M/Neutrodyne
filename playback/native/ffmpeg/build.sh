@@ -150,15 +150,15 @@ verify_signature() {
     mkdir -p "$home"
     chmod 700 "$home"
     keyring="$home/ffmpeg-release.gpg"
-    GNUPGHOME="$home" bounded 120 gpg --no-options --batch --yes --no-autostart \
+    bounded 120 gpg --homedir "$home" --no-options --batch --yes --no-autostart \
         --dearmor --output "$keyring" "$NATIVE_DIR/${SIGNING_KEY#playback/native/}" ||
         die "could not dearmor the FFmpeg release signing key"
-    fingerprint="$(GNUPGHOME="$home" bounded 120 gpg --no-options --batch --no-autostart \
+    fingerprint="$(bounded 120 gpg --homedir "$home" --no-options --batch --no-autostart \
         --with-colons --show-keys "$keyring" | awk -F: '$1 == "fpr" { print $10; exit }')" ||
         die "could not read the FFmpeg signing key's fingerprint"
     [ "$fingerprint" = "$SIGNING_KEY_FINGERPRINT" ] ||
         die "the FFmpeg signing key is $fingerprint, expected $SIGNING_KEY_FINGERPRINT"
-    GNUPGHOME="$home" bounded 120 gpgv --keyring "$keyring" "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
+    bounded 120 gpgv --homedir "$home" --keyring "$keyring" "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
         die "the FFmpeg source signature did not verify"
 
     log "verified the FFmpeg source signature with $SIGNING_KEY_FINGERPRINT"
