@@ -13,6 +13,11 @@ kotlin {
     }
 
     sourceSets {
+        // Opt-in fixture driver is absent from ordinary and published builds.
+        if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
+            androidMain.get().kotlin.srcDir("src/systemTest/kotlin")
+        }
+
         val jvmMain by creating { dependsOn(commonMain.get()) }
         androidMain.get().dependsOn(jvmMain)
         desktopMain.get().dependsOn(jvmMain)
