@@ -104,23 +104,32 @@ download() { # download <url> <file>
         return 0
     fi
     log "downloading $1"
-    curl -fsSL --retry 3 --connect-timeout 30 -o "$2" "$1" || die "download failed: $1"
+    curl -fsSL --retry 3 --connect-timeout 30 --max-time 1800 -o "$2" "$1" ||
+        die "download failed: $1"
 }
 
 verify_signature() {
     command -v gpg >/dev/null 2>&1 || die "gpg is required to verify the FFmpeg source signature"
     local keyring home
     home="$(mktemp -d)"
+    # gpg is a native Windows program under MSYS2, so its home has to be a Windows
+    # path: a POSIX one is read relative to the current drive root, and gpg then
+    # waits on a directory it cannot create instead of failing.
+    if command -v cygpath >/dev/null 2>&1; then
+        home="$(cygpath -w "$home")"
+    fi
     keyring="$home/ffmpeg-release-signing-key.asc"
     cp "$REPO_ROOT/$SIGNING_KEY" "$keyring"
-    GNUPGHOME="$home" gpg --quiet --batch --import "$keyring" >/dev/null 2>&1 ||
+    # Every gpg call is bounded, so a build that cannot verify fails instead of
+    # running until the job's timeout.
+    GNUPGHOME="$home" timeout 120 gpg --quiet --batch --import "$keyring" >/dev/null 2>&1 ||
         die "could not import the FFmpeg release signing key"
     local fingerprint
-    fingerprint="$(GNUPGHOME="$home" gpg --quiet --with-colons --show-keys "$keyring" |
+    fingerprint="$(GNUPGHOME="$home" timeout 120 gpg --quiet --with-colons --show-keys "$keyring" |
         awk -F: '$1 == "fpr" { print $10; exit }')"
     [ "$fingerprint" = "$SIGNING_KEY_FINGERPRINT" ] ||
         die "the FFmpeg signing key is $fingerprint, expected $SIGNING_KEY_FINGERPRINT"
-    GNUPGHOME="$home" gpg --quiet --batch --verify "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
+    GNUPGHOME="$home" timeout 120 gpg --quiet --batch --verify "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
         die "the FFmpeg source signature did not verify"
     rm -rf "$home"
     log "verified the FFmpeg source signature with $SIGNING_KEY_FINGERPRINT"
@@ -392,6 +401,9 @@ log "collecting the enabled-component inventory"
 # The enabled-component inventory, read from the build's own config.h. A grep
 # with no match exits 1, which under `pipefail` and `set -e` would end the build
 # without a word, so the inventory is collected first and its size is logged.
+log "config.h defines $(grep -c '^#define' "$SOURCE_DIR/config.h" || true) macros, "\
+    "$(grep -c 'DEMUXER' "$SOURCE_DIR/config.h" || true) of them naming a demuxer"
+log "a demuxer define reads: $(grep -m1 'DEMUXER' "$SOURCE_DIR/config.h" || true)"
 COMPONENTS="$(grep -E '^#define CONFIG_[A-Z0-9_]+_(DEMUXER|DECODER|PARSER|BSF|MUXER|ENCODER) 1' \
     "$SOURCE_DIR/config.h" | sed 's/^#define CONFIG_//; s/ 1$//' | sort || true)"
 log "the build enabled $(printf '%s\n' "$COMPONENTS" | grep -c '[^[:space:]]') components"

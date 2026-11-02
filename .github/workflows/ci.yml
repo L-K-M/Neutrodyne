@@ -410,7 +410,7 @@ jobs:
         run: |
           mkdir -p native-evidence
           for f in ffmpeg-build.txt ffmpeg-sizes.txt ffmpeg-license.txt \
-                   ffmpeg-protocols.txt ffmpeg-components.txt; do
+                   ffmpeg-protocols.txt ffmpeg-components.txt ffmpeg-config.h; do
             cp "playback/native/build/ffmpeg/${{ matrix.target }}/$f" native-evidence/
           done
           cp playback/native/build/ffmpeg-source/*.tar.xz native-evidence/ 2>/dev/null || true

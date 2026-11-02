@@ -213,7 +213,7 @@ abstract class CheckNativeLicencesTask : DefaultTask() {
         } else {
             var total = 0L
             var libraries = 0
-            for (line in sizes.readText().lines()) {
+            for (line in sizes.readText().lines().filter { it.isNotBlank() }) {
                 val parts = line.trim().split(' ')
                 if (parts.size != 2) {
                     problems += "ffmpeg-sizes.txt line '$line' is not '<library> <bytes>'"
