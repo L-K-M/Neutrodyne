@@ -110,6 +110,15 @@ class LinuxMprisSessionTest {
         }
     }
 
+    @Test
+    fun aNonFiniteRateCannotEnterTheCommandStream() {
+        assumeTrue("private session bus required", System.getenv("DBUS_SESSION_BUS_ADDRESS") != null)
+        LinuxMprisSession.open().use { session ->
+            kotlin.test.assertFailsWith<IllegalArgumentException> { session.setRate(Double.NaN) }
+            assertTrue(session.getRate().isFinite())
+        }
+    }
+
     private fun DBusConnection.properties(): Properties =
         getRemoteObject(MprisNames.BUS, MprisNames.PATH, Properties::class.java)
 

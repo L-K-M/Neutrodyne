@@ -113,6 +113,31 @@ class FfmpegCorpusTest {
     }
 
     @Test
+    fun `a corrupt packet reports a decode failure instead of being skipped`() {
+        val bytes = corpusFile("flac_2s.flac").readBytes()
+        FfmpegPipeline.open(MemoryByteSource(bytes), hostFfmpegDirectory()).use { pipeline ->
+            val packet = requireNotNull(pipeline.demuxer.readPacket())
+            packet.data.reinterpret(packet.size.toLong()).fill(0)
+            val failed = runCatching {
+                if (pipeline.decoder.send(packet)) pipeline.decoder.receive()
+            }.isFailure
+            assertTrue("a corrupt FLAC packet was silently discarded", failed)
+        }
+    }
+
+    @Test
+    fun `failed opens do not poison a subsequent valid pipeline`() {
+        repeat(10) {
+            assertTrue(runCatching {
+                FfmpegPipeline.open(MemoryByteSource(ByteArray(32)), hostFfmpegDirectory()).close()
+            }.isFailure)
+        }
+        FfmpegPipeline.open(MemoryByteSource(corpusFile("wav_2s.wav").readBytes()), hostFfmpegDirectory()).use { pipeline ->
+            assertEquals(88_200L, pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels })
+        }
+    }
+
+    @Test
     fun `the AAC priming of a fragmented MP4 is trimmed once`() {
         val manifest = readManifest()
         val trimmed = manifest.files.single { it.trimRule == AAC_PRIMING_RULE }
