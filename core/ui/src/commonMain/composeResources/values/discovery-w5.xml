@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="discovery_search">Search podcasts or paste a link</string>
+    <string name="discovery_disclosure">Searches are sent to %1$s</string>
+    <string name="discovery_disabled">Enable a directory in Discover settings</string>
+    <string name="discovery_top">Top podcasts</string>
+    <string name="discovery_popular">Popular in %1$s</string>
+    <string name="discovery_categories">Categories</string>
+    <string name="discovery_add_link">Add this link</string>
+    <string name="discovery_import">Import</string>
+    <string name="discovery_more">More</string>
+    <string name="discovery_empty">No podcasts found for ‘%1$s’</string>
+    <string name="discovery_unavailable">Search isn’t available right now</string>
+    <string name="discovery_charts_unavailable">Charts unavailable</string>
+    <string name="discovery_partial">%1$s did not answer; showing available results</string>
+    <string name="discovery_busy">%1$s is busy; showing available results</string>
+    <string name="discovery_invalid">This directory is unavailable</string>
+    <string name="discovery_subscribed">Subscribed</string>
+    <string name="discovery_search_for">Search for ‘%1$s’</string>
+    <string name="add_lookup_once">Look up once with Apple</string>
+    <string name="preview_subscribe_play">Subscribe to play</string>
+    <string name="preview_title">Podcast preview</string>
+    <string name="preview_confirm">Subscribe anyway?</string>
+    <string name="discovery_genre_technology">Technology</string>
+    <string name="discovery_genre_news">News</string>
+    <string name="discovery_genre_fiction">Fiction</string>
+    <string name="discovery_genre_comedy">Comedy</string>
+    <string name="discovery_genre_science">Science</string>
+    <string name="discovery_genre_history">History</string>
+    <string name="discovery_genre_sports">Sports</string>
+    <string name="discovery_genre_true_crime">True crime</string>
+    <string name="discovery_genre_business">Business</string>
+    <string name="discovery_genre_arts">Arts</string>
+    <string name="discovery_genre_education">Education</string>
+    <string name="discovery_genre_health_fitness">Health &amp; fitness</string>
+    <string name="discovery_genre_kids_family">Kids &amp; family</string>
+    <string name="discovery_genre_music">Music</string>
+    <string name="discovery_genre_society_culture">Society &amp; culture</string>
+    <string name="discovery_genre_tv_film">TV &amp; film</string>
+    <string name="discovery_genre_religion">Religion</string>
+    <string name="discovery_genre_government">Government</string>
+    <string name="discovery_genre_leisure">Leisure</string>
+</resources>

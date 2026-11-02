@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="privacy_feeds_title">Feeds und Publisher</string>
+    <string name="privacy_feeds_body">Abonnierte Feeds, Vorschau-Feeds und Weiterleitungsziele erhalten den angefragten URL-Pfad und die Query, bedingte Cache-Header und Basic-Zugangsdaten nur für den passenden Origin.</string>
+    <string name="privacy_add_input_title">Seiten und Feed-Kandidaten</string>
+    <string name="privacy_add_input_body">Die eingegebene oder geteilte Seite, bis zu fünf bekannte Feed-Pfade auf dieser Website und Publisher-Kandidaten erhalten ihren angefragten URL-Pfad und die Query. Kandidaten können andere Hosts nutzen. Neutrodyne prüft bis zu fünf Kandidaten und sendet sie an kein Verzeichnis.</string>
+    <string name="privacy_media_title">Audio-Hosts</string>
+    <string name="privacy_media_body">Enclosure-Hosts und Mess-Weiterleitungen der Publisher erhalten die Medien-URL, Bereichsanfragen und bei Bedarf Zugangsdaten des passenden Origins. Sie können Wiedergaben oder Downloads anhand von IP und User-Agent messen.</string>
+    <string name="privacy_artwork_title">Artwork-Hosts</string>
+    <string name="privacy_artwork_body">Feed- und Verzeichnis-Artwork-Hosts, darunter Apple-Bild-CDNs, fyyd-Bild-Hosts und Podcast-Index-Artwork-URLs, erhalten den angefragten Bildpfad, wenn ein Cover angezeigt wird. Verzeichnis-Schalter blockieren keine bereits gelieferten Bilder.</string>
+    <string name="privacy_chapters_title">Kapitel-Hosts</string>
+    <string name="privacy_chapters_body">Von Episodenkapiteln referenzierte Hosts erhalten die Kapiteldatei-URL, wenn Kapitel geladen werden.</string>
+    <string name="privacy_notes_images_title">Bild-Hosts der Shownotes</string>
+    <string name="privacy_notes_images_body">Bild-Hosts erhalten die Bild-URL, wenn Bilder erlaubt sind oder du sie lädst. Ändere das in den Feed-Einstellungen.</string>
+    <string name="privacy_apple_title">Apple</string>
+    <string name="privacy_apple_body">itunes.apple.com erhält Suchtext, Land und Suchparameter; explizite Apple-, pod.link- oder Overcast-Lookups senden Apple-Podcast-IDs. rss.marketingtools.apple.com erhält das Land für Gesamt-Charts. Genre-Charts senden Land und Genre-ID an itunes.apple.com; die Chart-Auflösung sendet Podcast-IDs dorthin. Apple erhält keine Abonnements, Feed-URLs oder Podcast-Index-Zugangsdaten.</string>
+    <string name="privacy_fyyd_title">fyyd</string>
+    <string name="privacy_fyyd_body">api.fyyd.de erhält Suchtext und Ergebnisanzahl-Parameter. Es erhält kein Land, keine Abonnements, Feed-URLs oder API-Zugangsdaten. Eine in „Hinzufügen“ eingegebene fyyd-Seite wird als Webseite abgerufen.</string>
+    <string name="privacy_podcastindex_title">Podcast Index</string>
+    <string name="privacy_podcastindex_body">api.podcastindex.org erhält Suchtext und Ergebnisanzahl-Parameter oder eine explizite Podcast-Index-Feed-ID. Jede Anfrage enthält X-Auth-Key (API-Schlüssel), X-Auth-Date (Zeitstempel) und Authorization (SHA-1 aus Schlüssel, Secret und Zeitstempel); das Secret selbst wird nicht gesendet. Die Verifizierung eines Paars sendet die feste Abfrage „podcast“. Kein Land, keine Abonnements oder Feed-URLs werden gesendet.</string>
+    <string name="privacy_youtube_subscriptions_title">YouTube-Abonnements</string>
+    <string name="privacy_youtube_subscriptions_body">Beim Hinzufügen oder Aktualisieren eines YouTube-Kanals erhält www.youtube.com Kanal-IDs und Seiten-/Feed-Anfragen. YouTube-Thumbnail-Hosts (i.ytimg.com, yt3.googleusercontent.com, yt3.ggpht.com) erhalten Bildpfade.</string>
+    <string name="privacy_youtube_streams_title">YouTube-Wiedergabe und Kanalsuche</string>
+    <string name="privacy_youtube_streams_body">Mit der Engine erhält www.youtube.com Video-/Kanal-IDs, explizite Kanalsuchen, Locale, Client-Header und ein flüchtiges Consent-Cookie. googlevideo.com-Hosts erhalten Medienanfragen. Podcast-Suchtext wird nicht an YouTube gesendet.</string>
+    <string name="privacy_youtube_engine_title">YouTube-Engine-Updates</string>
+    <string name="privacy_youtube_engine_body">Wenn aktiviert, erhält der GitHub-Pages-Host des Projekts Manifest-Anfragen; github.com und release-assets.githubusercontent.com erhalten Engine-Download-Pfade.</string>
+    <string name="privacy_app_updates_title">App-Updates</string>
+    <string name="privacy_app_updates_body">Wenn aktiviert, erhalten github.com und release-assets.githubusercontent.com Update-Manifest-Anfragen mit dem User-Agent der App. Das Antippen eines Releases oder Downloads öffnet deinen Browser.</string>
+    <string name="privacy_sync_server_title">Dein Sync-Server</string>
+    <string name="privacy_sync_server_body">Erst nach der Verknüpfung: Dein Server erhält sein Geräte-Token, Gerätenamen, Plattform/Version und den synchronisierten Bibliotheksstand, einschließlich privater Feed-URLs. Feed-Passwörter werden nur geteilt, wenn aktiviert. Er erhält keine Audio- oder Feed-Inhalte. Der Serverbetreiber kann gespeicherte Daten lesen.</string>
+    <string name="privacy_links_title">Von dir geöffnete Links</string>
+    <string name="privacy_links_body">Dein Browser oder die gewählte App erhält einen Link, den du antippst, einschließlich Release-/Download-Links. Es gelten deren eigene Datenschutzeinstellungen.</string>
+    <string name="privacy_issue_tracker_title">Issue-Tracker</string>
+    <string name="privacy_issue_tracker_body">Das Melden eines Problems öffnet github.com in deinem Browser. Prüfe jede Meldung vor dem Absenden.</string>
+    <string name="privacy_server_updates_title">Sync-Server-Updates</string>
+    <string name="privacy_server_updates_body">Der optionale Sync-Server, nicht diese App, prüft github.com und release-assets.githubusercontent.com auf Updates, wenn sein Betreiber die Prüfung aktiviert.</string>
+</resources>
