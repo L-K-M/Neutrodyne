@@ -17,16 +17,40 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 internal object UpdateManifestGuard : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        if (!request.url.encodedPath.endsWith("/neutrodyne-update.json")) return chain.proceed(request)
-        if (!allowed(request.url) || request.url.host != GITHUB_HOST) return rejected(request)
+        if (!request.url.encodedPath.endsWith("/$MANIFEST_NAME")) return chain.proceed(request)
+        val repository = repositoryOf(request.url)
+        if (!allowed(request.url) || request.url.host != GITHUB_HOST || repository == null) return rejected(request)
 
-        return chain.proceed(request.newBuilder().tag(UpdateManifestCall::class.java, UpdateManifestCall()).build())
+        return chain.proceed(
+            request.newBuilder().tag(UpdateManifestCall::class.java, UpdateManifestCall(repository)).build(),
+        )
     }
 
     internal fun allowed(url: HttpUrl): Boolean =
         url.isHttps && url.port == 443 && url.username.isEmpty() && url.password.isEmpty() &&
             url.fragment == null && url.host in ALLOWED_HOSTS &&
             (url.host != GITHUB_HOST || url.query == null)
+
+    /**
+     * The repository of a release manifest URL, or null for anything else on github.com. The parser
+     * only validates a manifest's links, so a redirect to another repository's manifest must stop here.
+     */
+    private fun repositoryOf(url: HttpUrl): String? {
+        val segments = url.pathSegments
+        if (segments.size != MANIFEST_SEGMENTS || segments.last() != MANIFEST_NAME || segments[2] != "releases") {
+            return null
+        }
+
+        // releases/latest/download/<name> or releases/download/<tag>/<name>.
+        val released = (segments[3] == "latest" && segments[4] == "download") || segments[3] == "download"
+        return if (released) "${segments[0]}/${segments[1]}".lowercase() else null
+    }
+
+    /** A hop of [call]: the CDN's signed paths are opaque, but github.com stays on one repository. */
+    internal fun allowedHop(
+        url: HttpUrl,
+        call: UpdateManifestCall,
+    ): Boolean = allowed(url) && (url.host != GITHUB_HOST || repositoryOf(url) == call.repository)
 
     internal fun rejected(request: Request): Response =
         Response
@@ -39,11 +63,14 @@ internal object UpdateManifestGuard : Interceptor {
             .build()
 
     private const val GITHUB_HOST = "github.com"
+    private const val MANIFEST_NAME = "neutrodyne-update.json"
+    private const val MANIFEST_SEGMENTS = 6
     private val ALLOWED_HOSTS =
         setOf(GITHUB_HOST, "release-assets.githubusercontent.com")
 }
 
 internal class UpdateManifestCall(
+    val repository: String,
     var hops: Int = 0,
 )
 
@@ -52,7 +79,7 @@ internal object UpdateManifestHopGuard : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val call = request.tag(UpdateManifestCall::class.java) ?: return chain.proceed(request)
-        if (!UpdateManifestGuard.allowed(request.url) || call.hops++ > MAX_REDIRECTS) {
+        if (!UpdateManifestGuard.allowedHop(request.url, call) || call.hops++ > MAX_REDIRECTS) {
             return UpdateManifestGuard.rejected(request)
         }
 
@@ -68,7 +95,9 @@ internal object UpdateManifestHopGuard : Interceptor {
         if (response.code !in REDIRECT_STATUSES) return response
 
         val target = response.header("Location")?.let { request.url.resolve(it) }
-        if (target != null && UpdateManifestGuard.allowed(target) && call.hops <= MAX_REDIRECTS) return response
+        if (target != null && UpdateManifestGuard.allowedHop(target, call) && call.hops <= MAX_REDIRECTS) {
+            return response
+        }
 
         response.close()
         return UpdateManifestGuard.rejected(clean)

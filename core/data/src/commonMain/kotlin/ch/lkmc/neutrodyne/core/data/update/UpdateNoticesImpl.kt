@@ -83,6 +83,8 @@ internal class UpdateNoticesImpl(
     }
 
     override fun dismiss(notice: UpdateNotice) {
+        // A waiter must not read the previous attempt's failure as this retry's result.
+        mutableError.value = null
         scope.launch {
             mutex.withLock {
                 if (mutablePending.value != notice) return@withLock
