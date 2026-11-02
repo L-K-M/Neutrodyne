@@ -3,10 +3,14 @@
 package ch.lkmc.neutrodyne.feature.episode
 
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
@@ -45,6 +49,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeViewModelTest : MainDispatcherTest() {
     private val episodes = FakeEpisodeRepository()
+    private val chapters = FakeChapterRepository()
     private val podcasts = FakePodcastRepository()
     private val settings = FakeSettingsRepository()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
@@ -55,6 +60,7 @@ class EpisodeViewModelTest : MainDispatcherTest() {
         EpisodeViewModel(
             episodeId,
             episodes,
+            chapters,
             podcasts,
             settings,
             playbackController,
@@ -377,6 +383,124 @@ class EpisodeViewModelTest : MainDispatcherTest() {
                 listOf<FakePlaybackController.Call>(
                     FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
                     FakePlaybackController.Call.Episode(5),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun chaptersLoadForTheShownEpisodeAndScopeToIt() =
+        runTest {
+            val chapter = EpisodeChapter(0, 60_000, "Opening", null, null, ChapterSource.PSC, false)
+            chapters.rows.value = mapOf(5L to listOf(chapter), 9L to listOf(chapter))
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.episodes.value = mapOf(5L to testEpisodeDetail(5))
+            playbackStates.currentChapter.value = CurrentChapter(5, 0, 1, chapter)
+            advanceUntilIdle()
+
+            assertEquals(listOf(5L), chapters.loads)
+            assertEquals(listOf(chapter), viewModel.uiState.value.chapters)
+            assertEquals(
+                chapter,
+                viewModel.uiState.value.currentChapter
+                    ?.chapter,
+            )
+            playbackStates.currentChapter.value = CurrentChapter(9, 0, 1, chapter)
+            advanceUntilIdle()
+            assertNull(viewModel.uiState.value.currentChapter)
+        }
+
+    @Test
+    fun timestampOnTheCurrentItemSeeksWithoutAToggle() =
+        runTest {
+            playbackController.playResult = PlayResult.Started
+            playbackStates.nowPlaying.value = testNowPlaying(5)
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.episodes.value = mapOf(5L to testEpisodeDetail(5))
+            advanceUntilIdle()
+
+            viewModel.onTimestamp(754_000)
+            advanceUntilIdle()
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Transport(
+                        FakePlaybackController.Action.SEEK,
+                        754_000,
+                    ),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun timestampBeyondTheDurationNeverReachesTheService() =
+        runTest {
+            playbackStates.nowPlaying.value = testNowPlaying(5)
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.episodes.value =
+                mapOf(5L to testEpisodeDetail(5, durationMs = 60_000))
+            advanceUntilIdle()
+
+            viewModel.onTimestamp(61_000)
+            advanceUntilIdle()
+            assertTrue(playbackController.calls.isEmpty())
+        }
+
+    @Test
+    fun timestampOnAnotherItemConsentAndRetryKeepThePosition() =
+        runTest {
+            playbackStates.nowPlaying.value = testNowPlaying(9)
+            playbackStates.pendingMeteredConsent.value = PlayResult.NeedsMeteredConsent(5)
+            playbackController.playResult = PlayResult.NeedsMeteredConsent(5)
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.episodes.value = mapOf(5L to testEpisodeDetail(5))
+            advanceUntilIdle()
+
+            viewModel.onTimestamp(754_000)
+            advanceUntilIdle()
+            assertEquals(
+                5L,
+                viewModel.playback.meteredConsent.value
+                    ?.episodeId,
+            )
+            assertTrue(playbackController.calls.isNotEmpty())
+
+            playbackController.playResult = PlayResult.Started
+            viewModel.playback.consentOnce()
+            advanceUntilIdle()
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Episode(5, 754_000),
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.CONSENT),
+                    FakePlaybackController.Call.Episode(5, 754_000),
+                ),
+                playbackController.calls,
+            )
+        }
+
+    @Test
+    fun timestampStartRefusalDismissesThroughTheSamePath() =
+        runTest {
+            playbackStates.pendingMeteredConsent.value = PlayResult.NeedsMeteredConsent(5)
+            playbackController.playResult = PlayResult.NeedsMeteredConsent(5)
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.episodes.value = mapOf(5L to testEpisodeDetail(5))
+            advanceUntilIdle()
+
+            viewModel.onTimestamp(754_000)
+            advanceUntilIdle()
+            viewModel.playback.consentDismiss()
+            advanceUntilIdle()
+            assertNull(viewModel.playback.meteredConsent.value)
+            // A dismissed start never silently re-attempts the play.
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Call.Episode(5, 754_000),
                 ),
                 playbackController.calls,
             )

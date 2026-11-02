@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
+import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -35,6 +36,8 @@ sealed interface StartRequest {
     data class Episode(
         val episodeId: Long,
         val positionMs: Long? = null,
+        /** Remainder of an external multi-item start, prepended to Up next in the commit. */
+        val externalQueue: List<Long>? = null,
     ) : StartRequest
 
     data class Feed(
@@ -43,6 +46,8 @@ sealed interface StartRequest {
         val order: FeedOrder,
         val startEpisodeId: Long? = null,
         val positionMs: Long? = null,
+        /** CONTEXT forces a still-valid browse membership check inside the commit transaction. */
+        val membership: StartMembership = StartMembership.ANY,
     ) : StartRequest
 
     data object Resume : StartRequest
@@ -72,6 +77,8 @@ class PlayStarter(
         val explicitPositionMs: Long?,
         val alreadyCurrent: Boolean = false,
         val resumeOrigin: QueueOrigin? = null,
+        val queueHead: List<Long> = emptyList(),
+        val membership: StartMembership = StartMembership.ANY,
     )
 
     /** No pull-before-play in M4. MS3's UI-only pull belongs before this operation. */
@@ -100,16 +107,35 @@ class PlayStarter(
             when (request) {
                 is StartRequest.Episode -> {
                     require(request.positionMs == null || request.positionMs >= 0)
+                    require(request.externalQueue == null || request.externalQueue.size < 100)
+                    val rest =
+                        request.externalQueue
+                            .orEmpty()
+                            .distinct()
+                            .filter { it != request.episodeId }
+                    for (id in rest) {
+                        require(id > 0)
+                        val row =
+                            media.get(id)
+                                ?: return StartOutcome.Refused(PlayResult.NotPlayable(id, UnplayableReason.NoMedia))
+                        row
+                            .refusal(capabilities.capabilities.value)
+                            ?.let { return StartOutcome.Refused(PlayResult.NotPlayable(id, it)) }
+                    }
                     val keep =
-                        queue.current?.episodeId == request.episodeId ||
-                            queue.upNext.any { it.episodeId == request.episodeId }
+                        request.externalQueue == null &&
+                            (
+                                queue.current?.episodeId == request.episodeId ||
+                                    queue.upNext.any { it.episodeId == request.episodeId }
+                            )
                     Selection(
                         request.episodeId,
                         null,
                         if (keep) ContextRetention.KEEP else ContextRetention.REPLACE,
                         null,
                         request.positionMs,
-                        queue.current?.episodeId == request.episodeId,
+                        queue.current?.episodeId == request.episodeId && request.externalQueue == null,
+                        queueHead = rest,
                     )
                 }
 
@@ -125,6 +151,7 @@ class PlayStarter(
                         ContextRetention.REPLACE,
                         if (queued == null) id else null,
                         request.positionMs,
+                        membership = request.membership,
                     )
                 }
 
@@ -203,6 +230,8 @@ class PlayStarter(
                         selected.anchorId,
                         if (selected.anchorId != null) item.sortDate else null,
                         outgoing,
+                        selected.queueHead,
+                        selected.membership,
                     ),
                     clock.now(),
                 )

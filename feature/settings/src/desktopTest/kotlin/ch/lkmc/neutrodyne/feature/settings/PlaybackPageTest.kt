@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -98,6 +99,41 @@ class PlaybackPageTest {
             onNodeWithText("Save").performClick()
             waitForIdle()
             assertEquals("1.0,1.5", runBlocking { settings.get(PlaybackSettingKeys.SPEED_PRESETS) })
+        }
+
+    @Test fun hardwareChoiceAndSmartResumeWriteTypedKeys() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            // Smart resume defaults on; seeding it off makes the switch's typed write observable.
+            runBlocking { settings.set(PlaybackSettingKeys.SMART_RESUME, false) }
+            val vm = PlaybackSettingsViewModel(settings, FakePlaybackMaintenance())
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.ANDROID, vm) }
+                }
+            }
+            onNodeWithText("Hardware next and previous").performScrollTo().performClick()
+            onNodeWithText("Skip forward and back").performClick()
+            waitForIdle()
+            assertEquals(
+                HardwareButtons.SKIP,
+                runBlocking { settings.get(PlaybackSettingKeys.HARDWARE_BUTTONS) },
+            )
+            onNodeWithText("Smart resume").performScrollTo().performClick()
+            waitForIdle()
+            assertEquals(true, runBlocking { settings.get(PlaybackSettingKeys.SMART_RESUME) })
+        }
+
+    @Test fun desktopHidesTheHardwareRow() =
+        runComposeUiTest {
+            val vm = PlaybackSettingsViewModel(FakeSettingsRepository(), FakePlaybackMaintenance())
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides RecordingAppNavigator()) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { PlaybackPage(PlatformKind.DESKTOP, vm) }
+                }
+            }
+            onNodeWithText("Smart resume").assertExists()
+            onNodeWithText("Hardware next and previous").assertDoesNotExist()
         }
 
     @Test fun clearCacheRequiresConfirmationAndCallsMaintenance() =

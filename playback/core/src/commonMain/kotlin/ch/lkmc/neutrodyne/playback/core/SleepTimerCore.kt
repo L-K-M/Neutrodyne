@@ -27,6 +27,9 @@ class SleepTimerCore {
     private var advancing = false
     private var factor = 1f
 
+    /** A request beat the item's load, as when a recreated runtime has not projected yet. */
+    private var armOnLoad = false
+
     fun set(
         mode: SleepTimerMode,
         episodeId: Long?,
@@ -34,6 +37,7 @@ class SleepTimerCore {
         if (mode is SleepTimerMode.Minutes) require(SleepTimerMode.isValidMinutes(mode.minutes))
         val effects = mutableListOf<Effect>(Effect.Fade(1f))
         factor = 1f
+        armOnLoad = mode == SleepTimerMode.EndOfEpisode && episodeId == null
         state =
             when (mode) {
                 SleepTimerMode.Off -> {
@@ -91,6 +95,7 @@ class SleepTimerCore {
     }
 
     fun currentChanged(episodeId: Long?): List<Effect> {
+        if (armOnLoad && episodeId != null) return set(SleepTimerMode.EndOfEpisode, episodeId)
         if (state !is SleepTimerState.EndOfEpisode) return emptyList()
         if (episodeId == null) return set(SleepTimerMode.Off, null)
         state = SleepTimerState.EndOfEpisode(episodeId)

@@ -183,7 +183,17 @@ internal class LifecycleHarness(
             override suspend fun collectGarbage() = 0
         }
     val items = MediaItemFactory(art, local)
-    val tree = MediaLibraryTree(opener, deferred(sessions), deferred(lookup), deferred(items), capabilities)
+    val tree =
+        MediaLibraryTree(
+            app,
+            opener,
+            deferred(sessions),
+            deferred(lookup),
+            deferred(items),
+            capabilities,
+            Provider { opener.requireDatabase() },
+            clock,
+        )
     val hub =
         PlaybackStateHub(
             opener,
@@ -238,6 +248,15 @@ internal class LifecycleHarness(
             hub,
             gate,
             tree,
+            SavedResumption(
+                opener,
+                deferred(queues),
+                deferred(lookup),
+                deferred(positions),
+                deferred(items),
+                capabilities,
+                Dispatchers.IO,
+            ),
             network,
             clock,
             local,

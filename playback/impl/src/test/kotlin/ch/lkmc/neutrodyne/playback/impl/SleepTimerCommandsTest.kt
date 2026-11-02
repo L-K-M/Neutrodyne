@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.os.Bundle
+import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
@@ -32,8 +33,20 @@ class SleepTimerCommandsTest {
                 }
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
             try {
-                pumpUntil { h.hub.bridge != null }
                 val session = service.get().onGetSession(controllerInfo()) as MediaLibrarySession
+                // A real client command is what opens the lazy runtime and attaches the bridge.
+                val client = h.run { MediaController.Builder(app, session.token).buildAsync().await() }
+                try {
+                    h.run {
+                        client
+                            .sendCustomCommand(
+                                CustomCommands.command(Wire.SLEEP_SET),
+                                SleepTimerCommands.encode(SleepTimerMode.Minutes(1)),
+                            ).await()
+                    }
+                } finally {
+                    client.release()
+                }
                 val callback =
                     SessionCallback(
                         { checkNotNull(h.hub.bridge) },

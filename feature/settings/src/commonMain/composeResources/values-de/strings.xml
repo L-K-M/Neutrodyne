@@ -54,6 +54,10 @@
         <item quantity="one">%1$d Sekunde</item>
         <item quantity="other">%1$d Sekunden</item>
     </plurals>
+    <string name="playback_hardware_buttons">Hardwaretasten Weiter und Zurück</string>
+    <string name="playback_hardware_episode">Nächste und vorherige Episode</string>
+    <string name="playback_hardware_skip">Vor- und zurückspringen</string>
+    <string name="playback_smart_resume">Intelligent fortsetzen</string>
     <string name="playback_pause_for_navigation">Bei Navigationsansagen pausieren</string>
     <string name="playback_stream_on_metered">Streaming über mobile Daten</string>
     <string name="playback_metered_allow">Immer</string>

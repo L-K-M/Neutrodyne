@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.os.Bundle
+import androidx.media3.session.MediaController
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
@@ -103,26 +104,29 @@ internal class PlaybackControllerImpl(
     }
 
     override fun seekTo(positionMs: Long) {
-        connection.controller?.let { controller ->
+        // The position belongs to this episode, and a rebinding can outlast it: A ends, B arrives.
+        val episodeId = hub.nowPlaying.value?.episodeId
+        transport { controller ->
+            if (episodeId != null && controller.episodeIdOrNull() != episodeId) return@transport
             val duration = controller.duration.takeIf { it > 0 }
             controller.seekTo(duration?.let { positionMs.coerceIn(0, it) } ?: positionMs.coerceAtLeast(0))
         }
     }
 
-    override fun skipBack() {
-        connection.controller?.seekBack()
-    }
+    override fun skipBack() = transport(MediaController::seekBack)
 
-    override fun skipForward() {
-        connection.controller?.seekForward()
-    }
+    override fun skipForward() = transport(MediaController::seekForward)
 
-    override fun skipToNext() {
-        connection.controller?.seekToNextMediaItem()
-    }
+    override fun skipToNext() = transport(MediaController::seekToNextMediaItem)
 
-    override fun skipToPrevious() {
-        connection.controller?.seekToPreviousMediaItem()
+    override fun skipToPrevious() = transport(MediaController::seekToPreviousMediaItem)
+
+    /**
+     * Process stop releases the binding, so the first transport after return must rebind it. A live
+     * binding runs in place and keeps tap order; backgrounded callers get no binding and do nothing.
+     */
+    private fun transport(command: (MediaController) -> Unit) {
+        scope.launch(Dispatchers.Main.immediate) { connection.awaitController()?.let(command) }
     }
 
     override fun setSleepTimer(mode: SleepTimerMode) {

@@ -175,6 +175,7 @@ private fun PlayerVisualSheet(visual: PlayerVisual) {
             previous = {},
             next = {},
             seek = {},
+            seekChapter = {},
             dismiss = {},
             stop = {},
             markPlayed = {},

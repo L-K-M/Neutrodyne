@@ -57,6 +57,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_enter_password
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -157,6 +158,29 @@ public class PlaybackActions(
         } else {
             play(context) { controller.play() }
         }
+    }
+
+    /**
+     * An explicit timestamp or chapter tap (06 Show notes; M5): [episodeId] is the episode the
+     * position belongs to, never the row's. A loaded current item seeks in place; saved-only or
+     * other episodes start at [positionMs] through the same consent/refusal/retry path as a start:
+     * explicit positions never toggle playback, and a retried start replays the same position.
+     */
+    public fun seekOrPlay(
+        episodeId: Long,
+        positionMs: Long,
+        durationMs: Long? = null,
+    ) {
+        if (positionMs < 0 || (durationMs != null && positionMs > durationMs)) return
+        ++startGeneration
+        startJob?.cancel()
+        consentDismiss()
+        val now = states.nowPlaying.value
+        if (now != null && now.episodeId == episodeId && now.phase != PlayerPhase.NOT_LOADED) {
+            controller.seekTo(positionMs)
+            return
+        }
+        play(null) { controller.playEpisodeAt(episodeId, positionMs) }
     }
 
     /** A context/header start (08's page Play): [attempt] runs on [scope], its result maps below. */

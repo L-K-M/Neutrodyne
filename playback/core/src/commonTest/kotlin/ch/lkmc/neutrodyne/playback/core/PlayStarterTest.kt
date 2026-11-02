@@ -135,6 +135,25 @@ class PlayStarterTest {
         contexts.startResult = 4
     }
 
+    @Test fun externalListCarriesAtomicQueueHeadAndReplacesQueuedContextAfterGates() =
+        runTest {
+            committed(StartRequest.Episode(2, externalQueue = listOf(3, 4, 3)))
+            val start = sessions.calls.single().start!!
+            assertEquals(ContextRetention.REPLACE, start.contextRetention)
+            assertNull(start.context)
+            assertEquals(listOf(3L, 4L), start.queueHead)
+        }
+
+    @Test fun invalidExternalRemainderAndRefusedFirstLeaveQueueUntouched() =
+        runTest {
+            lookup.items.value = lookup.items.value - 3L
+            assertIs<StartOutcome.Refused>(starter().start(StartRequest.Episode(2, externalQueue = listOf(3))))
+            assertTrue(sessions.calls.isEmpty())
+            gate.refusal = PlayResult.MeteredBlocked
+            assertIs<StartOutcome.Refused>(starter().start(StartRequest.Episode(2, externalQueue = listOf(4))))
+            assertTrue(sessions.calls.isEmpty())
+        }
+
     @Test fun groupStartSelectsFirstQueuedAndKeepsAnchorNullAndRemainingOrder() =
         runTest {
             val result = committed(feed)

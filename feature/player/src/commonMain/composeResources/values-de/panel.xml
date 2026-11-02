@@ -7,4 +7,8 @@
     <string name="player_collapse_panel">Player-Tabs einklappen</string>
     <string name="player_time_total">Gesamtzeit anzeigen</string>
     <string name="player_time_remaining">Restzeit anzeigen</string>
+    <string name="player_chapters">Kapitel (%1$d)</string>
+    <string name="player_chapter">Kap. %1$d · %2$s</string>
+    <string name="player_previous_chapter">Vorheriges Kapitel</string>
+    <string name="player_next_chapter">Nächstes Kapitel</string>
 </resources>

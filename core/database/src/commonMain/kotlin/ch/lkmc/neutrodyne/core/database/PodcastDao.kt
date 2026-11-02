@@ -392,6 +392,13 @@ abstract class PodcastDao(
     @Update(entity = PodcastEntity::class)
     abstract suspend fun updateFetchStates(rows: List<PodcastFetchState>)
 
+    /** Car library order uses displayed titles, including custom titles, with stable ties. */
+    @Query(
+        "SELECT * FROM podcast WHERE (:youtubePlayable = 1 OR sourceType = 'RSS')" +
+            " ORDER BY COALESCE(customTitle, title) COLLATE NOCASE, id",
+    )
+    abstract suspend fun listForBrowse(youtubePlayable: Boolean): List<PodcastEntity>
+
     // --- Library tiles and mosaics (02; M1: groupId = null → all) ---------------------------------
 
     @Query(
