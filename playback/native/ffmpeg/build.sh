@@ -238,8 +238,13 @@ case "$TARGET" in
             [ -f "$VCVARS" ] || die "vcvars64.bat not found at $VCVARS"
             log "loading the MSVC x64 environment from vcvars64.bat"
             ENV_FILE="$(mktemp)"
-            cmd //c "\"$(cygpath -w "$VCVARS")\" > NUL && set > \"$(cygpath -w "$ENV_FILE")\"" ||
-                die "vcvars64.bat failed"
+            # cmd's argument quoting turns a quoted vcvars path into a literal
+            # command name under MSYS2; a wrapper .bat sidesteps the parse.
+            BAT_FILE="$ENV_FILE.bat"
+            printf 'call "%s" >NUL 2>&1\r\nset > "%s"\r\n' \
+                "$(cygpath -w "$VCVARS")" "$(cygpath -w "$ENV_FILE")" > "$BAT_FILE"
+            cmd //c "$(cygpath -w "$BAT_FILE")" || die "vcvars64.bat failed"
+            rm -f "$BAT_FILE"
             while IFS= read -r line; do
                 case "$line" in
                     [A-Za-z_]*=*) export "${line%%=*}=${line#*=}" ;;
