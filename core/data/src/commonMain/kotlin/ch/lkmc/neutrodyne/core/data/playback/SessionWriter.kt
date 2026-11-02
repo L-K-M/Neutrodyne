@@ -90,6 +90,12 @@ internal class SessionWriter(
                         requireNotNull(db.podcastDao().byId(requireNotNull(spec.contextId)))
                     }
 
+                    // DOWNLOADS owns no context row: the contextList below is its
+                    // whole membership check (a completed download can be deleted).
+                    ContextType.DOWNLOADS -> {
+                        Unit
+                    }
+
                     else -> {
                         throw IllegalArgumentException("Unsupported browse context")
                     }
