@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
+import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -150,6 +151,16 @@ class PlayStarterTest {
                     ?.context
                     ?.type,
             )
+        }
+
+    @Test fun downloadsStartOfPlayedEpisodeCommitsAtZero() =
+        runTest {
+            lookup.items.value += 9L to media(9).copy(playedAt = 100)
+            val result = committed(StartRequest.Downloads(9))
+            assertEquals(0L, result.startPositionMs)
+            val start = sessions.calls.single().start!!
+            assertEquals(ContextType.DOWNLOADS, start.context?.type)
+            assertEquals(StartMembership.CONTEXT, start.membership)
         }
 
     @Test fun videoWithSelectedAudioCanStartWithoutOriginalEnclosure() =

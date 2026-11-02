@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.download.api.DeleteReason
+import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
 import ch.lkmc.neutrodyne.download.api.RejectReason
 import ch.lkmc.neutrodyne.download.api.RequestResult
@@ -35,6 +36,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -427,6 +429,53 @@ class DownloadControllerImplTest {
             }
         }
 
+    @Test fun overviewNoticesFollowRowsRootsAndPlatformState() =
+        runTest {
+            fixture { f ->
+                f.insert(f.episode(), State.COMPLETED)
+                f.noticeSources = NoticeSources(notificationsDenied = true)
+                assertEquals(emptySet(), f.controller.observeAll().first().notices)
+                val waiting = f.episode()
+                f.insert(waiting, State.QUEUED)
+                f.dao.updateUnclaimed(
+                    f.row(waiting).copy(waitReason = Wait.STORAGE, lastError = Error.STORAGE_FULL),
+                    State.QUEUED,
+                )
+                assertEquals(
+                    setOf(DownloadNotice.NOTIFICATIONS_OFF, DownloadNotice.STORAGE_LOW),
+                    f.controller.observeAll().first().notices,
+                )
+                f.network.setStatus(FakeNetworkMonitor.ONLINE.copy(isMetered = true))
+                f.noticeSources = NoticeSources(dataSaver = true)
+                assertEquals(
+                    setOf(DownloadNotice.STORAGE_LOW, DownloadNotice.DATA_SAVER),
+                    f.controller.observeAll().first().notices,
+                )
+                f.noticeSources = NoticeSources(backgroundRestricted = true)
+                assertEquals(
+                    setOf(DownloadNotice.STORAGE_LOW, DownloadNotice.BACKGROUND_RESTRICTED),
+                    f.controller.observeAll().first().notices,
+                )
+                f.noticeSources = NoticeSources()
+                val missing = f.episode()
+                f.insert(missing, State.MISSING)
+                f.dao.updateUnclaimed(
+                    f.row(missing).copy(lastError = Error.STORAGE_UNAVAILABLE),
+                    State.MISSING,
+                )
+                assertEquals(
+                    setOf(DownloadNotice.STORAGE_LOW, DownloadNotice.ROOT_UNAVAILABLE),
+                    f.controller.observeAll().first().notices,
+                )
+                f.dao.updateUnclaimed(
+                    f.row(waiting).copy(waitReason = Wait.NONE, lastError = null),
+                    State.QUEUED,
+                )
+                f.rootAvailable = false
+                assertEquals(setOf(DownloadNotice.ROOT_UNAVAILABLE), f.controller.observeAll().first().notices)
+            }
+        }
+
     private suspend fun fixture(block: suspend (Fixture) -> Unit) {
         val db = TestDb.inMemory()
         try {
@@ -450,6 +499,8 @@ class DownloadControllerImplTest {
         val events = mutableListOf<String>()
         var failJournal = false
         var rootReads = 0
+        var rootAvailable = true
+        var noticeSources = NoticeSources()
         private val files =
             object : DownloadControllerFiles {
                 override suspend fun prepareRemoval(rows: List<DownloadEntity>) {
@@ -496,7 +547,8 @@ class DownloadControllerImplTest {
 
                     override suspend fun list(): List<StorageRootInfo> = emptyList()
 
-                    override suspend fun resolve(rootId: String) = ResolvedRoot(rootId, "/downloads")
+                    override suspend fun resolve(rootId: String) =
+                        if (rootAvailable) ResolvedRoot(rootId, "/downloads") else null
 
                     override suspend fun ensureSpace(
                         rootId: String,
@@ -542,6 +594,7 @@ class DownloadControllerImplTest {
                 files,
                 media,
                 { false },
+                noticeSources = { noticeSources },
             )
 
         suspend fun episode(block: EpisodeEntity.() -> EpisodeEntity = { this }): Long =

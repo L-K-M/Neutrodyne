@@ -56,6 +56,7 @@ internal class DownloadControllerImpl(
     private val askNotificationPermission: suspend () -> Boolean,
     private val activity: Flow<Long> = flowOf(0L),
     private val hasActiveTransfers: () -> Boolean = { false },
+    private val noticeSources: suspend () -> NoticeSources = { NoticeSources() },
 ) : DownloadController {
     private val dao = db.downloadDao()
 

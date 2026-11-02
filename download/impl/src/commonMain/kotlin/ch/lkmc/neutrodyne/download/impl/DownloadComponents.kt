@@ -38,12 +38,20 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
+/** Android-only inputs for the Downloads screen notices; the desktop has none of these platform states. */
+internal data class NoticeSources(
+    val dataSaver: Boolean = false,
+    val backgroundRestricted: Boolean = false,
+    val notificationsDenied: Boolean = false,
+)
+
 internal class DownloadHost(
     val liveTokens: () -> Set<String>,
     val askNotificationPermission: suspend () -> Boolean,
     val share: (String, String) -> String?,
     val activity: Flow<Long> = flowOf(0L),
     val hasActiveTransfers: () -> Boolean = { false },
+    val noticeSources: suspend () -> NoticeSources = { NoticeSources() },
 )
 
 /** Lazily resolved after DB open by the platform hosts, never by the index's constructor. */
@@ -161,6 +169,7 @@ internal class DownloadComponents(
             host.askNotificationPermission,
             host.activity,
             host.hasActiveTransfers,
+            host.noticeSources,
         )
     val lifecycle: DownloadLifecycle =
         DownloadLifecycleImpl(db, controller, storage, index, playback, claimMutex, io, completedMedia)
