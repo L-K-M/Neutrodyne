@@ -365,32 +365,34 @@ internal class DownloadControllerImpl(
 
     // The platform notice inputs have no push signal, so a slow poll refreshes them
     // while the screen observes; rows, storage and the network stay event-driven.
-    private val noticePulse = flow {
-        while (true) {
-            emit(Unit)
-            delay(NOTICE_PROBE_MS)
+    private val noticePulse =
+        flow {
+            while (true) {
+                emit(Unit)
+                delay(NOTICE_PROBE_MS)
+            }
         }
-    }
 
     private suspend fun notices(
         rows: List<DownloadEntryRow>,
         storage: StorageUsage,
         status: NetworkStatus,
-    ): Set<DownloadNotice> = buildSet {
-        val sources = noticeSources()
-        if (sources.dataSaver && status.isMetered) add(DownloadNotice.DATA_SAVER)
-        if (sources.backgroundRestricted) add(DownloadNotice.BACKGROUND_RESTRICTED)
-        if (sources.notificationsDenied &&
-            rows.any { it.download.lane == DownloadLane.MANUAL && it.download.state !in FINISHED_STATES }
-        ) {
-            add(DownloadNotice.NOTIFICATIONS_OFF)
+    ): Set<DownloadNotice> =
+        buildSet {
+            val sources = noticeSources()
+            if (sources.dataSaver && status.isMetered) add(DownloadNotice.DATA_SAVER)
+            if (sources.backgroundRestricted) add(DownloadNotice.BACKGROUND_RESTRICTED)
+            if (sources.notificationsDenied &&
+                rows.any { it.download.lane == DownloadLane.MANUAL && it.download.state !in FINISHED_STATES }
+            ) {
+                add(DownloadNotice.NOTIFICATIONS_OFF)
+            }
+            if (rows.any { it.download.waitingForStorage() }) add(DownloadNotice.STORAGE_LOW)
+            if (rows.any { it.download.missingForStorage() } || roots.resolve(storage.rootId) == null) {
+                add(DownloadNotice.ROOT_UNAVAILABLE)
+            }
+            if (storage.orphanBytes > 0) add(DownloadNotice.ORPHAN_FILES)
         }
-        if (rows.any { it.download.waitingForStorage() }) add(DownloadNotice.STORAGE_LOW)
-        if (rows.any { it.download.missingForStorage() } || roots.resolve(storage.rootId) == null) {
-            add(DownloadNotice.ROOT_UNAVAILABLE)
-        }
-        if (storage.orphanBytes > 0) add(DownloadNotice.ORPHAN_FILES)
-    }
 
     private fun DownloadEntity.waitingForStorage() =
         waitReason == WaitReason.STORAGE && lastError == DownloadError.STORAGE_FULL
