@@ -288,7 +288,9 @@ log "building (this takes a few minutes)"
 
 # ------------------------------------------------------------------ artefacts
 
-# The layout probe: compiled against the very headers this build installed.
+# The layout probe: compiled against the very headers this build installed, and
+# handed the point release from the lock as its first argument, so the layout
+# records the exact source it came from (11 FFM bindings).
 log "generating ffmpeg-layout.json"
 CC_BIN="${CC:-cc}"
 case "$TARGET" in
@@ -301,11 +303,12 @@ if [ "$CC_BIN" = "cl" ]; then
         -Fe"$(cygpath -w "$BUILD/ffoffsets.exe")" -Fo"$(cygpath -w "$BUILD/ffoffsets.obj")" \
         >"$BUILD/ffoffsets-build.log" 2>&1 ||
         { cat "$BUILD/ffoffsets-build.log"; die "ffoffsets.c did not compile"; }
-    (cd "$LIBDIR" && "$(cygpath -u "$BUILD")/ffoffsets.exe" >"$(cygpath -u "$OUT")/ffmpeg-layout.json")
+    (cd "$LIBDIR" && "$(cygpath -u "$BUILD")/ffoffsets.exe" "$FFMPEG_VERSION" \
+        >"$(cygpath -u "$OUT")/ffmpeg-layout.json")
 else
     "$CC_BIN" -O2 -I"$OUT/include" "$SCRIPT_DIR/ffoffsets.c" -o "$BUILD/ffoffsets" ||
         die "ffoffsets.c did not compile"
-    (cd "$LIBDIR" && "$BUILD/ffoffsets" >"$OUT/ffmpeg-layout.json")
+    (cd "$LIBDIR" && "$BUILD/ffoffsets" "$FFMPEG_VERSION" >"$OUT/ffmpeg-layout.json")
 fi
 # The Windows runner reaches python as `python`, MSYS2 as `python3`.
 PYTHON="$(command -v python3 || command -v python || true)"

@@ -71,7 +71,8 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
 }
 
 /** The target this machine serves: the property, else the host (11 Platform matrix). */
-internal fun Project.nativeTargetOf(): String {    val requested = providers.gradleProperty("neutrodyne.ffmpegTarget").orNull
+internal fun Project.nativeTargetOf(): String {
+    val requested = providers.gradleProperty("neutrodyne.ffmpegTarget").orNull
     if (requested != null) {
         require(requested in NATIVE_TARGETS) {
             "neutrodyne.ffmpegTarget is '$requested'; expected one of $NATIVE_TARGETS"

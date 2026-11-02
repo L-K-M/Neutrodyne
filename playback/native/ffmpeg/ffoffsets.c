@@ -35,6 +35,7 @@
 #include "libavutil/frame.h"
 #include "libavutil/log.h"
 #include "libavutil/samplefmt.h"
+#include "libavutil/version.h"
 #include "libswresample/swresample.h"
 
 /** One struct field: printed as `"name": offset`. The last field of a struct
@@ -49,13 +50,15 @@ static void struct_begin(const char *name, size_t size)
 
 static void struct_end(void) { printf("      }\n    },\n"); }
 
-int main(void)
+int main(int argc, char **argv)
 {
-    printf("{\n");
+    /* The point release comes from the lock, handed over as the first argument
+     * by build.sh; without one the built library reports its own. A -D would
+     * need quoting that MSVC's and gcc's command lines parse differently. */
+    const char *version = argc > 1 ? argv[1] : av_version_info();
 
-    /* The point release comes from the build script's -D, which reads it from
-     * native-components.lock; the library majors below come from the headers. */
-    printf("  \"ffmpegVersion\": \"%s\",\n", FFMPEG_VERSION_STRING);
+    printf("{\n");
+    printf("  \"ffmpegVersion\": \"%s\",\n", version);
     printf("  \"libraries\": {\n");
     printf("    \"avcodec\": %d,\n", LIBAVCODEC_VERSION_MAJOR);
     printf("    \"avformat\": %d,\n", LIBAVFORMAT_VERSION_MAJOR);
