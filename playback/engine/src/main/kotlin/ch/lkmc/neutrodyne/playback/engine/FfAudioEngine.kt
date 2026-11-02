@@ -225,6 +225,7 @@ class FfAudioEngine(
                     Thread.sleep(RING_POLL_MS)
                 }
                 out.stop()
+                tl.finish(mediaUs)
                 ended.set(true)
                 arena.close()
             }
