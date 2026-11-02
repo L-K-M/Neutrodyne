@@ -5,7 +5,7 @@ import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import org.freedesktop.dbus.DBusPath
-import org.freedesktop.dbus.connections.DBusConnection
+import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.types.Variant
 

@@ -5,7 +5,7 @@ import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.runBlocking
 import org.freedesktop.dbus.annotations.DBusInterfaceName
-import org.freedesktop.dbus.connections.DBusConnection
+import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBusInterface
 import org.freedesktop.dbus.interfaces.Properties
