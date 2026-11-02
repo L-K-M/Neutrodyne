@@ -54,6 +54,7 @@ import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
+import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
@@ -499,5 +500,5 @@ private val StubInstallers: Set<EntryProviderInstaller> =
 @Composable
 private fun TopBarStub(tab: TopLevelKey) {
     val title = if (tab == FeedsKey) stringResource(Res.string.nav_feeds) else tab.toString()
-    NdTopAppBar(title = title)
+    NdTopAppBar(title = title, actions = { SettingsGearButton() })
 }

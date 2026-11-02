@@ -15,9 +15,11 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.printToLog
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -114,7 +116,16 @@ class SmokeTest {
         // M7's Discover and Privacy rows put the Licences row near the bottom of the small
         // API 26 window, where a click on an out-of-view row does nothing (device runs); the
         // row is scrolled into view first, as the other screen tests do.
-        compose.onNodeWithText("Licences").performScrollTo().performClick()
+        val licences = compose.onNodeWithText("Licences").performScrollTo()
+        try {
+            licences.performClick()
+        } catch (failure: RuntimeException) {
+            // Preserve the clickable bounds if ATF catches a size defect on a device-only layout.
+            runCatching {
+                compose.onRoot(useUnmergedTree = true).printToLog("SettingsTouchTargets")
+            }.exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
+        }
         compose.waitForIdle()
 
         // A non-empty list shows its section headers (a default build always has both).
