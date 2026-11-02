@@ -4,6 +4,7 @@
 package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.feeds.backup.AppInfoV1
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriterFactory
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import ch.lkmc.neutrodyne.feeds.backup.BackupKind
@@ -57,6 +58,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.time.Instant
 import java.util.UUID
+import java.util.zip.Deflater
 import java.util.zip.ZipFile
 
 internal class AccountArchiveWriter(
@@ -73,7 +75,15 @@ internal class AccountArchiveWriter(
             privateDirectory(destination.toAbsolutePath().parent)
             val temporary = destination.resolveSibling(".${destination.fileName}.${UUID.randomUUID()}.tmp")
             try {
-                write(snapshot, temporary)
+                write(snapshot, temporary, ArchiveWriterFactory.DEFAULT_DEFLATE_LEVEL)
+                if (ratioViolated(temporary)) {
+                    // Repetitive episode lines can compress past the restore guard's ratio
+                    // cap; rewriting at level 0 stores literal blocks, so the ratio is at
+                    // most marginally above 1 and the archive stays restorable.
+                    Files.delete(temporary)
+                    write(snapshot, temporary, Deflater.NO_COMPRESSION)
+                    check(!ratioViolated(temporary)) { "export exceeds archive caps" }
+                }
                 // Validate the finished ZIP and its exact entry receipts before publishing it.
                 ZipFile(temporary.toFile()).use { zip ->
                     val manifest =
@@ -104,9 +114,40 @@ internal class AccountArchiveWriter(
             }
         }
 
+    /**
+     * The app's restore-side guard ([ArchiveCaps.BACKUP]) applied to the finished archive
+     * before publication. Entry-count and inflated-size violations fail the export outright —
+     * no compression setting could fix them — so only the ratio rule reports true and lets the
+     * caller retry uncompressed.
+     */
+    private fun ratioViolated(file: Path): Boolean {
+        val caps = ArchiveCaps.BACKUP
+        ZipFile(file.toFile()).use { zip ->
+            check(zip.size() <= caps.maxEntries) { "export exceeds archive entry cap" }
+            var total = 0L
+            var ratio = false
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                check(entry.size <= caps.maxEntryBytes) { "export entry exceeds archive size cap" }
+                total += entry.size
+                check(total <= caps.maxTotalBytes) { "export exceeds archive size cap" }
+                val compressed = entry.compressedSize
+                if (entry.size > caps.ratioFloorBytes && compressed > 0 &&
+                    compressed <= Long.MAX_VALUE / caps.maxRatio &&
+                    entry.size > compressed * caps.maxRatio
+                ) {
+                    ratio = true
+                }
+            }
+            return ratio
+        }
+    }
+
     private fun write(
         snapshot: AccountSnapshot,
         path: Path,
+        deflateLevel: Int,
     ) {
         val now = inputs.wallMs()
         // Only bounded library/list metadata is materialized. Episode history is streamed separately.
@@ -176,7 +217,7 @@ internal class AccountArchiveWriter(
                 .associateBy { it.key.id.rid }
         val seenQueueEpisodes = mutableSetOf<String>()
         val entries = mutableListOf<EntryInfo>()
-        archives.create(path.toString().toPath()).use { zip ->
+        archives.create(path.toString().toPath(), deflateLevel).use { zip ->
             fun entry(
                 name: String,
                 records: () -> Int,
@@ -249,9 +290,25 @@ internal class AccountArchiveWriter(
                 wantedQueue.values.filter { it.key.id.rid !in seenQueueEpisodes }.forEach { row ->
                     val id = row.key.id as RecordId.Episode
                     val parent = keys[id.podcast.value] ?: return@forEach
+                    // The queue record's own match hints let the restore stub the episode;
+                    // without them canStub drops the line and the queue reference is lost.
+                    val hint = row.raw.match
                     codec.writeEpisodeLine(
                         sink,
-                        EpisodeLineV1(p = parent, k = id.key.value, t = "Untitled episode", ts = 0),
+                        EpisodeLineV1(
+                            p = parent,
+                            k = id.key.value,
+                            g = hint?.guid,
+                            t = hint?.title ?: "Untitled episode",
+                            d =
+                                hint?.date?.let {
+                                    runCatching { Instant.parse(it).toEpochMilli() }.getOrNull()
+                                },
+                            u = hint?.enc,
+                            yt = hint?.ytId,
+                            l = hint?.link,
+                            ts = 0,
+                        ),
                     )
                     lines++
                 }
@@ -443,6 +500,8 @@ internal class AccountArchiveWriter(
                 "playback.speed_presets" to "Text",
                 "playback.skip_back_ms" to "Int64",
                 "playback.skip_forward_ms" to "Int64",
+                "playback.smart_resume" to "Bool",
+                "playback.sleep_last_minutes" to "Int32",
                 "groups.show_ungrouped_tab" to "Bool",
                 "groups.all_filter_flags" to "Int32",
                 "groups.all_media_filter" to "Choice",
