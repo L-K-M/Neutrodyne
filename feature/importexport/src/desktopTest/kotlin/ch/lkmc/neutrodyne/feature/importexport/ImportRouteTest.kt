@@ -1091,7 +1091,8 @@ class ImportRouteTest {
             onNodeWithText("Settings").assertIsOn()
             onNodeWithText("Restore").performScrollTo().performClick()
             waitUntil { backups.restoreRequests.size == 1 }
-            assertTrue(RestoreCategory.SETTINGS in backups.restoreRequests.single().second.categories)
+            val request = backups.restoreRequests.single().second
+            assertTrue(RestoreCategory.SETTINGS in request.categories)
         }
 
     @Test fun replacePausesPlaybackOnTheMainDispatcher() =

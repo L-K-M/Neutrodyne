@@ -74,6 +74,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.restore_warn_ignored_entries
 import ch.lkmc.neutrodyne.core.ui.resources.restore_warn_skipped_lines
 import ch.lkmc.neutrodyne.core.ui.resources.restore_written_android
 import ch.lkmc.neutrodyne.core.ui.resources.restore_written_desktop
+import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
@@ -111,6 +112,7 @@ internal fun RestoreSessionRoute(
         Column(
             Modifier
                 .padding(padding)
+                .padding(bottom = LocalMiniPlayerInset.current)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
