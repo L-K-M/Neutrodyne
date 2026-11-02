@@ -100,23 +100,32 @@ verify_checksum() { # verify_checksum <file> <expected>
     [ "$actual" = "$2" ] || die "checksum mismatch for $1: expected $2, got $actual"
 }
 
-# bounded <seconds> <command...> — `timeout` is GNU coreutils: macOS has neither
-# it nor `gtimeout` without a Homebrew coreutils, so a bound that names it would
-# fail there before gpg ever runs. The watchdog kills the command when it
-# overruns; `wait` then reports the command's own status (143 when killed).
-bounded() {
-    local seconds="$1" pid watchdog status
-    shift
-    "$@" &
-    pid=$!
-    ( sleep "$seconds"; kill "$pid" 2>/dev/null ) &
-    watchdog=$!
-    status=0
-    wait "$pid" || status=$?
-    kill "$watchdog" 2>/dev/null
-    wait "$watchdog" 2>/dev/null || true
-    return "$status"
-}
+# bounded <seconds> <command...> — a hard bound on every network and gpg call
+# so a stalling download or a hanging gpg fails the build with a message
+# instead of sitting silent until the job's timeout. Both Windows legs that
+# died in silence (runs 41479793169 and 41500707088) produced no output for
+# the rest of the job somewhere in the download → gpg window. GNU timeout
+# (coreutils: MSYS2, the manylinux containers) is the bound wherever it
+# exists, because a foreground timeout cannot share the MSYS pathology where
+# bash's `wait` on a watchdog-killed job never returns; the in-shell watchdog
+# remains only where no timeout exists (macOS ships none).
+if command -v timeout >/dev/null 2>&1 && timeout --version >/dev/null 2>&1; then
+    bounded() { timeout --kill-after=5 "$1" "${@:2}"; }
+else
+    bounded() {
+        local seconds="$1" pid watchdog status
+        shift
+        "$@" &
+        pid=$!
+        ( sleep "$seconds"; kill -KILL "$pid" 2>/dev/null ) &
+        watchdog=$!
+        status=0
+        wait "$pid" || status=$?
+        kill "$watchdog" 2>/dev/null || true
+        wait "$watchdog" 2>/dev/null || true
+        return "$status"
+    }
+fi
 
 download() { # download <file> <url> [fallback-url]
     if [ -s "$1" ]; then
@@ -146,25 +155,32 @@ download() { # download <file> <url> [fallback-url]
 
 verify_signature() {
     command -v gpg >/dev/null 2>&1 || die "gpg is required to verify the FFmpeg source signature"
-    local keyring home
-    home="$(mktemp -d)"
-    # gpg is a native Windows program under MSYS2, so its home has to be a Windows
-    # path: a POSIX one is read relative to the current drive root, and gpg then
-    # waits on a directory it cannot create instead of failing.
-    if command -v cygpath >/dev/null 2>&1; then
-        home="$(cygpath -w "$home")"
-    fi
+    # The home stays in POSIX form on purpose: this script runs under MSYS2's
+    # own bash and gpg (both msys-linked), for which a POSIX home is the native
+    # case — pacman verifies every package signature through exactly this
+    # combination. A Windows-form home is what both silently-hung Windows legs
+    # ran with; gpg's agent socket handling on a converted path is the prime
+    # suspect for those hangs, so the conversion is gone and every gpg call is
+    # bounded so a regression fails in minutes, not hours.
+    local home keyring
+    home="$CACHE/gnupg-home"
+    rm -rf "$home"
+    mkdir -p "$home"
+    chmod 700 "$home" 2>/dev/null || true
     keyring="$home/ffmpeg-release-signing-key.asc"
     cp "$REPO_ROOT/$SIGNING_KEY" "$keyring"
-    # Every gpg call is bounded, so a build that cannot verify fails instead of
-    # running until the job's timeout.
+    # Every gpg call is bounded and logged around, so a hang is attributable to
+    # one call from the CI log instead of a two-hour silence.
     GNUPGHOME="$home" bounded 120 gpg --quiet --batch --import "$keyring" >/dev/null 2>&1 ||
         die "could not import the FFmpeg release signing key"
+    log "imported the FFmpeg release signing key"
     local fingerprint
     fingerprint="$(GNUPGHOME="$home" bounded 120 gpg --quiet --with-colons --show-keys "$keyring" |
-        awk -F: '$1 == "fpr" { print $10; exit }')"
+        awk -F: '$1 == "fpr" { print $10; exit }')" ||
+        die "could not read the FFmpeg signing key's fingerprint"
     [ "$fingerprint" = "$SIGNING_KEY_FINGERPRINT" ] ||
         die "the FFmpeg signing key is $fingerprint, expected $SIGNING_KEY_FINGERPRINT"
+    log "the signing key's fingerprint matches $SIGNING_KEY_FINGERPRINT"
     GNUPGHOME="$home" bounded 120 gpg --quiet --batch --verify "$SOURCE_SIGNATURE" "$SOURCE_TARBALL" ||
         die "the FFmpeg source signature did not verify"
     rm -rf "$home"
@@ -174,10 +190,12 @@ verify_signature() {
 if [ ! -d "$SOURCE_DIR" ]; then
     download "$SOURCE_TARBALL" "$SOURCE_URL" "$SOURCE_URL_FALLBACK"
     verify_checksum "$SOURCE_TARBALL" "$SOURCE_SHA256"
+    log "checksum verified: $(basename "$SOURCE_TARBALL")"
     if [ -n "$SIGNATURE_URL" ]; then
         download "$SOURCE_SIGNATURE" "$SIGNATURE_URL" "$SIGNATURE_URL_FALLBACK"
         if [ -n "$SIGNATURE_SHA256" ]; then
             verify_checksum "$SOURCE_SIGNATURE" "$SIGNATURE_SHA256"
+            log "checksum verified: $(basename "$SOURCE_SIGNATURE")"
         fi
         verify_signature
     fi
@@ -270,11 +288,31 @@ case "$TARGET" in
             rm -f "$VCVARS_WORK/vcvars-env.bat"
             ENV_FILE="$VCVARS_WORK/env.txt"
             [ -s "$ENV_FILE" ] || die "vcvars64.bat produced no environment"
+            # cmd's `set` writes CRLF lines and names such as
+            # CommonProgramFiles(x86) that bash cannot export (the first
+            # Windows leg died exactly there). Such names are skipped —
+            # bash never needs them, and native tools get their own values
+            # through the environment cmd already set — and the CR is
+            # stripped so no value ends in one.
             while IFS= read -r line; do
+                line="${line%$'\r'}"
                 case "$line" in
-                    [A-Za-z_]*=*) export "${line%%=*}=${line#*=}" ;;
+                    [A-Za-z_]*=*) ;;
+                    *) continue ;;
                 esac
+                env_name="${line%%=*}"
+                case "$env_name" in
+                    *[!A-Za-z0-9_]*) continue ;;
+                esac
+                export "$env_name=${line#*=}"
             done < "$ENV_FILE"
+            # cmd dumped PATH in Windows form; bash's own command lookup needs
+            # the POSIX form of the list (cl and the other native tools keep
+            # reading their Windows form through the variables they use).
+            if command -v cygpath >/dev/null 2>&1; then
+                posix_path="$(cygpath -up "$PATH")" &&
+                    export PATH="$posix_path"
+            fi
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
         command -v nasm >/dev/null 2>&1 || log "warning: NASM is not on PATH; x86 assembly is disabled"

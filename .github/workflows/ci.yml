@@ -380,14 +380,14 @@ jobs:
           [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
           sudo apt-get install -y -qq $pkgs
       # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell
-      # with GNU make, NASM and gpg. Gradle's Exec finds Git Bash first, which
-      # ships none of them, so build.sh re-execs itself under MSYS2 once these
-      # are installed.
+      # with GNU make, NASM and gpg. `buildFfmpeg` names MSYS2's bash explicitly
+      # (Git Bash ships none of the three), and coreutils provides the `timeout`
+      # that bounds every download and gpg call inside build.sh.
       - name: MSYS2 tools for the Windows FFmpeg build
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz"
+          /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz coreutils"
       # The modules MD0 builds on this target. The repository-wide suite stays on
       # linux-x64 in `unit`, which is where its reference platform is: the
       # committed Roborazzi goldens live in screenshots/{android,desktop} with no

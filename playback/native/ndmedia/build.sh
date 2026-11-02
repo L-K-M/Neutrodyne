@@ -112,11 +112,31 @@ case "$TARGET" in
             rm -f "$VCVARS_WORK/vcvars-env.bat"
             ENV_FILE="$VCVARS_WORK/env.txt"
             [ -s "$ENV_FILE" ] || die "vcvars64.bat produced no environment"
+            # cmd's `set` writes CRLF lines and names such as
+            # CommonProgramFiles(x86) that bash cannot export (this task died
+            # exactly there on the first wrapper-based leg). Such names are
+            # skipped — bash never needs them, and native tools get their own
+            # values through the environment cmd already set — and the CR is
+            # stripped so no value ends in one.
             while IFS= read -r line; do
+                line="${line%$'\r'}"
                 case "$line" in
-                    [A-Za-z_]*=*) export "${line%%=*}=${line#*=}" ;;
+                    [A-Za-z_]*=*) ;;
+                    *) continue ;;
                 esac
+                env_name="${line%%=*}"
+                case "$env_name" in
+                    *[!A-Za-z0-9_]*) continue ;;
+                esac
+                export "$env_name=${line#*=}"
             done < "$ENV_FILE"
+            # cmd dumped PATH in Windows form; bash's own command lookup needs
+            # the POSIX form of the list (cl keeps reading its Windows form
+            # through the variables it uses itself).
+            if command -v cygpath >/dev/null 2>&1; then
+                posix_path="$(cygpath -up "$PATH")" &&
+                    export PATH="$posix_path"
+            fi
             command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
         fi
         (cd "$BUILD_ROOT" && cl -nologo -O2 -LD \
