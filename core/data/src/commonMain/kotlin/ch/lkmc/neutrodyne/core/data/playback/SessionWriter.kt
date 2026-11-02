@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ContextType
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextSpec
@@ -90,28 +91,34 @@ internal class SessionWriter(
                         requireNotNull(db.podcastDao().byId(requireNotNull(spec.contextId)))
                     }
 
-                    // DOWNLOADS owns no context row: the contextList below is its
-                    // whole membership check (a completed download can be deleted).
+                    // The Downloads screen lists every COMPLETED row, played or
+                    // not, so its membership check is the row itself rather than
+                    // the contextList tail eligibility (which stays unplayed).
                     ContextType.DOWNLOADS -> {
-                        Unit
+                        require(
+                            db.downloadDao().byEpisode(start.currentEpisodeId)?.state ==
+                                DownloadState.COMPLETED,
+                        ) { "Episode left browse context before start" }
                     }
 
                     else -> {
                         throw IllegalArgumentException("Unsupported browse context")
                     }
                 }
-                require(
-                    db
-                        .feedDao()
-                        .contextList(
-                            FeedQueryBuilder.contextList(
-                                spec,
-                                1,
-                                capabilities.capabilities.value.inAppPlayback,
-                                start.currentEpisodeId,
-                            ),
-                        ).isNotEmpty(),
-                ) { "Episode left browse context before start" }
+                if (spec.type != ContextType.DOWNLOADS) {
+                    require(
+                        db
+                            .feedDao()
+                            .contextList(
+                                FeedQueryBuilder.contextList(
+                                    spec,
+                                    1,
+                                    capabilities.capabilities.value.inAppPlayback,
+                                    start.currentEpisodeId,
+                                ),
+                            ).isNotEmpty(),
+                    ) { "Episode left browse context before start" }
+                }
             }
             if (start.queueHead.isNotEmpty()) {
                 val ids = start.queueHead.distinct().filter { it != start.currentEpisodeId }
