@@ -774,21 +774,17 @@ jobs:
         shell: bash
         run: |
           /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz"
-      - name: Unit tests on this host
+      # The modules MD0 builds on this target. The repository-wide suite stays on
+      # linux-x64 in ci.yml's `unit` job, which is where its reference platform
+      # is: the committed Roborazzi goldens live in screenshots/{android,desktop}
+      # with no per-OS split, so a second desktop OS compares against another
+      # font stack, and the file-permission suites of M3/M5 assert POSIX
+      # semantics. Neither is evidence about the desktop engine, so neither is a
+      # desktop-matrix gate.
+      - name: Desktop engine tests on this host
         shell: bash
         run: |
-          # linux-arm64 cannot run the Android host tests: the SDK's aapt2/aidl
-          # and Gradle's aapt2 are x86_64 binaries and Robolectric ships no
-          # linux/aarch64 runtime. Excluding that task family also prunes its
-          # Android prerequisites; ci.yml's unit job keeps the Android host
-          # coverage on linux-x64.
-          if [ "${{ matrix.target }}" = linux-arm64 ]; then
-            ./gradlew allTests test \
-              -x testAndroidHostTest -x testDebugUnitTest \
-              -Proborazzi.test.verify=true --continue
-          else
-            ./gradlew allTests test -Proborazzi.test.verify=true --continue
-          fi
+          ./gradlew :playback:engine:test :playback:native:test :desktop:system:test
       - name: Build the target's FFmpeg and check its licences
         shell: bash
         run: |

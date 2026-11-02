@@ -148,6 +148,31 @@ else
     t_fail "the lock lists '$libraries', expected the four of D86"
 fi
 
+# --- the lock's own paths resolve ------------------------------------------------
+#
+# The lock names its files the way the repository does, so build.sh resolves
+# them from the repository root. A path that does not resolve is only discovered
+# when the build has already downloaded the tarball (the first runner died at
+# `cp` after both downloads, having verified neither).
+
+signing_key="$(sed -n 's/^signingKey = "\(.*\)"$/\1/p' "$LOCK")"
+if [ -n "$signing_key" ] && [ -f "$REPO_ROOT/$signing_key" ]; then
+    t_ok "the lock's signing key resolves from the repository root"
+else
+    t_fail "the lock's signingKey '$signing_key' does not resolve from $REPO_ROOT"
+fi
+
+# The signing key must carry the fingerprint the lock records. The armour header
+# spaces it in groups of four, so compare with the spaces removed.
+fingerprint="$(sed -n 's/^signingKeyFingerprint = "\(.*\)"$/\1/p' "$LOCK")"
+if [ -n "$fingerprint" ] &&
+    grep '^Comment:' "$REPO_ROOT/$signing_key" 2>/dev/null | tr -d ' \t\r' |
+        grep -q "$fingerprint"; then
+    t_ok "the signing key names its fingerprint in its armour header"
+else
+    t_fail "the signing key does not name $fingerprint in its armour header"
+fi
+
 for library in avcodec avformat avutil swresample; do
     if grep -q "\"$library" "$LOCK" || grep -q ",$library" "$LOCK" || grep -q "$library\"" "$LOCK"; then
         t_ok "the lock records $library"

@@ -32,6 +32,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 SCRIPT_PATH="$SCRIPT_DIR/build.sh"
 NATIVE_DIR="$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)"
+# The lock names its files the way the repository does, so the signing key is
+# resolved from the repository root, not from playback/native.
+REPO_ROOT="$(cd -- "$NATIVE_DIR/../.." >/dev/null 2>&1 && pwd -P)"
 LOCK="$NATIVE_DIR/native-components.lock"
 CACHE="$NATIVE_DIR/build/ffmpeg-cache"
 
@@ -107,7 +110,7 @@ verify_signature() {
     local keyring home
     home="$(mktemp -d)"
     keyring="$home/ffmpeg-release-signing-key.asc"
-    cp "$NATIVE_DIR/$SIGNING_KEY" "$keyring"
+    cp "$REPO_ROOT/$SIGNING_KEY" "$keyring"
     GNUPGHOME="$home" gpg --quiet --batch --import "$keyring" >/dev/null 2>&1 ||
         die "could not import the FFmpeg release signing key"
     local fingerprint

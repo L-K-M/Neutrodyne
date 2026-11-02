@@ -80,8 +80,16 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
         stage.resolve("BUILD.md").writeText(buildMarkdown(version, sourceUrl, signatureUrl, configure, buildTree))
         val script = stage.resolve("script")
         script.mkdirs()
-        lockFile.get().asFile.parentFile.resolve("ffmpeg/build.sh").copyTo(script.resolve("build.sh"))
-        lockFile.get().asFile.parentFile.resolve("ffmpeg/ffoffsets.c").copyTo(script.resolve("ffoffsets.c"))
+        lockFile
+            .get()
+            .asFile.parentFile
+            .resolve("ffmpeg/build.sh")
+            .copyTo(script.resolve("build.sh"))
+        lockFile
+            .get()
+            .asFile.parentFile
+            .resolve("ffmpeg/ffoffsets.c")
+            .copyTo(script.resolve("ffoffsets.c"))
         buildTree.resolve("COPYING.LGPLv2.1").takeIf { it.isFile }?.copyTo(stage.resolve("COPYING.LGPLv2.1"))
         buildTree.resolve("LICENSE.md").takeIf { it.isFile }?.copyTo(stage.resolve("LICENSE.md"))
 
