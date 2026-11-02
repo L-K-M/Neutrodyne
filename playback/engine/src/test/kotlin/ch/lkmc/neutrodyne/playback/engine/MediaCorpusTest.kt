@@ -44,7 +44,7 @@ class MediaCorpusTest {
         val containers = readManifest().files.map { it.container }.toSet()
 
         assertEquals(
-            setOf("mp3", "mp4", "ogg", "flac", "wav", "webm"),
+            setOf("mp3", "mp4", "ogg", "flac", "wav", "webm", "adts"),
             containers,
         )
     }

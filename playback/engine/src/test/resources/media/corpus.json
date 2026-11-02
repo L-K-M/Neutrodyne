@@ -41,6 +41,32 @@
       "sha256": "8f9f8b92190330ec260799855bd59420405cd4a8e11639ad3334390289e1f873"
     },
     {
+      "container": "adts",
+      "codec": "aac-he",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 94208,
+      "decodedSamples": 94208,
+      "trimRule": null,
+      "chapters": [],
+      "file": "heaac_v1_2s.aac",
+      "bytes": 17090,
+      "sha256": "42be9dbccd32c3d32fe111c20b13dcd1cc6332caf360a1b8ca2cd471db0f55ff"
+    },
+    {
+      "container": "adts",
+      "codec": "aac-hev2",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 96256,
+      "decodedSamples": 96256,
+      "trimRule": null,
+      "chapters": [],
+      "file": "heaac_v2_2s.aac",
+      "bytes": 8731,
+      "sha256": "f56d3f52b8d0af7412131b5d846fe03fb57edf12acc5c9d2c688f2529042695d"
+    },
+    {
       "container": "mp3",
       "codec": "mp3",
       "sampleRate": 44100,

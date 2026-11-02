@@ -742,9 +742,84 @@ def parse_matroska(data: bytes) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------- ADTS
+
+# An ADTS header is seven bytes with protection_absent set (nine with the CRC
+# otherwise): sync, layer, profile, rate index, channels and the whole frame's
+# length, so walking it counts the frames without decoding them. It also lets
+# the `aac` demuxer into the corpus, which no other fixture reaches.
+ADTS_HEADER_BYTES = 7
+
+ADTS_SAMPLE_RATES = [
+    96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350
+]
+
+# The HE-AAC fixtures, as make-engine-corpus.sh generated them: v1 is SBR over a
+# stereo core, v2 is Parametric Stereo over a mono core. An AAC-LC frame decodes
+# to 1024 samples; SBR doubles it to 2048 at twice the core rate. SBR data rides
+# inside the frames' extension elements — invisible to the ADTS header and out
+# of reach for a structural parser without decoding Huffman sections — so the
+# variant is recorded here from the generation recipe, and `--verify`'s
+# reference decode (ffprobe reports "HE-AAC" / "HE-AACv2") is the witness that
+# the SBR payload is really there.
+ADTS_SBR_VARIANTS = {
+    "heaac_v1_2s.aac": "aac-he",
+    "heaac_v2_2s.aac": "aac-hev2",
+}
+
+
+def parse_adts(data: bytes, name: str) -> dict[str, Any]:
+    frames = 0
+    pos = 0
+    sf_index = None
+    channels = None
+    while pos + ADTS_HEADER_BYTES <= len(data):
+        if data[pos] != 0xFF or (data[pos + 1] & 0xF0) != 0xF0:
+            raise CorpusError(f"no ADTS sync at offset {pos}")
+        if (data[pos + 1] >> 1) & 0x03:
+            raise CorpusError(f"ADTS layer is not 0 at offset {pos}")
+        if not (data[pos + 1] & 0x01):
+            raise CorpusError("an ADTS CRC (protection_absent=0) is not handled")
+        frame_length = (
+            ((data[pos + 3] & 0x03) << 11) | (data[pos + 4] << 3) | (data[pos + 5] >> 5)
+        )
+        if frame_length < ADTS_HEADER_BYTES or pos + frame_length > len(data):
+            raise CorpusError(f"the ADTS frame at {pos} overruns the file")
+        if frames == 0:
+            sf_index = (data[pos + 2] >> 2) & 0x0F
+            channels = ((data[pos + 2] & 0x01) << 2) | (data[pos + 3] >> 6)
+        pos += frame_length
+        frames += 1
+    if pos != len(data):
+        raise CorpusError(f"{len(data) - pos} trailing bytes after the last ADTS frame")
+    if frames == 0:
+        raise CorpusError("no ADTS frames")
+    if sf_index is None or sf_index >= len(ADTS_SAMPLE_RATES):
+        raise CorpusError(f"ADTS sampling frequency index {sf_index}")
+
+    variant = ADTS_SBR_VARIANTS.get(name)
+    core_rate = ADTS_SAMPLE_RATES[sf_index]
+    # Parametric Stereo stores a mono core; the decoded output is stereo.
+    decoded_channels = 2 if variant == "aac-hev2" else channels
+    samples_per_frame = 2048 if variant else 1024
+    decoded_rate = core_rate * 2 if variant else core_rate
+    decoded = frames * samples_per_frame
+    return {
+        "container": "adts",
+        "codec": variant or "aac",
+        "sampleRate": decoded_rate,
+        "channels": decoded_channels,
+        "expectedSamples": decoded,
+        "decodedSamples": decoded,
+        "trimRule": None,
+        "chapters": [],
+    }
+
+
 # ------------------------------------------------------------------------- driver
 
 PARSERS = {
+    ".aac": parse_adts,
     ".wav": parse_wav,
     ".flac": parse_flac,
     ".mp3": parse_mp3,
@@ -764,7 +839,9 @@ def describe(name: str) -> dict[str, Any]:
     parser = PARSERS.get(extension)
     if parser is None:
         raise CorpusError(f"no parser for {name}")
-    entry = parser(data)
+    # parse_adts alone also needs the file name: the HE-AAC variant is recorded
+    # from the generation recipe, which only the name identifies.
+    entry = parser(data, name) if parser is parse_adts else parser(data)
     entry["file"] = name
     entry["bytes"] = len(data)
     entry["sha256"] = hashlib.sha256(data).hexdigest()

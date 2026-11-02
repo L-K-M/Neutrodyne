@@ -132,4 +132,17 @@ rm -f "$out/m4a_chapters_3s.chapters"
   -map_metadata -1 -ac 2 -c:a libmp3lame -b:a 128k -write_xing 0 -id3v2_version 0 \
   "$out/mp3_silence_gaps_3s.mp3"
 
+# 14./15. HE-AAC v1 (SBR over a stereo core) and v2 (Parametric Stereo over a
+#    mono core) in ADTS — MD0 AC1 lists both, and ADTS also exercises the `aac`
+#    demuxer no other corpus file reaches. FFmpeg's rewritten AAC encoder no
+#    longer writes SBR ("Profile not supported!" for aac_he/aac_he_v2), so these
+#    come from Fraunhofer's libfdk-aac `aac-enc` frontend instead, built from
+#    source and named through AAC_ENC; the WAV input is the same deterministic
+#    sine as every other fixture.
+"$ffmpeg_bin" "${common[@]}" -f lavfi -i 'sine=frequency=440:sample_rate=44100:duration=2' \
+  -map_metadata -1 -ac 2 -c:a pcm_s16le "$out/heaac.wav"
+"${AAC_ENC:-aac-enc}" -r 64000 -t 5 "$out/heaac.wav" "$out/heaac_v1_2s.aac"
+"${AAC_ENC:-aac-enc}" -r 32000 -t 29 "$out/heaac.wav" "$out/heaac_v2_2s.aac"
+rm -f "$out/heaac.wav"
+
 echo "make-engine-corpus: wrote $(ls "$out" | wc -l) files to $out"
