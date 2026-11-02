@@ -36,8 +36,6 @@ internal object UiRestore {
     private const val WAIT_CLICK = 5_000L
     private const val WAIT_SCROLL_STEP = 1_000L
 
-    // The preview scrolls in ~one-viewport swipes; a few steps reach the bottom of the
-    // short category list before the call gives up.
     private const val SCROLL_FRACTION = 0.8f
     private const val MAX_SCROLL_STEPS = 8
 
@@ -133,41 +131,29 @@ internal object UiRestore {
     }
 
     private fun checkableRow(label: String): UiObject2 {
-        rowOrNull(label)?.let { return it }
-        // The mode radios and the three category rows sit below a tall preview summary
-        // inside one scrolling column; on small devices the later rows start below the
-        // fold. A row is reached by scrolling the preview list to it, the way a user
-        // swipes, never by matching an off-screen node.
-        scrollToMatch(rowSelector(label))
-        return rowOrNull(label) ?: throw IllegalStateException("checkable row '$label' never resolved")
+        val selector = By.pkg(BmgrArming.TARGET_PACKAGE).checkable(true).hasChild(By.text(label))
+        return findWithScroll(selector) ?: throw IllegalStateException("checkable row '$label' never resolved")
     }
 
-    private fun rowSelector(label: String): BySelector =
-        By.pkg(BmgrArming.TARGET_PACKAGE).checkable(true).hasChild(By.text(label))
-
-    private fun rowOrNull(label: String): UiObject2? =
-        device.wait(Until.findObject(rowSelector(label)), WAIT_CLICK)
-
-    /** Swipe the preview's scrollable down until [selector] resolves on screen. */
-    private fun scrollToMatch(selector: BySelector) {
-        val scrollable =
-            device.findObject(By.pkg(BmgrArming.TARGET_PACKAGE).scrollable(true)) ?: return
-        var steps = 0
-        while (steps < MAX_SCROLL_STEPS && scrollable.scroll(Direction.DOWN, SCROLL_FRACTION)) {
-            steps++
-            if (device.wait(Until.findObject(selector), WAIT_SCROLL_STEP) != null) return
+    /** Callers visit Merge, categories and Restore in display order, including below the fold. */
+    private fun findWithScroll(selector: BySelector): UiObject2? {
+        device.wait(Until.findObject(selector), WAIT_CLICK)?.let { return it }
+        repeat(MAX_SCROLL_STEPS) {
+            val scrollable =
+                device.findObject(By.pkg(BmgrArming.TARGET_PACKAGE).scrollable(true)) ?: return null
+            val canScrollFurther = scrollable.scroll(Direction.DOWN, SCROLL_FRACTION)
+            // A final swipe can reveal the target even when it reports the end of the list.
+            device.wait(Until.findObject(selector), WAIT_SCROLL_STEP)?.let { return it }
+            if (!canScrollFurther) return null
         }
+        return null
     }
 
     /** Click the Restore action and wait until the request is accepted (button gone). */
     fun requestRestore() {
-        var button = device.wait(Until.findObject(By.text(RESTORE_EXACT)), WAIT_CLICK)
-        if (button == null) {
-            // The button follows the last category row; scroll it up the way a user does.
-            scrollToMatch(By.text(RESTORE_EXACT))
-            button = device.wait(Until.findObject(By.text(RESTORE_EXACT)), WAIT_CLICK)
-        }
-        checkNotNull(button) { "restore action never resolved" }
+        val button =
+            findWithScroll(By.pkg(BmgrArming.TARGET_PACKAGE).text(RESTORE_EXACT))
+                ?: throw IllegalStateException("restore action never resolved")
         button.click()
         check(device.wait(Until.gone(By.text(RESTORE_EXACT)), WAIT_SHORT)) {
             "restore request was never accepted"
