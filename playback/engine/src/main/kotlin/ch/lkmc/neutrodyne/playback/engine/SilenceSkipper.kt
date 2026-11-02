@@ -353,8 +353,9 @@ internal class SilenceSkipper(
             silenceThresholdLevel.toInt()
 
     companion object {
-        const val DEFAULT_MINIMUM_SILENCE_DURATION_US = 100_000L
-        const val DEFAULT_MAX_SILENCE_TO_KEEP_DURATION_US = 2_000_000L
+        // Defaults match Android's PlayerFactory construction, not Media3's.
+        const val DEFAULT_MINIMUM_SILENCE_DURATION_US = 250_000L
+        const val DEFAULT_MAX_SILENCE_TO_KEEP_DURATION_US = 400_000L
         const val DEFAULT_SILENCE_RETENTION_RATIO = 0.2f
         const val DEFAULT_MIN_VOLUME_TO_KEEP_PERCENTAGE = 10
         const val DEFAULT_SILENCE_THRESHOLD_LEVEL: Short = 1024

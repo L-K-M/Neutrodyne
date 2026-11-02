@@ -5,7 +5,7 @@ import java.nio.file.Path
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.Assume.assumeTrue
 
 /**
  * MD0 AC3: through miniaudio's null back-end the timeline clock stays within
@@ -18,12 +18,12 @@ class EngineClockTest {
     fun clockTracksDeviceFramesAcrossSpeedsWithSkipSilence() {
         val ffmpeg = ffmpegDir()
         val ndmedia = ndmediaDir()
-        assumeTrue(ffmpeg != null && ndmedia != null) { "native builds required" }
+        assumeTrue("native builds required", ffmpeg != null && ndmedia != null)
         val file = mediaDir().resolve(ITEM)
-        assumeTrue(file.toFile().isFile)
+        assumeTrue("corpus item missing: $file", file.toFile().isFile)
 
         for (speed in SPEEDS) {
-            FfAudioEngine(ffmpeg, ndmedia, "null", RATE).use { engine ->
+            FfAudioEngine(requireNotNull(ffmpeg), requireNotNull(ndmedia), "null", RATE).use { engine ->
                 engine.play(file, speed, SKIP)
                 assertTrue(engine.awaitEnded(PLAY_TIMEOUT_MS), "item never ended at ${speed}x")
                 val position = engine.positionMs()

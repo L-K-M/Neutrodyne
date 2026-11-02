@@ -8,7 +8,7 @@ import kotlin.math.sin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.Assume.assumeTrue
 
 /**
  * The ndmedia ABI over its own build (11 ndmedia interface, MD0 W4). Runs in
@@ -20,7 +20,7 @@ class NdOutputTest {
     @Test
     fun nullBackendPlaysWrittenFramesAndReportsItsShape() {
         val directory = ndmediaDir() ?: run {
-            assumeTrue(false) { "no ndmedia build for this host" }
+            assumeTrue("no ndmedia build for this host", false)
             return
         }
         NdOutput.open(directory, "null", RATE, CHANNELS, RING_MS).use { out ->
@@ -60,7 +60,7 @@ class NdOutputTest {
     @Test
     fun clearDropsQueuedFrames() {
         val directory = ndmediaDir() ?: run {
-            assumeTrue(false) { "no ndmedia build for this host" }
+            assumeTrue("no ndmedia build for this host", false)
             return
         }
         NdOutput.open(directory, "null", RATE, CHANNELS, RING_MS).use { out ->
@@ -76,7 +76,7 @@ class NdOutputTest {
     @Test
     fun unknownBackendIsRejected() {
         val directory = ndmediaDir() ?: run {
-            assumeTrue(false) { "no ndmedia build for this host" }
+            assumeTrue("no ndmedia build for this host", false)
             return
         }
         try {

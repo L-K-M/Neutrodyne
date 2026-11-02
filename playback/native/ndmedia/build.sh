@@ -26,6 +26,17 @@ MINIAUDIO_SHA256="$(ini miniaudio sha256)"
 [ -n "$MINIAUDIO_VERSION" ] && [ -n "$MINIAUDIO_URL" ] && [ -n "$MINIAUDIO_SHA256" ] ||
     die "miniaudio section incomplete in $LOCK"
 
+# sha256sum is absent on macOS runners; shasum covers BSD, python the rest.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
+    fi
+}
+
 INCLUDE_DIR="$CACHE/miniaudio-$MINIAUDIO_VERSION"
 HEADER="$INCLUDE_DIR/miniaudio.h"
 mkdir -p "$INCLUDE_DIR"
@@ -33,7 +44,7 @@ if [ ! -f "$HEADER" ]; then
     fetch_ok=0
     for try in 1 2 3; do
         if curl -fsSL --retry 3 --connect-timeout 20 -o "$HEADER.part" "$MINIAUDIO_URL" && \
-           echo "$MINIAUDIO_SHA256  $HEADER.part" | sha256sum -c - >/dev/null 2>&1; then
+           [ "$(sha256_of "$HEADER.part")" = "$MINIAUDIO_SHA256" ]; then
             mv "$HEADER.part" "$HEADER"; fetch_ok=1; break
         fi
         rm -f "$HEADER.part"; sleep $((try * 5))

@@ -18,8 +18,6 @@ class NdOutput private constructor(
     private val library: NdmediaLibrary,
     private val handle: MemorySegment,
 ) : AutoCloseable {
-    private val open =
-        library.downcall("nd_out_open", NdmediaAbi.OPEN)
     private val write =
         library.downcall("nd_out_write", NdmediaAbi.WRITE)
     private val freeFrames =
@@ -73,9 +71,8 @@ class NdOutput private constructor(
     fun describe(): String {
         val buffer = library.allocate(DESCRIBE_CAP.toLong())
         val written = check("describe", describe.invokeExact(handle, buffer, DESCRIBE_CAP) as Int)
-        return buffer.getString(0, ValueLayout.JAVA_BYTE, DESCRIBE_CAP.toLong()).let {
-            it.substring(0, written)
-        }
+        // snprintf NUL-terminates within cap; getString(0) ends at that NUL.
+        return buffer.getString(0).take(written)
     }
 
     override fun close() {

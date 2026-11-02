@@ -31,19 +31,17 @@ class FfAudioEngine(
     private sealed interface Command {
         data class Play(val path: Path, val speed: Float, val skipSilence: Boolean) : Command
 
-        data object Pause : Command
-
-        data object Resume : Command
-
         data object Close : Command
     }
 
     private val commands = LinkedBlockingQueue<Command>()
     private val closed = AtomicBoolean(false)
     private val ended = AtomicBoolean(false)
+    private val wantPlaying = AtomicBoolean(false)
     private val outFramesWritten = AtomicLong(0)
-    private var output: NdOutput? = null
-    private var clock: TimelineClock? = null
+    // Cross-thread: callers pause/resume while the engine thread owns the fields.
+    @Volatile private var output: NdOutput? = null
+    @Volatile private var clock: TimelineClock? = null
     private val thread =
         Thread({ run() }, "nd-engine").apply { isDaemon = true; start() }
 
@@ -57,9 +55,19 @@ class FfAudioEngine(
         skipSilence: Boolean,
     ) = commands.offer(Command.Play(path, speed, skipSilence))
 
-    fun pause() = commands.offer(Command.Pause)
+    /**
+     * Pause and resume act on the device directly: commands queued during a
+     * playItem decode loop would sit unprocessed until the item ends.
+     */
+    fun pause() {
+        wantPlaying.set(false)
+        output?.stop()
+    }
 
-    fun resume() = commands.offer(Command.Resume)
+    fun resume() {
+        wantPlaying.set(true)
+        output?.start()
+    }
 
     fun positionMs(): Long = clock?.positionMs() ?: 0
 
@@ -78,32 +86,20 @@ class FfAudioEngine(
     }
 
     private fun run() {
-        var paused = false
         loop@ while (!closed.get()) {
             when (val command = commands.take()) {
                 is Command.Play -> {
-                    paused = false
-                    playItem(command, { paused })
-                }
-                Command.Pause -> {
-                    paused = true
-                    output?.stop()
-                    clock?.pause()
-                }
-                Command.Resume -> {
-                    paused = false
-                    output?.start()
+                    wantPlaying.set(true)
+                    playItem(command)
                 }
                 Command.Close -> break@loop
             }
         }
     }
 
-    private fun playItem(
-        command: Command.Play,
-        isPaused: () -> Boolean,
-    ) {
-        val source = FileByteSource.open(command.path)
+    private fun playItem(command: Command.Play) {
+        // The pipeline does not own the source; close the channel ourselves.
+        FileByteSource.open(command.path).use { source ->
         FfmpegPipeline.open(source, ffmpegDirectory).use { pipeline ->
             val decoder = pipeline.decoder
             val demuxer = pipeline.demuxer
@@ -144,10 +140,15 @@ class FfAudioEngine(
                     }
                     var written = 0
                     while (written < frames && !closed.get()) {
-                        while (isPaused() && !closed.get()) Thread.sleep(PAUSE_POLL_MS)
-                        written += out.write(seg, frames - written).also {
-                            if (it == 0) Thread.sleep(RING_POLL_MS)
-                        }
+                        while (!wantPlaying.get() && !closed.get()) Thread.sleep(PAUSE_POLL_MS)
+                        // nd_out_write may accept only part of the block; the
+                        // slice hands it the unwritten remainder next round.
+                        val accepted = out.write(
+                            seg.asSlice(written.toLong() * decoder.channels * BYTES_PER_F32),
+                            frames - written,
+                        )
+                        if (accepted == 0) Thread.sleep(RING_POLL_MS)
+                        written += accepted
                     }
                     tl.push(
                         TimelineClock.Marker(
@@ -214,11 +215,13 @@ class FfAudioEngine(
             ended.set(true)
             arena.close()
         }
+        }
     }
 
     private companion object {
         const val RING_MS = 200
         const val LATENCY_MS = 30
+        const val BYTES_PER_F32 = 4L
         const val FRAME_BYTES = 1 shl 20
         const val PAUSE_POLL_MS = 20L
         const val RING_POLL_MS = 2L
