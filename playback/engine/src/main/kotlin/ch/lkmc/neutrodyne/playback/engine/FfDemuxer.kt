@@ -100,18 +100,22 @@ class FfDemuxer
                     .orEmpty()
 
             val streamCount = formatContext.readInt(layout, "AVFormatContext", "nb_streams")
-            streamIndex = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
-            if (streamIndex < 0) {
-                // FFmpeg 9's av_find_best_stream skips an audio stream whose
-                // sample rate or channel count is still zero, and demuxers like
-                // mp3 and adts leave both to their parser: the probe runs only
-                // when stream selection says the header alone was not enough.
-                val found = library.findStreamInfo(formatContext)
-                require(found >= 0) {
-                    "the demuxer could not read the stream info: ${library.errorString(found)}"
+            val picked = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
+            streamIndex =
+                if (picked < 0) {
+                    // FFmpeg 9's av_find_best_stream skips an audio stream whose
+                    // sample rate or channel count is still zero, and demuxers
+                    // like mp3 and adts leave both to their parser: the probe
+                    // runs only when stream selection says the header alone
+                    // was not enough.
+                    val found = library.findStreamInfo(formatContext)
+                    require(found >= 0) {
+                        "the demuxer could not read the stream info: ${library.errorString(found)}"
+                    }
+                    library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
+                } else {
+                    picked
                 }
-                streamIndex = library.findBestStream(formatContext, layout.intConstant("AVMEDIA_TYPE_AUDIO"))
-            }
             // The message carries what FFmpeg actually found, because a spike
             // must fail loudly and a wrong offset here is otherwise invisible.
             require(streamIndex >= 0) {
