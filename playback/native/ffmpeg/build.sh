@@ -389,12 +389,20 @@ printf '%s\n' "$PROBE_PROTOCOLS" >"$OUT/ffmpeg-protocols.txt"
 cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h"
 
 log "collecting the enabled-component inventory"
-# The enabled-component inventory, read from the build's own config.h.
+# The enabled-component inventory, read from the build's own config.h. A grep
+# with no match exits 1, which under `pipefail` and `set -e` would end the build
+# without a word, so the inventory is collected first and its size is logged.
+COMPONENTS="$(grep -E '^#define CONFIG_[A-Z0-9_]+_(DEMUXER|DECODER|PARSER|BSF|MUXER|ENCODER) 1' \
+    "$SOURCE_DIR/config.h" | sed 's/^#define CONFIG_//; s/ 1$//' | sort || true)"
+log "the build enabled $(printf '%s\n' "$COMPONENTS" | grep -c '[^[:space:]]') components"
 {
     echo "# enabled components of the $TARGET build (from config.h)"
-    grep -E '^#define CONFIG_[A-Z0-9_]+_(DEMUXER|DECODER|PARSER|BSF|MUXER|ENCODER) 1' \
-        "$SOURCE_DIR/config.h" | sed 's/^#define CONFIG_//; s/ 1$//' | sort
+    printf '%s\n' "$COMPONENTS"
 } >"$OUT/ffmpeg-components.txt"
+
+# The build's own config.h, copied next to the libraries so the licence check and
+# the image scan can read it from the install tree without the build directory.
+cp "$SOURCE_DIR/config.h" "$OUT/ffmpeg-config.h" || die "config.h was not produced by configure"
 
 log "measuring the four libraries"
 # Sizes: the four shared libraries only, symlink targets counted once.
@@ -429,7 +437,7 @@ log "writing the build record"
     echo "signatureSha256 $SIGNATURE_SHA256"
     echo "signingKey $SIGNING_KEY_FINGERPRINT"
     echo "configure $CONFIGURE_LINE"
-    echo "compiler $($CC_BIN --version 2>/dev/null | head -1 || echo unknown)"
+    echo "compiler $("$CC_BIN" --version 2>/dev/null | head -1 || echo unknown)"
     echo "versions $PROBE_VERSION"
     echo "license $PROBE_LICENSE"
 } >"$OUT/ffmpeg-build.txt"
