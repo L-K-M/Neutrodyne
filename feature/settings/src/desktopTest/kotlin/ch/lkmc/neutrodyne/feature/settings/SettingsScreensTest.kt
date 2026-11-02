@@ -68,6 +68,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The M0a Settings screens driven through `NeutrodyneRoot` on the desktop JVM (01 S9 method): the
@@ -102,33 +103,26 @@ class SettingsScreensTest {
             onNodeWithText("Licences").assertExists()
         }
 
-    /**
-     * Diagnostic for the nightly TouchTargetSizeCheck miss: every clickable node on the
-     * scrolled 320x640 settings home must keep a 48dp target.
-     */
+    /** Visible clickables keep a 48dp layout after reaching the bottom of a compact Settings list. */
     @Test
-    fun settingsHomeSmallTargetsDump() =
+    fun settingsHomeVisibleTargetsKeep48DpAfterScroll() =
         runDesktopComposeUiTest(width = 320, height = 640) {
             setSettingsRoot()
             openSettings()
-            onNodeWithText("Licences").performScrollTo()
+            onNodeWithText("Licences").performScrollTo().assertIsDisplayed()
             waitForIdle()
-            val min = 48.dp.value
-            val offenders = mutableListOf<String>()
             onAllNodes(hasClickAction(), useUnmergedTree = true)
                 .fetchSemanticsNodes()
+                // Scrolled-out rows have empty clipped bounds and cannot be tapped.
+                .filter { !it.boundsInRoot.isEmpty }
                 .forEach { node ->
-                    val b = node.boundsInRoot
-                    val line =
-                        "bounds=$b w=${b.width} h=${b.height} " +
-                            "role=${node.config.getOrNull(SemanticsProperties.Role)} " +
-                            "cd=${node.config.getOrNull(SemanticsProperties.ContentDescription)} " +
-                            "text=${node.config.getOrNull(SemanticsProperties.Text)} " +
-                            "tag=${node.config.getOrNull(SemanticsProperties.TestTag)}"
-                    println("CLICKABLE $line")
-                    if (b.width < min || b.height < min) offenders += line
+                    val bounds = node.boundsInRoot
+                    val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
+                    assertTrue(
+                        bounds.width >= minimum && bounds.height >= minimum,
+                        "bounds=$bounds role=${node.config.getOrNull(SemanticsProperties.Role)} minimum=${minimum}px",
+                    )
                 }
-            kotlin.test.assertTrue(offenders.isEmpty(), "sub-48dp targets:\n" + offenders.joinToString("\n"))
         }
 
     @Test
