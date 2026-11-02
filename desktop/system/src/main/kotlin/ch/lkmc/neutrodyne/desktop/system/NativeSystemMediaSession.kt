@@ -42,7 +42,10 @@ class NativeSystemMediaSession private constructor(
         scope.launch {
             while (true) {
                 val event = native.poll()
-                if (event == null) { delay(POLL_MS); continue }
+                if (event == null) {
+                    delay(POLL_MS)
+                    continue
+                }
                 val command = when (event.kind) {
                     NativeSessionEventKind.PLAY -> RemoteCommand.Play
                     NativeSessionEventKind.PAUSE -> RemoteCommand.Pause

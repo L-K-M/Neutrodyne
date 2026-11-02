@@ -344,7 +344,7 @@ tasks.register("md0ProbeImage") {
             command += listOf("--mac-package-identifier", "ch.lkmc.neutrodyne.debug")
         }
         if (System.getProperty("os.name").startsWith("Windows")) command += "--win-console"
-        check(ProcessBuilder(command).inheritIO().start().waitFor() == 0) { "jpackage failed for the MD0 test image" }
+        providers.exec { commandLine(command) }.result.get().assertNormalExitValue()
         logger.lifecycle("Owner-only MD0 image: ${directory.resolve("image")}")
     }
 }

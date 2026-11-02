@@ -2,6 +2,10 @@
 package ch.lkmc.neutrodyne.playback.engine
 
 import ch.lkmc.neutrodyne.playback.native.NdOutput
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 import java.nio.ByteBuffer
@@ -9,280 +13,245 @@ import java.nio.ByteOrder
 import java.nio.file.Path
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
- * The MD0 engine-thread prototype (11 Engine thread): one thread runs
- * decode → DSP → ring → device for one item; commands arrive through a
- * nonblocking queue so a blocked source read can still be interrupted by
- * close. The position readers see comes from [TimelineClock] on the
- * device-confirmed frame counter.
- *
- * This is the spike's proof of concept, not the MD1 controller: it plays a
- * single local file once and exposes `positionMs`, `ended` and the underrun
- * counter for the AC3 measurement.
+ * MD0 single-local-item instrument. The worker owns decode, DSP and output
+ * lifetime. Callers serialize device controls with publication/cleanup; abort
+ * reaches an opening source before waiting for that worker. MD1 supplies the
+ * production queue/controller and asynchronous preparation.
  */
 class FfAudioEngine(
     private val ffmpegDirectory: Path,
     private val ndmediaDirectory: Path,
     private val backend: String?,
     private val deviceRate: Int,
-    private val openSource: (Path) -> ByteSource = FileByteSource::open,
+    private val openSource: (Path) -> ByteSource = ::FileChannelByteSource,
 ) : AutoCloseable {
-    private sealed interface Command {
-        data class Play(
-            val path: Path,
-            val speed: Float,
-            val skipSilence: Boolean,
-        ) : Command
+    private data class Item(val path: Path, val speed: Float, val skipSilence: Boolean)
 
-        data object Close : Command
-    }
-
-    private val commands = LinkedBlockingQueue<Command>()
+    private val commands = LinkedBlockingQueue<Item>()
+    private val control = Any()
     private val closed = AtomicBoolean(false)
+    private val submitted = AtomicBoolean(false)
     private val ended = AtomicBoolean(false)
-    private val wantPlaying = AtomicBoolean(false)
-    private val outFramesWritten = AtomicLong(0)
+    private val failure = AtomicReference<Throwable?>(null)
+    private var wantPlaying = false
+    private var source: ByteSource? = null
+    private var activeOutput: NdOutput? = null
 
-    // Cross-thread: callers pause/resume while the engine thread owns the fields.
     @Volatile private var output: NdOutput? = null
-
     @Volatile private var clock: TimelineClock? = null
-    private val thread =
-        Thread({ run() }, "nd-engine").apply {
-            isDaemon = true
-            start()
-        }
-
+    @Volatile var outputDescription: String? = null
+        private set
     @Volatile var durationMs: Long? = null
         private set
 
-    val isEnded: Boolean get() = ended.get()
+    private val thread = Thread({ run() }, "nd-engine").apply {
+        isDaemon = true
+        start()
+    }
 
-    val outputDescription: String? get() = output?.describe()
-
+    val isEnded: Boolean get() { checkFailure(); return ended.get() }
     val framesPlayed: Long get() = output?.framesPlayed ?: 0
-
     val underrunFrames: Long get() = output?.underrunFrames ?: 0
 
-    fun play(
-        path: Path,
-        speed: Float,
-        skipSilence: Boolean,
-    ) = commands.offer(Command.Play(path, speed, skipSilence))
-
-    /**
-     * Pause and resume act on the device directly: commands queued during a
-     * playItem decode loop would sit unprocessed until the item ends.
-     */
-    fun pause() {
-        wantPlaying.set(false)
-        output?.stop()
+    fun play(path: Path, speed: Float, skipSilence: Boolean): Boolean = synchronized(control) {
+        check(!closed.get()) { "engine is closed" }
+        require(speed.isFinite() && speed in MIN_SPEED..MAX_SPEED)
+        check(submitted.compareAndSet(false, true)) { "the MD0 instrument plays one item" }
+        wantPlaying = true
+        commands.offer(Item(path, speed, skipSilence))
     }
 
-    fun resume() {
-        wantPlaying.set(true)
-        output?.start()
+    fun pause() = synchronized(control) {
+        wantPlaying = false
+        activeOutput?.stop()
+        clock?.pause()
     }
 
-    fun positionMs(): Long = clock?.positionMs() ?: 0
+    fun resume() = synchronized(control) {
+        check(!closed.get()) { "engine is closed" }
+        checkFailure()
+        wantPlaying = true
+        clock?.resume()
+        activeOutput?.start()
+    }
 
-    /** Blocks until the item ends or [timeoutMs] passes; returns which. */
+    fun positionMs(): Long { checkFailure(); return clock?.positionMs() ?: 0 }
+
     fun awaitEnded(timeoutMs: Long): Boolean {
+        require(timeoutMs >= 0)
         val deadline = System.nanoTime() + timeoutMs * 1_000_000
-        while (!ended.get() && System.nanoTime() < deadline) Thread.sleep(10)
-        return ended.get()
+        while (!isEnded && System.nanoTime() < deadline) Thread.sleep(10)
+        return isEnded
     }
 
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        commands.offer(Command.Close)
+        synchronized(control) {
+            if (!closed.compareAndSet(false, true)) return
+            source?.abort()
+            activeOutput?.stop()
+        }
+        // Wake a worker waiting for its first item without interrupting a native
+        // read: source.abort is the AVIO cancellation mechanism.
+        thread.interrupt()
         thread.join(CLOSE_JOIN_MS)
-        output?.close()
+        check(!thread.isAlive) { "engine did not stop after source abort; native storage remains owned by worker" }
+    }
+
+    private fun checkFailure() {
+        failure.get()?.let { throw IllegalStateException("MD0 engine failed", it) }
     }
 
     private fun run() {
-        loop@ while (!closed.get()) {
-            when (val command = commands.take()) {
-                is Command.Play -> {
-                    wantPlaying.set(true)
-                    playItem(command)
-                }
+        try {
+            val item = commands.take()
+            if (closed.get()) return
+            playItem(item)
+        } catch (problem: Throwable) {
+            if (!closed.get()) failure.set(problem)
+        }
+    }
 
-                Command.Close -> {
-                    break@loop
-                }
+    private fun playItem(item: Item) {
+        openSource(item.path).use { input ->
+            synchronized(control) {
+                if (closed.get()) { input.abort(); return }
+                source = input
+            }
+            try {
+                FfmpegPipeline.open(input, ffmpegDirectory).use { pipeline -> playPipeline(item, pipeline) }
+            } finally {
+                synchronized(control) { source = null }
             }
         }
     }
 
-    private fun playItem(command: Command.Play) {
-        // The pipeline does not own the source; close the channel ourselves.
-        openSource(command.path).use { source ->
-            FfmpegPipeline.open(source, ffmpegDirectory).use { pipeline ->
-                durationMs = pipeline.demuxer.durationMs
-                val decoder = pipeline.decoder
-                val demuxer = pipeline.demuxer
-                val skip =
-                    SilenceSkipper().takeIf { command.skipSilence }?.apply {
-                        configure(decoder.sampleRate, decoder.channels)
-                    }
-                val sonic = Sonic(decoder.sampleRate, decoder.channels, command.speed, 1f, deviceRate)
-                val gain = GainStage()
-                val out = NdOutput.open(ndmediaDirectory, backend, deviceRate, decoder.channels, RING_MS)
+    private fun playPipeline(item: Item, pipeline: FfmpegPipeline) {
+        durationMs = pipeline.demuxer.durationMs
+        val decoder = pipeline.decoder
+        val skip = SilenceSkipper().takeIf { item.skipSilence }?.apply {
+            configure(decoder.sampleRate, decoder.channels)
+        }
+        val sonic = Sonic(decoder.sampleRate, decoder.channels, item.speed, 1f, deviceRate)
+        val gain = GainStage()
+        NdOutput.open(ndmediaDirectory, backend, deviceRate, decoder.channels, RING_MS).use { out ->
+            val description = out.describe()
+            val period = requireNotNull(Json.parseToJsonElement(description).jsonObject["period"]).jsonPrimitive.int
+            val timeline = TimelineClock(deviceRate, period.toLong(), out.clockReader())
+            var outputFrames = 0L
+            var inputFrames = 0L
+            var firstPtsUs: Long? = null
+            val buffer = ByteBuffer.allocate(FRAME_BYTES).order(ByteOrder.nativeOrder())
+            synchronized(control) {
+                if (closed.get()) return
                 output = out
-                val latency = LATENCY_MS.toLong() * deviceRate / 1000
-                val tl = TimelineClock(deviceRate, latency) { out.framesPlayed }
-                clock = tl
-                tl.clear()
-                out.start()
-
-                val arena = Arena.ofShared()
-                val inBuffer = ByteBuffer.allocate(FRAME_BYTES).order(ByteOrder.nativeOrder())
-                val outBuffer = ByteBuffer.allocate(FRAME_BYTES).order(ByteOrder.nativeOrder())
-                var mediaUs = 0L
-                var firstPtsSeen = false
-                var eos = false
-
+                activeOutput = out
+                clock = timeline
+                outputDescription = description
+                if (wantPlaying) out.start() else timeline.pause()
+            }
+            try {
                 fun pumpSonic() {
-                    while (sonic.outputSize > 0) {
-                        outBuffer.clear()
-                        sonic.getOutput(outBuffer)
-                        outBuffer.flip()
-                        val frames = outBuffer.remaining() / (decoder.channels * 2)
+                    while (sonic.outputSize > 0 && !closed.get()) {
+                        buffer.clear()
+                        sonic.getOutput(buffer)
+                        buffer.flip()
+                        val frames = buffer.remaining() / (decoder.channels * Short.SIZE_BYTES)
                         if (frames == 0) break
-                        val pcm = ShortArray(frames * decoder.channels)
-                        repeat(pcm.size) { pcm[it] = outBuffer.getShort() }
+                        val pcm = ShortArray(frames * decoder.channels) { buffer.getShort() }
                         gain.process(pcm, 0, frames, decoder.channels)
-                        val seg = arena.allocate(frames.toLong() * decoder.channels * 4)
-                        for (i in pcm.indices) {
-                            seg.set(ValueLayout.JAVA_FLOAT, i * 4L, pcm[i] / 32768f)
+                        val skippedUs = (skip?.skippedFrames ?: 0L) * MICROS_PER_SECOND / decoder.sampleRate
+                        timeline.push(TimelineClock.Marker(
+                            outputFrames, item.path.fileName.toString(),
+                            (firstPtsUs ?: 0L) + (outputFrames * item.speed.toDouble() * MICROS_PER_SECOND / deviceRate).toLong() + skippedUs,
+                            item.speed,
+                        ))
+                        // The ring copies each block. Release native conversion
+                        // storage immediately, rather than accumulating a soak's PCM.
+                        Arena.ofConfined().use { arena ->
+                            val segment = arena.allocate(pcm.size.toLong() * Float.SIZE_BYTES)
+                            pcm.forEachIndexed { index, sample ->
+                                segment.set(ValueLayout.JAVA_FLOAT, index.toLong() * Float.SIZE_BYTES, sample / 32768f)
+                            }
+                            var written = 0
+                            while (written < frames && !closed.get()) {
+                                val accepted = synchronized(control) {
+                                    if (!wantPlaying || closed.get()) 0 else out.write(
+                                        segment.asSlice(written.toLong() * decoder.channels * Float.SIZE_BYTES), frames - written,
+                                    )
+                                }
+                                written += accepted
+                                if (accepted == 0) Thread.sleep(RING_POLL_MS)
+                            }
+                            outputFrames += written
                         }
-                        var written = 0
-                        while (written < frames && !closed.get()) {
-                            while (!wantPlaying.get() && !closed.get()) Thread.sleep(PAUSE_POLL_MS)
-                            // nd_out_write may accept only part of the block; the
-                            // slice hands it the unwritten remainder next round.
-                            val accepted =
-                                out.write(
-                                    seg.asSlice(written.toLong() * decoder.channels * BYTES_PER_F32),
-                                    frames - written,
-                                )
-                            if (accepted == 0) Thread.sleep(RING_POLL_MS)
-                            written += accepted
-                        }
-                        tl.push(
-                            TimelineClock.Marker(
-                                outFramesWritten.get(),
-                                command.path.fileName.toString(),
-                                mediaUs,
-                                command.speed,
-                            ),
-                        )
-                        outFramesWritten.addAndGet(frames.toLong())
                     }
                 }
-
-                while (!eos && !closed.get()) {
-                    val packet = demuxer.readPacket()
-                    if (packet == null) {
-                        decoder.flush()
-                        eos = true
-                    } else {
-                        if (!decoder.send(packet)) continue
-                    }
-                    while (true) {
-                        val frame = decoder.receive() ?: break
-                        if (frame.samples.isEmpty()) continue
-                        if (!firstPtsSeen && frame.ptsUs != null) {
-                            mediaUs = frame.ptsUs
-                            firstPtsSeen = true
-                        }
-                        inBuffer.clear()
-                        val sb = inBuffer.asShortBuffer()
-                        sb.put(frame.samples)
-                        inBuffer.limit(frame.samples.size * 2)
-                        if (skip != null) {
-                            skip.queueInput(inBuffer.duplicate().order(ByteOrder.nativeOrder()))
-                            val out = ByteBuffer.allocate(FRAME_BYTES).order(ByteOrder.nativeOrder())
-                            skip.getOutput(out)
-                            out.flip()
-                            if (out.hasRemaining()) sonic.queueInput(out)
-                        } else {
-                            sonic.queueInput(inBuffer)
-                        }
-                        mediaUs += frame.samples.size.toLong() * 1_000_000 /
-                            (decoder.channels * decoder.sampleRate)
+                fun drainSkip() {
+                    while (skip?.hasOutput() == true) {
+                        buffer.clear()
+                        skip.getOutput(buffer)
+                        buffer.flip()
+                        sonic.queueInput(buffer)
                         pumpSonic()
                     }
                 }
-                if (skip != null) {
-                    skip.queueEndOfStream()
-                    val tail = ByteBuffer.allocate(FRAME_BYTES).order(ByteOrder.nativeOrder())
-                    skip.getOutput(tail)
-                    tail.flip()
-                    if (tail.hasRemaining()) sonic.queueInput(tail)
+                fun accept(frame: AudioFrame) {
+                    if (firstPtsUs == null) firstPtsUs = frame.ptsUs
+                    inputFrames += frame.samples.size / frame.channels
+                    val input = ByteBuffer.allocate(frame.samples.size * Short.SIZE_BYTES).order(ByteOrder.nativeOrder())
+                    input.asShortBuffer().put(frame.samples)
+                    if (skip == null) sonic.queueInput(input) else { skip.queueInput(input); drainSkip() }
+                    pumpSonic()
                 }
+                while (!closed.get()) {
+                    val packet = pipeline.demuxer.readPacket() ?: break
+                    check(decoder.send(packet)) { "decoder backpressure after its output was drained" }
+                    while (true) accept(decoder.receive() ?: break)
+                }
+                if (closed.get()) return
+                decoder.flush()
+                while (true) accept(decoder.receive() ?: break)
+                decoder.drainResampler()?.let(::accept)
+                skip?.queueEndOfStream()
+                drainSkip()
                 sonic.queueEndOfStream()
                 pumpSonic()
-                // Wait for the ring to drain so position reaches the media end.
-                val deadline = System.nanoTime() + DRAIN_WAIT_NS
-                while (out.freeFrames() < RING_MS * deviceRate / 1000 &&
-                    System.nanoTime() < deadline && !closed.get()
-                ) {
+                var progress = out.framesPlayed
+                var lastProgress = System.nanoTime()
+                while (out.framesPlayed < outputFrames && !closed.get()) {
+                    val playing = synchronized(control) { wantPlaying }
+                    val now = System.nanoTime()
+                    val played = out.framesPlayed
+                    if (!playing || played != progress) { progress = played; lastProgress = now }
+                    check(now - lastProgress < DRAIN_WAIT_NS) { "device stopped consuming queued PCM" }
                     Thread.sleep(RING_POLL_MS)
                 }
-                out.stop()
-                tl.finish(mediaUs)
-                ended.set(true)
-                arena.close()
+                if (!closed.get()) synchronized(control) {
+                    out.stop()
+                    timeline.resume()
+                    timeline.finish((firstPtsUs ?: 0L) + inputFrames * MICROS_PER_SECOND / decoder.sampleRate)
+                    ended.set(true)
+                }
+            } finally {
+                synchronized(control) {
+                    activeOutput = null
+                    out.stop()
+                }
             }
         }
     }
 
     private companion object {
+        const val MIN_SPEED = 0.5f
+        const val MAX_SPEED = 3f
         const val RING_MS = 200
-        const val LATENCY_MS = 30
-        const val BYTES_PER_F32 = 4L
         const val FRAME_BYTES = 1 shl 20
-        const val PAUSE_POLL_MS = 20L
+        const val MICROS_PER_SECOND = 1_000_000L
         const val RING_POLL_MS = 2L
         const val CLOSE_JOIN_MS = 5_000L
         const val DRAIN_WAIT_NS = 3_000_000_000L
     }
-}
-
-/** Opens a corpus file as a [ByteSource] (the spike uses local files only). */
-internal object FileByteSource {
-    fun open(path: Path): ByteSource =
-        object : ByteSource {
-            private val channel =
-                java.nio.channels.FileChannel
-                    .open(path)
-            private val aborted = AtomicBoolean(false)
-
-            override val length: Long? get() = channel.size()
-
-            override fun read(
-                position: Long,
-                dst: java.lang.foreign.MemorySegment,
-                maxBytes: Int,
-            ): Int {
-                if (aborted.get()) return -1
-                val buffer = ByteBuffer.allocate(maxBytes)
-                val read = channel.read(buffer, position)
-                if (read <= 0) return 0
-                buffer.flip()
-                dst.asSlice(0, read.toLong()).copyFrom(
-                    java.lang.foreign.MemorySegment
-                        .ofBuffer(buffer),
-                )
-                return read
-            }
-
-            override fun abort() = aborted.set(true)
-
-            override fun close() = channel.close()
-        }
 }

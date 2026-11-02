@@ -203,10 +203,14 @@ class FileChannelByteSource(
         if (!channel.isOpen) return -1
         val buffer = ByteBuffer.allocate(minOf(maxBytes, MAX_READ))
         var read = 0
-        while (read < buffer.capacity()) {
-            val count = channel.read(buffer, position + read)
-            if (count < 0) break
-            read += count
+        try {
+            while (read < buffer.capacity()) {
+                val count = channel.read(buffer, position + read)
+                if (count <= 0) break
+                read += count
+            }
+        } catch (_: java.nio.channels.ClosedChannelException) {
+            return -1
         }
         if (read == 0) return 0
         buffer.flip()
@@ -215,8 +219,7 @@ class FileChannelByteSource(
     }
 
     override fun abort() {
-        // A positional read cannot be interrupted; the engine instead relies on the
-        // bounded read size and re-checks its abort flag between reads.
+        channel.close()
     }
 
     override fun close() {
