@@ -80,10 +80,11 @@ class SleepTimerSheetTest {
             onNodeWithText("Custom…").performClick()
             onNodeWithText("Custom…").assertIsSelected()
             onNodeWithText("30 min").assertIsNotSelected()
+            // A preset tap leaves custom and reselects the persisted last choice.
             onNodeWithText("15 min").performClick()
-            onNodeWithText("15 min").assertIsSelected()
             onNodeWithText("Custom…").assertIsNotSelected()
-            assertEquals(listOf(SleepTimerMode.Minutes(15)), calls)
+            onNodeWithText("30 min").assertIsSelected()
+            assertEquals(listOf<SleepTimerMode>(SleepTimerMode.Minutes(15)), calls)
         }
 
     @Test fun runningPausedExtensionLiveStateAndServiceLoss() =
