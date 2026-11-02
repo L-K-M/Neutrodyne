@@ -77,7 +77,7 @@ internal class UpdateCheckStore(
                     val started = root.number("firstStartedAtMs")
                     val due = root.number("nextDueAtMs")
                     val retry = root.number("retryAttempt")
-                    require(retry <= MAX_RETRY_ATTEMPT)
+                    require(retry in 0..MAX_RETRY_ATTEMPT)
                     require(manifest == null || lastCheck != null)
                     Outcome.Success(UpdateStoreSnapshot(manifest, lastCheck, started, due, retry.toInt()))
                 } catch (_: CharacterCodingException) {

@@ -105,7 +105,11 @@ internal class AppUpdateCheckerImpl(
                 now,
                 dueAfter(now, DAY_MS),
                 0,
-            ).also { persist(it) }
+            ).also {
+                // Only a missing or corrupt file is replaced: a transient read failure keeps
+                // the in-memory default without overwriting the real cache.
+                if (read !is Outcome.Failure || read.error != UpdateStoreError.IO) persist(it)
+            }
             val cached = snapshot!!.manifest
             if (cached != null && cached.versionCode <= build.versionCode.toLong()) {
                 val cleared = snapshot!!.copy(manifest = null)
@@ -124,12 +128,16 @@ internal class AppUpdateCheckerImpl(
                     // suspended inside it. A manual run begun while off keeps that choice.
                     val active = flight.value
                     val mode = if (choice && !dev) UpdateScheduling.ENABLED else UpdateScheduling.DISABLED
-                    if (active != null && active.choiceAtStart != mode) active.job.cancel()
+                    // Deregister before cancelling so a joiner never finds a cancelled job.
+                    if (active != null && active.choiceAtStart != mode && flight.compareAndSet(active, null)) {
+                        active.job.cancel()
+                    }
                     mutex.withLock {
                         if (choice == enabled) return@withLock
                         enabled = choice
                         epoch++
                         flight.value?.job?.cancel()
+                        flight.value = null
                         manualDispatch?.cancel()
                         notifications.cancel()
                         recompute()
@@ -480,6 +488,7 @@ internal class AppUpdateCheckerImpl(
             val active = flight.value
             if (active?.origin == UpdateInvocation.MANUAL) {
                 active.job.cancel()
+                flight.value = null
                 if (mutableState.value == UpdateCheckState.Checking) {
                     failure(UpdateCheckError.NETWORK, active.previous)
                 }
