@@ -368,6 +368,9 @@
         <item quantity="one">%1$d episode</item>
         <item quantity="other">%1$d episodes</item>
     </plurals>
+    <string name="add_candidate_source_alternate_link">Linked feed</string>
+    <string name="add_candidate_source_apple_anchor">Apple Podcasts link</string>
+    <string name="add_candidate_source_same_site_anchor">Found on the page</string>
     <string name="add_subscription_list">This is a subscription list — a file of feeds to subscribe to all at once.</string>
     <string name="add_import_later">Import arrives with a later milestone — pick a single feed address meanwhile.</string>
     <string name="add_error_not_a_url">Enter a feed address</string>

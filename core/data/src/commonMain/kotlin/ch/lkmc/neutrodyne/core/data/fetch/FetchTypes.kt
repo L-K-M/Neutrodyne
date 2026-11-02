@@ -111,7 +111,20 @@ internal const val FEED_ACCEPT =
     "application/rss+xml, application/atom+xml;q=0.9, application/xml;q=0.8, text/xml;q=0.8, */*;q=0.5"
 
 /** Add/edit must reject YouTube even when a publisher redirects there. */
-internal enum class FeedRequestPurpose { REFRESH, ADD }
+internal enum class FeedRequestPurpose {
+    REFRESH,
+    ADD,
+
+    /**
+     * An add request the user did not name (autodiscovery candidates and probes, 03 note
+     * 2026-11-02): no hop may point into the local network — unlike [ADD], where only a
+     * non-local first URL forbids later local hops, so a typed LAN feed still works.
+     */
+    ADD_DISCOVERED,
+}
 
 /** Add's pre-M8 policy rejection, distinguished from transport errors by the resolver. */
 internal val ADD_YOUTUBE_REJECTED = NetError.Other("youtube")
+
+/** Add's local-destination refusal, mapped to `LocalNetworkUnsupported` by the resolver. */
+internal val ADD_LOCAL_REJECTED = NetError.Other("local")
