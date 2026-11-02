@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
+import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.ExternalReason
@@ -133,6 +134,25 @@ class PlayStarterTest {
         contexts.specResult = contexts.specResult.copy(type = ContextType.GROUP, contextId = 7)
         contexts.startResult = 4
     }
+
+    @Test fun externalListCarriesAtomicQueueHeadAndReplacesQueuedContextAfterGates() =
+        runTest {
+            committed(StartRequest.Episode(2, externalQueue = listOf(3, 4, 3)))
+            val start = sessions.calls.single().start!!
+            assertEquals(ContextRetention.REPLACE, start.contextRetention)
+            assertNull(start.context)
+            assertEquals(listOf(3L, 4L), start.queueHead)
+        }
+
+    @Test fun invalidExternalRemainderAndRefusedFirstLeaveQueueUntouched() =
+        runTest {
+            lookup.items.value = lookup.items.value - 3L
+            assertIs<StartOutcome.Refused>(starter().start(StartRequest.Episode(2, externalQueue = listOf(3))))
+            assertTrue(sessions.calls.isEmpty())
+            gate.refusal = PlayResult.MeteredBlocked
+            assertIs<StartOutcome.Refused>(starter().start(StartRequest.Episode(2, externalQueue = listOf(4))))
+            assertTrue(sessions.calls.isEmpty())
+        }
 
     @Test fun groupStartSelectsFirstQueuedAndKeepsAnchorNullAndRemainingOrder() =
         runTest {
@@ -337,6 +357,34 @@ class PlayStarterTest {
             assertEquals(0L, committed(StartRequest.Episode(8)).startPositionMs)
             sessions.queue = queue(current = null)
             assertEquals(500L, committed(StartRequest.Episode(8, 500)).startPositionMs)
+        }
+
+    @Test fun videoWithOnlyAnAudioAlternateCanStartButAudioWithoutAnEnclosureCannot() =
+        runTest {
+            val alternateOnly =
+                media(8).copy(
+                    isVideo = true,
+                    enclosureUrl = null,
+                    audioAlternate = AudioAlternate("https://example.org/audio.m4a", "audio/mp4", 123),
+                )
+            lookup.items.value = lookup.items.value + (8L to alternateOnly)
+            assertEquals(8, committed(StartRequest.Episode(8)).queue.current?.episodeId)
+            lookup.items.value = lookup.items.value + (8L to alternateOnly.copy(isVideo = false))
+            assertEquals(UnplayableReason.NoMedia, refusalReason(StartRequest.Episode(8)))
+        }
+
+    @Test fun smartResumeSettingReachesColdStartsAndExplicitPositionsWin() =
+        runTest {
+            positions.positions.value = mapOf(8L to StoredPosition(8, 70_000, clock.now() - 300_001, null))
+            val enabled = starter().start(StartRequest.Episode(8), resumePolicy = SmartResumePolicy.ENABLED)
+            assertEquals(65_000, assertIs<StartOutcome.Committed>(enabled).startPositionMs)
+            val disabled = starter().start(StartRequest.Episode(8), resumePolicy = SmartResumePolicy.DISABLED)
+            assertEquals(70_000, assertIs<StartOutcome.Committed>(disabled).startPositionMs)
+            val explicit = starter().start(StartRequest.Episode(8, 754_000), resumePolicy = SmartResumePolicy.ENABLED)
+            assertEquals(754_000, assertIs<StartOutcome.Committed>(explicit).startPositionMs)
+            sessions.queue = queue(current = 8)
+            val resumed = starter().start(StartRequest.Resume, resumePolicy = SmartResumePolicy.ENABLED)
+            assertEquals(65_000, assertIs<StartOutcome.Committed>(resumed).startPositionMs)
         }
 
     @Test fun failuresMapToServiceUnavailableAndCancellationPropagates() =

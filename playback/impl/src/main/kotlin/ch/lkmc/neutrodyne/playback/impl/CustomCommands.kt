@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.playback.impl
 import android.os.Bundle
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 
@@ -25,7 +27,16 @@ internal object CustomCommands {
     const val RESULT = "nd.result"
     const val EPISODE_ID = "nd.episodeId"
     const val REASON = "nd.reason"
-    val names = listOf(PLAY_CONTEXT, SPEED_SET_SCOPE, SKIP_SILENCE, SPEED_CYCLE, DISMISS)
+    val names =
+        listOf(
+            PLAY_CONTEXT,
+            SPEED_SET_SCOPE,
+            SKIP_SILENCE,
+            SPEED_CYCLE,
+            DISMISS,
+            PlaybackSessionCommands.CHAPTER_NEXT,
+            PlaybackSessionCommands.CHAPTER_PREV,
+        )
 
     fun command(name: String): SessionCommand = SessionCommand(name, Bundle.EMPTY)
 
@@ -37,11 +48,15 @@ internal object CustomCommands {
                 }
 
                 is StartRequest.Episode -> {
+                    // The wire codec cannot carry the external remainder; browse-validated
+                    // starts enter through onSetMediaItems, not this command.
+                    require(request.externalQueue == null)
                     putLong("startEpisodeId", request.episodeId)
                     request.positionMs?.let { putLong("startPositionMs", it) }
                 }
 
                 is StartRequest.Feed -> {
+                    require(request.membership == StartMembership.ANY)
                     val type =
                         when (val source = request.source) {
                             FeedSource.All -> {

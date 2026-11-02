@@ -7,4 +7,8 @@
     <string name="player_collapse_panel">Collapse player tabs</string>
     <string name="player_time_total">Show total time</string>
     <string name="player_time_remaining">Show remaining time</string>
+    <string name="player_chapters">Chapters (%1$d)</string>
+    <string name="player_chapter">Ch. %1$d · %2$s</string>
+    <string name="player_previous_chapter">Previous chapter</string>
+    <string name="player_next_chapter">Next chapter</string>
 </resources>

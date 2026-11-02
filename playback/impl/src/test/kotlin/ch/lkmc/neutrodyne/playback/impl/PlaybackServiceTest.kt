@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
@@ -27,6 +28,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -59,6 +61,94 @@ class PlaybackServiceTest {
                     service.access = h.access
                 }
             }
+    }
+
+    /**
+     * Service creation is lazy for the playback runtime; this drives one real start so the
+     * deferred bridge open actually begins, then pauses the seeded current again.
+     */
+    private fun activate(
+        service: NeutrodynePlaybackService,
+        h: LifecycleHarness,
+    ): kotlinx.coroutines.Deferred<Unit> =
+        h.scope.async {
+            val session = service.onGetSession(controllerInfo())!!
+            val controller = MediaController.Builder(h.app, session.token).buildAsync().await()
+            try {
+                controller
+                    .sendCustomCommand(
+                        CustomCommands.command(CustomCommands.PLAY_CONTEXT),
+                        CustomCommands.encode(StartRequest.Resume),
+                    ).await()
+                if (h.store.queue.current != null) {
+                    val loaded = CompletableDeferred<Unit>()
+                    val listener =
+                        object : androidx.media3.common.Player.Listener {
+                            override fun onTimelineChanged(
+                                timeline: androidx.media3.common.Timeline,
+                                reason: Int,
+                            ) {
+                                if (session.player.mediaItemCount > 0) loaded.complete(Unit)
+                            }
+                        }
+                    session.player.addListener(listener)
+                    try {
+                        controller.play()
+                        if (session.player.mediaItemCount == 0) loaded.await()
+                    } finally {
+                        session.player.removeListener(listener)
+                    }
+                    controller.pause()
+                }
+            } finally {
+                controller.release()
+            }
+        }
+
+    @Test fun metadataOnlyServiceStartupDoesNotProjectPinPrepareOrRequestNetwork() {
+        LifecycleHarness(app()).use { h ->
+            val server = mockwebserver3.MockWebServer().apply { start() }
+            h.seedCurrent()
+            h.lookup.items.value += 1L to media(url = server.url("/episode.mp3").toString())
+            install(h)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            try {
+                val session = service.get().onGetSession(controllerInfo())!!
+                val browser =
+                    h.run {
+                        androidx.media3.session.MediaBrowser
+                            .Builder(h.app, session.token)
+                            .buildAsync()
+                            .await()
+                    }
+                try {
+                    h.run { browser.getLibraryRoot(null).await() }
+                    val recent =
+                        h.run {
+                            RecentRootProbe
+                                .children(
+                                    session,
+                                    controllerInfo("com.android.systemui"),
+                                ).await()
+                        }
+                    assertEquals(0, recent.resultCode)
+                    assertEquals("episode:1", recent.value!!.single().mediaId)
+                    assertEquals(0, session.player.mediaItemCount)
+                    assertFalse(session.player.playWhenReady)
+                    assertNull(h.hub.bridge)
+                    assertNull(h.index[1])
+                    assertNull(h.resolver.streamKind(1))
+                    assertTrue(h.store.calls.isEmpty())
+                    assertEquals(0, server.requestCount)
+                    assertEquals(androidx.media3.common.Player.STATE_IDLE, session.player.playbackState)
+                } finally {
+                    browser.release()
+                }
+            } finally {
+                service.destroy()
+                server.close()
+            }
+        }
     }
 
     @Test fun pauseCancelsClientStartWhileServiceIsOpening() = pauseDuringStart(PauseSource.CANONICAL)
@@ -178,6 +268,8 @@ class PlaybackServiceTest {
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
             try {
                 assertNotNull(service.get().onGetSession(controllerInfo()))
+                assertEquals(1, h.openStarted.count)
+                activate(service.get(), h)
                 pumpUntil { h.openStarted.count == 0L }
                 assertEquals(0, h.dbProviderReads)
                 assertNull(h.hub.bridge)
@@ -203,6 +295,7 @@ class PlaybackServiceTest {
         LifecycleHarness(app(), delayed = true).use { h ->
             install(h)
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            activate(service.get(), h)
             pumpUntil { h.openStarted.count == 0L }
             service.destroy()
             h.allowOpen.countDown()
@@ -249,6 +342,8 @@ class PlaybackServiceTest {
                     Dispatchers.IO,
                 )
             try {
+                // Service creation is lazy: a real start must trigger the failed open attempt.
+                val play = h.scope.async { controller.play() }
                 pumpUntil { h.opener.openState.value is DatabaseOpenState.Failed }
                 assertNull(h.hub.bridge)
                 // The session stays available while its database open is failed.
@@ -256,7 +351,7 @@ class PlaybackServiceTest {
                 h.storage = Storage.READY
                 // The start-up gate's retry owns the next open, as on the app's real failure path.
                 h.run { h.opener.awaitOpen() }
-                assertEquals(PlayResult.Started, h.run { controller.play() })
+                assertEquals(PlayResult.Started, h.run { play.await() })
                 pumpUntil { h.hub.bridge != null }
                 val player = service.get().onGetSession(controllerInfo())!!.player
                 pumpUntil { player.mediaItemCount == 1 && player.playWhenReady }
@@ -273,12 +368,14 @@ class PlaybackServiceTest {
             install(h)
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
             try {
+                h.run { activate(service.get(), h).await() }
                 pumpUntil { h.hub.bridge != null }
                 val bridge = assertNotNull(h.hub.bridge)
                 val player = service.get().onGetSession(controllerInfo())!!.player
                 pumpUntil { player.mediaItemCount == 1 }
                 assertNull(h.connection.controller)
                 h.controller.pause()
+                pumpUntil { !player.playWhenReady }
                 assertFalse(player.playWhenReady)
                 h.run { bridge.stop() }
                 assertEquals(
@@ -432,6 +529,8 @@ class PlaybackServiceTest {
                 )
             try {
                 assertNotNull(h.run { connection.awaitController() })
+                // Lazy service creation needs one real start before the bridge exists.
+                h.run { activate(service.get(), h).await() }
                 val player = service.get().onGetSession(controllerInfo())!!.player
                 val expectedEpisodeId =
                     when (path) {
@@ -524,6 +623,49 @@ class PlaybackServiceTest {
                 assertEquals(ScopeWriteResult.FAILED, h.run { controller.setSpeed(Float.NaN, SettingScope.GLOBAL) })
             } finally {
                 connection.controller?.release()
+                service.destroy()
+            }
+        }
+    }
+
+    @Test fun sessionAndUiPausePathsUseElapsedSmartResumeWithoutReloading() {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent()
+            install(h)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            try {
+                h.run { activate(service.get(), h).await() }
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                pumpUntil { player.mediaItemCount == 1 && player.currentPosition == 12_000L }
+                player.play()
+                pumpUntil { player.playWhenReady }
+                player.pause()
+                h.clock.elapsedMs += 300_000
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(12_000L, player.currentPosition)
+                h.controller.pause()
+                h.clock.elapsedMs += 300_001
+                h.clock.nowMs -= 1_000_000
+                player.play()
+                pumpUntil { player.currentPosition == 7_000L }
+                assertEquals(1, player.mediaItemCount)
+                player.pause()
+                h.run { h.settings.set(PlaybackSettingKeys.SMART_RESUME, false) }
+                pumpUntil { !h.prefs.current.value.smartResume }
+                h.clock.elapsedMs += 300_001
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(7_000L, player.currentPosition)
+                h.run { h.settings.set(PlaybackSettingKeys.SMART_RESUME, true) }
+                pumpUntil { h.prefs.current.value.smartResume }
+                player.pause()
+                h.clock.elapsedMs += 300_001
+                h.run { checkNotNull(h.hub.bridge).start(StartRequest.Episode(1, 754_000), StartOrigin.UI) }
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(754_000L, player.currentPosition)
+            } finally {
                 service.destroy()
             }
         }

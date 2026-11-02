@@ -61,6 +61,10 @@
         <item quantity="one">%1$d second</item>
         <item quantity="other">%1$d seconds</item>
     </plurals>
+    <string name="playback_hardware_buttons">Hardware next and previous</string>
+    <string name="playback_hardware_episode">Next and previous episode</string>
+    <string name="playback_hardware_skip">Skip forward and back</string>
+    <string name="playback_smart_resume">Smart resume</string>
     <string name="playback_pause_for_navigation">Pause for navigation prompts</string>
     <string name="playback_stream_on_metered">Streaming on mobile data</string>
     <string name="playback_metered_allow">Always</string>

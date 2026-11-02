@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
 import ch.lkmc.neutrodyne.feature.player.resources.Res
+import ch.lkmc.neutrodyne.feature.player.resources.player_chapters
 import ch.lkmc.neutrodyne.feature.player.resources.player_collapse_panel
 import ch.lkmc.neutrodyne.feature.player.resources.player_expand_panel
 import ch.lkmc.neutrodyne.feature.player.resources.player_notes
@@ -41,19 +42,24 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.roundToInt
 
-internal enum class PlayerTab { UP_NEXT, NOTES }
+internal enum class PlayerTab { UP_NEXT, CHAPTERS, NOTES }
 
-/** Only the tab strip drags the panel; notes and queue keep their own scrolling. */
+/** Only the tab strip drags the panel; chapters, notes and queue keep their own scrolling. */
 @Composable
 internal fun PlayerTabs(
     state: PlayerSheetState,
     selected: PlayerTab,
     onSelect: (PlayerTab) -> Unit,
     count: Int,
+    chapterCount: Int,
     upNext: @Composable () -> Unit,
+    chapters: @Composable () -> Unit,
     notes: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tabs =
+        PlayerTab.entries.filter { it != PlayerTab.CHAPTERS || chapterCount > 0 }
+    val activeTab = selected.takeIf { it in tabs } ?: PlayerTab.UP_NEXT
     val density = LocalDensity.current
     val reducedMotion = LocalReducedMotion.current
     val motion = if (reducedMotion) SheetMotion.IMMEDIATE else SheetMotion.ANIMATED
@@ -101,16 +107,27 @@ internal fun PlayerTabs(
                                 },
                             ),
                     )
-                    PrimaryTabRow(selectedTabIndex = selected.ordinal, modifier = Modifier.weight(1f)) {
-                        PlayerTab.entries.forEach { tab ->
+                    PrimaryTabRow(
+                        selectedTabIndex = tabs.indexOf(activeTab).coerceAtLeast(0),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        tabs.forEach { tab ->
                             val label =
-                                if (tab == PlayerTab.NOTES) {
-                                    stringResource(Res.string.player_notes)
-                                } else {
-                                    stringResource(Res.string.player_queue_count, count)
+                                when (tab) {
+                                    PlayerTab.UP_NEXT -> {
+                                        stringResource(Res.string.player_queue_count, count)
+                                    }
+
+                                    PlayerTab.CHAPTERS -> {
+                                        stringResource(Res.string.player_chapters, chapterCount)
+                                    }
+
+                                    PlayerTab.NOTES -> {
+                                        stringResource(Res.string.player_notes)
+                                    }
                                 }
                             Tab(
-                                selected = selected == tab,
+                                selected = activeTab == tab,
                                 onClick = {
                                     onSelect(tab)
                                     scope.launch { state.expand(motion) }
@@ -122,7 +139,11 @@ internal fun PlayerTabs(
                 }
                 if (state.progress > 0f) {
                     Box(Modifier.fillMaxWidth().weight(1f)) {
-                        if (selected == PlayerTab.UP_NEXT) upNext() else notes()
+                        when (activeTab) {
+                            PlayerTab.UP_NEXT -> upNext()
+                            PlayerTab.CHAPTERS -> chapters()
+                            PlayerTab.NOTES -> notes()
+                        }
                     }
                 }
             }

@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.os.Bundle
+import androidx.media3.session.MediaController
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
@@ -19,6 +20,7 @@ import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
+import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import dev.zacsweers.metro.Inject
@@ -102,36 +104,63 @@ internal class PlaybackControllerImpl(
     }
 
     override fun seekTo(positionMs: Long) {
-        connection.controller?.let { controller ->
+        // The position belongs to this episode, and a rebinding can outlast it: A ends, B arrives.
+        val episodeId = hub.nowPlaying.value?.episodeId
+        transport { controller ->
+            if (episodeId != null && controller.episodeIdOrNull() != episodeId) return@transport
             val duration = controller.duration.takeIf { it > 0 }
             controller.seekTo(duration?.let { positionMs.coerceIn(0, it) } ?: positionMs.coerceAtLeast(0))
         }
     }
 
-    override fun skipBack() {
-        connection.controller?.seekBack()
+    override fun skipBack() = transport(MediaController::seekBack)
+
+    override fun skipForward() = transport(MediaController::seekForward)
+
+    override fun skipToNext() = transport(MediaController::seekToNextMediaItem)
+
+    override fun skipToPrevious() = transport(MediaController::seekToPreviousMediaItem)
+
+    /**
+     * Process stop releases the binding, so the first transport after return must rebind it. A live
+     * binding runs in place and keeps tap order; backgrounded callers get no binding and do nothing.
+     */
+    private fun transport(command: (MediaController) -> Unit) {
+        scope.launch(Dispatchers.Main.immediate) { connection.awaitController()?.let(command) }
     }
 
-    override fun skipForward() {
-        connection.controller?.seekForward()
+    override fun setSleepTimer(mode: SleepTimerMode) {
+        if (mode is SleepTimerMode.Minutes && !SleepTimerMode.isValidMinutes(mode.minutes)) return
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(PlaybackSessionCommands.SLEEP_SET, SleepTimerCommands.encode(mode))
+        }
     }
 
-    override fun skipToNext() {
-        connection.controller?.seekToNextMediaItem()
+    override fun extendSleepTimer(minutes: Int) {
+        if (!SleepTimerMode.isValidMinutes(minutes)) return
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(
+                PlaybackSessionCommands.SLEEP_EXTEND,
+                Bundle().apply { putInt(PlaybackSessionCommands.MINUTES, minutes) },
+            )
+        }
     }
 
-    override fun skipToPrevious() {
-        connection.controller?.seekToPreviousMediaItem()
+    override fun nextChapter() {
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(PlaybackSessionCommands.CHAPTER_NEXT)
+        }
     }
 
-    // shortcut: dispatch stays inactive until M5's sleep/chapter adapters; no UI or session advertises it.
-    override fun setSleepTimer(mode: SleepTimerMode) = Unit
-
-    override fun extendSleepTimer(minutes: Int) = Unit
-
-    override fun nextChapter() = Unit
-
-    override fun previousChapter() = Unit
+    override fun previousChapter() {
+        scope.launch(Dispatchers.Main.immediate) {
+            connection.awaitController() ?: return@launch
+            command(PlaybackSessionCommands.CHAPTER_PREV)
+        }
+    }
 
     override suspend fun setSpeed(
         speed: Float,

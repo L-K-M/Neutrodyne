@@ -92,5 +92,6 @@ internal class PlaybackMediaLookupImpl(
             chaptersUrl = chaptersUrl,
             chaptersType = chaptersType,
             audioAlternate = selectedAudioAlternate(),
+            downloadState = downloadState,
         )
 }

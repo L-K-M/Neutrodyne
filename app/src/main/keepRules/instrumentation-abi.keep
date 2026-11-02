@@ -333,6 +333,8 @@
   public int getMediaItemCount();
   public androidx.media3.common.MediaMetadata getMediaMetadata();
   public boolean getPlayWhenReady();
+  public void pause();
+  public void play();
   public void release();
   public void stop();
 }

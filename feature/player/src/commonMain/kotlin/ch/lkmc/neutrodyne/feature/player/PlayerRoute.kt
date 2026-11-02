@@ -134,6 +134,9 @@ private fun PlayerRouteContent(
         previous = vm::previous,
         next = vm::next,
         seek = { value -> vm.seekTo(value, seekEpisodeId) },
+        seekChapter = vm::onTimestamp,
+        nextEpisode = vm::nextEpisode,
+        previousEpisode = vm::previousEpisode,
         dismiss = vm::dismissPaused,
         stop = vm::stopAndClose,
         markPlayed = { ui.now?.let { episodeVm.markPlayed(it.episodeId) } },
@@ -154,7 +157,16 @@ private fun PlayerRouteContent(
             },
         modifier = modifier,
         upNext = upNext,
-        notes = { ui.now?.let { PlayerNotes(it.episodeId, it.position.durationMs, onLink = ::openLink) } },
+        notes = {
+            ui.now?.let {
+                PlayerNotes(
+                    it.episodeId,
+                    it.position.durationMs,
+                    onLink = ::openLink,
+                    onTimestamp = vm::onTimestamp,
+                )
+            }
+        },
     )
     if (password != null) EnterPasswordDialog(episodeVm::submitPassword, episodeVm::dismissPassword)
 }

@@ -142,6 +142,42 @@ interface EpisodeDao {
     @RawQuery(observedEntities = [EpisodeEntity::class, PodcastEntity::class, EpisodeStateEntity::class])
     suspend fun unplayedIds(query: RoomRawQuery): List<Long>
 
+    /**
+     * Caller escapes LIKE wildcards. LIKE folds ASCII only on the bundled driver, so "ärger" must also
+     * bind its case forms to find "Ärger" and "ÄRGER". Mixed non-ASCII case stays unmatched.
+     */
+    suspend fun searchTitles(
+        pattern: String,
+        limit: Int,
+        youtubePlayable: Boolean,
+    ): List<Long> =
+        searchTitleForms(
+            pattern,
+            pattern.lowercase(),
+            pattern.uppercase(),
+            pattern.capitalizedWords(),
+            limit,
+            youtubePlayable,
+        )
+
+    /** Values are bound, never interpolated into SQL. */
+    @Query(
+        "SELECT e.id FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE (e.title LIKE :typed ESCAPE '\\' OR e.title LIKE :lower ESCAPE '\\'" +
+            " OR e.title LIKE :upper ESCAPE '\\' OR e.title LIKE :capitalized ESCAPE '\\') AND " +
+            FeedQueryBuilder.VISIBLE +
+            " AND e.availability = 'AVAILABLE' AND (:youtubePlayable = 1 OR p.sourceType = 'RSS')" +
+            " ORDER BY e.sortDate DESC, e.id DESC LIMIT :limit",
+    )
+    suspend fun searchTitleForms(
+        typed: String,
+        lower: String,
+        upper: String,
+        capitalized: String,
+        limit: Int,
+        youtubePlayable: Boolean,
+    ): List<Long>
+
     // --- Playback media lookup (02 Media lookup, M4) -------------------------------------------------
 
     /**
@@ -206,3 +242,13 @@ data class NewEpisodeRow(
     val groupOrderKey: String?,
     val groupNotify: Boolean?,
 )
+
+/** First letter of each word up, the rest down, as most titles are written. */
+private fun String.capitalizedWords(): String =
+    buildString(length) {
+        var wordStart = true
+        for (char in this@capitalizedWords) {
+            append(if (wordStart) char.titlecaseChar() else char.lowercaseChar())
+            wordStart = !char.isLetterOrDigit()
+        }
+    }

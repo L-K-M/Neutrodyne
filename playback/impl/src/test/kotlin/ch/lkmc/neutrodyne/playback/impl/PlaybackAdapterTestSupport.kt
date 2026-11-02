@@ -43,6 +43,7 @@ import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
 import ch.lkmc.neutrodyne.playback.core.PlayedRule
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
@@ -159,6 +160,7 @@ internal class AdapterFixture(
     val factory = MediaItemFactory(TestArtwork, local)
     val planner =
         QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), StartPositionRule(), PlayedRule())
+    var resumePolicy = SmartResumePolicy.DISABLED
     val projector =
         QueueProjector(
             planner,
@@ -178,6 +180,8 @@ internal class AdapterFixture(
             Dispatchers.Unconfined,
             beforeAdvance = { true },
             reportFailure = failures::add,
+            boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
+            resumePolicy = { resumePolicy },
         )
 
     fun attach() {
@@ -238,10 +242,16 @@ internal class RecordingPlayer(
     player: androidx.media3.common.Player,
 ) : ForwardingPlayer(player) {
     val calls = mutableListOf<String>()
+    val seeks = mutableListOf<Long>()
     var beforePrepare: () -> Unit = {}
     var advancing: Boolean? = null
 
     override fun isPlaying(): Boolean = advancing ?: super.isPlaying()
+
+    override fun seekTo(positionMs: Long) {
+        seeks += positionMs
+        super.seekTo(positionMs)
+    }
 
     override fun setMediaItems(
         mediaItems: List<MediaItem>,
@@ -294,6 +304,9 @@ internal class RecordingPlayer(
 internal class AdapterSources : MediaSource.Factory {
     val created = mutableListOf<FakeMediaSource>()
 
+    /** Like production's progressive source: a metadata-only replacement keeps the position. */
+    var keepPositionOnMetadataUpdate = false
+
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val definition =
             FakeTimeline.TimelineWindowDefinition
@@ -301,7 +314,10 @@ internal class AdapterSources : MediaSource.Factory {
                 .setMediaItem(mediaItem)
                 .setDurationUs(AdapterFixture.DURATION_MS * 1000)
                 .build()
-        return FakeMediaSource(FakeTimeline(definition)).also { created += it }
+        return FakeMediaSource(FakeTimeline(definition)).also {
+            it.setCanUpdateMediaItems(keepPositionOnMetadataUpdate)
+            created += it
+        }
     }
 
     override fun getSupportedTypes() = intArrayOf(C.CONTENT_TYPE_OTHER)
@@ -314,6 +330,7 @@ internal class AdapterSources : MediaSource.Factory {
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal fun TestScope.awaitAdapter(
     message: String = "Adapter did not converge",
+    diagnostics: () -> String = { "" },
     predicate: () -> Boolean,
 ) {
     repeat(2_000) {
@@ -322,7 +339,7 @@ internal fun TestScope.awaitAdapter(
         if (predicate()) return
         Thread.sleep(2)
     }
-    fail(message)
+    fail("$message ${diagnostics()}".trimEnd())
 }
 
 private object TestArtwork : ArtworkStore {

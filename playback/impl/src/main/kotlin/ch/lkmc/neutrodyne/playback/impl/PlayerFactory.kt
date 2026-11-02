@@ -39,6 +39,26 @@ internal class PlayerFactory(
         val snapshot = prefs().current.value
         val renderers =
             object : DefaultRenderersFactory(ctx) {
+                // No visual renderer can be enabled by a controller. Video playback belongs to M14.
+                override fun buildVideoRenderers(
+                    context: Context,
+                    extensionRendererMode: Int,
+                    mediaCodecSelector: androidx.media3.exoplayer.mediacodec.MediaCodecSelector,
+                    enableDecoderFallback: Boolean,
+                    eventHandler: android.os.Handler,
+                    eventListener: androidx.media3.exoplayer.video.VideoRendererEventListener,
+                    allowedVideoJoiningTimeMs: Long,
+                    out: ArrayList<androidx.media3.exoplayer.Renderer>,
+                ) = Unit
+
+                override fun buildTextRenderers(
+                    context: Context,
+                    output: androidx.media3.exoplayer.text.TextOutput,
+                    outputLooper: android.os.Looper,
+                    extensionRendererMode: Int,
+                    out: ArrayList<androidx.media3.exoplayer.Renderer>,
+                ) = Unit
+
                 override fun buildAudioSink(
                     context: Context,
                     enableFloatOutput: Boolean,

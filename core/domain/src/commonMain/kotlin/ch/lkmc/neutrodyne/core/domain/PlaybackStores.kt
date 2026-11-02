@@ -51,6 +51,14 @@ interface PlaySessionStore {
         now: Long,
     ): Long?
 
+    /** A boundary pause completed the current item in place: mark it played, keeping the session.
+     * False when the persisted current/generation no longer equals [expected]: stale, no write. */
+    suspend fun markBoundaryPlayed(
+        episodeId: Long,
+        expected: SessionRevision,
+        now: Long,
+    ): Boolean
+
     /** Explicit dismissal: same durable clearing, no implicit mark-played.
      * [allowed] is a fast thread-safe predicate read inside the transaction on the writer's
      * dispatcher, not necessarily the caller's thread.
@@ -64,6 +72,9 @@ interface PlaySessionStore {
 
 enum class ContextRetention { REPLACE, KEEP }
 
+/** CONTEXT requires a context start to still satisfy the browse membership predicates at commit. */
+enum class StartMembership { ANY, CONTEXT }
+
 /** KEEP ignores context/anchor fields; REPLACE with null context means EXTERNAL, no tail. */
 data class SessionStart(
     val currentEpisodeId: Long,
@@ -73,6 +84,9 @@ data class SessionStart(
     val anchorSortDate: Long?,
     /** Interrupted current, captured after start gates; save/mark before promoting arrival. */
     val departure: Departure? = null,
+    /** External start remainder prepended to Up next inside the same commit transaction. */
+    val queueHead: List<Long> = emptyList(),
+    val membership: StartMembership = StartMembership.ANY,
 )
 
 /** Core-decided save/played flags; pinStartedAt is wall-clock start time, never a tick timestamp. */

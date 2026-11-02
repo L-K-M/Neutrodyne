@@ -9,10 +9,15 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlayerTimeDisplay
@@ -55,10 +60,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -76,6 +84,10 @@ internal data class PlayerUiState(
     val miniSkip: Boolean = true,
     val timeDisplay: PlayerTimeDisplay = PlayerTimeDisplay.REMAINING,
     val upNextCount: Int = 0,
+    val sleepTimer: SleepTimerState = SleepTimerState.Off,
+    val lastSleepMinutes: Int = PlaybackSettingKeys.SLEEP_LAST_MINUTES.default,
+    val chapters: List<EpisodeChapter> = emptyList(),
+    val currentChapter: CurrentChapter? = null,
 )
 
 /** Window-scoped presentation; starts and consent use the same policy as episode screens. */
@@ -89,6 +101,7 @@ internal class PlayerViewModel(
     private val clock: Clock,
     platform: PlatformInfo,
     queue: QueueRepository,
+    private val chapters: ChapterRepository,
 ) : ViewModel() {
     private val messages = UserMessages()
     private val timeWrites = Mutex()
@@ -108,6 +121,24 @@ internal class PlayerViewModel(
         )
     private val scopeWrite = MutableStateFlow<ScopeWriteResult?>(null)
     val scopeWriteResult: StateFlow<ScopeWriteResult?> = scopeWrite.asStateFlow()
+
+    /** Follows the current episode; a chapter read failure degrades to an empty list. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val chapterRows =
+        source.nowPlaying
+            .map { it?.episodeId }
+            .distinctUntilChanged()
+            .flatMapLatest { id ->
+                if (id == null) {
+                    flowOf(null to emptyList<EpisodeChapter>())
+                } else {
+                    chapters
+                        .observe(id)
+                        .map { id to it }
+                        .onStart { emit(id to emptyList()) }
+                        .catch { emit(id to emptyList()) }
+                }
+            }
 
     val uiState: StateFlow<PlayerUiState> =
         combine(
@@ -129,7 +160,20 @@ internal class PlayerViewModel(
                     messages.post(UiText.Res(Res.string.player_read_failed))
                 },
             ) { state, next -> state.copy(upNextCount = next.count { it.row.id != state.now?.episodeId }) }
-            .combine(messages.flow) { state, pending -> state.copy(messages = pending) }
+            .combine(source.sleepTimer) { state, timer -> state.copy(sleepTimer = timer) }
+            .combine(
+                settings.observe(PlaybackSettingKeys.SLEEP_LAST_MINUTES),
+            ) { state, minutes ->
+                state.copy(
+                    lastSleepMinutes =
+                        minutes.takeIf(SleepTimerMode::isValidMinutes)
+                            ?: PlaybackSettingKeys.SLEEP_LAST_MINUTES.default,
+                )
+            }.combine(chapterRows) { state, rows ->
+                state.copy(chapters = rows.second.takeIf { rows.first == state.now?.episodeId }.orEmpty())
+            }.combine(source.currentChapter) { state, current ->
+                state.copy(currentChapter = current?.takeIf { it.episodeId == state.now?.episodeId })
+            }.combine(messages.flow) { state, pending -> state.copy(messages = pending) }
             .stateIn(viewModelScope, SHARING, PlayerUiState(now = source.nowPlaying.value))
 
     /** The visible scrubber interpolates these 1 Hz samples, never a frame-rate flow. */
@@ -185,10 +229,49 @@ internal class PlayerViewModel(
 
     fun skipForward() = controller.skipForward()
 
-    fun previous() = controller.skipToPrevious()
+    /** Chapter steps take over the transport pair while chapters exist; the episode pair lives in the overflow. */
+    fun previous() {
+        if (uiState.value.chapters.isNotEmpty()) controller.previousChapter() else controller.skipToPrevious()
+    }
 
     fun next() {
+        if (uiState.value.chapters.isNotEmpty()) controller.nextChapter() else nextEpisode()
+    }
+
+    fun previousEpisode() = controller.skipToPrevious()
+
+    fun nextEpisode() {
         if (source.nowPlaying.value?.hasNext == true) controller.skipToNext()
+    }
+
+    /**
+     * The sheet's timer write (06 Sleep timer): `Minutes` must pass the shared range check and is
+     * the only mode that persists `playback.sleep_last_minutes`; timer state itself stays
+     * service-local. A failed preference write is a snackbar, never silent.
+     */
+    fun setSleepTimer(mode: SleepTimerMode) {
+        if (source.nowPlaying.value == null) return
+        if (mode is SleepTimerMode.Minutes && !SleepTimerMode.isValidMinutes(mode.minutes)) return
+        controller.setSleepTimer(mode)
+        if (mode !is SleepTimerMode.Minutes) return
+        viewModelScope.launch {
+            if (suspendRunCatching {
+                    settings.set(PlaybackSettingKeys.SLEEP_LAST_MINUTES, mode.minutes)
+                }.getOrNull() !is Outcome.Success
+            ) {
+                writeFailed()
+            }
+        }
+    }
+
+    fun extendSleepTimer(minutes: Int) {
+        if (SleepTimerMode.isValidMinutes(minutes)) controller.extendSleepTimer(minutes)
+    }
+
+    /** Show-notes timestamps and chapter taps seek a loaded current item; else they start at the position. */
+    fun onTimestamp(positionMs: Long) {
+        val now = source.nowPlaying.value ?: return
+        playbackActions.seekOrPlay(now.episodeId, positionMs, now.position.durationMs)
     }
 
     fun seekTo(

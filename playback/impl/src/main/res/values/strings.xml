@@ -4,4 +4,8 @@
     <string name="playback_paused">Playback paused</string>
     <string name="tap_to_resume">Android didn’t let Neutrodyne resume in the background. Tap to continue.</string>
     <string name="resume_playback">Resume</string>
+    <string name="auto_up_next">Up next</string>
+    <string name="auto_groups">Groups</string>
+    <string name="auto_downloads">Downloads</string>
+    <string name="auto_podcasts">Podcasts</string>
 </resources>
