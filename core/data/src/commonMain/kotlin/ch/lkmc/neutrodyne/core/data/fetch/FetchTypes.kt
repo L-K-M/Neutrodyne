@@ -21,6 +21,9 @@ internal data class FeedRequest(
     val maxBytes: Long = MAX_FEED_BYTES,
     /** Probes (autodiscovery) stop the body read after this many bytes. */
     val sniffOnlyBytes: Int? = null,
+    /** Add only: cancel an HTML response after this prefix; full feed limits are unchanged. */
+    val htmlReadLimit: Long? = null,
+    val purpose: FeedRequestPurpose = FeedRequestPurpose.REFRESH,
     /** Not-yet-stored credentials (add flow, `setCredentials` probe). */
     val credentials: BasicCredentials? = null,
 )
@@ -106,3 +109,9 @@ internal val FOLLOWABLE_STATUSES = setOf(301, 302, 303, 307, 308)
 /** The Accept header of every feed request (03 Request rules). */
 internal const val FEED_ACCEPT =
     "application/rss+xml, application/atom+xml;q=0.9, application/xml;q=0.8, text/xml;q=0.8, */*;q=0.5"
+
+/** Add/edit must reject YouTube even when a publisher redirects there. */
+internal enum class FeedRequestPurpose { REFRESH, ADD }
+
+/** Add's pre-M8 policy rejection, distinguished from transport errors by the resolver. */
+internal val ADD_YOUTUBE_REJECTED = NetError.Other("youtube")
