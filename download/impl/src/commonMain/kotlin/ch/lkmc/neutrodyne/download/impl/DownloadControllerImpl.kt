@@ -385,18 +385,18 @@ internal class DownloadControllerImpl(
         ) {
             add(DownloadNotice.NOTIFICATIONS_OFF)
         }
-        if (rows.any { it.download.waitReason == WaitReason.STORAGE && it.download.lastError == DownloadError.STORAGE_FULL }) {
-            add(DownloadNotice.STORAGE_LOW)
-        }
-        if (rows.any {
-                it.download.state == DownloadState.MISSING && it.download.lastError == DownloadError.STORAGE_UNAVAILABLE
-            } ||
-            roots.resolve(storage.rootId) == null
-        ) {
+        if (rows.any { it.download.waitingForStorage() }) add(DownloadNotice.STORAGE_LOW)
+        if (rows.any { it.download.missingForStorage() } || roots.resolve(storage.rootId) == null) {
             add(DownloadNotice.ROOT_UNAVAILABLE)
         }
         if (storage.orphanBytes > 0) add(DownloadNotice.ORPHAN_FILES)
     }
+
+    private fun DownloadEntity.waitingForStorage() =
+        waitReason == WaitReason.STORAGE && lastError == DownloadError.STORAGE_FULL
+
+    private fun DownloadEntity.missingForStorage() =
+        state == DownloadState.MISSING && lastError == DownloadError.STORAGE_UNAVAILABLE
 
     override fun observeStorage() = files.observeStorage()
 
