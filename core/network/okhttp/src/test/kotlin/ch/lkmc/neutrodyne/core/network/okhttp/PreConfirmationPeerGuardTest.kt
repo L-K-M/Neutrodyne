@@ -10,6 +10,8 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.SocketTimeoutException
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
@@ -85,6 +87,50 @@ class PreConfirmationPeerGuardTest {
             }
         }
         assertEquals(0, server.requestCount)
+    }
+
+    @Test fun localDnsAnswerOpensNoSocketOnFeedOrImage() {
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { recorder ->
+            val clients = newNetworkClients(baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1")) })
+            for (client in listOf(clients.feed, clients.image)) {
+                val request = Request.Builder()
+                    .url("http://local-peer.test:${recorder.localPort}/action")
+                    .header(PRE_CONFIRMATION_HEADER, "1")
+                    .build()
+                assertFailsWith<LocalNetworkUnsupportedException> { client.newCall(request).execute() }
+            }
+            assertZeroConnections(recorder)
+        }
+    }
+
+    @Test fun localImageRedirectOpensNoSocket() {
+        ServerSocket(0, 1, InetAddress.getByName(LAN_ADDR)).use { recorder ->
+            val target = "http://redirect-peer.test:${recorder.localPort}/action"
+            val clients = newNetworkClients(
+                baseDns = Dns { host -> listOf(InetAddress.getByName(if (host == "public.test") "127.0.0.1" else LAN_ADDR)) },
+                isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+            )
+            server.enqueue(mockResponse(302, "", "Location" to target))
+            val publicUrl = server.url("/art").newBuilder().host("public.test").build()
+            assertFailsWith<LocalNetworkUnsupportedException> {
+                clients.image.newCall(marked(publicUrl)).execute()
+            }
+            assertEquals(1, server.requestCount)
+            assertZeroConnections(recorder)
+        }
+    }
+
+    private fun assertZeroConnections(recorder: ServerSocket) {
+        recorder.soTimeout = 100
+        var count = 0
+        while (true) {
+            try {
+                recorder.accept().use { count++ }
+            } catch (_: SocketTimeoutException) {
+                break
+            }
+        }
+        assertEquals(0, count)
     }
 
     @Test fun markerNeverReachesTheWire() {
