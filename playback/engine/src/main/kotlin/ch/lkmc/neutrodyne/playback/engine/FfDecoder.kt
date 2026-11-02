@@ -118,7 +118,13 @@ class FfDecoder
             library.unrefFrame(frame)
             val result = library.receiveFrame(context, frame)
             if (result < 0) {
-                if (result == layout.intConstant("AVERROR_EAGAIN")) return null
+                // AVERROR_EOF ends the drain after a flush; EAGAIN means the
+                // decoder wants another packet first.
+                if (result == layout.intConstant("AVERROR_EAGAIN") ||
+                    result == layout.intConstant("AVERROR_EOF")
+                ) {
+                    return null
+                }
                 error("decoding failed: ${library.errorString(result)}")
             }
             return frameToPcm(frame)
@@ -161,7 +167,9 @@ class FfDecoder
 
             val format = frame.readInt(layout, "AVFrame", "format")
             val rate = frame.readInt(layout, "AVFrame", "sample_rate")
-            val mask = frame.readChannelMask(layout) ?: defaultMaskFor(frame.readChannelCount(layout))
+            val mask =
+                frame.readChannelMask(layout, "AVFrame")
+                    ?: defaultMaskFor(frame.readChannelCount(layout, "AVFrame"))
             if (format != inputFormat || mask != inputMask || rate != inputRate) {
                 reconfigure(format, mask, rate)
             }

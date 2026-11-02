@@ -139,7 +139,7 @@ class FfDemuxer
                 AudioTrackInfo(
                     codec = codecOf(parameters.readInt(layout, "AVCodecParameters", "codec_id")),
                     sampleRate = parameters.readInt(layout, "AVCodecParameters", "sample_rate"),
-                    channels = parameters.readChannelCount(layout),
+                    channels = parameters.readChannelCount(layout, "AVCodecParameters"),
                     initialPadding = parameters.readInt(layout, "AVCodecParameters", "initial_padding"),
                     trailingPadding = parameters.readInt(layout, "AVCodecParameters", "trailing_padding"),
                     seekPreroll = parameters.readInt(layout, "AVCodecParameters", "seek_preroll"),

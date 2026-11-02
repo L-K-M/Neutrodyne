@@ -81,18 +81,44 @@ internal fun MemorySegment.readRational(
 }
 
 /**
+ * `AVChannelLayout` is embedded inside its parent struct ([field] names where),
+ * so the view is widened to the end of the embedded value and then sliced at
+ * its offset; reading the parent's start would read an unrelated field.
+ */
+private fun MemorySegment.channelLayout(
+    layout: FfmpegLayout,
+    struct: String,
+    field: String,
+): MemorySegment {
+    val base = layout.offset(struct, field)
+    val size = layout.struct("AVChannelLayout").size
+    return atLeast(base + size).asSlice(base, size)
+}
+
+/**
  * `AVChannelLayout`'s native mask, or null when the layout is not a native one
  * (custom or unspecified), in which case the resampler is configured by channel
  * count instead.
  */
-internal fun MemorySegment.readChannelMask(layout: FfmpegLayout): Long? {
-    val order = readInt(layout, "AVChannelLayout", "order")
-    if (order != layout.intConstant("AV_CHANNEL_ORDER_NATIVE")) return null
-    return readLong(layout, "AVChannelLayout", "u")
+internal fun MemorySegment.readChannelMask(
+    layout: FfmpegLayout,
+    struct: String,
+    field: String = "ch_layout",
+): Long? {
+    val embedded = channelLayout(layout, struct, field)
+    if (embedded.readInt(layout, "AVChannelLayout", "order") !=
+        layout.intConstant("AV_CHANNEL_ORDER_NATIVE")
+    ) {
+        return null
+    }
+    return embedded.readLong(layout, "AVChannelLayout", "u")
 }
 
-internal fun MemorySegment.readChannelCount(layout: FfmpegLayout): Int =
-    readInt(layout, "AVChannelLayout", "nb_channels")
+internal fun MemorySegment.readChannelCount(
+    layout: FfmpegLayout,
+    struct: String,
+    field: String = "ch_layout",
+): Int = channelLayout(layout, struct, field).readInt(layout, "AVChannelLayout", "nb_channels")
 
 /**
  * The frame's `uint8_t **extended_data`: passed straight to `swr_convert`, which

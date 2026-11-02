@@ -108,6 +108,8 @@ int main(int argc, char **argv)
     struct_begin("AVPacket", sizeof(AVPacket));
     FIELD(AVPacket, stream_index);
     FIELD(AVPacket, pts);
+    FIELD(AVPacket, data);
+    FIELD(AVPacket, size);
     FIELD(AVPacket, side_data);
     FIELD_LAST(AVPacket, side_data_elems);
     struct_end();
