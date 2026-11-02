@@ -393,8 +393,8 @@ jobs:
       - name: Build the target's FFmpeg and check its licences
         shell: bash
         run: |
-          ./gradlew :playback:native:buildFfmpeg :playback:native:checkNativeLicences \
-            :playback:native:assembleFfmpegSource
+          ./gradlew :playback:native:buildFfmpeg :playback:native:buildNdmedia \
+            :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
       # The modules MD0 builds on this target, and the corpus suite that loads the
       # FFmpeg build the previous step produced (11 Testing, MD0 AC1).
       - name: Desktop engine tests on this host

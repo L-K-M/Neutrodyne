@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Unlicense
+# Build libndmedia for one target (11 ndmedia interface). One .c file plus the
+# pinned miniaudio header — small enough to compile directly with cc/cl, no
+# build system. Usage: ndmedia/build.sh <target>
+#   windows-x64 | macos-arm64 | linux-x64 | linux-arm64
+set -euo pipefail
+
+die() { echo "error: $*" >&2; exit 1; }
+
+TARGET="${1:?usage: ndmedia/build.sh <target>}"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+NATIVE_ROOT="$(cd "$ROOT/.." && pwd)"
+BUILD_ROOT="$NATIVE_ROOT/build/ndmedia/$TARGET"
+CACHE="${ND_CACHE:-$HOME/.cache/neutrodyne-native}"
+mkdir -p "$BUILD_ROOT" "$CACHE"
+
+# Pinned inputs from native-components.lock ([miniaudio] section, INI style).
+LOCK="$NATIVE_ROOT/native-components.lock"
+ini() { awk -F' *= *' -v sec="$1" -v key="$2" '
+        /^\[/ { insec = ($0 == "[" sec "]") }
+        insec && $1 == key { gsub(/"/, "", $2); print $2; exit }' "$LOCK"; }
+MINIAUDIO_VERSION="$(ini miniaudio version)"
+MINIAUDIO_URL="$(ini miniaudio sourceUrl)"
+MINIAUDIO_SHA256="$(ini miniaudio sha256)"
+[ -n "$MINIAUDIO_VERSION" ] && [ -n "$MINIAUDIO_URL" ] && [ -n "$MINIAUDIO_SHA256" ] ||
+    die "miniaudio section incomplete in $LOCK"
+
+INCLUDE_DIR="$CACHE/miniaudio-$MINIAUDIO_VERSION"
+HEADER="$INCLUDE_DIR/miniaudio.h"
+mkdir -p "$INCLUDE_DIR"
+if [ ! -f "$HEADER" ]; then
+    fetch_ok=0
+    for try in 1 2 3; do
+        if curl -fsSL --retry 3 --connect-timeout 20 -o "$HEADER.part" "$MINIAUDIO_URL" && \
+           echo "$MINIAUDIO_SHA256  $HEADER.part" | sha256sum -c - >/dev/null 2>&1; then
+            mv "$HEADER.part" "$HEADER"; fetch_ok=1; break
+        fi
+        rm -f "$HEADER.part"; sleep $((try * 5))
+    done
+    [ "$fetch_ok" = 1 ] || die "could not fetch $MINIAUDIO_URL with sha256 $MINIAUDIO_SHA256"
+fi
+
+SRC="$ROOT/ndmedia.c"
+CFLAGS="-O2 -fvisibility=hidden -I$INCLUDE_DIR -I$ROOT"
+
+case "$TARGET" in
+    linux-x64|linux-arm64)
+        OUT="$BUILD_ROOT/libndmedia.so"
+        # Same manylinux glibc floor as the FFmpeg build.
+        IMAGE="quay.io/pypa/manylinux_2_28_x86_64"
+        [ "$TARGET" = linux-arm64 ] && IMAGE="quay.io/pypa/manylinux_2_28_aarch64"
+        if [ -n "${ND_IN_MANYLINUX:-}" ]; then
+            cc $CFLAGS -fPIC -shared "$SRC" -o "$OUT" -lpthread -lm -ldl
+        elif command -v docker >/dev/null 2>&1; then
+            docker run --rm -e ND_IN_MANYLINUX=1 -e ND_CACHE=/cache \
+                -v "$NATIVE_ROOT":/src -v "$CACHE":/cache -w /src \
+                "$IMAGE" bash ndmedia/build.sh "$TARGET"
+        else
+            # Without docker the host compiler still proves the code; the
+            # manylinux floor is asserted by the desktop-matrix runners.
+            cc $CFLAGS -fPIC -shared "$SRC" -o "$OUT" -lpthread -lm -ldl
+        fi
+        ;;
+    macos-arm64)
+        OUT="$BUILD_ROOT/libndmedia.dylib"
+        cc $CFLAGS -fPIC -dynamiclib -arch arm64 -mmacosx-version-min=13.0 \
+            -install_name "@rpath/libndmedia.dylib" \
+            "$SRC" -o "$OUT" \
+            -framework AudioToolbox -framework CoreAudio -framework CoreFoundation
+        ;;
+    windows-x64)
+        OUT="$BUILD_ROOT/ndmedia.dll"
+        # MSVC from the runner's Visual Studio, driven through the MSYS2 shell —
+        # the same env-load mechanism ffmpeg/build.sh uses.
+        if ! command -v cl >/dev/null 2>&1; then
+            VSWHERE="${PROGRAMFILES:-/c/Program Files} (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+            [ -x "$VSWHERE" ] || VSWHERE="/c/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+            [ -x "$VSWHERE" ] || die "vswhere.exe not found: install the Visual Studio build tools"
+            VS_PATH="$("$VSWHERE" -latest -products '*' \
+                -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+                -property installationPath | tr -d '\r')"
+            [ -n "$VS_PATH" ] || die "vswhere found no MSVC x64 toolchain"
+            VCVARS="$VS_PATH/VC/Auxiliary/Build/vcvars64.bat"
+            [ -f "$VCVARS" ] || die "vcvars64.bat not found at $VCVARS"
+            ENV_FILE="$(mktemp)"
+            cmd //c "\"$(cygpath -w "$VCVARS")\" > NUL && set > \"$(cygpath -w "$ENV_FILE")\"" ||
+                die "vcvars64.bat failed"
+            while IFS= read -r line; do
+                case "$line" in
+                    [A-Za-z_]*=*) export "${line%%=*}=${line#*=}" ;;
+                esac
+            done < "$ENV_FILE"
+            rm -f "$ENV_FILE"
+            command -v cl >/dev/null 2>&1 || die "cl is still not on PATH after vcvars64.bat"
+        fi
+        (cd "$BUILD_ROOT" && cl -nologo -O2 -LD \
+            -I"$(cygpath -w "$INCLUDE_DIR")" -I"$(cygpath -w "$ROOT")" \
+            "$(cygpath -w "$SRC")" \
+            /link /OUT:ndmedia.dll ole32.lib uuid.lib advapi32.lib user32.lib) ||
+            die "cl failed"
+        rm -f "$BUILD_ROOT/ndmedia.lib" "$BUILD_ROOT/ndmedia.exp" "$BUILD_ROOT/ndmedia.obj"
+        ;;
+    *) die "unknown target $TARGET" ;;
+esac
+
+[ -f "$OUT" ] || die "expected $OUT"
+BYTES=$(stat -c %s "$OUT" 2>/dev/null || stat -f %z "$OUT")
+{
+    echo "target=$TARGET"
+    echo "miniaudio=$MINIAUDIO_VERSION"
+    echo "miniaudio_sha256=$MINIAUDIO_SHA256"
+    echo "output=$(basename "$OUT")"
+    echo "bytes=$BYTES"
+} > "$BUILD_ROOT/ndmedia-build.txt"
+echo "built $OUT ($BYTES bytes)"

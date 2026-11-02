@@ -35,6 +35,16 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                     inputs.files("ffmpeg")
                 }
 
+            val ndmediaOutputDir = layout.buildDirectory.dir("ndmedia/$nativeTarget")
+            tasks.register<Exec>("buildNdmedia") {
+                group = "build"
+                description = "Build libndmedia (miniaudio device + SPSC ring) for $nativeTarget (11 ndmedia interface)."
+                workingDir = layout.projectDirectory.asFile
+                commandLine(bashExecutable(), "ndmedia/build.sh", nativeTarget)
+                inputs.files("ndmedia")
+                outputs.dir(ndmediaOutputDir)
+            }
+
             tasks.register<CheckNativeLicencesTask>("checkNativeLicences") {
                 group = "verification"
                 description = "Apply D3's licence envelope to the native components (01 Native components)."
