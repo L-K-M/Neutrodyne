@@ -239,7 +239,9 @@ internal class RssTransferSource(
                     ?: return TransferResult.Restart("invalid_content_range")
             val start = match.groupValues[1].toLongOrNull() ?: return TransferResult.Restart("invalid_content_range")
             val end = match.groupValues[2].toLongOrNull() ?: return TransferResult.Restart("invalid_content_range")
-            total = match.groupValues[3].toLongOrNull()
+            // A '*' total proves nothing about the resource end, so the range cannot be
+            // promoted to completion: restart for a whole-resource response instead.
+            total = match.groupValues[3].toLongOrNull() ?: return TransferResult.Restart("range_total_unknown")
             if (plan.ifRange == null || offset == 0L || start != offset || end < start || end == Long.MAX_VALUE ||
                 (total != null && end >= total) || (plan.expectedTotal != null && total != plan.expectedTotal) ||
                 (contentLength != null && contentLength != end - start + 1)
