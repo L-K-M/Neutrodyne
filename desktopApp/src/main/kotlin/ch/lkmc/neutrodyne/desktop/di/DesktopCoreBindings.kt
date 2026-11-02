@@ -18,10 +18,12 @@ import ch.lkmc.neutrodyne.core.database.StrictMigrations
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoGroupChannels
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.platform.DesktopPlatformInfo
+import ch.lkmc.neutrodyne.desktop.platform.DesktopUpdateRuntimeInputs
 import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
@@ -92,6 +94,10 @@ object DesktopCoreBindings {
     @Provides
     @SingleIn(AppScope::class)
     fun platformInfo(): PlatformInfo = DesktopPlatformInfo()
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun updateRuntimeInputs(): UpdateRuntimeInputs = DesktopUpdateRuntimeInputs()
 
     @Provides
     @SingleIn(AppScope::class)

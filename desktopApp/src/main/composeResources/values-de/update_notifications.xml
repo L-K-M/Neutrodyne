@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_app_update_title">Neutrodyne %1$s ist verfügbar</string>
+</resources>
