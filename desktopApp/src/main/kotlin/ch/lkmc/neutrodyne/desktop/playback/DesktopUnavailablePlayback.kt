@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.desktop.playback
 
 import ch.lkmc.neutrodyne.core.common.AppScope
-import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -27,6 +26,4 @@ object DesktopPlaybackBindings {
     @Provides internal fun state(stub: DesktopUnavailablePlayback): PlaybackStateSource = stub
 
     @Provides internal fun maintenance(stub: DesktopUnavailablePlayback): PlaybackMaintenance = stub
-
-    @Provides fun localMediaIndex(): LocalMediaIndex = LocalMediaIndex { null }
 }
