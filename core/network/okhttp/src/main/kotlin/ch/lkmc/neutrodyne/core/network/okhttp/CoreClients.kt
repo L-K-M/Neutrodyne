@@ -9,6 +9,7 @@ import okhttp3.Dispatcher
 import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import java.net.InetSocketAddress
 import java.util.concurrent.TimeUnit
 
 /**
@@ -32,10 +33,12 @@ class CoreClients(
     @param:DebugInterceptors private val debugInterceptors: Set<Interceptor>,
 ) : ConnectionPoolEvictor {
     /**
-     * The desktop-test seam (03 note 2026-11-02): the add pipeline's LAN refusal is syntactic,
-     * so discovery tests serve their MockWebServer under a fake public host that [baseDns] maps
-     * to loopback. The clients build during this delegation, so the Dns wrapper in `coreBuilder`
-     * reads [baseDns] per lookup — assigning it here still lands before the first request.
+     * The desktop-test seam (03 note 2026-11-02): discovery tests serve their MockWebServer
+     * under a fake public host that [baseDns] maps to a chosen loopback address, and
+     * [isLocalPeer] decides which loopback sub-addresses count as "the LAN" so marked calls
+     * can still reach the public stand-in (127.0.0.1) while 127.0.0.2 refuses. The clients
+     * build during this delegation, so the Dns wrapper and peer guard in `coreBuilder` read
+     * both lazily — assigning them here still lands before the first request.
      */
     constructor(
         ua: UserAgentInterceptor,
@@ -43,12 +46,17 @@ class CoreClients(
         hints: DnsFamilyHints,
         @DebugInterceptors debugInterceptors: Set<Interceptor>,
         baseDns: Dns,
+        isLocalPeer: (InetSocketAddress) -> Boolean = ::isLocalPeerSocket,
     ) : this(ua, lanGuard, hints, debugInterceptors) {
         this.baseDns = baseDns
+        this.isLocalPeer = isLocalPeer
     }
 
     /** `Dns.SYSTEM` in production; only the test seam rewrites it, before any lookup can run. */
     private var baseDns: Dns = Dns.SYSTEM
+
+    /** The production peer classification; the test seam narrows it to one loopback address. */
+    private var isLocalPeer: (InetSocketAddress) -> Boolean = ::isLocalPeerSocket
 
     // Declared before the clients: property initializers run in order, and `coreBuilder` reads them.
     private val dispatcher =
@@ -66,6 +74,11 @@ class CoreClients(
             .dns(lanGuard.dns(FamilyHintDns(Dns { hostname -> baseDns.lookup(hostname) }, hints), mode))
             .addInterceptor(lanGuard.interceptor(mode))
             .addInterceptor(ua)
+            // The M7 actual-peer guard (03 note 2026-11-02): a network interceptor, so it runs
+            // after the connection exists — on every follow-up hop — and only for requests
+            // carrying the pre-confirmation marker. On `core` so feed, image and the other
+            // derivatives all get it.
+            .addNetworkInterceptor(PreConfirmationPeerGuard { peer -> isLocalPeer(peer) })
             .apply { debugInterceptors.forEach(::addInterceptor) }
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -105,3 +118,7 @@ class CoreClients(
         const val POOL_KEEP_ALIVE_MINUTES = 5L
     }
 }
+
+/** An unresolved peer can never be verified public — refuse it like a local address. */
+private fun isLocalPeerSocket(peer: InetSocketAddress): Boolean =
+    peer.address == null || isLocalPeerAddress(peer.address)
