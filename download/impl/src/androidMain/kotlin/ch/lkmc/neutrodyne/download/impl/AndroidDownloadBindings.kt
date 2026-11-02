@@ -124,7 +124,7 @@ object AndroidDownloadBindings {
                 NoticeSources(
                     dataSaver =
                         application.getSystemService(ConnectivityManager::class.java).restrictBackgroundStatus ==
-                        ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED,
+                            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED,
                     backgroundRestricted =
                         Build.VERSION.SDK_INT >= 28 &&
                             application.getSystemService(ActivityManager::class.java).isBackgroundRestricted,

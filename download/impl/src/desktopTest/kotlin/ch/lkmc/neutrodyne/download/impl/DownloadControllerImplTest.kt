@@ -477,7 +477,10 @@ class DownloadControllerImplTest {
         }
 
     private suspend fun notices(f: Fixture): Set<DownloadNotice> =
-        f.controller.observeAll().first().notices
+        f.controller
+            .observeAll()
+            .first()
+            .notices
 
     private suspend fun fixture(block: suspend (Fixture) -> Unit) {
         val db = TestDb.inMemory()
