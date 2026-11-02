@@ -117,6 +117,23 @@ class AuthHttpTest {
             client.get("/api/v1/account") { api(disabled.token) }.expect(HttpStatusCode.Forbidden)
         }
 
+    @Test fun `a password change revokes device tokens but keeps the caller session`() =
+        authApplication { f ->
+            f.account(password = "correct password")
+            val minted = f.services.auth.login("alice", "correct password", deviceInfo())
+            val browser = f.services.auth.loginWeb("alice", "correct password", "Browser")
+            val caller = f.services.tokens.authenticate(browser, TokenKind.WEB_SESSION)
+            f.services.auth.changePassword(caller, "correct password", "new password")
+            client.get("/api/v1/account") { api(minted.token) }.expect(HttpStatusCode.Unauthorized)
+            client
+                .get("/account") {
+                    header(HttpHeaders.Cookie, "nds_session=$browser")
+                }.expect(HttpStatusCode.OK)
+            client
+                .postApi("/api/v1/auth/login", LoginRequest("alice", "new password", deviceInfo()))
+                .expect(HttpStatusCode.OK)
+        }
+
     @Test fun `HTTP link supports all four errors consent preview and single use`() =
         authApplication { f ->
             val grant = f.grant(f.account())

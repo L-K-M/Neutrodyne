@@ -237,6 +237,75 @@ class RecoveryJobsTest {
             }
         }
 
+    @Test fun restoreAcceptsRedirectChainsThatNormalOperationCreates() =
+        runBlocking {
+            val directory = tempDataDir()
+            val backup = directory.resolve("chain-backup.db")
+            var id = 0L
+            AuthFixture(loadValidConfig().copy(dataDir = directory)).use { f ->
+                val account = f.account()
+                id = account.id
+                val principal = f.principal(f.grant(account))
+                val fixture = WriterFixture()
+                val feed = "https://example.com/feed"
+                // Ordinary dedupe builds the two-hop authority B->A->C.
+                f.services.records.push(
+                    principal,
+                    SyncRequest(null, listOf(fixture.podcast(A, feed, subscribedAt = 2))),
+                )
+                f.services.records.push(
+                    principal,
+                    SyncRequest(null, listOf(fixture.podcast(B, feed, subscribedAt = 3, at = fixture.clock(1)))),
+                )
+                f.services.records.push(
+                    principal,
+                    SyncRequest(null, listOf(fixture.podcast(C, feed, subscribedAt = 1, at = fixture.clock(2)))),
+                )
+                f.store.read(id) {
+                    assertEquals(podcastA, redirects()[key(SyncCollection.PODCAST, B)])
+                    assertEquals(key(SyncCollection.PODCAST, C), redirects()[podcastA])
+                }
+                f.store.backup(backup)
+            }
+            ServerRecovery(directory).restore(backup)
+            SqliteSyncStore(directory).use { store ->
+                store.read(id) {
+                    assertEquals(podcastA, redirects()[key(SyncCollection.PODCAST, B)])
+                    assertEquals(key(SyncCollection.PODCAST, C), redirects()[podcastA])
+                    assertEquals(podcastA.id, checkNotNull(record(key(SyncCollection.PODCAST, B))).raw.mergedInto)
+                    assertEquals(key(SyncCollection.PODCAST, C).id, checkNotNull(record(podcastA)).raw.mergedInto)
+                }
+            }
+        }
+
+    @Test fun gcKeepsDeadParentsUntilTheirNewestChildrenAreAcknowledged() =
+        authServices { f ->
+            val account = f.account()
+            val grant = f.grant(account)
+            val principal = f.principal(grant)
+            val fixture = WriterFixture()
+            f.services.records.push(principal, SyncRequest(null, listOf(fixture.podcast())))
+            f.services.records.push(
+                principal,
+                SyncRequest(null, listOf(fixture.write(podcastA, "subscribed", JsonPrimitive(false), fixture.clock(1)))),
+            )
+            // A played episode written after the unsubscribe sequences past the parent's death.
+            f.services.records.push(
+                principal,
+                SyncRequest(null, listOf(fixture.write(episode(), "played", JsonPrimitive(true), fixture.clock(2)))),
+            )
+            val parentSeq = f.store.read(account.id) { checkNotNull(record(podcastA)).seq }
+            val episodeSeq = f.store.read(account.id) { checkNotNull(record(episode())).seq }
+            f.now += 366 * DAY_MS
+            // The only fresh device acknowledged the tombstone but not the newer episode.
+            f.store.maintenance { update("UPDATE device SET last_seen_at=?,last_cursor=?", f.now, parentSeq) }
+            assertEquals(0L, f.services.gcJob.run())
+            assertTrue(f.store.read(account.id) { record(podcastA) != null && record(episode()) != null })
+            f.store.maintenance { update("UPDATE device SET last_cursor=?", episodeSeq) }
+            assertEquals(2L, f.services.gcJob.run())
+            assertTrue(f.store.read(account.id) { record(podcastA) == null && record(episode()) == null })
+        }
+
     @Test fun invalidOrCorruptAuthorityRestoreLeavesCurrentBytesUntouched() =
         runBlocking {
             val directory = tempDataDir()

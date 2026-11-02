@@ -81,6 +81,15 @@ class HealthCheckTest {
         }
 
     @Test
+    fun `a readyz burst shares one write probe for a short interval`() =
+        runBlocking {
+            var probes = 0
+            val routes = HealthRoutes(tempDataDir(), writeProbe = { probes++; true })
+            repeat(10) { assertTrue(routes.isReady()) }
+            assertEquals(1, probes)
+        }
+
+    @Test
     fun `readiness fails on a database write failure`() =
         runBlocking {
             assertFalse(HealthRoutes(tempDataDir(), writeProbe = { false }).isReady())

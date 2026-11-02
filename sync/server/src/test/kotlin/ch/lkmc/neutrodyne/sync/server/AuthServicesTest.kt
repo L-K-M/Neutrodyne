@@ -200,6 +200,7 @@ class AuthServicesTest {
             val web = f.services.tokens.authenticate(raw, TokenKind.WEB_SESSION)
             f.services.auth.changePassword(web, null, "first password")
             assertTrue(f.services.tokens.valid(web))
+            assertFailsWith<ProtocolException> { f.principal(device) }
             val second = f.services.auth.loginWeb("alice", "first password", null)
             val other = f.services.tokens.authenticate(second, TokenKind.WEB_SESSION)
             assertFailsWith<ProtocolException> {
@@ -210,7 +211,7 @@ class AuthServicesTest {
             }
             val firstSet =
                 f.services.accounts
-                    .summary(f.principal(device))
+                    .summary(web)
                     .passwordSetAt
             assertNotNull(firstSet)
             f.now += HOUR_MS
@@ -219,13 +220,13 @@ class AuthServicesTest {
             assertEquals(
                 firstSet,
                 f.services.accounts
-                    .summary(f.principal(device))
+                    .summary(web)
                     .passwordSetAt,
             )
             f.now += 30 * DAY_MS
             assertNull(
                 f.services.accounts
-                    .summary(f.principal(device))
+                    .summary(web)
                     .passwordSetAt,
             )
         }

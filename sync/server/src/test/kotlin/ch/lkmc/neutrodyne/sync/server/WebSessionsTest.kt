@@ -113,6 +113,73 @@ class WebSessionsTest {
             }
         }
 
+    @Test fun `explicit default ports on either side of the origin check still match`() =
+        runBlocking<Unit> {
+            AuthFixture().use { f ->
+                f.account(password = "correct password")
+                val raw = f.services.auth.loginWeb("alice", "correct password", "Browser")
+                val ported =
+                    WebSessions(
+                        f.services.tokens,
+                        f.config.copy(publicUrl = URI("https://sync.example.test:443")),
+                        f.inputs,
+                    )
+                val nopublic =
+                    WebSessions(
+                        f.services.tokens,
+                        f.config.copy(publicUrl = null),
+                        f.inputs,
+                    )
+                testApplication {
+                    application {
+                        f.install(this)
+                        routing {
+                            route("/ported") {
+                                ported.installFormProtection(this)
+                                post {
+                                    ported.authenticate(call)
+                                    ported.requireForm(call, call.receiveText())
+                                    call.respondText("accepted")
+                                }
+                            }
+                            route("/fallback") {
+                                nopublic.installFormProtection(this)
+                                post {
+                                    nopublic.authenticate(call)
+                                    nopublic.requireForm(call, call.receiveText())
+                                    call.respondText("accepted")
+                                }
+                            }
+                        }
+                    }
+                    val token = ported.csrf(raw)
+                    // A public URL carrying :443 must accept the browser's bare origin.
+                    client
+                        .post("/ported") {
+                            header(HttpHeaders.Host, "sync.example.test")
+                            header(HttpHeaders.Cookie, "nds_session=$raw")
+                            header(HttpHeaders.Origin, "https://sync.example.test")
+                            setBody(token)
+                        }.expect(HttpStatusCode.OK)
+                    // An explicit default port on the request side normalizes too.
+                    client
+                        .post("/fallback") {
+                            header(HttpHeaders.Host, "sync.example.test:80")
+                            header(HttpHeaders.Cookie, "nds_session=$raw")
+                            header(HttpHeaders.Origin, "http://sync.example.test")
+                            setBody(token)
+                        }.expect(HttpStatusCode.OK)
+                    client
+                        .post("/fallback") {
+                            header(HttpHeaders.Host, "sync.example.test:80")
+                            header(HttpHeaders.Cookie, "nds_session=$raw")
+                            header(HttpHeaders.Origin, "http://evil.example")
+                            setBody(token)
+                        }.expect(HttpStatusCode.Forbidden)
+                }
+            }
+        }
+
     @Test fun `insecure LAN drops Secure and device tokens cannot authenticate admin pages`() =
         runBlocking<Unit> {
             AuthFixture().use { f ->
