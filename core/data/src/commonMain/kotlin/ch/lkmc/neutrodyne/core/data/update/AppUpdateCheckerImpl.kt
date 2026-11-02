@@ -143,12 +143,14 @@ internal class AppUpdateCheckerImpl(
 
     override suspend fun checkNow(): UpdateCheckState {
         initialize()
+        var joined: Flight? = null
         val task =
             mutex.withLock {
                 refreshChoice()
                 if (dev) return mutableState.value
                 manualDispatch?.let { return@withLock it }
                 flight.value?.let {
+                    joined = it
                     it.origin = UpdateInvocation.MANUAL
                     return@withLock it.job
                 }
@@ -193,8 +195,14 @@ internal class AppUpdateCheckerImpl(
             task.await()
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
-                task.cancel()
-                abortManual()
+                val scheduled = joined?.takeIf { it.startedAs == UpdateInvocation.SCHEDULED }
+                if (scheduled != null) {
+                    // The scheduled fetch outlives the page that joined it, and notifies again.
+                    mutex.withLock { scheduled.origin = UpdateInvocation.SCHEDULED }
+                } else {
+                    task.cancel()
+                    abortManual()
+                }
             }
             throw cancelled
         }
@@ -512,6 +520,7 @@ internal class AppUpdateCheckerImpl(
         val choiceAtStart: UpdateScheduling,
         val previous: UpdateCheckState,
     ) {
+        val startedAs = origin
         lateinit var job: Deferred<UpdateCheckState>
     }
 
