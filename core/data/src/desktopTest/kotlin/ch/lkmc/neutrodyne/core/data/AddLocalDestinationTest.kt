@@ -190,7 +190,13 @@ class AddLocalDestinationTest {
     // so only the connected peer's address can refuse the request. ------------------------------
 
     /** A `lan.test` URL that resolves to the LAN recorder — public spelling, local peer. */
-    private fun lanPeerUrl(path: String) = lan.url(path).newBuilder().host(LAN_HOST).build().toString()
+    private fun lanPeerUrl(path: String) =
+        lan
+            .url(path)
+            .newBuilder()
+            .host(LAN_HOST)
+            .build()
+            .toString()
 
     @Test fun alternateResolvingToLanPeerIsNeverRequested() =
         runBlocking {
@@ -254,9 +260,13 @@ class AddLocalDestinationTest {
                                 )
                             }
 
-                            "/candidate.xml" -> mockResponse(302, "", "Location" to lanPeerUrl("/"))
+                            "/candidate.xml" -> {
+                                mockResponse(302, "", "Location" to lanPeerUrl("/"))
+                            }
 
-                            else -> notFound(request)
+                            else -> {
+                                notFound(request)
+                            }
                         }
                 }
             assertEquals(

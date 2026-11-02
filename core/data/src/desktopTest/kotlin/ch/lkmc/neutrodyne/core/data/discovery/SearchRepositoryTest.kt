@@ -7,9 +7,9 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
+import ch.lkmc.neutrodyne.core.data.NO_LOCAL_PEER
 import ch.lkmc.neutrodyne.core.data.fakePlatform
 import ch.lkmc.neutrodyne.core.data.mockResponse
-import ch.lkmc.neutrodyne.core.data.NO_LOCAL_PEER
 import ch.lkmc.neutrodyne.core.data.newDb
 import ch.lkmc.neutrodyne.core.data.newNetworkClients
 import ch.lkmc.neutrodyne.core.data.newResolver

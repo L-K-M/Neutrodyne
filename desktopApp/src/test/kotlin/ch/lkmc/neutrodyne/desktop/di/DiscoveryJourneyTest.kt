@@ -31,11 +31,6 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
-import ch.lkmc.neutrodyne.core.network.okhttp.CoreClients
-import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
-import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
-import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
-import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.GroupDraft
@@ -47,6 +42,11 @@ import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.network.okhttp.CoreClients
+import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
+import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
+import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
+import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository

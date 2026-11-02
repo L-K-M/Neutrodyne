@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -14,7 +15,9 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
+import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
 import ch.lkmc.neutrodyne.core.model.ProviderId
+import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.model.SearchResults
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
@@ -48,6 +51,8 @@ import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.persistentSetOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -70,6 +75,8 @@ import kotlin.test.assertTrue
 /** Real share routing, resolution and Coil rendering, without live providers or a fake loader. */
 @OptIn(ExperimentalTestApi::class)
 class DiscoveryPrivacyJourneyTest {
+    @Test fun addSearchWaitsForItsRecipientsAndDirectoryKeepsThem() = journey(Entry.DISCLOSURE)
+
     @Test fun encodedShareWaitsForTap() = journey(Entry.ENCODED_SHARE)
 
     @Test fun idnaShareWaitsForTap() = journey(Entry.IDNA_SHARE)
@@ -95,6 +102,14 @@ class DiscoveryPrivacyJourneyTest {
             val build = BuildInfoLoader.load()
             val reporter = DesktopCrashReporter(dirs, build, clock, RecentLogBuffer())
             val search = FakeSearchRepository()
+            if (entry == Entry.DISCLOSURE) {
+                search.providersGate = CompletableDeferred()
+                search.providers.value = listOf(
+                    ProviderInfo(ProviderId.APPLE, true),
+                    ProviderInfo(ProviderId.PODCAST_INDEX, true, keySource = DirectoryKeySource.USER),
+                    ProviderInfo(ProviderId.FYYD, false),
+                ).toImmutableList()
+            }
             val graph =
                 createDynamicGraphFactory<M2JourneyGraph.Factory>(DiscoveryJourneyBindings(db, clock, scope, search))
                     .create(dirs, build, reporter)
@@ -143,6 +158,7 @@ class DiscoveryPrivacyJourneyTest {
                         }
                         search.chartAnswer = Outcome.Success(persistentListOf(hit))
                         val route = when (entry) {
+                            Entry.DISCLOSURE -> shared("medical history")
                             Entry.ENCODED_SHARE -> shared("http://%31%32%37.0.0.2:${server.port}/action")
                             Entry.IDNA_SHARE -> shared("http://１２７.０.０.２:${server.port}/action")
                             Entry.ADD_ART, Entry.ADD_REDIRECT_ART -> shared(publicFeed)
@@ -172,7 +188,22 @@ class DiscoveryPrivacyJourneyTest {
                             waitUntil(timeoutMillis = 10_000) { onAllNodes(hasText("Directory show")).fetchSemanticsNodes().isNotEmpty() }
                             onNodeWithText("Directory show").performClick()
                         }
-                        if (entry == Entry.ENCODED_SHARE || entry == Entry.IDNA_SHARE) {
+                        if (entry == Entry.DISCLOSURE) {
+                            val action = "Search for ‘medical history’"
+                            val disclosure = "Searches are sent to Apple, Podcast Index"
+                            waitUntil(timeoutMillis = 10_000) { onAllNodes(hasText(action)).fetchSemanticsNodes().isNotEmpty() }
+                            onNodeWithText(action).assertIsNotEnabled().performClick()
+                            onNodeWithText("Enable a directory in Discover settings").assertDoesNotExist()
+                            assertTrue(search.queries.isEmpty())
+                            runOnIdle { search.providersGate!!.complete(Unit) }
+                            waitUntil(timeoutMillis = 10_000) { onAllNodes(hasText(disclosure)).fetchSemanticsNodes().isNotEmpty() }
+                            onNodeWithText(disclosure).assertIsDisplayed()
+                            onNodeWithText(action).performClick()
+                            waitUntil(timeoutMillis = 10_000) { search.queries.isNotEmpty() }
+                            waitForIdle()
+                            onNodeWithText(disclosure).assertIsDisplayed()
+                            assertEquals(listOf("medical history"), search.queries)
+                        } else if (entry == Entry.ENCODED_SHARE || entry == Entry.IDNA_SHARE) {
                             waitForIdle()
                             onNodeWithText("Subscribe").assertIsDisplayed()
                             onNodeWithText("Looking up…").assertDoesNotExist()
@@ -203,5 +234,5 @@ class DiscoveryPrivacyJourneyTest {
 
     private fun shared(text: String): Route = IntentRouter.route(RouteInput(RouteInput.Action.SEND, text = text))
 
-    private enum class Entry { ENCODED_SHARE, IDNA_SHARE, ADD_ART, ADD_REDIRECT_ART, DIRECTORY_ART, CHART_ART, PREVIEW_ART }
+    private enum class Entry { DISCLOSURE, ENCODED_SHARE, IDNA_SHARE, ADD_ART, ADD_REDIRECT_ART, DIRECTORY_ART, CHART_ART, PREVIEW_ART }
 }
