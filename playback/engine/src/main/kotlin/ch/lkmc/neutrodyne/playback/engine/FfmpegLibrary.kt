@@ -365,12 +365,16 @@ class FfmpegLibrary
                     FfmpegLayout.readOrNull(directory)
                         ?: error("no ${FfmpegLayout.FILE_NAME} in $directory: run buildFfmpeg")
                 val os = System.getProperty("os.name")
+                // FFmpeg installs shared libs under $prefix/lib, its Windows
+                // DLLs under $prefix/bin (configure's shlibdir_default).
+                val libDir = if (os.startsWith("Windows")) "bin" else "lib"
                 val arena = Arena.ofShared()
                 val lookups =
                     layout.libraries.entries.associate { (name, major) ->
                         name to
                             SymbolLookup.libraryLookup(
                                 directory
+                                    .resolve(libDir)
                                     .resolve(libraryFileName(name, major, os))
                                     .toAbsolutePath()
                                     .toString(),
