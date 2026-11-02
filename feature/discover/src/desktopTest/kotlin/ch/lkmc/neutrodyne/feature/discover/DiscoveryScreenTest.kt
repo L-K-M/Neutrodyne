@@ -66,6 +66,18 @@ class DiscoveryScreenTest {
     }
 
     @Test
+    fun unknownProvidersDoNotClaimDirectoriesAreDisabled() =
+        runComposeUiTest {
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    DiscoverScreen(DiscoverState(), {}, {}, navigator)
+                }
+            }
+            onNodeWithText("Enable a directory in Discover settings").assertDoesNotExist()
+            onNodeWithText("Searches are sent to", substring = true).assertDoesNotExist()
+        }
+
+    @Test
     fun enterAndImeOpenFullDirectoryEvenForShortQuery() =
         runComposeUiTest {
             setContent {

@@ -165,7 +165,7 @@ class AddPodcastSheetTest {
 
             // The preview card carries the title and "author · N episodes" line (08).
             onNodeWithText("A Show").assertIsDisplayed()
-            assertEquals(listOf("https://example.com/feed"), resolver.inputs)
+            assertEquals(listOf("https://example.com/feed"), resolver.unconfirmedInputs)
 
             onNodeWithText("Subscribe").performClick()
             waitForIdle()
@@ -571,6 +571,7 @@ class AddPodcastSheetTest {
             )
             onNodeWithText("Search for ‘medical history’").assertIsNotEnabled()
             onNodeWithText("Searches are sent to", substring = true).assertDoesNotExist()
+            onNodeWithText("Enable a directory in Discover settings").assertDoesNotExist()
         }
 
     /** The chooser shows the localized source label, never the enum identifier (M7). */
