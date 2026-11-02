@@ -181,6 +181,7 @@ class UpdateCheckStoreTest {
                 "a".repeat(MAX_UPDATE_MANIFEST_BYTES * 2 + 1),
                 valid.replace("\"schema\":1", "\"schema\":2"),
                 valid.replace("\"retryAttempt\":2", "\"retryAttempt\":7"),
+                valid.replace("\"retryAttempt\":2", "\"retryAttempt\":-1"),
                 valid.replace("\"retryAttempt\":2", "\"retryAttempt\":\"2\""),
                 valid.replace("\"firstStartedAtMs\":${snapshot.firstStartedAtMs}", "\"firstStartedAtMs\":-1"),
             ).forEach { bad ->

@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -20,6 +21,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -497,6 +499,37 @@ class AppUpdateCheckerTest {
             assertEquals(Keys.ABSENT, h.settings.get(Keys.NOTIFIED_VERSION_CODE))
         }
 
+    @Test fun switchToggleDuringAHeldScheduledFetchStartsAFreshCheck() =
+        runTest {
+            val h = Harness(this)
+            h.checker.initialize()
+            val unwind = CompletableDeferred<Unit>()
+            h.source.action = {
+                try {
+                    awaitCancellation()
+                } finally {
+                    // Hold the cancelled fetch's unwind so perform() cannot reach the finally
+                    // that deregisters it before the next caller looks up the flight.
+                    withContext(NonCancellable) { unwind.await() }
+                }
+            }
+            val first = launch { h.checker.execute(UpdateInvocation.SCHEDULED) }
+            runCurrent()
+            assertEquals(CheckState.Checking, h.checker.state.value)
+            h.settings.set(Keys.CHECK_ENABLED, false)
+            runCurrent()
+            h.settings.set(Keys.CHECK_ENABLED, true)
+            runCurrent()
+            h.source.action = null
+            val second = async { h.checker.execute(UpdateInvocation.SCHEDULED) }
+            runCurrent()
+            unwind.complete(Unit)
+            // A caller after the toggle must run a new check, not join the cancelled job.
+            assertIs<CheckState.Available>(second.await())
+            first.join()
+            assertEquals(2, h.source.calls)
+        }
+
     @Test fun switchOffAndOnRecomputeWithoutFetching() =
         runTest {
             val h = Harness(this)
@@ -591,6 +624,27 @@ class AppUpdateCheckerTest {
             assertEquals(CheckState.Idle(null), h.checker.state.value)
             assertEquals(h.clock.now() + DAY, store.value?.nextDueAtMs)
             assertEquals(0, h.source.calls)
+        }
+
+    @Test fun ioReadFailureKeepsTheStoredSnapshotAndSurfacesTheError() =
+        runTest {
+            val stored =
+                UpdateStoreSnapshot(
+                    manifest(),
+                    TestClock.DEFAULT_NOW,
+                    TestClock.DEFAULT_NOW,
+                    TestClock.DEFAULT_NOW + DAY,
+                    3,
+                )
+            val store = MemoryUpdateStore(stored).also { it.readError = UpdateStoreError.IO }
+            val h = Harness(this, store = store)
+            h.checker.initialize()
+            // A transient read failure keeps the in-memory default; the real cache file —
+            // manifest, retry attempt and due time — must not be overwritten.
+            assertEquals(SettingsError.WriteFailed, h.checker.writeError.value)
+            assertEquals(0, store.writes)
+            assertEquals(stored, store.value)
+            assertEquals(CheckState.Idle(null), h.checker.state.value)
         }
 
     @Test fun cacheRenameBeforePreferenceWriteIsReconciledAfterRestart() =
