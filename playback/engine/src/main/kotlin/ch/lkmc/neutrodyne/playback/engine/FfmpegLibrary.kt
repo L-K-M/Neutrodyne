@@ -62,7 +62,8 @@ class FfmpegLibrary
 
         val avutilVersion: Int get() = callInt("avutil", "avutil_version", VERSION)
 
-        val swresampleVersion: Int get() = callInt("swresample", "swr_version", VERSION)
+        // libswresample 7 renamed swr_version to swresample_version.
+        val swresampleVersion: Int get() = callInt("swresample", "swresample_version", VERSION)
 
         /**
          * `avcodec_license()`, the string MD0 AC2 checks: a build configured with
@@ -260,9 +261,13 @@ class FfmpegLibrary
         fun allocResampler(): MemorySegment = callAddress("swresample", "swr_alloc", SWR_ALLOC)
 
         /**
-         * `swr_alloc_set_opts`: the output is interleaved s16 stereo at the
-         * source rate, so the DSP chain of 11 runs at the source rate and only
-         * the output stage resamples to the device's.
+         * Configures [resampler] through AVOptions: the output is interleaved
+         * s16 stereo at the source rate, so the DSP chain of 11 runs at the
+         * source rate and only the output stage resamples to the device's.
+         * libswresample 7 removed `swr_alloc_set_opts` for the
+         * AVChannelLayout-taking `swr_alloc_set_opts2`; the option strings
+         * carry the same masks through `av_channel_layout_from_string`, so no
+         * struct is marshalled.
          */
         fun setResamplerOptions(
             resampler: MemorySegment,
@@ -271,21 +276,14 @@ class FfmpegLibrary
             inChannelMask: Long,
             inFormat: Int,
             inRate: Int,
-        ): MemorySegment =
-            callAddress(
-                "swresample",
-                "swr_alloc_set_opts",
-                SWR_ALLOC_SET_OPTS,
-                resampler,
-                outChannelMask,
-                layout.intConstant("AV_SAMPLE_FMT_S16"),
-                outRate,
-                inChannelMask,
-                inFormat,
-                inRate,
-                0,
-                MemorySegment.NULL,
-            )
+        ) {
+            optionSet(resampler, "in_chlayout", "0x${java.lang.Long.toHexString(inChannelMask)}")
+            optionSet(resampler, "out_chlayout", "0x${java.lang.Long.toHexString(outChannelMask)}")
+            optionSetInt(resampler, "in_sample_fmt", inFormat)
+            optionSetInt(resampler, "out_sample_fmt", layout.intConstant("AV_SAMPLE_FMT_S16"))
+            optionSetInt(resampler, "in_sample_rate", inRate)
+            optionSetInt(resampler, "out_sample_rate", outRate)
+        }
 
         fun initResampler(resampler: MemorySegment): Int = callInt("swresample", "swr_init", SWR_INIT, resampler)
 
@@ -315,6 +313,24 @@ class FfmpegLibrary
         fun freeResampler(slot: MemorySegment) = callVoid("swresample", "swr_free", SWR_FREE, slot)
 
         // ------------------------------------------------------------ metadata
+
+        private fun optionSet(
+            resampler: MemorySegment,
+            name: String,
+            value: String,
+        ) {
+            val set = callInt("avutil", "av_opt_set", OPT_SET, resampler, cString(name), cString(value), 0)
+            require(set >= 0) { "the resampler refused $name=$value: ${errorString(set)}" }
+        }
+
+        private fun optionSetInt(
+            resampler: MemorySegment,
+            name: String,
+            value: Int,
+        ) {
+            val set = callInt("avutil", "av_opt_set_int", OPT_SET_INT, resampler, cString(name), value.toLong(), 0)
+            require(set >= 0) { "the resampler refused $name=$value: ${errorString(set)}" }
+        }
 
         /** `av_dict_get`, or null when the entry is absent. */
         fun dictGet(
@@ -487,18 +503,13 @@ class FfmpegLibrary
                 FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS)
             private val FLUSH_BUFFERS = FunctionDescriptor.ofVoid(ValueLayout.ADDRESS)
             private val SWR_ALLOC = FunctionDescriptor.of(ValueLayout.ADDRESS)
-            private val SWR_ALLOC_SET_OPTS =
+            private val OPT_SET =
                 FunctionDescriptor.of(
-                    ValueLayout.ADDRESS,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
                     ValueLayout.JAVA_INT,
                     ValueLayout.ADDRESS,
+                    ValueLayout.ADDRESS,
+                    ValueLayout.ADDRESS,
+                    ValueLayout.JAVA_INT,
                 )
             private val SWR_INIT = FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS)
             private val SWR_CONVERT =

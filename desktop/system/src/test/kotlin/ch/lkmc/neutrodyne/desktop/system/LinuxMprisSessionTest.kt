@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
-import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.runBlocking
 import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
@@ -14,88 +13,87 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * MD0 AC4 on Linux: a private `dbus-daemon --session` bus proves the exported
- * MPRIS object answers `org.freedesktop.DBus.Properties` queries and that
- * media-key method calls arrive as [RemoteCommand]s — the same proof desktop
- * environments get, without needing a desktop. Skips where `dbus-daemon` is
- * not installed (the Linux desktop-matrix runner installs `dbus-x11`).
+ * MD0 AC4 on Linux: `dbus-run-session` hands the test JVM a private session
+ * bus through `DBUS_SESSION_BUS_ADDRESS`, and the exported MPRIS object proves
+ * it answers `org.freedesktop.DBus.Properties` queries and delivers media-key
+ * method calls as [RemoteCommand]s — the same proof desktop environments get,
+ * without needing a desktop. The test skips when no session bus address is
+ * set: CI wraps the Gradle invocation in `dbus-run-session` on Linux, where
+ * MPRIS is the media-key contract. Starting the daemon here would trip the
+ * process-spawn rule (01 banned APIs), so the runner owns it.
  */
 class LinuxMprisSessionTest {
     @Test(timeout = TEST_TIMEOUT_MS)
     fun privateBusAnswersPropertiesAndDeliversCommands() {
-        val daemon = findDbusDaemon() ?: run {
-            assumeTrue("dbus-daemon is not installed on this host", false)
-            return
-        }
-        val bus = ProcessBuilder(daemon, "--session", "--nofork", "--print-address=1")
-            .redirectErrorStream(true)
-            .start()
-        try {
-            val address = bus.inputStream.bufferedReader().readLine()
-            assumeTrue("private session bus failed to start", address?.startsWith("unix:") == true)
+        val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")
+        assumeTrue(
+            "no session bus: run under dbus-run-session (CI wraps the Linux Gradle steps)",
+            address?.startsWith("unix:") == true,
+        )
 
-            LinuxMprisSession.open(address).use { session ->
-                val received = ConcurrentLinkedQueue<RemoteCommand>()
-                Thread({
-                        runBlocking { session.commands.collect { received += it } }
-                    }, "mpris-collector")
-                    .apply { isDaemon = true; start() }
-
-                session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
-
-                DBusConnectionBuilder.forAddress(address).build().use { client ->
-                    val props = client.properties()
-
-                    // Client-side Get unwraps Variants recursively, so the
-                    // a{sv} map's values come back as their raw types.
-                    assertEquals(
-                        "Playing",
-                        props.Get<Any?>(MprisNames.PLAYER, "PlaybackStatus"),
-                    )
-                    assertEquals(
-                        "Neutrodyne",
-                        props.Get<Any?>(MprisNames.ROOT, "Identity"),
-                    )
-                    assertEquals(
-                        testNowPlaying().position.positionMs * US_PER_MS,
-                        props.Get<Any?>(MprisNames.PLAYER, "Position"),
-                    )
-
-                    @Suppress("UNCHECKED_CAST")
-                    val metadata =
-                        props.Get<Any?>(MprisNames.PLAYER, "Metadata")
-                            as Map<String, Any?>
-                    assertEquals(testNowPlaying().title, metadata["xesam:title"])
-
-                    val player = client.player()
-                    player.PlayPause()
-                    player.Seek(SEEK_US)
-                    player.Next()
-                    client.root().Raise()
-                    props.Set(
-                        MprisNames.PLAYER,
-                        "Rate",
-                        Variant(SET_RATE),
-                    )
-
-                    await("Toggle") { received.contains(RemoteCommand.Toggle) }
-                    await("SeekTo") { received.any { it is RemoteCommand.SeekTo } }
-                    await("Next") { received.contains(RemoteCommand.Next) }
-                    await("SetRate") { received.contains(RemoteCommand.SetRate(SET_RATE.toFloat())) }
-
-                    val seek = received.filterIsInstance<RemoteCommand.SeekTo>().last()
-                    assertEquals(testNowPlaying().position.positionMs + SEEK_US / US_PER_MS, seek.positionMs)
-                    assertEquals(
-                        SET_RATE,
-                        props.Get<Any?>(MprisNames.PLAYER, "Rate") as Double,
-                        RATE_EPSILON,
-                    )
+        LinuxMprisSession.open(address).use { session ->
+            val received = ConcurrentLinkedQueue<RemoteCommand>()
+            Thread({
+                runBlocking { session.commands.collect { received += it } }
+            }, "mpris-collector")
+                .apply {
+                    isDaemon = true
+                    start()
                 }
+
+            session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
+
+            DBusConnectionBuilder.forAddress(address).build().use { client ->
+                val props = client.properties()
+
+                // Client-side Get unwraps Variants recursively, so the
+                // a{sv} map's values come back as their raw types.
+                assertEquals(
+                    "Playing",
+                    props.Get<Any?>(MprisNames.PLAYER, "PlaybackStatus"),
+                )
+                assertEquals(
+                    "Neutrodyne",
+                    props.Get<Any?>(MprisNames.ROOT, "Identity"),
+                )
+                assertEquals(
+                    testNowPlaying().position.positionMs * US_PER_MS,
+                    props.Get<Any?>(MprisNames.PLAYER, "Position"),
+                )
+
+                @Suppress("UNCHECKED_CAST")
+                val metadata =
+                    props.Get<Any?>(MprisNames.PLAYER, "Metadata")
+                        as Map<String, Any?>
+                assertEquals(testNowPlaying().title, metadata["xesam:title"])
+
+                val player = client.player()
+                player.PlayPause()
+                player.Seek(SEEK_US)
+                player.Next()
+                client.root().Raise()
+                props.Set(
+                    MprisNames.PLAYER,
+                    "Rate",
+                    Variant(SET_RATE),
+                )
+
+                await("Toggle") { received.contains(RemoteCommand.Toggle) }
+                await("SeekTo") { received.any { it is RemoteCommand.SeekTo } }
+                await("Next") { received.contains(RemoteCommand.Next) }
+                await("SetRate") { received.contains(RemoteCommand.SetRate(SET_RATE.toFloat())) }
+
+                val seek = received.filterIsInstance<RemoteCommand.SeekTo>().last()
+                assertEquals(testNowPlaying().position.positionMs + SEEK_US / US_PER_MS, seek.positionMs)
+                assertEquals(
+                    SET_RATE,
+                    props.Get<Any?>(MprisNames.PLAYER, "Rate") as Double,
+                    RATE_EPSILON,
+                )
             }
-        } finally {
-            bus.destroyForcibly()
         }
     }
 
@@ -108,24 +106,10 @@ class LinuxMprisSessionTest {
     private fun DBusConnection.root(): MprisRootClient =
         getRemoteObject(MprisNames.BUS, MprisNames.PATH, MprisRootClient::class.java)
 
-    private fun findDbusDaemon(): String? =
-        listOfNotNull(
-                System.getenv("DBUS_DAEMON"),
-                "dbus-daemon",
-                "/usr/bin/dbus-daemon",
-                "/usr/local/bin/dbus-daemon",
-            )
-            .firstOrNull { candidate ->
-                runCatching {
-                        ProcessBuilder(candidate, "--version")
-                            .redirectErrorStream(true)
-                            .start()
-                            .waitFor()
-                    }
-                    .isSuccess
-            }
-
-    private fun await(what: String, until: () -> Boolean) {
+    private fun await(
+        what: String,
+        until: () -> Boolean,
+    ) {
         val deadline = System.nanoTime() + AWAIT_MS * 1_000_000
         while (!until() && System.nanoTime() < deadline) Thread.sleep(AWAIT_POLL_MS)
         assertTrue("$what never arrived on the commands flow", until())
@@ -146,6 +130,7 @@ class LinuxMprisSessionTest {
 
 // Client-side proxies need the bus interface names; dbus-java derives them
 // from @DBusInterfaceName, not from the Kotlin type name.
+@Suppress("ktlint:standard:function-naming", "FunctionName")
 @DBusInterfaceName(MprisNames.PLAYER)
 internal interface MprisPlayerClient : DBusInterface {
     fun PlayPause()
@@ -155,6 +140,7 @@ internal interface MprisPlayerClient : DBusInterface {
     fun Next()
 }
 
+@Suppress("ktlint:standard:function-naming", "FunctionName")
 @DBusInterfaceName(MprisNames.ROOT)
 internal interface MprisRootClient : DBusInterface {
     fun Raise()

@@ -154,13 +154,17 @@ jobs:
         with:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-4.17-sdk36
+      # :desktop:system's MPRIS test needs a private session bus; the runner
+      # owns the daemon because test code may not spawn processes (rule 17).
+      - name: Session bus for the MPRIS test
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq dbus-daemon
       # TODO: add `:youtube:ytdlp:shimTest` and
       # `:youtube:ytdlp-desktop:shimTestStdio` (MD3) as their milestones land —
       # 09's full line: ./gradlew allTests test mutationTest
       # :youtube:ytdlp:shimTest :youtube:ytdlp-desktop:shimTestStdio
       # -Proborazzi.test.verify=true --continue
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
-        run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
+        run: dbus-run-session -- ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
       - name: Room schema drift
         run: test -z "$(git status --porcelain -- core/database/schemas)" || { echo "::error::Room schema changed without a committed version"; git status --porcelain -- core/database/schemas; exit 1; }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -369,7 +373,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update -qq
-          pkgs="binutils xvfb dbus-x11"
+          pkgs="binutils xvfb dbus-x11 dbus-daemon"
           [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
           sudo apt-get install -y -qq $pkgs
       # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell
@@ -397,11 +401,16 @@ jobs:
             :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
       # The modules MD0 builds on this target, and the corpus suite that loads the
       # FFmpeg build the previous step produced (11 Testing, MD0 AC1).
+      # On Linux the MPRIS test connects to the private session bus
+      # dbus-run-session provides; the runner owns the daemon because test
+      # code may not spawn processes (01 banned-API rule 17).
       - name: Desktop engine tests on this host
         shell: bash
         run: |
-          ./gradlew :playback:engine:test :playback:engine:ffmpegTest \
-            :playback:native:test :desktop:system:test
+          tests="./gradlew :playback:engine:test :playback:engine:ffmpegTest \
+            :playback:native:test :desktop:system:test"
+          [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
+          $tests
       # The measured evidence MD0 records per target: stripped sizes, the licence
       # string, the protocol inventory, the enabled components and the build's
       # own configure line and toolchain.

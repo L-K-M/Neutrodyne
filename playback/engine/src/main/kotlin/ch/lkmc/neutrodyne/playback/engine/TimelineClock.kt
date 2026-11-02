@@ -44,8 +44,11 @@ internal class TimelineClock(
             if (m.outFrame <= played && (best == null || m.outFrame > best.outFrame)) best = m
         }
         val anchor = best ?: return pausedPositionUs.get() / 1000
-        val delta = ((played - anchor.outFrame).coerceAtLeast(0) *
-            (anchor.speed.toDouble() * 1_000_000 / deviceRate)).toLong()
+        val delta =
+            (
+                (played - anchor.outFrame).coerceAtLeast(0) *
+                    (anchor.speed.toDouble() * 1_000_000 / deviceRate)
+            ).toLong()
         return (anchor.mediaTimeUs + delta) / 1000
     }
 

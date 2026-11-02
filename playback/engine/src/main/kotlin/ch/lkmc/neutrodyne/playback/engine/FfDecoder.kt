@@ -187,15 +187,15 @@ class FfDecoder
             rate: Int,
         ) {
             library.freeResampler(resamplerSlot)
-            val created =
-                library.setResamplerOptions(
-                    library.allocResampler(),
-                    layout.constant("AV_CHANNEL_LAYOUT_STEREO_MASK"),
-                    sampleRate,
-                    mask,
-                    format,
-                    rate,
-                )
+            val created = library.allocResampler()
+            library.setResamplerOptions(
+                created,
+                layout.constant("AV_CHANNEL_LAYOUT_STEREO_MASK"),
+                sampleRate,
+                mask,
+                format,
+                rate,
+            )
             resamplerSlot.set(ValueLayout.ADDRESS, 0L, created)
             val initialised = library.initResampler(created)
             require(initialised >= 0) { "the resampler would not initialise: ${library.errorString(initialised)}" }

@@ -290,9 +290,10 @@ case "$TARGET" in
         TARGET_FLAGS=(
             --cc=gcc
             # Every shared library carries an rpath of its own directory.
-            # $$ survives ffbuild/config.mak's make expansion; a single $O
-            # expands to nothing and leaves RUNPATH as the literal "RIGIN".
-            --extra-ldflags=-Wl,-rpath,'$$ORIGIN'
+            # Make collapses $$ to $ in the recipe and the recipe's shell then
+            # needs \$ to keep the dollar literal, so configure must receive
+            # \$$ORIGIN for RUNPATH to hold $ORIGIN.
+            --extra-ldflags=-Wl,-rpath,'\$$ORIGIN'
         )
         MAKE=(make)
         ;;

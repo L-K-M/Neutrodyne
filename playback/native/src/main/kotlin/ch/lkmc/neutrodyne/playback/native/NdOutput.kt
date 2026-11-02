@@ -127,4 +127,6 @@ class NdOutput private constructor(
     }
 }
 
-class NdOutputException(message: String) : Exception(message)
+class NdOutputException(
+    message: String,
+) : Exception(message)

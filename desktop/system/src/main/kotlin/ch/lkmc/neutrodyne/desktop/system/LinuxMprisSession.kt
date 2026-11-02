@@ -28,7 +28,9 @@ import org.freedesktop.dbus.types.Variant
  */
 class LinuxMprisSession private constructor(
     private val connection: DBusConnection,
-) : SystemMediaSession, MprisRoot, MprisPlayer {
+) : SystemMediaSession,
+    MprisRoot,
+    MprisPlayer {
     private val commandSink = MutableSharedFlow<RemoteCommand>(extraBufferCapacity = COMMAND_BUFFER)
 
     override val commands: Flow<RemoteCommand> = commandSink
@@ -37,10 +39,15 @@ class LinuxMprisSession private constructor(
     override fun getObjectPath() = MprisNames.PATH
 
     @Volatile private var current: NowPlaying? = null
+
     @Volatile private var rate = 1.0
+
     @Volatile private var positionMs = 0L
+
     @Volatile private var durationMs: Long? = null
+
     @Volatile private var volume = 1.0
+
     @Volatile private var closed = false
 
     override fun publish(
@@ -110,7 +117,10 @@ class LinuxMprisSession private constructor(
         emitSeeked(target)
     }
 
-    override fun SetPosition(trackId: DBusPath, position: Long) {
+    override fun SetPosition(
+        trackId: DBusPath,
+        position: Long,
+    ) {
         val target = position / US_PER_MS
         emit(RemoteCommand.SeekTo(target))
         emitSeeked(target)

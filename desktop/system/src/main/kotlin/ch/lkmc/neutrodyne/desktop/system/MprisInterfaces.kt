@@ -21,6 +21,7 @@ internal object MprisNames {
  * the bus names verbatim — D-Bus members are capitalized, so these Java
  * methods intentionally are too.
  */
+@Suppress("ktlint:standard:function-naming", "FunctionName")
 @DBusInterfaceName(MprisNames.ROOT)
 internal interface MprisRoot : DBusInterface {
     fun Raise()
@@ -59,6 +60,7 @@ internal interface MprisRoot : DBusInterface {
 }
 
 /** `org.mpris.MediaPlayer2.Player` — the transport interface media keys hit. */
+@Suppress("ktlint:standard:function-naming", "FunctionName")
 @DBusInterfaceName(MprisNames.PLAYER)
 internal interface MprisPlayer : DBusInterface {
     fun Next()
@@ -75,7 +77,10 @@ internal interface MprisPlayer : DBusInterface {
 
     fun Seek(offset: Long)
 
-    fun SetPosition(trackId: DBusPath, position: Long)
+    fun SetPosition(
+        trackId: DBusPath,
+        position: Long,
+    )
 
     fun OpenUri(uri: String)
 
@@ -135,5 +140,7 @@ internal interface MprisPlayer : DBusInterface {
 }
 
 /** MPRIS `Seeked` signal; spec requires it after every Seek/SetPosition. */
-internal class SeekedSignal(path: String, positionUs: Long) :
-    DBusSignal(path, MprisNames.PLAYER, "Seeked", positionUs)
+internal class SeekedSignal(
+    path: String,
+    positionUs: Long,
+) : DBusSignal(path, MprisNames.PLAYER, "Seeked", positionUs)

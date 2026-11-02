@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+
 /*
  * Ported from androidx.media3.common.audio.Sonic (Media3 1.11.1, Apache-2.0),
  * itself a Java port of Bill Cox's Sonic library. Copyright 2026 The Android
@@ -79,8 +80,14 @@ internal class Sonic(
         val adjustedRemainingFrames = remainingFrameCount - remainingInputToCopyFrameCount
         val expectedOutputFrames =
             outputFrameCount +
-                (((adjustedRemainingFrames / s + remainingInputToCopyFrameCount +
-                    accumulatedSpeedAdjustmentError + pitchFrameCount) / r) + 0.5).toInt()
+                (
+                    (
+                        (
+                            adjustedRemainingFrames / s + remainingInputToCopyFrameCount +
+                                accumulatedSpeedAdjustmentError + pitchFrameCount
+                        ) / r
+                    ) + 0.5
+                ).toInt()
         accumulatedSpeedAdjustmentError = 0.0
         ensureInput(remainingFrameCount + 2 * maxRequiredFrameCount)
         for (i in 0 until 2 * maxRequiredFrameCount * channelCount) {

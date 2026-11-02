@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.native
 
+import org.junit.Assume.assumeTrue
 import java.lang.foreign.Arena
 import java.lang.foreign.ValueLayout
 import java.nio.file.Path
@@ -8,7 +9,6 @@ import kotlin.math.sin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import org.junit.Assume.assumeTrue
 
 /**
  * The ndmedia ABI over its own build (11 ndmedia interface, MD0 W4). Runs in
@@ -19,10 +19,11 @@ import org.junit.Assume.assumeTrue
 class NdOutputTest {
     @Test
     fun nullBackendPlaysWrittenFramesAndReportsItsShape() {
-        val directory = ndmediaDir() ?: run {
-            assumeTrue("no ndmedia build for this host", false)
-            return
-        }
+        val directory =
+            ndmediaDir() ?: run {
+                assumeTrue("no ndmedia build for this host", false)
+                return
+            }
         NdOutput.open(directory, "null", RATE, CHANNELS, RING_MS).use { out ->
             val describe = out.describe()
             assertTrue("\"rate\":$RATE" in describe, describe)
@@ -59,10 +60,11 @@ class NdOutputTest {
 
     @Test
     fun clearDropsQueuedFrames() {
-        val directory = ndmediaDir() ?: run {
-            assumeTrue("no ndmedia build for this host", false)
-            return
-        }
+        val directory =
+            ndmediaDir() ?: run {
+                assumeTrue("no ndmedia build for this host", false)
+                return
+            }
         NdOutput.open(directory, "null", RATE, CHANNELS, RING_MS).use { out ->
             Arena.ofConfined().use { arena ->
                 val pcm = arena.allocate(RATE / 10L * CHANNELS * 4)
@@ -75,10 +77,11 @@ class NdOutputTest {
 
     @Test
     fun unknownBackendIsRejected() {
-        val directory = ndmediaDir() ?: run {
-            assumeTrue("no ndmedia build for this host", false)
-            return
-        }
+        val directory =
+            ndmediaDir() ?: run {
+                assumeTrue("no ndmedia build for this host", false)
+                return
+            }
         try {
             NdOutput.open(directory, "definitely-not-a-backend", RATE, CHANNELS, RING_MS).close()
             throw AssertionError("an unknown backend must not open")

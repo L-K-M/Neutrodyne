@@ -39,7 +39,8 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
             val ndmediaOutputDir = layout.buildDirectory.dir("ndmedia/$nativeTarget")
             tasks.register<Exec>("buildNdmedia") {
                 group = "build"
-                description = "Build libndmedia (miniaudio device + SPSC ring) for $nativeTarget (11 ndmedia interface)."
+                description =
+                    "Build libndmedia (miniaudio device + SPSC ring) for $nativeTarget (11 ndmedia interface)."
                 workingDir = layout.projectDirectory.asFile
                 commandLine(bashExecutable(), "ndmedia/build.sh", nativeTarget)
                 inputs.files("ndmedia")

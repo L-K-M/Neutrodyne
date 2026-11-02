@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import org.junit.Assume.assumeTrue
 import java.nio.file.Path
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertTrue
-import org.junit.Assume.assumeTrue
 
 /**
  * MD0 AC3: through miniaudio's null back-end the timeline clock stays within
@@ -36,8 +36,7 @@ class EngineClockTest {
         }
     }
 
-    private fun mediaDir(): Path =
-        Path.of(requireNotNull(System.getProperty(MODULE_DIR)), "src/test/resources/media")
+    private fun mediaDir(): Path = Path.of(requireNotNull(System.getProperty(MODULE_DIR)), "src/test/resources/media")
 
     private fun ffmpegDir(): Path? {
         val root = System.getProperty(ROOT_DIR) ?: return null
@@ -56,6 +55,7 @@ class EngineClockTest {
         const val ROOT_DIR = "neutrodyne.rootDir"
         const val RATE = 44_100
         const val ITEM = "mp3_silence_gaps_3s.mp3"
+
         // 133632 decoded samples at 44100 Hz per corpus.json.
         const val EXPECTED_END_MS = 3_030L
         const val MAX_ERROR_MS = 50L

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+
 /*
  * Ported from androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
  * (Media3 1.11.1, Apache-2.0). Copyright 2026 The Android Open Source Project.
@@ -306,8 +307,10 @@ internal class SilenceSkipper(
         max: Int,
     ): Int {
         if (max == 0) return minVolumeToKeepPercentageWhenMuting
-        return ((minVolumeToKeepPercentageWhenMuting - 100) *
-            (AVOID_TRUNCATION_FACTOR * value / max)) / AVOID_TRUNCATION_FACTOR + 100
+        return (
+            (minVolumeToKeepPercentageWhenMuting - 100) *
+                (AVOID_TRUNCATION_FACTOR * value / max)
+        ) / AVOID_TRUNCATION_FACTOR + 100
     }
 
     private fun calculateFadeInPercentage(
@@ -320,8 +323,7 @@ internal class SilenceSkipper(
             (AVOID_TRUNCATION_FACTOR * value / max) / AVOID_TRUNCATION_FACTOR
     }
 
-    private fun durationUsToFrames(durationUs: Long): Int =
-        (durationUs * sampleRate / MICROS_PER_SECOND).toInt()
+    private fun durationUsToFrames(durationUs: Long): Int = (durationUs * sampleRate / MICROS_PER_SECOND).toInt()
 
     private fun findNoisePosition(buffer: ByteBuffer): Int {
         var i = buffer.position() + 1
@@ -383,10 +385,12 @@ internal class SilenceSkipper(
                     byteArray[startIndex] = 0xFF.toByte()
                     byteArray[startIndex + 1] = 0x7F.toByte()
                 }
+
                 sample <= Short.MIN_VALUE -> {
                     byteArray[startIndex] = 0x00.toByte()
                     byteArray[startIndex + 1] = 0x80.toByte()
                 }
+
                 else -> {
                     byteArray[startIndex] = (sample and 0xFF).toByte()
                     byteArray[startIndex + 1] = (sample shr 8).toByte()

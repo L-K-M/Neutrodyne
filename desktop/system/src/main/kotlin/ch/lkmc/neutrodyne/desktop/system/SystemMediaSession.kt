@@ -44,7 +44,11 @@ sealed interface RemoteCommand {
 
     data object SkipBack : RemoteCommand
 
-    data class SeekTo(val positionMs: Long) : RemoteCommand
+    data class SeekTo(
+        val positionMs: Long,
+    ) : RemoteCommand
 
-    data class SetRate(val rate: Float) : RemoteCommand
+    data class SetRate(
+        val rate: Float,
+    ) : RemoteCommand
 }
