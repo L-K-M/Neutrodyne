@@ -48,8 +48,8 @@ class LinuxMprisSessionTest {
                 DBusConnectionBuilder.forAddress(address).build().use { client ->
                     val props = client.properties()
 
-                    // Client-side Get returns the value already unwrapped
-                    // from its Variant; the a{sv} map's values stay Variants.
+                    // Client-side Get unwraps Variants recursively, so the
+                    // a{sv} map's values come back as their raw types.
                     assertEquals(
                         "Playing",
                         props.Get<Any?>(MprisNames.PLAYER, "PlaybackStatus"),
@@ -66,8 +66,8 @@ class LinuxMprisSessionTest {
                     @Suppress("UNCHECKED_CAST")
                     val metadata =
                         props.Get<Any?>(MprisNames.PLAYER, "Metadata")
-                            as Map<String, Variant<*>>
-                    assertEquals(testNowPlaying().title, metadata["xesam:title"]?.value)
+                            as Map<String, Any?>
+                    assertEquals(testNowPlaying().title, metadata["xesam:title"])
 
                     val player = client.player()
                     player.PlayPause()
