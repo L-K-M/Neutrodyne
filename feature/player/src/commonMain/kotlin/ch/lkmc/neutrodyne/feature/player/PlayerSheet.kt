@@ -586,7 +586,16 @@ internal fun PlayerSheet(
                                     PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
                                     TextButton(
                                         onClick = next,
-                                        enabled = ui.chapters.isNotEmpty() || now.hasNext,
+                                        // With chapters the button is nextChapter, a no-op past the
+                                        // last one; a null current sits before the first chapter or
+                                        // in a gap, where a next target still exists.
+                                        enabled =
+                                            if (ui.chapters.isEmpty()) {
+                                                now.hasNext
+                                            } else {
+                                                val current = ui.currentChapter
+                                                current == null || current.index < ui.chapters.lastIndex
+                                            },
                                         modifier =
                                             Modifier.weight(1f, fill = false).semantics {
                                                 contentDescription =

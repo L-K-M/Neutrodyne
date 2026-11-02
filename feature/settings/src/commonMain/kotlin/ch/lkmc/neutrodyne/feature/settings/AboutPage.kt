@@ -6,12 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +19,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -86,21 +86,19 @@ internal fun AboutPage(buildInfo: BuildInfo) {
         }
     }
     if (showInstallHelp) {
-        AlertDialog(
+        NdDialog(
             onDismissRequest = { showInstallHelp = false },
-            title = { Text(stringResource(Res.string.install_help_title)) },
-            text = {
-                Text(
-                    stringResource(Res.string.install_help_android),
-                    Modifier.verticalScroll(rememberScrollState()),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { showInstallHelp = false },
-                ) { Text(stringResource(Res.string.install_help_close)) }
-            },
-        )
+            title = stringResource(Res.string.install_help_title),
+            confirm =
+                NdDialogAction(stringResource(Res.string.install_help_close)) {
+                    showInstallHelp = false
+                },
+        ) {
+            Text(
+                stringResource(Res.string.install_help_android),
+                Modifier.verticalScroll(rememberScrollState()),
+            )
+        }
     }
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(

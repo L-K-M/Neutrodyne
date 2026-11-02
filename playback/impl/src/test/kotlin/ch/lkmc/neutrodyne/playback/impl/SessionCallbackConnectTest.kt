@@ -9,6 +9,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import dev.zacsweers.metro.Provider
@@ -176,6 +177,31 @@ class SessionCallbackConnectTest {
                     }
                 assertIs<IllegalArgumentException>(denied.cause)
                 assertEquals(0, h.dbProviderReads)
+            } finally {
+                session.release()
+                exo.release()
+            }
+        }
+    }
+
+    @Test fun trustedSessionCommandsExcludeSetRating() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            val callback = callback(h, FakeSigningFacts())
+            val exo = h.playerFactory.create()
+            val session = MediaLibrarySession.Builder(h.app, exo, callback).build()
+            try {
+                // Neutrodyne has no rating feature and no onSetRating override, so the
+                // command must not appear in either trust branch's accepted set.
+                for (controller in listOf(controllerInfo(), controllerInfo(trusted = false))) {
+                    val result = callback.onConnectAsync(session, controller).get()
+                    assertTrue(result.isAccepted, controller.packageName)
+                    assertFalse(
+                        result.availableSessionCommands.contains(
+                            SessionCommand.COMMAND_CODE_SESSION_SET_RATING,
+                        ),
+                        controller.packageName,
+                    )
+                }
             } finally {
                 session.release()
                 exo.release()
