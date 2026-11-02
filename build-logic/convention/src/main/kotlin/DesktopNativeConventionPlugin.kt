@@ -27,7 +27,7 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                     group = "build"
                     description = "Build the minimal FFmpeg libraries of D86 for $nativeTarget (11 FFmpeg build)."
                     workingDir = layout.projectDirectory.asFile
-                    commandLine("bash", "ffmpeg/build.sh", nativeTarget)
+                    commandLine(bashExecutable(), "ffmpeg/build.sh", nativeTarget)
                     outputDirectory.set(ffmpegOutputDir)
                     lockFile.set(nativeLock)
                     // build.sh, foffsets.c and the signing key: a change to any of them
@@ -71,8 +71,7 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
 }
 
 /** The target this machine serves: the property, else the host (11 Platform matrix). */
-internal fun Project.nativeTargetOf(): String {
-    val requested = providers.gradleProperty("neutrodyne.ffmpegTarget").orNull
+internal fun Project.nativeTargetOf(): String {    val requested = providers.gradleProperty("neutrodyne.ffmpegTarget").orNull
     if (requested != null) {
         require(requested in NATIVE_TARGETS) {
             "neutrodyne.ffmpegTarget is '$requested'; expected one of $NATIVE_TARGETS"
@@ -102,4 +101,24 @@ internal fun ffmpegVersionOf(lockFile: java.io.File): String {
             ?.get(1)
     require(!version.isNullOrBlank()) { "native-components.lock has no [ffmpeg] version" }
     return version
+}
+
+/**
+ * The shell `buildFfmpeg` runs under. A bare `bash` is ambiguous on Windows: the
+ * runner's `PATH` reaches `C:\Windows\System32\bash.exe` (WSL's launcher) before
+ * Git Bash, so the build died with "Windows Subsystem for Linux has no installed
+ * distributions" and no output of its own. FFmpeg's documented MSVC shell is
+ * MSYS2 (doc/platform.texi), so MSYS2's bash is named explicitly, with Git Bash
+ * as the fallback for a developer who has one but not the other.
+ */
+internal fun bashExecutable(): String {
+    if (!System.getProperty("os.name").startsWith("Windows")) return "bash"
+    val candidates =
+        listOfNotNull(
+            System.getenv("MSYS2_ROOT")?.let { "$it/usr/bin/bash.exe" },
+            "C:/msys64/usr/bin/bash.exe",
+            "C:/Program Files/MSYS2/usr/bin/bash.exe",
+            "C:/Program Files/Git/bin/bash.exe",
+        )
+    return candidates.firstOrNull { java.io.File(it).isFile } ?: "bash"
 }

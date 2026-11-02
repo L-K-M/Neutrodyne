@@ -11,8 +11,6 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-// The task type, not org.gradle.process.Exec: buildFfmpeg is an Exec task, and the
-// process-level interface exposes neither workingDir nor commandLine.
 import org.gradle.api.tasks.Exec
 import org.tomlj.Toml
 import org.tomlj.TomlArray
@@ -131,6 +129,9 @@ object NativeLicencePolicy {
  * build cache to another, so caching would only let a stale tree from an earlier step of the
  * same job skip the build that step is meant to perform. The build script, the layout probe
  * and the signing key are declared as inputs by the plugin, so editing one rebuilds.
+ *
+ * It extends the task `Exec`, not `org.gradle.process.Exec`: the process-level interface
+ * exposes neither `workingDir` nor `commandLine`.
  */
 abstract class BuildFfmpegTask : Exec() {
     @get:OutputDirectory
