@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.PlaybackBeforeUnsubscribe
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -61,6 +62,7 @@ internal class DownloadComponents(
     db: NeutrodyneDatabase,
     settings: SettingsRepository,
     device: DeviceSettingsStore,
+    resolver: EffectiveSettingsResolver,
     private val network: NetworkMonitor,
     clock: Clock,
     roots: StorageRoots,
@@ -83,6 +85,7 @@ internal class DownloadComponents(
     val deletes = DeferredDeletes(device, fileSystem, roots, db.downloadDao()::allRows)
     private val verification = DownloadFiles(fileSystem, roots, PlatformSriHasher(roots), uris, deletes)
     val reconciler = DownloadReconciler(db, fileSystem, roots, uris, index, deletes, claimMutex, host.liveTokens, clock)
+    val quota = DownloadQuota(settings)
     private val storage =
         DownloadStorage(
             db,
@@ -93,10 +96,12 @@ internal class DownloadComponents(
             deletes,
             reconciler,
             claimMutex,
+            quota,
             media,
             artwork,
             host.share,
         )
+    val cleanup = CleanupPlannerImpl(db, resolver, clock, storage, deletes, index, reconciler, claimMutex, io)
     val progress = DownloadProgressHub(scope, clock)
 
     private fun conditions() =
@@ -153,6 +158,7 @@ internal class DownloadComponents(
                 deletes.completed(row)
                 completedMedia(row)
             },
+            cleanup,
         )
     val controller =
         DownloadControllerImpl(

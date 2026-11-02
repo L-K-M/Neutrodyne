@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
+import ch.lkmc.neutrodyne.core.testing.FakeCleanupPlanner
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -199,6 +200,7 @@ class UidtSlotBlockedDrainTest {
                     Mutex(),
                     {},
                     {},
+                    FakeCleanupPlanner(),
                 )
             val reporter =
                 object : DrainReporter {

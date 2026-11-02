@@ -27,6 +27,7 @@ internal class DownloadStorage(
     private val deletes: DeferredDeletes,
     private val reconciler: DownloadReconciler,
     private val claimMutex: Mutex,
+    private val quota: DownloadQuota,
     private val media: PlaybackMediaLookup,
     private val artwork: ArtworkStore,
     private val share: (String, String) -> String?,
@@ -46,22 +47,34 @@ internal class DownloadStorage(
     override suspend fun reportFileMissing(episodeId: Long) = reconciler.reportFileMissing(episodeId)
 
     override fun observeStorage() =
-        combine(db.downloadDao().observeEntries(), reconciler.orphanBytes) { entries, orphans ->
+        combine(
+            db.downloadDao().observeEntries(),
+            reconciler.orphanBytes,
+            quota.capMb,
+            quota.refusedEstimate,
+        ) { entries, orphans, capMb, _ ->
             val rows = entries.map { it.download }
             val root = roots.current()
             var partial = 0L
             for (row in rows) {
                 val path = row.tempPath ?: continue
-                if (roots.resolve(row.rootId) != null) partial += files.stat(row.rootId, path)?.bytes ?: 0
+                if (!path.endsWith(".part") || roots.resolve(row.rootId) == null) continue
+                try {
+                    val info = files.stat(row.rootId, path)
+                    if (info != null && !info.directory) partial += info.bytes
+                } catch (_: okio.IOException) {
+                    // A removable root may vanish between resolve and stat; reconcile owns its state.
+                }
             }
+            val cap = DownloadQuota.capBytes(capMb)
             StorageUsage(
                 root,
                 rows.filter { it.state == DownloadState.COMPLETED }.sumOf { it.totalBytes ?: 0 },
                 partial,
                 orphans,
                 roots.list().firstOrNull { it.rootId == root }?.freeBytes,
-                null,
-                false,
+                cap,
+                quota.autoBlocked(rows, cap),
             )
         }
 
