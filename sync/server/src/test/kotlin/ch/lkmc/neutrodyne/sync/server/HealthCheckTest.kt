@@ -34,7 +34,11 @@ class HealthCheckTest {
                     f.install(this)
                 }.start(wait = false)
             try {
-                val port = server.engine.resolvedConnectors().single().port
+                val port =
+                    server.engine
+                        .resolvedConnectors()
+                        .single()
+                        .port
                 // Regression: with the default HTTP/2 preference the probe's h2c Upgrade
                 // header makes the CIO body read hang and the probe times out (exit 1).
                 assertEquals(ExitCodes.OK, HealthCheck.check(mapOf(ServerEnv.LISTEN to "127.0.0.1:$port")))
