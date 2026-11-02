@@ -117,7 +117,11 @@ internal class ServerModule(
             authRoutes?.authenticate(this)
             if (services != null) monitor.subscribe(ApplicationStopping) { services.events.close() }
             routing {
-                HealthRoutes(config.dataDir, writeProbe = writeProbe).install(this)
+                HealthRoutes(
+                    config.dataDir,
+                    writeProbe = writeProbe,
+                    now = services?.inputs?.wallMs ?: System::currentTimeMillis,
+                ).install(this)
                 rateLimit(RateLimits.PUBLIC) {
                     WellKnownRoutes(
                         serverVersion,
