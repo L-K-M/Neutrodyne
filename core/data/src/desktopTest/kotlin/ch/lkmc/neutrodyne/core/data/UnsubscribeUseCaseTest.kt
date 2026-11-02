@@ -79,6 +79,38 @@ class UnsubscribeUseCaseTest {
         root.deleteRecursively()
     }
 
+    @Test fun downloadCleanupPrecedesCascadeAndFailureAbortsIt() =
+        runTest {
+            val podcast =
+                db.podcastDao().insertPodcast(
+                    ch.lkmc.neutrodyne.core.testing.database
+                        .podcastEntity(),
+                )
+            val episode =
+                db.episodeDao().insertStub(
+                    ch.lkmc.neutrodyne.core.testing.database
+                        .episodeEntity(podcastId = podcast),
+                )
+            db.downloadDao().insert(
+                ch.lkmc.neutrodyne.core.testing.database
+                    .downloadEntity(episode),
+            )
+            val lifecycle =
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle { ids ->
+                    assertNotNull(db.episodeDao().byId(episode))
+                    db.downloadDao().removeUnclaimed(ids)
+                }
+            lifecycle.failure = IllegalStateException("journal unavailable")
+            val useCase = newUnsubscribe(db, scheduler, clock, downloads = lifecycle)
+            kotlin.test.assertFailsWith<IllegalStateException> { useCase(listOf(podcast)) }
+            assertNotNull(db.podcastDao().byId(podcast))
+            lifecycle.failure = null
+            assertEquals(listOf(podcast), useCase(listOf(podcast)))
+            assertEquals(listOf(listOf(episode)), lifecycle.removals)
+            assertNull(db.downloadDao().byEpisode(episode))
+            assertNull(db.episodeStateDao().byEpisode(episode))
+        }
+
     private val poster = FakeNewEpisodePoster()
 
     private fun unsubscribe() =

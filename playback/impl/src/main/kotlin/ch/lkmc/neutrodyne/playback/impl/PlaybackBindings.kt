@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.playback.impl
 import androidx.lifecycle.ProcessLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.PlaybackBeforeUnsubscribe
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
@@ -31,6 +32,9 @@ public object PlaybackBindings {
     internal fun gate(value: MeteredStreamingGate): StartGate = value
 
     @Provides internal fun unsubscribe(value: PlaybackUnsubscribeGuard): PlaybackBeforeUnsubscribe = value
+
+    // The nullable key is what ChapterRepositoryImpl asks for; the reader lives on Android only.
+    @Provides internal fun embeddedChapters(value: EmbeddedChapterReader): EmbeddedChapterReader? = value
 }
 
 @ContributesIntoSet(AppScope::class)

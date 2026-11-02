@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.FilterFlagBits
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextSpec
 import ch.lkmc.neutrodyne.core.model.PositionSource
@@ -24,7 +25,9 @@ import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -437,6 +440,53 @@ class SessionWriterTest {
             val accepted = request.copy(context = spec.copy(contextId = podcast))
             writer.commitStart(accepted, 100)
             assertEquals(podcast, db.playSessionDao().get()?.contextId)
+        }
+
+    @Test fun downloadsMembershipCommitsOnlyWhileTheFileIsComplete() =
+        runTest {
+            val before = db.playSessionDao().get()
+            val ids = seed(2)
+            val spec =
+                PlayContextSpec(
+                    ContextType.DOWNLOADS,
+                    null,
+                    FeedOrder.NEWEST_FIRST,
+                    FilterFlagBits.UNPLAYED,
+                    MediaFilter.ALL,
+                    null,
+                    false,
+                )
+            val request =
+                SessionStart(ids[0], spec, ContextRetention.REPLACE, ids[0], 200, membership = StartMembership.CONTEXT)
+            assertFailsWith<IllegalArgumentException> { writer.commitStart(request, 100) }
+            assertEquals(before, db.playSessionDao().get())
+            db.downloadDao().insert(downloadEntity(ids[0]))
+            writer.commitStart(request, 100)
+            assertEquals(ContextType.DOWNLOADS, db.playSessionDao().get()?.contextType)
+        }
+
+    @Test fun playedCompletedDownloadCommitsThroughDownloadsMembership() =
+        runTest {
+            val ids = seed(2)
+            db.downloadDao().insert(downloadEntity(ids[0]))
+            db.episodeStateDao().upsert(episodeStateEntity(ids[0], playedAt = 50))
+            val spec =
+                PlayContextSpec(
+                    ContextType.DOWNLOADS,
+                    null,
+                    FeedOrder.NEWEST_FIRST,
+                    FilterFlagBits.UNPLAYED,
+                    MediaFilter.ALL,
+                    null,
+                    false,
+                )
+            writer.commitStart(
+                SessionStart(ids[0], spec, ContextRetention.REPLACE, ids[0], 200, membership = StartMembership.CONTEXT),
+                100,
+            )
+            assertEquals(ids[0], db.playSessionDao().get()?.currentEpisodeId)
+            assertEquals(ContextType.DOWNLOADS, db.playSessionDao().get()?.contextType)
+            assertTrue(writer.virtualQueue(20).contextTail.isEmpty())
         }
 
     private suspend fun seed(count: Int): List<Long> {
