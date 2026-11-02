@@ -425,7 +425,7 @@ data class FeedRequest(val url: String, val etag: String?, val lastModified: Str
                        val htmlReadLimit: Long? = null,          // Add only: bound an HTML body after the sniff
                        val purpose: FeedRequestPurpose = FeedRequestPurpose.REFRESH,
                        val credentials: BasicCredentials? = null)   // not-yet-stored credentials (add flow, setCredentials probe)
-enum class FeedRequestPurpose { REFRESH, ADD }   // ADD refuses a YouTube target at every hop (M8 continues it)
+enum class FeedRequestPurpose { REFRESH, ADD, ADD_DISCOVERED } // Both ADD modes refuse YouTube at every hop
 sealed interface FetchOutcome {
     data class NotModified(val maxAgeSec: Long?, val serverDateMs: Long?) : FetchOutcome
     data class Body(val file: okio.Path, val sha256Hex: String, val requestedUrl: String, val finalUrl: String,
