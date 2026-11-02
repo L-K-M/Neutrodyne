@@ -27,6 +27,7 @@ internal class HealthRoutes(
     private val probeLock = Mutex()
     private var probeCachedAtMs: Long? = null
     private var probeResult = false
+
     fun install(routing: Routing) {
         routing.apply {
             get(HEALTH_PATH) {
