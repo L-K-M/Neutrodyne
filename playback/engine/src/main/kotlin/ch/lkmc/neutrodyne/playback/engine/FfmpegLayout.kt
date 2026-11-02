@@ -72,7 +72,8 @@ data class FfmpegLayout(
 @Serializable
 data class StructLayout(
     val size: Long,
-    val fields: Map<String, Long>,
+    // Opaque structs (AVIOContext) ship only a size; field reads still error.
+    val fields: Map<String, Long> = emptyMap(),
 ) {
     fun offsetOf(field: String): Long = requireNotNull(fields[field]) { "ffmpeg-layout.json records no field $field" }
 
