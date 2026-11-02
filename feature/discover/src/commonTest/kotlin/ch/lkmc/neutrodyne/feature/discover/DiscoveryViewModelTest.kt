@@ -231,6 +231,9 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             repository.providersGate!!.complete(Unit)
             advanceUntilIdle()
             assertEquals(repository.providers.value, vm.state.value.providers)
+            assertTrue(repository.queries.isEmpty())
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
+            advanceUntilIdle()
             assertEquals(listOf("news"), repository.queries)
             vm.viewModelScope.cancel()
         }
@@ -242,6 +245,12 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertEquals(repository.providers.value, vm.state.value.providers)
             assertTrue(repository.queries.isEmpty())
+            vm.retry()
+            advanceUntilIdle()
+            assertTrue(repository.queries.isEmpty())
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
+            advanceUntilIdle()
+            assertEquals(listOf("news"), repository.queries)
             vm.viewModelScope.cancel()
         }
 
@@ -264,6 +273,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         runTest {
             val vm = DirectoryViewModel(DirectoryKey("AI", "invalid"), repository)
             runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
+            runCurrent()
             assertEquals(listOf("AI"), repository.queries)
             assertFalse(vm.state.value.loading)
             assertTrue(repository.chartRequests.isEmpty())
@@ -275,6 +286,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         runTest {
             for (key in listOf(DirectoryKey("", "invalid"), DirectoryKey("https://private.test/x", null))) {
                 val vm = DirectoryViewModel(key, repository)
+                runCurrent()
+                vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
                 advanceUntilIdle()
                 assertTrue(vm.state.value.invalid)
                 vm.viewModelScope.cancel()
@@ -288,6 +301,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         runTest {
             repository.chartAnswer = Outcome.Failure(ProviderStatus.Failed(NetError.Offline))
             val vm = DirectoryViewModel(DirectoryKey("", ChartGenre.NEWS.id), repository)
+            runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             advanceUntilIdle()
             assertEquals(ProviderStatus.Failed(NetError.Offline), vm.state.value.chartError)
             repository.chartAnswer = Outcome.Success(persistentListOf(hit))
@@ -317,6 +332,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
                     )
                 repository.searchAnswer = { flowOf(answer) }
                 val vm = DirectoryViewModel(DirectoryKey("news", null), repository)
+                runCurrent()
+                vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
                 advanceUntilIdle()
                 assertEquals(answer, vm.state.value.results)
                 assertEquals(!answer.complete, vm.state.value.loading)

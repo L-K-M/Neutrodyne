@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.testing.ConnectionCountingSocketFactory
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.Dispatcher
@@ -29,12 +30,13 @@ import kotlin.test.assertIs
  * [server] answers the fake public [TEST_HOST] through the stub DNS below; [lan] is a second
  * server bound to `127.0.0.2` at [server]'s port, standing in for a LAN destination — so a
  * public host spelled [LAN_HOST] that resolves there simulates a DNS-rebound LAN peer, and
- * `lan.requestCount == 0` proves a refused destination was never dialed.
+ * both the HTTP request count and accepted TCP socket count stay zero.
  */
 class AddLocalDestinationTest {
     @get:Rule val serverRule = MockWebServerRule()
     private val server get() = serverRule.server
-    private val lan = MockWebServer()
+    private val lanConnections = ConnectionCountingSocketFactory()
+    private val lan = MockWebServer().apply { serverSocketFactory = lanConnections }
 
     private val testDns =
         Dns { host ->
@@ -118,6 +120,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun publicAlternateCannotRedirectToLoopback() =
@@ -154,6 +157,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun publicPageCannotRedirectToLocal() =
@@ -171,6 +175,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun typedLanUrlIsStillFetched() =
@@ -219,6 +224,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun pageRedirectResolvingToLanPeerIsRefused() =
@@ -237,6 +243,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun candidateRedirectResolvingToLanPeerIsRefused() =
@@ -274,6 +281,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun directoryPreviewResolvingToLanPeerIsRefused() =
@@ -284,6 +292,7 @@ class AddLocalDestinationTest {
                 assertIs<Outcome.Failure<AddPodcastError>>(bundle.resolver.preview(lanPeerUrl("/feed"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun directoryLiteralLocalPreviewIsRefused() =
@@ -295,6 +304,7 @@ class AddLocalDestinationTest {
                 ).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun directoryPreviewCannotRedirectToLocal() =
@@ -306,6 +316,7 @@ class AddLocalDestinationTest {
             )
             assertEquals(1, server.requestCount)
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun unconfirmedFirstHostResolvingLocalIsRefused() =
@@ -315,6 +326,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolveUnconfirmed(lanPeerUrl("/feed"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun encodedLanAlternateIsNeverRequested() =
@@ -338,6 +350,7 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 
     @Test fun fullwidthLanAlternateIsNeverRequested() =
@@ -361,5 +374,6 @@ class AddLocalDestinationTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
             )
             assertEquals(0, lan.requestCount)
+            assertEquals(0, lanConnections.acceptedConnections)
         }
 }

@@ -35,7 +35,7 @@ internal data class ChartRow(
 internal data class DiscoverState(
     val input: String = "",
     val results: SearchResults? = null,
-    val providers: List<ProviderInfo> = emptyList(),
+    val providers: List<ProviderInfo>? = null,
     val charts: List<ChartRow> = emptyList(),
 )
 
@@ -57,9 +57,9 @@ internal class DiscoverViewModel(
         viewModelScope.launch {
             repository.observeProviders().collect { providers ->
                 val previous = mutableState.value.providers
-                val changed = previous.isNotEmpty() && previous.configuration() != providers.configuration()
+                val changed = previous?.configuration() != providers.configuration()
                 mutableState.update { it.copy(providers = providers) }
-                if (changed) restartSearch(SearchTiming.IMMEDIATE)
+                if (changed) restartSearch(if (previous == null) SearchTiming.DEBOUNCED else SearchTiming.IMMEDIATE)
             }
         }
         viewModelScope.launch {
@@ -121,7 +121,7 @@ internal class DiscoverViewModel(
         searchJob?.cancel()
         val run = ++generation
         val query = mutableState.value.input.trim()
-        if (query.length < MIN_QUERY_LENGTH || isLinkInput(query)) {
+        if (mutableState.value.providers == null || query.length < MIN_QUERY_LENGTH || isLinkInput(query)) {
             mutableState.update { it.copy(results = null) }
             return
         }
@@ -162,4 +162,4 @@ private const val YOUTUBE_CHANNEL_ID_LENGTH = 24
 
 private enum class SearchTiming { IMMEDIATE, DEBOUNCED }
 
-private fun List<ProviderInfo>.configuration() = map { Triple(it.id, it.effective, it.configurationVersion) }
+internal fun List<ProviderInfo>.configuration() = map { Triple(it.id, it.effective, it.configurationVersion) }

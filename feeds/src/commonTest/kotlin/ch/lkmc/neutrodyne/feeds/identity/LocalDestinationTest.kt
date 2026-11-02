@@ -107,7 +107,7 @@ class LocalDestinationTest {
 
     @Test
     fun nonCanonicalHttpAuthoritiesAreLocal() {
-        for (prefix in listOf("http:/", "http:\\\\", "http:", "https:/")) {
+        for (prefix in listOf("http:/", "http:\\", "http:\\\\", "http:", "https:/")) {
             assertTrue(isLocal("${prefix}127.0.0.1/feed"), "expected local: $prefix")
         }
     }

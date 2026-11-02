@@ -15,9 +15,9 @@ import java.net.InetAddress
 import java.net.UnknownHostException
 
 /**
- * Thrown by the LAN guard for a request or lookup that can only reach a local-network host on
- * Android API 37+ (01 Interceptors). An `UnknownHostException` so callers treat it like DNS
- * failure; `JvmNetErrors` maps it to `NetError.LocalNetworkUnsupported`.
+ * A local-network refusal: Android API 37+'s LAN policy or the pre-confirmation policy on
+ * either platform (01 Interceptors). `JvmNetErrors` maps this typed DNS/transport failure
+ * to `NetError.LocalNetworkUnsupported`.
  */
 class LocalNetworkUnsupportedException(
     host: String,
