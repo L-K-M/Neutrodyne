@@ -23,22 +23,18 @@ dependencies {
  * for the target this machine serves, so the suite runs on each of the four
  * desktop runners and never where no build exists. `test` therefore excludes it
  * instead of letting it fail on a host without a native build.
+ *
+ * The task is depended on by path, not by provider: `:playback:engine` is
+ * configured before `:playback:native`, and a task provider from a project that
+ * has not been evaluated yet cannot be resolved.
  */
-val nativeBuild = project(":playback:native").tasks.named("buildFfmpeg")
-
 tasks.register<Test>("ffmpegTest") {
     group = "verification"
     description = "Decode the MD0 corpus through the FFM bindings on this host's FFmpeg build."
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     useJUnit()
-    dependsOn(nativeBuild)
-    // The directory buildFfmpeg installed into, read from the task itself so the
-    // target this machine serves is never spelled out twice. It is resolved at
-    // execution time, when the build has produced its output.
-    doFirst {
-        systemProperty("neutrodyne.ffmpegDir", nativeBuild.get().outputs.files.singleFile)
-    }
+    dependsOn(":playback:native:buildFfmpeg")
 }
 
 tasks.named<Test>("test") {

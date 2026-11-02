@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.exists
+import kotlin.io.path.isRegularFile
 import kotlin.io.path.readBytes
 import kotlin.math.abs
 import kotlinx.serialization.json.Json
@@ -54,7 +56,7 @@ class FfmpegCorpusTest {
 
         for (entry in manifest.files) {
             val bytes = corpusFile(entry.file).readBytes()
-            FfmpegPipeline.open(MemoryByteSource(bytes), ffmpegDirectory()).use { pipeline ->
+            FfmpegPipeline.open(MemoryByteSource(bytes), hostFfmpegDirectory()).use { pipeline ->
                 val blocks = pipeline.decodeAll()
                 val decoded = blocks.sumOf { it.samples.size.toLong() / it.channels }
                 measurements +=
@@ -102,7 +104,8 @@ class FfmpegCorpusTest {
         val manifest = readManifest()
         val trimmed = manifest.files.single { it.trimRule == AAC_PRIMING_RULE }
 
-        FfmpegPipeline.open(MemoryByteSource(corpusFile(trimmed.file).readBytes()), ffmpegDirectory()).use { pipeline ->
+        val bytes = corpusFile(trimmed.file).readBytes()
+        FfmpegPipeline.open(MemoryByteSource(bytes), hostFfmpegDirectory()).use { pipeline ->
             val decoded = pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels }
             assertEquals(trimmed.expectedSamples, decoded)
             // The container reports no trimming of its own, so the 1,024-sample
@@ -113,7 +116,7 @@ class FfmpegCorpusTest {
 
     @Test
     fun `the libraries are LGPL, separate and carry no protocol`() {
-        val library = FfmpegLibrary.load(ffmpegDirectory())
+        val library = FfmpegLibrary.load(hostFfmpegDirectory())
         val layout = library.layout
 
         assertEquals("LGPL version 2.1 or later", library.license)
@@ -126,7 +129,7 @@ class FfmpegCorpusTest {
         }
         // AC2's protocol inventory: the build registers none, so nothing can reach
         // the network through FFmpeg itself.
-        val protocols = ffmpegDirectory().resolve("ffmpeg-protocols.txt")
+        val protocols = hostFfmpegDirectory().resolve("ffmpeg-protocols.txt")
         assertTrue("ffmpeg-protocols.txt is missing: run buildFfmpeg", protocols.exists())
         assertEquals("", protocols.readText().trim())
     }
@@ -168,19 +171,12 @@ class FfmpegCorpusTest {
     private fun corpusDirectory(): Path =
         Path.of(requireNotNull(System.getProperty(MODULE_DIR)), "src/test/resources/media")
 
-    private fun ffmpegDirectory(): Path =
-        Path.of(
-            requireNotNull(System.getProperty(FFMPEG_DIR)) {
-                "neutrodyne.ffmpegDir is not set: run the ffmpegTest task, which runs buildFfmpeg first"
-            },
-        )
-
     private fun readManifest(): CorpusManifest =
         Json.decodeFromString(CorpusManifest.serializer(), corpusDirectory().resolve("corpus.json").readText())
 
     companion object {
+        /** The test convention that names this module's directory. */
         private const val MODULE_DIR = "neutrodyne.moduleDir"
-        private const val FFMPEG_DIR = "neutrodyne.ffmpegDir"
 
         /** MD0 AC1's accuracy goal at the first audible sample. */
         private const val SEEK_TOLERANCE_MS = 50L
@@ -197,14 +193,36 @@ class FfmpegCorpusTest {
         @BeforeClass
         @JvmStatic
         fun requireABuild() {
-            val directory =
-                requireNotNull(System.getProperty(FFMPEG_DIR)) {
-                    "neutrodyne.ffmpegDir is not set: run :playback:engine:ffmpegTest, which runs buildFfmpeg first"
-                }
             assertTrue(
-                "no ${FfmpegLayout.FILE_NAME} in $directory: run :playback:native:buildFfmpeg",
-                Path.of(directory).resolve(FfmpegLayout.FILE_NAME).exists(),
+                "no ${FfmpegLayout.FILE_NAME} in the FFmpeg build: run :playback:native:buildFfmpeg",
+                hostFfmpegDirectory().resolve(FfmpegLayout.FILE_NAME).exists(),
             )
         }
     }
 }
+
+/**
+ * The FFmpeg build of this host. `buildFfmpeg` installs into
+ * `<root>/playback/native/build/ffmpeg/<target>/`, one target per host, so the
+ * directory that carries a layout file is the build this host can load. A missing
+ * build fails the suite: an empty or skipped suite must never look like success.
+ */
+private fun hostFfmpegDirectory(): Path {
+    System.getProperty(FFMPEG_DIR)?.let { return Path.of(it) }
+    val root = Path.of(requireNotNull(System.getProperty(ROOT_DIR)))
+    val builds = root.resolve("playback/native/build/ffmpeg")
+    require(Files.isDirectory(builds)) { "no FFmpeg build in $builds: run :playback:native:buildFfmpeg" }
+    val candidates =
+        Files.list(builds).use { stream ->
+            stream.filter { it.resolve(FfmpegLayout.FILE_NAME).isRegularFile() }.toList()
+        }
+    require(candidates.isNotEmpty()) { "no ${FfmpegLayout.FILE_NAME} in $builds: run :playback:native:buildFfmpeg" }
+    require(candidates.size == 1) {
+        "more than one FFmpeg build in $builds: ${candidates.map { it.fileName }}"
+    }
+    return candidates.single()
+}
+
+/** The test properties the FFmpeg build is resolved from. */
+private const val ROOT_DIR = "neutrodyne.rootDir"
+private const val FFMPEG_DIR = "neutrodyne.ffmpegDir"
