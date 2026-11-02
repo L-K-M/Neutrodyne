@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.notifications.UpdateNotifier
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -83,7 +84,16 @@ class UpdateNotificationDeviceTest {
             }
             assertThat(manager.areNotificationsEnabled()).isTrue()
             assertThat(adapter.post(info)).isEqualTo(UpdatePostResult.ACCEPTED)
-            val notification = manager.activeNotifications.single { it.id == UPDATE_ID }.notification
+            // notify() reaches the status bar service asynchronously; API 26 can lag behind post().
+            val notification =
+                withTimeout(POST_TIMEOUT_MS) {
+                    var posted = manager.activeNotifications.singleOrNull { it.id == UPDATE_ID }
+                    while (posted == null) {
+                        delay(POLL_MS)
+                        posted = manager.activeNotifications.singleOrNull { it.id == UPDATE_ID }
+                    }
+                    posted
+                }.notification
             val actions =
                 listOf(
                     notification.contentIntent to false,
@@ -109,5 +119,7 @@ class UpdateNotificationDeviceTest {
 
     private companion object {
         const val UPDATE_ID = 4200
+        const val POST_TIMEOUT_MS = 5_000L
+        const val POLL_MS = 50L
     }
 }
