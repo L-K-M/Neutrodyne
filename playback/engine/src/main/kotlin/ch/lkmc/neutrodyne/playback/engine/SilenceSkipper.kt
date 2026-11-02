@@ -50,7 +50,7 @@ internal class SilenceSkipper(
         sampleRate = sampleRateHz
         bytesPerFrame = channelCount * 2
         val size =
-            alignToFrame((durationUsToFrames(minimumSilenceDurationUs) * bytesPerFrame) / 2)
+            alignToFrame((durationUsToFrames(minimumSilenceDurationUs) * bytesPerFrame) / 2) * 2
         if (maybeSilenceBuffer.size != size) {
             maybeSilenceBuffer = ByteArray(size)
             contiguousOutputBuffer = ByteArray(size)
@@ -200,7 +200,7 @@ internal class SilenceSkipper(
 
     private fun calculateShortenedSilenceLength(silenceToShortenBytes: Int): Int {
         val bytesNeededToReachMax =
-            durationUsToFrames(maxSilenceToKeepDurationUs) - outputSilenceFramesSinceNoise -
+            (durationUsToFrames(maxSilenceToKeepDurationUs) - outputSilenceFramesSinceNoise) * bytesPerFrame -
                 maybeSilenceBuffer.size / 2
         check(bytesNeededToReachMax >= 0)
         return alignToFrame(

@@ -56,6 +56,9 @@ fi
 
 SRC="$ROOT/ndmedia.c"
 CFLAGS="-O2 -fvisibility=hidden -I$INCLUDE_DIR -I$ROOT"
+# GCC otherwise copies GPL runtime atomic helpers into this permissive library.
+# ARMv8's inline LL/SC instructions satisfy the same baseline without them.
+[ "$TARGET" != linux-arm64 ] || CFLAGS="$CFLAGS -mno-outline-atomics"
 
 case "$TARGET" in
     linux-x64|linux-arm64)

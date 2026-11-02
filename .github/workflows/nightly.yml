@@ -796,7 +796,7 @@ jobs:
         shell: bash
         run: |
           tests="./gradlew :playback:engine:test :playback:engine:ffmpegTest \
-            :playback:native:test :desktop:system:test :desktop:system:systemSessionTest"
+            :playback:native:test :desktop:system:test :desktop:system:systemSessionTest --continue"
           [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
           $tests
       - name: Inspect native binary boundaries

@@ -125,6 +125,8 @@ class LinuxMprisSession private constructor(
         trackId: DBusPath,
         position: Long,
     ) {
+        val item = current ?: return
+        if (trackId.path != "$TRACK_PATH/${item.episodeId}" || position < 0) return
         val target = position / US_PER_MS
         emit(RemoteCommand.SeekTo(target))
         emitSeeked(target)
