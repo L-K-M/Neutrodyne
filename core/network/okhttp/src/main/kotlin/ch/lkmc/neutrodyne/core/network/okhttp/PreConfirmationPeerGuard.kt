@@ -51,7 +51,7 @@ internal class PreConfirmationPeerGuard(
     }
 }
 
-/** Removes the internal header before other interceptors and covers the entire follow-up chain. */
+/** Removes the internal header before debug/network interceptors and covers the follow-up chain. */
 internal class PreConfirmationRequestGuard(
     private val destinations: PreConfirmationDestinations,
 ) : Interceptor {
@@ -82,9 +82,6 @@ internal class PreConfirmationDestinations(
 ) {
     fun check(url: HttpUrl) {
         val host = url.host.removeSuffix(".")
-        if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
-            throw LocalNetworkUnsupportedException(host)
-        }
         val addresses =
             if (host.contains(':') || host.all { it in '0'..'9' || it == '.' }) {
                 listOf(InetAddress.getByName(host))
