@@ -387,10 +387,6 @@ jobs:
       # per-OS split, so a second desktop OS compares against another font stack,
       # and the file-permission suites of M3/M5 assert POSIX semantics. Neither
       # is evidence about the desktop engine, so neither is a desktop-matrix gate.
-      - name: Desktop engine tests on this host
-        shell: bash
-        run: |
-          ./gradlew :playback:engine:test :playback:native:test :desktop:system:test
       # buildFfmpeg, checkNativeLicences and assembleFfmpegSource for the target
       # this host serves: the licence gate reads the built libraries, so it can
       # only run where the build ran (11 FFmpeg build, MD0 AC2).
@@ -399,6 +395,13 @@ jobs:
         run: |
           ./gradlew :playback:native:buildFfmpeg :playback:native:checkNativeLicences \
             :playback:native:assembleFfmpegSource
+      # The modules MD0 builds on this target, and the corpus suite that loads the
+      # FFmpeg build the previous step produced (11 Testing, MD0 AC1).
+      - name: Desktop engine tests on this host
+        shell: bash
+        run: |
+          ./gradlew :playback:engine:test :playback:engine:ffmpegTest \
+            :playback:native:test :desktop:system:test
       # The measured evidence MD0 records per target: stripped sizes, the licence
       # string, the protocol inventory, the enabled components and the build's
       # own configure line and toolchain.

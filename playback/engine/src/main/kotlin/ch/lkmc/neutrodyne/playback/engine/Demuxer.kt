@@ -56,6 +56,14 @@ data class AudioPacket(
     val skipSamples: Int,
     /** Trailing samples to drop (FFmpeg's skip-samples side data). */
     val discardPadding: Int,
+    /**
+     * Samples the engine must drop from this item's decoded output, which the
+     * container did not already tell the decoder to trim: the AAC priming of a
+     * fragmented MP4 without an edit list (11 Demux and decode, Gapless
+     * trimming). Zero for every container that carries skip-samples side data,
+     * because the decoder has already been told what to drop.
+     */
+    val primingSamples: Int = 0,
 )
 
 /** The audio stream's decode parameters (11 Demux and decode step 5). */

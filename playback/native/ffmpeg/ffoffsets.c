@@ -35,7 +35,6 @@
 #include "libavutil/frame.h"
 #include "libavutil/log.h"
 #include "libavutil/samplefmt.h"
-#include "libavutil/version.h"
 #include "libswresample/swresample.h"
 
 /** One struct field: printed as `"name": offset`. The last field of a struct
@@ -52,13 +51,17 @@ static void struct_end(void) { printf("      }\n    },\n"); }
 
 int main(int argc, char **argv)
 {
-    /* The point release comes from the lock, handed over as the first argument
-     * by build.sh; without one the built library reports its own. A -D would
-     * need quoting that MSVC's and gcc's command lines parse differently. */
-    const char *version = argc > 1 ? argv[1] : av_version_info();
+    /* The point release comes from native-components.lock, handed over as the
+     * first argument by build.sh: this probe prints what the headers of this
+     * build define, and a -D would have to be quoted differently for cl and
+     * gcc. It therefore needs no FFmpeg library at all — headers only. */
+    if (argc < 2) {
+        fprintf(stderr, "usage: ffoffsets <ffmpeg-version>\n");
+        return 2;
+    }
 
     printf("{\n");
-    printf("  \"ffmpegVersion\": \"%s\",\n", version);
+    printf("  \"ffmpegVersion\": \"%s\",\n", argv[1]);
     printf("  \"libraries\": {\n");
     printf("    \"avcodec\": %d,\n", LIBAVCODEC_VERSION_MAJOR);
     printf("    \"avformat\": %d,\n", LIBAVFORMAT_VERSION_MAJOR);
@@ -70,6 +73,7 @@ int main(int argc, char **argv)
 
     struct_begin("AVFormatContext", sizeof(AVFormatContext));
     FIELD(AVFormatContext, pb);
+    FIELD(AVFormatContext, iformat);
     FIELD(AVFormatContext, ctx_flags);
     FIELD(AVFormatContext, nb_streams);
     FIELD(AVFormatContext, streams);
@@ -77,6 +81,12 @@ int main(int argc, char **argv)
     FIELD(AVFormatContext, chapters);
     FIELD(AVFormatContext, duration);
     FIELD_LAST(AVFormatContext, flags);
+    struct_end();
+
+    /* The demuxer that claimed this source, by its own name: the engine records
+     * it in the evidence and the AAC priming rule of the demuxer reads it. */
+    struct_begin("AVInputFormat", sizeof(AVInputFormat));
+    FIELD_LAST(AVInputFormat, name);
     struct_end();
 
     struct_begin("AVStream", sizeof(AVStream));
@@ -108,7 +118,13 @@ int main(int argc, char **argv)
     FIELD(AVFrame, sample_rate);
     FIELD(AVFrame, ch_layout);
     FIELD(AVFrame, pts);
-    FIELD_LAST(AVFrame, duration);
+    FIELD(AVFrame, duration);
+    /* Where the decoded samples live: `data` is the array of plane pointers and
+     * `extended_data` the pointer the resampler reads. Only their array offsets
+     * are printed, so no data pointer is ever dereferenced here. */
+    FIELD(AVFrame, data);
+    FIELD(AVFrame, extended_data);
+    FIELD_LAST(AVFrame, linesize);
     struct_end();
 
     struct_begin("AVChapter", sizeof(AVChapter));
@@ -133,6 +149,13 @@ int main(int argc, char **argv)
     FIELD(AVPacketSideData, data);
     FIELD(AVPacketSideData, size);
     FIELD_LAST(AVPacketSideData, type);
+    struct_end();
+
+    /* `av_dict_get` returns one of these; the bindings read its two C strings
+     * for chapter titles. */
+    struct_begin("AVDictionaryEntry", sizeof(AVDictionaryEntry));
+    FIELD(AVDictionaryEntry, key);
+    FIELD_LAST(AVDictionaryEntry, value);
     struct_end();
 
     printf("    \"AVIOContext\": { \"size\": %zu }\n", sizeof(AVIOContext));
@@ -166,6 +189,10 @@ int main(int argc, char **argv)
     printf("    \"AV_ERROR_MAX_STRING_SIZE\": %d,\n", AV_ERROR_MAX_STRING_SIZE);
     printf("    \"AV_CHANNEL_LAYOUT_STEREO_MASK\": %llu,\n",
            (unsigned long long)AV_CH_LAYOUT_STEREO);
+    printf("    \"AV_CHANNEL_LAYOUT_MONO_MASK\": %llu,\n",
+           (unsigned long long)AV_CH_LAYOUT_MONO);
+    printf("    \"AV_CHANNEL_ORDER_NATIVE\": %d,\n", AV_CHANNEL_ORDER_NATIVE);
+    printf("    \"AV_CHANNEL_ORDER_UNSPEC\": %d,\n", AV_CHANNEL_ORDER_UNSPEC);
     printf("    \"AV_PKT_DATA_SKIP_SAMPLES\": %d,\n", AV_PKT_DATA_SKIP_SAMPLES);
     /* Error codes are negative Mkmpeg error numbers; the bindings compare them
      * against the same macro values instead of magic integers. */
