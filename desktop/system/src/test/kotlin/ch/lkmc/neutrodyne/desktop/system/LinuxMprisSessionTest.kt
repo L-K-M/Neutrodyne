@@ -48,22 +48,24 @@ class LinuxMprisSessionTest {
                 DBusConnectionBuilder.forAddress(address).build().use { client ->
                     val props = client.properties()
 
+                    // Client-side Get returns the value already unwrapped
+                    // from its Variant; the a{sv} map's values stay Variants.
                     assertEquals(
                         "Playing",
-                        props.Get<Variant<*>>(MprisNames.PLAYER, "PlaybackStatus").value,
+                        props.Get<Any?>(MprisNames.PLAYER, "PlaybackStatus"),
                     )
                     assertEquals(
                         "Neutrodyne",
-                        props.Get<Variant<*>>(MprisNames.ROOT, "Identity").value,
+                        props.Get<Any?>(MprisNames.ROOT, "Identity"),
                     )
                     assertEquals(
                         testNowPlaying().position.positionMs * US_PER_MS,
-                        props.Get<Variant<*>>(MprisNames.PLAYER, "Position").value as Long,
+                        props.Get<Any?>(MprisNames.PLAYER, "Position"),
                     )
 
                     @Suppress("UNCHECKED_CAST")
                     val metadata =
-                        props.Get<Variant<*>>(MprisNames.PLAYER, "Metadata").value
+                        props.Get<Any?>(MprisNames.PLAYER, "Metadata")
                             as Map<String, Variant<*>>
                     assertEquals(testNowPlaying().title, metadata["xesam:title"]?.value)
 
@@ -87,7 +89,7 @@ class LinuxMprisSessionTest {
                     assertEquals(testNowPlaying().position.positionMs + SEEK_US / US_PER_MS, seek.positionMs)
                     assertEquals(
                         SET_RATE,
-                        props.Get<Variant<*>>(MprisNames.PLAYER, "Rate").value as Double,
+                        props.Get<Any?>(MprisNames.PLAYER, "Rate") as Double,
                         RATE_EPSILON,
                     )
                 }
