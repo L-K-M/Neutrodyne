@@ -25,7 +25,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.downloads_file_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.download.api.DownloadController
-import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.download.api.DownloadsOverview
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
@@ -55,14 +54,6 @@ public data class DownloadsUiState(
     val offline: Boolean = false,
 )
 
-/** At most two notices, in 07's order. Deferred producers cannot expose M6b controls. */
-public fun manualDownloadNotices(notices: Set<DownloadNotice>): List<DownloadNotice> =
-    DownloadNotice.entries
-        .filter {
-            it in notices &&
-                it !in setOf(DownloadNotice.CAP_REACHED, DownloadNotice.MOVE_IN_PROGRESS, DownloadNotice.YOUTUBE_PAUSED)
-        }.take(2)
-
 @ViewModelKey(DownloadsViewModel::class)
 @ContributesIntoMap(AppScope::class)
 @Inject
@@ -74,6 +65,7 @@ public class DownloadsViewModel(
     private val settings: SettingsRepository,
     platform: PlatformInfo,
     network: NetworkMonitor,
+    private val localMedia: ch.lkmc.neutrodyne.download.api.LocalMediaIndex,
 ) : ViewModel() {
     private val messages = UserMessages()
     private val overview = MutableStateFlow<DownloadsOverview?>(null)
@@ -82,6 +74,10 @@ public class DownloadsViewModel(
     private val visible = MutableStateFlow<Set<Long>>(emptySet())
     private val selected = MutableStateFlow<Set<Long>>(emptySet())
     private val orphanState = MutableStateFlow<Long?>(null)
+    private val orphanWorkingState = MutableStateFlow(false)
+    public val orphanWorking: kotlinx.coroutines.flow.StateFlow<Boolean> = orphanWorkingState
+    private val orphanErrorState = MutableStateFlow<UiText?>(null)
+    public val orphanError: kotlinx.coroutines.flow.StateFlow<UiText?> = orphanErrorState
     public val orphanConfirmation: kotlinx.coroutines.flow.StateFlow<Long?> = orphanState
     public val downloads =
         DownloadRequestHandler(
@@ -235,18 +231,40 @@ public class DownloadsViewModel(
             if (it == null) messages.post(UiText.Res(Res.string.downloads_file_unavailable))
         }
 
+    public fun revealFile(
+        id: Long,
+        reveal: ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder,
+    ) {
+        val uri = localMedia.localUriOrNull(id)
+        if (uri == null || !reveal.reveal(uri)) {
+            messages.post(UiText.Res(Res.string.downloads_file_unavailable))
+        }
+    }
+
     public fun askDeleteOrphans() {
-        orphanState.value = storage.value?.orphanBytes
+        orphanErrorState.value = null
+        orphanState.value = storage.value?.orphanBytes?.takeIf { it > 0 }
     }
 
     public fun dismissOrphans() {
-        orphanState.value = null
+        if (!orphanWorking.value) orphanState.value = null
     }
 
     public fun deleteOrphans() {
-        if (orphanState.value == null) return
-        orphanState.value = null
-        run { check(controller.deleteOrphanFiles() is OrphanDeleteResult.Deleted) }
+        if (orphanState.value == null || orphanWorking.value) return
+        orphanWorkingState.value = true
+        orphanErrorState.value = null
+        viewModelScope.launch {
+            try {
+                if (suspendRunCatching { controller.deleteOrphanFiles() }.getOrNull() is OrphanDeleteResult.Deleted) {
+                    orphanState.value = null
+                } else {
+                    orphanErrorState.value = UiText.Res(Res.string.write_failed)
+                }
+            } finally {
+                orphanWorkingState.value = false
+            }
+        }
     }
 
     public fun onMessageShown(id: Long) {

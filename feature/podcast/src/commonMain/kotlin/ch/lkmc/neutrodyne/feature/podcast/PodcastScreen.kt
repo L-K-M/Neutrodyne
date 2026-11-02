@@ -95,6 +95,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
+import ch.lkmc.neutrodyne.core.ui.resources.download_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
@@ -157,6 +158,7 @@ internal fun PodcastScreen(
     onDismissUnsubscribe: () -> Unit,
     onRemoveGroup: (Group) -> Unit,
     modifier: Modifier = Modifier,
+    onDownloadAll: () -> Unit = {},
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
@@ -213,6 +215,7 @@ internal fun PodcastScreen(
                         feedUrl = state.feedUrl,
                         onOpenSettings = onOpenSettings,
                         onMarkAllPlayedClick = onMarkAllPlayedClick,
+                        onDownloadAll = onDownloadAll,
                         onUnsubscribe = onUnsubscribeRequest,
                     )
                 },
@@ -456,6 +459,7 @@ private fun PodcastOverflow(
     feedUrl: String?,
     onOpenSettings: () -> Unit,
     onMarkAllPlayedClick: () -> Unit,
+    onDownloadAll: () -> Unit,
     onUnsubscribe: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -475,6 +479,10 @@ private fun PodcastOverflow(
             contentDescription = stringResource(Res.string.action_more),
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(stringResource(Res.string.download_all)) }, onClick = {
+                open = false
+                onDownloadAll()
+            })
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.podcast_settings)) },
                 onClick = {
