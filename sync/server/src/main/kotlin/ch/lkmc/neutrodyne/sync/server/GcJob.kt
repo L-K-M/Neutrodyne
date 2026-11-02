@@ -75,12 +75,20 @@ internal class GcJob(
                         }.forEach { parent ->
                             val children =
                                 rows.filter { row ->
-                                    val member = row.key.id as? RecordId.Member
-                                    member != null &&
-                                        (
-                                            member.group.value == parent.key.id.rid ||
-                                                member.podcast.value == parent.key.id.rid
-                                        )
+                                    when (val id = row.key.id) {
+                                        is RecordId.Member ->
+                                            id.group.value == parent.key.id.rid ||
+                                                id.podcast.value == parent.key.id.rid
+
+                                        // Episodes and their up-next markers share the
+                                        // Episode id; a newer one must hold the podcast
+                                        // back just like a newer member does.
+                                        is RecordId.Episode ->
+                                            parent.key.collection == SyncCollection.PODCAST &&
+                                                id.podcast.value == parent.key.id.rid
+
+                                        else -> false
+                                    }
                                 }
                             if (children.any { it.seq > bound }) {
                                 candidates -= parent.key
