@@ -125,6 +125,8 @@ jobs:
           python3 scripts/ci/tests/preserve-emulator-crashes.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
+          python3 scripts/ci/tests/assert-download-tests.test.py
+          python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/update-json.test.py
 
   unit:
