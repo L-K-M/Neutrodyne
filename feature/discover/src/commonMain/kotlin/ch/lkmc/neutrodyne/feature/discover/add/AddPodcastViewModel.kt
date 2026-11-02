@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name_empty
@@ -49,6 +50,8 @@ public data class AddPodcastUiState(
     val createdGroupId: Long? = null,
     val creatingGroup: Boolean = false,
     val groupError: UiText? = null,
+    /** Directory recipients as the settings see them; the search action's disclosure lists them. */
+    val providers: List<ProviderInfo> = emptyList(),
     /**
      * The identity of the newest resolve/subscribe attempt (UI review round 2). Completions
      * tagged with an older generation are dropped; the route closes only while [done]'s
@@ -201,6 +204,15 @@ public class AddPodcastViewModel(
         if (trimmed == resolvedInput && mutableState.value.step !is AddSheetStep.Input) return
         resolvedInput = trimmed
         runResolve { resolver.resolve(trimmed) }
+    }
+
+    /**
+     * The prefill's automatic resolve (03 implementation note 2026-11-02): a shared local
+     * address is never fetched without a tap — the user sees the URL and submits it. A typed
+     * local URL still resolves on that tap through [resolve].
+     */
+    public fun autoResolve(input: String) {
+        resolve(input)
     }
 
     /** The `AuthRequired` retry (03 Basic auth): the same input, now with credentials. */
