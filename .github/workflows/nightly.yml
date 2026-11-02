@@ -267,8 +267,9 @@ jobs:
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true :app:connectedReleaseAndroidTest
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
             # M5 W9: host-driven reboot evidence on the installed release app; the
-            # instrumentation process exits before the host reboots the guest.
-            python3 scripts/ci/playback-reboot.py --hardening
+            # instrumentation process exits before the host reboots the guest. Dispatch-only
+            # (scope reboot) while this image's System UI builds no card after reboot (09).
+            if [ "${{ inputs.scope }}" = reboot ]; then python3 scripts/ci/playback-reboot.py --hardening; fi
             sha256sum "$RELEASE_ABI_TARGET_APK" > "$RELEASE_ABI_TARGET_SHA"
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
       # The device log of both emulator steps, for diagnosing a failed run (system_server state).

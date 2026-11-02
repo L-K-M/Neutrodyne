@@ -537,7 +537,8 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   are assembled from the short fixture at runtime; the muxed
   `h264_aac_8s.mp4` joins the committed fixtures.
 
-  The API 37 release leg additionally runs `scripts/ci/playback-reboot.py`:
+  The API 37 release leg runs `scripts/ci/playback-reboot.py` on dispatch
+  (`nightly.yml` scope `reboot`):
   three independent instrumentation processes seed and pause a real
   episode with pinned local artwork, end normally, then the host reboots
   and unlocks the guest, disables networking, refuses a media session that
@@ -551,6 +552,16 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   process never outlives the reboot. Audible fade/listening, DHU,
   Bluetooth/AVRCP, and physical-headset checks remain manual acceptance
   evidence and are never claimed by this wiring.
+
+  **Implementation note (2026-11-02).** The reboot leg is dispatch-only for
+  now. On the API 37 image the seed phase shows the System UI media card, the
+  reboot completes and the app keeps its saved session and position. After the
+  reboot, System UI binds the service, then releases it without building a
+  resumption card (runs 41389816470 and 41413587028). The service's recent
+  root returns the saved item to a System UI controller in
+  `PlaybackServiceTest.metadataOnlyServiceStartupDoesNotProjectPinPrepareOrRequestNetwork`.
+  Boot resumption therefore stays a physical-device check until this leg
+  passes.
 
 - **Instrumented hygiene:** orchestrator with `clearPackageData`. Locally, `connectedDebugAndroidTest` installs `ch.lkmc.neutrodyne.debug` beside the published app and never touches it; release-type runs and `:benchmark` install the published application ID and key, clear it after each test and uninstall it after the run, so they run only on an emulator or a device whose Neutrodyne holds nothing worth keeping ([01 Debug build type](01-foundation.md#debug-build-type); `CONTRIBUTING.md`'s testing section repeats it). In `debug` builds ACRA is not installed (its mailbox is forced empty, [D62](../PLAN.md#3-key-decisions)), and 01's `DebugToolsInitializer` turns LeakCanary's automatic heap dumps off while the system property below is set, so dumps never stall a device test. ACRA is **on** in the release build, so release-type runs switch it off: the runner `NeutrodyneTestRunner` (`:app/src/androidTest`, an `AndroidJUnitRunner`) sets the system property `neutrodyne.instrumentedTest=true` in `newApplication` before calling `super`, which instantiates the application and calls `attach`, and with it `attachBaseContext` ([AOSP Instrumentation](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/app/Instrumentation.java)); 01's call site skips `installAcra` while the property is set ([ACRA configuration](#acra-configuration)). **One exception, `YtxIsolationTest`** ([04 Testing](04-youtube.md#testing), PLAN M9 AC5, in the debug suite): its "no ACRA dialog" assertion needs ACRA as users have it, so its `@BeforeClass` calls `installAcra(application, mailTo = "ytx-isolation-test@invalid")` itself on the main thread — a test-only, non-empty address, so the assertion depends neither on PO-10 nor on the build type — and after each `:ytx` failure asserts that ACRA's `ACRA-unapproved` report directory ([ACRA `ReportLocator`](https://github.com/ACRA/acra/blob/master/acra-core/src/main/java/org/acra/file/ReportLocator.kt)) stays empty and that no `:acra` process runs. Unverified: that ACRA installed after `Application.onCreate` (its setup guide installs it in `attachBaseContext`, [ACRA BasicSetup](https://github.com/ACRA/acra/wiki/BasicSetup)) catches a later main-process crash fully (M9a check by hand; fallback: the assertion moves to `:benchmark`'s out-of-process system tests against a build with `-Pneutrodyne.acraMailto=ytx-isolation-test@invalid`). That ACRA is never installed in `:ytx` itself is `YtxProcessStartTest`'s probe (01), which is meaningful only where ACRA is installed: it is tagged `ReleaseSmoke` and runs in the release-type runs once PO-10 names the mailbox. The property is inert unless an instrumentation sets it inside the app's process (PLAN 7.2's test-hook rule), and R8 cannot remove a system-property read, so `release` needs no keep rule for it. Unverified: that the orchestrator calls `newApplication` in every test process (M0a check with a deliberate crash in a test). Library modules' device tests run no `NeutrodyneApplication`; `:benchmark`'s out-of-process tests leave ACRA on, and a crash fails them anyway.
 
