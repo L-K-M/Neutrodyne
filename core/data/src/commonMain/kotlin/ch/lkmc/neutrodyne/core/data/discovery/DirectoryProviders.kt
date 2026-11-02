@@ -214,8 +214,9 @@ internal class FyydSearchProvider(
     suspend fun search(
         query: String,
         config: DirectoryConfiguration,
-    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> =
-        cache.load("${config.version}:${query.lowercase()}") {
+    ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> {
+        if (!config.fyyd) return Outcome.Failure(ProviderStatus.Disabled)
+        return cache.load("${config.version}:${query.lowercase()}") {
             when (
                 val result =
                     http.get(
@@ -241,6 +242,7 @@ internal class FyydSearchProvider(
                 }
             }.takeIf { settings.current().version == config.version } ?: Outcome.Failure(ProviderStatus.Disabled)
         }
+    }
 }
 
 internal class PodcastIndexSearchProvider(
