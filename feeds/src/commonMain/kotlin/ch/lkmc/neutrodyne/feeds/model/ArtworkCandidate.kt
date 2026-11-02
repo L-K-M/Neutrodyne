@@ -15,6 +15,7 @@ public enum class ArtworkSource {
     ATOM_LOGO,
     ATOM_ICON,
     GOOGLEPLAY_IMAGE,
+    DIRECTORY,
 }
 
 /**
