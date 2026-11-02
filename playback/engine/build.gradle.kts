@@ -32,9 +32,9 @@ tasks.register<Test>("ffmpegTest") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     useJUnit()
-    dependsOn(":playback:native:buildFfmpeg")
+    dependsOn(":playback:native:buildFfmpeg", ":playback:native:buildNdmedia")
 }
 
 tasks.named<Test>("test") {
-    filter.excludeTestsMatching("*FfmpegCorpusTest")
+    filter.excludeTestsMatching("*FfmpegCorpusTest", "*EngineClockTest")
 }
