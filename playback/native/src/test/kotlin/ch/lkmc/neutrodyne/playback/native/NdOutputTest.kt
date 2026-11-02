@@ -59,6 +59,22 @@ class NdOutputTest {
     }
 
     @Test
+    fun aFullRingRemainsFullUntilTheConsumerReadsIt() {
+        val directory = ndmediaDir() ?: return assumeTrue("native build required", false)
+        NdOutput.open(directory, "null", RATE, CHANNELS, RING_MS).use { out ->
+            val capacity = RATE * RING_MS / 1_000
+            Arena.ofConfined().use { arena ->
+                val pcm = arena.allocate((capacity + 1L) * CHANNELS * 4)
+                assertEquals(capacity, out.write(pcm, capacity + 1))
+                assertEquals(0, out.freeFrames(), "full must not alias empty")
+                assertEquals(0, out.write(pcm, 1), "unplayed samples must not be overwritten")
+                assertEquals(capacity, out.clear())
+                assertEquals(capacity, out.freeFrames())
+            }
+        }
+    }
+
+    @Test
     fun clearDropsQueuedFrames() {
         val directory =
             ndmediaDir() ?: run {
