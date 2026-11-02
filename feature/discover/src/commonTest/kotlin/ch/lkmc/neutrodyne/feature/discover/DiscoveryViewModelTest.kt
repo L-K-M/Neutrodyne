@@ -212,6 +212,29 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             vm.viewModelScope.cancel()
         }
 
+    /**
+     * The disclosure race (M7): a DirectoryKey opened while the provider configuration is
+     * still loading must not dispatch a search — the recipients are unknown to the screen.
+     * Once the list lands it is in state before the first query leaves.
+     */
+    @Test
+    fun directoryDispatchesOnlyAfterProvidersAreKnown() =
+        runTest {
+            repository.providersGate = CompletableDeferred()
+            val vm = DirectoryViewModel(DirectoryKey("news", null), repository)
+            runCurrent()
+            assertNull(vm.state.value.providers)
+            assertTrue(repository.queries.isEmpty())
+            vm.retry()
+            advanceUntilIdle()
+            assertTrue(repository.queries.isEmpty())
+            repository.providersGate!!.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(repository.providers.value, vm.state.value.providers)
+            assertEquals(listOf("news"), repository.queries)
+            vm.viewModelScope.cancel()
+        }
+
     @Test
     fun directoryExplicitShortQueryIsNotDebouncedAndIgnoresGenre() =
         runTest {

@@ -236,12 +236,14 @@ internal fun AddPodcastSheet(
                     NdTextButton(stringResource(Res.string.add_lookup_once), onLookupOnce)
                 }
                 if (step.searchQuery != null) {
-                    // The tap sends the query to every effective provider — disclose them first
+                    // The tap sends the query to every effective provider — it stays disabled
+                    // until the recipient list has loaded and its disclosure is on screen
                     // (the same text Discover's search field shows, 03 note 2026-11-02).
-                    ProviderDisclosure(state.providers)
+                    state.providers?.let { ProviderDisclosure(it) }
                     NdTextButton(
                         stringResource(Res.string.discovery_search_for, step.searchQuery),
                         { onSearch(step.searchQuery) },
+                        enabled = state.providers != null,
                     )
                 }
                 if (step.auth) {
