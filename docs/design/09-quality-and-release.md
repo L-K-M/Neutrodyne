@@ -545,8 +545,8 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   taps its play action with the loopback source restored. It enables audio hardening `throw` after reboot and archives
   phase output, screenshots, hierarchy dumps, package fingerprint and
   logs under `app/build/reports/playback-reboot` (artifact:
-  `api37-playback-results`). These host-only phases skip in ordinary
-  suites and are not counted among the required cases; the host rejects
+  `api37-playback-results`). The runner leaves these host-only phases out of
+  ordinary suites, and they are not counted among the required cases; the host rejects
   any phase without exactly one non-skipped pass. An instrumentation
   process never outlives the reboot. Audible fade/listening, DHU,
   Bluetooth/AVRCP, and physical-headset checks remain manual acceptance
