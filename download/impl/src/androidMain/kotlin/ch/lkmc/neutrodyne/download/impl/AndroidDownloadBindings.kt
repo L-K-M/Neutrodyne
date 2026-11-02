@@ -6,6 +6,7 @@ import android.app.ActivityManager
 import android.app.Application
 import android.app.usage.UsageStatsManager
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.os.Build
 import androidx.core.content.FileProvider
 import androidx.work.WorkerParameters
@@ -118,6 +119,20 @@ object AndroidDownloadBindings {
                             File(path),
                         ).toString()
                 }
+            },
+            noticeSources = {
+                NoticeSources(
+                    dataSaver =
+                        application.getSystemService(ConnectivityManager::class.java).restrictBackgroundStatus ==
+                        ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED,
+                    backgroundRestricted =
+                        Build.VERSION.SDK_INT >= 28 &&
+                            application.getSystemService(ActivityManager::class.java).isBackgroundRestricted,
+                    notificationsDenied =
+                        Build.VERSION.SDK_INT >= 33 &&
+                            application.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                            PackageManager.PERMISSION_GRANTED,
+                )
             },
         )
 

@@ -1438,6 +1438,8 @@ work; this observer must not duplicate a later common alert collector.
 | `MOVE_IN_PROGRESS` | `download-move` (Android) or `downloads-move` (desktop) running or pending | "Moving downloads… {k} of {n}" | — |
 | `ORPHAN_FILES` | `orphanBytes ≥ 10 MB` | "{1.2 GB} of files Neutrodyne no longer tracks." | "Delete" (`deleteOrphanFiles()`, after confirmation) |
 
+**Implementation note (2026-11-01, M6a).** `DownloadControllerImpl.observeAll` produces the notices from the state it already observes: the download rows, `StorageUsage`, `NetworkMonitor.status` and `StorageRoots.resolve`, plus a host-provided `NoticeSources` probe for the Android-only inputs (`getRestrictBackgroundStatus`, `isBackgroundRestricted`, the `POST_NOTIFICATIONS` grant). The desktop host returns an empty probe, so the three Android-only notices are never raised there; rows, storage and the network re-emit on their own flows, while the platform probe is re-read on a slow poll inside the observed flow. `CAP_REACHED`, `YOUTUBE_PAUSED` and `MOVE_IN_PROGRESS` remain unproduced in M6a and are hidden downstream regardless.
+
 ---
 
 ## Auto-download policy

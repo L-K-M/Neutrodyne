@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.download.impl
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.NetworkStatus
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.DownloadEntryRow
 import ch.lkmc.neutrodyne.core.database.DownloadSourceRow
@@ -13,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
@@ -32,9 +34,12 @@ import ch.lkmc.neutrodyne.download.api.RejectReason
 import ch.lkmc.neutrodyne.download.api.RequestResult
 import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
+import ch.lkmc.neutrodyne.download.api.StorageUsage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -330,7 +335,7 @@ internal class DownloadControllerImpl(
         dao.observeLiveFor(listOf(episodeId)).map { dao.byEpisode(episodeId)?.status() }.distinctUntilChanged()
 
     override fun observeAll(): Flow<DownloadsOverview> =
-        combine(dao.observeEntries(), files.observeStorage()) { rows, storage ->
+        combine(dao.observeEntries(), files.observeStorage(), network.status, noticePulse) { rows, storage, status, _ ->
             val ordered =
                 rows.sortedWith(
                     compareByDescending<DownloadEntryRow> { it.download.priority }
@@ -354,9 +359,44 @@ internal class DownloadControllerImpl(
                             )
                     }.map { it.entry() },
                 storage,
-                if (storage.orphanBytes > 0) setOf(DownloadNotice.ORPHAN_FILES) else emptySet(),
+                notices(rows, storage, status),
             )
         }.distinctUntilChanged()
+
+    // The platform notice inputs have no push signal, so a slow poll refreshes them
+    // while the screen observes; rows, storage and the network stay event-driven.
+    private val noticePulse = flow {
+        while (true) {
+            emit(Unit)
+            delay(NOTICE_PROBE_MS)
+        }
+    }
+
+    private suspend fun notices(
+        rows: List<DownloadEntryRow>,
+        storage: StorageUsage,
+        status: NetworkStatus,
+    ): Set<DownloadNotice> = buildSet {
+        val sources = noticeSources()
+        if (sources.dataSaver && status.isMetered) add(DownloadNotice.DATA_SAVER)
+        if (sources.backgroundRestricted) add(DownloadNotice.BACKGROUND_RESTRICTED)
+        if (sources.notificationsDenied &&
+            rows.any { it.download.lane == DownloadLane.MANUAL && it.download.state !in FINISHED_STATES }
+        ) {
+            add(DownloadNotice.NOTIFICATIONS_OFF)
+        }
+        if (rows.any { it.download.waitReason == WaitReason.STORAGE && it.download.lastError == DownloadError.STORAGE_FULL }) {
+            add(DownloadNotice.STORAGE_LOW)
+        }
+        if (rows.any {
+                it.download.state == DownloadState.MISSING && it.download.lastError == DownloadError.STORAGE_UNAVAILABLE
+            } ||
+            roots.resolve(storage.rootId) == null
+        ) {
+            add(DownloadNotice.ROOT_UNAVAILABLE)
+        }
+        if (storage.orphanBytes > 0) add(DownloadNotice.ORPHAN_FILES)
+    }
 
     override fun observeStorage() = files.observeStorage()
 
@@ -520,6 +560,7 @@ internal class DownloadControllerImpl(
         const val BIND_CHUNK = 500
         const val MIN_ENCLOSURE_BYTES = 100_000L
         const val BYTES_PER_MILLISECOND = 16L
+        const val NOTICE_PROBE_MS = 30_000L
         val HLS_TYPES =
             setOf(
                 "application/x-mpegurl",
