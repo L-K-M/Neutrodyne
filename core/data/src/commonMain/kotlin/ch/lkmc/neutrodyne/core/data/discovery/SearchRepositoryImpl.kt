@@ -95,24 +95,32 @@ internal class SearchRepositoryImpl(
                     launch {
                         var weights = emptySet<String>()
                         val answer =
-                            withTimeoutOrNull(DirectoryHttp.DEADLINE_MS) {
-                                when (id) {
-                                    ProviderId.APPLE -> {
-                                        apple.search(text, config.country)
-                                    }
+                            // One provider's crash must not cancel its siblings through the
+                            // channelFlow scope; a stable category keeps error detail out.
+                            try {
+                                withTimeoutOrNull(DirectoryHttp.DEADLINE_MS) {
+                                    when (id) {
+                                        ProviderId.APPLE -> {
+                                            apple.search(text, config.country)
+                                        }
 
-                                    ProviderId.FYYD -> {
-                                        fyyd.search(text, config)
-                                    }
+                                        ProviderId.FYYD -> {
+                                            fyyd.search(text, config)
+                                        }
 
-                                    ProviderId.PODCAST_INDEX -> {
-                                        pi.search(text, config).map {
-                                            weights = it.downranked
-                                            it.hits
+                                        ProviderId.PODCAST_INDEX -> {
+                                            pi.search(text, config).map {
+                                                weights = it.downranked
+                                                it.hits
+                                            }
                                         }
                                     }
-                                }
-                            } ?: Outcome.Failure(ProviderStatus.Failed(NetError.Timeout))
+                                } ?: Outcome.Failure(ProviderStatus.Failed(NetError.Timeout))
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                Outcome.Failure(ProviderStatus.Failed(NetError.Other("provider")))
+                            }
                         responses.send(SearchAnswer(id, answer, weights))
                     }
                 }
@@ -291,12 +299,15 @@ internal fun fuseDirectoryHits(
     val groups = mutableListOf<MutableList<DirectoryHit>>()
     for (id in DIRECTORY_PROVIDER_ORDER) {
         for (hit in answers[id].orEmpty()) {
+            // A null identity matches nothing, not even another null: two shows whose feed
+            // URLs both fail to normalize are distinct and must stay separate.
+            val hitIdentity = UrlNormalizer.forIdentity(hit.feedUrl)
             val matching =
                 groups.filter { rows ->
-                    rows.any {
-                        UrlNormalizer.forIdentity(it.feedUrl) ==
-                            UrlNormalizer.forIdentity(hit.feedUrl) ||
-                            (hit.podcastGuid != null && it.podcastGuid == hit.podcastGuid)
+                    rows.any { row ->
+                        val rowIdentity = UrlNormalizer.forIdentity(row.feedUrl)
+                        (rowIdentity != null && rowIdentity == hitIdentity) ||
+                            (hit.podcastGuid != null && row.podcastGuid == hit.podcastGuid)
                     }
                 }
             val group = matching.firstOrNull() ?: mutableListOf<DirectoryHit>().also { groups += it }
