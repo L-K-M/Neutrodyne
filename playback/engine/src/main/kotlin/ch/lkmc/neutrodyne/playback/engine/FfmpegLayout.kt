@@ -34,8 +34,7 @@ data class FfmpegLayout(
     private fun majorOf(library: String): Int =
         requireNotNull(libraries[library]) { "ffmpeg-layout.json records no $library major" }
 
-    fun struct(name: String): StructLayout =
-        requireNotNull(structs[name]) { "ffmpeg-layout.json has no struct $name" }
+    fun struct(name: String): StructLayout = requireNotNull(structs[name]) { "ffmpeg-layout.json has no struct $name" }
 
     /** The offset of one field of a struct the layout records. */
     fun offset(
@@ -75,8 +74,7 @@ data class StructLayout(
     val size: Long,
     val fields: Map<String, Long>,
 ) {
-    fun offsetOf(field: String): Long =
-        requireNotNull(fields[field]) { "ffmpeg-layout.json records no field $field" }
+    fun offsetOf(field: String): Long = requireNotNull(fields[field]) { "ffmpeg-layout.json records no field $field" }
 
     /** Every field this struct's readers need, checked once at load time. */
     fun requireFields(vararg names: String) {

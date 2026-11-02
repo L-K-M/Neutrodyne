@@ -44,6 +44,15 @@ class FfDemuxer
 
         override val chapters: List<EngineChapter>
 
+        /** The track's trimming information, published once with the track (11 Demux and decode step 6). */
+        override val gapless: Gapless
+            get() =
+                Gapless(
+                    initialPadding = audioTrack.initialPadding,
+                    trailingPadding = audioTrack.trailingPadding,
+                    seekPreroll = audioTrack.seekPreroll,
+                )
+
         /** The container's own name, as its demuxer identifies itself. */
         val containerName: String
 
@@ -126,22 +135,25 @@ class FfDemuxer
                         }
                     }
             codecParametersOf = stream.readAddress(layout, "AVStream", "codecpar")
-            audioTrack = AudioTrackInfo(
-                codec = codecOf(parameters.readInt(layout, "AVCodecParameters", "codec_id")),
-                sampleRate = parameters.readInt(layout, "AVCodecParameters", "sample_rate"),
-                channels = parameters.readChannelCount(layout),
-                initialPadding = parameters.readInt(layout, "AVCodecParameters", "initial_padding"),
-                trailingPadding = parameters.readInt(layout, "AVCodecParameters", "trailing_padding"),
-                seekPreroll = parameters.readInt(layout, "AVCodecParameters", "seek_preroll"),
-                skipSamplesPresent = false,
-            )
+            audioTrack =
+                AudioTrackInfo(
+                    codec = codecOf(parameters.readInt(layout, "AVCodecParameters", "codec_id")),
+                    sampleRate = parameters.readInt(layout, "AVCodecParameters", "sample_rate"),
+                    channels = parameters.readChannelCount(layout),
+                    initialPadding = parameters.readInt(layout, "AVCodecParameters", "initial_padding"),
+                    trailingPadding = parameters.readInt(layout, "AVCodecParameters", "trailing_padding"),
+                    seekPreroll = parameters.readInt(layout, "AVCodecParameters", "seek_preroll"),
+                    skipSamplesPresent = false,
+                )
             durationMs = durationOf()
             chapters = chaptersOf()
         }
 
         private fun codecOf(codecId: Int): AudioCodec {
             val name =
-                layout.codecIds.entries.firstOrNull { it.value == codecId }?.key
+                layout.codecIds.entries
+                    .firstOrNull { it.value == codecId }
+                    ?.key
                     ?: error("FFmpeg reports codec id $codecId, which D86's build does not enable")
             return requireNotNull(AudioCodec.fromName(name)) { "FFmpeg reports $name, which D86 does not list" }
         }

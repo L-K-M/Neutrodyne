@@ -232,14 +232,12 @@ class FfmpegLibrary
         fun setDecoderThreads(
             context: MemorySegment,
             threads: Int,
-        ): Int =
-            callInt("avutil", "av_opt_set_int", OPT_SET_INT, context, cString("threads"), threads.toLong(), 0)
+        ): Int = callInt("avutil", "av_opt_set_int", OPT_SET_INT, context, cString("threads"), threads.toLong(), 0)
 
         fun openCodec(
             context: MemorySegment,
             codec: MemorySegment,
-        ): Int =
-            callInt("avcodec", "avcodec_open2", OPEN_CODEC, context, codec, MemorySegment.NULL, MemorySegment.NULL)
+        ): Int = callInt("avcodec", "avcodec_open2", OPEN_CODEC, context, codec, MemorySegment.NULL, MemorySegment.NULL)
 
         fun freeCodecContext(slot: MemorySegment) =
             callVoid("avcodec", "avcodec_free_context", FREE_CODEC_CONTEXT, slot)
@@ -247,8 +245,7 @@ class FfmpegLibrary
         fun sendPacket(
             context: MemorySegment,
             packet: MemorySegment?,
-        ): Int =
-            callInt("avcodec", "avcodec_send_packet", SEND_PACKET, context, packet ?: MemorySegment.NULL)
+        ): Int = callInt("avcodec", "avcodec_send_packet", SEND_PACKET, context, packet ?: MemorySegment.NULL)
 
         fun receiveFrame(
             context: MemorySegment,
@@ -290,8 +287,7 @@ class FfmpegLibrary
                 MemorySegment.NULL,
             )
 
-        fun initResampler(resampler: MemorySegment): Int =
-            callInt("swresample", "swr_init", SWR_INIT, resampler)
+        fun initResampler(resampler: MemorySegment): Int = callInt("swresample", "swr_init", SWR_INIT, resampler)
 
         /**
          * `swr_convert` into a caller-owned buffer. The frame's `extended_data`
@@ -371,11 +367,15 @@ class FfmpegLibrary
                 val os = System.getProperty("os.name")
                 val arena = Arena.ofShared()
                 val lookups =
-                    layout.libraries.entries.associateWith { (name, major) ->
-                        SymbolLookup.libraryLookup(
-                            directory.resolve(libraryFileName(name, major, os)).absolutePathString(),
-                            arena,
-                        )
+                    layout.libraries.entries.associate { (name, major) ->
+                        name to
+                            SymbolLookup.libraryLookup(
+                                directory
+                                    .resolve(libraryFileName(name, major, os))
+                                    .toAbsolutePath()
+                                    .toString(),
+                                arena,
+                            )
                     }
                 val library = FfmpegLibrary(layout, arena, lookups)
                 library.verifyMajors()
