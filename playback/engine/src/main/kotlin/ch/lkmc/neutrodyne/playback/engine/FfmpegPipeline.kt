@@ -85,8 +85,10 @@ class FfmpegPipeline
                     val ptsUs = requireNotNull(frame.ptsUs) { "the seek produced audio without a timestamp" }
                     val count = frame.samples.size / frame.channels
                     val delta = (targetUs - ptsUs).coerceAtLeast(0)
-                    val dropped = ((delta * frame.sampleRate + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND)
-                        .coerceAtMost(count.toLong()).toInt()
+                    val dropped =
+                        ((delta * frame.sampleRate + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND)
+                            .coerceAtMost(count.toLong())
+                            .toInt()
                     if (dropped == count) continue
                     return frame.copy(
                         samples = frame.samples.copyOfRange(dropped * frame.channels, frame.samples.size),

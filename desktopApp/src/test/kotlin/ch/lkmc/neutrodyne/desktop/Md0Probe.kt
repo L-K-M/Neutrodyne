@@ -51,7 +51,8 @@ object Md0Probe {
         val ndmedia = root.resolve("playback/native/build/ndmedia/$target")
         PrintWriter(Files.newBufferedWriter(report, StandardOpenOption.CREATE_NEW), true).use { output ->
             fun log(kind: String, detail: String) {
-                val line = "{\"monoNs\":${System.nanoTime()},\"kind\":\"$kind\",\"detail\":${JsonPrimitive(detail)}}"
+                val line = "{\"monoNs\":${System.nanoTime()}," +
+                    "\"kind\":\"$kind\",\"detail\":${JsonPrimitive(detail)}}"
                 output.println(line)
                 println(line)
             }
@@ -73,7 +74,11 @@ object Md0Probe {
                     pause = { engine.pause(); paused = true },
                     position = engine::positionMs, saver = saver,
                 )
-                val session = if (os == "Linux") LinuxMprisSession.open() else NativeSystemMediaSession.open(ndmedia)
+                val session = if (os == "Linux") {
+                    LinuxMprisSession.open()
+                } else {
+                    NativeSystemMediaSession.open(ndmedia)
+                }
                 session.use {
                     val commands = launch {
                         session.commands.collect { command ->
@@ -130,7 +135,9 @@ object Md0Probe {
                             val elapsedMs = (System.nanoTime() - start) / 1_000_000
                             clock.elapsedMs = elapsedMs
                             clock.nowMs = System.currentTimeMillis()
-                            check(engine.outputDescription != null || elapsedMs < 10_000) { "output did not open" }
+                            check(engine.outputDescription != null || elapsedMs < 10_000) {
+                                "output did not open"
+                            }
                             engine.awaitEnded(0)
                             val position = engine.positionMs()
                             val snapshot = testNowPlaying().let { item ->
@@ -150,7 +157,8 @@ object Md0Probe {
                                 .orElse(java.time.Duration.ZERO).toNanos()
                             log(
                                 "sample",
-                                "elapsedMs=$elapsedMs positionMs=$position underrunFrames=${engine.underrunFrames} " +
+                                "elapsedMs=$elapsedMs positionMs=$position " +
+                                    "underrunFrames=${engine.underrunFrames} " +
                                     "cpuNs=$cpu paused=$paused device=${engine.outputDescription}",
                             )
                             if (session is NativeSystemMediaSession) {
@@ -166,7 +174,8 @@ object Md0Probe {
                         saver.onPause(engine.positionMs(), null)
                         log(
                             "result",
-                            "completed=$completed requestedSeconds=$seconds underrunFrames=${engine.underrunFrames}; " +
+                            "completed=$completed requestedSeconds=$seconds " +
+                                "underrunFrames=${engine.underrunFrames}; " +
                                 "no automatic hardware or clock-accuracy verdict",
                         )
                         check(completed) { "the file ended before the requested soak duration" }

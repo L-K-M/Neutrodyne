@@ -76,8 +76,18 @@ class EngineClockTest {
         val pcm = parityInput("speech")
         val header = ByteBuffer.allocate(44 + pcm.size).order(ByteOrder.LITTLE_ENDIAN)
         header.put("RIFF".toByteArray()).putInt(36 + pcm.size).put("WAVEfmt ".toByteArray())
-        header.putInt(16).putShort(1).putShort(2).putInt(RATE).putInt(RATE * 4)
-        header.putShort(4).putShort(16).put("data".toByteArray()).putInt(pcm.size).put(pcm)
+        header
+            .putInt(16)
+            .putShort(1)
+            .putShort(2)
+            .putInt(RATE)
+            .putInt(RATE * 4)
+        header
+            .putShort(4)
+            .putShort(16)
+            .put("data".toByteArray())
+            .putInt(pcm.size)
+            .put(pcm)
         val file = Files.createTempFile("md0-clock-gap-", ".wav")
         try {
             Files.write(file, header.array())
@@ -95,7 +105,10 @@ class EngineClockTest {
                             Thread.sleep(1)
                             continue
                         }
-                        val period = requireNotNull(Json.parseToJsonElement(description).jsonObject["period"]).jsonPrimitive.int
+                        val period =
+                            requireNotNull(
+                                Json.parseToJsonElement(description).jsonObject["period"],
+                            ).jsonPrimitive.int
                         val before = engine.framesPlayed
                         val actual = engine.positionMs()
                         val after = engine.framesPlayed
@@ -115,7 +128,10 @@ class EngineClockTest {
                     }
                     println("MD0 gap clock: speed=$speed samples=$measurements maxErrorMs=$maximumError")
                     assertTrue(engine.isEnded, "gap corpus never ended")
-                    assertTrue(measurements >= 5 && beforeGap && afterGap, "missing live samples around the skipped gap")
+                    assertTrue(
+                        measurements >= 5 && beforeGap && afterGap,
+                        "missing live samples around the skipped gap",
+                    )
                     assertTrue(maximumError <= MAX_ERROR_MS, "${speed}x: gap clock error=$maximumError ms")
                 }
             }

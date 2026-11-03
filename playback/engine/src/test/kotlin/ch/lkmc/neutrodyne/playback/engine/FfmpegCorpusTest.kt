@@ -318,7 +318,10 @@ class FfmpegCorpusTest {
         return null
     }
 
-    private fun assertPcm(expected: ShortArray, actual: ShortArray) {
+    private fun assertPcm(
+        expected: ShortArray,
+        actual: ShortArray,
+    ) {
         assertTrue(
             "PCM mismatch: expected ${expected.size} samples, actual ${actual.size}; " +
                 "first expected=${expected.take(8)} actual=${actual.take(8)}",

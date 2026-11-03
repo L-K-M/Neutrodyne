@@ -28,7 +28,11 @@ class FfAudioEngine(
     private val deviceRate: Int,
     private val openSource: (Path) -> ByteSource = ::FileChannelByteSource,
 ) : AutoCloseable {
-    private data class Item(val path: Path, val speed: Float, val skipSilence: Boolean)
+    private data class Item(
+        val path: Path,
+        val speed: Float,
+        val skipSilence: Boolean,
+    )
 
     private val commands = LinkedBlockingQueue<Item>()
     private val control = Any()
@@ -41,44 +45,61 @@ class FfAudioEngine(
     private var activeOutput: NdOutput? = null
 
     @Volatile private var output: NdOutput? = null
+
     @Volatile private var clock: TimelineClock? = null
+
     @Volatile var outputDescription: String? = null
         private set
+
     @Volatile var durationMs: Long? = null
         private set
 
-    private val thread = Thread({ run() }, "nd-engine").apply {
-        isDaemon = true
-        start()
-    }
+    private val thread =
+        Thread({ run() }, "nd-engine").apply {
+            isDaemon = true
+            start()
+        }
 
-    val isEnded: Boolean get() { checkFailure(); return ended.get() }
+    val isEnded: Boolean get() {
+        checkFailure()
+        return ended.get()
+    }
     val framesPlayed: Long get() = output?.framesPlayed ?: 0
     val underrunFrames: Long get() = output?.underrunFrames ?: 0
 
-    fun play(path: Path, speed: Float, skipSilence: Boolean): Boolean = synchronized(control) {
-        check(!closed.get()) { "engine is closed" }
-        require(speed.isFinite() && speed in MIN_SPEED..MAX_SPEED)
-        check(submitted.compareAndSet(false, true)) { "the MD0 instrument plays one item" }
-        wantPlaying = true
-        commands.offer(Item(path, speed, skipSilence))
-    }
+    fun play(
+        path: Path,
+        speed: Float,
+        skipSilence: Boolean,
+    ): Boolean =
+        synchronized(control) {
+            check(!closed.get()) { "engine is closed" }
+            require(speed.isFinite() && speed in MIN_SPEED..MAX_SPEED)
+            check(submitted.compareAndSet(false, true)) { "the MD0 instrument plays one item" }
+            wantPlaying = true
+            commands.offer(Item(path, speed, skipSilence))
+        }
 
-    fun pause() = synchronized(control) {
-        wantPlaying = false
-        activeOutput?.stop()
-        clock?.pause()
-    }
+    fun pause() =
+        synchronized(control) {
+            wantPlaying = false
+            activeOutput?.stop()
+            clock?.pause()
+        }
 
-    fun resume() = synchronized(control) {
-        check(!closed.get()) { "engine is closed" }
+    fun resume() =
+        synchronized(control) {
+            check(!closed.get()) { "engine is closed" }
+            checkFailure()
+            wantPlaying = true
+            clock?.resume()
+            activeOutput?.start()
+        }
+
+    fun positionMs(): Long {
         checkFailure()
-        wantPlaying = true
-        clock?.resume()
-        activeOutput?.start()
+        return clock?.positionMs() ?: 0
     }
-
-    fun positionMs(): Long { checkFailure(); return clock?.positionMs() ?: 0 }
 
     fun awaitEnded(timeoutMs: Long): Boolean {
         require(timeoutMs >= 0)
@@ -131,12 +152,16 @@ class FfAudioEngine(
         }
     }
 
-    private fun playPipeline(item: Item, pipeline: FfmpegPipeline) {
+    private fun playPipeline(
+        item: Item,
+        pipeline: FfmpegPipeline,
+    ) {
         durationMs = pipeline.demuxer.durationMs
         val decoder = pipeline.decoder
-        val skip = SilenceSkipper().takeIf { item.skipSilence }?.apply {
-            configure(decoder.sampleRate, decoder.channels)
-        }
+        val skip =
+            SilenceSkipper().takeIf { item.skipSilence }?.apply {
+                configure(decoder.sampleRate, decoder.channels)
+            }
         val sonic = Sonic(decoder.sampleRate, decoder.channels, item.speed, 1f, deviceRate)
         val gain = GainStage()
         NdOutput.open(ndmediaDirectory, backend, deviceRate, decoder.channels, RING_MS).use { out ->
@@ -175,11 +200,17 @@ class FfAudioEngine(
                             }
                             var written = 0
                             while (written < frames && !closed.get()) {
-                                val accepted = synchronized(control) {
-                                    if (!wantPlaying || closed.get()) 0 else out.write(
-                                        segment.asSlice(written.toLong() * decoder.channels * Float.SIZE_BYTES), frames - written,
-                                    )
-                                }
+                                val accepted =
+                                    synchronized(control) {
+                                        if (!wantPlaying || closed.get()) {
+                                            0
+                                        } else {
+                                            out.write(
+                                                segment.asSlice(written.toLong() * decoder.channels * Float.SIZE_BYTES),
+                                                frames - written,
+                                            )
+                                        }
+                                    }
                                 written += accepted
                                 if (accepted == 0) Thread.sleep(RING_POLL_MS)
                             }
@@ -209,12 +240,17 @@ class FfAudioEngine(
                         queueSonic(buffer, sourceFrame)
                     }
                 }
+
                 fun accept(frame: AudioFrame) {
                     if (frame.samples.isEmpty()) return
                     if (firstPtsUs == null) firstPtsUs = frame.ptsUs
                     val sourceFrame = inputFrames
                     inputFrames += frame.samples.size / frame.channels
-                    val input = ByteBuffer.allocate(frame.samples.size * Short.SIZE_BYTES).order(ByteOrder.nativeOrder())
+                    val input =
+                        ByteBuffer
+                            .allocate(
+                                frame.samples.size * Short.SIZE_BYTES,
+                            ).order(ByteOrder.nativeOrder())
                     input.asShortBuffer().put(frame.samples)
                     if (skip == null) {
                         queueSonic(input, sourceFrame)
@@ -250,11 +286,13 @@ class FfAudioEngine(
                     check(now - lastProgress < DRAIN_WAIT_NS) { "device stopped consuming queued PCM" }
                     Thread.sleep(RING_POLL_MS)
                 }
-                if (!closed.get()) synchronized(control) {
-                    out.stop()
-                    timeline.resume()
-                    timeline.finish((firstPtsUs ?: 0L) + inputFrames * MICROS_PER_SECOND / decoder.sampleRate)
-                    ended.set(true)
+                if (!closed.get()) {
+                    synchronized(control) {
+                        out.stop()
+                        timeline.resume()
+                        timeline.finish((firstPtsUs ?: 0L) + inputFrames * MICROS_PER_SECOND / decoder.sampleRate)
+                        ended.set(true)
+                    }
                 }
             } finally {
                 synchronized(control) {
