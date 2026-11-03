@@ -242,8 +242,8 @@ class FfDemuxer
             val target = positionMs * den / (MILLIS_PER_SECOND * num)
             val result = library.seekFile(formatContext, streamIndex, Long.MIN_VALUE, target, Long.MAX_VALUE, 0)
             require(result >= 0) { "the seek to $positionMs ms failed: ${library.errorString(result)}" }
-            // The seek is done, so the abort it raised must not abort the reads
-            // that follow it.
+            // Only a return to the beginning encounters container priming again.
+            firstPacket = positionMs == 0L
             avio.resumeReads()
         }
 

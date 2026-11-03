@@ -163,6 +163,24 @@ class FfmpegCorpusTest {
     }
 
     @Test
+    fun `a seek returns actual PCM cropped to the requested source sample`() {
+        val bytes = corpusFile("wav_2s.wav").readBytes()
+        FfmpegPipeline.open(MemoryByteSource(bytes), hostFfmpegDirectory()).use { pipeline ->
+            val samples = pipeline.decodeAll().flatMap { it.samples.asIterable() }.toShortArray()
+            val frame = requireNotNull(pipeline.seekFrame(123))
+            val firstFrame = (123L * frame.sampleRate + 999) / 1_000
+            kotlin.test.assertContentEquals(
+                samples.copyOfRange(
+                    (firstFrame * frame.channels).toInt(),
+                    (firstFrame * frame.channels).toInt() + frame.samples.size,
+                ),
+                frame.samples,
+            )
+            assertEquals(123L, requireNotNull(frame.ptsUs) / 1_000)
+        }
+    }
+
+    @Test
     fun `partial priming trims complete interleaved frames and their timestamp`() {
         val bytes = corpusFile("wav_2s.wav").readBytes()
         fun firstFrame(priming: Int): AudioFrame =

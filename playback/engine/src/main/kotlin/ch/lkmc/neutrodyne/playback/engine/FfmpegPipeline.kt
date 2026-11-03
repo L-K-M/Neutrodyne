@@ -57,31 +57,44 @@ class FfmpegPipeline
          * the first audible sample in milliseconds. MD0 AC1's accuracy goal is
          * ±50 ms, measured against the reference manifest.
          */
-        fun seekAndDecode(positionMs: Long): Long {
+        fun seekAndDecode(positionMs: Long): Long =
+            requireNotNull(seekFrame(positionMs)?.ptsUs) {
+                "the seek to $positionMs ms produced no timestamped audio"
+            } / MICROS_PER_MS
+
+        /** Return the actual cropped PCM, or null when no audio remains. */
+        fun seekFrame(positionMs: Long): AudioFrame? {
             demuxer.seekTo(positionMs)
             decoder.flushBuffers()
             decoder.discardPendingSamples()
-            val targetUs = positionMs * MICROS_PER_MS
+            val targetUs = Math.multiplyExact(positionMs, MICROS_PER_MS)
+            var flushing = false
             while (true) {
-                val packet = demuxer.readPacket() ?: break
-                check(decoder.send(packet)) { "seek decoder backpressure after draining" }
+                if (!flushing) {
+                    val packet = demuxer.readPacket()
+                    if (packet == null) {
+                        decoder.flush()
+                        flushing = true
+                    } else {
+                        check(decoder.send(packet)) { "seek decoder backpressure after draining" }
+                    }
+                }
                 while (true) {
                     val frame = decoder.receive() ?: break
                     if (frame.samples.isEmpty()) continue
                     val ptsUs = requireNotNull(frame.ptsUs) { "the seek produced audio without a timestamp" }
-                    // Ogg seeks by page boundary: the demuxer's first packets
-                    // after a seek belong to the page it landed on and can
-                    // precede the target by the whole page duration. Whole
-                    // frames that end before the target are dropped, as the
-                    // consuming engine would drop them before output.
-                    val endUs =
-                        ptsUs + frame.samples.size.toLong() * MICROS_PER_MS /
-                            (frame.channels.toLong() * frame.sampleRate)
-                    if (endUs <= targetUs) continue
-                    return ptsUs / 1000
+                    val count = frame.samples.size / frame.channels
+                    val delta = (targetUs - ptsUs).coerceAtLeast(0)
+                    val dropped = ((delta * frame.sampleRate + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND)
+                        .coerceAtMost(count.toLong()).toInt()
+                    if (dropped == count) continue
+                    return frame.copy(
+                        samples = frame.samples.copyOfRange(dropped * frame.channels, frame.samples.size),
+                        ptsUs = ptsUs + dropped * MICROS_PER_SECOND / frame.sampleRate,
+                    )
                 }
+                if (flushing) return null
             }
-            error("the seek to $positionMs ms produced no audio")
         }
 
         override fun close() {
@@ -120,5 +133,6 @@ class FfmpegPipeline
             }
 
             private const val MICROS_PER_MS = 1_000L
+            private const val MICROS_PER_SECOND = 1_000_000L
         }
     }

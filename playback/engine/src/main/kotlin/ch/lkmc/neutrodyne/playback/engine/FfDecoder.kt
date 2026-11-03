@@ -158,6 +158,7 @@ class FfDecoder
         /** Drops every buffered frame, as a seek requires (11 Demux and decode step 3). */
         fun flushBuffers() {
             library.flushCodecBuffers(context)
+            remainingPriming = UNDECIDED
         }
 
         /**
@@ -258,13 +259,18 @@ class FfDecoder
             val total = samples * STEREO_CHANNELS
             if (total <= 0) return AudioFrame(ShortArray(0), STEREO_CHANNELS, sampleRate, null)
             val pcm = ShortArray(total)
-            val source = outputBuffer.reinterpret((leading + total).toLong() * Short.SIZE_BYTES)
+            val leadingSamples = leading * STEREO_CHANNELS
+            val source = outputBuffer.reinterpret((leadingSamples + total).toLong() * Short.SIZE_BYTES)
             for (index in 0 until total) {
                 pcm[index] =
-                    source.get(ValueLayout.JAVA_SHORT, (leading + index).toLong() * Short.SIZE_BYTES)
+                    source.get(ValueLayout.JAVA_SHORT, (leadingSamples + index).toLong() * Short.SIZE_BYTES)
             }
             val ptsUs =
-                if (pts == NO_TIMESTAMP) null else pts * timeBaseNum * MICROS_PER_SECOND / timeBaseDen
+                if (pts == NO_TIMESTAMP) {
+                    null
+                } else {
+                    pts * timeBaseNum * MICROS_PER_SECOND / timeBaseDen + leading * MICROS_PER_SECOND / sampleRate
+                }
             return AudioFrame(pcm, STEREO_CHANNELS, sampleRate, ptsUs)
         }
 
