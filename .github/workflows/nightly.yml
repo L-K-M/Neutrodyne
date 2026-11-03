@@ -2,11 +2,11 @@
 #
 # nightly.yml — 09's overnight jobs. M0a carries `instrumented-full` (debug
 # leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; M1a
-# adds `mutation-full`. The other jobs land with their milestones
-# (`system-tests` M6b, `no-engine-build` M9a, `desktop-matrix` M0b,
-# `sync-convergence` MS0, `server-image-smoke` MS1, `benchmark-dryrun` M10,
-# `screenshots-full` M10, `live-canary`, `youtube-canary` and
-# `engine-nightly-canary` M9a).
+# adds `mutation-full`; MD0 adds `desktop-matrix` (the four desktop targets'
+# unit tests, FFmpeg builds and licence checks). The other jobs land with their
+# milestones (`system-tests` M6b, `no-engine-build` M9a, `sync-convergence` MS0,
+# `server-image-smoke` MS1, `benchmark-dryrun` M10, `screenshots-full` M10,
+# `live-canary`, `youtube-canary` and `engine-nightly-canary` M9a).
 #
 # A failing job runs scripts/ci/report-nightly.sh, which opens or updates one
 # issue per job (label `nightly-failure`) and closes it after the next green
@@ -717,6 +717,143 @@ jobs:
           name: bgstart-results
           path: ${{ runner.temp }}/bgstart
           if-no-files-found: error
+
+  # MD0's four-target desktop matrix (11 Platform matrix, D88): the same legs as
+  # ci.yml's dispatch-only `desktop-matrix`, on the overnight schedule. Each
+  # target's unit tests, its own FFmpeg build and its own licence check run on
+  # the host that serves it, because a shared library cannot be cross-built and
+  # jpackage cannot cross-package. The measured licence evidence is uploaded per
+  # target and feeds MD0 AC2's ledger in 11.
+  desktop-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runs-on: windows-2025
+            # The MSVC FFmpeg compile is the slowest leg; the shared 90-minute
+            # ceiling once cut it off mid-build, so the leg gets its own.
+            timeout-minutes: 150
+          - target: macos-arm64
+            runs-on: macos-15
+          - target: linux-x64
+            runs-on: ubuntu-24.04
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: ${{ matrix.timeout-minutes || 90 }}
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'desktop'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Android SDK (the KMP android targets configure AGP in every module)
+        shell: bash
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          # One SDK location for AGP: the runner image's inherited
+          # ANDROID_SDK_ROOT must not disagree with ANDROID_HOME, and on Windows
+          # Gradle needs the C:\ form, not the MSYS one.
+          sdk_dir="$HOME/android-sdk"
+          command -v cygpath >/dev/null 2>&1 && sdk_dir="$(cygpath -w "$sdk_dir")"
+          echo "ANDROID_HOME=$sdk_dir" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_dir" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # binutils serves jlink's strip-debug; xvfb and dbus-x11 wrap the desktop
+      # UI tests; libegl1 is skiko-linux-arm64's only unresolvable NEEDED entry.
+      - name: Host tools (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          pkgs="binutils xvfb dbus-x11 dbus-daemon"
+          [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          sudo apt-get install -y -qq $pkgs
+      # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell
+      # with GNU make, NASM and gpg. `buildFfmpeg` names MSYS2's bash explicitly
+      # (Git Bash ships none of the three), and coreutils provides the `timeout`
+      # that bounds every download and gpg call inside build.sh.
+      - name: MSYS2 tools for the Windows FFmpeg build
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz coreutils"
+      # The modules MD0 builds on this target. The repository-wide suite stays on
+      # linux-x64 in ci.yml's `unit` job, which is where its reference platform
+      # is: the committed Roborazzi goldens live in screenshots/{android,desktop}
+      # with no per-OS split, so a second desktop OS compares against another
+      # font stack, and the file-permission suites of M3/M5 assert POSIX
+      # semantics. Neither is evidence about the desktop engine, so neither is a
+      # desktop-matrix gate.
+      - name: Desktop engine tests on this host
+        shell: bash
+        run: |
+          tests="./gradlew :playback:engine:test \
+            :playback:native:test --continue"
+          [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
+          $tests
+      - name: Collect the licence evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p native-evidence
+          for f in ffmpeg-build.txt ffmpeg-sizes.txt ffmpeg-license.txt \
+                   ffmpeg-protocols.txt ffmpeg-components.txt ffmpeg-config.h; do
+            source="playback/native/build/ffmpeg/${{ matrix.target }}/$f"
+            [ ! -f "$source" ] || cp "$source" native-evidence/
+          done
+          cp playback/native/build/ffmpeg-source/*.tar.xz native-evidence/ 2>/dev/null || true
+          # A native crash writes its report into the engine module's directory;
+          # it is the only stack a segfault leaves, so it rides along too.
+          cp playback/engine/hs_err_pid*.log native-evidence/ 2>/dev/null || true
+          printf '%s\n' "${{ github.sha }}" > native-evidence/commit.txt
+          ls -l native-evidence
+      - name: Report failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh desktop-matrix-${{ matrix.target }}
+      - name: Report recovery
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh desktop-matrix-${{ matrix.target }} --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: desktop-native-${{ matrix.target }}
+          path: |
+            native-evidence/
+            playback/native/build/ffmpeg/${{ matrix.target }}/lib/
+            playback/native/build/ffmpeg/${{ matrix.target }}/bin/
+            playback/native/build/ndmedia/${{ matrix.target }}/*ndmedia*
+            desktopApp/config/licenses/MIT-0-miniaudio.json
+            desktopApp/config/licenses/LGPL-2.1-or-later.json
+            playback/native/build/ffmpeg/${{ matrix.target }}/ffmpeg-layout.json
+            playback/native/build/ffmpeg-cache/build-${{ matrix.target }}/*.log
+            playback/native/build/ndmedia/${{ matrix.target }}/ndmedia-build.txt
+            playback/engine/build/test-results/
+            playback/engine/build/reports/tests/
+            playback/native/build/test-results/
+            desktop/system/build/test-results/
+          retention-days: 14
 
   repro:
     runs-on: ubuntu-24.04
