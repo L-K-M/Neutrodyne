@@ -79,7 +79,7 @@ private fun assertParity(
     assertTrue(failures.isEmpty(), failures.joinToString("\n"))
 }
 
-private fun parityInput(kind: String): ByteArray {
+internal fun parityInput(kind: String): ByteArray {
     val buffer = ByteBuffer.allocate(PARITY_RATE * PARITY_CHANNELS * 2).order(ByteOrder.LITTLE_ENDIAN)
     repeat(PARITY_RATE) { frame ->
         val silent = kind == "silence" || frame in 12_000 until 31_000

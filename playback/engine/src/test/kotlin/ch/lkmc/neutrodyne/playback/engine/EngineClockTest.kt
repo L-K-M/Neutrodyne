@@ -6,6 +6,9 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assume.assumeTrue
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.math.abs
 import kotlin.test.Test
@@ -68,6 +71,59 @@ class EngineClockTest {
         }
     }
 
+    @Test
+    fun liveClockFollowsRetainedAudioAcrossARealSilenceGap() {
+        val pcm = parityInput("speech")
+        val header = ByteBuffer.allocate(44 + pcm.size).order(ByteOrder.LITTLE_ENDIAN)
+        header.put("RIFF".toByteArray()).putInt(36 + pcm.size).put("WAVEfmt ".toByteArray())
+        header.putInt(16).putShort(1).putShort(2).putInt(RATE).putInt(RATE * 4)
+        header.putShort(4).putShort(16).put("data".toByteArray()).putInt(pcm.size).put(pcm)
+        val file = Files.createTempFile("md0-clock-gap-", ".wav")
+        try {
+            Files.write(file, header.array())
+            for (speed in SPEEDS) {
+                FfAudioEngine(requireNotNull(ffmpegDir()), requireNotNull(ndmediaDir()), "null", RATE).use { engine ->
+                    engine.play(file, speed, true)
+                    val deadline = System.nanoTime() + 10_000_000_000L
+                    var measurements = 0
+                    var beforeGap = false
+                    var afterGap = false
+                    var maximumError = 0L
+                    while (!engine.isEnded && System.nanoTime() < deadline) {
+                        val description = engine.outputDescription
+                        if (description == null) {
+                            Thread.sleep(1)
+                            continue
+                        }
+                        val period = requireNotNull(Json.parseToJsonElement(description).jsonObject["period"]).jsonPrimitive.int
+                        val before = engine.framesPlayed
+                        val actual = engine.positionMs()
+                        val after = engine.framesPlayed
+                        if (before == after && before > period && !engine.isEnded) {
+                            val retained = ((before - period) * speed.toDouble()).toLong()
+                            // The pinned Android PCM has 37,718 retained frames:
+                            // 6,382 disappear from the 19,000-frame quiet region.
+                            // The retained front ends at frame 18,614; the fade-in
+                            // keeps the region's tail, so the source jumps there.
+                            val media = retained + if (retained >= GAP_OUTPUT_FRAME) SKIPPED_FRAMES else 0L
+                            val reference = media * 1_000 / RATE
+                            maximumError = maxOf(maximumError, abs(actual - reference))
+                            measurements++
+                            if (retained < GAP_OUTPUT_FRAME) beforeGap = true else afterGap = true
+                        }
+                        Thread.sleep(1)
+                    }
+                    println("MD0 gap clock: speed=$speed samples=$measurements maxErrorMs=$maximumError")
+                    assertTrue(engine.isEnded, "gap corpus never ended")
+                    assertTrue(measurements >= 5 && beforeGap && afterGap, "missing live samples around the skipped gap")
+                    assertTrue(maximumError <= MAX_ERROR_MS, "${speed}x: gap clock error=$maximumError ms")
+                }
+            }
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
     private fun mediaDir(): Path = Path.of(requireNotNull(System.getProperty(MODULE_DIR)), "src/test/resources/media")
 
     private fun ffmpegDir(): Path? {
@@ -86,6 +142,8 @@ class EngineClockTest {
         const val MODULE_DIR = "neutrodyne.moduleDir"
         const val ROOT_DIR = "neutrodyne.rootDir"
         const val RATE = 44_100
+        const val GAP_OUTPUT_FRAME = 18_614L
+        const val SKIPPED_FRAMES = 6_382L
         const val ITEM = "mp3_silence_gaps_3s.mp3"
 
         // 133632 decoded samples at 44100 Hz per corpus.json.
