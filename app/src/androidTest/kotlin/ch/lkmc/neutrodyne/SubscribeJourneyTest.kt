@@ -117,7 +117,8 @@ class SubscribeJourneyTest {
                 server.start()
                 val url = server.url("/feed.xml").toString()
                 // 03 note 2026-11-02: a directory-named feed URL is a discovered destination and
-                // may never be loopback — Apple's hit names a fake public host the replay answers.
+                // may never be loopback; Apple's hit names a reserved public address the replay
+                // answers without DNS or a connection, including under the DNS preflight guard.
                 val feedUrl = if (entry == Entry.APPLE) APPLE_FEED_URL else url
                 val lookup =
                     instrumentation.context.assets
@@ -306,7 +307,9 @@ class SubscribeJourneyTest {
         const val PREVIEW_TIMEOUT_MS = 20_000L
         const val SUBSCRIBE_TIMEOUT_MS = 20_000L
         const val SHOWN_TEXTS = 12
-        const val APPLE_FEED_HOST = "feeds.example"
+
+        // TEST-NET-1 (RFC 5737): replayed below the preflight, never sent to a real peer.
+        const val APPLE_FEED_HOST = "192.0.2.1"
         const val APPLE_FEED_URL = "https://$APPLE_FEED_HOST/feed.xml"
     }
 }
