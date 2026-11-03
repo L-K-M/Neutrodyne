@@ -1981,7 +1981,7 @@ Owner procedure, still open on each real OS:
    it is an owner-local instrument and is never uploaded or distributed.
 5. While playing, unplug the active jack and USB device, then repeat with
    Bluetooth disconnection. Look for `REMOVED`, output pause and a
-   `saved-to-fake-store` record. Change only the default device separately:
+   `fake-store-position` record. Change only the default device separately:
    that must continue playing. Record Linux's actual sink-removal behavior;
    automatic rerouting there is an accepted limitation. Windows monitors
    the multimedia default endpoint; a different actual miniaudio endpoint
@@ -1998,6 +1998,13 @@ Owner procedure, still open on each real OS:
    by the CI suites. If an OS session cannot be created, capture the exact
    error; the in-app controls are the documented degraded mode, and AC4
    remains open. libmpv does not resolve an OS-session or suspend failure.
+
+Diagnostic wording note (2026-11-01): `fake-store-position` reports the store's
+current value after a system event. It also appears after resume/default
+changes, which intentionally do not save; it asserts no new write. Existing
+`Md0SafetyTest` cases verify that policy. A log-label assertion would only
+mirror wording, and an actual OS-event log reproduction remains part of the
+owner checks above.
 
 Clock lifetime note (2026-11-01): the callback publishes two counters into
 aligned caller-owned storage. `NdOutput` pins it while the device can write;

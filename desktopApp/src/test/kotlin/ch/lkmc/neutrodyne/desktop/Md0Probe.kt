@@ -130,7 +130,7 @@ object Md0Probe {
                                     session.systemEvents.collect { event ->
                                         log("system-event", event.toString())
                                         safety.accept(event.kind)
-                                        log("saved-to-fake-store", "position=${store.positions.value[1]?.positionMs}")
+                                        log("fake-store-position", "position=${store.positions.value[1]?.positionMs}")
                                     }
                                 } else {
                                     requireNotNull(power).events.collect { event ->
@@ -142,7 +142,7 @@ object Md0Probe {
                                                 NativeSessionEventKind.RESUME
                                             },
                                         )
-                                        log("saved-to-fake-store", "position=${store.positions.value[1]?.positionMs}")
+                                        log("fake-store-position", "position=${store.positions.value[1]?.positionMs}")
                                     }
                                 }
                             }
