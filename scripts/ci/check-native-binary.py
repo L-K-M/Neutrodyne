@@ -28,13 +28,14 @@ def main():
     layout = json.loads((ffmpeg / "ffmpeg-layout.json").read_text())
     expected = {f"lib{name}.so.{major}" for name, major in layout["libraries"].items()}
     candidates = list((ffmpeg / ("bin" if target.startswith("windows") else "lib")).iterdir())
+    candidates += list((base / "ndmedia" / target).iterdir())
     binaries = sorted({p.resolve() for p in candidates if p.is_file() and (
         p.name.endswith((".dll", ".dylib", ".so")) or re.search(r"\.so\.[0-9.]+$", p.name)
     )})
     problems = []
     records = []
-    if len(binaries) != 4:
-        problems.append(f"expected four FFmpeg libraries, found {len(binaries)}")
+    if len(binaries) != 5:
+        problems.append(f"expected four FFmpeg libraries and ndmedia, found {len(binaries)}")
     for file in binaries:
         imports = []
         if target.startswith("linux"):
