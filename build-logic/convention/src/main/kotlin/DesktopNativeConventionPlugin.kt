@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.tasks.Exec
 import org.gradle.kotlin.dsl.register
 
 /**
@@ -34,6 +35,17 @@ class DesktopNativeConventionPlugin : Plugin<Project> {
                     // rebuilds, which the Exec task's own inputs would not notice.
                     inputs.files("ffmpeg")
                 }
+
+            val ndmediaOutputDir = layout.buildDirectory.dir("ndmedia/$nativeTarget")
+            tasks.register<Exec>("buildNdmedia") {
+                group = "build"
+                description =
+                    "Build libndmedia (miniaudio device + SPSC ring) for $nativeTarget (11 ndmedia interface)."
+                workingDir = layout.projectDirectory.asFile
+                commandLine(bashExecutable(), "ndmedia/build.sh", nativeTarget)
+                inputs.files("ndmedia", "native-components.lock")
+                outputs.dir(ndmediaOutputDir)
+            }
 
             tasks.register<CheckNativeLicencesTask>("checkNativeLicences") {
                 group = "verification"
