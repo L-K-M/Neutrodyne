@@ -52,11 +52,29 @@ def main():
             if file.name.startswith("libav") or file.name.startswith("libswresample"):
                 if "$ORIGIN" not in dynamic:
                     problems.append(f"{file.name}: missing $ORIGIN search path")
-            if file.name == "libndmedia.so":
-                symbols = run("nm", "-a", str(file))
-                helpers = sorted(set(re.findall(r"\b__aarch64_(?:cas|swp|ldadd|ldclr|ldeor|ldset)[A-Za-z0-9_]*", symbols)))
+            # Inspect FFmpeg before install strips local compiler-runtime symbols.
+            # The delivered ELF alone cannot establish absence of copied helpers.
+            symbol_file = file
+            if "ndmedia" not in file.name:
+                component = file.name.split(".so")[0]
+                source = base / "ffmpeg-cache" / f"ffmpeg-{layout['ffmpegVersion']}" / component
+                unstripped = {p.resolve() for p in source.glob(f"{component}.so*") if p.is_file()}
+                if len(unstripped) != 1:
+                    problems.append(f"{file.name}: missing unique unstripped compiler-runtime audit input")
+                    symbol_file = None
+                else:
+                    symbol_file = unstripped.pop()
+            if symbol_file is not None:
+                symbols = run("nm", "-a", str(symbol_file))
+                if not symbols.strip():
+                    problems.append(f"{file.name}: no symbols for compiler-runtime audit")
+                helpers = sorted(set(re.findall(
+                    r"\b(?:__aarch64_(?:cas|swp|ldadd|ldclr|ldeor|ldset)[A-Za-z0-9_]*|"
+                    r"__do_global_dtors_aux|frame_dummy|crtstuff\.c|"
+                    r"__(?:u?div|u?mod|multi|mulv)(?:di|ti)3)\b", symbols,
+                )))
                 if helpers:
-                    problems.append(f"{file.name}: linked GCC out-of-line atomic helpers: {helpers}")
+                    problems.append(f"{file.name}: copied GCC runtime code: {helpers}")
         elif target.startswith("windows"):
             # dumpbin is supplied by the same MSVC environment used for the build.
             imports = re.findall(r"(?im)^\s*([a-z0-9_.-]+\.dll)\s*$", run("dumpbin", "/DEPENDENTS", str(file)))
