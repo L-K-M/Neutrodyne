@@ -32,9 +32,6 @@
 #define MA_NO_ENGINE
 #include "miniaudio.h"
 
-_Static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_LONG_LOCK_FREE == 2 && ATOMIC_LLONG_LOCK_FREE == 2,
-               "the audio callback requires always-lock-free integer atomics");
-
 #define ND_DEFAULT_CHANNELS 2
 #define ND_DEFAULT_RING_MS 200
 #define ND_RAMP_MS 5
@@ -82,6 +79,10 @@ ND_API int nd_out_attach_clock(nd_out *o, int64_t *counters) {
     o->clock_mirror = (atomic_llong *)counters;
     atomic_init(&o->clock_mirror[0], 0);
     atomic_init(&o->clock_mirror[1], 0);
+    if (!atomic_is_lock_free(&o->clock_mirror[0]) || !atomic_is_lock_free(&o->clock_mirror[1])) {
+        o->clock_mirror = NULL;
+        return ND_E_ARG;
+    }
     nd_publish_clock(o);
     return 0;
 }
@@ -273,6 +274,14 @@ ND_API int nd_out_open(const nd_out_config *cfg, nd_out **out) {
     atomic_init(&o->stopping, 0);
     atomic_init(&o->stopped, 0);
     atomic_init(&o->ramp_pos, o->ramp_frames); /* no ramp before first start */
+    /* Test the actual allocated objects, including their ABI alignment. MSVC's
+       macro classification does not establish this per-object property. */
+    if (!atomic_is_lock_free(&o->r) || !atomic_is_lock_free(&o->w) || !atomic_is_lock_free(&o->frames_played) ||
+        !atomic_is_lock_free(&o->underrun_frames) || !atomic_is_lock_free(&o->started) ||
+        !atomic_is_lock_free(&o->stopping) || !atomic_is_lock_free(&o->stopped) || !atomic_is_lock_free(&o->ramp_pos)) {
+        nd_out_close(o);
+        return ND_E_BACKEND;
+    }
 
     *out = o;
     return 0;
