@@ -138,7 +138,9 @@ class FfDecoder
                 if (result < 0) {
                     if (result == layout.intConstant("AVERROR_EAGAIN") ||
                         result == layout.intConstant("AVERROR_EOF")
-                    ) return null
+                    ) {
+                        return null
+                    }
                     error("decoding failed: ${library.errorString(result)}")
                 }
                 // A resampler may buffer a frame without emitting PCM. Keep

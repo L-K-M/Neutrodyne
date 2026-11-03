@@ -57,25 +57,26 @@ class FfmpegCorpusTest {
 
         for (entry in manifest.files) {
             val bytes = corpusFile(entry.file).readBytes()
-            FfmpegPipeline.open(
-                MemoryByteSource(bytes),
-                hostFfmpegDirectory(),
-            ).use { pipeline ->
-                val blocks = pipeline.decodeAll()
-                val decoded = blocks.sumOf { it.samples.size.toLong() / it.channels }
-                measurements +=
-                    Measurement(
-                        file = entry.file,
-                        expectedSamples = entry.expectedSamples,
-                        decodedSamples = decoded,
-                        rawSamples = pipeline.rawDecodedSamples,
-                        container = pipeline.demuxer.containerName,
-                        chapters = pipeline.demuxer.chapters,
-                        expectedChapters = entry.chapters,
-                        seekErrorMs = seekError(pipeline, entry),
-                        durationMs = pipeline.demuxer.durationMs,
-                    )
-            }
+            FfmpegPipeline
+                .open(
+                    MemoryByteSource(bytes),
+                    hostFfmpegDirectory(),
+                ).use { pipeline ->
+                    val blocks = pipeline.decodeAll()
+                    val decoded = blocks.sumOf { it.samples.size.toLong() / it.channels }
+                    measurements +=
+                        Measurement(
+                            file = entry.file,
+                            expectedSamples = entry.expectedSamples,
+                            decodedSamples = decoded,
+                            rawSamples = pipeline.rawDecodedSamples,
+                            container = pipeline.demuxer.containerName,
+                            chapters = pipeline.demuxer.chapters,
+                            expectedChapters = entry.chapters,
+                            seekErrorMs = seekError(pipeline, entry),
+                            durationMs = pipeline.demuxer.durationMs,
+                        )
+                }
         }
 
         measurements.forEach { println("MD0 corpus: ${it.describe()}") }
@@ -108,57 +109,60 @@ class FfmpegCorpusTest {
     fun `seeks at the start middle and near the end produce timestamped audio`() {
         for (entry in readManifest().files) {
             val duration = entry.expectedSamples * 1000 / entry.sampleRate
-            FfmpegPipeline.open(
-                MemoryByteSource(corpusFile(entry.file).readBytes()),
-                hostFfmpegDirectory(),
-            ).use { pipeline ->
-                for (target in listOf(0L, duration / 2, (duration - 100).coerceAtLeast(0))) {
-                    val actual = pipeline.seekAndDecode(target)
-                    assertTrue(
-                        "${entry.file}: seek $target returned $actual",
-                        abs(actual - target) <= SEEK_TOLERANCE_MS,
-                    )
+            FfmpegPipeline
+                .open(
+                    MemoryByteSource(corpusFile(entry.file).readBytes()),
+                    hostFfmpegDirectory(),
+                ).use { pipeline ->
+                    for (target in listOf(0L, duration / 2, (duration - 100).coerceAtLeast(0))) {
+                        val actual = pipeline.seekAndDecode(target)
+                        assertTrue(
+                            "${entry.file}: seek $target returned $actual",
+                            abs(actual - target) <= SEEK_TOLERANCE_MS,
+                        )
+                    }
                 }
-            }
         }
     }
 
     @Test
     fun `seeks between frame boundaries stay within the accuracy budget`() {
         for (entry in readManifest().files) {
-            FfmpegPipeline.open(
-                MemoryByteSource(corpusFile(entry.file).readBytes()),
-                hostFfmpegDirectory(),
-            ).use { pipeline ->
-                for (target in listOf(37L, 113L, 257L, 809L)) {
-                    val actual = pipeline.seekAndDecode(target)
-                    assertTrue(
-                        "${entry.file}: seek $target returned $actual",
-                        abs(actual - target) <= SEEK_TOLERANCE_MS,
-                    )
+            FfmpegPipeline
+                .open(
+                    MemoryByteSource(corpusFile(entry.file).readBytes()),
+                    hostFfmpegDirectory(),
+                ).use { pipeline ->
+                    for (target in listOf(37L, 113L, 257L, 809L)) {
+                        val actual = pipeline.seekAndDecode(target)
+                        assertTrue(
+                            "${entry.file}: seek $target returned $actual",
+                            abs(actual - target) <= SEEK_TOLERANCE_MS,
+                        )
+                    }
                 }
-            }
         }
     }
 
     @Test
     fun `seeking to zero applies container priming again`() {
         for (entry in readManifest().files) {
-            FfmpegPipeline.open(
-                MemoryByteSource(corpusFile(entry.file).readBytes()),
-                hostFfmpegDirectory(),
-            ).use { pipeline ->
-                pipeline.decodeAll()
-                pipeline.demuxer.seekTo(0)
-                pipeline.decoder.flushBuffers()
-                pipeline.decoder.discardPendingSamples()
-                val decoded = pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels }
-                assertEquals(
-                    "${entry.file}: seek-to-zero changed the decoded sample count",
-                    entry.expectedSamples,
-                    decoded,
-                )
-            }
+            FfmpegPipeline
+                .open(
+                    MemoryByteSource(corpusFile(entry.file).readBytes()),
+                    hostFfmpegDirectory(),
+                ).use { pipeline ->
+                    pipeline.decodeAll()
+                    pipeline.demuxer.seekTo(0)
+                    pipeline.decoder.flushBuffers()
+                    pipeline.decoder.discardPendingSamples()
+                    val decoded = pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels }
+                    assertEquals(
+                        "${entry.file}: seek-to-zero changed the decoded sample count",
+                        entry.expectedSamples,
+                        decoded,
+                    )
+                }
         }
     }
 
@@ -183,15 +187,17 @@ class FfmpegCorpusTest {
     @Test
     fun `partial priming trims complete interleaved frames and their timestamp`() {
         val bytes = corpusFile("wav_2s.wav").readBytes()
+
         fun firstFrame(priming: Int): AudioFrame =
-            FfmpegPipeline.open(
-                MemoryByteSource(bytes),
-                hostFfmpegDirectory(),
-            ).use { pipeline ->
-                val packet = requireNotNull(pipeline.demuxer.readPacket()).copy(primingSamples = priming)
-                assertTrue(pipeline.decoder.send(packet))
-                requireNotNull(pipeline.decoder.receive())
-            }
+            FfmpegPipeline
+                .open(
+                    MemoryByteSource(bytes),
+                    hostFfmpegDirectory(),
+                ).use { pipeline ->
+                    val packet = requireNotNull(pipeline.demuxer.readPacket()).copy(primingSamples = priming)
+                    assertTrue(pipeline.decoder.send(packet))
+                    requireNotNull(pipeline.decoder.receive())
+                }
         val baseline = firstFrame(0)
         val trimmed = firstFrame(1)
         assertPcm(
@@ -207,33 +213,38 @@ class FfmpegCorpusTest {
     @Test
     fun `a corrupt packet reports a decode failure instead of being skipped`() {
         val bytes = corpusFile("flac_2s.flac").readBytes()
-        FfmpegPipeline.open(
-            MemoryByteSource(bytes),
-            hostFfmpegDirectory(),
-        ).use { pipeline ->
-            val packet = requireNotNull(pipeline.demuxer.readPacket())
-            packet.data.reinterpret(packet.size.toLong()).fill(0)
-            val failed = runCatching {
-                if (pipeline.decoder.send(packet)) pipeline.decoder.receive()
-                Unit
-            }.isFailure
-            assertTrue("a corrupt FLAC packet was silently discarded", failed)
-        }
+        FfmpegPipeline
+            .open(
+                MemoryByteSource(bytes),
+                hostFfmpegDirectory(),
+            ).use { pipeline ->
+                val packet = requireNotNull(pipeline.demuxer.readPacket())
+                packet.data.reinterpret(packet.size.toLong()).fill(0)
+                val failed =
+                    runCatching {
+                        if (pipeline.decoder.send(packet)) pipeline.decoder.receive()
+                        Unit
+                    }.isFailure
+                assertTrue("a corrupt FLAC packet was silently discarded", failed)
+            }
     }
 
     @Test
     fun `failed opens do not poison a subsequent valid pipeline`() {
         repeat(10) {
-            assertTrue(runCatching {
-                FfmpegPipeline.open(MemoryByteSource(ByteArray(32)), hostFfmpegDirectory()).close()
-            }.isFailure)
+            assertTrue(
+                runCatching {
+                    FfmpegPipeline.open(MemoryByteSource(ByteArray(32)), hostFfmpegDirectory()).close()
+                }.isFailure,
+            )
         }
-        FfmpegPipeline.open(
-            MemoryByteSource(corpusFile("wav_2s.wav").readBytes()),
-            hostFfmpegDirectory(),
-        ).use { pipeline ->
-            assertEquals(88_200L, pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels })
-        }
+        FfmpegPipeline
+            .open(
+                MemoryByteSource(corpusFile("wav_2s.wav").readBytes()),
+                hostFfmpegDirectory(),
+            ).use { pipeline ->
+                assertEquals(88_200L, pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels })
+            }
     }
 
     @Test
@@ -242,16 +253,17 @@ class FfmpegCorpusTest {
         val trimmed = manifest.files.single { it.trimRule == AAC_PRIMING_RULE }
 
         val bytes = corpusFile(trimmed.file).readBytes()
-        FfmpegPipeline.open(
-            MemoryByteSource(bytes),
-            hostFfmpegDirectory(),
-        ).use { pipeline ->
-            val decoded = pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels }
-            assertEquals(trimmed.expectedSamples, decoded)
-            // The container reports no trimming of its own, so the 1,024-sample
-            // priming came from the demuxer's rule and was applied exactly once.
-            assertEquals(requireNotNull(trimmed.decodedSamples), pipeline.rawDecodedSamples)
-        }
+        FfmpegPipeline
+            .open(
+                MemoryByteSource(bytes),
+                hostFfmpegDirectory(),
+            ).use { pipeline ->
+                val decoded = pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels }
+                assertEquals(trimmed.expectedSamples, decoded)
+                // The container reports no trimming of its own, so the 1,024-sample
+                // priming came from the demuxer's rule and was applied exactly once.
+                assertEquals(requireNotNull(trimmed.decodedSamples), pipeline.rawDecodedSamples)
+            }
     }
 
     @Test

@@ -93,7 +93,10 @@ object Md0Probe {
                                     paused = !paused
                                     if (paused) saver.onPause(engine.positionMs(), null)
                                 }
-                                else -> log("transport-only", "received $command; single-item spike has no queue controller")
+                                else -> log(
+                                    "transport-only",
+                                    "received $command; single-item spike has no queue controller",
+                                )
                             }
                         }
                     }
@@ -108,7 +111,13 @@ object Md0Probe {
                         } else {
                             requireNotNull(power).events.collect { event ->
                                 log("system-event", event.toString())
-                                safety.accept(if (event == PowerEvent.Suspending) NativeSessionEventKind.SUSPEND else NativeSessionEventKind.RESUME)
+                                safety.accept(
+                                    if (event == PowerEvent.Suspending) {
+                                        NativeSessionEventKind.SUSPEND
+                                    } else {
+                                        NativeSessionEventKind.RESUME
+                                    },
+                                )
                                 log("saved-to-fake-store", "position=${store.positions.value[1]?.positionMs}")
                             }
                         }
@@ -125,17 +134,28 @@ object Md0Probe {
                             engine.awaitEnded(0)
                             val position = engine.positionMs()
                             val snapshot = testNowPlaying().let { item ->
-                                item.copy(title = file.name, isPlaying = !paused, position = item.position.copy(positionMs = position, durationMs = engine.durationMs, speed = speed))
+                                item.copy(
+                                    title = file.name,
+                                    isPlaying = !paused,
+                                    position = item.position.copy(
+                                        positionMs = position,
+                                        durationMs = engine.durationMs,
+                                        speed = speed,
+                                    ),
+                                )
                             }
                             session.publish(snapshot, 10_000, 30_000, listOf(0.5f, 1f, 2f, 3f))
                             saver.onTick(position, null, !paused)
-                            val cpu = ProcessHandle.current().info().totalCpuDuration().orElse(java.time.Duration.ZERO).toNanos()
+                            val cpu = ProcessHandle.current().info().totalCpuDuration()
+                                .orElse(java.time.Duration.ZERO).toNanos()
                             log(
                                 "sample",
                                 "elapsedMs=$elapsedMs positionMs=$position underrunFrames=${engine.underrunFrames} " +
                                     "cpuNs=$cpu paused=$paused device=${engine.outputDescription}",
                             )
-                            if (session is NativeSystemMediaSession) check(session.failure.value == null) { session.failure.value.orEmpty() }
+                            if (session is NativeSystemMediaSession) {
+                                check(session.failure.value == null) { session.failure.value.orEmpty() }
+                            }
                             if (elapsedMs >= seconds * 1_000) {
                                 completed = true
                                 break
@@ -174,7 +194,9 @@ internal class Md0SafetyCoordinator(
             NativeSessionEventKind.SUSPEND, NativeSessionEventKind.REMOVED -> {
                 pause()
                 val result = saver.onPause(position(), null)
-                if (result is PositionSaveResult.Failed) throw IllegalStateException("event position save failed", result.cause)
+                if (result is PositionSaveResult.Failed) {
+                    throw IllegalStateException("event position save failed", result.cause)
+                }
             }
             NativeSessionEventKind.RESUME, NativeSessionEventKind.DEFAULT_CHANGED -> Unit
             else -> error("not a power or route event: $event")

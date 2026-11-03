@@ -235,7 +235,10 @@ class FfAudioEngine(
                     val playing = synchronized(control) { wantPlaying }
                     val now = System.nanoTime()
                     val played = out.framesPlayed
-                    if (!playing || played != progress) { progress = played; lastProgress = now }
+                    if (!playing || played != progress) {
+                        progress = played
+                        lastProgress = now
+                    }
                     check(now - lastProgress < DRAIN_WAIT_NS) { "device stopped consuming queued PCM" }
                     Thread.sleep(RING_POLL_MS)
                 }
