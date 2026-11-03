@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 ND_API int nd_session_open(void);
+/* Strings are borrowed UTF-8. Windows rejects invalid text or fields above
+   4095 UTF-16 code units; no caller buffer is retained after this call. */
 ND_API int nd_session_publish(const char *title, const char *artist, int64_t duration_ms, int64_t position_ms,
                               float rate, int playing);
 ND_API int nd_session_poll(int64_t *value);

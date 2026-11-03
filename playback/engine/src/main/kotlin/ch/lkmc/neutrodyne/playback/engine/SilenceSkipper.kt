@@ -41,7 +41,11 @@ internal class SilenceSkipper(
     private var maybeSilenceBufferContentsSize = 0
     private var ended = false
     private var inputEnded = false
-    private data class Output(val pcm: ByteBuffer, val sourceFrame: Long)
+
+    private data class Output(
+        val pcm: ByteBuffer,
+        val sourceFrame: Long,
+    )
 
     private val outputQueue = ArrayDeque<Output>()
     private var sourceFramesConsumed = 0L
@@ -201,8 +205,9 @@ internal class SilenceSkipper(
             }
             // Fade-in retains the source tail; muted/fade-out blocks keep its
             // front. A cumulative skip total would attach future skips too early.
-            val sourceFrame = sourceFramesConsumed +
-                if (rampType == FADE_IN) (bytesConsumed - bytesToOutput) / bytesPerFrame else 0
+            val sourceFrame =
+                sourceFramesConsumed +
+                    if (rampType == FADE_IN) (bytesConsumed - bytesToOutput) / bytesPerFrame else 0
             outputSilence(bytesToOutput, rampType, sourceFrame)
             sourceFramesConsumed += bytesConsumed / bytesPerFrame
             check(bytesConsumed % bytesPerFrame == 0)

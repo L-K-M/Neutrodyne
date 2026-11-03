@@ -2,17 +2,12 @@
 // WinRT ABI declarations come from the Windows SDK. No C++/WinRT or WRL
 // implementation is embedded: the COM delegates and ownership below are ours.
 #include "session.h"
-#include <array>
-#include <atomic>
-#include <future>
 #include <mmdeviceapi.h>
-#include <mutex>
 #include <roapi.h>
 #include <shobjidl.h>
-#include <stdexcept>
-#include <string>
+#include <string.h>
 #include <systemmediatransportcontrolsinterop.h>
-#include <thread>
+#include <wchar.h>
 #include <windows.h>
 #include <windows.media.h>
 
@@ -27,32 +22,65 @@ struct Event {
     int kind;
     int64_t value;
 };
-std::mutex mutex;
-std::array<Event, 64> events;
+// Win32 primitives keep the flat shim independent of the C++ runtime DLLs.
+class AtomicWord {
+    mutable volatile LONG value;
+
+  public:
+    AtomicWord(LONG initial = 0) noexcept : value(initial) {}
+    LONG load() const noexcept { return InterlockedCompareExchange(&value, 0, 0); }
+    operator LONG() const noexcept { return load(); }
+    void operator=(LONG next) noexcept { InterlockedExchange(&value, next); }
+    LONG exchange(LONG next) noexcept { return InterlockedExchange(&value, next); }
+    LONG operator++() noexcept { return InterlockedIncrement(&value); }
+    LONG operator--() noexcept { return InterlockedDecrement(&value); }
+};
+SRWLOCK mutex = SRWLOCK_INIT;
+SRWLOCK lifecycle = SRWLOCK_INIT;
+class Guard {
+    SRWLOCK *held;
+
+  public:
+    Guard(SRWLOCK *lock = &mutex) noexcept : held(lock) { AcquireSRWLockExclusive(held); }
+    ~Guard() { ReleaseSRWLockExclusive(held); }
+    Guard(const Guard &) = delete;
+    Guard &operator=(const Guard &) = delete;
+};
+constexpr size_t EVENT_CAPACITY = 64;
+constexpr size_t TEXT_CAPACITY = 4096;
+constexpr size_t ENDPOINT_CAPACITY = 1024;
+Event events[EVENT_CAPACITY];
 size_t head = 0, count = 0;
-std::atomic<bool> active{false};
-std::atomic<HRESULT> failure{S_OK};
-std::thread worker;
+AtomicWord active{false};
+AtomicWord failure{S_OK};
+AtomicWord readyResult{S_OK};
+HANDLE worker = nullptr, readyEvent = nullptr;
 HWND window = nullptr;
-std::wstring title, artist, endpoint;
+wchar_t title[TEXT_CAPACITY]{}, artist[TEXT_CAPACITY]{}, endpoint[ENDPOINT_CAPACITY]{};
+
+HRESULT copyEndpoint(LPCWSTR id) {
+    size_t length = id ? wcslen(id) : 0;
+    if (length >= ENDPOINT_CAPACITY)
+        return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    if (length)
+        memcpy(endpoint, id, length * sizeof(wchar_t));
+    endpoint[length] = 0;
+    return S_OK;
+}
 bool playing = false;
 int64_t durationMs = 0, positionMs = 0;
 float playbackRate = 1;
 constexpr UINT publishMessage = WM_APP + 1;
 
 void enqueue(int kind, int64_t value = 0) noexcept {
-    try {
-        std::lock_guard<std::mutex> lock(mutex);
-        if (!active)
-            return;
-        if (count == events.size()) {
-            failure = E_OUTOFMEMORY;
-            return;
-        }
-        events[(head + count++) % events.size()] = {kind, value};
-    } catch (...) {
-        failure = E_FAIL;
+    Guard guard;
+    if (!active)
+        return;
+    if (count == EVENT_CAPACITY) {
+        failure = E_OUTOFMEMORY;
+        return;
     }
+    events[(head + count++) % EVENT_CAPACITY] = {kind, value};
 }
 
 template <class T> void release(T *&value) {
@@ -63,7 +91,7 @@ template <class T> void release(T *&value) {
 }
 
 class ButtonHandler final : public Buttons {
-    std::atomic<ULONG> references{1};
+    AtomicWord references{1};
 
   public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **result) override {
@@ -77,12 +105,7 @@ class ButtonHandler final : public Buttons {
         return S_OK;
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return ++references; }
-    ULONG STDMETHODCALLTYPE Release() override {
-        auto n = --references;
-        if (!n)
-            delete this;
-        return n;
-    }
+    ULONG STDMETHODCALLTYPE Release() override { return --references; }
     HRESULT STDMETHODCALLTYPE Invoke(ISystemMediaTransportControls *,
                                      ISystemMediaTransportControlsButtonPressedEventArgs *args) override {
         SystemMediaTransportControlsButton button;
@@ -110,7 +133,7 @@ class ButtonHandler final : public Buttons {
 };
 
 class PositionHandler final : public Positions {
-    std::atomic<ULONG> references{1};
+    AtomicWord references{1};
 
   public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **result) override {
@@ -124,12 +147,7 @@ class PositionHandler final : public Positions {
         return S_OK;
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return ++references; }
-    ULONG STDMETHODCALLTYPE Release() override {
-        auto n = --references;
-        if (!n)
-            delete this;
-        return n;
-    }
+    ULONG STDMETHODCALLTYPE Release() override { return --references; }
     HRESULT STDMETHODCALLTYPE Invoke(ISystemMediaTransportControls *,
                                      IPlaybackPositionChangeRequestedEventArgs *args) override {
         TimeSpan value;
@@ -141,10 +159,10 @@ class PositionHandler final : public Positions {
 };
 
 class Routes final : public IMMNotificationClient {
-    std::atomic<ULONG> references{1};
+    AtomicWord references{1};
     bool current(LPCWSTR id) {
-        std::lock_guard<std::mutex> lock(mutex);
-        return id && endpoint == id;
+        Guard guard;
+        return id && wcscmp(endpoint, id) == 0;
     }
 
   public:
@@ -159,12 +177,7 @@ class Routes final : public IMMNotificationClient {
         return S_OK;
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return ++references; }
-    ULONG STDMETHODCALLTYPE Release() override {
-        auto n = --references;
-        if (!n)
-            delete this;
-        return n;
-    }
+    ULONG STDMETHODCALLTYPE Release() override { return --references; }
     HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR id, DWORD state) override {
         if (state != DEVICE_STATE_ACTIVE && current(id))
             enqueue(ND_SESSION_REMOVED);
@@ -181,15 +194,20 @@ class Routes final : public IMMNotificationClient {
         if (flow != eRender || role != eMultimedia)
             return S_OK;
         enqueue(ND_SESSION_DEFAULT_CHANGED);
-        try {
-            std::lock_guard<std::mutex> lock(mutex);
-            endpoint = id ? id : L"";
-        } catch (...) {
-            failure = E_FAIL;
-        }
+        Guard guard;
+        HRESULT result = copyEndpoint(id);
+        if (FAILED(result))
+            failure = result;
         return S_OK;
     }
 };
+
+// Each delegate retains a permanent module-owned reference. Unregistering
+// releases OS ownership; a late native callback still cannot reach freed code
+// or enter the JVM. The worker takes and releases an additional local reference.
+ButtonHandler buttonHandler;
+PositionHandler positionHandler;
+Routes routeHandler;
 
 LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_CLOSE) {
@@ -210,12 +228,12 @@ LRESULT CALLBACK procedure(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     return DefWindowProcW(hwnd, message, w, l);
 }
 
-HRESULT text(const std::wstring &value, HSTRING *out) {
-    return WindowsCreateString(value.data(), static_cast<UINT32>(value.size()), out);
+HRESULT text(const wchar_t *value, HSTRING *out) {
+    return WindowsCreateString(value, static_cast<UINT32>(wcslen(value)), out);
 }
 
 HRESULT publish(ISystemMediaTransportControls *controls, ISystemMediaTransportControls2 *controls2) {
-    std::lock_guard<std::mutex> lock(mutex);
+    Guard guard;
     ISystemMediaTransportControlsDisplayUpdater *updater = nullptr;
     IMusicDisplayProperties *music = nullptr;
     HSTRING t = nullptr, a = nullptr;
@@ -271,7 +289,8 @@ HRESULT publish(ISystemMediaTransportControls *controls, ISystemMediaTransportCo
     return result;
 }
 
-void run(std::promise<int> ready) noexcept {
+DWORD WINAPI run(void *) noexcept {
+    HWND ownedWindow = nullptr;
     ISystemMediaTransportControlsInterop *factory = nullptr;
     ISystemMediaTransportControls *controls = nullptr;
     ISystemMediaTransportControls2 *controls2 = nullptr;
@@ -297,10 +316,12 @@ void run(std::promise<int> ready) noexcept {
         result = HRESULT_FROM_WIN32(GetLastError());
     if (SUCCEEDED(result)) {
         // A hidden top-level window, not HWND_MESSAGE, receives power broadcasts.
-        window = CreateWindowW(cls.lpszClassName, L"Neutrodyne MD0", WS_OVERLAPPED, 0, 0, 0, 0, nullptr, nullptr,
-                               cls.hInstance, nullptr);
-        if (!window)
+        ownedWindow = CreateWindowW(cls.lpszClassName, L"Neutrodyne MD0", WS_OVERLAPPED, 0, 0, 0, 0, nullptr, nullptr,
+                                    cls.hInstance, nullptr);
+        if (!ownedWindow)
             result = HRESULT_FROM_WIN32(GetLastError());
+        Guard guard;
+        window = ownedWindow;
     }
     if (SUCCEEDED(result))
         result = text(L"Windows.Media.SystemMediaTransportControls", &className);
@@ -308,13 +329,14 @@ void run(std::promise<int> ready) noexcept {
         result = RoGetActivationFactory(className, __uuidof(ISystemMediaTransportControlsInterop),
                                         reinterpret_cast<void **>(&factory));
     if (SUCCEEDED(result))
-        result = factory->GetForWindow(window, __uuidof(ISystemMediaTransportControls),
+        result = factory->GetForWindow(ownedWindow, __uuidof(ISystemMediaTransportControls),
                                        reinterpret_cast<void **>(&controls));
     if (SUCCEEDED(result))
         result =
             controls->QueryInterface(__uuidof(ISystemMediaTransportControls2), reinterpret_cast<void **>(&controls2));
     if (SUCCEEDED(result)) {
-        positions = new PositionHandler();
+        positions = &positionHandler;
+        positions->AddRef();
         result = controls2->add_PlaybackPositionChangeRequested(positions, &positionToken);
         positionSubscribed = SUCCEEDED(result);
     }
@@ -329,7 +351,8 @@ void run(std::promise<int> ready) noexcept {
     if (SUCCEEDED(result))
         result = controls->put_IsPreviousEnabled(true);
     if (SUCCEEDED(result)) {
-        buttons = new ButtonHandler();
+        buttons = &buttonHandler;
+        buttons->AddRef();
         result = controls->add_ButtonPressed(buttons, &token);
         subscribed = SUCCEEDED(result);
     }
@@ -346,18 +369,22 @@ void run(std::promise<int> ready) noexcept {
         LPWSTR id = nullptr;
         result = device->GetId(&id);
         if (SUCCEEDED(result)) {
-            endpoint = id;
+            Guard guard;
+            result = copyEndpoint(id);
             CoTaskMemFree(id);
         }
     }
     if (SUCCEEDED(result)) {
-        routes = new Routes();
+        routes = &routeHandler;
+        routes->AddRef();
         result = devices->RegisterEndpointNotificationCallback(routes);
     }
-    ready.set_value(static_cast<int>(result));
+    readyResult = result;
+    SetEvent(readyEvent);
     if (SUCCEEDED(result)) {
         MSG message;
-        while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+        int fetched;
+        while ((fetched = GetMessageW(&message, nullptr, 0, 0)) > 0) {
             if (message.message == publishMessage)
                 failure = publish(controls, controls2);
             else {
@@ -365,6 +392,10 @@ void run(std::promise<int> ready) noexcept {
                 DispatchMessageW(&message);
             }
         }
+        if (fetched < 0)
+            failure = HRESULT_FROM_WIN32(GetLastError());
+        else if (active)
+            failure = E_ABORT;
     }
     active = false;
     if (routes && devices)
@@ -375,9 +406,12 @@ void run(std::promise<int> ready) noexcept {
         controls2->remove_PlaybackPositionChangeRequested(positionToken);
     if (controls)
         controls->put_IsEnabled(false);
-    if (window && IsWindow(window))
-        DestroyWindow(window);
-    window = nullptr;
+    {
+        Guard guard;
+        window = nullptr;
+    }
+    if (ownedWindow && IsWindow(ownedWindow))
+        DestroyWindow(ownedWindow);
     release(routes);
     release(device);
     release(devices);
@@ -389,78 +423,95 @@ void run(std::promise<int> ready) noexcept {
     WindowsDeleteString(className);
     if (initialized)
         RoUninitialize();
+    return 0;
 }
 
-std::wstring utf8(const char *value) {
-    if (!value)
-        return L"";
-    int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, nullptr, 0);
-    if (!length)
-        throw std::invalid_argument("invalid UTF-8");
-    std::wstring result(static_cast<size_t>(length), L'\0');
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, result.data(), length);
-    result.pop_back();
-    return result;
+HRESULT utf8(const char *value, wchar_t *buffer, int capacity) {
+    if (!value) {
+        buffer[0] = 0;
+        return S_OK;
+    }
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value, -1, buffer, capacity))
+        return HRESULT_FROM_WIN32(GetLastError());
+    return S_OK;
 }
 } // namespace
 
 extern "C" ND_API int nd_session_open(void) {
-    if (active.exchange(true))
+    Guard lifecycleGuard(&lifecycle);
+    if (worker || active.exchange(true))
         return ND_E_STATE;
-    try {
-        failure = S_OK;
-        head = count = 0;
-        std::promise<int> ready;
-        auto future = ready.get_future();
-        worker = std::thread(run, std::move(ready));
-        int result = future.get();
-        if (FAILED(result)) {
-            worker.join();
-            active = false;
-        }
-        return result;
-    } catch (...) {
+    failure = S_OK;
+    head = count = 0;
+    readyEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!readyEvent) {
         active = false;
-        return ND_E_DEVICE;
+        return HRESULT_FROM_WIN32(GetLastError());
     }
+    worker = CreateThread(nullptr, 0, run, nullptr, 0, nullptr);
+    if (!worker) {
+        HRESULT error = HRESULT_FROM_WIN32(GetLastError());
+        CloseHandle(readyEvent);
+        readyEvent = nullptr;
+        active = false;
+        return error;
+    }
+    WaitForSingleObject(readyEvent, INFINITE);
+    CloseHandle(readyEvent);
+    readyEvent = nullptr;
+    int result = static_cast<int>(readyResult.load());
+    if (FAILED(result)) {
+        WaitForSingleObject(worker, INFINITE);
+        CloseHandle(worker);
+        worker = nullptr;
+        active = false;
+    }
+    return result;
 }
 extern "C" ND_API int nd_session_publish(const char *t, const char *a, int64_t duration, int64_t position, float rate,
                                          int p) {
-    if (!active)
+    wchar_t nextTitle[TEXT_CAPACITY], nextArtist[TEXT_CAPACITY];
+    HRESULT result = utf8(t, nextTitle, TEXT_CAPACITY);
+    if (SUCCEEDED(result))
+        result = utf8(a, nextArtist, TEXT_CAPACITY);
+    if (FAILED(result))
+        return result;
+    Guard guard;
+    if (!active || !window)
         return ND_E_STATE;
-    try {
-        {
-            std::lock_guard<std::mutex> lock(mutex);
-            title = utf8(t);
-            artist = utf8(a);
-            playing = p != 0;
-            durationMs = duration;
-            positionMs = position;
-            playbackRate = rate;
-        }
-        return PostMessageW(window, publishMessage, 0, 0) ? 0 : ND_E_STATE;
-    } catch (...) {
-        return ND_E_ARG;
-    }
+    memcpy(title, nextTitle, (wcslen(nextTitle) + 1) * sizeof(wchar_t));
+    memcpy(artist, nextArtist, (wcslen(nextArtist) + 1) * sizeof(wchar_t));
+    playing = p != 0;
+    durationMs = duration;
+    positionMs = position;
+    playbackRate = rate;
+    return PostMessageW(window, publishMessage, 0, 0) ? 0 : ND_E_STATE;
 }
 extern "C" ND_API int nd_session_poll(int64_t *value) {
     if (!value)
         return ND_E_ARG;
     if (FAILED(failure))
         return static_cast<int>(failure.load());
-    std::lock_guard<std::mutex> lock(mutex);
+    Guard guard;
     if (!count)
         return 0;
     const auto event = events[head];
-    head = (head + 1) % events.size();
+    head = (head + 1) % EVENT_CAPACITY;
     --count;
     *value = event.value;
     return event.kind;
 }
 extern "C" ND_API void nd_session_close(void) {
-    active = false;
-    if (window)
-        PostMessageW(window, WM_CLOSE, 0, 0);
-    if (worker.joinable())
-        worker.join();
+    Guard lifecycleGuard(&lifecycle);
+    {
+        Guard guard;
+        active = false;
+        if (window)
+            PostMessageW(window, WM_CLOSE, 0, 0);
+    }
+    if (worker) {
+        WaitForSingleObject(worker, INFINITE);
+        CloseHandle(worker);
+        worker = nullptr;
+    }
 }

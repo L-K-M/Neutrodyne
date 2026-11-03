@@ -218,15 +218,21 @@ class FfAudioEngine(
                         }
                     }
                 }
-                fun queueSonic(input: ByteBuffer, sourceFrame: Long) {
+
+                fun queueSonic(
+                    input: ByteBuffer,
+                    sourceFrame: Long,
+                ) {
                     val frames = input.remaining() / (decoder.channels * Short.SIZE_BYTES)
                     if (frames == 0) return
-                    timeline.push(TimelineClock.Marker(
-                        (retainedInputFrames * deviceRate / (decoder.sampleRate * item.speed.toDouble())).toLong(),
-                        item.path.fileName.toString(),
-                        (firstPtsUs ?: 0L) + sourceFrame * MICROS_PER_SECOND / decoder.sampleRate,
-                        item.speed,
-                    ))
+                    timeline.push(
+                        TimelineClock.Marker(
+                            (retainedInputFrames * deviceRate / (decoder.sampleRate * item.speed.toDouble())).toLong(),
+                            item.path.fileName.toString(),
+                            (firstPtsUs ?: 0L) + sourceFrame * MICROS_PER_SECOND / decoder.sampleRate,
+                            item.speed,
+                        ),
+                    )
                     retainedInputFrames += frames
                     sonic.queueInput(input)
                     pumpSonic()

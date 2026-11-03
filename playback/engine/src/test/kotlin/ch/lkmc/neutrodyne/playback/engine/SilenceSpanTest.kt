@@ -17,6 +17,7 @@ class SilenceSpanTest {
         for (chunk in listOf(127, 1_024, 8_192)) {
             val skip = SilenceSkipper().apply { configure(RATE, CHANNELS) }
             var retained = 0
+
             fun drain() {
                 while (skip.hasOutput()) {
                     val out = ByteBuffer.allocate(256 * FRAME_BYTES).order(ByteOrder.nativeOrder())
