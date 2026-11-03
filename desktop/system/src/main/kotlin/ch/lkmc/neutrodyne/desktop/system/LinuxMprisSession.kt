@@ -147,6 +147,7 @@ class LinuxMprisSession private constructor(
     override fun getRate() = rate
 
     override fun setRate(rate: Double) {
+        require(rate.isFinite()) { "playback rate must be finite" }
         val clamped = rate.coerceIn(MIN_RATE, MAX_RATE)
         this.rate = clamped
         emit(RemoteCommand.SetRate(clamped.toFloat()))

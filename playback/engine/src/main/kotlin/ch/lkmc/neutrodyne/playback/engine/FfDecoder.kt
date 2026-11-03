@@ -122,30 +122,37 @@ class FfDecoder
             // the compressed data and every property FFmpeg carries — pts and
             // the skip-samples side data its decoders trim by — which copying
             // data bytes alone would silently drop.
-            if (library.refPacket(target, demuxer.currentPacket) < 0) return false
-            return library.sendPacket(context, target) >= 0
+            val referenced = library.refPacket(target, demuxer.currentPacket)
+            check(referenced >= 0) { "packet reference failed: ${library.errorString(referenced)}" }
+            val result = library.sendPacket(context, target)
+            if (result == layout.intConstant("AVERROR_EAGAIN")) return false
+            check(result >= 0) { "packet decoding failed: ${library.errorString(result)}" }
+            return true
         }
 
         override fun receive(): AudioFrame? {
             val frame = requireNotNull(frameSlot.dereference()) { "the frame was released" }
-            library.unrefFrame(frame)
-            val result = library.receiveFrame(context, frame)
-            if (result < 0) {
-                // AVERROR_EOF ends the drain after a flush; EAGAIN means the
-                // decoder wants another packet first.
-                if (result == layout.intConstant("AVERROR_EAGAIN") ||
-                    result == layout.intConstant("AVERROR_EOF")
-                ) {
-                    return null
+            while (true) {
+                library.unrefFrame(frame)
+                val result = library.receiveFrame(context, frame)
+                if (result < 0) {
+                    if (result == layout.intConstant("AVERROR_EAGAIN") ||
+                        result == layout.intConstant("AVERROR_EOF")
+                    ) return null
+                    error("decoding failed: ${library.errorString(result)}")
                 }
-                error("decoding failed: ${library.errorString(result)}")
+                // A resampler may buffer a frame without emitting PCM. Keep
+                // draining the decoder before declaring that it needs input.
+                frameToPcm(frame)?.let { return it }
             }
-            return frameToPcm(frame)
         }
 
         /** Sends a null packet so the decoder emits the frames it is still holding. */
         override fun flush() {
-            library.sendPacket(context, null)
+            val result = library.sendPacket(context, null)
+            check(result >= 0 || result == layout.intConstant("AVERROR_EOF")) {
+                "decoder drain failed: ${library.errorString(result)}"
+            }
         }
 
         /** Drops every buffered frame, as a seek requires (11 Demux and decode step 3). */

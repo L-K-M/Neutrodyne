@@ -31,7 +31,13 @@ class FfmpegPipeline
             val blocks = mutableListOf<AudioFrame>()
             while (true) {
                 val packet = demuxer.readPacket() ?: break
-                if (!decoder.send(packet)) continue
+                if (!decoder.send(packet)) {
+                    while (true) {
+                        val frame = decoder.receive() ?: break
+                        if (frame.samples.isNotEmpty()) blocks += frame
+                    }
+                    check(decoder.send(packet)) { "decoder remained blocked after draining" }
+                }
                 while (true) {
                     val frame = decoder.receive() ?: break
                     if (frame.samples.isNotEmpty()) blocks += frame
@@ -58,7 +64,7 @@ class FfmpegPipeline
             val targetUs = positionMs * MICROS_PER_MS
             while (true) {
                 val packet = demuxer.readPacket() ?: break
-                if (!decoder.send(packet)) continue
+                check(decoder.send(packet)) { "seek decoder backpressure after draining" }
                 while (true) {
                     val frame = decoder.receive() ?: break
                     if (frame.samples.isEmpty()) continue

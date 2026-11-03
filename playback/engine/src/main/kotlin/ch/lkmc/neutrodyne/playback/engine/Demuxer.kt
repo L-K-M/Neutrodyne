@@ -105,9 +105,9 @@ enum class AudioCodec {
 /** Decodes packets of one track into interleaved 16-bit PCM (11 Demux and decode step 5). */
 interface Decoder : AutoCloseable {
     /**
-     * Hand one packet to the decoder. Returns false when the decoder rejected it
-     * as undecodable (the engine drops the packet and counts consecutive
-     * failures, 11 Engine errors).
+     * Hand one packet to the decoder. False means backpressure: drain output
+     * and retry this same packet before reading another. Decode errors throw;
+     * this spike never silently reports a corrupt packet as successfully read.
      */
     fun send(packet: AudioPacket): Boolean
 
