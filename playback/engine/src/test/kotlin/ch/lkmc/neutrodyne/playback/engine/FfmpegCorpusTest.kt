@@ -169,7 +169,7 @@ class FfmpegCorpusTest {
             val samples = pipeline.decodeAll().flatMap { it.samples.asIterable() }.toShortArray()
             val frame = requireNotNull(pipeline.seekFrame(123))
             val firstFrame = (123L * frame.sampleRate + 999) / 1_000
-            kotlin.test.assertContentEquals(
+            assertPcm(
                 samples.copyOfRange(
                     (firstFrame * frame.channels).toInt(),
                     (firstFrame * frame.channels).toInt() + frame.samples.size,
@@ -194,7 +194,7 @@ class FfmpegCorpusTest {
             }
         val baseline = firstFrame(0)
         val trimmed = firstFrame(1)
-        kotlin.test.assertContentEquals(
+        assertPcm(
             baseline.samples.copyOfRange(baseline.channels, baseline.samples.size),
             trimmed.samples,
         )
@@ -304,6 +304,14 @@ class FfmpegCorpusTest {
             }
         }
         return null
+    }
+
+    private fun assertPcm(expected: ShortArray, actual: ShortArray) {
+        assertTrue(
+            "PCM mismatch: expected ${expected.size} samples, actual ${actual.size}; " +
+                "first expected=${expected.take(8)} actual=${actual.take(8)}",
+            expected.contentEquals(actual),
+        )
     }
 
     private fun corpusFile(name: String): Path = corpusDirectory().resolve(name)
