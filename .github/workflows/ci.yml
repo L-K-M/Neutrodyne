@@ -88,7 +88,8 @@ jobs:
           sudo apt-get install -y -qq clang-format-18
           clang-format-18 --dry-run --Werror playback/native/ffmpeg/ffoffsets.c \
             playback/native/ndmedia/*.c playback/native/ndmedia/*.h \
-            playback/native/ndmedia/*.cpp playback/native/ndmedia/*.m
+            playback/native/ndmedia/*.cpp playback/native/ndmedia/*.m \
+            playback/native/ndmedia/tests/*.c
       - name: KGP assertion (PLAN M0 AC3)
         # The root project's buildEnvironment: plugins load through the included build, so :app's lists none (01 S1)
         run: ./gradlew -q buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'

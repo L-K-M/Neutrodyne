@@ -1970,6 +1970,16 @@ test compares native/shared counts and reads the retained counter after close.
 Native source bundles now include the actual per-target build record, lock,
 verification key and build scripts, with missing or corrupt inputs rejected.
 
+Native boundary note (2026-11-01): the spike uses explicit host-compiler
+commands in `ndmedia/build.sh`, rather than adding CMake. Device names are
+escaped before JSON serialization; pure C boundary tests run with each host
+compiler and their executables stay outside the native output directory.
+A pre-fix automated OS-name injection was impractical without adding a
+platform-device test hook. The owner reproduction is to name an output device
+with a quote, backslash and non-ASCII text, then verify that `md0Probe` reports
+valid JSON and preserves the name. Real device-stop errors now propagate as
+`ND_E_DEVICE`; forced hardware-stop failure remains an owner measurement.
+
 The spike runs on `impl/md0-current`. The production graph still binds
 `DesktopUnavailablePlayback`; MD0 creates no tester build. Dispatch and
 nightly workflows select Windows x64, macOS arm64 and both Linux targets.

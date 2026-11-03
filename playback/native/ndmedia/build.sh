@@ -152,6 +152,19 @@ case "$TARGET" in
     *) die "unknown target $TARGET" ;;
 esac
 
+# A pure native boundary test runs on the same compiler, outside the output
+# directory so it cannot enter a future shipping native image.
+TEST_PROGRAM="$CACHE/json-check-$TARGET"
+if [ "$TARGET" = windows-x64 ]; then
+    TEST_PROGRAM="$TEST_PROGRAM.exe"
+    cl -nologo -std:c11 -MD -I"$(cygpath -w "$ROOT")" \
+        "$(cygpath -w "$ROOT/tests/json_test.c")" \
+        -Fe"$(cygpath -w "$TEST_PROGRAM")" -Fo"$(cygpath -w "$CACHE/json-check.obj")" || die "JSON test compile failed"
+else
+    cc -std=c11 -I"$ROOT" "$ROOT/tests/json_test.c" -o "$TEST_PROGRAM" || die "JSON test compile failed"
+fi
+"$TEST_PROGRAM" || die "device-name JSON boundary test failed"
+
 [ -f "$OUT" ] || die "expected $OUT"
 BYTES=$(stat -c %s "$OUT" 2>/dev/null || stat -f %z "$OUT")
 {

@@ -17,6 +17,7 @@
  * bounded number of polling intervals.
  */
 #include "ndmedia.h"
+#include "json.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -30,6 +31,9 @@
 #define MA_NO_NODE_GRAPH
 #define MA_NO_ENGINE
 #include "miniaudio.h"
+
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2 && ATOMIC_LONG_LOCK_FREE == 2 && ATOMIC_LLONG_LOCK_FREE == 2,
+               "the audio callback requires always-lock-free integer atomics");
 
 #define ND_DEFAULT_CHANNELS 2
 #define ND_DEFAULT_RING_MS 200
@@ -338,7 +342,8 @@ ND_API int nd_out_stop(nd_out *o) {
         nd_sleep_ms(1);
         ++waited;
     }
-    ma_device_stop(&o->device);
+    if (ma_device_stop(&o->device) != MA_SUCCESS)
+        return ND_E_DEVICE;
     atomic_store_explicit(&o->started, 0, memory_order_release);
     atomic_store_explicit(&o->stopping, 0, memory_order_relaxed);
     return 0;
@@ -399,7 +404,10 @@ ND_API int nd_out_describe(nd_out *o, char *json, int cap) {
             be = "other";
             break;
         }
+    char escaped[sizeof(o->device_name) * 6];
+    if (nd_json_escape(escaped, sizeof(escaped), o->device_name) < 0)
+        return ND_E_ARG;
     n = snprintf(json, (size_t)cap, "{\"rate\":%d,\"channels\":%d,\"backend\":\"%s\",\"device\":\"%s\",\"period\":%u}",
-                 o->rate, o->channels, be, o->device_name, (unsigned)o->device.playback.internalPeriodSizeInFrames);
+                 o->rate, o->channels, be, escaped, (unsigned)o->device.playback.internalPeriodSizeInFrames);
     return n >= cap ? ND_E_ARG : n;
 }
