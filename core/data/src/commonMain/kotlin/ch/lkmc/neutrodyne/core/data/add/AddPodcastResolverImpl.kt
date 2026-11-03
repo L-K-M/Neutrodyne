@@ -456,7 +456,8 @@ internal class AddPodcastResolverImpl(
                                     UrlNormalizer.origin(url)
                             },
                             false,
-                            purpose = requestPurpose,
+                            // Consent for /feed never covers an inferred /feed/podcast URL.
+                            purpose = FeedRequestPurpose.ADD_DISCOVERED,
                         )
                     } else {
                         parsed
