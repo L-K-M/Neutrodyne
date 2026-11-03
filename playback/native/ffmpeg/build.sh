@@ -334,12 +334,18 @@ case "$TARGET" in
         fi
         TARGET_FLAGS=(
             --cc=gcc
+            # No GCC CRT startup code may be copied outside OpenJDK (D3).
+            # Shared-only flags leave configure's executable probes intact.
+            --extra-ldsoflags=-nostartfiles
             # Every shared library carries an rpath of its own directory.
             # Make collapses $$ to $ in the recipe and the recipe's shell then
             # needs \$ to keep the dollar literal, so configure must receive
             # \$$ORIGIN for RUNPATH to hold $ORIGIN.
             --extra-ldflags=-Wl,-rpath,'\$$ORIGIN'
         )
+        if [ "$TARGET" = linux-arm64 ]; then
+            TARGET_FLAGS+=(--extra-cflags=-mno-outline-atomics)
+        fi
         MAKE=(make)
         ;;
 esac

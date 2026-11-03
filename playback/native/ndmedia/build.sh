@@ -67,7 +67,7 @@ case "$TARGET" in
         IMAGE="quay.io/pypa/manylinux_2_28_x86_64"
         [ "$TARGET" = linux-arm64 ] && IMAGE="quay.io/pypa/manylinux_2_28_aarch64"
         if [ -n "${ND_IN_MANYLINUX:-}" ]; then
-            cc $CFLAGS -fPIC -shared "$SRC" -o "$OUT" -lpthread -lm -ldl
+            cc $CFLAGS -fPIC -shared -nostartfiles "$SRC" -o "$OUT" -lpthread -lm -ldl
         elif command -v docker >/dev/null 2>&1; then
             # ffmpeg/build.sh's convention: everything after the container
             # exec happens inside it, so the host never writes beside the
@@ -79,7 +79,7 @@ case "$TARGET" in
         else
             # Without docker the host compiler still proves the code; the
             # manylinux floor is asserted by the desktop-matrix runners.
-            cc $CFLAGS -fPIC -shared "$SRC" -o "$OUT" -lpthread -lm -ldl
+            cc $CFLAGS -fPIC -shared -nostartfiles "$SRC" -o "$OUT" -lpthread -lm -ldl
         fi
         ;;
     macos-arm64)

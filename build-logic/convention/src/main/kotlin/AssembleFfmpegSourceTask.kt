@@ -166,7 +166,7 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
                     "--extra-ldflags=-mmacosx-version-min=13.0 -Wl,-rpath,@loader_path` | Apple clang |",
             )
             appendLine(
-                "| `linux-x64`, `linux-arm64` | `--cc=gcc -Wl,-rpath,'\\\$ORIGIN'` | " +
+                "| `linux-x64`, `linux-arm64` | `--cc=gcc --extra-ldsoflags=-nostartfiles -Wl,-rpath,'\\\$ORIGIN'` | " +
                     "gcc inside `manylinux_2_28` (glibc 2.28 baseline, below the app's 2.31 floor) |",
             )
             appendLine()
