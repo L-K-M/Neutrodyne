@@ -1879,7 +1879,8 @@ Names fixed by PLAN and the change brief (`desktop.*` keys, `-Dneutrodyne.smoke`
 
 Implementation note (2026-11-01, continuation verified 2026-11-02): the
 initial prototype's end-position assertion did not establish a live clock
-accuracy result. AC3 remains open until live reference comparisons pass.
+accuracy result. Live reference comparisons now pass on all four targets;
+AC3 remains open for its real-device soak.
 Regression run `41528771248` exposes ring saturation, clock pause and clock
 reset defects before their repairs. Custom AVIO owns its current buffer and
 context even with `AVFMT_FLAG_CUSTOM_IO`; cleanup follows
@@ -1900,9 +1901,9 @@ into the production graph.
 
 Inspection of the Linux arm64 artifact from `41530910232` found GCC's
 out-of-line atomic helpers inside `ndmedia`. Their runtime exception does
-not widen D3. The new binary gate rejects them. The bounded remedy is
-`-mno-outline-atomics` on arm64, then a rebuilt binary and import/symbol
-inspection. If compiler runtime code remains, use a permissively licensed
+not widen D3. The new binary gate rejects them. The verified remedy is
+`-mno-outline-atomics` on arm64, followed by rebuilt binary and import/symbol
+inspection in run `41560278989`. If compiler runtime code remains, use a permissively licensed
 compiler runtime; do not waive the licence envelope or declare AC2 closed.
 
 Expanded runtime audit note (2026-11-01): run `41553908272` found GCC's
@@ -1910,11 +1911,12 @@ Expanded runtime audit note (2026-11-01): run `41553908272` found GCC's
 atomics inside `avutil`, beyond the previously inspected `ndmedia` helpers.
 [GCC's source](https://raw.githubusercontent.com/gcc-mirror/gcc/master/libgcc/crtstuff.c)
 places the startup code under its GPL runtime exception, which D3 does not
-extend outside OpenJDK. The candidate repair uses `-nostartfiles` only for
+extend outside OpenJDK. The verified repair uses `-nostartfiles` only for
 shared links (`--extra-ldsoflags` for FFmpeg), plus `-mno-outline-atomics` for
 both arm64 builds. The audit reads FFmpeg's unstripped link outputs because
 installed stripping removes local helper names. Rebuild, decode and import
-proofs remain required; an unresolved copied runtime is a blocker. The
+checks passed on both Linux targets in run `41560278989`; an unresolved
+copied runtime remains a blocker. The
 fallback is an audited permissive compiler runtime, not an exception waiver.
 
 Clock mapping note (2026-11-01): the live known-gap test failed by 145 ms in
@@ -1923,16 +1925,20 @@ audio already queued. Retained PCM now carries its source-frame span,
 including the silence processor's retained fade-in tail, and the engine
 publishes the span at the corresponding Sonic boundary. The source-span
 suite checks input chunking and partial drains; the Android waveform suite
-must still match. The null-device gap test samples before and after the jump
+still matches all 54 configurations. The null-device gap test samples before and after the jump
 at all four required speeds, separately from EOF and the no-gap WAV test.
-The 50 ms requirement is unchanged and the repaired matrix is pending.
+The 50 ms requirement is unchanged. The repaired matrix passed, with a
+maximum measured gap-clock error of 1 ms on each target.
 
 The native callback accepts only actual allocated atomics for which
 `atomic_is_lock_free` succeeds, including both shared-clock slots. This
 checks the compiler's per-object ABI rather than assuming MSVC's macro
 classification. Linux and macOS also have standalone ASan/UBSan null-device
 stress instruments for partial writes, ring wraps, clear and teardown;
-results are pending. Their executables are temporary diagnostics outside
+three iterations per host passed without sanitizer reports in run
+`41560278989`. These intentionally drain the ring and record 240 underrun
+frames per iteration, so they are memory-safety evidence, not an underrun-free
+playback measurement. Their executables are temporary diagnostics outside
 shipping native output. Windows sanitizer coverage remains open.
 
 The owner-only `:desktopApp:md0Probe` and `md0ProbeImage` tasks use test
@@ -2015,23 +2021,44 @@ valid JSON and preserves the name. Real device-stop errors now propagate as
 The spike runs on `impl/md0-current`. The production graph still binds
 `DesktopUnavailablePlayback`; MD0 creates no tester build. Dispatch and
 nightly workflows select Windows x64, macOS arm64 and both Linux targets.
-The following ledger distinguishes a candidate implementation from a closed
-acceptance criterion. A successful endpoint assignment cannot prove drift.
+
+Implementation evidence note (2026-11-01, measured 2026-11-03):
+[run 41560278989](https://github.com/L-K-M/Neutrodyne/actions/runs/41560278989)
+at `1a7a782c1a599646dd9801b65b4bfba20b96da49` passed documentation, static,
+unit, instrumented, assemble, server and all four desktop jobs. Each
+`desktop-native-<target>` artifact retains the generated ABI layout, test XML,
+configuration, protocol/component inventory, binary hashes/imports and exact
+source bundle for 14 days. The matrix ran the real miniaudio null backend.
+
+| Target | Four stripped FFmpeg libraries, bytes | Gap-clock maximum error, ms | Live samples at 0.5× / 1× / 2× / 3× |
+|---|---:|---:|---|
+| Windows x64 | 3,583,488 | 1 | 818 / 356 / 194 / 174 |
+| macOS arm64 | 2,334,368 | 1 | 284 / 118 / 60 / 38 |
+| Linux x64 | 3,107,508 | 1 | 1,593 / 803 / 403 / 272 |
+| Linux arm64 | 3,320,420 | 1 | 1,609 / 811 / 407 / 274 |
+
+Windows diagnosis note (2026-11-01): run `41556548008` passed SMTC API tests
+but failed the import audit because the shim's C++ standard-library helpers
+introduced `MSVCP140.dll`. The shim now uses Win32 threads, events, SRW locks,
+Interlocked counters and bounded UTF-16 buffers with the SDK's COM/WinRT ABI.
+Run `41560278989` passed registration/publication/teardown and the import
+audit without MSVCP. This supplies no physical-key or Modern Standby proof.
 
 | Criterion | Evidence and present result | Decision or fallback |
 |---|---|---|
-| AC1 corpus, chapters and seeks | Sixteen first-party synthetic fixtures, including HE-AAC v1/v2, AAC fragmentation, unindexed VBR MP3 and silence gaps. Counts come from the independent container parser, not the decoder. Native matrix tests check counts, chapters, quarter/start/middle/near-end timestamped seeks. Final four-target validation is pending. | Retain the custom AVIO/FFM candidate. A codec/container failure requires a corrected minimal FFmpeg build or an LGPL libmpv evaluation; do not omit the fixture. |
-| AC2 licence, size and replaceability | Four separate upstream-named LGPL FFmpeg libraries, no network protocols; licence/configuration/component/size checks and verified exact-source bundle. Binary inspection also checks deployment floors, imports and embedded atomic helpers. Final four-target audit is pending. | Open. Reject forbidden code or an oversized build. Reduce the component set only within D86, or evaluate an LGPL fallback with its own notices/source/size evidence. |
-| AC3 clock and playback | `TimelineClockTest` checks pause/reset/underruns. `EngineClockTest` samples the live null-device clock at all four speeds before EOF, separately from endpoint checks. The first live test failed by 112 ms on macOS; markers and measured period were repaired, with final validation pending. No 30-minute real-device run or reference-laptop CPU measurement ran. | Open. Keep the candidate instrument; passing short/null tests cannot close the soak or drift through actual skipped gaps. If the clock cannot meet the budget, repair its DSP span accounting or evaluate libmpv before MD1 playback is enabled. |
-| AC4 media sessions and safety | Private-bus MPRIS and logind tests exercise transport; macOS API registration passed in run `41541772367`. Windows registration is pending. Injected safety tests use the actual saver with a fake store. Physical keys, hidden-window routing, active headphone removal, signed macOS routing and suspend/Modern Standby ordering remain owner checks above. | Open. In-app controls and periodic saves are documented degraded behavior, not AC4 acceptance. A libmpv decoder does not fix OS-session or power delivery. |
-| AC5 engine decision | The custom engine remains the candidate behind the `AudioEngine` seam. The single-local-item instrument is not the production controller and does not implement queue transition or remote seek execution. | Conditional continuation only. MD0 has no unconditional go until required CI and hardware evidence is recorded. The LGPL libmpv option remains available under the same licence envelope; it has not been built or measured by this spike. |
+| AC1 corpus, chapters and seeks | Go on all four targets. `FfmpegCorpusTest` decodes all 16 independently referenced synthetic fixtures with exact sample counts, chapters, repeated seek-to-zero priming and timestamped start/middle/near-end/unaligned seeks within 50 ms. The logged quarter-duration seeks measured 0 ms error on every fixture/target. `MediaCorpusTest` checks hashes and reference metadata. | Retain custom AVIO/FFM. A future codec/container regression requires a corrected minimal FFmpeg build or an LGPL libmpv evaluation; do not omit a fixture. |
+| AC2 licence, size and replaceability | Go for the spike. Each target reports “LGPL version 2.1 or later”, four separate upstream-named libraries, zero network protocols and less than 4,000,000 bytes. `checkNativeLicences`, source-bundle negative tests and the five-library binary audit passed. The Linux audit also examines unstripped outputs for copied GCC runtime code. | Retain the dynamically loaded minimal FFmpeg build. The production image/release scan and source attachment remain MD1b obligations because MD0 ships no app image. Reject forbidden code or an oversized build; never widen D3 to pass the gate. |
+| AC3 clock and playback | Null-backend go; hardware portion open. `EngineClockTest` samples live PCM before EOF and across an actual skipped gap at 0.5×, 1×, 2× and 3×; maximum gap error is 1 ms on every target. `TimelineClockTest`, `SilenceSpanTest` and `EngineCommandsTest` cover pause/reset/underruns, spans and blocked-source controls. No physical 30-minute soak or reference-laptop CPU measurement ran. | Continue with the custom engine instrument. Keep production unavailable until MD1 and retain the hardware hold. If real playback misses the budget, repair device/DSP accounting or evaluate an LGPL libmpv build behind the seam. |
+| AC4 media sessions and safety | API/transport go; hardware portion open. Windows SMTC and macOS Now Playing API registration/publication/teardown passed. Private-bus MPRIS and logind tests passed on Linux. Injected removal/suspend/default-change tests use the actual saver with a fake store. Physical keys, hidden-window routing, signed macOS routing, active headphone removal and suspend/Modern Standby timing remain owner checks above. | In-app controls and periodic saves are documented degraded behavior, not AC4 acceptance. Keep AC4 open until those checks run. libmpv does not resolve OS-session or power delivery failures. |
+| AC5 engine decision | Conditional go for the custom FFmpeg/FFM/miniaudio core, backed by the four-target results above. The single-local-item instrument is not the production controller and does not execute full queue transitions or remote seeks. | Continue toward MD1 with the hardware hold explicit; MD0 has no unconditional acceptance while AC3/AC4 hardware evidence is open. If a core blocker recurs, evaluate an LGPL libmpv build with its own size, source and licence proof. That fallback was not built or measured here. |
 
-Implementation note (2026-11-01): Android's pinned Media3 processors now
-produce independent PCM reference hashes in `Md0DspReferenceTest`. The desktop
-suite compares 45 Sonic and nine silence-skipping configurations across input
-chunk sizes. Sonic passed all configurations in run `41541772367`; silence
-skipping exposed two byte/frame-unit defects. Their repairs require a new
-matrix run. The original statement that parity was deferred to MD1 was wrong.
+Implementation note (2026-11-01): Android's pinned Media3 1.11.1 processors
+produce independent PCM reference hashes in `Md0DspReferenceTest`; the
+producer artifact was captured from CI. The desktop suite now matches all
+45 Sonic and nine silence-skipping configurations across input chunk sizes
+on all four targets. Silence skipping first exposed two byte/frame-unit
+defects, observed failing in run `41541772367` before repair. The original
+statement that parity was deferred to MD1 was wrong.
 
 The MPRIS prototype validates track identity for absolute seeks. `Raise`,
 `Quit` and `OpenUri` remain transport stubs, and `Stop` maps to Pause. Full
