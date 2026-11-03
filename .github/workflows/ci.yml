@@ -440,6 +440,10 @@ jobs:
       # On Linux the MPRIS test connects to the private session bus
       # dbus-run-session provides; the runner owns the daemon because test
       # code may not spawn processes (01 banned-API rule 17).
+      - name: Sanitize the native null-device boundary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/ci/check-ndmedia-sanitizers.sh
       - name: Desktop engine tests on this host
         shell: bash
         run: |
