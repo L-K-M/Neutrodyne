@@ -135,6 +135,7 @@ class NdOutput private constructor(
         private const val DESCRIBE_CAP = 2_048
         private const val BYTES_PER_FRAME = 8L
         private val COUNTER = ValueLayout.JAVA_LONG.varHandle()
+
         // Pin storage while native callbacks can write it. After close, clock
         // readers keep the automatic arena alive until their last reference dies.
         private val LIVE_COUNTERS = java.util.concurrent.ConcurrentHashMap<Long, MemorySegment>()
@@ -172,10 +173,11 @@ class NdOutput private constructor(
             val handle = slot.get(NdmediaAbi.ADDRESS, 0)
             LIVE_COUNTERS[handle.address()] = counters
             try {
-                val attach = library.downcall(
-                    "nd_out_attach_clock",
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
-                )
+                val attach =
+                    library.downcall(
+                        "nd_out_attach_clock",
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+                    )
                 val attached = attach.invokeExact(handle, counters) as Int
                 if (attached < 0) throw NdOutputException("nd_out_attach_clock failed with $attached")
                 return NdOutput(library, handle, counters)

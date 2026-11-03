@@ -134,8 +134,9 @@ class AvioBridge
                 -1L
             }
 
-        private fun onInterrupt(@Suppress("UNUSED_PARAMETER") opaque: MemorySegment): Int =
-            if (aborted.get()) 1 else 0
+        private fun onInterrupt(
+            @Suppress("UNUSED_PARAMETER") opaque: MemorySegment,
+        ): Int = if (aborted.get()) 1 else 0
 
         private fun onWrite(
             @Suppress("UNUSED_PARAMETER") opaque: MemorySegment,

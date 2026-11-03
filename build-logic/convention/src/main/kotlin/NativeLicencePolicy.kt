@@ -227,9 +227,12 @@ abstract class CheckNativeLicencesTask : DefaultTask() {
                 val recorded = parseNativeLibrarySizes(sizes.readText())
                 val directory = out.resolve(if (target.get() == "windows-x64") "bin" else "lib")
                 for ((name, bytes) in recorded) {
-                    val binaries = directory.listFiles().orEmpty()
-                        .filter { it.isFile && isFfmpegLibrary(it.name, name) }
-                        .distinctBy { it.canonicalPath }
+                    val binaries =
+                        directory
+                            .listFiles()
+                            .orEmpty()
+                            .filter { it.isFile && isFfmpegLibrary(it.name, name) }
+                            .distinctBy { it.canonicalPath }
                     require(binaries.size == 1 && binaries.single().length() == bytes) {
                         "size record for $name does not match one installed shared library"
                     }
@@ -324,5 +327,7 @@ internal fun parseNativeLibrarySizes(text: String): Map<String, Long> {
     return sizes
 }
 
-private fun isFfmpegLibrary(file: String, name: String): Boolean =
-    Regex("(?:$name-[0-9]+\\.dll|lib$name\\.so(?:\\.[0-9]+)+|lib$name(?:\\.[0-9]+)+\\.dylib)").matches(file)
+private fun isFfmpegLibrary(
+    file: String,
+    name: String,
+): Boolean = Regex("(?:$name-[0-9]+\\.dll|lib$name\\.so(?:\\.[0-9]+)+|lib$name(?:\\.[0-9]+)+\\.dylib)").matches(file)

@@ -26,7 +26,12 @@ data class FfmpegLayout(
     val constants: Map<String, Long>,
 ) {
     internal fun validate() {
-        require(pointerSize == java.lang.foreign.ValueLayout.ADDRESS.byteSize().toInt() && sizeTSize == pointerSize) {
+        require(
+            pointerSize ==
+                java.lang.foreign.ValueLayout.ADDRESS
+                    .byteSize()
+                    .toInt() && sizeTSize == pointerSize,
+        ) {
             "FFmpeg layout has incompatible pointer or size_t width"
         }
         require(libraries.keys == setOf("avutil", "swresample", "avcodec", "avformat")) {

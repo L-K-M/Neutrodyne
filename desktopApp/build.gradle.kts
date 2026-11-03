@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Unlicense
+import org.gradle.api.provider.MapProperty
+import org.gradle.kotlin.dsl.getByType
+import org.jetbrains.compose.ComposeExtension
+import org.jetbrains.compose.desktop.DesktopExtension
+import org.jetbrains.compose.resources.ResourcesExtension
 import java.security.MessageDigest
 import java.util.jar.Attributes
 import java.util.jar.JarEntry
 import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
 import java.util.jar.Manifest
-import org.gradle.api.provider.MapProperty
-import org.gradle.kotlin.dsl.getByType
-import org.jetbrains.compose.ComposeExtension
-import org.jetbrains.compose.desktop.DesktopExtension
-import org.jetbrains.compose.resources.ResourcesExtension
 
 plugins {
     alias(libs.plugins.neutrodyne.desktop.application)
@@ -287,18 +287,27 @@ tasks.register<JavaExec>("md0Probe") {
         providers.gradleProperty("md0.speed").getOrElse("1"),
         providers.gradleProperty("md0.skip").getOrElse("true"),
         providers.gradleProperty("md0.seconds").getOrElse("1800"),
-        providers.gradleProperty("md0.report").getOrElse(layout.buildDirectory.file("md0-probe-${System.currentTimeMillis()}.jsonl").get().asFile.absolutePath),
+        providers
+            .gradleProperty(
+                "md0.report",
+            ).getOrElse(
+                layout.buildDirectory
+                    .file("md0-probe-${System.currentTimeMillis()}.jsonl")
+                    .get()
+                    .asFile.absolutePath,
+            ),
     )
 }
 
-val md0ProbeJar = tasks.register<Jar>("md0ProbeJar") {
-    dependsOn("testClasses")
-    archiveFileName.set("md0-probe.jar")
-    destinationDirectory.set(layout.buildDirectory.dir("md0-probe"))
-    from(sourceSets["main"].output, sourceSets["test"].output)
-    from(sourceSets["test"].runtimeClasspath.filter { it.isDirectory })
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
+val md0ProbeJar =
+    tasks.register<Jar>("md0ProbeJar") {
+        dependsOn("testClasses")
+        archiveFileName.set("md0-probe.jar")
+        destinationDirectory.set(layout.buildDirectory.dir("md0-probe"))
+        from(sourceSets["main"].output, sourceSets["test"].output)
+        from(sourceSets["test"].runtimeClasspath.filter { it.isDirectory })
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
 
 // Owner-only test image for the signed Mac media-key check. Never published.
 tasks.register("md0ProbeImage") {
@@ -306,22 +315,41 @@ tasks.register("md0ProbeImage") {
     dependsOn(md0ProbeJar, sourceSets["test"].runtimeClasspath)
     notCompatibleWithConfigurationCache("Test-only hardware image stages the resolved test runtime")
     doLast {
-        val directory = layout.buildDirectory.dir("md0-probe-image/${System.currentTimeMillis()}").get().asFile
+        val directory =
+            layout.buildDirectory
+                .dir("md0-probe-image/${System.currentTimeMillis()}")
+                .get()
+                .asFile
         val input = directory.resolve("input").apply { mkdirs() }
-        val libraries = sourceSets["test"].runtimeClasspath.files.filter { it.isFile && it.extension == "jar" }.map { jar ->
-            val hash = MessageDigest.getInstance("SHA-256").digest(jar.readBytes())
-                .joinToString("") { "%02x".format(it) }.take(16)
-            val name = "${jar.nameWithoutExtension}-$hash.jar"
-            if (!input.resolve(name).exists()) jar.copyTo(input.resolve(name), overwrite = false)
-            name
-        }.distinct()
-        val manifest = Manifest().apply {
-            mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"
-            mainAttributes[Attributes.Name.MAIN_CLASS] = "ch.lkmc.neutrodyne.desktop.Md0Probe"
-            mainAttributes[Attributes.Name.CLASS_PATH] = libraries.joinToString(" ")
-        }
+        val libraries =
+            sourceSets["test"]
+                .runtimeClasspath.files
+                .filter { it.isFile && it.extension == "jar" }
+                .map { jar ->
+                    val hash =
+                        MessageDigest
+                            .getInstance("SHA-256")
+                            .digest(jar.readBytes())
+                            .joinToString("") { "%02x".format(it) }
+                            .take(16)
+                    val name = "${jar.nameWithoutExtension}-$hash.jar"
+                    if (!input.resolve(name).exists()) jar.copyTo(input.resolve(name), overwrite = false)
+                    name
+                }.distinct()
+        val manifest =
+            Manifest().apply {
+                mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"
+                mainAttributes[Attributes.Name.MAIN_CLASS] = "ch.lkmc.neutrodyne.desktop.Md0Probe"
+                mainAttributes[Attributes.Name.CLASS_PATH] = libraries.joinToString(" ")
+            }
         JarOutputStream(input.resolve("md0-probe.jar").outputStream(), manifest).use { output ->
-            JarFile(md0ProbeJar.get().archiveFile.get().asFile).use { jar ->
+            JarFile(
+                md0ProbeJar
+                    .get()
+                    .archiveFile
+                    .get()
+                    .asFile,
+            ).use { jar ->
                 val entries = jar.entries()
                 while (entries.hasMoreElements()) {
                     val entry = entries.nextElement()
@@ -332,19 +360,43 @@ tasks.register("md0ProbeImage") {
                 }
             }
         }
-        val javaHome = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) }.get().metadata.installationPath.asFile
-        val tool = javaHome.resolve("bin/jpackage" + if (System.getProperty("os.name").startsWith("Windows")) ".exe" else "")
-        val command = mutableListOf(
-            tool.absolutePath, "--type", "app-image", "--name", "Md0Probe", "--app-version", "0.0.1",
-            "--input", input.absolutePath, "--main-jar", "md0-probe.jar", "--dest", directory.resolve("image").absolutePath,
-            "--java-options", "--enable-native-access=ALL-UNNAMED",
-            "--java-options", "\"-Dneutrodyne.rootDir=${rootProject.layout.projectDirectory.asFile.absolutePath}\"",
-        )
+        val javaHome =
+            javaToolchains
+                .launcherFor {
+                    languageVersion.set(JavaLanguageVersion.of(25))
+                }.get()
+                .metadata.installationPath.asFile
+        val tool =
+            javaHome.resolve("bin/jpackage" + if (System.getProperty("os.name").startsWith("Windows")) ".exe" else "")
+        val command =
+            mutableListOf(
+                tool.absolutePath,
+                "--type",
+                "app-image",
+                "--name",
+                "Md0Probe",
+                "--app-version",
+                "0.0.1",
+                "--input",
+                input.absolutePath,
+                "--main-jar",
+                "md0-probe.jar",
+                "--dest",
+                directory.resolve("image").absolutePath,
+                "--java-options",
+                "--enable-native-access=ALL-UNNAMED",
+                "--java-options",
+                "\"-Dneutrodyne.rootDir=${rootProject.layout.projectDirectory.asFile.absolutePath}\"",
+            )
         if (System.getProperty("os.name") == "Mac OS X") {
             command += listOf("--mac-package-identifier", "ch.lkmc.neutrodyne.debug")
         }
         if (System.getProperty("os.name").startsWith("Windows")) command += "--win-console"
-        providers.exec { commandLine(command) }.result.get().assertNormalExitValue()
+        providers
+            .exec { commandLine(command) }
+            .result
+            .get()
+            .assertNormalExitValue()
         logger.lifecycle("Owner-only MD0 image: ${directory.resolve("image")}")
     }
 }

@@ -17,13 +17,25 @@ class NativeMediaSession private constructor(
     private var closed = false
 
     @Synchronized
-    fun publish(title: String?, artist: String, durationMs: Long, positionMs: Long, rate: Float, playing: Boolean) {
+    fun publish(
+        title: String?,
+        artist: String,
+        durationMs: Long,
+        positionMs: Long,
+        rate: Float,
+        playing: Boolean,
+    ) {
         check(!closed) { "media session is closed" }
         Arena.ofConfined().use { arena ->
-            val result = publishCall.invokeWithArguments(
-                title?.let(arena::allocateFrom) ?: MemorySegment.NULL,
-                arena.allocateFrom(artist), durationMs, positionMs, rate, if (playing) 1 else 0,
-            ) as Int
+            val result =
+                publishCall.invokeWithArguments(
+                    title?.let(arena::allocateFrom) ?: MemorySegment.NULL,
+                    arena.allocateFrom(artist),
+                    durationMs,
+                    positionMs,
+                    rate,
+                    if (playing) 1 else 0,
+                ) as Int
             check(result >= 0) { "native media publish failed: $result" }
         }
     }
@@ -53,10 +65,16 @@ class NativeMediaSession private constructor(
     }
 
     companion object {
-        private val PUBLISH = FunctionDescriptor.of(
-            ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
-            ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_FLOAT, ValueLayout.JAVA_INT,
-        )
+        private val PUBLISH =
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_LONG,
+                ValueLayout.JAVA_FLOAT,
+                ValueLayout.JAVA_INT,
+            )
         private val POLL = FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS)
 
         fun open(directory: Path): NativeMediaSession {
@@ -74,9 +92,22 @@ class NativeMediaSession private constructor(
     }
 }
 
-enum class NativeSessionEventKind(val code: Int) {
-    PLAY(1), PAUSE(2), TOGGLE(3), NEXT(4), PREVIOUS(5), SEEK(6),
-    SUSPEND(7), RESUME(8), REMOVED(9), DEFAULT_CHANGED(10),
+enum class NativeSessionEventKind(
+    val code: Int,
+) {
+    PLAY(1),
+    PAUSE(2),
+    TOGGLE(3),
+    NEXT(4),
+    PREVIOUS(5),
+    SEEK(6),
+    SUSPEND(7),
+    RESUME(8),
+    REMOVED(9),
+    DEFAULT_CHANGED(10),
 }
 
-data class NativeSessionEvent(val kind: NativeSessionEventKind, val value: Long)
+data class NativeSessionEvent(
+    val kind: NativeSessionEventKind,
+    val value: Long,
+)

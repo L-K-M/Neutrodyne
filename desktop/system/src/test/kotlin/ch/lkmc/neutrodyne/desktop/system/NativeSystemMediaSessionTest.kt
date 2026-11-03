@@ -3,8 +3,8 @@ package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
 import org.junit.Assume.assumeTrue
-import java.nio.file.Path
 import org.junit.Test
+import java.nio.file.Path
 import kotlin.test.assertNull
 
 /** API registration proof only. Physical keys and a signed Mac app remain hardware checks. */

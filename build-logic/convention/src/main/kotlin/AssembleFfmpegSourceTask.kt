@@ -196,7 +196,10 @@ abstract class AssembleFfmpegSourceTask : DefaultTask() {
 internal fun ffmpegSourceBundleName(version: String): String = "ffmpeg-$version-neutrodyne-src.tar.xz"
 
 /** Source offers must bind to the archive that the native lock approved. */
-internal fun verifyNativeSourceHash(file: java.io.File, expected: String) {
+internal fun verifyNativeSourceHash(
+    file: java.io.File,
+    expected: String,
+) {
     require(file.isFile) { "native source is missing: $file" }
     val digest = java.security.MessageDigest.getInstance("SHA-256")
     file.inputStream().use { input ->

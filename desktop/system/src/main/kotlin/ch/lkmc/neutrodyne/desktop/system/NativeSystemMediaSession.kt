@@ -29,11 +29,13 @@ class NativeSystemMediaSession private constructor(
     private val eventChannel = Channel<NativeSessionEvent>(BUFFER)
     private val closing = AtomicBoolean(false)
     private val lastFailure = MutableStateFlow<String?>(null)
-    private val scope = CoroutineScope(
-        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, failure ->
-            if (!closing.get()) lastFailure.value = failure.toString()
-        },
-    )
+    private val scope =
+        CoroutineScope(
+            SupervisorJob() + Dispatchers.IO +
+                CoroutineExceptionHandler { _, failure ->
+                    if (!closing.get()) lastFailure.value = failure.toString()
+                },
+        )
     override val commands = commandChannel.receiveAsFlow()
     val systemEvents = eventChannel.receiveAsFlow()
     val failure: StateFlow<String?> = lastFailure
@@ -46,25 +48,34 @@ class NativeSystemMediaSession private constructor(
                     delay(POLL_MS)
                     continue
                 }
-                val command = when (event.kind) {
-                    NativeSessionEventKind.PLAY -> RemoteCommand.Play
-                    NativeSessionEventKind.PAUSE -> RemoteCommand.Pause
-                    NativeSessionEventKind.TOGGLE -> RemoteCommand.Toggle
-                    NativeSessionEventKind.NEXT -> RemoteCommand.Next
-                    NativeSessionEventKind.PREVIOUS -> RemoteCommand.Previous
-                    NativeSessionEventKind.SEEK -> RemoteCommand.SeekTo(event.value)
-                    else -> null
-                }
+                val command =
+                    when (event.kind) {
+                        NativeSessionEventKind.PLAY -> RemoteCommand.Play
+                        NativeSessionEventKind.PAUSE -> RemoteCommand.Pause
+                        NativeSessionEventKind.TOGGLE -> RemoteCommand.Toggle
+                        NativeSessionEventKind.NEXT -> RemoteCommand.Next
+                        NativeSessionEventKind.PREVIOUS -> RemoteCommand.Previous
+                        NativeSessionEventKind.SEEK -> RemoteCommand.SeekTo(event.value)
+                        else -> null
+                    }
                 if (command != null) commandChannel.send(command) else eventChannel.send(event)
             }
         }
     }
 
-    override fun publish(nowPlaying: NowPlaying?, skipBackMs: Long, skipForwardMs: Long, speedPresets: List<Float>) {
+    override fun publish(
+        nowPlaying: NowPlaying?,
+        skipBackMs: Long,
+        skipForwardMs: Long,
+        speedPresets: List<Float>,
+    ) {
         native.publish(
-            nowPlaying?.title, nowPlaying?.podcastTitle.orEmpty(),
-            nowPlaying?.position?.durationMs ?: 0, nowPlaying?.position?.positionMs ?: 0,
-            nowPlaying?.position?.speed ?: 1f, nowPlaying?.isPlaying ?: false,
+            nowPlaying?.title,
+            nowPlaying?.podcastTitle.orEmpty(),
+            nowPlaying?.position?.durationMs ?: 0,
+            nowPlaying?.position?.positionMs ?: 0,
+            nowPlaying?.position?.speed ?: 1f,
+            nowPlaying?.isPlaying ?: false,
         )
     }
 

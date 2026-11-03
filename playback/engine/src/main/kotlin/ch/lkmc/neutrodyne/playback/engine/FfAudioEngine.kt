@@ -117,7 +117,10 @@ class FfAudioEngine(
     private fun playItem(item: Item) {
         openSource(item.path).use { input ->
             synchronized(control) {
-                if (closed.get()) { input.abort(); return }
+                if (closed.get()) {
+                    input.abort()
+                    return
+                }
                 source = input
             }
             try {

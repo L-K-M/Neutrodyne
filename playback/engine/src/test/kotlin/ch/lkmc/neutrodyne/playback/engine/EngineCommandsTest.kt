@@ -34,13 +34,14 @@ class EngineCommandsTest {
         engine.play(media(), 1f, false)
         assertTrue(source.entered.await(WAIT_SECONDS, TimeUnit.SECONDS))
         val finished = CountDownLatch(1)
-        val closer = Thread {
-            try {
-                engine.close()
-            } finally {
-                finished.countDown()
+        val closer =
+            Thread {
+                try {
+                    engine.close()
+                } finally {
+                    finished.countDown()
+                }
             }
-        }
         closer.start()
         try {
             assertTrue(finished.await(1_500, TimeUnit.MILLISECONDS), "close did not abort the blocked read")
@@ -56,12 +57,13 @@ class EngineCommandsTest {
 
     private fun nativeDirectory(kind: String): Path {
         val root = Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")))
-        val target = when {
-            System.getProperty("os.name").startsWith("Windows") -> "windows-x64"
-            System.getProperty("os.name") == "Mac OS X" -> "macos-arm64"
-            System.getProperty("os.arch") in setOf("aarch64", "arm64") -> "linux-arm64"
-            else -> "linux-x64"
-        }
+        val target =
+            when {
+                System.getProperty("os.name").startsWith("Windows") -> "windows-x64"
+                System.getProperty("os.name") == "Mac OS X" -> "macos-arm64"
+                System.getProperty("os.arch") in setOf("aarch64", "arm64") -> "linux-arm64"
+                else -> "linux-x64"
+            }
         return root.resolve("playback/native/build/$kind/$target")
     }
 
@@ -76,7 +78,9 @@ class EngineCommandsTest {
         assertTrue(engine.outputDescription != null, "output was never opened")
     }
 
-    private class BlockedSource(bytes: ByteArray) : ByteSource {
+    private class BlockedSource(
+        bytes: ByteArray,
+    ) : ByteSource {
         private val delegate = MemoryByteSource(bytes)
         private val first = AtomicBoolean(true)
         val entered = CountDownLatch(1)
@@ -84,7 +88,11 @@ class EngineCommandsTest {
         val aborted = AtomicBoolean(false)
         override val length: Long? get() = delegate.length
 
-        override fun read(position: Long, dst: MemorySegment, maxBytes: Int): Int {
+        override fun read(
+            position: Long,
+            dst: MemorySegment,
+            maxBytes: Int,
+        ): Int {
             if (first.compareAndSet(true, false)) {
                 entered.countDown()
                 check(release.await(WAIT_SECONDS, TimeUnit.SECONDS)) { "test read was never released" }

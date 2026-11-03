@@ -16,8 +16,8 @@ import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
-import kotlin.test.assertTrue
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /** Independent reference producer: these are the pinned Android processors, never the ports. */
 @RunWith(RobolectricTestRunner::class)
@@ -49,15 +49,22 @@ class Md0DspReferenceTest {
         println(text)
         assertTrue(rows.size > 50)
         val root = Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")))
-        val expected = Files.readAllLines(root.resolve("playback/engine/src/test/resources/dsp-reference.tsv"))
-            .filterNot { it.startsWith("#") || it.isBlank() }
+        val expected =
+            Files
+                .readAllLines(root.resolve("playback/engine/src/test/resources/dsp-reference.tsv"))
+                .filterNot { it.startsWith("#") || it.isBlank() }
         assertEquals(expected, rows.filterNot { it.startsWith("#") }, "the pinned Android reference changed")
     }
 
-    private fun process(processor: AudioProcessor, input: ByteArray, chunkFrames: Int): ByteArray {
+    private fun process(
+        processor: AudioProcessor,
+        input: ByteArray,
+        chunkFrames: Int,
+    ): ByteArray {
         processor.configure(AudioProcessor.AudioFormat(RATE, CHANNELS, C.ENCODING_PCM_16BIT))
         processor.flush(AudioProcessor.StreamMetadata.DEFAULT)
         val result = ByteArrayOutputStream()
+
         fun drain() {
             val output = processor.output
             val bytes = ByteArray(output.remaining())
@@ -81,7 +88,13 @@ class Md0DspReferenceTest {
         return result.toByteArray()
     }
 
-    private fun row(stage: String, kind: String, chunk: Int, speed: Float, pcm: ByteArray): String {
+    private fun row(
+        stage: String,
+        kind: String,
+        chunk: Int,
+        speed: Float,
+        pcm: ByteArray,
+    ): String {
         val hash = MessageDigest.getInstance("SHA-256").digest(pcm).joinToString("") { "%02x".format(it) }
         return "$stage\t$kind\t$chunk\t$speed\t${pcm.size / (CHANNELS * 2)}\t$hash"
     }
