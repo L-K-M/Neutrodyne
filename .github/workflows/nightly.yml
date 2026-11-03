@@ -800,6 +800,14 @@ jobs:
       # font stack, and the file-permission suites of M3/M5 assert POSIX
       # semantics. Neither is evidence about the desktop engine, so neither is a
       # desktop-matrix gate.
+      - name: Build the target's FFmpeg and check its licences
+        shell: bash
+        run: |
+          ./gradlew :playback:native:buildFfmpeg \
+            :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+      # On Linux the MPRIS test connects to the private session bus
+      # dbus-run-session provides; the runner owns the daemon because test
+      # code may not spawn processes (01 banned-API rule 17).
       - name: Desktop engine tests on this host
         shell: bash
         run: |
@@ -807,6 +815,19 @@ jobs:
             :playback:native:test --continue"
           [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
           $tests
+      - name: Inspect native binary boundaries
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = Windows ]; then
+            vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+            [ -x "$vswhere" ] || vswhere="/c/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+            vcroot="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+            vcroot="$(cygpath -u "$vcroot")"
+            version="$(cat "$vcroot/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" | tr -d '\r\n')"
+            export PATH="$vcroot/VC/Tools/MSVC/$version/bin/Hostx64/x64:$PATH"
+          fi
+          python scripts/ci/check-native-binary.py --target "${{ matrix.target }}"
       - name: Collect the licence evidence
         if: always()
         shell: bash
