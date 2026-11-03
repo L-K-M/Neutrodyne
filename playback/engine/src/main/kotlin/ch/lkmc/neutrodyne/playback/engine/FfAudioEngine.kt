@@ -169,7 +169,8 @@ class FfAudioEngine(
                         timeline.push(TimelineClock.Marker(
                             outputFrames, item.path.fileName.toString(),
                             (firstPtsUs ?: 0L) +
-                                (outputFrames * item.speed.toDouble() * MICROS_PER_SECOND / deviceRate).toLong() + skippedUs,
+                                (outputFrames * item.speed.toDouble() * MICROS_PER_SECOND / deviceRate).toLong() +
+                                skippedUs,
                             item.speed,
                         ))
                         // The ring copies each block. Release native conversion
@@ -207,7 +208,12 @@ class FfAudioEngine(
                     inputFrames += frame.samples.size / frame.channels
                     val input = ByteBuffer.allocate(frame.samples.size * Short.SIZE_BYTES).order(ByteOrder.nativeOrder())
                     input.asShortBuffer().put(frame.samples)
-                    if (skip == null) sonic.queueInput(input) else { skip.queueInput(input); drainSkip() }
+                    if (skip == null) {
+                        sonic.queueInput(input)
+                    } else {
+                        skip.queueInput(input)
+                        drainSkip()
+                    }
                     pumpSonic()
                 }
                 while (!closed.get()) {

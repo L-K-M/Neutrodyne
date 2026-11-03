@@ -79,7 +79,10 @@ object Md0Probe {
                         session.commands.collect { command ->
                             log("command", command.toString())
                             when (command) {
-                                RemoteCommand.Play -> { engine.resume(); paused = false }
+                                RemoteCommand.Play -> {
+                                    engine.resume()
+                                    paused = false
+                                }
                                 RemoteCommand.Pause -> {
                                     engine.pause()
                                     paused = true
@@ -133,7 +136,10 @@ object Md0Probe {
                                     "cpuNs=$cpu paused=$paused device=${engine.outputDescription}",
                             )
                             if (session is NativeSystemMediaSession) check(session.failure.value == null) { session.failure.value.orEmpty() }
-                            if (elapsedMs >= seconds * 1_000) { completed = true; break }
+                            if (elapsedMs >= seconds * 1_000) {
+                                completed = true
+                                break
+                            }
                             delay(250)
                         }
                         engine.pause()
