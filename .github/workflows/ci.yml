@@ -82,9 +82,16 @@ jobs:
       # toolchain). `:playback:native:checkNativeLicences` is not a static gate:
       # it reads the four built libraries, so it runs per target in
       # `desktop-matrix` below, where each target's own toolchain exists.
+      - name: Native source formatting
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-format-18
+          clang-format-18 --dry-run --Werror playback/native/ffmpeg/ffoffsets.c
       - name: KGP assertion (PLAN M0 AC3)
         # The root project's buildEnvironment: plugins load through the included build, so :app's lists none (01 S1)
         run: ./gradlew -q buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'
+      - name: Native policy regression tests
+        run: ./gradlew -p build-logic :convention:test --tests NativeLicencePolicyTest
       - name: Static checks (M0a)
         run: >-
           ./gradlew spotlessCheck :app:lintRelease assertModuleGraph
@@ -119,6 +126,7 @@ jobs:
       # the four-runner build would otherwise discover (MD0, 11 FFmpeg build).
       - name: CI script fixture tests
         run: |
+          scripts/ci/tests/native-ffmpeg-build.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
@@ -130,6 +138,7 @@ jobs:
           python3 scripts/ci/tests/preserve-emulator-crashes.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
+          python3 scripts/ci/tests/native-msys-reexec.test.py
       - name: Preserve a formatting repair patch
         if: failure()
         run: |
@@ -404,6 +413,16 @@ jobs:
       # buildFfmpeg, checkNativeLicences and assembleFfmpegSource for the target
       # this host serves: the licence gate reads the built libraries, so it can
       # only run where the build ran (11 FFmpeg build, MD0 AC2).
+      - name: Build the target's FFmpeg and check its licences
+        shell: bash
+        run: |
+          ./gradlew :playback:native:buildFfmpeg \
+            :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+      # The modules MD0 builds on this target, and the corpus suite that loads the
+      # FFmpeg build the previous step produced (11 Testing, MD0 AC1).
+      # On Linux the MPRIS test connects to the private session bus
+      # dbus-run-session provides; the runner owns the daemon because test
+      # code may not spawn processes (01 banned-API rule 17).
       - name: Desktop engine tests on this host
         shell: bash
         run: |
@@ -415,6 +434,19 @@ jobs:
       # string, the protocol inventory, the enabled components and the build's
       # own configure line and toolchain. It exists even when the tests failed,
       # which is when the evidence matters most, so it is collected either way.
+      - name: Inspect native binary boundaries
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = Windows ]; then
+            vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+            [ -x "$vswhere" ] || vswhere="/c/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+            vcroot="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+            vcroot="$(cygpath -u "$vcroot")"
+            version="$(cat "$vcroot/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" | tr -d '\r\n')"
+            export PATH="$vcroot/VC/Tools/MSVC/$version/bin/Hostx64/x64:$PATH"
+          fi
+          python scripts/ci/check-native-binary.py --target "${{ matrix.target }}"
       - name: Collect the licence evidence
         if: always()
         shell: bash
