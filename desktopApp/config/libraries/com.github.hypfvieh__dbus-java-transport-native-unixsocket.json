@@ -1,0 +1,7 @@
+{
+  "_comment": "dbus-java 5.2.2 unix-socket transport; ships inside :desktop:system for MPRIS (11 OS integration)",
+  "uniqueId": "com.github.hypfvieh:dbus-java-transport-native-unixsocket",
+  "licenses": [
+    "MIT-dbus-java"
+  ]
+}
