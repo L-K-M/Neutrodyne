@@ -147,6 +147,27 @@ class FfmpegCorpusTest {
     }
 
     @Test
+    fun `partial priming trims complete interleaved frames and their timestamp`() {
+        val bytes = corpusFile("wav_2s.wav").readBytes()
+        fun firstFrame(priming: Int): AudioFrame =
+            FfmpegPipeline.open(MemoryByteSource(bytes), hostFfmpegDirectory()).use { pipeline ->
+                val packet = requireNotNull(pipeline.demuxer.readPacket()).copy(primingSamples = priming)
+                assertTrue(pipeline.decoder.send(packet))
+                requireNotNull(pipeline.decoder.receive())
+            }
+        val baseline = firstFrame(0)
+        val trimmed = firstFrame(1)
+        kotlin.test.assertContentEquals(
+            baseline.samples.copyOfRange(baseline.channels, baseline.samples.size),
+            trimmed.samples,
+        )
+        assertEquals(
+            requireNotNull(baseline.ptsUs) + 1_000_000 / baseline.sampleRate,
+            trimmed.ptsUs,
+        )
+    }
+
+    @Test
     fun `a corrupt packet reports a decode failure instead of being skipped`() {
         val bytes = corpusFile("flac_2s.flac").readBytes()
         FfmpegPipeline.open(MemoryByteSource(bytes), hostFfmpegDirectory()).use { pipeline ->
