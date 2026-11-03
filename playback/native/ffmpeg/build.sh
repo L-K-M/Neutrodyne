@@ -454,10 +454,10 @@ PROBE
 # stable. FFmpeg installs the unversioned symlink the linker looks for next to
 # each versioned library.
 if [ "$CC_BIN" = "cl" ]; then
-    # MSVC takes the import libraries, which a Windows build installs in $OUT/lib.
+    # MSVC installs its import libraries beside the DLLs in $OUT/bin.
     cl -nologo -O2 -I"$(cygpath -w "$OUT/include")" "$(cygpath -w "$BUILD/probe.c")" \
-        "$(cygpath -w "$OUT/lib/avcodec.lib")" "$(cygpath -w "$OUT/lib/avformat.lib")" \
-        "$(cygpath -w "$OUT/lib/avutil.lib")" "$(cygpath -w "$OUT/lib/swresample.lib")" \
+        "$(cygpath -w "$OUT/bin/avcodec.lib")" "$(cygpath -w "$OUT/bin/avformat.lib")" \
+        "$(cygpath -w "$OUT/bin/avutil.lib")" "$(cygpath -w "$OUT/bin/swresample.lib")" \
         -Fe"$(cygpath -w "$BUILD/probe.exe")" -Fo"$(cygpath -w "$BUILD/probe.obj")" \
         >"$BUILD/probe-build.log" 2>&1 ||
         { cat "$BUILD/probe-build.log"; die "probe.c did not compile"; }
