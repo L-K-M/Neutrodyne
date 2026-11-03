@@ -1956,8 +1956,10 @@ Owner procedure, still open on each real OS:
 2. Run `./gradlew :desktopApp:md0Probe -Pmd0.file=/absolute/audio-file
    -Pmd0.backend=default -Pmd0.speed=3 -Pmd0.skip=true -Pmd0.seconds=1800
    -Pmd0.report=/absolute/new-report.jsonl` as one command. The report path
-   must not already exist. The default backend opens actual hardware;
+   must not already exist. Count a hardware run only when the reported device backend is not `null`;
    `-Pmd0.backend=null` is diagnostic and supplies no audible/device proof.
+   If hardware cannot be opened, use explicit null and leave the device
+   measurements open.
    An early EOF fails the soak. Inspect the frame and CPU samples and count
    post-start underruns; retain the complete report, including failures.
 3. Use fresh launches for steps 3–6; interrupted runs do not count toward the
