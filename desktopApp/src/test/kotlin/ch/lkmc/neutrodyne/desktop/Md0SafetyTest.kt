@@ -9,7 +9,7 @@ import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.native.NativeSessionEventKind
 import kotlinx.coroutines.test.runTest
 import java.io.IOException
-import kotlin.test.Test
+import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
