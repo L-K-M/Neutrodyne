@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,7 +17,7 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -74,7 +75,7 @@ import kotlin.test.assertTrue
 @ReleaseSmoke
 @RunWith(AndroidJUnit4::class)
 class SubscribeJourneyTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
     fun sharedAppleLinkResolvesWithoutWritingUntilConfirmation() = journey(Entry.APPLE)
@@ -197,20 +198,22 @@ class SubscribeJourneyTest {
                             ),
                         )
                     }
-                compose.setContent {
-                    if (showing) {
-                        CompositionLocalProvider(
-                            LocalMetroViewModelFactory provides graph.metroViewModelFactory,
-                            LocalUiClock provides clock,
-                            LocalPlatformActions provides rememberAndroidPlatformActions(),
-                        ) {
-                            NeutrodyneRoot(
-                                state = RootUiState.READY,
-                                actions = RootActions({}, {}, {}, {}, { false }),
-                                slots = RootSlots(player = {}, userMessages = emptyFlow()),
-                                installers = graph.entryInstallers,
-                                routes = routing.routes,
-                            )
+                compose.runOnUiThread {
+                    compose.activity.setContent(parent = null) {
+                        if (showing) {
+                            CompositionLocalProvider(
+                                LocalMetroViewModelFactory provides graph.metroViewModelFactory,
+                                LocalUiClock provides clock,
+                                LocalPlatformActions provides rememberAndroidPlatformActions(),
+                            ) {
+                                NeutrodyneRoot(
+                                    state = RootUiState.READY,
+                                    actions = RootActions({}, {}, {}, {}, { false }),
+                                    slots = RootSlots(player = {}, userMessages = emptyFlow()),
+                                    installers = graph.entryInstallers,
+                                    routes = routing.routes,
+                                )
+                            }
                         }
                     }
                 }
