@@ -145,6 +145,7 @@ class FfAudioEngine(
             val timeline = TimelineClock(deviceRate, period.toLong(), out.clockReader())
             var outputFrames = 0L
             var inputFrames = 0L
+            var retainedInputFrames = 0L
             var firstPtsUs: Long? = null
             val buffer = ByteBuffer.allocate(FRAME_BYTES).order(ByteOrder.nativeOrder())
             synchronized(control) {
@@ -165,14 +166,6 @@ class FfAudioEngine(
                         if (frames == 0) break
                         val pcm = ShortArray(frames * decoder.channels) { buffer.getShort() }
                         gain.process(pcm, 0, frames, decoder.channels)
-                        val skippedUs = (skip?.skippedFrames ?: 0L) * MICROS_PER_SECOND / decoder.sampleRate
-                        timeline.push(TimelineClock.Marker(
-                            outputFrames, item.path.fileName.toString(),
-                            (firstPtsUs ?: 0L) +
-                                (outputFrames * item.speed.toDouble() * MICROS_PER_SECOND / deviceRate).toLong() +
-                                skippedUs,
-                            item.speed,
-                        ))
                         // The ring copies each block. Release native conversion
                         // storage immediately, rather than accumulating a soak's PCM.
                         Arena.ofConfined().use { arena ->
@@ -194,22 +187,37 @@ class FfAudioEngine(
                         }
                     }
                 }
+                fun queueSonic(input: ByteBuffer, sourceFrame: Long) {
+                    val frames = input.remaining() / (decoder.channels * Short.SIZE_BYTES)
+                    if (frames == 0) return
+                    timeline.push(TimelineClock.Marker(
+                        (retainedInputFrames * deviceRate / (decoder.sampleRate * item.speed.toDouble())).toLong(),
+                        item.path.fileName.toString(),
+                        (firstPtsUs ?: 0L) + sourceFrame * MICROS_PER_SECOND / decoder.sampleRate,
+                        item.speed,
+                    ))
+                    retainedInputFrames += frames
+                    sonic.queueInput(input)
+                    pumpSonic()
+                }
+
                 fun drainSkip() {
                     while (skip?.hasOutput() == true) {
                         buffer.clear()
-                        skip.getOutput(buffer)
+                        val sourceFrame = requireNotNull(skip.getOutput(buffer))
                         buffer.flip()
-                        sonic.queueInput(buffer)
-                        pumpSonic()
+                        queueSonic(buffer, sourceFrame)
                     }
                 }
                 fun accept(frame: AudioFrame) {
+                    if (frame.samples.isEmpty()) return
                     if (firstPtsUs == null) firstPtsUs = frame.ptsUs
+                    val sourceFrame = inputFrames
                     inputFrames += frame.samples.size / frame.channels
                     val input = ByteBuffer.allocate(frame.samples.size * Short.SIZE_BYTES).order(ByteOrder.nativeOrder())
                     input.asShortBuffer().put(frame.samples)
                     if (skip == null) {
-                        sonic.queueInput(input)
+                        queueSonic(input, sourceFrame)
                     } else {
                         skip.queueInput(input)
                         drainSkip()

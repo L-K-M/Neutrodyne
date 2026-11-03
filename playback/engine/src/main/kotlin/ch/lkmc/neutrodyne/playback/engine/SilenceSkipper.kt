@@ -41,7 +41,10 @@ internal class SilenceSkipper(
     private var maybeSilenceBufferContentsSize = 0
     private var ended = false
     private var inputEnded = false
-    private val outputQueue = ArrayDeque<ByteBuffer>()
+    private data class Output(val pcm: ByteBuffer, val sourceFrame: Long)
+
+    private val outputQueue = ArrayDeque<Output>()
+    private var sourceFramesConsumed = 0L
 
     /** True once a stream format has been configured via [configure]. */
     fun configure(
@@ -58,6 +61,7 @@ internal class SilenceSkipper(
         }
         state = STATE_NOISY
         skippedFrames = 0
+        sourceFramesConsumed = 0
         outputSilenceFramesSinceNoise = 0
         maybeSilenceBufferStartIndex = 0
         maybeSilenceBufferContentsSize = 0
@@ -86,15 +90,18 @@ internal class SilenceSkipper(
 
     fun isEnded(): Boolean = ended && outputQueue.isEmpty()
 
-    /** Drains the next processed block into [buffer]. */
-    fun getOutput(buffer: ByteBuffer) {
-        val out = outputQueue.firstOrNull() ?: return
+    /** Drain retained PCM and return its actual first frame in the source timeline. */
+    fun getOutput(buffer: ByteBuffer): Long? {
+        val block = outputQueue.firstOrNull() ?: return null
+        val out = block.pcm
+        val sourceFrame = block.sourceFrame + out.position() / bytesPerFrame
         val count = minOf(buffer.remaining(), out.remaining())
         val limit = out.limit()
         out.limit(out.position() + count)
         buffer.put(out)
         out.limit(limit)
         if (!out.hasRemaining()) outputQueue.removeFirst()
+        return sourceFrame
     }
 
     fun hasOutput(): Boolean = outputQueue.isNotEmpty()
@@ -102,19 +109,21 @@ internal class SilenceSkipper(
     private fun output(data: ByteBuffer) {
         val out = ByteBuffer.allocate(data.remaining()).order(ByteOrder.nativeOrder())
         out.put(data).flip()
-        outputQueue.addLast(out)
+        outputQueue.addLast(Output(out, sourceFramesConsumed))
+        sourceFramesConsumed += out.remaining() / bytesPerFrame
     }
 
     private fun outputRange(
         data: ByteArray,
         size: Int,
         rampType: Int,
+        sourceFrame: Long,
     ) {
         require(size % bytesPerFrame == 0)
         modifyVolume(data, size, rampType)
         val out = ByteBuffer.allocate(size).order(ByteOrder.nativeOrder())
         out.put(data, 0, size).flip()
-        outputQueue.addLast(out)
+        outputQueue.addLast(Output(out, sourceFrame))
     }
 
     private fun processNoisy(input: ByteBuffer) {
@@ -165,16 +174,17 @@ internal class SilenceSkipper(
         val sizeBeforeOutput = maybeSilenceBufferContentsSize
         var bytesToOutput: Int
         val bytesConsumed: Int
+        val rampType: Int
         if (maybeSilenceBufferContentsSize == maybeSilenceBuffer.size || shouldTransitionToNoisyState) {
             if (outputSilenceFramesSinceNoise == 0) {
                 if (shouldTransitionToNoisyState) {
                     bytesToOutput = maybeSilenceBufferContentsSize
-                    outputSilence(bytesToOutput, DO_NOT_CHANGE_VOLUME)
+                    rampType = DO_NOT_CHANGE_VOLUME
                     bytesConsumed = bytesToOutput
                 } else {
                     check(maybeSilenceBufferContentsSize >= maybeSilenceBuffer.size / 2)
                     bytesToOutput = maybeSilenceBuffer.size / 2
-                    outputSilence(bytesToOutput, FADE_OUT)
+                    rampType = FADE_OUT
                     bytesConsumed = bytesToOutput
                 }
             } else if (shouldTransitionToNoisyState) {
@@ -183,12 +193,18 @@ internal class SilenceSkipper(
                 bytesConsumed = bytesRemainingAfterOutputtingHalfMin + maybeSilenceBuffer.size / 2
                 val shortenedSilenceLength = calculateShortenedSilenceLength(bytesRemainingAfterOutputtingHalfMin)
                 bytesToOutput = maybeSilenceBuffer.size / 2 + shortenedSilenceLength
-                outputSilence(bytesToOutput, FADE_IN)
+                rampType = FADE_IN
             } else {
                 bytesConsumed = maybeSilenceBufferContentsSize - maybeSilenceBuffer.size / 2
                 bytesToOutput = calculateShortenedSilenceLength(bytesConsumed)
-                outputSilence(bytesToOutput, MUTE)
+                rampType = MUTE
             }
+            // Fade-in retains the source tail; muted/fade-out blocks keep its
+            // front. A cumulative skip total would attach future skips too early.
+            val sourceFrame = sourceFramesConsumed +
+                if (rampType == FADE_IN) (bytesConsumed - bytesToOutput) / bytesPerFrame else 0
+            outputSilence(bytesToOutput, rampType, sourceFrame)
+            sourceFramesConsumed += bytesConsumed / bytesPerFrame
             check(bytesConsumed % bytesPerFrame == 0)
             check(sizeBeforeOutput >= bytesToOutput)
             maybeSilenceBufferContentsSize -= bytesConsumed
@@ -214,6 +230,7 @@ internal class SilenceSkipper(
     private fun outputSilence(
         sizeToOutput: Int,
         rampType: Int,
+        sourceFrame: Long,
     ) {
         if (sizeToOutput == 0) return
         require(maybeSilenceBufferContentsSize >= sizeToOutput)
@@ -283,7 +300,7 @@ internal class SilenceSkipper(
                 )
             }
         }
-        outputRange(contiguousOutputBuffer, sizeToOutput, rampType)
+        outputRange(contiguousOutputBuffer, sizeToOutput, rampType, sourceFrame)
     }
 
     private fun modifyVolume(
