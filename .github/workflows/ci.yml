@@ -76,10 +76,12 @@ jobs:
       # invoked, not just wired). `checkBrandAssets` joined 2026-10-06: it was
       # delivered early with M0a.1, so a hand-edited generated asset must fail
       # here, not only on a local `check`. Still TODO as their milestones land:
-      # checkTranslations, :playback:native:checkNativeLicences (MD0),
-      # clang-format over playback/native/src/native/ (MD0), detekt SARIF
-      # upload with continue-on-error (non-blocking until a stable detekt
-      # supports this toolchain).
+      # checkTranslations, clang-format over playback/native/src/native/ (MD0,
+      # with the first native sources), detekt SARIF upload with
+      # continue-on-error (non-blocking until a stable detekt supports this
+      # toolchain). `:playback:native:checkNativeLicences` is not a static gate:
+      # it reads the four built libraries, so it runs per target in
+      # `desktop-matrix` below, where each target's own toolchain exists.
       - name: KGP assertion (PLAN M0 AC3)
         # The root project's buildEnvironment: plugins load through the included build, so :app's lists none (01 S1)
         run: ./gradlew -q buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'
@@ -112,6 +114,9 @@ jobs:
           fi
       # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
       # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
+      # native-ffmpeg-build.test.sh covers playback/native/ffmpeg/build.sh's
+      # guards, the licence envelope of the lock and the shell-function order
+      # the four-runner build would otherwise discover (MD0, 11 FFmpeg build).
       - name: CI script fixture tests
         run: |
           scripts/ci/tests/install-android-sdk.test.sh
@@ -125,6 +130,21 @@ jobs:
           python3 scripts/ci/tests/preserve-emulator-crashes.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
+      - name: Preserve a formatting repair patch
+        if: failure()
+        run: |
+          format_status=0
+          ./gradlew spotlessApply || format_status=$?
+          mkdir -p build/md0-evidence
+          git diff --binary > build/md0-evidence/format.patch
+          exit "$format_status"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: static-md0-evidence
+          path: |
+            build/md0-evidence/
+            build-logic/convention/build/test-results/
 
   unit:
     runs-on: ubuntu-24.04
@@ -148,11 +168,8 @@ jobs:
         with:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-4.17-sdk36
-      # TODO: add `:youtube:ytdlp:shimTest` and
-      # `:youtube:ytdlp-desktop:shimTestStdio` (MD3) as their milestones land —
-      # 09's full line: ./gradlew allTests test mutationTest
-      # :youtube:ytdlp:shimTest :youtube:ytdlp-desktop:shimTestStdio
-      # -Proborazzi.test.verify=true --continue
+      # :desktop:system's MPRIS test needs a private session bus; the runner
+      # owns the daemon because test code may not spawn processes (rule 17).
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
         run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
       - name: Room schema drift
@@ -303,6 +320,7 @@ jobs:
   # TODO (M0b): `desktop-smoke` (xvfb-run smoke start of the Linux x64 image +
   # check-desktop-image.sh + check-runtime-sources.sh --image) — `needs: assemble`
   # per 09; it lands with the desktop packaging.
+
 
   server:
     needs: assemble
