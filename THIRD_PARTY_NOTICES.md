@@ -152,8 +152,11 @@ source is the `python-build-standalone-<tag>-src.tar.gz` asset attached to the r
 - `playback/engine/src/main/kotlin/ch/lkmc/neutrodyne/playback/engine/Sonic.kt`:
   Media3 1.11.1 androidx.media3.common.audio.Sonic, Apache-2.0; copyright
   2017 The Android Open Source Project and 2010 Bill Cox, Sonic Library.
+- `playback/engine/src/main/kotlin/ch/lkmc/neutrodyne/playback/engine/SilenceSkipper.kt`:
+  Media3 1.11.1 SilenceSkippingAudioProcessor, Apache-2.0; copyright
+  2018 The Android Open Source Project.
 
-This file is a modified Kotlin port for the desktop. Their source headers
+Both files are modified Kotlin ports for the desktop. Their source headers
 and desktop AboutLibraries entries retain the original licence and credits.
 The Media3 source archives contain no separate NOTICE file.
 

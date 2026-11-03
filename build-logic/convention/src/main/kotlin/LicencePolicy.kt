@@ -8,6 +8,7 @@ internal fun Project.configureLicensee() {
     pluginManager.apply("app.cash.licensee")
     val jna = libs.version("jna")
     val jsoup = libs.version("jsoup")
+    val dbusJava = libs.version("dbusJava")
     extensions.configure<LicenseeExtension> {
         for (spdx in ALLOWED_SPDX) allow(spdx)
         allowDependency("net.java.dev.jna", "jna", jna) { because("dual-licensed; used under Apache-2.0 (D3)") }
@@ -30,6 +31,14 @@ internal fun Project.configureLicensee() {
             // Its POM carries only the CVS-hosted licence URL + a CC public-domain URL.
             because("BSD-style licence, URL-declared only; pinned transitive version")
         }
+        // :desktop:system's MPRIS prototype; the POM declares "MIT License"
+        // as a name Licensee does not map to the SPDX id.
+        allowDependency("com.github.hypfvieh", "dbus-java-core", dbusJava) { because("MIT") }
+        allowDependency(
+            "com.github.hypfvieh",
+            "dbus-java-transport-native-unixsocket",
+            dbusJava,
+        ) { because("MIT") }
         // No GPL, AGPL, LGPL or MPL artifact is otherwise allowed, not even scoped (D3).
     }
 
