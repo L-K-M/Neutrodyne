@@ -83,8 +83,9 @@ class FfDemuxer
         /** The audio stream's `AVCodecParameters`, held while the pipeline is open. */
         private val codecParametersOf: MemorySegment
 
-        /** True until the first packet of the audio stream has been read. */
-        private var firstPacket = true
+        private enum class PrimingOrigin { OPEN, SEEK_ZERO, CONTINUING }
+
+        private var primingOrigin = PrimingOrigin.OPEN
 
         init {
             try {
@@ -243,7 +244,7 @@ class FfDemuxer
             val result = library.seekFile(formatContext, streamIndex, Long.MIN_VALUE, target, Long.MAX_VALUE, 0)
             require(result >= 0) { "the seek to $positionMs ms failed: ${library.errorString(result)}" }
             // Only a return to the beginning encounters container priming again.
-            firstPacket = positionMs == 0L
+            primingOrigin = if (positionMs == 0L) PrimingOrigin.SEEK_ZERO else PrimingOrigin.CONTINUING
             avio.resumeReads()
         }
 
@@ -306,9 +307,15 @@ class FfDemuxer
          * dropping anything here as well would trim twice.
          */
         private fun primingOf(skipSamples: Int): Int {
-            if (!firstPacket) return 0
-            firstPacket = false
+            val origin = primingOrigin
+            if (origin == PrimingOrigin.CONTINUING) return 0
+            primingOrigin = PrimingOrigin.CONTINUING
             if (skipSamples > 0) return 0
+            // A flushed Opus decoder does not repeat codecpar's initial delay;
+            // Ogg may omit the first-open skip side data when seeking to zero.
+            if (origin == PrimingOrigin.SEEK_ZERO && audioTrack.codec == AudioCodec.OPUS) {
+                return audioTrack.initialPadding
+            }
             // initial_padding reaches the decoder through codecpar and is
             // trimmed inside avcodec: our own trim on top would double it.
             if (audioTrack.initialPadding > 0) return 0

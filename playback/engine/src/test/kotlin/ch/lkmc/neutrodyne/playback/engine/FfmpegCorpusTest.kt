@@ -146,6 +146,7 @@ class FfmpegCorpusTest {
 
     @Test
     fun `seeking to zero applies container priming again`() {
+        val failures = mutableListOf<String>()
         for (entry in readManifest().files) {
             FfmpegPipeline
                 .open(
@@ -157,13 +158,12 @@ class FfmpegCorpusTest {
                     pipeline.decoder.flushBuffers()
                     pipeline.decoder.discardPendingSamples()
                     val decoded = pipeline.decodeAll().sumOf { it.samples.size.toLong() / it.channels }
-                    assertEquals(
-                        "${entry.file}: seek-to-zero changed the decoded sample count",
-                        entry.expectedSamples,
-                        decoded,
-                    )
+                    if (decoded != entry.expectedSamples) {
+                        failures += "${entry.file}: seek-to-zero expected ${entry.expectedSamples}, actual $decoded"
+                    }
                 }
         }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
     @Test
