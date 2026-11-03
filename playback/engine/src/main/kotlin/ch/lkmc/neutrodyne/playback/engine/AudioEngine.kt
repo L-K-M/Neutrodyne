@@ -6,9 +6,10 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * The desktop audio engine seam (11 Engine contracts, D86). One implementation
- * (`FfAudioEngine`, MD0's prototype) drives decode, the DSP chain, the ring
- * buffer and the device on its own thread; an LGPL libmpv build can replace it
- * behind this same interface without the controller noticing.
+ * in MD1 will drive decode, DSP, the ring and the device on its own thread;
+ * an LGPL libmpv build can replace it behind this interface. MD0's
+ * [FfAudioEngine] is a separate single-local-item instrument, not an
+ * implementation of the production queue/controller contract.
  *
  * Every method may be called from any thread and returns immediately: commands
  * are serialised on the engine thread, `positionMs` is lock-free. Callbacks and

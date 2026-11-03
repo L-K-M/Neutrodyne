@@ -83,8 +83,8 @@ class FfmpegLibrary
         // ------------------------------------------------------------ memory and strings
 
         /**
-         * `av_malloc`: the one allocator the AVIO buffer must come from, because
-         * the format context releases it when it is closed.
+         * `av_malloc`: the allocator paired with av_free for the custom AVIO
+         * buffer, whose lifetime the bridge owns.
          */
         fun malloc(size: Long): MemorySegment = callAddress("avutil", "av_malloc", MALLOC, size)
 

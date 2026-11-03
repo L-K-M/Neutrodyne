@@ -64,7 +64,8 @@ private fun assertParity(stage: String, expectedRows: Int) {
         val count = pcm.size / (PARITY_CHANNELS * 2)
         val hash = MessageDigest.getInstance("SHA-256").digest(pcm).joinToString("") { "%02x".format(it) }
         if (count != fields[4].toInt() || hash != fields[5]) {
-            failures += "$stage/$kind chunk=$chunk speed=$speed: count=$count hash=$hash; reference=${fields[4]}/${fields[5]}"
+            failures += "$stage/$kind chunk=$chunk speed=$speed: count=$count hash=$hash; " +
+                "reference=${fields[4]}/${fields[5]}"
         }
     }
     assertTrue(failures.isEmpty(), failures.joinToString("\n"))

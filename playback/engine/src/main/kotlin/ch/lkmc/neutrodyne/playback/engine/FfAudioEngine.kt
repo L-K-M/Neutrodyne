@@ -165,7 +165,8 @@ class FfAudioEngine(
                         val skippedUs = (skip?.skippedFrames ?: 0L) * MICROS_PER_SECOND / decoder.sampleRate
                         timeline.push(TimelineClock.Marker(
                             outputFrames, item.path.fileName.toString(),
-                            (firstPtsUs ?: 0L) + (outputFrames * item.speed.toDouble() * MICROS_PER_SECOND / deviceRate).toLong() + skippedUs,
+                            (firstPtsUs ?: 0L) +
+                                (outputFrames * item.speed.toDouble() * MICROS_PER_SECOND / deviceRate).toLong() + skippedUs,
                             item.speed,
                         ))
                         // The ring copies each block. Release native conversion

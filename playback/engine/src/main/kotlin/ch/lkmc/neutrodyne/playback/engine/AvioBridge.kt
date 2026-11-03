@@ -21,9 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * bodies catch everything and return a defined FFmpeg error so no throwable
  * crosses the native boundary.
  *
- * The AVIO buffer comes from FFmpeg's own allocator because the format context
- * releases it when it is closed; nothing the context owns lives in [arena],
- * which holds the upcall stubs and the caller's own scratch memory.
+ * The AVIO buffer comes from FFmpeg's allocator. This custom-I/O owner frees
+ * its current buffer and context after closing the format. Those C allocations
+ * are separate from [arena], which holds upcall stubs and scratch memory.
  */
 class AvioBridge
     private constructor(
@@ -43,7 +43,7 @@ class AvioBridge
 
         private val buffer: MemorySegment = library.malloc(AVIO_BUFFER_BYTES.toLong())
 
-        /** The `AVIOContext*` FFmpeg reads through; the format context owns it. */
+        /** The `AVIOContext*` FFmpeg borrows; this bridge owns it. */
         val context: MemorySegment =
             library
                 .downcall("avformat", "avio_alloc_context", AVIO_ALLOC)

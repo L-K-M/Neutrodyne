@@ -127,14 +127,22 @@ object Md0Probe {
                             session.publish(snapshot, 10_000, 30_000, listOf(0.5f, 1f, 2f, 3f))
                             saver.onTick(position, null, !paused)
                             val cpu = ProcessHandle.current().info().totalCpuDuration().orElse(java.time.Duration.ZERO).toNanos()
-                            log("sample", "elapsedMs=$elapsedMs positionMs=$position underrunFrames=${engine.underrunFrames} cpuNs=$cpu paused=$paused device=${engine.outputDescription}")
+                            log(
+                                "sample",
+                                "elapsedMs=$elapsedMs positionMs=$position underrunFrames=${engine.underrunFrames} " +
+                                    "cpuNs=$cpu paused=$paused device=${engine.outputDescription}",
+                            )
                             if (session is NativeSystemMediaSession) check(session.failure.value == null) { session.failure.value.orEmpty() }
                             if (elapsedMs >= seconds * 1_000) { completed = true; break }
                             delay(250)
                         }
                         engine.pause()
                         saver.onPause(engine.positionMs(), null)
-                        log("result", "completed=$completed requestedSeconds=$seconds underrunFrames=${engine.underrunFrames}; no automatic hardware or clock-accuracy verdict")
+                        log(
+                            "result",
+                            "completed=$completed requestedSeconds=$seconds underrunFrames=${engine.underrunFrames}; " +
+                                "no automatic hardware or clock-accuracy verdict",
+                        )
                         check(completed) { "the file ended before the requested soak duration" }
                     } finally {
                         commands.cancelAndJoin()
