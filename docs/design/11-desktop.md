@@ -1905,6 +1905,36 @@ not widen D3. The new binary gate rejects them. The bounded remedy is
 inspection. If compiler runtime code remains, use a permissively licensed
 compiler runtime; do not waive the licence envelope or declare AC2 closed.
 
+Expanded runtime audit note (2026-11-01): run `41553908272` found GCC's
+`crtstuff.c` startup functions in all five Linux libraries and outlined
+atomics inside `avutil`, beyond the previously inspected `ndmedia` helpers.
+[GCC's source](https://raw.githubusercontent.com/gcc-mirror/gcc/master/libgcc/crtstuff.c)
+places the startup code under its GPL runtime exception, which D3 does not
+extend outside OpenJDK. The candidate repair uses `-nostartfiles` only for
+shared links (`--extra-ldsoflags` for FFmpeg), plus `-mno-outline-atomics` for
+both arm64 builds. The audit reads FFmpeg's unstripped link outputs because
+installed stripping removes local helper names. Rebuild, decode and import
+proofs remain required; an unresolved copied runtime is a blocker. The
+fallback is an audited permissive compiler runtime, not an exception waiver.
+
+Clock mapping note (2026-11-01): the live known-gap test failed by 145 ms in
+that same run. Cumulative decode-ahead skip counts attached future jumps to
+audio already queued. Retained PCM now carries its source-frame span,
+including the silence processor's retained fade-in tail, and the engine
+publishes the span at the corresponding Sonic boundary. The source-span
+suite checks input chunking and partial drains; the Android waveform suite
+must still match. The null-device gap test samples before and after the jump
+at all four required speeds, separately from EOF and the no-gap WAV test.
+The 50 ms requirement is unchanged and the repaired matrix is pending.
+
+The native callback accepts only actual allocated atomics for which
+`atomic_is_lock_free` succeeds, including both shared-clock slots. This
+checks the compiler's per-object ABI rather than assuming MSVC's macro
+classification. Linux and macOS also have standalone ASan/UBSan null-device
+stress instruments for partial writes, ring wraps, clear and teardown;
+results are pending. Their executables are temporary diagnostics outside
+shipping native output. Windows sanitizer coverage remains open.
+
 The owner-only `:desktopApp:md0Probe` and `md0ProbeImage` tasks use test
 classes, never the production image. They are instruments, not tester
 releases. `Md0SafetyTest` injects suspend, resume, removal and default-change
@@ -1924,7 +1954,8 @@ Owner procedure, still open on each real OS:
    `-Pmd0.backend=null` is diagnostic and supplies no audible/device proof.
    An early EOF fails the soak. Inspect the frame and CPU samples and count
    post-start underruns; retain the complete report, including failures.
-3. With the prototype playing and no main player window, press keyboard and
+3. Use fresh launches for steps 3–6; interrupted runs do not count toward the
+   30-minute soak. With the prototype playing and no main player window, press keyboard and
    headset play/pause, next/previous and seek controls. Verify the corresponding
    `command` records. Play/pause controls actual output; next/previous/seek
    records prove transport only in this single-item instrument. Full queue
@@ -1947,9 +1978,10 @@ Owner procedure, still open on each real OS:
    automatic rerouting there is an accepted limitation. Windows monitors
    the multimedia default endpoint; a different actual miniaudio endpoint
    and built-in jack notification coverage still need hardware comparison.
-6. Suspend with the lid and menu while playing, then wake. Compare native
-   event/report timestamps with observed audio stop, check pause and the
-   recorded position, and verify that wake never starts output. Include a
+6. Suspend with the lid and menu while playing, then wake. Compare system
+   event-arrival/report timestamps with recorded audio stop, check pause and the
+   recorded position, and verify that wake never starts output. Report timestamps
+   mark JVM receipt, not the original native callback. Include a
    Windows Modern Standby laptop and its power mode. A late/missing event
    stays a failure/open result, with the five-second periodic save as the
    documented loss bound; the fake-store probe does not prove disk durability.
