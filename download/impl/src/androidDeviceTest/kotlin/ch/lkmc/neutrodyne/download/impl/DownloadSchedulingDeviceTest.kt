@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.download.impl
 import android.app.job.JobScheduler
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -16,7 +17,9 @@ import org.junit.runner.RunWith
  * harness and an integrated W4/W5 engine; compilation is not execution evidence. */
 @RunWith(AndroidJUnit4::class)
 class DownloadSchedulingDeviceTest {
-    @Test fun ac3PersistedUidtBuilderOnReal34Or36() {
+    @Test
+    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    fun ac3PersistedUidtBuilderOnReal34Or36() {
         assumeTrue(Build.VERSION.SDK_INT >= 34)
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val job = JobSchedulerFacade(context).info(listOf(deviceRow()))
