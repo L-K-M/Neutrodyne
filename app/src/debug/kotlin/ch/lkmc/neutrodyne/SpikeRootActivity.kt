@@ -12,6 +12,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -33,16 +34,21 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberAndroidPlatformActions
+import ch.lkmc.neutrodyne.core.ui.radio.RadioDestinationMenu
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
@@ -68,12 +74,31 @@ internal fun SpikeRoot() {
             slots = SpikeSlots,
             installers = SpikeInstallers,
             modifier = Modifier.testTag(SpikeRootTags.ROOT),
+            routes = SpikeRoutes.routes,
         )
     }
 }
 
 internal object SpikeRootTags {
     const val ROOT = "root-box"
+}
+
+/**
+ * The test's deep-link feed into the root's `routes` channel. Selecting another tab while the
+ * current one has pushed entries is only reachable through intents/routes under the radio home,
+ * never through the home's Menu key (that key only exists on the home screen itself).
+ */
+internal object SpikeRoutes {
+    private val channel = Channel<Route>(Channel.BUFFERED)
+    val routes: Flow<Route> = channel.receiveAsFlow()
+
+    fun emit(route: Route) {
+        check(channel.trySend(route).isSuccess) { "route channel closed" }
+    }
+
+    fun drain() {
+        while (channel.tryReceive().isSuccess) Unit
+    }
 }
 
 private val SpikeActions =
@@ -152,10 +177,14 @@ internal object PodcastVmProbe {
 private fun FeedsStub() {
     val navigator = LocalAppNavigator.current
     var count by rememberSaveable { mutableIntStateOf(0) }
+    var menu by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         StubTopBar("Feeds")
         Text("feeds-content")
         Text("feeds-count:$count")
+        // The home's one menu key, as the radio programme header carries it in production.
+        NdButton(label = "feeds-menu", onClick = { menu = true }, modifier = Modifier.testTag("radio_menu"))
+        if (menu) RadioDestinationMenu(onDismiss = { menu = false })
         NdButton(label = "feeds-inc", onClick = { count++ })
         NdButton(label = "open-sheet", onClick = { navigator.push(AddPodcastKey(null)) })
         NdButton(label = "open-dialog", onClick = { navigator.push(ExportKey(null)) })
