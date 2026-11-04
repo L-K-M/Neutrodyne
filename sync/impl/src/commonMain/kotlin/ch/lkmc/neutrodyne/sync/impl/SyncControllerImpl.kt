@@ -185,7 +185,7 @@ class SyncControllerImpl(
                 HeldResolution.KEEP_MINE -> {
                     db.withWriteTransaction<Unit> {
                         db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.keepMine(db, batch)
+                            MassChangeGuard.keepMine(db, batch, clock)
                         }
                     }
                 }

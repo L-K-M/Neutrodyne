@@ -22,7 +22,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
-import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.Volatile
 
 /**
  * [SettingsSyncPort] over the portable [SettingStore] (10 Settings capture). The recorder is
@@ -37,7 +37,8 @@ internal class DataStoreSettingsSyncPort(
     private val settingsStore: SettingsStore,
     private val clock: Clock,
 ) : SettingsSyncPort {
-    private val recorderRef = AtomicReference<suspend (SettingKey<*>, String) -> Unit>(null)
+    @Volatile
+    private var recorderRef: suspend (SettingKey<*>, String) -> Unit = { _, _ -> }
     private val local = MutableSharedFlow<LocalSyncedSetting>(extraBufferCapacity = 16)
     override val localSyncedChanges: Flow<LocalSyncedSetting> = local
 
@@ -52,7 +53,7 @@ internal class DataStoreSettingsSyncPort(
     }
 
     override fun registerRecorder(recorder: suspend (key: SettingKey<*>, json: String) -> Unit) {
-        recorderRef.set(recorder)
+        recorderRef = recorder
     }
 
     override fun encode(
@@ -80,7 +81,7 @@ internal class DataStoreSettingsSyncPort(
     ) {
         if (!key.synced) return
         val json = encode(key, value) ?: return
-        recorderRef.get()?.invoke(key, json)
+        recorderRef.invoke(key, json)
     }
 
     override fun emitLocal(
