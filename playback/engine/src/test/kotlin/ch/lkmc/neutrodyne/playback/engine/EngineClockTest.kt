@@ -30,7 +30,7 @@ class EngineClockTest {
         assumeTrue("corpus item missing: $file", file.toFile().isFile)
 
         for (speed in SPEEDS) {
-            FfAudioEngine(requireNotNull(ffmpeg), requireNotNull(ndmedia), "null", RATE).use { engine ->
+            Md0AudioProbe(requireNotNull(ffmpeg), requireNotNull(ndmedia), "null", RATE).use { engine ->
                 engine.play(file, speed, SKIP)
                 assertTrue(engine.awaitEnded(PLAY_TIMEOUT_MS), "item never ended at ${speed}x")
                 val position = engine.positionMs()
@@ -48,7 +48,7 @@ class EngineClockTest {
         val ffmpeg = requireNotNull(ffmpegDir()) { "FFmpeg build required" }
         val ndmedia = requireNotNull(ndmediaDir()) { "ndmedia build required" }
         for (speed in SPEEDS) {
-            FfAudioEngine(ffmpeg, ndmedia, "null", RATE).use { engine ->
+            Md0AudioProbe(ffmpeg, ndmedia, "null", RATE).use { engine ->
                 engine.play(mediaDir().resolve("wav_2s.wav"), speed, true)
                 val deadline = System.nanoTime() + 5_000_000_000L
                 while (engine.outputDescription == null && System.nanoTime() < deadline) Thread.sleep(5)
@@ -92,7 +92,7 @@ class EngineClockTest {
         try {
             Files.write(file, header.array())
             for (speed in SPEEDS) {
-                FfAudioEngine(requireNotNull(ffmpegDir()), requireNotNull(ndmediaDir()), "null", RATE).use { engine ->
+                Md0AudioProbe(requireNotNull(ffmpegDir()), requireNotNull(ndmediaDir()), "null", RATE).use { engine ->
                     engine.play(file, speed, true)
                     val deadline = System.nanoTime() + 10_000_000_000L
                     var measurements = 0

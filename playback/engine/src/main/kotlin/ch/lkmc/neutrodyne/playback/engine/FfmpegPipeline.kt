@@ -20,6 +20,32 @@ class FfmpegPipeline
         val demuxer: FfDemuxer,
         val decoder: FfDecoder,
     ) : AutoCloseable {
+        private var draining = false
+        private var resamplerDrained = false
+
+        /** One streaming frame, preserving decoder backpressure and EOF drain state. */
+        fun readFrame(): AudioFrame? {
+            while (true) {
+                val frame = decoder.receive()
+                if (frame != null) {
+                    if (frame.samples.isEmpty()) continue
+                    return frame
+                }
+                if (draining) {
+                    if (resamplerDrained) return null
+                    resamplerDrained = true
+                    return decoder.drainResampler()?.takeIf { it.samples.isNotEmpty() }
+                }
+                val packet = demuxer.readPacket()
+                if (packet == null) {
+                    decoder.flush()
+                    draining = true
+                } else {
+                    check(decoder.send(packet)) { "decoder backpressure after draining output" }
+                }
+            }
+        }
+
         /** The number of decoded samples per channel, after the item's priming trim. */
         val decodedSamples: Long get() = decoder.decodedSamples
 
@@ -29,26 +55,7 @@ class FfmpegPipeline
         /** Decodes the whole item and returns the PCM of every block in order. */
         fun decodeAll(): List<AudioFrame> {
             val blocks = mutableListOf<AudioFrame>()
-            while (true) {
-                val packet = demuxer.readPacket() ?: break
-                if (!decoder.send(packet)) {
-                    while (true) {
-                        val frame = decoder.receive() ?: break
-                        if (frame.samples.isNotEmpty()) blocks += frame
-                    }
-                    check(decoder.send(packet)) { "decoder remained blocked after draining" }
-                }
-                while (true) {
-                    val frame = decoder.receive() ?: break
-                    if (frame.samples.isNotEmpty()) blocks += frame
-                }
-            }
-            decoder.flush()
-            while (true) {
-                val frame = decoder.receive() ?: break
-                if (frame.samples.isNotEmpty()) blocks += frame
-            }
-            decoder.drainResampler()?.let { if (it.samples.isNotEmpty()) blocks += it }
+            while (true) blocks += readFrame() ?: break
             return blocks
         }
 
@@ -68,34 +75,22 @@ class FfmpegPipeline
             decoder.flushBuffers()
             decoder.discardPendingSamples()
             val targetUs = Math.multiplyExact(positionMs, MICROS_PER_MS)
-            var flushing = false
+            draining = false
+            resamplerDrained = false
             while (true) {
-                if (!flushing) {
-                    val packet = demuxer.readPacket()
-                    if (packet == null) {
-                        decoder.flush()
-                        flushing = true
-                    } else {
-                        check(decoder.send(packet)) { "seek decoder backpressure after draining" }
-                    }
-                }
-                while (true) {
-                    val frame = decoder.receive() ?: break
-                    if (frame.samples.isEmpty()) continue
-                    val ptsUs = requireNotNull(frame.ptsUs) { "the seek produced audio without a timestamp" }
-                    val count = frame.samples.size / frame.channels
-                    val delta = (targetUs - ptsUs).coerceAtLeast(0)
-                    val dropped =
-                        ((delta * frame.sampleRate + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND)
-                            .coerceAtMost(count.toLong())
-                            .toInt()
-                    if (dropped == count) continue
-                    return frame.copy(
-                        samples = frame.samples.copyOfRange(dropped * frame.channels, frame.samples.size),
-                        ptsUs = ptsUs + dropped * MICROS_PER_SECOND / frame.sampleRate,
-                    )
-                }
-                if (flushing) return null
+                val frame = readFrame() ?: return null
+                val ptsUs = requireNotNull(frame.ptsUs) { "the seek produced audio without a timestamp" }
+                val count = frame.samples.size / frame.channels
+                val delta = (targetUs - ptsUs).coerceAtLeast(0)
+                val dropped =
+                    ((delta * frame.sampleRate + MICROS_PER_SECOND - 1) / MICROS_PER_SECOND)
+                        .coerceAtMost(count.toLong())
+                        .toInt()
+                if (dropped == count) continue
+                return frame.copy(
+                    samples = frame.samples.copyOfRange(dropped * frame.channels, frame.samples.size),
+                    ptsUs = ptsUs + dropped * MICROS_PER_SECOND / frame.sampleRate,
+                )
             }
         }
 

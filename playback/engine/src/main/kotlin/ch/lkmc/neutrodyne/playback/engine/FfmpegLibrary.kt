@@ -130,6 +130,9 @@ class FfmpegLibrary
                 MemorySegment.NULL,
             )
 
+        internal fun setProbeSize(context: MemorySegment, bytes: Long): Int =
+            callInt("avutil", "av_opt_set_int", OPT_SET_INT, context, cString("probesize"), bytes, 0)
+
         fun findStreamInfo(context: MemorySegment): Int =
             callInt(
                 "avformat",

@@ -13,7 +13,7 @@ import ch.lkmc.neutrodyne.desktop.system.RemoteCommand
 import ch.lkmc.neutrodyne.playback.core.PlayedRule
 import ch.lkmc.neutrodyne.playback.core.PositionSaveResult
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
-import ch.lkmc.neutrodyne.playback.engine.FfAudioEngine
+import ch.lkmc.neutrodyne.playback.engine.Md0AudioProbe
 import ch.lkmc.neutrodyne.playback.native.NativeSessionEventKind
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
@@ -68,7 +68,7 @@ object Md0Probe {
                         "file=${file.name}; position store is an in-memory fake",
                 )
                 log("build", Files.readString(ffmpeg.resolve("ffmpeg-build.txt")))
-                FfAudioEngine(ffmpeg, ndmedia, backend, 44_100).use { engine ->
+                Md0AudioProbe(ffmpeg, ndmedia, backend, 44_100).use { engine ->
                     val clock = TestClock(nowMs = System.currentTimeMillis())
                     val store = FakePositionStore()
                     val saver = PositionSaver(store, clock, PlayedRule())

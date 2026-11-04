@@ -52,8 +52,8 @@ class EngineCommandsTest {
         }
     }
 
-    private fun engine(source: ByteSource): FfAudioEngine =
-        FfAudioEngine(nativeDirectory("ffmpeg"), nativeDirectory("ndmedia"), "null", 44_100) { source }
+    private fun engine(source: ByteSource): Md0AudioProbe =
+        Md0AudioProbe(nativeDirectory("ffmpeg"), nativeDirectory("ndmedia"), "null", 44_100) { source }
 
     private fun nativeDirectory(kind: String): Path {
         val root = Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")))
@@ -72,7 +72,7 @@ class EngineCommandsTest {
 
     private fun blockedSource() = BlockedSource(Files.readAllBytes(media()))
 
-    private fun awaitOutput(engine: FfAudioEngine) {
+    private fun awaitOutput(engine: Md0AudioProbe) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS)
         while (engine.outputDescription == null && System.nanoTime() < deadline) Thread.sleep(5)
         assertTrue(engine.outputDescription != null, "output was never opened")

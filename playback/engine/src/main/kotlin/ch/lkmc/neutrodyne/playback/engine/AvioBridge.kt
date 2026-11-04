@@ -10,6 +10,7 @@ import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * A custom AVIO over a JVM [ByteSource] (11 Demux and decode step 2).
@@ -53,6 +54,12 @@ class AvioBridge
         private var closed = false
         private var position = 0L
         private val aborted = AtomicBoolean(false)
+        private val failure = AtomicReference<Throwable?>(null)
+
+        /** Restore the typed source error after the native call has safely returned. */
+        internal fun throwIfFailed() {
+            failure.get()?.let { throw it }
+        }
 
         /** Any thread; makes a blocked [ByteSource.read] return so a seek can interrupt it. */
         fun abort() {
@@ -100,6 +107,7 @@ class AvioBridge
                 }
             } catch (failure: Throwable) {
                 // An upcall must never let a throwable cross into FFmpeg.
+                this.failure.compareAndSet(null, failure)
                 library.layout.intConstant("AVERROR_EIO")
             }
 
