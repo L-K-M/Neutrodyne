@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+  <string name="sync_title">Sync</string>
+  <string name="sync_intro">Halte deine Podcasts auf Handy und Computern mit einem Neutrodyne-Sync-Server selbst im Schritt. Ohne Server funktioniert alles wie bisher.</string>
+  <string name="sync_continue">Weiter</string>
+  <string name="sync_linked">Mit %1$s verbunden</string>
+  <string name="sync_now">Jetzt synchronisieren</string>
+  <string name="sync_what_syncs">Synchronisiert: Abos, Gruppen, Wiedergabestatus, Positionen, Favoriten, Warteschlange und synchronisierte Einstellungen. Nie synchronisiert: Downloads, Bilder und Feed-Inhalte.</string>
+  <string name="sync_reconnect">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren.</string>
+  <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>
+  <string name="sync_revoked">Dieses Gerät wurde von %1$s getrennt.</string>
+</resources>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+  <string name="sync_title">Sync</string>
+  <string name="sync_intro">Keep your podcasts in step on your phone and computers with a Neutrodyne Sync server you run yourself. Without one, everything works as now.</string>
+  <string name="sync_continue">Continue</string>
+  <string name="sync_linked">Linked to %1$s</string>
+  <string name="sync_now">Sync now</string>
+  <string name="sync_what_syncs">Synced: subscriptions, groups, played state, positions, favourites, Up next and synced settings. Never synced: downloads, artwork and feed contents.</string>
+  <string name="sync_reconnect">Reconnect to %1$s to keep syncing.</string>
+  <string name="sync_finish_link">Finish linking to %1$s.</string>
+  <string name="sync_revoked">This device was unlinked from %1$s.</string>
+</resources>

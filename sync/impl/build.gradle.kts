@@ -15,6 +15,9 @@ kotlin {
             implementation(libs.okhttp.mockwebserver3)
             implementation(libs.okio)
         }
+        findByName("androidMain")?.dependencies {
+            implementation(libs.androidx.work.runtime)
+        }
         commonMain.dependencies {
             implementation(project(":sync:api"))
             implementation(project(":sync:protocol"))
