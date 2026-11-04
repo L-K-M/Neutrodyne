@@ -72,6 +72,7 @@ class FakeExtractorChannelLookup : ExtractorChannelLookup {
 
 class FakeYouTubeChannelSearch : YouTubeChannelSearch {
     var result: ChannelSearchResult = ChannelSearchResult.Unsupported
+    var search: suspend (String, SearchCursor?) -> ChannelSearchResult = { _, _ -> result }
     val calls = mutableListOf<Pair<String, SearchCursor?>>()
 
     override suspend fun search(
@@ -79,7 +80,7 @@ class FakeYouTubeChannelSearch : YouTubeChannelSearch {
         cursor: SearchCursor?,
     ): ChannelSearchResult {
         calls += query to cursor
-        return result
+        return search.invoke(query, cursor)
     }
 }
 
