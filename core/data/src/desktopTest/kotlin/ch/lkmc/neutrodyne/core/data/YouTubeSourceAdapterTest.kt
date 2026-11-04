@@ -16,8 +16,12 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.data.youtube.DefaultYouTubeHealth
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeDescriptionLoader
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImpl
 import ch.lkmc.neutrodyne.core.data.youtube.YouTubeSourceAdapter
+import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.domain.ChannelMetadataReason
+import ch.lkmc.neutrodyne.core.domain.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
@@ -33,13 +37,16 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelMetadata
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeFeedOutageMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
+import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.youtube.api.FeedGate
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
@@ -667,13 +674,75 @@ class YouTubeSourceAdapterTest {
             }
         }
 
+    @Test fun realTruncationProvenanceFollowsTheSelectedVariantThroughReorderingAndIngest() =
+        runTest {
+            fixture().use { f ->
+                val id = f.channel(3)
+                val prefix = "0:00 First\n0:10 Second\n0:20 Third"
+                val clipped = prefix + " ".repeat(512 * 1024) + "0:30 Fourth"
+
+                fun notes(
+                    number: Int,
+                    text: String,
+                    date: Long,
+                ) = video(number, date).replace("Description $number", text)
+                server.enqueue(mockResponse(body = atom(listOf(notes(1, prefix, NOW - DAY), notes(2, clipped, NOW)))))
+                server.enqueue(mockResponse(body = atom(listOf(notes(1, clipped, NOW - DAY), notes(2, prefix, NOW)))))
+                val result = f.parsed(id)
+                val truncatedIndex =
+                    result.feed.items
+                        .single { it.externalMediaId == vid(2) }
+                        .feedOrder
+                assertEquals(
+                    listOf(truncatedIndex),
+                    result.feed.warnings
+                        .filter {
+                            it.code == WarningCode.TEXT_TRUNCATED
+                        }.map { it.itemIndex },
+                )
+                newIngestor(f.db, f.clock, defaultDispatcher = StandardTestDispatcher(testScheduler)).ingest(
+                    dueFeedOf(f.db, id),
+                    result.feed,
+                    IngestContext(
+                        IngestMode.REFRESH,
+                        result.partial,
+                        result.meta,
+                        result.rowHints,
+                        result.absenceFloor,
+                    ),
+                )
+                val complete = f.db.episodeDao().youTubeByVideoId(id, vid(1))!!
+                val truncated = f.db.episodeDao().youTubeByVideoId(id, vid(2))!!
+                val codec = EpisodeDescriptionCodec
+                assertEquals(
+                    DescriptionCompleteness.COMPLETE,
+                    codec.decode(f.db.episodeDao().description(complete.id)!!).completeness,
+                )
+                assertEquals(
+                    DescriptionCompleteness.TRUNCATED,
+                    codec.decode(f.db.episodeDao().description(truncated.id)!!).completeness,
+                )
+                val loader =
+                    YouTubeDescriptionLoader(
+                        f.db,
+                        f.engine,
+                        YouTubeFactsWriterImpl(f.db, JsoupShowNotesSanitizer()),
+                        f.clock,
+                        backgroundScope,
+                    )
+                assertEquals(prefix, loader.load(complete.id))
+                assertNull(loader.load(truncated.id))
+                assertTrue(f.engine.factCalls.isEmpty())
+            }
+        }
+
     private suspend fun TestScope.fixture(): Fixture = Fixture(this)
 
     private inner class Fixture(
         scope: TestScope,
     ) : AutoCloseable {
         val clock = TestClock(NOW)
-        val db = newDb(clock, kotlinx.coroutines.test.StandardTestDispatcher(scope.testScheduler))
+        val db = newDb(clock, StandardTestDispatcher(scope.testScheduler))
         val root =
             kotlin.io.path
                 .createTempDirectory("nd-youtube-adapter")
@@ -719,7 +788,7 @@ class YouTubeSourceAdapterTest {
                 ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment(
                     db,
                     engine,
-                    ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImpl(
+                    YouTubeFactsWriterImpl(
                         db,
                         ch.lkmc.neutrodyne.feeds.jvm.html
                             .JsoupShowNotesSanitizer(),
