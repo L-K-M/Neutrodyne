@@ -147,6 +147,16 @@ abstract class GroupDao {
     @Query("SELECT * FROM podcast_group WHERE id = :id")
     abstract suspend fun groupById(id: Long): PodcastGroupEntity?
 
+    /** 10's `ChangeBuilder`/`SyncApplier`: the sync record ID is the group `uuid`. */
+    @Query("SELECT * FROM podcast_group WHERE uuid = :uuid")
+    abstract suspend fun groupByUuid(uuid: String): PodcastGroupEntity?
+
+    @Query("SELECT * FROM podcast_group_member WHERE groupId = :groupId AND podcastId = :podcastId")
+    abstract suspend fun member(
+        groupId: Long,
+        podcastId: Long,
+    ): PodcastGroupMemberEntity?
+
     @Query("SELECT * FROM podcast_group_member WHERE groupId = :groupId ORDER BY orderKey, podcastId")
     abstract suspend fun membersOf(groupId: Long): List<PodcastGroupMemberEntity>
 
@@ -520,6 +530,10 @@ interface PositionDao {
 interface QueueDao {
     @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
     suspend fun insert(row: QueueEntryEntity): Long
+
+    /** 10's `ChangeBuilder`/`SyncApplier`: one episode's Up next row. */
+    @Query("SELECT * FROM queue_entry WHERE episodeId = :episodeId")
+    suspend fun entryByEpisode(episodeId: Long): QueueEntryEntity?
 
     @Query("SELECT * FROM queue_entry ORDER BY orderKey, id")
     suspend fun entries(): List<QueueEntryEntity>
