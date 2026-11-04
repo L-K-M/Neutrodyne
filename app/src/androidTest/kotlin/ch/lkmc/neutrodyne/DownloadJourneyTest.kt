@@ -144,6 +144,8 @@ class DownloadJourneyTest {
             assertTrue(media.canonicalPath.startsWith(root.canonicalPath + File.separator))
             assertTrue(media.isFile && media.length() == row.downloadedBytes)
             assertTrue(media.length() >= E4_MIN_BYTES)
+            // Completion is durable before the in-memory playback projection is published.
+            await { graph.localMediaIndex.localUriOrNull(id) != null }
             assertNotNull(graph.localMediaIndex.localUriOrNull(id))
             // The publisher disappears before local chapter enrichment and the first playback start.
             server.close()
