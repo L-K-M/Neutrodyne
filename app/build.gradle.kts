@@ -85,7 +85,14 @@ tasks.withType<Test>().configureEach {
     exclude("ch/lkmc/neutrodyne/DeviceTestSelectionTest\$FailureFixture.class")
 }
 
+// The profile consumer creates this build type after the application DSL is evaluated.
+// Fixture helpers must never enter debug, release or another published runtime.
+configurations.matching { it.name == "benchmarkReleaseImplementation" }.configureEach {
+    dependencies.add(project.dependencies.project(mapOf("path" to ":core:testing")))
+}
+
 dependencies {
+    add("baselineProfile", project(":benchmark"))
     for (feature in listOf(
         "feeds",
         "library",

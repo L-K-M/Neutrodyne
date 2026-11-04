@@ -202,7 +202,7 @@ jobs:
             -PtestBuildType=release :app:dumpReleaseR8Inputs
           python3 scripts/ci/trace-instrumentation-abi.py --check
       - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar -Pneutrodyne.abiSplits=true
+        run: ./gradlew assembleRelease assembleDebug :app:assembleBenchmarkRelease :benchmark:assembleBenchmarkRelease :sync:server:fatJar -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs

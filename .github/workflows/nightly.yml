@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
+        description: "full | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
         default: full
 
 permissions:
@@ -927,3 +927,65 @@ jobs:
           name: bmgr-legacy-negative-api${{ matrix.api }}
           path: build/bmgr-api29-probe/
           if-no-files-found: error
+
+  benchmark-dryrun:
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'benchmark-dryrun'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Enable KVM and install emulator
+        run: |
+          sudo chmod a+rw /dev/kvm
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
+      - name: Exercise all Macrobenchmark journeys
+        run: >-
+          ./gradlew :benchmark:bench34BenchmarkReleaseAndroidTest
+          --max-workers=1
+          -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1
+          -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.dryRunMode.enable=true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: benchmark-dryrun
+          path: benchmark/build/outputs/
+          retention-days: 14
+
+  screenshots-full:
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'screenshots-full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Verify both full golden sets
+        run: ./gradlew verifyRoborazziAndroidHostTest verifyRoborazziDesktop -Proborazzi.test.verify=true -PscreenshotTier=full -Pneutrodyne.pseudoLocales=true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: screenshots-full-diffs
+          path: '**/build/outputs/roborazzi/'
+          retention-days: 14
