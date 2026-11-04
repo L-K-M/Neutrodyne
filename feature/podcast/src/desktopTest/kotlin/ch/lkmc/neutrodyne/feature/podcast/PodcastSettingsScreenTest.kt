@@ -86,6 +86,28 @@ class PodcastSettingsScreenTest {
         Locale.setDefault(previousLocale)
     }
 
+    @Test fun channelSwitchesKeepLongFormAndExplainPastLiveRows() =
+        runComposeUiTest {
+            var variants: Int? = null
+            setSettings(
+                PodcastSettingsUiState(
+                    loaded = true,
+                    detail =
+                        testPodcastDetail(7).copy(
+                            sourceType = SourceType.YOUTUBE_CHANNEL,
+                            youtubeVariants = 1,
+                        ),
+                ),
+                onVariants = { variants = it },
+            )
+            onNodeWithText("Include Shorts").performClick()
+            assertEquals(3, variants)
+            onNodeWithText("Include past live streams").performClick()
+            assertEquals(5, variants)
+            onNodeWithText("This changes future polls.", substring = true).assertIsDisplayed()
+            onNodeWithText("Edit feed address").assertDoesNotExist()
+        }
+
     @Test
     fun loadingShowsSpinner() =
         runComposeUiTest {
@@ -519,6 +541,7 @@ class PodcastSettingsScreenTest {
 
     private fun ComposeUiTest.setSettings(
         state: PodcastSettingsUiState,
+        onVariants: (Int) -> Unit = {},
         onCustomTitle: (String?) -> Unit = {},
         onOrderChange: (FeedOrder) -> Unit = {},
         onIncludeInAll: (Boolean) -> Unit = {},
@@ -544,6 +567,7 @@ class PodcastSettingsScreenTest {
                     PodcastSettingsScreen(
                         state = state,
                         onCustomTitle = onCustomTitle,
+                        onVariants = onVariants,
                         onOrderChange = onOrderChange,
                         onIncludeInAll = onIncludeInAll,
                         onEditFeedUrl = onEditFeedUrl,
