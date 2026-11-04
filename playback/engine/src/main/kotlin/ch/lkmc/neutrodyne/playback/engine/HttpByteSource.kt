@@ -99,7 +99,6 @@ internal class LookAheadLoader(
     private val monitor = Object()
     private var stopped = false
     private var requested: Long? = null
-    private var fetchStart = 0L
     private var cursor = 0L
     private var demand = 0L
     private var revision = 0L
@@ -144,7 +143,7 @@ internal class LookAheadLoader(
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(READ_WAIT_SECONDS)
             demand = position
             val cached = resource.read(position, count)
-            if (cached == null && (position < fetchStart || position - cursor > REOPEN_DISTANCE_BYTES)) {
+            if (cached == null && (position < cursor || position - cursor > REOPEN_DISTANCE_BYTES)) {
                 revision++
                 call?.cancel()
                 requested = position
@@ -186,7 +185,6 @@ internal class LookAheadLoader(
                         val position = requireNotNull(requested)
                         requested = null
                         cursor = position
-                        fetchStart = position
                         position to revision
                     }
                 load(work.first, work.second)
