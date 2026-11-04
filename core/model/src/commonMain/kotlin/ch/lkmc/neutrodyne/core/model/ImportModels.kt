@@ -54,6 +54,11 @@ data class ImportOptions(
     val sourceGroups: List<SourceGroup> = emptyList(),
     /** ordinal → user rename parsed from a Neutrodyne file's `text` (05 §3.5, parser-owned). */
     val itemCustomTitles: Map<Int, String> = emptyMap(),
+    /** Parser-owned ordinal maps; input may come from htmlUrl rather than originalUrl.
+     * Store the classified input string, never a handle as podcast identity. Validated variants
+     * use nd:ytVariants > URL hint > LONG_FORM; old sessions read empty maps. */
+    val itemYouTubeInputs: Map<Int, String> = emptyMap(),
+    val itemYouTubeVariants: Map<Int, Int> = emptyMap(),
     /** Worker bookkeeping: when commit ran and the fetch-attempt marker (05 6–7). */
     val committedAt: Long? = null,
     val attemptMarkerAt: Long? = null,
@@ -69,6 +74,8 @@ data class ImportOptions(
             laneAttempts = laneAttempts,
             sourceGroups = sourceGroups,
             itemCustomTitles = itemCustomTitles,
+            itemYouTubeInputs = itemYouTubeInputs,
+            itemYouTubeVariants = itemYouTubeVariants,
             committedAt = committedAt,
             attemptMarkerAt = attemptMarkerAt,
         )
