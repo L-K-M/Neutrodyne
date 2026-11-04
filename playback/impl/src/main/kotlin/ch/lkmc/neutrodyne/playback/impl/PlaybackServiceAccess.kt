@@ -66,7 +66,17 @@ public class PlaybackServiceAccess internal constructor(
     internal val localChanges: LocalMediaChanges,
     internal val missingLocalMedia: Provider<MissingLocalMediaReporter>,
     private val localReadiness: LocalMediaReadiness,
+    internal val availability: Provider<ch.lkmc.neutrodyne.core.domain.YouTubeAvailabilityRecorder>,
+    internal val engine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine,
+    internal val streams: ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver,
+    private val application: android.app.Application,
 ) {
+    internal fun audioPref() =
+        prefs.current.value.audioPref(
+            application.resources.configuration.locales[0]
+                .language,
+        )
+
     internal suspend fun open(): PlaybackPorts =
         withContext(io) {
             awaitDatabase()
