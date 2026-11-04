@@ -59,7 +59,18 @@ class AddPodcastRouteTest {
             .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
     private val search = FakeSearchRepository()
-    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups, search) }
+    private val viewModel by lazy {
+        AddPodcastViewModel(
+            resolver,
+            subscribe,
+            groups,
+            search,
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeChannelResolver(),
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeChannelRepository(),
+        )
+    }
     private val navigator = RecordingAppNavigator()
     private val host = SnackbarHostState()
 

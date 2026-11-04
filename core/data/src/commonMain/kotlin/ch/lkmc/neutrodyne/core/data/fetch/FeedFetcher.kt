@@ -61,7 +61,7 @@ internal class FeedFetcher(
             if (req.purpose != FeedRequestPurpose.REFRESH &&
                 (youTube.classify(url) != null || youTube.isYouTubeHost(url))
             ) {
-                return FetchOutcome.Network(ADD_YOUTUBE_REJECTED)
+                return FetchOutcome.Network(ADD_YOUTUBE_REJECTED, rejectedYouTubeUrl = url)
             }
             // A discovered URL must never fetch the LAN; a public add input must not redirect
             // there either. Refresh keeps its existing behaviour. The spelling check is the
