@@ -129,13 +129,21 @@ class SyncApplier(
                 SyncCollection.SETTING -> applySetting(resolved, merge)
             }
         if (outcome is RecordOutcome.Applied || outcome is RecordOutcome.Held) {
+            val pendingSetting =
+                if (coll == SyncCollection.SETTING) {
+                    val value = merge.record.fields["v"]?.v
+                    val text = (value as? JsonPrimitive)?.content ?: value?.toString()
+                    text?.let { PendingSetting(it, merge.record.maxClock?.toString() ?: "") }
+                } else {
+                    null
+                }
             clockStore.put(
                 coll.wire,
                 resolved.rid,
                 RawSyncRecord(
                     state = merge.record,
                     by = dto.by ?: stored?.by,
-                    pendingSetting = stored?.pendingSetting,
+                    pendingSetting = pendingSetting ?: stored?.pendingSetting,
                     pendingAuth = stored?.pendingAuth,
                 ),
             )
