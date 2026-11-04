@@ -31,12 +31,3 @@ object SyncNavigation {
             }
         }
 }
-
-/** The link flow screen (08 Linking a device); a placeholder until the full flow lands. */
-@Composable
-internal fun SyncSetupScreen(
-    controller: SyncController,
-    serverUrl: String,
-) {
-    SyncSettingsScreen(controller)
-}
