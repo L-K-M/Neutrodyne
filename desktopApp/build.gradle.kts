@@ -273,6 +273,7 @@ extensions
         if (smokeRun.get()) jvmArgs("-Dneutrodyne.smoke=true")
     }
 
+<<<<<<< HEAD
 // Test-only MD0 instrument; no entry point or fixture enters the app image.
 tasks.register<JavaExec>("md0Probe") {
     group = "verification"
@@ -413,4 +414,11 @@ tasks.matching { it.name == "run" }.configureEach {
 
 tasks.withType<JavaExec>().matching { it.name == "run" }.configureEach {
     systemProperty("neutrodyne.rootDir", rootProject.layout.projectDirectory.asFile.absolutePath)
+}
+
+// Share only replay code/resources with the test APK, never with either application.
+sourceSets.test {
+    kotlin.srcDir("../app/src/externalModeTest/kotlin")
+    resources.srcDir("../youtube/impl/src/test/resources")
+    resources.srcDir("../feeds/src/test/resources")
 }
