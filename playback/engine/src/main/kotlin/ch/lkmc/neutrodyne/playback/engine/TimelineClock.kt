@@ -26,7 +26,10 @@ internal class TimelineClock(
         val speed: Float,
     )
 
-    private data class Entry(val sequence: Long, val marker: Marker)
+    private data class Entry(
+        val sequence: Long,
+        val marker: Marker,
+    )
 
     private val markers = AtomicReferenceArray<Entry?>(MARKER_COUNT)
     private val writeIndex = AtomicLong(0)
@@ -57,11 +60,17 @@ internal class TimelineClock(
             val first = earliest
             if (first == null || frame < first.marker.outFrame ||
                 (frame == first.marker.outFrame && entry.sequence > first.sequence)
-            ) earliest = entry
+            ) {
+                earliest = entry
+            }
             val preceding = best
-            if (frame <= played && (preceding == null || frame > preceding.marker.outFrame ||
-                    (frame == preceding.marker.outFrame && entry.sequence > preceding.sequence))
-            ) best = entry
+            if (frame <= played && (
+                    preceding == null || frame > preceding.marker.outFrame ||
+                        (frame == preceding.marker.outFrame && entry.sequence > preceding.sequence)
+                )
+            ) {
+                best = entry
+            }
         }
         val anchor = (best ?: earliest)?.marker ?: return 0
         val delta =

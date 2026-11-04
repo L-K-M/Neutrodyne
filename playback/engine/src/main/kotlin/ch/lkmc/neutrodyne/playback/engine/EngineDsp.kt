@@ -31,7 +31,10 @@ internal class EngineDsp(
 
     val endUs: Long get() = (firstPtsUs ?: 0L) + inputFrames * MICROS_PER_SECOND / sampleRate
 
-    fun configure(newSpeed: Float, skipSilence: Boolean) {
+    fun configure(
+        newSpeed: Float,
+        skipSilence: Boolean,
+    ) {
         if (speed == newSpeed && skipEnabled == skipSilence) return
         // Flush the old processor before replacing it: its buffered PCM still
         // belongs to the old rate and must retain the old timeline slope.
@@ -69,7 +72,8 @@ internal class EngineDsp(
         drainSonic()
     }
 
-    private fun newSkipper(): SilenceSkipper? = SilenceSkipper().takeIf { skipEnabled }?.apply { configure(sampleRate, channels) }
+    private fun newSkipper(): SilenceSkipper? =
+        SilenceSkipper().takeIf { skipEnabled }?.apply { configure(sampleRate, channels) }
 
     private fun drainSkipper() {
         val skip = skipper ?: return
@@ -81,7 +85,10 @@ internal class EngineDsp(
         }
     }
 
-    private fun queueSonic(input: ByteBuffer, sourceFrame: Long) {
+    private fun queueSonic(
+        input: ByteBuffer,
+        sourceFrame: Long,
+    ) {
         val frames = input.remaining() / (channels * Short.SIZE_BYTES)
         if (frames == 0) return
         val firstPts = firstPtsUs ?: 0L
@@ -95,8 +102,10 @@ internal class EngineDsp(
         previousSourceEnd = sourceFrame + frames
         clock.push(
             TimelineClock.Marker(
-                outputCursor.toLong(), episodeId.toString(),
-                (firstPtsUs ?: 0L) + sourceFrame * MICROS_PER_SECOND / sampleRate, speed,
+                outputCursor.toLong(),
+                episodeId.toString(),
+                (firstPtsUs ?: 0L) + sourceFrame * MICROS_PER_SECOND / sampleRate,
+                speed,
             ),
         )
         outputCursor += frames * deviceRate / (sampleRate * speed.toDouble())

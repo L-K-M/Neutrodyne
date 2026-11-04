@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.playback.native.NdOutputException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -30,7 +31,12 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /** Device selection is explicit in tests: the null backend never opens audio hardware. */
-enum class EngineBackend(internal val nativeName: String?) { SYSTEM(null), NULL("null") }
+enum class EngineBackend(
+    internal val nativeName: String?,
+) {
+    SYSTEM(null),
+    NULL("null"),
+}
 
 /**
  * One engine thread owns native decode, DSP and output lifetime. Preparation
@@ -54,25 +60,54 @@ class FfAudioEngine internal constructor(
         backend: EngineBackend = EngineBackend.SYSTEM,
         deviceRate: Int = DEFAULT_RATE,
     ) : this(
-        ffmpegDirectory, ndmediaDirectory, resolver,
+        ffmpegDirectory,
+        ndmediaDirectory,
+        resolver,
         { source ->
             when (source) {
                 is ResolvedSource.File -> FileByteSource(source.path)
                 else -> HttpByteSource.open(clients, source, cache)
             }
-        }, backend, deviceRate,
+        },
+        backend,
+        deviceRate,
     )
 
-    init { require(deviceRate > 0) }
+    init {
+        require(deviceRate > 0)
+    }
 
-    private data class SilenceJump(val outFrame: Long, val event: EngineEvent.Discontinuity)
+    private data class SilenceJump(
+        val outFrame: Long,
+        val event: EngineEvent.Discontinuity,
+    )
+
     private val silenceJumps = ArrayDeque<SilenceJump>()
 
-    private data class Request(val generation: Long, val item: EngineItem, val positionMs: Long, val attempt: Int = 0)
-    private data class Settings(val speed: Float = 1f, val skipSilence: Boolean = false, val volume: Float = 1f, val fade: Float = 1f)
-    private class Prepared(val source: ByteSource, val pipeline: FfmpegPipeline) : AutoCloseable {
+    private data class Request(
+        val generation: Long,
+        val item: EngineItem,
+        val positionMs: Long,
+        val attempt: Int = 0,
+    )
+
+    private data class Settings(
+        val speed: Float = 1f,
+        val skipSilence: Boolean = false,
+        val volume: Float = 1f,
+        val fade: Float = 1f,
+    )
+
+    private class Prepared(
+        val source: ByteSource,
+        val pipeline: FfmpegPipeline,
+    ) : AutoCloseable {
         override fun close() {
-            try { pipeline.close() } finally { source.close() }
+            try {
+                pipeline.close()
+            } finally {
+                source.close()
+            }
         }
     }
 
@@ -98,19 +133,34 @@ class FfAudioEngine internal constructor(
     private var sessionBaseFrames = 0L
     private var sessionPeriodFrames = 0L
     private val anchorMs = AtomicLong(0)
+
     @Volatile private var clock: TimelineClock? = null
+
     @Volatile internal var outputDescription: String? = null
         private set
+
     @Volatile internal var outputFramesPlayed: (() -> Long)? = null
         private set
-    private val prepare = Executors.newSingleThreadScheduledExecutor { action -> Thread(action, "nd-prepare").apply { isDaemon = true } }
+    private val prepare =
+        Executors.newSingleThreadScheduledExecutor { action ->
+            Thread(action, "nd-prepare").apply { isDaemon = true }
+        }
+
     init {
         prepare.scheduleWithFixedDelay(::monitorBuffer, BUFFER_POLL_MS, BUFFER_POLL_MS, TimeUnit.MILLISECONDS)
     }
 
-    private val thread = Thread({ run() }, "nd-engine").apply { isDaemon = true; start() }
+    private val thread =
+        Thread({ run() }, "nd-engine").apply {
+            isDaemon = true
+            start()
+        }
 
-    override fun setWindow(items: List<EngineItem>, currentIndex: Int, startPositionMs: Long?) {
+    override fun setWindow(
+        items: List<EngineItem>,
+        currentIndex: Int,
+        startPositionMs: Long?,
+    ) {
         require(items.map { it.episodeId }.distinct().size == items.size) { "duplicate episode in engine window" }
         require(if (items.isEmpty()) currentIndex == 0 else currentIndex in items.indices)
         require(startPositionMs == null || startPositionMs >= 0)
@@ -123,22 +173,25 @@ class FfAudioEngine internal constructor(
         }
     }
 
-    override fun updateWindow(diff: EngineWindowDiff) = synchronized(control) {
-        checkOpen()
-        window = diff.applyTo(window, current?.episodeId)
-    }
+    override fun updateWindow(diff: EngineWindowDiff) =
+        synchronized(control) {
+            checkOpen()
+            window = diff.applyTo(window, current?.episodeId)
+        }
 
-    override fun play() = synchronized(control) {
-        checkOpen()
-        wantPlaying = true
-        applyDesiredState()
-    }
+    override fun play() =
+        synchronized(control) {
+            checkOpen()
+            wantPlaying = true
+            applyDesiredState()
+        }
 
-    override fun pause() = synchronized(control) {
-        checkOpen()
-        wantPlaying = false
-        applyDesiredState()
-    }
+    override fun pause() =
+        synchronized(control) {
+            checkOpen()
+            wantPlaying = false
+            applyDesiredState()
+        }
 
     override fun seekTo(positionMs: Long) {
         require(positionMs >= 0)
@@ -147,7 +200,8 @@ class FfAudioEngine internal constructor(
             if (current == null) return
             val from = positionMs()
             replaceRequest(positionMs)
-            emit(EngineEvent.Discontinuity(requireNotNull(current).episodeId, DiscontinuityReason.SEEK, from, positionMs))
+            val item = requireNotNull(current)
+            emit(EngineEvent.Discontinuity(item.episodeId, DiscontinuityReason.SEEK, from, positionMs))
         }
     }
 
@@ -221,38 +275,41 @@ class FfAudioEngine internal constructor(
 
     private fun run() {
         try {
-        while (!closed.get()) {
-            val request = commands.poll()
-            if (request == null) {
-                Thread.sleep(POLL_MS)
-                continue
-            }
-            if (!isCurrent(request)) continue
-            try {
-                val future = prepare.submit<Prepared> { prepare(request) }
-                // Even a superseded result is collected and closed. Cancellation
-                // interrupts its source/job, never an FFM call or its arena.
-                future.get().use { prepared ->
-                    if (isCurrent(request)) playPipeline(request, prepared.pipeline)
+            while (!closed.get()) {
+                val request = commands.poll()
+                if (request == null) {
+                    Thread.sleep(POLL_MS)
+                    continue
                 }
-            } catch (failure: Throwable) {
-                val problem = (failure as? java.util.concurrent.ExecutionException)?.cause ?: failure
-                synchronized(control) {
-                    if (!isCurrent(request)) return@synchronized
-                    if (request.attempt == 0 && shouldResolveAgain(problem)) {
-                        val position = positionMs()
-                        anchorMs.set(position)
-                        clock = null
-                        mutableState.value = EngineState.Buffering(request.item.episodeId)
-                        commands.offer(request.copy(positionMs = position, attempt = 1))
-                    } else {
-                        mutableState.value = EngineState.Error(request.item.episodeId, mapError(problem))
+                if (!isCurrent(request)) continue
+                try {
+                    val future = prepare.submit<Prepared> { prepare(request) }
+                    // Even a superseded result is collected and closed. Cancellation
+                    // interrupts its source/job, never an FFM call or its arena.
+                    future.get().use { prepared ->
+                        if (isCurrent(request)) playPipeline(request, prepared.pipeline)
+                    }
+                } catch (failure: Throwable) {
+                    val problem = (failure as? java.util.concurrent.ExecutionException)?.cause ?: failure
+                    synchronized(control) {
+                        if (!isCurrent(request)) return@synchronized
+                        if (request.attempt == 0 && shouldResolveAgain(problem)) {
+                            val position = positionMs()
+                            anchorMs.set(position)
+                            clock = null
+                            mutableState.value = EngineState.Buffering(request.item.episodeId)
+                            commands.offer(request.copy(positionMs = position, attempt = 1))
+                        } else {
+                            mutableState.value = EngineState.Error(request.item.episodeId, mapError(problem))
+                        }
+                    }
+                } finally {
+                    synchronized(control) {
+                        source = null
+                        resolveJob = null
                     }
                 }
-            } finally {
-                synchronized(control) { source = null; resolveJob = null }
             }
-        }
         } finally {
             synchronized(control) {
                 output = null
@@ -262,41 +319,56 @@ class FfAudioEngine internal constructor(
         }
     }
 
-    private fun prepare(request: Request): Prepared = runBlocking {
-        synchronized(control) {
-            check(isCurrent(request)) { "superseded engine preparation" }
-            resolveJob = coroutineContext.job
-        }
-        val resolved = resolver.resolve(request.item, request.attempt)
-        if (resolved is ResolvedSource.YouTube) {
-            val waitMs = (resolved.availableAtMs ?: 0) - System.currentTimeMillis()
-            if (waitMs > SOURCE_WAIT_MS) throw IOException("YouTube stream availability exceeds 30 seconds")
-            if (waitMs > 0) delay(waitMs)
-        }
-        val input = openSource(resolved)
-        try {
+    private fun prepare(request: Request): Prepared =
+        runBlocking {
             synchronized(control) {
-                if (!isCurrent(request)) input.abort()
-                check(isCurrent(request)) { "superseded engine source" }
-                source = input
+                check(isCurrent(request)) { "superseded engine preparation" }
+                resolveJob = coroutineContext.job
             }
-            val pipeline = FfmpegPipeline.open(input, ffmpegDirectory)
-            if (input is HttpByteSource) pipeline.demuxer.durationMs?.let(input::setDurationEstimate)
-            Prepared(input, pipeline)
-        } catch (failure: Throwable) {
-            input.close()
-            throw failure
+            val resolved = resolver.resolve(request.item, request.attempt)
+            if (resolved is ResolvedSource.YouTube) {
+                val waitMs = (resolved.availableAtMs ?: 0) - System.currentTimeMillis()
+                if (waitMs > SOURCE_WAIT_MS) throw IOException("YouTube stream availability exceeds 30 seconds")
+                if (waitMs > 0) delay(waitMs)
+            }
+            val input = openSource(resolved)
+            try {
+                synchronized(control) {
+                    if (!isCurrent(request)) input.abort()
+                    check(isCurrent(request)) { "superseded engine source" }
+                    source = input
+                }
+                val pipeline = FfmpegPipeline.open(input, ffmpegDirectory)
+                try {
+                    if (input is HttpByteSource) pipeline.demuxer.durationMs?.let(input::setDurationEstimate)
+                    synchronized(control) {
+                        coroutineContext.ensureActive()
+                        check(isCurrent(request)) { "superseded prepared pipeline" }
+                        // After handoff, cancellation must abort the source rather
+                        // than cancel runBlocking and discard its native result.
+                        resolveJob = null
+                    }
+                    Prepared(input, pipeline)
+                } catch (failure: Throwable) {
+                    pipeline.close()
+                    throw failure
+                }
+            } catch (failure: Throwable) {
+                input.close()
+                throw failure
+            }
         }
-    }
 
-    private fun playPipeline(request: Request, pipeline: FfmpegPipeline) {
+    private fun playPipeline(
+        request: Request,
+        pipeline: FfmpegPipeline,
+    ) {
         val item = request.item
         val first = if (request.positionMs > 0) pipeline.seekFrame(request.positionMs) else null
         if (!isCurrent(request)) return
-        emit(EngineEvent.TracksKnown(item.episodeId, pipeline.demuxer.durationMs, pipeline.demuxer.chapters, pipeline.demuxer.gapless))
-        val out = ownedOutput ?: NdOutput.open(ndmediaDirectory, backend.nativeName, deviceRate, CHANNELS, RING_MS).also {
-            ownedOutput = it
-        }
+        val demuxer = pipeline.demuxer
+        emit(EngineEvent.TracksKnown(item.episodeId, demuxer.durationMs, demuxer.chapters, demuxer.gapless))
+        val out = ownedOutput ?: openOutput()
         run {
             out.stop()
             out.clear()
@@ -306,7 +378,14 @@ class FfAudioEngine internal constructor(
             val description = out.describe()
             val period = requireNotNull(Json.parseToJsonElement(description).jsonObject["period"]).jsonPrimitive.int
             val timeline = TimelineClock(deviceRate, period.toLong(), readFrames)
-            timeline.push(TimelineClock.Marker(0, item.episodeId.toString(), request.positionMs * MICROS_PER_MS, settings.get().speed))
+            timeline.push(
+                TimelineClock.Marker(
+                    0,
+                    item.episodeId.toString(),
+                    request.positionMs * MICROS_PER_MS,
+                    settings.get().speed,
+                ),
+            )
             synchronized(control) {
                 if (!isCurrent(request)) return
                 clock = timeline
@@ -323,18 +402,35 @@ class FfAudioEngine internal constructor(
             }
             var writtenFrames = 0L
             val initial = settings.get()
-            val dsp = EngineDsp(
-                pipeline.decoder.sampleRate, CHANNELS, deviceRate, item.episodeId, timeline,
-                { pcm -> writtenFrames += write(request, out, pcm) },
-                initial.speed, initial.skipSilence, { settings.get().let { it.volume * it.fade } },
-                { frame, fromUs, toUs ->
-                    synchronized(control) {
-                        if (isCurrent(request)) silenceJumps.addLast(
-                            SilenceJump(frame, EngineEvent.Discontinuity(item.episodeId, DiscontinuityReason.SILENCE_SKIP, fromUs / MICROS_PER_MS, toUs / MICROS_PER_MS)),
-                        )
-                    }
-                },
-            )
+            val dsp =
+                EngineDsp(
+                    pipeline.decoder.sampleRate,
+                    CHANNELS,
+                    deviceRate,
+                    item.episodeId,
+                    timeline,
+                    { pcm -> writtenFrames += write(request, out, pcm) },
+                    initial.speed,
+                    initial.skipSilence,
+                    { settings.get().let { it.volume * it.fade } },
+                    { frame, fromUs, toUs ->
+                        synchronized(control) {
+                            if (isCurrent(request)) {
+                                silenceJumps.addLast(
+                                    SilenceJump(
+                                        frame,
+                                        EngineEvent.Discontinuity(
+                                            item.episodeId,
+                                            DiscontinuityReason.SILENCE_SKIP,
+                                            fromUs / MICROS_PER_MS,
+                                            toUs / MICROS_PER_MS,
+                                        ),
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                )
             try {
                 if (first != null) dsp.accept(first)
                 if (request.positionMs == 0L || first != null) {
@@ -363,7 +459,13 @@ class FfAudioEngine internal constructor(
                         if (!isCurrent(request)) return
                         out.stop()
                         publishSilenceJumps(out)
-                        timeline.finish(if (first == null && request.positionMs > 0) request.positionMs * MICROS_PER_MS else dsp.endUs)
+                        val endUs =
+                            if (first == null && request.positionMs > 0) {
+                                request.positionMs * MICROS_PER_MS
+                            } else {
+                                dsp.endUs
+                            }
+                        timeline.finish(endUs)
                         mutableState.value = EngineState.Ended
                     }
                 }
@@ -377,14 +479,24 @@ class FfAudioEngine internal constructor(
         }
     }
 
-    private fun write(request: Request, out: NdOutput, pcm: ShortArray): Long {
+    private fun openOutput(): NdOutput =
+        NdOutput.open(ndmediaDirectory, backend.nativeName, deviceRate, CHANNELS, RING_MS).also { ownedOutput = it }
+
+    private fun write(
+        request: Request,
+        out: NdOutput,
+        pcm: ShortArray,
+    ): Long {
         val frames = pcm.size / CHANNELS
         Arena.ofConfined().use { arena ->
             val segment = arena.allocate(pcm.size.toLong() * Float.SIZE_BYTES)
-            pcm.forEachIndexed { index, sample -> segment.set(ValueLayout.JAVA_FLOAT, index.toLong() * Float.SIZE_BYTES, sample / 32768f) }
+            pcm.forEachIndexed { index, sample ->
+                segment.set(ValueLayout.JAVA_FLOAT, index.toLong() * Float.SIZE_BYTES, sample / 32768f)
+            }
             var written = 0
             while (written < frames && isCurrent(request)) {
-                val accepted = out.write(segment.asSlice(written.toLong() * CHANNELS * Float.SIZE_BYTES), frames - written)
+                val remaining = segment.asSlice(written.toLong() * CHANNELS * Float.SIZE_BYTES)
+                val accepted = out.write(remaining, frames - written)
                 written += accepted
                 synchronized(control) {
                     if (isCurrent(request) && accepted > 0) {
@@ -402,21 +514,24 @@ class FfAudioEngine internal constructor(
     }
 
     /** A blocked AVIO downcall cannot publish underrun state from nd-engine. */
-    private fun monitorBuffer() = synchronized(control) {
-        val out = output ?: return@synchronized
-        publishSilenceJumps(out)
-        if (closed.get() || !wantPlaying || !outputReady || mutableState.value == EngineState.Ended) {
-            emptySinceNs = null
-            return@synchronized
+    private fun monitorBuffer() =
+        synchronized(control) {
+            val out = output ?: return@synchronized
+            publishSilenceJumps(out)
+            if (closed.get() || !wantPlaying || !outputReady || mutableState.value == EngineState.Ended) {
+                emptySinceNs = null
+                return@synchronized
+            }
+            if (out.framesPlayed < queuedFrames) {
+                emptySinceNs = null
+                return@synchronized
+            }
+            val now = System.nanoTime()
+            val since = emptySinceNs ?: now.also { emptySinceNs = it }
+            if (now - since >= BUFFER_EMPTY_NS) {
+                current?.let { mutableState.value = EngineState.Buffering(it.episodeId) }
+            }
         }
-        if (out.framesPlayed < queuedFrames) {
-            emptySinceNs = null
-            return@synchronized
-        }
-        val now = System.nanoTime()
-        val since = emptySinceNs ?: now.also { emptySinceNs = it }
-        if (now - since >= BUFFER_EMPTY_NS) current?.let { mutableState.value = EngineState.Buffering(it.episodeId) }
-    }
 
     private fun publishSilenceJumps(out: NdOutput) {
         val heardFrame = out.framesPlayed - sessionBaseFrames - sessionPeriodFrames
@@ -430,19 +545,38 @@ class FfAudioEngine internal constructor(
     }
 
     private fun checkOpen() = check(!closed.get()) { "engine is closed" }
+
     private fun isCurrent(request: Request): Boolean = !closed.get() && request.generation == generation.get()
 
     private fun shouldResolveAgain(failure: Throwable): Boolean =
         failure is ContentChangedException || (failure is HttpSourceException && failure.status in RESOLVE_STATUSES)
 
-    private fun mapError(failure: Throwable): EngineError = when (failure) {
-        is HttpSourceException -> if (failure.status == 401) EngineError.AuthRequired else EngineError.Http(failure.status)
-        is NoSuchFileException -> EngineError.LocalFileMissing
-        is IOException -> EngineError.Network
-        is NdOutputException -> EngineError.Output(failure.message ?: "output failed")
-        is IllegalArgumentException -> EngineError.UnsupportedFormat
-        else -> EngineError.Engine(failure.message ?: failure.javaClass.simpleName)
-    }
+    private fun mapError(failure: Throwable): EngineError =
+        when (failure) {
+            is HttpSourceException -> {
+                if (failure.status == 401) EngineError.AuthRequired else EngineError.Http(failure.status)
+            }
+
+            is NoSuchFileException -> {
+                EngineError.LocalFileMissing
+            }
+
+            is IOException -> {
+                EngineError.Network
+            }
+
+            is NdOutputException -> {
+                EngineError.Output(failure.message ?: "output failed")
+            }
+
+            is IllegalArgumentException -> {
+                EngineError.UnsupportedFormat
+            }
+
+            else -> {
+                EngineError.Engine(failure.message ?: failure.javaClass.simpleName)
+            }
+        }
 
     private companion object {
         const val DEFAULT_RATE = 44_100

@@ -27,7 +27,11 @@ class HttpByteSource internal constructor(
     private val closed = AtomicBoolean(false)
     override val length: Long? get() = resource.length
 
-    override fun read(position: Long, dst: MemorySegment, maxBytes: Int): Int {
+    override fun read(
+        position: Long,
+        dst: MemorySegment,
+        maxBytes: Int,
+    ): Int {
         require(position >= 0 && maxBytes > 0 && dst.byteSize() >= maxBytes)
         if (closed.get()) return -1
         val bytes = loader.read(position, maxBytes) ?: return if (closed.get()) -1 else 0
@@ -60,10 +64,24 @@ class HttpByteSource internal constructor(
             cache: SpanCache,
         ): HttpByteSource =
             when (source) {
-                is ResolvedSource.Http -> HttpByteSource(clients.media, source.url, source.headers, cache, source.cacheKey)
-                is ResolvedSource.YouTube ->
-                    HttpByteSource(clients[HttpClientKind.YOUTUBE], source.url, emptyMap(), cache, source.cacheKey, source.contentLength)
-                is ResolvedSource.File -> error("a local file does not use HTTP")
+                is ResolvedSource.Http -> {
+                    HttpByteSource(clients.media, source.url, source.headers, cache, source.cacheKey)
+                }
+
+                is ResolvedSource.YouTube -> {
+                    HttpByteSource(
+                        clients[HttpClientKind.YOUTUBE],
+                        source.url,
+                        emptyMap(),
+                        cache,
+                        source.cacheKey,
+                        source.contentLength,
+                    )
+                }
+
+                is ResolvedSource.File -> {
+                    error("a local file does not use HTTP")
+                }
             }
     }
 }
@@ -87,55 +105,71 @@ internal class LookAheadLoader(
     private var revision = 0L
     private var call: Call? = null
     private var failure: IOException? = null
-    @Volatile private var aheadBytes = (bitRate.coerceAtLeast(8) / 8 * MAX_AHEAD_SECONDS).coerceIn(MIN_AHEAD_BYTES, MAX_AHEAD_BYTES)
+
+    @Volatile private var aheadBytes =
+        (bitRate.coerceAtLeast(8) / 8 * MAX_AHEAD_SECONDS).coerceIn(MIN_AHEAD_BYTES, MAX_AHEAD_BYTES)
+
     @Volatile private var lowWaterBytes = minOf(aheadBytes, bitRate.coerceAtLeast(8) / 8 * MIN_AHEAD_SECONDS)
     private val thread: Thread
 
     init {
         require(expectedLength == null || expectedLength >= 0)
         // YouTube's resolved clen is authoritative before a cached byte can be returned.
-        if (expectedLength != null && resource.length != null && expectedLength != resource.length) resource.invalidate()
+        if (expectedLength != null && resource.length != null && expectedLength != resource.length) {
+            resource.invalidate()
+        }
         if (expectedLength != null && resource.length == null) resource.setMetadata(expectedLength, resource.validator)
-        thread = Thread({ run() }, "nd-loader").apply { isDaemon = true; start() }
+        thread =
+            Thread({ run() }, "nd-loader").apply {
+                isDaemon = true
+                start()
+            }
     }
 
-    fun setBitRate(bitRate: Long) = synchronized(monitor) {
-        require(bitRate > 0)
-        aheadBytes = (bitRate.coerceAtMost(MAX_AHEAD_BYTES * 8) / 8 * MAX_AHEAD_SECONDS)
-            .coerceIn(MIN_AHEAD_BYTES, MAX_AHEAD_BYTES)
-        lowWaterBytes = minOf(aheadBytes, bitRate.coerceAtMost(MAX_AHEAD_BYTES * 8) / 8 * MIN_AHEAD_SECONDS)
-        monitor.notifyAll()
-    }
+    fun setBitRate(bitRate: Long) =
+        synchronized(monitor) {
+            require(bitRate > 0)
+            aheadBytes =
+                (bitRate.coerceAtMost(MAX_AHEAD_BYTES * 8) / 8 * MAX_AHEAD_SECONDS)
+                    .coerceIn(MIN_AHEAD_BYTES, MAX_AHEAD_BYTES)
+            lowWaterBytes = minOf(aheadBytes, bitRate.coerceAtMost(MAX_AHEAD_BYTES * 8) / 8 * MIN_AHEAD_SECONDS)
+            monitor.notifyAll()
+        }
 
-    fun read(position: Long, count: Int): ByteArray? = synchronized(monitor) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(READ_WAIT_SECONDS)
-        demand = position
-        val cached = resource.read(position, count)
-        if (cached == null && (position < fetchStart || position - cursor > REOPEN_DISTANCE_BYTES)) {
-            revision++
+    fun read(
+        position: Long,
+        count: Int,
+    ): ByteArray? =
+        synchronized(monitor) {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(READ_WAIT_SECONDS)
+            demand = position
+            val cached = resource.read(position, count)
+            if (cached == null && (position < fetchStart || position - cursor > REOPEN_DISTANCE_BYTES)) {
+                revision++
+                call?.cancel()
+                requested = position
+            } else if (cached == null && requested == null && call == null) {
+                requested = position
+            }
+            monitor.notifyAll()
+            while (true) {
+                if (stopped) return@synchronized null
+                failure?.let { throw it }
+                resource.read(position, count)?.let { return@synchronized it }
+                if (resource.length?.let { position >= it } == true) return@synchronized null
+                if (System.nanoTime() >= deadline) throw IOException("Media read made no progress for 30 seconds")
+                monitor.wait(WAIT_SLICE_MS)
+            }
+            @Suppress("UNREACHABLE_CODE")
+            null
+        }
+
+    override fun close() =
+        synchronized(monitor) {
+            stopped = true
             call?.cancel()
-            requested = position
-        } else if (cached == null && requested == null && call == null) {
-            requested = position
+            monitor.notifyAll()
         }
-        monitor.notifyAll()
-        while (true) {
-            if (stopped) return@synchronized null
-            failure?.let { throw it }
-            resource.read(position, count)?.let { return@synchronized it }
-            if (resource.length?.let { position >= it } == true) return@synchronized null
-            if (System.nanoTime() >= deadline) throw IOException("Media read made no progress for 30 seconds")
-            monitor.wait(WAIT_SLICE_MS)
-        }
-        @Suppress("UNREACHABLE_CODE")
-        null
-    }
-
-    override fun close() = synchronized(monitor) {
-        stopped = true
-        call?.cancel()
-        monitor.notifyAll()
-    }
 
     fun awaitClosed() {
         thread.join(CLOSE_WAIT_MS)
@@ -145,27 +179,37 @@ internal class LookAheadLoader(
     private fun run() {
         try {
             while (true) {
-                val work = synchronized(monitor) {
-                    while (!stopped && requested == null) monitor.wait()
-                    if (stopped) return
-                    val position = requireNotNull(requested)
-                    requested = null
-                    cursor = position
-                    fetchStart = position
-                    position to revision
-                }
+                val work =
+                    synchronized(monitor) {
+                        while (!stopped && requested == null) monitor.wait()
+                        if (stopped) return
+                        val position = requireNotNull(requested)
+                        requested = null
+                        cursor = position
+                        fetchStart = position
+                        position to revision
+                    }
                 load(work.first, work.second)
             }
         } catch (problem: IOException) {
-            synchronized(monitor) { failure = problem; monitor.notifyAll() }
+            synchronized(monitor) {
+                failure = problem
+                monitor.notifyAll()
+            }
         } catch (problem: Exception) {
-            synchronized(monitor) { failure = IOException("Media loader failed", problem); monitor.notifyAll() }
+            synchronized(monitor) {
+                failure = IOException("Media loader failed", problem)
+                monitor.notifyAll()
+            }
         } finally {
             resource.close()
         }
     }
 
-    private fun load(start: Long, version: Long) {
+    private fun load(
+        start: Long,
+        version: Long,
+    ) {
         var position = start
         var failures = 0
         while (true) {
@@ -198,15 +242,22 @@ internal class LookAheadLoader(
         }
     }
 
-    private fun fetch(position: Long, version: Long) {
+    private fun fetch(
+        position: Long,
+        version: Long,
+    ) {
         val validator = resource.validator
-        val request = Request.Builder().url(url).apply {
-            headers.forEach { (name, value) -> header(name, value) }
-            header("Range", "bytes=$position-")
-            header("Accept-Encoding", "identity")
-            removeHeader("If-Range")
-            if (validator != null) header("If-Range", validator)
-        }.build()
+        val request =
+            Request
+                .Builder()
+                .url(url)
+                .apply {
+                    headers.forEach { (name, value) -> header(name, value) }
+                    header("Range", "bytes=$position-")
+                    header("Accept-Encoding", "identity")
+                    removeHeader("If-Range")
+                    if (validator != null) header("If-Range", validator)
+                }.build()
         val active = client.newCall(request)
         synchronized(monitor) {
             if (stopped || revision != version) return
@@ -230,11 +281,24 @@ internal class LookAheadLoader(
                 if (validator?.startsWith("\"") == true && etag != null && etag != validator) {
                     throw ContentChangedException("Media ETag changed during range resume")
                 }
-                val nextValidator = when {
-                    etag == null -> if (response.code == 206) validator ?: response.header("Last-Modified") else response.header("Last-Modified")
-                    etag.startsWith("\"") && etag.endsWith("\"") -> etag
-                    else -> null // Weak ETags must never become If-Range validators.
-                }
+                val nextValidator =
+                    when {
+                        etag == null -> {
+                            if (response.code == 206) {
+                                validator ?: response.header("Last-Modified")
+                            } else {
+                                response.header("Last-Modified")
+                            }
+                        }
+
+                        etag.startsWith("\"") && etag.endsWith("\"") -> {
+                            etag
+                        }
+
+                        else -> {
+                            null
+                        } // Weak ETags must never become If-Range validators.
+                    }
                 resource.setMetadata(total ?: resource.length, nextValidator)
                 val body = response.body
                 val input = body.byteStream()
@@ -245,9 +309,12 @@ internal class LookAheadLoader(
                 var offset = position
                 while (!cancelled(version)) {
                     if (discard == 0L && !waitForRoom(offset, version)) return
-                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), if (discard > 0) discard else buffer.size.toLong()).toInt())
+                    val count = minOf(buffer.size.toLong(), if (discard > 0) discard else buffer.size.toLong()).toInt()
+                    val read = input.read(buffer, 0, count)
                     if (read < 0) {
-                        if (discard > 0 || resource.length?.let { offset < it } == true) throw IOException("Media body ended early")
+                        if (discard > 0 || resource.length?.let { offset < it } == true) {
+                            throw IOException("Media body ended early")
+                        }
                         if (resource.length == null) resource.setMetadata(offset, resource.validator)
                         return
                     }
@@ -258,7 +325,10 @@ internal class LookAheadLoader(
                     }
                     resource.write(offset, buffer.copyOf(read))
                     offset += read
-                    synchronized(monitor) { cursor = offset; monitor.notifyAll() }
+                    synchronized(monitor) {
+                        cursor = offset
+                        monitor.notifyAll()
+                    }
                     cache.evict()
                 }
             }
@@ -267,26 +337,38 @@ internal class LookAheadLoader(
         }
     }
 
-    private fun responseLength(response: Response, position: Long): Long? {
+    private fun responseLength(
+        response: Response,
+        position: Long,
+    ): Long? {
         if (response.code == 200) return response.body.contentLength().takeIf { it >= 0 }
-        val match = CONTENT_RANGE.matchEntire(response.header("Content-Range") ?: "")
-            ?: throw IOException("Invalid media Content-Range")
+        val match =
+            CONTENT_RANGE.matchEntire(response.header("Content-Range") ?: "")
+                ?: throw IOException("Invalid media Content-Range")
         val start = match.groupValues[1].toLongOrNull() ?: throw IOException("Invalid media range start")
         val end = match.groupValues[2].toLongOrNull() ?: throw IOException("Invalid media range end")
         val total = match.groupValues[3].takeIf { it != "*" }?.toLongOrNull()
-        if (start != position || end < start || (total != null && total <= end)) throw IOException("Mismatched media range")
+        if (start != position || end < start || (total != null && total <= end)) {
+            throw IOException("Mismatched media range")
+        }
         val bodyLength = response.body.contentLength()
         if (bodyLength >= 0 && bodyLength != end - start + 1) throw IOException("Mismatched media body length")
         return total
     }
 
-    private fun waitForRoom(position: Long, version: Long): Boolean = synchronized(monitor) {
-        val ceiling = if (resource.isPersistent) aheadBytes else minOf(aheadBytes, MEMORY_AHEAD_BYTES)
-        if (position - demand >= ceiling) {
-            while (!stopped && revision == version && position - demand > minOf(lowWaterBytes, ceiling / 2)) monitor.wait(WAIT_SLICE_MS)
+    private fun waitForRoom(
+        position: Long,
+        version: Long,
+    ): Boolean =
+        synchronized(monitor) {
+            val ceiling = if (resource.isPersistent) aheadBytes else minOf(aheadBytes, MEMORY_AHEAD_BYTES)
+            if (position - demand >= ceiling) {
+                while (!stopped && revision == version && position - demand > minOf(lowWaterBytes, ceiling / 2)) {
+                    monitor.wait(WAIT_SLICE_MS)
+                }
+            }
+            !stopped && revision == version
         }
-        !stopped && revision == version
-    }
 
     private fun cancelled(version: Long): Boolean = synchronized(monitor) { stopped || revision != version }
 
