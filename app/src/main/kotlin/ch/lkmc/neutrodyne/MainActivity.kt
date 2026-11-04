@@ -55,9 +55,9 @@ import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
+import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
@@ -209,10 +209,8 @@ class MainActivity : AppCompatActivity() {
             gateExpired = true
         }
         lifecycleScope.launch {
-            combine(
-                settings.observe(AppearanceSettingKeys.THEME),
-                settings.observe(AppearanceSettingKeys.DYNAMIC_COLOR),
-            ) { theme, dynamicColor -> AppearancePrefs(theme = theme, dynamicColor = dynamicColor) }
+            settings
+                .observeAppearance()
                 .flowWithLifecycle(lifecycle)
                 .collect { appearance.value = it }
         }

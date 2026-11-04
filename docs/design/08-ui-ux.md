@@ -2092,6 +2092,15 @@ sequenceDiagram
 
 Serves R5.5, R5.6, R5.4, N4. Delivered in M0a (app scheme with a placeholder brand, light/dark, tokens, `Nd*` wrappers), M0b (the brand scheme of [D97](../PLAN.md#3-key-decisions) and the [brand assets](#brand-assets); the desktop following the OS light or dark setting), M1 (`ArtColors`, monograms), M2 (group tones), M10 (artwork-scoped schemes, pure black, the brand checked in both themes in both golden sets), MD4 (the desktop's contrast and reduced-motion preferences). Honours [D6](../PLAN.md#3-key-decisions), [D57](../PLAN.md#3-key-decisions), [D97](../PLAN.md#3-key-decisions), [PO-4](../PLAN.md#po-4-material-3-expressive), [PO-17](../PLAN.md#48-further-product-owner-decisions) (partly resolved: icon and palette given, typeface still the platform default).
 
+**Implementation note (2026-11-04, M10 current-code port):** The shared
+scheme now uses MaterialKolor MCU 5.0.1, including its complete colour-role
+mapping, the six cached brand variants and a bounded artwork-scheme cache.
+Both shells collect the portable artwork-tint and pure-black preferences;
+the desktop waits for appearance settings within the same one-second cap as
+Android. Pure black follows the surface ramp below. Android dynamic colour
+remains the default where supported. Component-owned licence texts for MCU
+and its Kotlin port ship in the Android and desktop notices.
+
 ### Layers
 
 | Layer | Used by | Source |

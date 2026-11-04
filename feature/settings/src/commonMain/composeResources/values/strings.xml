@@ -88,4 +88,8 @@
     <string name="swipe_left">Swipe left</string>
     <string name="swipe_mark_played">Mark played / unplayed</string>
     <string name="swipe_none">None</string>
+    <string name="appearance_artwork_tint">Use artwork colours</string>
+    <string name="appearance_artwork_tint_summary">Tint the player and headers with cover colours</string>
+    <string name="appearance_pure_black">Pure black</string>
+    <string name="appearance_pure_black_summary">Use black surfaces in the dark theme</string>
 </resources>

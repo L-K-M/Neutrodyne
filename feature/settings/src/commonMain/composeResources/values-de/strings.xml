@@ -81,4 +81,8 @@
     <string name="swipe_left">Nach links wischen</string>
     <string name="swipe_mark_played">Als gespielt / ungespielt markieren</string>
     <string name="swipe_none">Keine</string>
+    <string name="appearance_artwork_tint">Coverfarben verwenden</string>
+    <string name="appearance_artwork_tint_summary">Player und Kopfbereiche mit Coverfarben tönen</string>
+    <string name="appearance_pure_black">Reines Schwarz</string>
+    <string name="appearance_pure_black_summary">Schwarze Oberflächen im dunklen Design verwenden</string>
 </resources>

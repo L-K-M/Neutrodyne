@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.datastore.DataStoreBindings
 import ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.core.testing.SettingsRepositoryContract
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys as Appearance
 
 /**
  * The DataStore-backed [SettingsRepository] against the shared contract, plus what only the real
@@ -79,6 +81,27 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
             val repository = repositoryOver(brokenRoot)
 
             assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableText, "x"))
+        }
+
+    @Test fun appearanceValuesPersistAndStayOutOfSync() =
+        runTest {
+            val repository = repositoryOver(root.resolve("appearance"))
+            repository.set(Appearance.PURE_BLACK, true)
+            repository.set(Appearance.ARTWORK_TINT, false)
+            repository.set(Appearance.LIBRARY_DENSITY, LibraryDensity.LARGE)
+            repository.set(Appearance.PLAYER_PANEL_HIDDEN, true)
+            scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            scope.coroutineContext[kotlinx.coroutines.Job]!!.join()
+            scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+            val reopened = repositoryOver(root.resolve("appearance"))
+            assertTrue(reopened.get(Appearance.PURE_BLACK))
+            assertFalse(reopened.get(Appearance.ARTWORK_TINT))
+            assertEquals(LibraryDensity.LARGE, reopened.get(Appearance.LIBRARY_DENSITY))
+            assertTrue(reopened.get(Appearance.PLAYER_PANEL_HIDDEN))
+            assertTrue(
+                ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys.ALL
+                    .none { it.synced },
+            )
         }
 
     private fun TestScope.repositoryOver(dir: File): DataStoreSettingsRepository {

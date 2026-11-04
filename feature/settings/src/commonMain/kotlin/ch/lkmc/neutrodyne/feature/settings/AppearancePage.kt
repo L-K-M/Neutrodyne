@@ -36,10 +36,14 @@ import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_artwork_tint
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_artwork_tint_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_mini_player_skip_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_pure_black
+import ch.lkmc.neutrodyne.feature.settings.resources.appearance_pure_black_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_dark
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_light
@@ -70,10 +74,15 @@ internal fun AppearancePage(
         settings
             .observe(AppearanceSettingKeys.DYNAMIC_COLOR)
             .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.DYNAMIC_COLOR.default)
-    val miniPlayerSkip by
-        settings
-            .observe(AppearanceSettingKeys.MINI_PLAYER_SKIP)
-            .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.MINI_PLAYER_SKIP.default)
+    val miniPlayerSkip by settings
+        .observe(AppearanceSettingKeys.MINI_PLAYER_SKIP)
+        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.MINI_PLAYER_SKIP.default)
+    val tint by settings
+        .observe(AppearanceSettingKeys.ARTWORK_TINT)
+        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.ARTWORK_TINT.default)
+    val black by settings
+        .observe(AppearanceSettingKeys.PURE_BLACK)
+        .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.PURE_BLACK.default)
     val scope = rememberCoroutineScope()
     val snackbarHost = LocalSnackbarHost.current
     val saveFailed = stringResource(Res.string.settings_save_failed)
@@ -100,6 +109,18 @@ internal fun AppearancePage(
                 title = stringResource(Res.string.appearance_theme),
                 summary = stringResource(themeLabel(theme)),
                 onClick = { showThemeDialog = true },
+            )
+            SettingsSwitchRow(
+                title = stringResource(Res.string.appearance_artwork_tint),
+                summary = stringResource(Res.string.appearance_artwork_tint_summary),
+                checked = tint,
+                onCheckedChange = { save(AppearanceSettingKeys.ARTWORK_TINT, it) },
+            )
+            SettingsSwitchRow(
+                title = stringResource(Res.string.appearance_pure_black),
+                summary = stringResource(Res.string.appearance_pure_black_summary),
+                checked = black,
+                onCheckedChange = { save(AppearanceSettingKeys.PURE_BLACK, it) },
             )
             SettingsSwitchRow(
                 title = stringResource(Res.string.appearance_mini_player_skip),
