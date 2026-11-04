@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.download.api.DeleteReason
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -48,6 +49,7 @@ internal class AutoDownloadPlannerImpl(
     private val media: PlaybackMediaLookup,
     private val platform: PlatformKind,
     @param:Dispatcher(IO) private val dispatcher: CoroutineDispatcher,
+    private val capabilities: YouTubeCapabilitiesSource? = null,
 ) : AutoDownloadPlanner {
     private val plannerMutex = Mutex()
     private val dao = db.downloadDao()
@@ -63,11 +65,25 @@ internal class AutoDownloadPlannerImpl(
                     val wanted = policies.mapValues { (id, policy) -> candidates(id, policy, watermarks[id]) }
                     removeUnwanted(policies, wanted)
                     val pending = mutableListOf<Pending>()
+                    val youtubeOn = capabilities?.capabilities?.value?.downloads == true
                     for ((podcastId, policy) in policies) {
                         if (!policy.enabled || policy.source == SettingSource.NotSupported) continue
                         val sources = db.episodeDao().downloadSources(wanted.getValue(podcastId).map { it.id })
                         for (source in sources) {
-                            // YouTube transfers belong to M9a/MD3, even if a future resolver enables them.
+                            val identity = source.youtubeIdentity()
+                            if (identity != null) {
+                                if (!youtubeOn) continue
+                                pending +=
+                                    Pending(
+                                        podcastId,
+                                        source,
+                                        identity.videoId,
+                                        downloadEstimate(null, source.durationMs),
+                                        policy,
+                                        SourceKind.YOUTUBE,
+                                    )
+                                continue
+                            }
                             if (source.sourceType != SourceType.RSS || source.youtubeChannelId != null) continue
                             val enclosure = source.enclosureUrl ?: continue
                             val alternate = if (source.isVideo) media.get(source.episodeId)?.audioAlternate else null
@@ -78,6 +94,7 @@ internal class AutoDownloadPlannerImpl(
                                     alternate?.url ?: enclosure,
                                     downloadEstimate(alternate?.length ?: source.enclosureLength, source.durationMs),
                                     policy,
+                                    SourceKind.RSS_ENCLOSURE,
                                 )
                         }
                     }
@@ -105,7 +122,7 @@ internal class AutoDownloadPlannerImpl(
                                     state = DownloadState.QUEUED,
                                     priority = AUTO_PRIORITY,
                                     requestedAt = now + index,
-                                    sourceKind = SourceKind.RSS_ENCLOSURE,
+                                    sourceKind = item.kind,
                                     sourceRef = item.url,
                                     rootId = checkNotNull(root),
                                     estimatedBytes = item.estimate,
@@ -117,7 +134,13 @@ internal class AutoDownloadPlannerImpl(
                     }
                 }
                 // Scheduler may take a lane mutex: never call it while holding claimMutex.
-                if (dao.queuedNeeds(DownloadLane.AUTO, clock.now()).queued > 0) {
+                if (dao
+                        .queuedNeeds(
+                            DownloadLane.AUTO,
+                            clock.now(),
+                            capabilities?.capabilities?.value?.downloads == true,
+                        ).queued > 0
+                ) {
                     scheduler.ensureScheduled(DownloadLane.AUTO)
                 }
             }
@@ -155,7 +178,13 @@ internal class AutoDownloadPlannerImpl(
         watermark: Long?,
     ): List<AutoDownloadCandidate> {
         if (!policy.enabled || policy.source == SettingSource.NotSupported || watermark == null) return emptyList()
-        return dao.autoCandidates(id, watermark, policy.keepLatest, policy.includeVideo, youtubeDownloads = false)
+        return dao.autoCandidates(
+            id,
+            watermark,
+            policy.keepLatest,
+            policy.includeVideo,
+            youtubeDownloads = capabilities?.capabilities?.value?.downloads == true,
+        )
     }
 
     private suspend fun removeUnwanted(
@@ -262,6 +291,7 @@ internal class AutoDownloadPlannerImpl(
         val url: String,
         val estimate: Long?,
         val policy: EffectiveAutoDownload,
+        val kind: SourceKind,
     )
 
     private companion object {

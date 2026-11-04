@@ -3,6 +3,9 @@ package ch.lkmc.neutrodyne.download.impl
 
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.datastore.SettingStore
+import ch.lkmc.neutrodyne.core.model.DownloadError
+import ch.lkmc.neutrodyne.core.model.DownloadState
+import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import kotlinx.collections.immutable.toPersistentSet
 import okio.IOException
@@ -48,7 +51,10 @@ internal class DeferredDeletes(
         val live = rows()
         val owned =
             live
-                .flatMap { row ->
+                .filterNot {
+                    it.sourceKind == SourceKind.YOUTUBE && it.state == DownloadState.FAILED &&
+                        it.lastError == DownloadError.UNSUPPORTED_STREAM && it.runnerToken == null
+                }.flatMap { row ->
                     listOfNotNull(row.tempPath ?: DownloadPaths.part(row.episodeId), row.relativePath)
                         .map { row.rootId to it }
                 }.toSet()

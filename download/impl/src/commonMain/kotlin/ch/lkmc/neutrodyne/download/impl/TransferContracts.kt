@@ -3,9 +3,11 @@
 package ch.lkmc.neutrodyne.download.impl
 
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
+import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.YouTubeTransferSnapshot
 
 /** One attempt; resolved URLs are memory-only. Engine owns every database transition. */
@@ -15,12 +17,14 @@ internal interface TransferSource {
     suspend fun prepare(
         row: DownloadEntity,
         part: PartFile,
+        attempt: TransferAttempt = TransferAttempt(),
     ): Prepared
 
     suspend fun transfer(
         plan: TransferPlan,
         part: PartFile,
         sink: ProgressSink,
+        attempt: TransferAttempt = TransferAttempt(),
     ): TransferResult
 }
 
@@ -42,6 +46,10 @@ internal data class TransferPlan(
 }
 
 internal sealed interface Prepared {
+    data class Retry(
+        val result: TransferResult.Transient,
+    ) : Prepared
+
     /** Rename survived a crash; engine commits COMPLETED without another request or move. */
     data class Adopted(
         val complete: TransferResult.Complete,
@@ -68,6 +76,22 @@ internal sealed interface Prepared {
         val httpStatus: Int?,
     ) : Prepared
 }
+
+/** Owned by one DownloadEngine child across all prepares, chunks, restarts and retries. */
+internal class TransferAttempt {
+    var pref: AudioPref? = null
+    var youtube: YouTubeTransferSnapshot? = null
+    var admitted = false
+    var invalidations = 0
+    val refusedUrls = mutableSetOf<String>()
+    var identity: YouTubeDownloadIdentity? = null
+    var unavailable: Availability? = null
+}
+
+internal data class YouTubeDownloadIdentity(
+    val podcastId: Long,
+    val videoId: String,
+)
 
 internal enum class MediaKind { MP3, M4B, MP4, OGG, FLAC, WAV, WEBM, AAC, HLS, NOT_MEDIA, UNKNOWN_BINARY }
 

@@ -51,6 +51,7 @@ internal class RssTransferSource(
     override suspend fun prepare(
         row: DownloadEntity,
         part: PartFile,
+        attempt: TransferAttempt,
     ): Prepared {
         credentials.awaitLoaded()
         val source =
@@ -126,6 +127,7 @@ internal class RssTransferSource(
         plan: TransferPlan,
         part: PartFile,
         sink: ProgressSink,
+        attempt: TransferAttempt,
     ): TransferResult {
         if (!network.status.value.isConnected) return networkWait()
         require(

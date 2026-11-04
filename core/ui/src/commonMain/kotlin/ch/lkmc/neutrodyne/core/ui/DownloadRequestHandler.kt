@@ -36,6 +36,10 @@ public fun downloadWaitCommand(
             DownloadCommand.PROMOTE
         }
 
+        WaitReason.YOUTUBE_ENGINE_OFF -> {
+            null
+        }
+
         WaitReason.NETWORK -> {
             null
         }
