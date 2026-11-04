@@ -4,7 +4,7 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
-import ch.lkmc.neutrodyne.core.datastore.SettingStore
+import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.domain.LocalSyncedSetting
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference
 @ContributesBinding(AppScope::class)
 @SingleIn(AppScope::class)
 internal class DataStoreSettingsSyncPort(
-    private val settingsStore: SettingStore,
+    private val settingsStore: SettingsStore,
     private val clock: Clock,
 ) : SettingsSyncPort {
     private val recorderRef = AtomicReference<suspend (SettingKey<*>, String) -> Unit>(null)
@@ -139,6 +139,6 @@ internal class DataStoreSettingsSyncPort(
         key: SettingKey<*>,
         value: Any,
     ) {
-        (settingsStore as SettingStore).set(key as SettingKey<Any>, value)
+        settingsStore.set(key as SettingKey<Any>, value)
     }
 }

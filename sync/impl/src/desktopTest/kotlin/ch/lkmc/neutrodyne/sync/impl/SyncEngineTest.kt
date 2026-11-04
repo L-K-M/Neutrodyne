@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.LinkTokenRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LoginRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -180,8 +181,17 @@ class SyncEngineTest {
                         override suspend fun onDeleted(uuid: String) = Unit
                     },
                 sharePasswords = { false },
-                serverUrl = { "https://sync.example" },
-                token = { "token" },
+                address =
+                    object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
+                        override suspend fun serverUrl(): String = "https://sync.example"
+
+                        override suspend fun username(): String? = null
+
+                        override suspend fun shareFeedPasswords(): Boolean = false
+
+                        override suspend fun syncPlaybackSettings(): Boolean = true
+                    },
+                tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)

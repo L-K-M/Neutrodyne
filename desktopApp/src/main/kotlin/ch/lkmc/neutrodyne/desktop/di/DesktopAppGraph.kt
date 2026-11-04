@@ -62,8 +62,17 @@ import kotlinx.coroutines.CoroutineScope
  * `stop(grace = 3 s)` (11 Shutdown step 2). The media/OS bindings of `:desktop:system` join with
  * their milestones.
  */
-@DependencyGraph(AppScope::class, bindingContainers = [DesktopYouTubeBindingsModule::class])
+@DependencyGraph(
+    AppScope::class,
+    bindingContainers = [DesktopYouTubeBindingsModule::class, ch.lkmc.neutrodyne.sync.impl.SyncBindings::class],
+)
 interface DesktopAppGraph {
+    /** 10's sync application service (Settings › Sync, the shell banners). */
+    val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
+
+    /** The link state machine; `null` while no link runs. */
+    val linkFlow: ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl
+
     val dirs: AppDirs
 
     val buildInfo: BuildInfo
