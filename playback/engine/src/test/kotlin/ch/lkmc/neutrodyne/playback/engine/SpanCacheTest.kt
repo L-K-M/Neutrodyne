@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SpanCacheTest {
     @Test
@@ -46,6 +47,25 @@ class SpanCacheTest {
             assertEquals(0L, cache.sizeBytes())
         } finally {
             directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun memoryWindowRetainsNewBytesAfterABackwardSeek() {
+        val file = Files.createTempFile("unwritable-seek-cache", ".tmp")
+        try {
+            val cache = SpanCache(file)
+            cache.open("yt:video:140").use { resource ->
+                val chunk = ByteArray(1024 * 1024) { 1 }
+                val firstOffset = 16L * chunk.size
+                repeat(8) { resource.write(firstOffset + it * chunk.size, chunk) }
+                resource.write(0, byteArrayOf(2, 3, 4))
+                assertContentEquals(byteArrayOf(2, 3, 4), resource.read(0, 3))
+                assertNull(resource.read(firstOffset, 1))
+                assertTrue(cache.sizeBytes() <= 8L * chunk.size)
+            }
+        } finally {
+            Files.delete(file)
         }
     }
 
