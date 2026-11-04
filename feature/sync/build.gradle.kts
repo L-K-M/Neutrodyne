@@ -7,6 +7,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":sync:api"))
+            implementation(project(":core:designsystem"))
         }
     }
 }
