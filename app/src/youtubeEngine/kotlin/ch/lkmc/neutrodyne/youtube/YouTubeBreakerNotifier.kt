@@ -9,8 +9,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
+import androidx.core.net.toUri
 import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.YouTubeAlertReceiver
 import ch.lkmc.neutrodyne.core.common.AppInitializer
@@ -66,7 +66,7 @@ internal class YouTubeBreakerNotifier(
                             NOTIFICATION_ID,
                             Intent(
                                 Intent.ACTION_VIEW,
-                                Uri.parse("neutrodyne://open/settings/youtube"),
+                                "neutrodyne://open/settings/youtube".toUri(),
                                 app,
                                 MainActivity::class.java,
                             ),

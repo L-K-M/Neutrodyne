@@ -82,7 +82,6 @@ import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.Interceptor
-import okhttp3.OkHttpClient
 import org.junit.Test
 import java.io.File
 import java.util.Locale
@@ -110,15 +109,13 @@ class DiscoveryJourneyTest {
             val reporter = DesktopCrashReporter(dirs, build, clock, RecentLogBuffer())
             val search = FakeSearchRepository()
             val server = MockWebServer()
-            val fixtureClient = OkHttpClient()
             val replay =
                 Interceptor { chain ->
                     val original = chain.request()
                     if (original.url.host != "journey.neutrodyne.invalid") return@Interceptor chain.proceed(original)
                     val request = original.newBuilder().url(server.url(original.url.encodedPath)).build()
-                    fixtureClient
-                        .newCall(request)
-                        .execute()
+                    chain
+                        .proceed(request)
                         .newBuilder()
                         .request(original)
                         .build()
@@ -269,8 +266,6 @@ class DiscoveryJourneyTest {
                 runOnIdle { showing = false }
                 waitForIdle()
                 scope.cancel()
-                fixtureClient.dispatcher.executorService.shutdown()
-                fixtureClient.connectionPool.evictAll()
                 db.close()
                 dirs.data.parent
                     .toFile()
