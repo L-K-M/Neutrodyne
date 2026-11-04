@@ -114,6 +114,84 @@ class FirstLinkMergerTest {
             }
         }
 
+    @Test
+    fun resyncReassertsOriginalValuesAndCompleteClocks() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val podcastId =
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                val clock = Hlc.of(october, 7, remote)
+                db
+                    .syncClockDao()
+                    .upsert(
+                        ch.lkmc.neutrodyne.core.database.SyncClockEntity(
+                            "episode",
+                            podcastSyncId + "g:one",
+                            ch.lkmc.neutrodyne.sync.protocol.SyncJson.encodeToString(
+                                RawSyncRecord(
+                                    ch.lkmc.neutrodyne.sync.protocol.RecordState(
+                                        ch.lkmc.neutrodyne.sync.protocol.SyncCollection.EPISODE,
+                                        mapOf(
+                                            "played" to
+                                                ch.lkmc.neutrodyne.sync.protocol.FieldState(
+                                                    JsonPrimitive(true),
+                                                    clock,
+                                                ),
+                                            "playedAt" to
+                                                ch.lkmc.neutrodyne.sync.protocol.FieldState(
+                                                    JsonPrimitive(5L),
+                                                    clock,
+                                                ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    )
+
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = ScriptedClient(emptyList()),
+                        applier = applier(db),
+                        clock = TestClock(now),
+                        nodeId = NodeId("0000000000000001"),
+                    )
+                val resyncResult = merger.resync()
+                java.io.File("/tmp/resync-debug.log").appendText("result=$resyncResult\n")
+                assertTrue(resyncResult is FirstLinkResult.Completed)
+
+                val outboxRows = db.syncOutboxDao().rows()
+                assertTrue(
+                    outboxRows.any { it.field == "played" },
+                    "rows=$outboxRows clocks=${db.syncClockDao().all()}",
+                )
+                val played = outboxRows.first { it.field == "played" }
+                assertEquals(remote.value, played.nodeId)
+                assertEquals(7L, Hlc(played.hlc, NodeId(played.nodeId)).counter)
+                assertEquals(ch.lkmc.neutrodyne.core.database.SyncCaptureKind.REPLAY, played.captureKind)
+                assertEquals("true", played.value)
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase): SyncApplier =
         SyncApplier(
             db = db,
@@ -136,11 +214,14 @@ class FirstLinkMergerTest {
             sharePasswords = { false },
         )
 
-    private suspend fun link(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
+    private suspend fun link(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        enabled: Boolean = false,
+    ) {
         db.withWriteTransaction {
             db
                 .syncStateDao()
-                .upsert(SyncStateEntity(enabled = false, nodeId = "0000000000000001", hlc = 1L shl 16))
+                .upsert(SyncStateEntity(enabled = enabled, nodeId = "0000000000000001", hlc = 1L shl 16))
         }
     }
 

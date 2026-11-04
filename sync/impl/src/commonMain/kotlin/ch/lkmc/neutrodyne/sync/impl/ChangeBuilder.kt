@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /**
@@ -68,11 +69,17 @@ class ChangeBuilder(
     ) {
         when (row.field) {
             "played" -> {
-                val literal = row.value?.let(::parseJsonObject)
-                val played = (literal?.get("played") as? JsonPrimitive)?.booleanOrNull ?: return
-                val playedAt = (literal?.get("playedAt") as? JsonPrimitive)?.longOrNull
-                fields["played"] = FieldValue(JsonPrimitive(played), clock.toString())
-                fields["playedAt"] = FieldValue(playedAt?.let(::JsonPrimitive) ?: JsonNull, clock.toString())
+                val element = row.value?.let(::parsed)
+                val objectLiteral = element as? JsonObject
+                if (objectLiteral != null) {
+                    val played = (objectLiteral.get("played") as? JsonPrimitive)?.booleanOrNull ?: return
+                    val playedAt = (objectLiteral.get("playedAt") as? JsonPrimitive)?.longOrNull
+                    fields["played"] = FieldValue(JsonPrimitive(played), clock.toString())
+                    fields["playedAt"] = FieldValue(playedAt?.let(::JsonPrimitive) ?: JsonNull, clock.toString())
+                } else if (element is JsonPrimitive) {
+                    // A replay row carries the boolean alone; `playedAt` is a separate row.
+                    fields["played"] = FieldValue(element, clock.toString())
+                }
             }
 
             "pos" -> {
@@ -84,8 +91,23 @@ class ChangeBuilder(
             }
 
             "feedKeys" -> {
-                val keys = source.feedKeys(rid)
-                if (keys.isNotEmpty()) fields["feedKeys"] = FieldValue(add = keys)
+                // A replay row carries the known set as its literal; a local row reads the source.
+                val replay =
+                    row.captureKind == ch.lkmc.neutrodyne.core.database.SyncCaptureKind.REPLAY &&
+                        row.value != null
+                if (replay) {
+                    val parsed =
+                        runCatching {
+                            ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                                .parseToJsonElement(row.value!!)
+                                as? kotlinx.serialization.json.JsonArray
+                        }.getOrNull()
+                    val keys = parsed?.map { it.jsonPrimitive.content } ?: emptyList()
+                    if (keys.isNotEmpty()) fields["feedKeys"] = FieldValue(add = keys)
+                } else {
+                    val keys = source.feedKeys(rid)
+                    if (keys.isNotEmpty()) fields["feedKeys"] = FieldValue(add = keys)
+                }
             }
 
             "auth" -> {
