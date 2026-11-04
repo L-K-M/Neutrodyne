@@ -87,6 +87,7 @@ class UidtSlotBlockedDrainTest {
                     override suspend fun prepare(
                         row: DownloadEntity,
                         part: PartFile,
+                        attempt: TransferAttempt,
                     ) = Prepared.Go(
                         TransferPlan(row.episodeId, row.sourceRef, 0, row.totalBytes, row.etag),
                         row.rootId,
@@ -98,6 +99,7 @@ class UidtSlotBlockedDrainTest {
                         plan: TransferPlan,
                         part: PartFile,
                         sink: ProgressSink,
+                        attempt: TransferAttempt,
                     ): TransferResult {
                         starts += plan.episodeId
                         awaitCancellation()

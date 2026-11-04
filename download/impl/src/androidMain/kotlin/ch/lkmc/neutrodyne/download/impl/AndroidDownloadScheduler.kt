@@ -210,7 +210,11 @@ internal class AndroidDownloadScheduler(
     private suspend fun queued(lane: DownloadLane): List<DownloadEntity> =
         rows().filter {
             it.lane == lane && it.state == DownloadState.QUEUED && it.runnerToken == null &&
-                it.sourceKind == ch.lkmc.neutrodyne.core.model.SourceKind.RSS_ENCLOSURE
+                it.waitReason != WaitReason.YOUTUBE_ENGINE_OFF &&
+                when (it.sourceKind) {
+                    ch.lkmc.neutrodyne.core.model.SourceKind.RSS_ENCLOSURE -> true
+                    ch.lkmc.neutrodyne.core.model.SourceKind.YOUTUBE -> conditions().youtubeAllowed
+                }
         }
 
     private fun due(row: DownloadEntity): Boolean = (row.nextAttemptAt ?: Long.MIN_VALUE) <= clock.now()

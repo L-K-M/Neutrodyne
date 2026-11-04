@@ -67,3 +67,8 @@ interface DownloadController {
 
     suspend fun shareableFile(episodeId: Long): ShareableFile?
 }
+
+/** The app's current audio-track language (`ISO-639`), bound by each shell for download prefs. */
+fun interface DownloadAudioLanguage {
+    fun current(): String
+}
