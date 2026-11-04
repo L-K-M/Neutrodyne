@@ -5,18 +5,25 @@ package ch.lkmc.neutrodyne.sync.impl
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
-import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
-import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
-import ch.lkmc.neutrodyne.core.domain.SecretStore
-import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
-import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
+import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
+import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.DesktopOs
+import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
+import ch.lkmc.neutrodyne.sync.api.DiscoveredServer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
+import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
@@ -24,26 +31,54 @@ import ch.lkmc.neutrodyne.sync.api.SyncNotice
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
+import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
-import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceRenameRequest
+import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
+import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.random.Random
+
+/** Which unauthenticated call a failure came from, so a 401 maps to the right problem. */
+internal enum class LinkAuthKind { LOGIN, INVITE, LINK }
+
+/** RFC 8628 poll outcomes the link-token endpoint reports as `400 {"error": …}`. */
+private const val AUTHORIZATION_PENDING = "authorization_pending"
+private const val SLOW_DOWN = "slow_down"
+private const val EXPIRED_TOKEN = "expired_token"
+private const val ACCESS_DENIED = "access_denied"
+
+private const val MIN_LINK_INTERVAL_SECONDS = 5
+private const val SLOW_DOWN_INCREMENT_SECONDS = 5
+private const val UNLINK_PUSH_BUDGET_MS = 5_000L
+private const val DELETE_CONFIRMATION = "DELETE"
+private const val RESET_MODE_PURGE = "purge"
 
 /**
  * The [SyncController] application service (10 Client sync engine, 08 Sync screens). The status is
  * derived from `sync_state` and the secret store; the engine runs the rounds; the link flow is the
- * state machine the setup screen follows.
+ * state machine the setup screen follows, driven here with the real client calls.
  */
 @Inject
 @ContributesBinding(AppScope::class)
@@ -55,19 +90,31 @@ class SyncControllerImpl(
     private val linkFlow: LinkFlowImpl,
     private val tokenStore: SyncTokenStore,
     private val clock: Clock,
-    private val secrets: SecretStore,
-    private val settings: SettingsSyncPort,
-    private val playback: PlaybackSyncPort,
-    private val syncIngestHook: SyncIngestHook,
-    private val channelSync: GroupChannelSync,
-    private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress,
+    private val address: SyncServerAddress,
     private val flags: SyncFlags,
-    @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: kotlinx.coroutines.CoroutineScope,
+    private val build: BuildInfo,
+    private val merger: FirstLinkMerger,
+    private val gate: LocalNetworkGate,
+    private val errors: NetErrorClassifier,
+    @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
+    @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
 ) : SyncController {
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.NotConfigured)
     override val status: StateFlow<SyncStatus> = _status.asStateFlow()
 
-    override val link: LinkFlow? = linkFlow
+    /**
+     * The state machine plus its cancel: cancelling the flow's job stops the code polling too.
+     */
+    override val link: LinkFlow? =
+        object : LinkFlow {
+            override val state: StateFlow<ch.lkmc.neutrodyne.sync.api.LinkState>
+                get() = linkFlow.state
+
+            override fun cancel() {
+                linkJob?.cancel()
+                linkFlow.cancel()
+            }
+        }
 
     private val _heldChanges = MutableStateFlow<List<MassChangePrompt>>(emptyList())
     override val heldChanges: StateFlow<List<MassChangePrompt>> = _heldChanges.asStateFlow()
@@ -79,34 +126,62 @@ class SyncControllerImpl(
     private val _notices = MutableSharedFlow<SyncNotice>(extraBufferCapacity = 16)
     override val notices: Flow<SyncNotice> = _notices
 
+    /** The running flow's cancellation handle and the answers the flow waits for. */
+    private var linkJob: Job? = null
+    private var insecureDecision: CompletableDeferred<Boolean>? = null
+    private var permissionDecision: CompletableDeferred<Boolean>? = null
+
+    /** What the current flow knows about the server and this device. */
+    private var pendingServer: DiscoveredServer? = null
+    private var pendingNodeId: NodeId? = null
+    private var pendingDeviceId: String? = null
+    private var accountName: String? = null
+
+    /** A non-terminal round problem shown on the status card until the next good round. */
+    private val lastRoundProblem = MutableStateFlow<SyncProblem?>(null)
+
+    private val discovery = ServerDiscovery(client)
+
     init {
         scope.launch { refreshStatus() }
     }
 
     suspend fun refreshStatus() {
+        val url = address.serverUrl()
         val state = db.syncStateDao().get()
+        val token = url?.let { tokenStore.load(hostOf(it)) }
         _status.value =
             when {
-                state == null || address.serverUrl() == null -> {
+                url == null || state == null -> {
                     SyncStatus.NotConfigured
                 }
 
-                state.linkedAt == null && state.deviceId != null -> {
-                    SyncStatus.LinkUnfinished(address.serverUrl().orEmpty())
+                state.lastError == REVOKED_ERROR -> {
+                    SyncStatus.Revoked(url)
                 }
 
-                state.enabled && state.linkedAt != null -> {
+                state.enabled && state.linkedAt != null && token != null -> {
                     SyncStatus.Linked(
-                        serverUrl = address.serverUrl().orEmpty(),
+                        serverUrl = url,
                         accountId = state.accountId.orEmpty(),
                         deviceId = state.deviceId.orEmpty(),
-                        username = null,
+                        username = address.username(),
                         nodeId = state.nodeId.orEmpty(),
                         lastSyncAtMs = state.lastSyncAt,
-                        problem = null,
+                        problem = lastRoundProblem.value,
                     )
                 }
 
+                state.deviceId != null && state.linkedAt == null -> {
+                    SyncStatus.LinkUnfinished(url)
+                }
+
+                // A linked database without a token: a copied data directory or a restored install.
+                state.deviceId != null || state.serverUrl == null -> {
+                    SyncStatus.Reconnect(url, address.username())
+                }
+
+                // A deliberate unlink keeps `sync_state.serverUrl`; the library stays as it is.
                 else -> {
                     SyncStatus.NotConfigured
                 }
@@ -117,31 +192,114 @@ class SyncControllerImpl(
         serverUrl: String,
         method: LinkMethod,
     ) {
-        linkFlow.discovering()
+        linkJob?.cancel()
+        insecureDecision = null
+        permissionDecision = null
+        pendingNodeId = NodeId.random()
+        pendingDeviceId = newDeviceId()
+        linkJob =
+            scope.launch {
+                try {
+                    runLink(serverUrl, method)
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Throwable) {
+                    linkFlow.failed(classify(failure))
+                }
+            }
     }
 
     override fun discover(address: String) {
-        linkFlow.discovering()
+        linkJob?.cancel()
+        insecureDecision = null
+        permissionDecision = null
+        pendingNodeId = NodeId.random()
+        pendingDeviceId = newDeviceId()
+        linkJob =
+            scope.launch {
+                try {
+                    linkFlow.discovering()
+                    val server = preflight(address) ?: return@launch
+                    pendingServer = server
+                    linkFlow.awaitingInput(LinkMethod.CODE, server, disclosure(server))
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Throwable) {
+                    linkFlow.failed(classify(failure))
+                }
+            }
     }
 
-    override fun grantLocalNetwork(granted: Boolean) = Unit
+    override fun grantLocalNetwork(granted: Boolean) {
+        gate.onPermissionResult(granted)
+        permissionDecision?.complete(granted)
+    }
 
-    override fun confirmInsecure() = Unit
+    override fun confirmInsecure() {
+        insecureDecision?.complete(true)
+    }
 
-    override fun submitInvite(code: String) = Unit
+    override fun submitInvite(code: String) {
+        val server = pendingServer ?: return
+        scope.launch {
+            linkFlow.authorising()
+            try {
+                val token = client.redeemInvite(server.serverUrl, normaliseUserCode(code), deviceInfo())
+                authorised(server, token)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.INVITE))
+            }
+        }
+    }
 
     override fun submitPassword(
         username: String,
         password: CharArray,
-    ) = Unit
+    ) {
+        val server = pendingServer ?: return
+        scope.launch {
+            linkFlow.authorising()
+            try {
+                val token = client.login(server.serverUrl, username, password.concatToString(), deviceInfo())
+                authorised(server, token)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.LOGIN))
+            } finally {
+                password.fill('\u0000')
+            }
+        }
+    }
 
-    override fun chooseFirstLink(choice: FirstLinkChoice) = Unit
+    override fun chooseFirstLink(choice: FirstLinkChoice) {
+        // An empty account offers no choice: only the named upload confirmation can continue it.
+        if (linkFlow.state.value is ch.lkmc.neutrodyne.sync.api.LinkState.ConfirmUpload &&
+            choice != FirstLinkChoice.MERGE
+        ) {
+            return
+        }
+        linkJob = scope.launch { beginMerge(choice) }
+    }
 
     override fun syncNow() {
         scope.launch {
             _syncing.value = true
             try {
                 engine.round(SyncRoundReason.SYNC_NOW)
+                lastRoundProblem.value = null
+                clearTransientError()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                val problem = classify(failure)
+                if (problem == SyncProblem.Revoked) {
+                    markRevoked()
+                } else {
+                    lastRoundProblem.value = problem
+                }
             } finally {
                 _syncing.value = false
                 refreshStatus()
@@ -149,22 +307,128 @@ class SyncControllerImpl(
         }
     }
 
-    override fun unlink() {
-        scope.launch {
-            db.syncStateDao().unlink()
-            tokenStore.clear(hostOf(address.serverUrl().orEmpty()))
-            refreshStatus()
+    override suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem> {
+        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        return try {
+            val response = client.linkApprove(server, token, normaliseUserCode(userCode))
+            Outcome.Success(
+                PendingDevice(
+                    userCode = normaliseUserCode(userCode),
+                    deviceName = response.deviceName,
+                    platform = response.platform,
+                    appVersion = response.appVersion,
+                    requestedAtMs = parseEpochMilliseconds(response.requestedAt),
+                ),
+            )
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Outcome.Failure(mapAuthFailure(failure, LinkAuthKind.LINK))
         }
     }
 
-    override fun deleteServerData(confirm: String) = Unit
+    override suspend fun confirmLink(
+        userCode: String,
+        approve: Boolean,
+    ): Outcome<Unit, SyncProblem> {
+        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        return try {
+            client.linkConfirm(server, token, normaliseUserCode(userCode), approve)
+            Outcome.Success(Unit)
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Outcome.Failure(mapAuthFailure(failure, LinkAuthKind.LINK))
+        }
+    }
 
-    override fun renameDevice(
+    override suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem> {
+        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        return try {
+            val current = db.syncStateDao().get()?.deviceId
+            Outcome.Success(
+                client.devices().map { device ->
+                    SyncDevice(
+                        id = device.id,
+                        name = device.name,
+                        platform = device.platform,
+                        appVersion = device.appVersion,
+                        lastSeenAtMs = device.lastSeenAt?.let(::parseEpochMilliseconds),
+                        current = device.id == current,
+                        stale = device.stale,
+                    )
+                },
+            )
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Outcome.Failure(tracked(failure))
+        }
+    }
+
+    override suspend fun unlink(): Outcome<Unit, SyncProblem> {
+        // One push round with a 5-s budget first, so the last edits reach the other devices; an
+        // unreachable server must not block the local unlink.
+        try {
+            withContext(io) {
+                withTimeoutOrNull(UNLINK_PUSH_BUDGET_MS) { engine.round(SyncRoundReason.SYNC_NOW) }
+            }
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Unit
+        }
+        address.serverUrl()?.let { url -> runCatching { client.logout() } }
+        db.syncStateDao().unlink()
+        address.serverUrl()?.let { tokenStore.clear(hostOf(it)) }
+        lastRoundProblem.value = null
+        refreshStatus()
+        return Outcome.Success(Unit)
+    }
+
+    override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
+        if (confirm != DELETE_CONFIRMATION) return Outcome.Failure(SyncProblem.Server(400))
+        val (url, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        return try {
+            client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
+            db.syncStateDao().unlink()
+            tokenStore.clear(hostOf(url))
+            lastRoundProblem.value = null
+            refreshStatus()
+            Outcome.Success(Unit)
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Outcome.Failure(tracked(failure))
+        }
+    }
+
+    override suspend fun renameDevice(
         deviceId: String,
         name: String,
-    ) = Unit
+    ): Outcome<Unit, SyncProblem> {
+        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        return try {
+            client.renameDevice(deviceId, name.trim())
+            Outcome.Success(Unit)
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Outcome.Failure(tracked(failure))
+        }
+    }
 
-    override fun revokeDevice(deviceId: String) = Unit
+    override suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem> {
+        val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        return try {
+            client.revokeDevice(deviceId)
+            Outcome.Success(Unit)
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Outcome.Failure(tracked(failure))
+        }
+    }
 
     override fun resolveHeld(
         id: Long,
@@ -203,9 +467,378 @@ class SyncControllerImpl(
         remoteSession.value = null
     }
 
-    override fun setSyncPlaybackSettings(enabled: Boolean) = Unit
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
+        address.setSyncPlaybackSettings(enabled)
+        flags.syncPlaybackSettings = enabled
+    }
 
-    override fun setShareFeedPasswords(enabled: Boolean) = Unit
+    override suspend fun setShareFeedPasswords(enabled: Boolean) {
+        address.setShareFeedPasswords(enabled)
+        flags.sharePasswords = enabled
+    }
+
+    private suspend fun runLink(
+        serverUrl: String,
+        method: LinkMethod,
+    ) {
+        linkFlow.discovering()
+        val server = preflight(serverUrl) ?: return
+        pendingServer = server
+        linkFlow.awaitingInput(method, server, disclosure(server))
+        when (method) {
+            LinkMethod.CODE -> runDeviceCode(server)
+            LinkMethod.INVITE, LinkMethod.PASSWORD -> Unit
+        }
+    }
+
+    /**
+     * Normalises and checks the typed address: a plain `http://` to a public address is refused
+     * before any request, a local one asks for confirmation, and Android 17 gates local networks
+     * behind `ACCESS_LOCAL_NETWORK`.
+     */
+    private suspend fun preflight(address: String): DiscoveredServer? {
+        val normalized =
+            discovery.normalise(address) ?: run {
+                linkFlow.failed(SyncProblem.Server(400))
+                return null
+            }
+        val host = hostOf(normalized)
+        if (normalized.startsWith("http://") && !gate.allowsPlainHttp(host)) {
+            linkFlow.failed(SyncProblem.InsecureTransport)
+            return null
+        }
+        val discovered =
+            when (val result = discovery.discover(normalized)) {
+                is DiscoveryResult.Failure -> {
+                    linkFlow.failed(result.problem)
+                    return null
+                }
+
+                is DiscoveryResult.Success -> {
+                    result.server
+                }
+            }
+        if (discovered.serverUrl.startsWith("http://")) {
+            val confirmed = awaitInsecure(host)
+            if (!confirmed) {
+                linkFlow.showAddress()
+                return null
+            }
+        }
+        if (gate.needsPermission(host)) {
+            val granted = awaitPermission(host)
+            if (!granted) {
+                linkFlow.failed(SyncProblem.LocalNetworkPermissionDenied)
+                return null
+            }
+        }
+        return discovered
+    }
+
+    private suspend fun runDeviceCode(server: DiscoveredServer) {
+        val start =
+            try {
+                client.linkStart(server.serverUrl, deviceInfo())
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.LINK))
+                return
+            }
+        linkFlow.showCode(start.userCode, start.verificationUri, clock.now() + start.expiresIn * 1_000L)
+        var intervalSeconds = start.interval.coerceAtLeast(MIN_LINK_INTERVAL_SECONDS)
+        while (true) {
+            delay(intervalSeconds * 1_000L)
+            try {
+                val token = client.linkToken(server.serverUrl, start.deviceCode)
+                linkFlow.authorising()
+                authorised(server, token)
+                return
+            } catch (failure: SyncProblemException) {
+                when (failure.error) {
+                    AUTHORIZATION_PENDING -> {
+                        Unit
+                    }
+
+                    SLOW_DOWN -> {
+                        intervalSeconds += SLOW_DOWN_INCREMENT_SECONDS
+                    }
+
+                    EXPIRED_TOKEN -> {
+                        linkFlow.failed(SyncProblem.InvalidCode)
+                        return
+                    }
+
+                    ACCESS_DENIED -> {
+                        linkFlow.failed(SyncProblem.LinkDeclined)
+                        return
+                    }
+
+                    else -> {
+                        linkFlow.failed(SyncProblem.Server(400))
+                        return
+                    }
+                }
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                linkFlow.failed(classify(failure))
+                return
+            }
+        }
+    }
+
+    /** Stores the token and the link identity, then decides the first-link step (10 First-link choices). */
+    private suspend fun authorised(
+        server: DiscoveredServer,
+        token: TokenResponse,
+    ) {
+        tokenStore.save(hostOf(server.serverUrl), token.token)
+        address.setServerUrl(server.serverUrl)
+        token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
+        val nodeId = checkNotNull(pendingNodeId)
+        val deviceId = checkNotNull(pendingDeviceId)
+        db.withWriteTransaction {
+            val existing = db.syncStateDao().get()
+            db.syncStateDao().upsert(
+                (existing ?: SyncStateEntity()).copy(
+                    enabled = false,
+                    applying = false,
+                    serverUrl = server.serverUrl,
+                    accountId = token.accountId,
+                    deviceId = deviceId,
+                    nodeId = nodeId.value,
+                    protocol = PROTOCOL_VERSION,
+                    cursor = null,
+                    hlc = existing?.hlc ?: 0,
+                    linkedAt = null,
+                    lastSyncAt = null,
+                    lastError = null,
+                ),
+            )
+        }
+        lastRoundProblem.value = null
+        accountName = token.username
+        refreshStatus()
+
+        val summary = client.account()
+        accountName = summary.username
+        val localPodcasts = db.podcastDao().allForExport().size
+        val localGroups = db.groupDao().groupsInOrder().size
+        when {
+            summary.counts.podcasts == 0 && summary.counts.groups == 0 -> {
+                if (localPodcasts == 0 && localGroups == 0) {
+                    completeEmptyLink()
+                } else {
+                    linkFlow.confirmUpload(summary.username, hostOf(server.serverUrl))
+                }
+            }
+
+            localPodcasts == 0 && localGroups == 0 -> {
+                beginMerge(FirstLinkChoice.USE_SERVER)
+            }
+
+            else -> {
+                linkFlow.chooseFirstLink(localPodcasts, localGroups, summary.counts.podcasts, summary.counts.groups)
+            }
+        }
+    }
+
+    /** Nothing to combine: the link completes without a merge (both libraries are empty). */
+    private suspend fun completeEmptyLink() {
+        db.withWriteTransaction {
+            db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(enabled = true, linkedAt = clock.now())) }
+        }
+        linkFlow.linked(accountName.orEmpty(), deviceName())
+        refreshStatus()
+    }
+
+    private suspend fun beginMerge(choice: FirstLinkChoice) {
+        _syncing.value = true
+        try {
+            linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, 0, 1)
+            when (
+                val result =
+                    merger.merge(choice) { phase, done, total -> linkFlow.merging(phase, done, total) }
+            ) {
+                is FirstLinkResult.Completed -> {
+                    linkFlow.linked(accountName.orEmpty(), deviceName())
+                    refreshStatus()
+                }
+
+                is FirstLinkResult.Failed -> {
+                    linkFlow.failed(SyncProblem.MergeFailed)
+                    refreshStatus()
+                }
+            }
+        } finally {
+            _syncing.value = false
+        }
+    }
+
+    private suspend fun disclosure(server: DiscoveredServer): ch.lkmc.neutrodyne.sync.api.SyncDisclosure =
+        ch.lkmc.neutrodyne.sync.api.SyncDisclosure(
+            host = hostOf(server.serverUrl),
+            privateFeedLinks =
+                db
+                    .podcastDao()
+                    .allForExport()
+                    .count { it.needsCredentials || it.credentialId != null },
+            encrypted = server.serverUrl.startsWith("https://"),
+        )
+
+    private suspend fun deviceInfo(): DeviceInfoDto {
+        val nodeId = checkNotNull(pendingNodeId) { "no link in progress" }
+        val deviceId = checkNotNull(pendingDeviceId) { "no link in progress" }
+        val name =
+            (address.deviceName()?.takeIf { it.isNotBlank() } ?: defaultDeviceName())
+                .trim()
+                .take(ProtocolLimits.MAX_DEVICE_NAME)
+        return DeviceInfoDto(
+            id = deviceId,
+            name = name,
+            platform = platformWire(),
+            appVersion = build.versionName,
+            nodeId = nodeId.value,
+        )
+    }
+
+    private fun defaultDeviceName(): String =
+        when (build.platform) {
+            BuildInfo.Platform.ANDROID -> {
+                "Android"
+            }
+
+            BuildInfo.Platform.DESKTOP -> {
+                when (build.desktop?.os) {
+                    DesktopOs.WINDOWS -> "Windows"
+                    DesktopOs.MACOS -> "macOS"
+                    DesktopOs.LINUX -> "Linux"
+                    null -> "Desktop"
+                }
+            }
+        }
+
+    private fun platformWire(): String =
+        when (build.platform) {
+            BuildInfo.Platform.ANDROID -> "android"
+            BuildInfo.Platform.DESKTOP -> build.desktop?.os?.wire ?: "linux"
+        }
+
+    private suspend fun deviceName(): String = address.deviceName().orEmpty()
+
+    /**
+     * Waits for the Android 17 local-network answer. The deferred exists before the state is
+     * published, so a fast grant cannot arrive before the flow starts waiting.
+     */
+    private suspend fun awaitInsecure(host: String): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        insecureDecision = deferred
+        linkFlow.insecure(host)
+        return try {
+            deferred.await()
+        } finally {
+            insecureDecision = null
+        }
+    }
+
+    /** Waits for the local-network permission answer; see [awaitInsecure]. */
+    private suspend fun awaitPermission(host: String): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        permissionDecision = deferred
+        linkFlow.needsLocalNetwork(host)
+        return try {
+            deferred.await()
+        } finally {
+            permissionDecision = null
+        }
+    }
+
+    /** The linked server's URL and device token, or `null` when this device cannot act. */
+    private suspend fun linkedContext(): Pair<String, String>? {
+        val url = address.serverUrl() ?: return null
+        val state = db.syncStateDao().get()
+        val token = tokenStore.load(hostOf(url))
+        return if (state?.enabled == true && state.linkedAt != null && token != null) url to token else null
+    }
+
+    /** Maps a transport failure and remembers a revocation. */
+    private suspend fun tracked(failure: Throwable): SyncProblem {
+        val problem = classify(failure)
+        if (problem == SyncProblem.Revoked) markRevoked()
+        return problem
+    }
+
+    private suspend fun markRevoked() {
+        db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastError = REVOKED_ERROR)) }
+        refreshStatus()
+    }
+
+    private suspend fun clearTransientError() {
+        val state = db.syncStateDao().get() ?: return
+        if (state.lastError != null && state.lastError != REVOKED_ERROR) {
+            db.syncStateDao().upsert(state.copy(lastError = null))
+        }
+    }
+
+    /** Transport failure → [SyncProblem]; expected failures never throw (10 Errors). */
+    private fun classify(failure: Throwable): SyncProblem {
+        if (failure is SyncTransportException) {
+            return when (failure.status) {
+                401 -> SyncProblem.Revoked
+                403, 404, 408, 410, 413, 421, 429 -> SyncProblem.Server(failure.status)
+                426 -> SyncProblem.AppTooOld
+                in 500..599 -> SyncProblem.Unreachable("server_${failure.status}")
+                else -> SyncProblem.Server(failure.status)
+            }
+        }
+        if (failure is SyncProblemException) return SyncProblem.Server(400)
+        val netError =
+            try {
+                errors.classify(failure)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                NetError.Other(failure::class.simpleName ?: "other")
+            }
+        return when (netError) {
+            NetError.Offline -> SyncProblem.Offline
+            NetError.Timeout -> SyncProblem.Unreachable("timeout")
+            NetError.DnsFailure -> SyncProblem.Unreachable("dns")
+            NetError.ConnectionFailed -> SyncProblem.Unreachable("connection_failed")
+            NetError.LocalNetworkUnsupported -> SyncProblem.LocalNetworkPermissionDenied
+            is NetError.Tls -> SyncProblem.CertificateRejected
+            NetError.Cancelled -> SyncProblem.Unreachable("cancelled")
+            is NetError.Other -> SyncProblem.Unreachable(netError.type)
+        }
+    }
+
+    /** A 401 means different things on the three unauthenticated entry points (10 Errors). */
+    private fun mapAuthFailure(
+        failure: Throwable,
+        kind: LinkAuthKind,
+    ): SyncProblem {
+        if (failure is SyncTransportException) {
+            return when (failure.status) {
+                401 -> {
+                    when (kind) {
+                        LinkAuthKind.LOGIN -> SyncProblem.WrongPassword
+                        LinkAuthKind.INVITE -> SyncProblem.InviteInvalid
+                        LinkAuthKind.LINK -> SyncProblem.InvalidCode
+                    }
+                }
+
+                426 -> {
+                    SyncProblem.AppTooOld
+                }
+
+                else -> {
+                    classify(failure)
+                }
+            }
+        }
+        return classify(failure)
+    }
 
     private suspend fun refreshHeld() {
         _heldChanges.value =
@@ -224,4 +857,29 @@ class SyncControllerImpl(
                 )
             }
     }
+
+    private companion object {
+        const val REVOKED_ERROR = "Revoked"
+    }
 }
+
+/** `spaces and hyphens ignored, case-insensitive`, as the server normalises codes (10 Link methods). */
+internal fun normaliseUserCode(code: String): String = code.filterNot { it == ' ' || it == '-' }.uppercase()
+
+/** A fresh UUIDv4-shaped device ID for one link (10 Authentication and device linking). */
+internal fun newDeviceId(): String {
+    val bytes = ByteArray(16)
+    Random.nextBytes(bytes)
+    bytes[6] = ((bytes[6].toInt() and 0x0F) or 0x40).toByte()
+    bytes[8] = ((bytes[8].toInt() and 0x3F) or 0x80).toByte()
+    val hex = bytes.joinToString("") { it.toUByte().toString(16).padStart(2, '0') }
+    return "${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-" +
+        "${hex.substring(16, 20)}-${hex.substring(20)}"
+}
+
+private fun parseEpochMilliseconds(iso: String): Long =
+    runCatching {
+        kotlin.time.Instant
+            .parse(iso)
+            .toEpochMilliseconds()
+    }.getOrDefault(0L)

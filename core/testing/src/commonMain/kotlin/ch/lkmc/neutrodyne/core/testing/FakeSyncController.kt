@@ -2,14 +2,18 @@
 
 package ch.lkmc.neutrodyne.core.testing
 
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
+import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
 import ch.lkmc.neutrodyne.sync.api.SyncController
+import ch.lkmc.neutrodyne.sync.api.SyncDevice
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
+import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -49,6 +53,19 @@ class FakeSyncController(
     val remoteSessionDismissals = mutableListOf<Unit>()
     val playbackSettings = mutableListOf<Boolean>()
     val passwordSharing = mutableListOf<Boolean>()
+    val approvals = mutableListOf<String>()
+    val confirmations = mutableListOf<Pair<String, Boolean>>()
+    val deviceLists = mutableListOf<Unit>()
+
+    /** Scripted results; the defaults succeed (UI tests rarely exercise failures). */
+    var devicesResult: Outcome<List<SyncDevice>, SyncProblem> = Outcome.Success(emptyList())
+    var approveResult: Outcome<PendingDevice, SyncProblem> =
+        Outcome.Success(PendingDevice("", "", "", "", 0))
+    var confirmResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+    var unlinkResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+    var deleteServerDataResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+    var renameResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+    var revokeResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
 
     override fun startLink(
         serverUrl: String,
@@ -88,23 +105,45 @@ class FakeSyncController(
         syncNows += Unit
     }
 
-    override fun unlink() {
+    override suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem> {
+        approvals += userCode
+        return approveResult
+    }
+
+    override suspend fun confirmLink(
+        userCode: String,
+        approve: Boolean,
+    ): Outcome<Unit, SyncProblem> {
+        confirmations += userCode to approve
+        return confirmResult
+    }
+
+    override suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem> {
+        deviceLists += Unit
+        return devicesResult
+    }
+
+    override suspend fun unlink(): Outcome<Unit, SyncProblem> {
         unlinks += Unit
+        return unlinkResult
     }
 
-    override fun deleteServerData(confirm: String) {
+    override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
         serverDataDeletes += confirm
+        return deleteServerDataResult
     }
 
-    override fun renameDevice(
+    override suspend fun renameDevice(
         deviceId: String,
         name: String,
-    ) {
+    ): Outcome<Unit, SyncProblem> {
         renames += deviceId to name
+        return renameResult
     }
 
-    override fun revokeDevice(deviceId: String) {
+    override suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem> {
         revokes += deviceId
+        return revokeResult
     }
 
     override fun resolveHeld(
@@ -119,11 +158,11 @@ class FakeSyncController(
         remoteSession.value = null
     }
 
-    override fun setSyncPlaybackSettings(enabled: Boolean) {
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
         playbackSettings += enabled
     }
 
-    override fun setShareFeedPasswords(enabled: Boolean) {
+    override suspend fun setShareFeedPasswords(enabled: Boolean) {
         passwordSharing += enabled
     }
 

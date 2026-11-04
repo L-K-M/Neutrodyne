@@ -35,20 +35,15 @@ private const val MAX_ROUNDS = 50
 class SyncEngine(
     private val db: NeutrodyneDatabase,
     private val client: SyncClient,
+    private val applier: SyncApplier,
     private val clock: Clock,
     private val secrets: SecretStore,
-    private val settings: SettingsSyncPort,
-    private val playback: PlaybackSyncPort,
-    private val syncIngestHook: SyncIngestHook,
-    private val channelSync: GroupChannelSync,
     private val sharePasswords: () -> Boolean,
     private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress,
     private val tokens: SyncTokenStore,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
-    private val applier =
-        SyncApplier(db, clock, secrets, settings, playback, syncIngestHook, channelSync, sharePasswords)
 
     suspend fun round(reason: SyncRoundReason): SyncReport {
         val started = clock.now()
