@@ -1,10 +1,12 @@
 {
   "uniqueId": "neutrodyne:font-courierprime",
-  "name": "Courierprime font",
+  "name": "Courier Prime font",
   "website": "https://github.com/google/fonts/tree/main/ofl/courierprime",
   "developers": [],
   "licenses": [
     "OFL-1.1-courierprime"
   ],
-  "tag": "bundled"
+  "tag": "bundled",
+  "artifactVersion": "3.018",
+  "description": "Bundled Google Fonts Courier Prime, weights 400/700. Source: https://github.com/google/fonts/tree/main/ofl/courierprime"
 }
