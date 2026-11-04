@@ -20,14 +20,14 @@ class DeviceTestSelectionTest {
     fun unseededOreoSelectsExactlyTheSupportedCases() {
         for (sdk in listOf(26, 27)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(','))
-                .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, YTX, ATF)
+                .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, YTX, YOUTUBE_SMOKE, YTX_ISOLATION, ATF)
         }
     }
 
     @Test
     fun modernDevicesKeepLocaleAndPythonAcceptanceChecks() {
         assertThat(select(sdk = 33).getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE, ATF)
-        for (sdk in listOf(34, 36)) {
+        for (sdk in listOf(34, 36, 37)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE)
         }
     }
@@ -37,7 +37,7 @@ class DeviceTestSelectionTest {
         for (sdk in listOf(26, 33)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(',')).contains(ATF)
         }
-        for (sdk in listOf(34, 36)) {
+        for (sdk in listOf(34, 36, 37)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(',')).doesNotContain(ATF)
         }
     }
@@ -131,6 +131,8 @@ class DeviceTestSelectionTest {
             "ch.lkmc.neutrodyne.UpdateNotificationDeviceTest#deniedPermissionDoesNotPostOrRequestPermission"
         const val RELABEL = "ch.lkmc.neutrodyne.PerAppLanguageTest#perAppLanguageRelabelsTheDestinations"
         const val YTX = "ch.lkmc.neutrodyne.YtxReleaseSmokeTest"
+        const val YOUTUBE_SMOKE = "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest"
+        const val YTX_ISOLATION = "ch.lkmc.neutrodyne.YtxIsolationTest"
         const val ATF = "ch.lkmc.neutrodyne.AccessibilityChecksTest"
     }
 }
