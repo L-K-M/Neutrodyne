@@ -143,7 +143,8 @@ private fun isLanV6(b: ByteArray): Boolean {
     // An IPv4-mapped IPv6 address (::ffff:a.b.c.d) is judged by the mapped IPv4 address.
     val v4Mapped =
         (0 until V4_MAPPED_PREFIX_BYTES).all { b[it].toInt() == 0 } &&
-            b[V4_MAPPED_PREFIX_BYTES].toInt() == 0xFF && b[V4_MAPPED_PREFIX_BYTES + 1].toInt() == 0xFF
+            (b[V4_MAPPED_PREFIX_BYTES].toInt() and 0xFF) == 0xFF &&
+            (b[V4_MAPPED_PREFIX_BYTES + 1].toInt() and 0xFF) == 0xFF
     if (v4Mapped) return isLanV4(b, V4_MAPPED_PREFIX_BYTES + 2)
 
     val b0 = b[0].toInt() and 0xFF
@@ -184,7 +185,8 @@ private fun isLocalPeerV4(
 private fun isLocalPeerV6(b: ByteArray): Boolean {
     val v4Mapped =
         (0 until V4_MAPPED_PREFIX_BYTES).all { b[it].toInt() == 0 } &&
-            b[V4_MAPPED_PREFIX_BYTES].toInt() == 0xFF && b[V4_MAPPED_PREFIX_BYTES + 1].toInt() == 0xFF
+            (b[V4_MAPPED_PREFIX_BYTES].toInt() and 0xFF) == 0xFF &&
+            (b[V4_MAPPED_PREFIX_BYTES + 1].toInt() and 0xFF) == 0xFF
     if (v4Mapped) return isLocalPeerV4(b, V4_MAPPED_PREFIX_BYTES + 2)
 
     val b0 = b[0].toInt() and 0xFF
