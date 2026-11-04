@@ -510,6 +510,10 @@ class EpisodeScreenTest {
                 FakePlaybackStateSource(),
                 testPlatformInfo,
                 FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+                artwork = {
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeArtworkRepository()
+                },
             )
         val owner =
             object : LifecycleOwner {

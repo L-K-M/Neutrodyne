@@ -6,10 +6,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.SettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_auto_settings
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_body
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_title
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
@@ -22,15 +26,18 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 internal fun DownloadsRoute() {
+    val navigator = LocalAppNavigator.current
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
             title = stringResource(Res.string.nav_downloads),
             actions = { SettingsGearButton() },
         )
-        NdEmptyState(
+        EmptyState(
             icon = NdIcons.Download,
             title = stringResource(Res.string.downloads_empty_title),
             body = stringResource(Res.string.downloads_empty_body),
+            actionLabel = stringResource(Res.string.downloads_auto_settings),
+            onAction = { navigator.push(SettingsKey(SettingsPage.DOWNLOADS)) },
         )
     }
 }
