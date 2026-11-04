@@ -90,6 +90,10 @@ abstract class PodcastDao(
     @Query("SELECT * FROM podcast WHERE feedKey = :feedKey")
     abstract suspend fun byFeedKey(feedKey: String): PodcastEntity?
 
+    /** 10's `ChangeBuilder`/`SyncApplier`: the sync record ID is `podcast.syncId`. */
+    @Query("SELECT * FROM podcast WHERE syncId = :syncId")
+    abstract suspend fun bySyncId(syncId: String): PodcastEntity?
+
     @Delete
     abstract suspend fun deleteAliases(rows: List<PodcastUrlAliasEntity>)
 

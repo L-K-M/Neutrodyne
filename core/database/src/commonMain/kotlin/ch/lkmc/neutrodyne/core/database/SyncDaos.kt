@@ -399,9 +399,27 @@ interface SyncHeldDao {
     @Insert
     suspend fun insert(row: SyncHeldEntity): Long
 
+    @Upsert
+    suspend fun upsert(row: SyncHeldEntity)
+
     /** 10 observes the table for the held-changes prompt (low churn, never joined). */
     @Query("SELECT * FROM sync_held ORDER BY heldAt, id")
     fun observeAll(): Flow<List<SyncHeldEntity>>
+
+    @Query("SELECT * FROM sync_held ORDER BY heldAt, id")
+    suspend fun all(): List<SyncHeldEntity>
+
+    @Query("SELECT * FROM sync_held WHERE heldAt = :heldAt ORDER BY id")
+    suspend fun forRound(heldAt: Long): List<SyncHeldEntity>
+
+    @Query("SELECT * FROM sync_held WHERE id = :id")
+    suspend fun byId(id: Long): SyncHeldEntity?
+
+    @Query("DELETE FROM sync_held WHERE heldAt = :heldAt")
+    suspend fun deleteRound(heldAt: Long)
+
+    @Query("DELETE FROM sync_held WHERE id = :id")
+    suspend fun delete(id: Long)
 
     @Query("SELECT COUNT(*) FROM sync_held")
     suspend fun count(): Int
