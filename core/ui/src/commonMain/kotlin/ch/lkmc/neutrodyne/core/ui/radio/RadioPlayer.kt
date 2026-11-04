@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -65,8 +66,11 @@ internal fun RadioPlayer(
     actions: RadioActions,
     compact: Boolean,
     short: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val selected = state.selected
+    // Retain the reference cap through 1.3x text; larger type needs a larger physical key.
+    val capScale = (LocalDensity.current.fontScale / FIXED_CAP_FONT_SCALE).coerceAtLeast(1f)
     val duration = selected?.durationMs ?: 0L
     val status =
         when {
@@ -76,7 +80,7 @@ internal fun RadioPlayer(
             else -> Res.string.radio_ready
         }
     val statusText = stringResource(status)
-    Column(Modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth()) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -139,15 +143,21 @@ internal fun RadioPlayer(
                         17
                     },
                     bold = true,
+                    maxLines = 2,
                     modifier =
                         Modifier.padding(
                             top = 5.dp,
                             bottom = 3.dp,
                         ),
                 )
-                RadioText(selected?.podcast ?: stringResource(Res.string.radio_choose_other), 11, mono = false)
+                RadioText(
+                    selected?.podcast ?: stringResource(Res.string.radio_choose_other),
+                    11,
+                    mono = false,
+                    maxLines = 1,
+                )
                 Needle(state.elapsedMs, duration, selected != null && duration > 0, actions.seek)
-                if (!compact) RadioText(radioElapsed(duration), 11, modifier = Modifier.align(Alignment.End))
+                if (!compact) RadioText(radioTimeline(duration), 11, modifier = Modifier.align(Alignment.End))
             }
         }
         MaterialPlate(
@@ -169,7 +179,7 @@ internal fun RadioPlayer(
                 val label = stringResource(if (state.playing) Res.string.radio_pause else Res.string.radio_play)
                 Box(
                     Modifier
-                        .size(if (compact) 64.dp else 70.dp)
+                        .size((if (compact) 64.dp else 70.dp) * capScale)
                         .background(
                             Brush.radialGradient(
                                 listOf(
@@ -188,7 +198,8 @@ internal fun RadioPlayer(
                     Column(
                         Modifier
                             .offset(y = if (state.playing) 1.dp else (-2).dp)
-                            .size(if (compact) 56.dp else 60.dp)
+                            .alpha(if (selected == null) 0.56f else 1f)
+                            .size((if (compact) 56.dp else 60.dp) * capScale)
                             .background(Brush.linearGradient(listOf(Color(0xFFFFF8E7), Color(0xFFB99B68))), CircleShape)
                             .border(1.dp, Color(0xFFFFF4D6), CircleShape)
                             .concaveIvory()
@@ -225,10 +236,10 @@ private fun Needle(
     onSeek: (Long) -> Unit,
 ) {
     val progress = if (durationMs > 0) (elapsedMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-    val seekLabel = stringResource(Res.string.chapter_seek, radioElapsed(elapsedMs))
+    val seekLabel = stringResource(Res.string.chapter_seek, radioTimeline(elapsedMs))
     Column(Modifier.padding(top = 8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            for (index in 0..4) RadioText(radioElapsed(durationMs * index / 4), 10)
+            for (index in 0..4) RadioText(radioTimeline(durationMs * index / 4), 10)
         }
         Canvas(
             Modifier
@@ -393,3 +404,5 @@ private fun Nixie(
 
 // Unlit wire behind each digit, a material glyph rather than localized copy.
 private const val CATHODE_GHOST = '8'
+
+private const val FIXED_CAP_FONT_SCALE = 1.3f
