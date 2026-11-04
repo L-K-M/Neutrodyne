@@ -68,7 +68,7 @@ internal class AutoDownloadPlannerImpl(
                         val sources = db.episodeDao().downloadSources(wanted.getValue(podcastId).map { it.id })
                         for (source in sources) {
                             // YouTube transfers belong to M9a/MD3, even if a future resolver enables them.
-                            if (source.sourceType != SourceType.RSS) continue
+                            if (source.sourceType != SourceType.RSS || source.youtubeChannelId != null) continue
                             val enclosure = source.enclosureUrl ?: continue
                             val alternate = if (source.isVideo) media.get(source.episodeId)?.audioAlternate else null
                             pending +=

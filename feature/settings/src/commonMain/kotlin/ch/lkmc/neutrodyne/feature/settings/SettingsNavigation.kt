@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoSet
@@ -55,6 +56,7 @@ public object SettingsNavigation {
         notices: UpdateNotices,
         runtime: UpdateRuntimeInputs,
         podcasts: Provider<PodcastRepository>,
+        capabilities: YouTubeCapabilitiesSource,
     ): EntryProviderInstaller =
         {
             // Entries are injected before the startup gate opens the database. Resolve the
@@ -101,6 +103,7 @@ public object SettingsNavigation {
                     platformInfo.kind,
                     runtime.target,
                     hasChannels,
+                    capabilities,
                 )
             }
             entry<InstallHelpKey>(metadata = NdSceneMetadata.paneDetail()) { key ->

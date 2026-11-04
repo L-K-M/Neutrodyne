@@ -1106,6 +1106,15 @@ private class PagerFixture {
                     downloadController =
                         ch.lkmc.neutrodyne.core.testing
                             .FakeDownloadController(),
+                    externalOpenService =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeExternalOpen(),
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
+                    youTubeHealth =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeHealth(),
                 ).also {
                     model = it
                     store.put("feeds", it)

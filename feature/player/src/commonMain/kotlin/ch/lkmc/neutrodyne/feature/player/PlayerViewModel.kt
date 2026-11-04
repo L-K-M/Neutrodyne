@@ -12,6 +12,8 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
@@ -23,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlayerTimeDisplay
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.ui.AvailabilityText
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
 import ch.lkmc.neutrodyne.core.ui.MeteredConsent
 import ch.lkmc.neutrodyne.core.ui.PlaybackActions
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
@@ -102,8 +105,17 @@ internal class PlayerViewModel(
     platform: PlatformInfo,
     queue: QueueRepository,
     private val chapters: ChapterRepository,
+    externalOpenService: YouTubeExternalOpen,
 ) : ViewModel() {
     private val messages = UserMessages()
+    val externalOpen =
+        ExternalOpenHandler(
+            viewModelScope,
+            messages,
+            mark = { externalOpenService.onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+            undo = { externalOpenService.undo(it) },
+            onFailure = { writeFailed() },
+        )
     private val timeWrites = Mutex()
     private val playbackActions =
         PlaybackActions(
@@ -305,6 +317,7 @@ internal class PlayerViewModel(
     fun declineMobileData() = playbackActions.consentDismiss()
 
     fun onMessageShown(id: Long) {
+        externalOpen.shown(id)
         messages.shown(id)
         playbackActions.onMessageShown(id)
     }

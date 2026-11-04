@@ -27,6 +27,8 @@ import ch.lkmc.neutrodyne.core.domain.RefreshStatus
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
@@ -44,9 +46,11 @@ import ch.lkmc.neutrodyne.core.ui.DownloadAllController
 import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
 import ch.lkmc.neutrodyne.core.ui.PlaybackActions
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
@@ -59,6 +63,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
@@ -75,6 +80,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -104,6 +110,8 @@ public class PodcastViewModel
         liveStateSource: EpisodeLiveStateSource,
         clock: Clock,
         downloadController: DownloadController,
+        externalOpenService: YouTubeExternalOpen,
+        capabilities: YouTubeCapabilitiesSource,
     ) : ViewModel() {
         init {
             viewModelScope.launch {
@@ -115,6 +123,14 @@ public class PodcastViewModel
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
         private val userMessages = UserMessages()
+        public val externalOpen =
+            ExternalOpenHandler(
+                viewModelScope,
+                userMessages,
+                mark = { externalOpenService.onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+                undo = { externalOpenService.undo(it) },
+                onFailure = ::reportWriteFailed,
+            )
         public val downloads =
             DownloadRequestHandler(
                 viewModelScope,
@@ -171,6 +187,17 @@ public class PodcastViewModel
                 state.copy(groups = memberships.toImmutableList())
             }.combine(userMessages.flow) { state, messages ->
                 state.copy(messages = messages)
+            }.combine(capabilities.capabilities) { state, caps ->
+                state.copy(
+                    rowCaps =
+                        RowCaps(
+                            caps.inAppPlayback,
+                            caps.downloads,
+                            caps.enrichment,
+                            null,
+                            state.offline,
+                        ),
+                )
             }.stateIn(viewModelScope, SHARING, PodcastUiState())
 
         public val episodeSelection =
@@ -367,6 +394,7 @@ public class PodcastViewModel
             // A dismissed Undo snackbar can never fire its action; drop the stale mapping.
             membershipUndos.remove(id)
             playback.onMessageShown(id)
+            externalOpen.shown(id)
             userMessages.shown(id)
         }
 

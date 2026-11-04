@@ -122,7 +122,7 @@ class NeutrodyneWindowContentTest {
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
             onNodeWithText("Appearance").assertExists()
 
-            onAllNodesWithText("About").onFirst().performClick()
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Neutrodyne").assertExists()
             onNodeWithText("Debug build").assertExists()
         }
@@ -241,6 +241,7 @@ class NeutrodyneWindowContentTest {
             setWindowContent()
 
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            // Settings gained more rows; bring this action into the viewport before clicking.
             onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
 
             // The desktop source loads the generated aboutlibraries.json off the classpath. The

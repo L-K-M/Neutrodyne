@@ -288,10 +288,19 @@ class EpisodeRowTest {
                     sourceType = SourceType.YOUTUBE_CHANNEL,
                     externalMediaId = "vid-42",
                 ),
-                caps = RowCaps.FULL.copy(inAppPlayback = false),
+                caps = RowCaps.FULL.copy(inAppPlayback = false, downloads = false),
                 onAction = { actions += it },
             )
             assertEquals("Watch on YouTube", firstCustomActionLabel())
+            val labels =
+                onNodeWithText("Episode 1")
+                    .fetchSemanticsNode()
+                    .config[SemanticsActions.CustomActions]
+                    .map { it.label }
+            assertFalse("Play next" in labels)
+            assertFalse("Play last" in labels)
+            assertFalse("Download" in labels)
+
             onNodeWithText("Episode 1")
                 .performCustomAccessibilityActionWithLabel("Watch on YouTube")
             assertEquals(listOf<EpisodeAction>(EpisodeAction.WatchOnYouTube(1, "vid-42")), actions)
