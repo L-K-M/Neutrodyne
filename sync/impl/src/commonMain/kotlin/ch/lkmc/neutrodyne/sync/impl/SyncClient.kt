@@ -134,8 +134,8 @@ class SyncTransportException(
  */
 class KtorSyncClient(
     private val clients: NeutrodyneHttpClients,
-    private val tokenProvider: () -> String?,
-    private val baseUrlProvider: () -> String,
+    private val tokenProvider: suspend () -> String?,
+    private val baseUrlProvider: suspend () -> String,
 ) : SyncClient {
     private val client: HttpClient = clients.client(HttpClientKind.SYNC)
 

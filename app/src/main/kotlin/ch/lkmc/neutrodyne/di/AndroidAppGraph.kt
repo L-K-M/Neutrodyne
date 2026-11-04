@@ -54,8 +54,16 @@ import kotlinx.coroutines.CoroutineScope
  * The Android main process's graph (01 Dependency injection, D82). It exists only in the main process
  * (D73): `:ytx` builds [YtxGraph], `:acra` builds nothing.
  */
-@DependencyGraph(AppScope::class, bindingContainers = [YouTubeBindingsModule::class])
+@DependencyGraph(
+    AppScope::class,
+    bindingContainers = [YouTubeBindingsModule::class, ch.lkmc.neutrodyne.sync.impl.SyncBindings::class],
+)
 interface AndroidAppGraph : DownloadComponentsInjector {
+    /** 10's sync application service (Settings › Sync, the shell banners). */
+    val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
+
+    /** The link state machine; `null` while no link runs. */
+    val linkFlow: ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl
     val application: Application
 
     @ApplicationScope
