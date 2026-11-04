@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: Unlicense
+
+package ch.lkmc.neutrodyne.sync.impl
+
+import ch.lkmc.neutrodyne.sync.api.DiscoveredServer
+import ch.lkmc.neutrodyne.sync.api.SyncProblem
+import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
+
+sealed interface DiscoveryResult {
+    data class Success(
+        val server: DiscoveredServer,
+    ) : DiscoveryResult
+
+    data class Failure(
+        val problem: SyncProblem,
+    ) : DiscoveryResult
+}
+
+/**
+ * 10 Discovery: normalises the typed address (`https://` assumed, a trailing path kept), fetches
+ * the discovery document and rejects a protocol range that excludes this app.
+ */
+class ServerDiscovery(
+    private val client: SyncClient,
+) {
+    suspend fun discover(address: String): DiscoveryResult {
+        val normalized = normalise(address)
+        if (normalized == null) return DiscoveryResult.Failure(SyncProblem.Server(400))
+        return try {
+            val document = client.discover(normalized)
+            when {
+                PROTOCOL_VERSION < document.protocol.min -> {
+                    DiscoveryResult.Failure(SyncProblem.AppTooOld)
+                }
+
+                PROTOCOL_VERSION > document.protocol.max -> {
+                    DiscoveryResult.Failure(SyncProblem.ServerTooOld)
+                }
+
+                else -> {
+                    DiscoveryResult.Success(
+                        DiscoveredServer(
+                            name = document.name,
+                            serverVersion = document.serverVersion,
+                            serverUrl = normalized,
+                            features = document.features,
+                            maxBatch = document.maxBatch,
+                            maxSkewMs = document.maxSkewMs,
+                        ),
+                    )
+                }
+            }
+        } catch (failure: SyncTransportException) {
+            DiscoveryResult.Failure(SyncProblem.Server(failure.status))
+        }
+    }
+
+    /** `https://` when no scheme is typed; a trailing path is kept for path-prefix servers. */
+    fun normalise(address: String): String? {
+        val trimmed = address.trim()
+        if (trimmed.isEmpty()) return null
+        val withScheme =
+            if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+                trimmed
+            } else {
+                "https://$trimmed"
+            }
+        val path = withScheme.substringAfter("://", "").dropWhile { it == '/' }
+        if (path.isEmpty()) return null
+        return withScheme.trimEnd('/')
+    }
+}
