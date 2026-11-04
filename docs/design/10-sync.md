@@ -1037,6 +1037,13 @@ On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the 
 4. The gate re-classifies at each round and on every network change, because split-horizon DNS gives the same name a LAN address at home and a public one outside, and the same address is local on Wi-Fi but not through a VPN: a missing or revoked permission blocks only rounds whose server classifies as local (`LocalNetworkPermissionDenied`), and the help offers the permission again. A server reached through a VPN (Tailscale's `100.64.0.0/10` on its VPN interface) is therefore not local and needs no permission.
 5. **Safety net** for a classification that misses (an unusual route set, a definition change in a later Android release): on API 37+ without the grant, when two consecutive rounds end in a connect timeout to the sync server while the active network is Wi-Fi or Ethernet without VPN, Settings › Sync and the problem banner offer "Your server may be on this network — allow local network access" instead of only `Unreachable`; granting it sets `syncAllowed` for this server. The NDK's `android_getnetworkblockedreason(sockFd)` (returns `ANDROID_NETWORK_BLOCKED_REASON_LNP`, [local network permission](https://developer.android.com/privacy-and-security/local-network-permission)) would identify the cause exactly but needs the socket descriptor beneath OkHttp and a JNI shim; not used in v1.0.
 
+**Implementation note (2026-11-04, MS2).** `LocalNetworkPermissionGate`
+classifies `.local` names and the IPv4/IPv6 private, link-local, CGNAT,
+multicast and broadcast ranges; the active-network route check (a global
+IPv6 address on a directly-connected route) and the connect-timeout safety
+net are not implemented yet. The `SYNC` client bypasses the LAN guard only
+while the gate has set `LocalNetworkAccess.syncAllowed`.
+
 **Desktop.** No platform rule on Windows and Linux. macOS may show its Local Network privacy prompt for a LAN server ([TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)); the bundle declares `NSLocalNetworkUsageDescription` (11 owns the `Info.plist`), and because the ad-hoc identity changes with every update the prompt may return after an update (Unverified with ad-hoc identity, S17). A denied prompt shows as connection failures; the help names the System Settings switch.
 
 ### Error handling and backoff
@@ -1167,6 +1174,15 @@ stateDiagram-v2
 4. Finish seeding `sync_clock.raw` and its field clocks for every matched/applied record as above, with the received clocks for server-won fields and the frozen historical stamps for local-won fields; set `enabled = 1`, `cursor` = the last pulled cursor, `hlc = max(own, every clock seen, now)`.
 5. Capture only fields the server lacks or the local side won, using the frozen `onApplied` inputs and their pre-merge timestamps: podcast presence from `subscribedAt`, user fields/overrides from their local change time, groups from `updatedAt`, members/Up next from `addedAt`, episodes from state/position timestamps and the session from `play_session.updatedAt`. `captureAt` takes the literal value too. Server-won fields are never re-stamped. Server-only Up next items appended in step 3 get fresh order keys/clocks for the deliberately merged order; settings the account lacked use literal `v` captures at now. Write `linkedAt` in the completing transaction.
 6. Push in rounds of 1,000; the server's field merge keeps whichever side is newer.
+
+**Implementation note (2026-11-04, MS2).** The base branch has no
+`LibraryMerger` implementation (05's `RestoreMerger` refuses the `LINK_*`
+policies), so `FirstLinkMerger` seeds this device's rows into `sync_clock`
+with their own row timestamps (counter 0, this node) and reuses the
+engine's field merge instead of `mergeStaged`. The rules are the same
+timestamp-LWW comparison (a local June `playedAt` loses to a server
+October "unplayed"); the staging-file resume of step 1 is not implemented
+yet and a crash mid-merge restarts the pull.
 
 Step 5's `captureAt` receives the frozen value as well as its pre-merge timestamp for played/position/session fields. Field winners come from 05's `onApplied(MergedRecord)` callback; `MergeSummary` carries counts only. Settings the server lacked use literal `v` captures. It never reads a post-merge projection at push time; an interrupted first link resumes from the saved raw inputs without turning an applied server value into a new local action.
 
