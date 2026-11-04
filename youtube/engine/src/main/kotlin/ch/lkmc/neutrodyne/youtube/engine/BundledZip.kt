@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.youtube.engine
 
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import java.util.zip.CRC32
 import java.util.zip.ZipFile
 
@@ -26,45 +27,55 @@ internal object BundledZip {
         ejsVersion: String,
     ) {
         require(archive.length() in 1..MAX_ZIP_BYTES) { "Bundle size limit" }
-        val names = validateDirectory(archive.readBytes())
+        val bytes = archive.readBytes()
+        val (names, prefix) = validateDirectory(bytes)
         require(!destination.exists())
         Files.createDirectory(destination.toPath())
-        ZipFile(archive).use { zip ->
-            require(zip.size() == names.size)
-            var total = 0L
-            for (entry in zip.entries()) {
-                require(entry.name in names)
-                val output = File(destination, entry.name)
-                if (entry.isDirectory) {
-                    require(entry.size == 0L)
-                    Files.createDirectories(output.toPath())
-                    continue
-                }
-                require(entry.size in 0..MAX_ENTRY_BYTES && entry.compressedSize >= 0)
-                require(entry.size <= maxOf(1L, entry.compressedSize) * MAX_RATIO) { "ZIP expansion ratio" }
-                Files.createDirectories(output.parentFile.toPath())
-                val crc = CRC32()
-                var size = 0L
-                zip.getInputStream(entry).use { input ->
-                    Files.newOutputStream(output.toPath(), java.nio.file.StandardOpenOption.CREATE_NEW).use { sink ->
-                        val buffer = ByteArray(8192)
-                        while (true) {
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            size += count
-                            total += count
-                            require(
-                                size <= MAX_ENTRY_BYTES && total <= MAX_TOTAL_BYTES && size <= entry.size,
-                            ) { "ZIP expansion limit" }
-                            crc.update(buffer, 0, count)
-                            sink.write(buffer, 0, count)
+        // Android requires a ZIP local header at byte zero. Keep the signed zipapp unchanged
+        // and strip only its validated preamble in a temporary extraction copy.
+        val normalized = if (prefix > 0) File.createTempFile("ytdlp-", ".zip", archive.parentFile) else null
+        try {
+            normalized?.writeBytes(bytes.copyOfRange(prefix, bytes.size))
+            ZipFile(normalized ?: archive).use { zip ->
+                require(zip.size() == names.size)
+                var total = 0L
+                for (entry in zip.entries()) {
+                    require(entry.name in names)
+                    val output = File(destination, entry.name)
+                    if (entry.isDirectory) {
+                        require(entry.size == 0L)
+                        Files.createDirectories(output.toPath())
+                        continue
+                    }
+                    require(entry.size in 0..MAX_ENTRY_BYTES && entry.compressedSize >= 0)
+                    require(entry.size <= maxOf(1L, entry.compressedSize) * MAX_RATIO) { "ZIP expansion ratio" }
+                    Files.createDirectories(output.parentFile.toPath())
+                    val crc = CRC32()
+                    var size = 0L
+                    zip.getInputStream(entry).use { input ->
+                        Files.newOutputStream(output.toPath(), StandardOpenOption.CREATE_NEW).use { sink ->
+                            val buffer = ByteArray(8192)
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                size += count
+                                total += count
+                                require(
+                                    size <= MAX_ENTRY_BYTES && total <= MAX_TOTAL_BYTES && size <= entry.size,
+                                ) { "ZIP expansion limit" }
+                                crc.update(buffer, 0, count)
+                                sink.write(buffer, 0, count)
+                            }
                         }
                     }
+                    require(size == entry.size && crc.value == entry.crc) { "ZIP size/CRC mismatch" }
+                    require(output.setReadOnly()) { "Cannot protect bundled file" }
                 }
-                require(size == entry.size && crc.value == entry.crc) { "ZIP size/CRC mismatch" }
-                require(output.setReadOnly()) { "Cannot protect bundled file" }
             }
+        } finally {
+            normalized?.let { Files.deleteIfExists(it.toPath()) }
         }
+
         val info = File(destination, "yt_dlp/version.py").readText()
         require(info.lineSequence().any { it == "ORIGIN = 'yt-dlp/yt-dlp'" })
         require(info.lineSequence().any { it == "CHANNEL = 'stable'" })
@@ -77,7 +88,12 @@ internal object BundledZip {
         )
     }
 
-    private fun validateDirectory(bytes: ByteArray): Set<String> {
+    private data class Directory(
+        val names: Set<String>,
+        val prefix: Int,
+    )
+
+    private fun validateDirectory(bytes: ByteArray): Directory {
         fun u16(at: Int): Int {
             require(at >= 0 && at + 2 <= bytes.size)
             return (bytes[at].toInt() and 255) or ((bytes[at + 1].toInt() and 255) shl 8)
@@ -166,6 +182,6 @@ internal object BundledZip {
                     names
             },
         )
-        return names
+        return Directory(names, prefix.toInt())
     }
 }
