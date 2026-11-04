@@ -8,6 +8,7 @@
 -keep class ch.lkmc.neutrodyne.NeutrodyneTestRunner { *; }
 -keep class ch.lkmc.neutrodyne.SmokeTest { *; }
 -keep class ch.lkmc.neutrodyne.YtxReleaseSmokeTest { *; }
+-keep class ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest { *; }
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest {
     public <init>();
     @org.junit.Before <methods>;

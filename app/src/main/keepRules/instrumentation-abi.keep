@@ -414,9 +414,42 @@
   public static void endSection();
   public static void forceEnableAppTracing();
 }
+-keep class androidx.work.CoroutineWorker {
+  public java.lang.Object doWork(kotlin.coroutines.Continuation);
+}
+-keep class androidx.work.Data {
+  androidx.work.Data EMPTY;
+}
+-keep class androidx.work.ForegroundInfo {
+}
+-keep interface androidx.work.ForegroundUpdater {
+  public com.google.common.util.concurrent.ListenableFuture setForegroundAsync(android.content.Context, java.util.UUID, androidx.work.ForegroundInfo);
+}
+-keep class androidx.work.ListenableWorker$Result {
+  public static androidx.work.ListenableWorker$Result success();
+}
+-keep class androidx.work.ListenableWorker {
+}
+-keep interface androidx.work.ProgressUpdater {
+  public com.google.common.util.concurrent.ListenableFuture updateProgress(android.content.Context, java.util.UUID, androidx.work.Data);
+}
 -keep enum androidx.work.WorkInfo$State {
 }
 -keep class androidx.work.WorkInfo {
+}
+-keep class androidx.work.WorkerFactory {
+  public androidx.work.ListenableWorker createWorker(android.content.Context, java.lang.String, androidx.work.WorkerParameters);
+}
+-keep class androidx.work.WorkerParameters$RuntimeExtras {
+  public <init>();
+}
+-keep class androidx.work.WorkerParameters {
+  public <init>(java.util.UUID, androidx.work.Data, java.util.Collection, androidx.work.WorkerParameters$RuntimeExtras, int, int, java.util.concurrent.Executor, kotlin.coroutines.CoroutineContext, androidx.work.impl.utils.taskexecutor.TaskExecutor, androidx.work.WorkerFactory, androidx.work.ProgressUpdater, androidx.work.ForegroundUpdater);
+}
+-keep interface androidx.work.impl.utils.taskexecutor.TaskExecutor {
+}
+-keep class androidx.work.impl.utils.taskexecutor.WorkManagerTaskExecutor {
+  public <init>(java.util.concurrent.Executor);
 }
 -keep class ch.lkmc.neutrodyne.MainActivity {
 }
@@ -457,6 +490,12 @@
   public kotlinx.coroutines.flow.StateFlow getOpenState();
   public ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase requireDatabase();
 }
+-keep class ch.lkmc.neutrodyne.core.database.DownloadDao {
+  public java.lang.Object byEpisode(long, kotlin.coroutines.Continuation);
+}
+-keep class ch.lkmc.neutrodyne.core.database.DownloadEntity {
+  public ch.lkmc.neutrodyne.core.model.DownloadState getState();
+}
 -keep class ch.lkmc.neutrodyne.core.database.EpisodeAltEnclosureEntity {
   public <init>(long, int, java.lang.String, java.lang.Long, java.lang.Long, java.lang.Integer, java.lang.String, java.lang.String, java.lang.String, java.lang.String, boolean, java.lang.String, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
 }
@@ -494,6 +533,7 @@
 -keep class ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase {
   public ch.lkmc.neutrodyne.core.database.ArtworkDao artworkDao();
   public ch.lkmc.neutrodyne.core.database.ChapterDao chapterDao();
+  public ch.lkmc.neutrodyne.core.database.DownloadDao downloadDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeDao episodeDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeStateDao episodeStateDao();
   public ch.lkmc.neutrodyne.core.database.GroupDao groupDao();
@@ -584,6 +624,12 @@
   public long getEpisodeId();
   public int getIndex();
 }
+-keep enum ch.lkmc.neutrodyne.core.model.DownloadLane {
+  ch.lkmc.neutrodyne.core.model.DownloadLane MANUAL;
+}
+-keep enum ch.lkmc.neutrodyne.core.model.DownloadState {
+  ch.lkmc.neutrodyne.core.model.DownloadState COMPLETED;
+}
 -keep class ch.lkmc.neutrodyne.core.model.EpisodeChapter {
   public ch.lkmc.neutrodyne.core.model.ChapterSource getSource();
   public java.lang.String getTitle();
@@ -637,6 +683,7 @@
 }
 -keep enum ch.lkmc.neutrodyne.core.model.SourceType {
   ch.lkmc.neutrodyne.core.model.SourceType RSS;
+  ch.lkmc.neutrodyne.core.model.SourceType YOUTUBE_CHANNEL;
 }
 -keep class ch.lkmc.neutrodyne.core.model.VirtualQueue {
   public ch.lkmc.neutrodyne.core.model.QueueItem getCurrent();
@@ -678,6 +725,12 @@
 -keep enum ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered {
   ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered NEVER;
 }
+-keep enum ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality {
+}
+-keep class ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys {
+  public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Bool getENGINE_ENABLED();
+  ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys INSTANCE;
+}
 -keep class ch.lkmc.neutrodyne.core.ui.resources.Res$string {
   ch.lkmc.neutrodyne.core.ui.resources.Res$string INSTANCE;
 }
@@ -703,12 +756,34 @@
   public kotlinx.coroutines.CoroutineScope getAppScope();
   public ch.lkmc.neutrodyne.core.domain.BackupRepository getBackupRepository();
   public ch.lkmc.neutrodyne.core.database.DatabaseOpener getDatabaseOpener();
+  public dev.zacsweers.metro.Provider getDownloadController();
+  public ch.lkmc.neutrodyne.download.api.LocalMediaIndex getLocalMediaIndex();
   public dev.zacsweers.metro.Provider getPlaySessionStore();
   public ch.lkmc.neutrodyne.playback.api.PlaybackController getPlaybackController();
   public ch.lkmc.neutrodyne.playback.api.PlaybackStateSource getPlaybackStateSource();
   public dev.zacsweers.metro.Provider getPositionStore();
   public dev.zacsweers.metro.Provider getQueueRepository();
   public ch.lkmc.neutrodyne.core.domain.SettingsRepository getSettingsRepository();
+  public androidx.work.WorkerFactory getWorkerFactory();
+  public ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource getYoutubeCapabilities();
+  public ch.lkmc.neutrodyne.youtube.api.YouTubeEngine getYoutubeEngine();
+  public ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver getYoutubeStreamResolver();
+}
+-keep enum ch.lkmc.neutrodyne.download.api.DeleteReason {
+  ch.lkmc.neutrodyne.download.api.DeleteReason LIFECYCLE;
+}
+-keep interface ch.lkmc.neutrodyne.download.api.DownloadController {
+  public java.lang.Object cancel(java.util.Collection, kotlin.coroutines.Continuation);
+  public java.lang.Object delete(java.util.Collection, ch.lkmc.neutrodyne.download.api.DeleteReason, kotlin.coroutines.Continuation);
+  public java.lang.Object request(java.util.List, ch.lkmc.neutrodyne.core.model.DownloadLane, java.lang.Boolean, kotlin.coroutines.Continuation);
+}
+-keep interface ch.lkmc.neutrodyne.download.api.LocalMediaIndex {
+  public java.lang.String localUriOrNull(long);
+}
+-keep class ch.lkmc.neutrodyne.download.api.RequestResult$Queued {
+  public int getQueued();
+}
+-keep interface ch.lkmc.neutrodyne.download.api.RequestResult {
 }
 -keep class ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps$Companion {
 }
@@ -800,6 +875,48 @@
   public java.lang.String between(java.lang.String, java.lang.String);
   public java.util.List rewrite(int);
   ch.lkmc.neutrodyne.sync.protocol.OrderKey INSTANCE;
+}
+-keep class ch.lkmc.neutrodyne.youtube.api.AudioPref {
+  public <init>(ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality, boolean, java.lang.Integer, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
+}
+-keep enum ch.lkmc.neutrodyne.youtube.api.EngineAvailability {
+  ch.lkmc.neutrodyne.youtube.api.EngineAvailability DISABLED;
+}
+-keep class ch.lkmc.neutrodyne.youtube.api.EngineStatus {
+  public ch.lkmc.neutrodyne.youtube.api.EngineAvailability getAvailability();
+}
+-keep enum ch.lkmc.neutrodyne.youtube.api.ResolvePurpose {
+}
+-keep class ch.lkmc.neutrodyne.youtube.api.ResolveResult$Ok {
+  public ch.lkmc.neutrodyne.youtube.api.ResolvedAudio getAudio();
+}
+-keep interface ch.lkmc.neutrodyne.youtube.api.ResolveResult {
+}
+-keep class ch.lkmc.neutrodyne.youtube.api.ResolvedAudio {
+  public java.lang.Long getContentLength();
+  public int getItag();
+}
+-keep class ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities {
+  public boolean getInAppPlayback();
+}
+-keep interface ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource {
+  public kotlinx.coroutines.flow.StateFlow getCapabilities();
+}
+-keep interface ch.lkmc.neutrodyne.youtube.api.YouTubeEngine {
+  public kotlinx.coroutines.flow.StateFlow getStatus();
+}
+-keep interface ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver {
+  public void invalidateAll();
+  public static java.lang.Object resolveAudio$default(ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver, java.lang.String, ch.lkmc.neutrodyne.youtube.api.AudioPref, ch.lkmc.neutrodyne.youtube.api.ResolvePurpose, kotlin.coroutines.Continuation, int, java.lang.Object);
+}
+-keep class ch.lkmc.neutrodyne.youtube.ytdlp.EnginePrepareWorker {
+}
+-keep enum ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks$Fault {
+}
+-keep class ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks {
+  public static void arm$default(ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks, android.content.Context, java.io.File, ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks$Fault, int, java.lang.Object);
+  public void clear();
+  ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks INSTANCE;
 }
 -keep class ch.lkmc.neutrodyne.youtube.ytdlp.ytx.IYtxCallback$Stub {
   public <init>();
@@ -1102,6 +1219,9 @@
 }
 -keep class kotlin.collections.ArraysKt {
 }
+-keep class kotlin.collections.ArraysKt___ArraysJvmKt {
+  public static byte[] copyInto$default(byte[], byte[], int, int, int, int, java.lang.Object);
+}
 -keep class kotlin.collections.ArraysKt___ArraysKt {
   public static java.lang.Object first(java.lang.Object[]);
   public static java.lang.Object firstOrNull(java.lang.Object[]);
@@ -1266,6 +1386,13 @@
   public static java.lang.String readText$default(java.io.File, java.nio.charset.Charset, int, java.lang.Object);
   public static void writeText$default(java.io.File, java.lang.String, java.nio.charset.Charset, int, java.lang.Object);
 }
+-keep class kotlin.io.FilesKt__UtilsKt {
+  public static boolean deleteRecursively(java.io.File);
+  public static java.io.File resolve(java.io.File, java.lang.String);
+}
+-keep class kotlin.io.TextStreamsKt {
+  public static java.lang.String readText(java.io.Reader);
+}
 -keep @interface kotlin.jvm.JvmField {
 }
 -keep interface kotlin.jvm.functions.Function0 {
@@ -1368,6 +1495,9 @@
 -keep class kotlin.text.CharsKt__CharJVMKt {
   public static int checkRadix(int);
 }
+-keep class kotlin.text.Charsets {
+  java.nio.charset.Charset UTF_8;
+}
 -keep class kotlin.text.Regex {
   public <init>(java.lang.String);
   public java.lang.String replace(java.lang.CharSequence, java.lang.String);
@@ -1378,8 +1508,10 @@
   public static java.lang.Integer toIntOrNull(java.lang.String);
 }
 -keep class kotlin.text.StringsKt__StringsJVMKt {
+  public static byte[] encodeToByteArray(java.lang.String);
   public static boolean endsWith$default(java.lang.String, java.lang.String, boolean, int, java.lang.Object);
   public static boolean equals(java.lang.String, java.lang.String, boolean);
+  public static java.lang.String replace$default(java.lang.String, java.lang.String, java.lang.String, boolean, int, java.lang.Object);
   public static boolean startsWith$default(java.lang.String, java.lang.String, boolean, int, java.lang.Object);
 }
 -keep class kotlin.text.StringsKt__StringsKt {
@@ -1532,6 +1664,7 @@
   public java.lang.String timeoutMessage-LRDsOJo(long);
 }
 -keep class kotlinx.coroutines.Dispatchers {
+  public static kotlinx.coroutines.CoroutineDispatcher getDefault();
   public static kotlinx.coroutines.CoroutineDispatcher getIO();
   public static kotlinx.coroutines.MainCoroutineDispatcher getMain();
 }
