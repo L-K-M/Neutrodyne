@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
+import ch.lkmc.neutrodyne.youtube.api.ResolvePurpose
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
@@ -42,6 +43,8 @@ class FakeYouTubeCapabilitiesSource : YouTubeCapabilitiesSource {
 class FakeYouTubeStreamResolver : YouTubeStreamResolver {
     var result: ResolveResult = ResolveResult.Unsupported
     val requests = mutableListOf<Pair<String, AudioPref>>()
+    val purposes = mutableListOf<ResolvePurpose>()
+    var resolve: suspend (String, AudioPref, ResolvePurpose) -> ResolveResult = { _, _, _ -> result }
     val invalidated = mutableListOf<String>()
     var invalidateAllCalls = 0
         private set
@@ -49,9 +52,11 @@ class FakeYouTubeStreamResolver : YouTubeStreamResolver {
     override suspend fun resolveAudio(
         videoId: String,
         pref: AudioPref,
+        purpose: ResolvePurpose,
     ): ResolveResult {
         requests += videoId to pref
-        return result
+        purposes += purpose
+        return resolve.invoke(videoId, pref, purpose)
     }
 
     override fun invalidate(videoId: String) {

@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.IpFamily
 import kotlinx.coroutines.flow.StateFlow
+import okio.IOException
 
 /** externalReason is null iff all five capabilities are true (04). Read at each operation. */
 data class YouTubeCapabilities(
@@ -23,6 +24,11 @@ interface YouTubeCapabilitiesSource {
 
 /**
  * Main-safe, cache-aware stream lookup (04). Cancellation propagates; expected failures are values.
+ * Single-flight key is (videoId, AudioPref), never purpose. Each caller's monotonic wait budget
+ * begins at entry. Joining never extends the underlying flight deadline; a short waiter timing out
+ * leaves other waiters alive. Last waiter cancels the host call. A background caller may start a
+ * new flight within its remaining overall budget. Cache hits do not reserve extraction trials.
+ * Playback's 35 s extraction watchdog excludes the separate <=30 s preroll wait.
  * Concurrent same-video calls may coalesce. Invalidation is thread-safe/non-blocking and affects
  * later lookups, not already pinned streams. External mode returns Unsupported without network.
  */
@@ -30,6 +36,7 @@ interface YouTubeStreamResolver {
     suspend fun resolveAudio(
         videoId: String,
         pref: AudioPref,
+        purpose: ResolvePurpose = ResolvePurpose.PLAYBACK,
     ): ResolveResult
 
     fun invalidate(videoId: String)
@@ -49,20 +56,17 @@ sealed interface ResolveResult {
     data class Transient(
         val cause: Throwable,
         val kind: TransientKind = TransientKind.NETWORK,
-    ) : ResolveResult
+    ) : ResolveResult {
+        override fun toString(): String = "ResolveResult.Transient(kind=$kind)"
+    }
 
     data object Unsupported : ResolveResult
 }
 
 enum class TransientKind { NETWORK, TIMEOUT, RATE_LIMITED, EXTRACTION, BREAKER_OPEN, ENGINE_UNAVAILABLE }
 
-enum class AudioQuality(
-    val ranks: List<Int>,
-) {
-    STANDARD(listOf(140, 251, 250, 139, 249)),
-    DATA_SAVER(listOf(250, 249, 139, 140)),
-    OPUS(listOf(251, 250, 140)),
-}
+/** Source-compatible name for the shared setting type; no second quality enum or mapper. */
+typealias AudioQuality = ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality
 
 data class AudioPref(
     val quality: AudioQuality = AudioQuality.STANDARD,
@@ -93,3 +97,40 @@ data class ResolvedAudio(
 ) {
     override fun toString(): String = "ResolvedAudio($videoId, $formatId, expiresAt=$expiresAtMs)"
 }
+
+/** Includes queue/start wait; background work gets lower admission priority and a 45 s budget. */
+enum class ResolvePurpose(
+    val warmTimeoutMs: Long,
+    val coldTimeoutMs: Long,
+) {
+    PLAYBACK(20_000, 25_000),
+    BACKGROUND(45_000, 45_000),
+}
+
+/** Shared loader exception; expected resolver errors remain values until a blocking loader boundary. */
+class YouTubeResolveException(
+    val result: ResolveResult,
+) : IOException("YouTube source is unavailable")
+
+/** Playback compares the full identity; missing length/lmt cannot prove safe cross-attempt resume. */
+data class YouTubeRepresentationKey(
+    val formatId: String,
+    val contentLength: Long?,
+    val lastModifiedMicros: Long?,
+)
+
+/** Persist only this proof: itag, totalBytes=clen, lastModified=decimal lmt microseconds. Never URL.
+ * Missing or different proof restarts the part. Full formatId must also match within an attempt;
+ * preferences are snapshotted for that attempt. W8 must test same-itag DRC/dub and lmt changes.
+ * Equal real-world tuples across different representations trigger the D22 contingency, not a guess.
+ */
+data class YouTubeResumeProof(
+    val itag: Int?,
+    val contentLength: Long?,
+    val lastModifiedMicros: Long?,
+)
+
+data class YouTubeTransferSnapshot(
+    val pref: AudioPref,
+    val representation: YouTubeRepresentationKey,
+)
