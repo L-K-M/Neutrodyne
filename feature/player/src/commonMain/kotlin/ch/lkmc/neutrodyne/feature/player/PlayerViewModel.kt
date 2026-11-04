@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
 import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
+import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
@@ -53,6 +54,7 @@ import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -106,6 +108,7 @@ internal class PlayerViewModel(
     queue: QueueRepository,
     private val chapters: ChapterRepository,
     externalOpenService: YouTubeExternalOpen,
+    val youtubeHealth: YouTubeHealth? = null,
 ) : ViewModel() {
     private val messages = UserMessages()
     val externalOpen =
@@ -416,7 +419,7 @@ internal class PlayerViewModel(
 
             is UnplayableReason.YouTube -> {
                 if (reason.availability ==
-                    ch.lkmc.neutrodyne.core.model.Availability.AVAILABLE
+                    Availability.AVAILABLE
                 ) {
                     UiText.Res(Res.string.player_not_playable)
                 } else {

@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
@@ -22,6 +23,8 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoSet
@@ -57,6 +60,8 @@ public object SettingsNavigation {
         runtime: UpdateRuntimeInputs,
         podcasts: Provider<PodcastRepository>,
         capabilities: YouTubeCapabilitiesSource,
+        engine: YouTubeEngine,
+        youtubeHealth: YouTubeHealth,
     ): EntryProviderInstaller =
         {
             // Entries are injected before the startup gate opens the database. Resolve the
@@ -104,6 +109,8 @@ public object SettingsNavigation {
                     runtime.target,
                     hasChannels,
                     capabilities,
+                    engine,
+                    youtubeHealth,
                 )
             }
             entry<InstallHelpKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
@@ -114,7 +121,7 @@ public object SettingsNavigation {
                     runtime.target,
                     key.section,
                     phase,
-                    (update as? ch.lkmc.neutrodyne.core.model.update.UpdateCheckState.Available)?.info,
+                    (update as? UpdateCheckState.Available)?.info,
                 )
             }
             entry<VerificationNoticeKey>(metadata = NdSceneMetadata.dialog()) {

@@ -10,6 +10,8 @@ import ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
@@ -27,18 +29,54 @@ internal fun SettingsRoute(
     updateTarget: UpdateRuntimeTarget,
     hasChannels: Flow<Boolean> = flowOf(false),
     capabilities: YouTubeCapabilitiesSource? = null,
+    engine: YouTubeEngine? = null,
+    youtubeHealth: YouTubeHealth? = null,
 ) {
     when (key.page) {
-        SettingsPage.YOUTUBE -> YouTubePage(settings, capabilities, platform)
-        SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
-        SettingsPage.FEEDS -> FeedsPage(platform)
-        SettingsPage.PLAYBACK -> PlaybackPage(platform)
-        SettingsPage.DOWNLOADS -> DownloadsSettingsPage(platform)
-        SettingsPage.DESKTOP -> DownloadsSettingsPage(platform, page = SettingsPage.DESKTOP)
-        SettingsPage.UPDATES -> UpdatesPage(buildInfo, updateTarget, key.openRelease)
-        SettingsPage.DISCOVER -> DiscoverPage()
-        SettingsPage.PRIVACY -> PrivacyPage()
-        SettingsPage.ABOUT -> AboutPage(buildInfo)
-        else -> AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
+        SettingsPage.YOUTUBE -> {
+            YouTubePage(settings, capabilities, platform, engine, youtubeHealth)
+        }
+
+        SettingsPage.APPEARANCE -> {
+            AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
+        }
+
+        SettingsPage.FEEDS -> {
+            FeedsPage(platform)
+        }
+
+        SettingsPage.PLAYBACK -> {
+            PlaybackPage(platform)
+        }
+
+        SettingsPage.DOWNLOADS -> {
+            DownloadsSettingsPage(platform, youtubeSettings = {
+                if (capabilities != null) YouTubeDownloadSettings(settings, capabilities)
+            })
+        }
+
+        SettingsPage.DESKTOP -> {
+            DownloadsSettingsPage(platform, page = SettingsPage.DESKTOP)
+        }
+
+        SettingsPage.UPDATES -> {
+            UpdatesPage(buildInfo, updateTarget, key.openRelease)
+        }
+
+        SettingsPage.DISCOVER -> {
+            DiscoverPage()
+        }
+
+        SettingsPage.PRIVACY -> {
+            PrivacyPage()
+        }
+
+        SettingsPage.ABOUT -> {
+            AboutPage(buildInfo)
+        }
+
+        else -> {
+            AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
+        }
     }
 }

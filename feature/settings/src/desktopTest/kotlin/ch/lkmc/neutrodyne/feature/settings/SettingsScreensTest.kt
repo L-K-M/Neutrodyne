@@ -130,7 +130,11 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot()
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performScrollTo().assertIsDisplayed().performClick()
+            onAllNodesWithText("Licences")
+                .onFirst()
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
             waitForIdle()
             onNodeWithText("kotlinx-coroutines-core").assertExists()
             onNodeWithText("Libraries · 1 library").assertExists()
@@ -146,7 +150,11 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(licencesSource = null)
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performScrollTo().assertIsDisplayed().performClick()
+            onAllNodesWithText("Licences")
+                .onFirst()
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
 
             onNodeWithText("No licence information in this build.").assertIsDisplayed()
         }
@@ -164,7 +172,11 @@ class SettingsScreensTest {
                     ),
             )
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performScrollTo().assertIsDisplayed().performClick()
+            onAllNodesWithText("Licences")
+                .onFirst()
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
             waitForIdle()
 
             onNodeWithText("Bundled components", substring = true).assertExists()
@@ -324,6 +336,10 @@ class SettingsScreensTest {
                                 Provider { FakePodcastRepository() },
                                 ch.lkmc.neutrodyne.core.testing
                                     .FakeYouTubeCapabilitiesSource(),
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeEngine(),
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeHealth(),
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )
