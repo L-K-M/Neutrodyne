@@ -1517,6 +1517,12 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.WorkManagerRefreshSchedulerContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions$ToAppScope$ProvidesArtworkRepositoryImplMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions$ToAppScope$ProvidesArtworkRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions$ToAppScope$ProvidesArtworkRepositoryImplMetroFactory {
+  ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions$ToAppScope$ProvidesArtworkRepositoryImplMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions {
@@ -2786,7 +2792,7 @@
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.player.PlayerViewModelContributions$ToAppScope$ProvideIntoMapPlayerViewModelMetroFactory$Companion Companion;
