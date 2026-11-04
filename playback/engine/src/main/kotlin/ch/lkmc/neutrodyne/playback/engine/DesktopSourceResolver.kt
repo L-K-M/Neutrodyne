@@ -6,12 +6,23 @@ import java.nio.file.Path
 
 /** Resolution belongs to the application adapter; the engine never queries repositories. */
 fun interface DesktopSourceResolver {
-    suspend fun resolve(item: EngineItem, attempt: Int): ResolvedSource
+    suspend fun resolve(
+        item: EngineItem,
+        attempt: Int,
+    ): ResolvedSource
 }
 
 sealed interface ResolvedSource {
-    data class File(val path: Path) : ResolvedSource
-    data class Http(val url: String, val headers: Map<String, String>, val cacheKey: String) : ResolvedSource
+    data class File(
+        val path: Path,
+    ) : ResolvedSource
+
+    data class Http(
+        val url: String,
+        val headers: Map<String, String>,
+        val cacheKey: String,
+    ) : ResolvedSource
+
     data class YouTube(
         val url: String,
         val formatId: String,
@@ -21,6 +32,10 @@ sealed interface ResolvedSource {
     ) : ResolvedSource
 }
 
-class ContentChangedException(message: String) : IOException(message)
+class ContentChangedException(
+    message: String,
+) : IOException(message)
 
-class HttpSourceException(val status: Int) : IOException("Media HTTP status $status")
+class HttpSourceException(
+    val status: Int,
+) : IOException("Media HTTP status $status")

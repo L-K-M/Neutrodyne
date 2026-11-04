@@ -34,7 +34,11 @@ class SpanCache(
                             return@forEach
                         }
                         require(index.length == null || index.length >= 0)
-                        require(index.spans.all { (start, size) -> start >= 0 && size > 0 && start <= Long.MAX_VALUE - size })
+                        require(
+                            index.spans.all { (start, size) ->
+                                start >= 0 && size > 0 && start <= Long.MAX_VALUE - size
+                            },
+                        )
                         val resource = Resource(index.key, path, index)
                         resources[index.key] = resource
                         access = maxOf(access, index.lastAccess)
@@ -96,7 +100,10 @@ class SpanCache(
 
     @Synchronized
     fun clear() {
-        resources.values.filter { it.pins == 0 }.map { it.key }.forEach(::remove)
+        resources.values
+            .filter { it.pins == 0 }
+            .map { it.key }
+            .forEach(::remove)
     }
 
     /** All methods share the cache lock; disk failure switches this lease to memory. */
@@ -122,39 +129,50 @@ class SpanCache(
             lastAccess = ++access
         }
 
-        fun setMetadata(length: Long?, validator: String?) = synchronized(this@SpanCache) {
+        fun setMetadata(
+            length: Long?,
+            validator: String?,
+        ) = synchronized(this@SpanCache) {
             require(length == null || length >= 0)
             totalLength = length
             storedValidator = validator
             persist()
         }
 
-        fun read(position: Long, count: Int): ByteArray? = synchronized(this@SpanCache) {
-            require(position >= 0 && count > 0)
-            touch()
-            val inMemory = memory.floorEntry(position)
-            if (inMemory != null && position - inMemory.key < inMemory.value.size) {
-                val offset = (position - inMemory.key).toInt()
-                return@synchronized inMemory.value.copyOfRange(offset, minOf(inMemory.value.size, offset + count))
-            }
-            if (!persistent) return@synchronized null
-            val span = spans.floorEntry(position) ?: return@synchronized null
-            val offset = position - span.key
-            if (offset >= span.value) return@synchronized null
-            try {
-                java.nio.channels.FileChannel.open(path.resolve(span.key.toString()), StandardOpenOption.READ).use { channel ->
-                    val buffer = java.nio.ByteBuffer.allocate(minOf(count.toLong(), span.value - offset).toInt())
-                    val read = channel.read(buffer, offset)
-                    if (read <= 0) return@synchronized null
-                    buffer.array().copyOf(read)
+        fun read(
+            position: Long,
+            count: Int,
+        ): ByteArray? =
+            synchronized(this@SpanCache) {
+                require(position >= 0 && count > 0)
+                touch()
+                val inMemory = memory.floorEntry(position)
+                if (inMemory != null && position - inMemory.key < inMemory.value.size) {
+                    val offset = (position - inMemory.key).toInt()
+                    return@synchronized inMemory.value.copyOfRange(offset, minOf(inMemory.value.size, offset + count))
                 }
-            } catch (_: IOException) {
-                disablePersistence()
-                null
+                if (!persistent) return@synchronized null
+                val span = spans.floorEntry(position) ?: return@synchronized null
+                val offset = position - span.key
+                if (offset >= span.value) return@synchronized null
+                try {
+                    val file = path.resolve(span.key.toString())
+                    java.nio.channels.FileChannel.open(file, StandardOpenOption.READ).use { channel ->
+                        val buffer = java.nio.ByteBuffer.allocate(minOf(count.toLong(), span.value - offset).toInt())
+                        val read = channel.read(buffer, offset)
+                        if (read <= 0) return@synchronized null
+                        buffer.array().copyOf(read)
+                    }
+                } catch (_: IOException) {
+                    disablePersistence()
+                    null
+                }
             }
-        }
 
-        fun write(position: Long, bytes: ByteArray) = synchronized(this@SpanCache) {
+        fun write(
+            position: Long,
+            bytes: ByteArray,
+        ) = synchronized(this@SpanCache) {
             require(position >= 0 && position <= Long.MAX_VALUE - bytes.size)
             if (bytes.isEmpty()) return@synchronized
             touch()
@@ -162,12 +180,18 @@ class SpanCache(
                 try {
                     Files.createDirectories(path)
                     val previous = spans.floorEntry(position)
-                    val start = if (previous != null && previous.key + previous.value == position) previous.key else position
-                    Files.newOutputStream(
-                        path.resolve(start.toString()),
-                        StandardOpenOption.CREATE,
-                        if (start == position) StandardOpenOption.TRUNCATE_EXISTING else StandardOpenOption.APPEND,
-                    ).use { it.write(bytes) }
+                    val start =
+                        if (previous != null && previous.key + previous.value == position) {
+                            previous.key
+                        } else {
+                            position
+                        }
+                    Files
+                        .newOutputStream(
+                            path.resolve(start.toString()),
+                            StandardOpenOption.CREATE,
+                            if (start == position) StandardOpenOption.TRUNCATE_EXISTING else StandardOpenOption.APPEND,
+                        ).use { it.write(bytes) }
                     spans[start] = position + bytes.size - start
                     persist()
                 } catch (_: IOException) {
@@ -181,22 +205,24 @@ class SpanCache(
         }
 
         /** Discard stale content even while this lease remains pinned for error reporting. */
-        fun invalidate() = synchronized(this@SpanCache) {
-            deleteOwnedDirectory(path)
-            spans.clear()
-            memory.clear()
-            totalLength = null
-            storedValidator = null
-        }
+        fun invalidate() =
+            synchronized(this@SpanCache) {
+                deleteOwnedDirectory(path)
+                spans.clear()
+                memory.clear()
+                totalLength = null
+                storedValidator = null
+            }
 
         internal fun sizeBytes(): Long = spans.values.sum() + memory.values.sumOf { it.size.toLong() }
 
-        override fun close() = synchronized(this@SpanCache) {
-            check(pins > 0) { "cache lease already closed" }
-            pins--
-            touch()
-            persist()
-        }
+        override fun close() =
+            synchronized(this@SpanCache) {
+                check(pins > 0) { "cache lease already closed" }
+                pins--
+                touch()
+                persist()
+            }
 
         private fun disablePersistence() {
             persistent = false
@@ -209,7 +235,8 @@ class SpanCache(
             try {
                 Files.createDirectories(path)
                 val temporary = path.resolve("index.tmp")
-                Files.writeString(temporary, Json.encodeToString(Index(key, totalLength, storedValidator, spans.toMap(), lastAccess)))
+                val index = Index(key, totalLength, storedValidator, spans.toMap(), lastAccess)
+                Files.writeString(temporary, Json.encodeToString(index))
                 Files.move(temporary, path.resolve(INDEX), StandardCopyOption.REPLACE_EXISTING)
             } catch (_: IOException) {
                 disablePersistence()
@@ -232,7 +259,11 @@ class SpanCache(
         const val INDEX = "index.json"
 
         fun hash(key: String): String =
-            MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).take(16).joinToString("") { "%02x".format(it) }
+            MessageDigest
+                .getInstance("SHA-256")
+                .digest(key.toByteArray())
+                .take(16)
+                .joinToString("") { "%02x".format(it) }
 
         fun deleteOwnedDirectory(path: Path) {
             try {

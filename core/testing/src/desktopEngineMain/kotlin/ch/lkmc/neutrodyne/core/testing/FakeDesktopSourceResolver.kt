@@ -10,8 +10,12 @@ class FakeDesktopSourceResolver : DesktopSourceResolver {
     val calls = mutableListOf<Pair<EngineItem, Int>>()
     val sources = mutableMapOf<Pair<Long, Int>, ResolvedSource>()
 
-    override suspend fun resolve(item: EngineItem, attempt: Int): ResolvedSource = synchronized(this) {
-        calls += item to attempt
-        requireNotNull(sources[item.episodeId to attempt]) { "no source for ${item.episodeId}, attempt $attempt" }
-    }
+    override suspend fun resolve(
+        item: EngineItem,
+        attempt: Int,
+    ): ResolvedSource =
+        synchronized(this) {
+            calls += item to attempt
+            requireNotNull(sources[item.episodeId to attempt]) { "no source for ${item.episodeId}, attempt $attempt" }
+        }
 }
