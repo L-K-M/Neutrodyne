@@ -162,7 +162,10 @@ class DesktopPlaybackController(
             }
         }
         scope.launch { value.engine.state.collect { state -> guarded { engineState(state) } } }
-        scope.launch { value.engine.events.collect { event -> guarded { engineEvent(event) } } }
+        // SharedFlow has no replay. Subscribe before setWindow can emit preparation metadata.
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            value.engine.events.collect { event -> guarded { engineEvent(event) } }
+        }
         scope.launch {
             value.settings.observePreferences().collect { preferences ->
                 guarded {

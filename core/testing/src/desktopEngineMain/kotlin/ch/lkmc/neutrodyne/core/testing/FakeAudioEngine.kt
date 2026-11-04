@@ -27,6 +27,7 @@ class FakeAudioEngine : AudioEngine {
     private var currentIndex = 0
     private var playing = false
     var onPlay: (() -> Unit)? = null
+    var onWindow: (() -> Unit)? = null
 
     override fun setWindow(
         items: List<EngineItem>,
@@ -39,6 +40,7 @@ class FakeAudioEngine : AudioEngine {
         this.currentIndex = currentIndex
         position = startPositionMs ?: 0
         state.value = items.getOrNull(currentIndex)?.let { EngineState.Buffering(it.episodeId) } ?: EngineState.Idle
+        onWindow?.invoke()
     }
 
     override fun updateWindow(diff: EngineWindowDiff) {
