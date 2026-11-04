@@ -6,4 +6,7 @@ import androidx.compose.runtime.Composable
 
 /** Desktop has no status bar to tint: no-op. */
 @Composable
-public actual fun PlatformSystemBarAppearance(appearance: StatusBarAppearance) = Unit
+public actual fun PlatformSystemBarAppearance(
+    appearance: StatusBarAppearance,
+    owner: SystemBarOwner,
+) = Unit
