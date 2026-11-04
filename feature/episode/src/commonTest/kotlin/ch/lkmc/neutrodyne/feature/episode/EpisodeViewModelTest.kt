@@ -49,7 +49,6 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeViewModelTest : MainDispatcherTest() {
-
     private val engine =
         ch.lkmc.neutrodyne.core.testing
             .FakeYouTubeEngine()
