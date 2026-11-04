@@ -14,6 +14,14 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okio)
+    testImplementation(libs.okhttp.mockwebserver3)
+    testImplementation(libs.okhttp.mockwebserver3.junit4)
+}
+
+// The engine's JDK 25 fakes live with the shared test doubles. Compiling these
+// sources here avoids exposing FFM/JDK 25 types to core:testing's JDK 21 artifact.
+kotlin.sourceSets.named("test") {
+    kotlin.srcDir(rootProject.file("core/testing/src/desktopEngineMain/kotlin"))
 }
 
 // `ffmpegTest` runs the corpus suite that loads the built FFmpeg libraries
@@ -39,4 +47,5 @@ tasks.named<Test>("test") {
     filter.excludeTestsMatching("*FfmpegCorpusTest")
     filter.excludeTestsMatching("*EngineClockTest")
     filter.excludeTestsMatching("*EngineCommandsTest")
+    filter.excludeTestsMatching("*FfAudioEngineTest")
 }
