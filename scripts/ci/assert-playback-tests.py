@@ -44,7 +44,11 @@ PLAY_JOURNEY = ("ch.lkmc.neutrodyne.PlayJourneyTest",
                 "groupFeedPlayQueueFirstSheetShadePauseAndReopen")
 ATF_CONTROL = ("ch.lkmc.neutrodyne.AccessibilityChecksTest",
                "enabledChecksFailAnUnlabelledTinyTargetBeforeTheClick")
+YOUTUBE_SMOKE = ("ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest", "resolvesAndDownloadsRecordedAudioThroughYtx")
+YTX_ISOLATION = ("ch.lkmc.neutrodyne.YtxIsolationTest", "killedHungAndCrashingHostsLeaveMainPlaybackRunning")
+PYTHON_X86_64_MIN_API = 28
 RELEASE_SMOKE = {
+    YOUTUBE_SMOKE[0]: (YOUTUBE_SMOKE[1],),
     "ch.lkmc.neutrodyne.SmokeTest": (
         "fiveLabelledDestinations",
         "destinationsSurviveRotationAndDarkMode",
@@ -115,6 +119,9 @@ def expected_map(profile, device):
         api = re.fullmatch(r"api([0-9]+)", device)
         if profile == "api37" or (api and int(api[1]) >= ACCESSIBILITY_MIN_API):
             expected[ATF_CONTROL[0]] = {ATF_CONTROL[1]}
+        if profile == "api37" or (api and int(api[1]) >= PYTHON_X86_64_MIN_API):
+            expected[YOUTUBE_SMOKE[0]] = {YOUTUBE_SMOKE[1]}
+            expected[YTX_ISOLATION[0]] = {YTX_ISOLATION[1]}
         if profile in ("nightly", "api37"):
             expected[CLASS] |= {TIMER, EMBEDDED}
         if profile == "nightly" and device in SOAK_DEVICES:

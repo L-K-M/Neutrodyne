@@ -30,6 +30,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
+import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -45,6 +46,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
+import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.createDynamicGraphFactory
@@ -326,6 +328,8 @@ private class AppleJourneyBindings(
     fun scope(): CoroutineScope = scope
 
     @Provides fun settings(): SettingsRepository = FakeSettingsRepository()
+
+    @Provides fun engineSettings(): EngineSettings = FakeEngineSettings()
 
     @Provides @DebugInterceptors
     fun interceptors(): Set<Interceptor> = setOf(replay)
