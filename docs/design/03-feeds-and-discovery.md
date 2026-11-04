@@ -1381,6 +1381,18 @@ Order, first match wins (`AddPodcastResolverImpl` for the YouTube row, `HostReco
 
 **Typed names.** `NotAUrl(query)` leads only to directory search (08's "Search for …" → `DirectoryKey`, [Search and discovery](#search-and-discovery)); `AddPodcastResolver` and `SearchRepository` never send text to YouTube. Finding a YouTube channel by name is 04's explicit Discover action "Search YouTube channels" ([04 Channel search](04-youtube.md#channel-search)), offered only while `YouTubeCapabilitiesSource.capabilities.value.channelSearch` is true — the YouTube engine is in the build and on: the 64-bit APKs from M9a, every desktop build from MD3 (R3.1, [D90](../PLAN.md#3-key-decisions)). In external mode (`armeabi-v7a` APK, engine off or failed, the desktop before MD3) the user pastes or shares a channel link or types an `@handle`; both take the YouTube pre-check and 04's engine-free resolution (R3.7, [08 Capability differences in UI](08-ui-ux.md#capability-differences-in-ui)).
 
+**Implementation note (2026-11-04, M8 current-code port).** Add now returns
+`AddResolution.YouTube` for classified inputs, including bare and shared
+handles, unwrapped URLs, directory targets, autodiscovery and redirected
+YouTube targets. `FeedFetcher` still stops before dialing YouTube on an Add
+request and returns the rejected URL to the resolver for hand-off. RSS
+preview/subscribe paths retain a defensive refusal. The 2026-11-01/02
+credential, directory-consent, HTML-cap and local-destination rules remain
+in force. A verified RSS feed still wins over a page's YouTube or consent
+candidate; YouTube decides only when no RSS candidate verified. Channel
+metadata is resolved by the Add ViewModel, with canonical identity and chosen
+memberships committed only after confirmation. No Atom preview is ingested.
+
 ### Fetch, sniff and autodiscovery
 
 ```mermaid
