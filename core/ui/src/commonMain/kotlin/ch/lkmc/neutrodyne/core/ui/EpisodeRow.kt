@@ -150,12 +150,11 @@ public fun EpisodeRow(
             label to { onAction(action) }
         } + additionalActions
 
-    // Relax the outer fill constraint before applying the reading-width cap, then center it.
     EpisodeSwipe(
         row,
         caps.swipe,
         onAction,
-        modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = ROW_MAX_WIDTH),
+        modifier,
     ) {
         EpisodeRowLayout(
             modifier =
@@ -291,19 +290,36 @@ private fun EpisodeRowLayout(
     val stacked = LocalDensity.current.fontScale >= LARGE_TEXT_FONT_SCALE
     val currentTrailing by rememberUpdatedState(trailing)
     val transport = remember { movableContentOf { currentTrailing() } }
+
+    // The reading block caps and centers; the interaction chrome (focus, gestures, selection
+    // container) spans the full track so the whole list line stays one click target.
+    fun readingWidth() =
+        Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = ROW_MAX_WIDTH)
+
     Column(modifier) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            readingWidth().testTag(READING_BLOCK_TAG),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             content()
             if (!stacked) transport()
         }
         if (stacked) {
-            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) { transport() }
+            Box(readingWidth()) {
+                Row(
+                    Modifier.align(Alignment.CenterEnd),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) { transport() }
+            }
         }
     }
 }
 
 private const val LARGE_TEXT_FONT_SCALE = 1.5f
 private val ROW_MAX_WIDTH = 720.dp
+
+/** Identifies the capped reading block; the interactive track spans the full list line. */
+internal const val READING_BLOCK_TAG = "episode_reading_block"
 
 /** The row's action list (08's custom-actions catalogue), shared by menu and semantics. */
 @Composable

@@ -74,9 +74,12 @@ class EpisodeRowTest {
     fun wideRowsStayCenteredWithinTheReadingWidth() =
         runDesktopComposeUiTest(width = 1400, height = 400) {
             setRow(testEpisodeRow(1))
-            val row = onNodeWithText("Episode 1").fetchSemanticsNode().boundsInRoot
-            assertTrue(row.width <= 720f, "Row exceeds the reading width: $row")
-            assertTrue(kotlin.math.abs(row.center.x - 700f) < 1f, "Row is not centered: $row")
+            // The merged clickable node spans the whole list line (one click target per row,
+            // EpisodeRowGesturesTest); the capped reading block carries its own tag.
+            val block =
+                onNodeWithTag(READING_BLOCK_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue(block.width <= 720f, "Row exceeds the reading width: $block")
+            assertTrue(kotlin.math.abs(block.center.x - 700f) < 1f, "Row is not centered: $block")
         }
 
     @Test
