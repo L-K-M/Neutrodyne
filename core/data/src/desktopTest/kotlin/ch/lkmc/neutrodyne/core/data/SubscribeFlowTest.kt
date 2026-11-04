@@ -545,14 +545,14 @@ class SubscribeFlowTest {
             server.enqueue(mockResponse(302, "", "Location" to "/cdn.xml"))
             server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
             val feedA =
-                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl("/a.xml")))
-            assertEquals(feedUrl("/a.xml"), feedA.preview.previewId)
+                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(publicFeedUrl("/a.xml")))
+            assertEquals(publicFeedUrl("/a.xml"), feedA.preview.previewId)
 
             server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e2")))))
             val previewC =
-                assertIs<Outcome.Success<ch.lkmc.neutrodyne.core.model.FeedPreview>>(
+                assertIs<AddResolution.Feed>(
                     resolverBundle.resolver.preview(publicFeedUrl("/cdn.xml")),
-                ).value
+                ).preview
 
             assertEquals(publicFeedUrl("/cdn.xml"), previewC.feedUrl)
             assertEquals(publicFeedUrl("/cdn.xml"), previewC.previewId)

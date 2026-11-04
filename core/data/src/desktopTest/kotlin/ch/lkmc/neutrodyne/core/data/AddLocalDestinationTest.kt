@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.data
 
-import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.NetError
@@ -244,6 +243,17 @@ class AddLocalDestinationTest {
             assertEquals(0, lanConnections.acceptedConnections)
         }
 
+    @Test fun directoryPreviewNeverFetchesLocalTarget() =
+        runBlocking {
+            lan.enqueue(mockResponse(body = rssBody(title = "Private", items = arrayOf(rssItem("e1")))))
+            val result = bundle.resolver.preview(lan.url("/feed").toString())
+            assertEquals(
+                AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                assertIs<AddResolution.Failure>(result).error,
+            )
+            assertEquals(0, lan.requestCount)
+        }
+
     @Test fun typedLanUrlIsStillFetched() =
         runBlocking {
             server.enqueue(
@@ -355,7 +365,7 @@ class AddLocalDestinationTest {
             lan.enqueue(mockResponse(body = rssBody(title = "LAN honeypot")))
             assertEquals(
                 AddPodcastError.Network(NetError.LocalNetworkUnsupported),
-                assertIs<Outcome.Failure<AddPodcastError>>(bundle.resolver.preview(lanPeerUrl("/feed"))).error,
+                assertIs<AddResolution.Failure>(bundle.resolver.preview(lanPeerUrl("/feed"))).error,
             )
             assertEquals(0, lan.requestCount)
             assertEquals(0, lanConnections.acceptedConnections)
@@ -365,7 +375,7 @@ class AddLocalDestinationTest {
         runBlocking {
             assertEquals(
                 AddPodcastError.Network(NetError.LocalNetworkUnsupported),
-                assertIs<Outcome.Failure<AddPodcastError>>(
+                assertIs<AddResolution.Failure>(
                     bundle.resolver.preview(lan.url("/feed").toString()),
                 ).error,
             )
@@ -378,7 +388,7 @@ class AddLocalDestinationTest {
             server.enqueue(mockResponse(302, "", "Location" to lanPeerUrl("/feed")))
             assertEquals(
                 AddPodcastError.Network(NetError.LocalNetworkUnsupported),
-                assertIs<Outcome.Failure<AddPodcastError>>(bundle.resolver.preview(url("/redirect"))).error,
+                assertIs<AddResolution.Failure>(bundle.resolver.preview(url("/redirect"))).error,
             )
             assertEquals(1, server.requestCount)
             assertEquals(0, lan.requestCount)
