@@ -40,8 +40,8 @@ import ch.lkmc.neutrodyne.core.model.SearchResults
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
-import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
@@ -81,6 +81,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import org.junit.Test
 import java.io.File
 import java.util.Locale
@@ -107,12 +109,27 @@ class DiscoveryJourneyTest {
             val build = BuildInfoLoader.load()
             val reporter = DesktopCrashReporter(dirs, build, clock, RecentLogBuffer())
             val search = FakeSearchRepository()
+            val server = MockWebServer()
+            val fixtureClient = OkHttpClient()
+            val replay =
+                Interceptor { chain ->
+                    val original = chain.request()
+                    if (original.url.host != "journey.neutrodyne.invalid") return@Interceptor chain.proceed(original)
+                    val request = original.newBuilder().url(server.url(original.url.encodedPath)).build()
+                    fixtureClient
+                        .newCall(request)
+                        .execute()
+                        .newBuilder()
+                        .request(original)
+                        .build()
+                }
             val graph =
-                createDynamicGraphFactory<M2JourneyGraph.Factory>(DiscoveryJourneyBindings(db, clock, scope, search))
-                    .create(dirs, build, reporter)
+                createDynamicGraphFactory<M2JourneyGraph.Factory>(
+                    DiscoveryJourneyBindings(db, clock, scope, search, replay),
+                ).create(dirs, build, reporter)
             var showing by mutableStateOf(true)
             try {
-                MockWebServer().use { server ->
+                server.use {
                     val feed = File("../feeds/src/test/resources/discovery/journey-feed.xml").readText()
                     server.enqueue(
                         MockResponse
@@ -123,7 +140,14 @@ class DiscoveryJourneyTest {
                             .build(),
                     )
                     server.start()
-                    val url = server.url("/feed.xml").toString()
+                    // Directory previews are automatic discoveries and reject LAN destinations.
+                    // Keep their identity public while the test transport reads the local server.
+                    val url =
+                        if (entry == Entry.PREVIEW) {
+                            "https://journey.neutrodyne.invalid/feed.xml"
+                        } else {
+                            server.url("/feed.xml").toString()
+                        }
                     val groupId =
                         runBlocking {
                             (
@@ -245,6 +269,8 @@ class DiscoveryJourneyTest {
                 runOnIdle { showing = false }
                 waitForIdle()
                 scope.cancel()
+                fixtureClient.dispatcher.executorService.shutdown()
+                fixtureClient.connectionPool.evictAll()
                 db.close()
                 dirs.data.parent
                     .toFile()
@@ -262,7 +288,11 @@ private class DiscoveryJourneyBindings(
     private val clock: Clock,
     private val scope: CoroutineScope,
     private val search: SearchRepository,
+    private val replay: Interceptor,
 ) {
+    @Provides @DebugInterceptors
+    fun interceptors(): Set<Interceptor> = setOf(replay)
+
     @Provides fun search(): SearchRepository = search
 
     @Provides fun database(): NeutrodyneDatabase = db
