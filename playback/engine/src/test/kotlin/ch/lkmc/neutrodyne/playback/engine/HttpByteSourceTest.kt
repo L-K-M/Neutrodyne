@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
 class HttpByteSourceTest {
     @get:Rule val serverRule = MockWebServerRule()
     private val server get() = serverRule.server
-    private val client = OkHttpClient.Builder().readTimeout(2, TimeUnit.SECONDS).build()
+    private val client = testMediaClient().newBuilder().readTimeout(2, TimeUnit.SECONDS).build()
 
     @Test
     fun resumesACutWithRangeAndStrongIfRange() =
