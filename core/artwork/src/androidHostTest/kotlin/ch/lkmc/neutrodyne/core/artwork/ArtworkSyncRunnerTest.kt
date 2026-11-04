@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.art.MonogramMode
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import coil3.ImageLoader
+import coil3.asImage
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineDispatcher
@@ -42,6 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -89,14 +91,25 @@ class ArtworkSyncRunnerTest {
     /** Everything the runner touches, wired exactly like the app graph binds it. */
     private inner class Harness(
         scope: CoroutineScope,
-        io: CoroutineDispatcher,
+        private val io: CoroutineDispatcher,
     ) : AutoCloseable {
         val clock = TestClock()
         val db: NeutrodyneDatabase = TestDb.inMemory(app, clock = clock)
         val work = RecordingWorkScheduler()
         val scheduler = ArtworkSyncScheduler(work, scope)
         val store = DefaultArtworkStore(db, StoragePaths(app), AndroidArtworkContentUris(app), scope, scheduler, io)
-        val runner =
+        val samples = AtomicInteger()
+        var sampleHook: () -> Unit = {}
+        private val sampler =
+            object : ArtworkPixelSampler {
+                override fun sample(image: coil3.Image): ArtworkPixels {
+                    samples.incrementAndGet()
+                    sampleHook()
+                    return AndroidArtworkPixelSampler().sample(image)
+                }
+            }
+
+        fun newRunner() =
             ArtworkSyncRunner(
                 db,
                 store,
@@ -107,7 +120,36 @@ class ArtworkSyncRunnerTest {
                 scheduler,
                 clock,
                 io,
+                sampler,
+                Dispatchers.Default,
             )
+
+        val runner = newRunner()
+
+        suspend fun legacy(
+            url: String,
+            pixels: ByteArray = jpegBytes(400, 300, Color.GRAY),
+        ): String {
+            val key = uKey(url)
+            podcast(key, url)
+            db.artworkDao().upsert(
+                ArtworkEntity(
+                    key,
+                    url = url,
+                    localPath = "$key.jpg",
+                    pinCount = 1,
+                    version = 7,
+                    fetchedAt = clock.now(),
+                    width = 400,
+                    height = 300,
+                ),
+            )
+            file("$key.jpg").apply {
+                parentFile!!.mkdirs()
+                writeBytes(pixels)
+            }
+            return key
+        }
 
         suspend fun podcast(
             key: String,
@@ -583,6 +625,121 @@ class ArtworkSyncRunnerTest {
                 job.cancelAndJoin()
 
                 assertIs<CancellationException>(thrown)
+            }
+        }
+
+    @Test
+    fun localBackfillCompletesMonochromeOnceWithoutNetworkOrByteVersionChurn() =
+        runTest {
+            harnessed {
+                val key = legacy(server.url("/legacy.jpg").toString())
+                val old = byKey(key)
+                val bytes = file("$key.jpg").readBytes()
+                runner.runOnce()
+                val extracted = byKey(key)
+                assertNull(extracted.seedArgb)
+                assertNotNull(extracted.avgArgb)
+                assertEquals(old.copy(avgArgb = extracted.avgArgb), extracted)
+                assertTrue(bytes.contentEquals(file("$key.jpg").readBytes()))
+                newRunner().runOnce()
+                assertEquals(1, samples.get())
+                assertEquals(0, server.requestCount)
+            }
+        }
+
+    @Test
+    fun transparentLegacyPixelsHaveZeroAverageAndAreNotRepeated() =
+        runTest {
+            harnessed {
+                val empty = android.graphics.Bitmap.createBitmap(300, 300, android.graphics.Bitmap.Config.ARGB_8888)
+                val png = AndroidArtworkCodec().encode(empty.asImage(), ArtworkEncoding.PNG)
+                val key = legacy(server.url("/transparent.png").toString(), png.bytes.toByteArray())
+                runner.runOnce()
+                assertNull(byKey(key).seedArgb)
+                assertEquals(0, byKey(key).avgArgb)
+                newRunner().runOnce()
+                assertEquals(1, samples.get())
+                assertEquals(0, server.requestCount)
+                empty.recycle()
+            }
+        }
+
+    @Test
+    fun backfillDeadlineCommitsOnlyCompletedBatchesAndRestartsFromRows() =
+        runTest {
+            harnessed {
+                val keys = (1..10).map { legacy(server.url("/legacy-$it.jpg").toString()) }
+                sampleHook = { clock.advanceBy(10.minutes) }
+                runner.runOnce(5.minutes)
+                assertEquals(8, keys.count { byKey(it).avgArgb != null })
+                assertEquals(1, work.enqueues.get())
+                sampleHook = {}
+                newRunner().runOnce()
+                assertEquals(10, keys.count { byKey(it).avgArgb != null })
+                assertEquals(10, samples.get())
+                assertEquals(0, server.requestCount)
+                assertTrue(keys.all { byKey(it).version == 7 })
+            }
+        }
+
+    @Test
+    fun cancellingLocalExtractionDoesNotPublishAndCanRestart() =
+        runTest {
+            harnessed {
+                val key = legacy(server.url("/cancel.jpg").toString())
+                val old = byKey(key)
+                sampleHook = { throw CancellationException("cancel extraction") }
+                assertFailsWith<CancellationException> { runner.runOnce() }
+                assertEquals(old, byKey(key))
+                sampleHook = {}
+                newRunner().runOnce()
+                assertNotNull(byKey(key).avgArgb)
+                assertEquals(old.version, byKey(key).version)
+                assertEquals(0, server.requestCount)
+            }
+        }
+
+    @Test
+    fun failedLocalDecodeBacksOffThenRepairsThroughNormalProduction() =
+        runTest {
+            harnessed {
+                val url = server.url("/corrupt.jpg").toString()
+                val key = legacy(url, byteArrayOf(1, 2, 3))
+                runner.runOnce()
+                assertEquals("BACKFILL_DECODE:1", byKey(key).lastError)
+                assertEquals(7, byKey(key).version)
+                runner.runOnce()
+                assertEquals(0, server.requestCount)
+                clock.advanceBy(61.minutes)
+                server.enqueue(imageResponse(jpegBytes(400, 300, NAVY)))
+                runner.runOnce()
+                assertEquals(1, server.requestCount)
+                assertNotNull(byKey(key).avgArgb)
+                assertEquals(8, byKey(key).version)
+                assertNull(byKey(key).lastError)
+            }
+        }
+
+    @Test
+    fun extractionFailurePreservesOldFileColoursAndRetryState() =
+        runTest {
+            harnessed {
+                val url = server.url("/extraction.jpg").toString()
+                val key = uKey(url)
+                podcast(key, url)
+                server.enqueue(imageResponse(jpegBytes(400, 300, AMBER)))
+                runner.runOnce()
+                val old = byKey(key)
+                assertNotNull(old.seedArgb)
+                assertNotNull(old.avgArgb)
+                clock.advanceBy(31.days)
+                sampleHook = { error("sample unavailable") }
+                server.enqueue(imageResponse(jpegBytes(400, 300, NAVY)))
+                runner.runOnce()
+                assertEquals(old.copy(lastError = "DECODE:1", fetchedAt = clock.now()), byKey(key))
+                assertTrue(file("$key.jpg").exists())
+                runner.runOnce()
+                assertEquals(2, server.requestCount)
             }
         }
 

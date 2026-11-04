@@ -151,6 +151,8 @@ class ArtworkSyncWorkerTest {
                         fixture.scheduler,
                         fixture.clock,
                         dispatcher,
+                        AndroidArtworkPixelSampler(),
+                        Dispatchers.Default,
                     )
                 val bounded = worker(Provider { runner }, dispatcher)
                 val running = async(Dispatchers.IO) { bounded.doWork() }
@@ -192,6 +194,8 @@ class ArtworkSyncWorkerTest {
             fixture.scheduler,
             fixture.clock,
             Dispatchers.IO,
+            AndroidArtworkPixelSampler(),
+            Dispatchers.Default,
         )
 
     private fun worker(
@@ -205,7 +209,25 @@ class ArtworkSyncWorkerTest {
                         appContext: Context,
                         workerClassName: String,
                         workerParameters: WorkerParameters,
-                    ): ListenableWorker = ArtworkSyncWorker(appContext, workerParameters, fixture.opener, runner, io)
+                    ): ListenableWorker =
+                        ArtworkSyncWorker(
+                            appContext,
+                            workerParameters,
+                            fixture.opener,
+                            runner,
+                            Provider {
+                                MosaicSync(
+                                    fixture.db,
+                                    fixture.store,
+                                    MosaicSources(fixture.db),
+                                    MosaicRenderer(fixture.store, fixture.monograms, fixture.codec),
+                                    fixture.scheduler,
+                                    fixture.clock,
+                                    Dispatchers.Default,
+                                )
+                            },
+                            io,
+                        )
                 },
             ).build()
 }

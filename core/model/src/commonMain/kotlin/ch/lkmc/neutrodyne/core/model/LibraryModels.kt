@@ -52,6 +52,7 @@ data class PodcastDetail(
     val includeInAll: Boolean,
     /** `pagingNextUrl != null` — older pages may be fetched on demand (03). */
     val hasOlderPages: Boolean,
+    val artworkAvgArgb: Int? = null,
 )
 
 /** The episode detail screen's data (position comes from `EpisodeLiveStateSource`, not here). */

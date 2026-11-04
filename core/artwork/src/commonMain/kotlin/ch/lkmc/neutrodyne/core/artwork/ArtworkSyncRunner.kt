@@ -34,6 +34,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /** One bounded, restartable pass; all retry state lives in artwork rows, never work input. */
 @SingleIn(AppScope::class)
@@ -48,10 +49,15 @@ public class ArtworkSyncRunner internal constructor(
     private val scheduler: ArtworkSyncScheduler,
     private val clock: Clock,
     @param:Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
+    private val sampler: ArtworkPixelSampler,
+    @param:Dispatcher(NeutrodyneDispatchers.Default) private val defaultDispatcher: CoroutineDispatcher,
 ) {
     private val runs = Mutex()
 
-    public suspend fun runOnce(deadline: Duration? = null): Unit =
+    public suspend fun runOnce(
+        deadline: Duration? = null,
+        systemMosaics: (suspend (Duration?) -> Unit)? = null,
+    ): Unit =
         withContext(io) {
             runs.withLock {
                 val end = deadline?.let { clock.elapsedRealtime() + it.inWholeMilliseconds }
@@ -70,8 +76,15 @@ public class ArtworkSyncRunner internal constructor(
                             if (!ArtworkKeys.VALID.matches(candidate.key)) return@mapNotNull null
                             val descriptor = descriptor(candidate) ?: return@mapNotNull null
                             val row = db.artworkDao().byKey(candidate.key)
-                            if (!needsWork(candidate.key, descriptor, row)) return@mapNotNull null
-                            Work(candidate, descriptor, row)
+                            if (row != null && backoffActive(row, clock.now())) return@mapNotNull null
+                            val localPath = row?.localPath
+                            val backfill =
+                                row != null && row.avgArgb == null && row.url == descriptor &&
+                                    localPath != null && !localPath.endsWith(".fallback.png") &&
+                                    row.lastError?.startsWith("BACKFILL_") != true &&
+                                    store.pinnedFile(candidate.key) != null
+                            if (!backfill && !needsWork(candidate.key, descriptor, row)) return@mapNotNull null
+                            Work(candidate, descriptor, row, if (backfill) WorkMode.BACKFILL else WorkMode.PRODUCE)
                         }
                 val producers = Semaphore(PRODUCERS)
                 for (batch in wanted.chunked(BATCH_SIZE)) {
@@ -94,9 +107,10 @@ public class ArtworkSyncRunner internal constructor(
                         scheduler.enqueueNow()
                         return@withLock
                     }
-                    store.applyBatch(results, clock.now())
+                    store.applyBatch(results.filterNotNull(), clock.now())
                     yield()
                 }
+                systemMosaics?.invoke(end?.let { (it - clock.elapsedRealtime()).coerceAtLeast(0).milliseconds })
                 store.collectGarbage()
             }
         }
@@ -113,17 +127,22 @@ public class ArtworkSyncRunner internal constructor(
             (key.startsWith("u-") && (row.fetchedAt ?: Long.MIN_VALUE) < clock.now() - MONTH_MS)
     }
 
-    private suspend fun produce(work: Work): ArtworkProduction {
+    private suspend fun produce(work: Work): ArtworkProduction? {
+        if (work.mode == WorkMode.BACKFILL) return backfill(work)
+
         val candidate = work.candidate
         try {
             if (candidate.key.startsWith("m-")) {
                 val spec = Monogram.spec(candidate.title)
-                return ArtworkProduction(
-                    candidate.key,
-                    work.descriptor,
-                    codec.encode(monograms.render(spec)),
-                    monogramColor = spec.colors(MonogramMode.RASTER).first,
-                )
+                val tone = spec.colors(MonogramMode.RASTER).first
+                return withContext(defaultDispatcher) {
+                    ArtworkProduction(
+                        candidate.key,
+                        work.descriptor,
+                        codec.encode(monograms.render(spec)),
+                        colours = ExtractedArtworkColors(tone, tone),
+                    )
+                }
             }
             val imageLoader = loader()
             val request =
@@ -150,7 +169,14 @@ public class ArtworkSyncRunner internal constructor(
                     if (result.image.width < MIN_SIDE && result.image.height < MIN_SIDE) {
                         ArtworkProduction(candidate.key, work.descriptor, error = "TOO_SMALL")
                     } else {
-                        ArtworkProduction(candidate.key, work.descriptor, codec.encode(result.image))
+                        withContext(defaultDispatcher) {
+                            ArtworkProduction(
+                                candidate.key,
+                                work.descriptor,
+                                codec.encode(result.image),
+                                colours = ArtworkColorExtractor.extract(sampler.sample(result.image)),
+                            )
+                        }
                     }
                 }
             }
@@ -158,6 +184,51 @@ public class ArtworkSyncRunner internal constructor(
             throw error
         } catch (error: Exception) {
             return ArtworkProduction(candidate.key, work.descriptor, error = artworkError(error))
+        }
+    }
+
+    private suspend fun backfill(work: Work): ArtworkProduction? {
+        val snapshot = store.localSnapshot(checkNotNull(work.row)) ?: return null
+        try {
+            val colours =
+                if (work.candidate.key.startsWith("m-")) {
+                    val tone = Monogram.spec(work.candidate.title).colors(MonogramMode.RASTER).first
+                    ExtractedArtworkColors(tone, tone)
+                } else {
+                    // Bytes, not URL/path input: this request cannot reach the network or race GC.
+                    val request =
+                        ImageRequest
+                            .Builder(context)
+                            .data(snapshot.bytes.toByteArray())
+                            .size(MAX_SIDE)
+                            .precision(Precision.INEXACT)
+                            .memoryCachePolicy(CachePolicy.DISABLED)
+                            .diskCachePolicy(CachePolicy.DISABLED)
+                            .softwareArtwork()
+                            .build()
+                    when (val result = loader().execute(request)) {
+                        is ErrorResult -> {
+                            throw result.throwable
+                        }
+
+                        is SuccessResult -> {
+                            withContext(defaultDispatcher) {
+                                ArtworkColorExtractor.extract(sampler.sample(result.image))
+                            }
+                        }
+                    }
+                }
+            return ArtworkProduction(work.candidate.key, work.descriptor, colours = colours, backfill = snapshot)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // Corrupt legacy inputs follow the existing retry schedule, then a normal fetch repairs them.
+            return ArtworkProduction(
+                work.candidate.key,
+                work.descriptor,
+                error = "BACKFILL_${artworkError(error)}",
+                backfill = snapshot,
+            )
         }
     }
 
@@ -189,7 +260,10 @@ public class ArtworkSyncRunner internal constructor(
         val candidate: ArtworkCandidate,
         val descriptor: String,
         val row: ArtworkEntity?,
+        val mode: WorkMode,
     )
+
+    private enum class WorkMode { PRODUCE, BACKFILL }
 
     private companion object {
         const val PRODUCERS = 4
@@ -205,7 +279,8 @@ internal data class ArtworkProduction(
     val descriptor: String,
     val image: EncodedArtwork? = null,
     val error: String? = null,
-    val monogramColor: Int? = null,
+    val colours: ExtractedArtworkColors? = null,
+    val backfill: ArtworkLocalSnapshot? = null,
 )
 
 internal fun monogramDescriptor(spec: MonogramSpec): String = "nd:monogram:v1:${spec.initials}:${spec.hue}"
