@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.testing
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
 import kotlinx.coroutines.CompletableDeferred
 
 /**
@@ -27,11 +28,27 @@ class FakeSubscribeUseCase : SubscribeUseCase {
 
     val subscribed = mutableListOf<Pair<String, Set<Long>>>()
 
+    val youtubeSubscriptions =
+        mutableListOf<Triple<ChannelResolution.Resolved, Int, Set<Long>>>()
+
+    override suspend fun youTube(
+        resolution: ChannelResolution.Resolved,
+        variants: Int,
+        groupIds: Set<Long>,
+    ): Outcome<Long, SubscribeError> {
+        youtubeSubscriptions += Triple(resolution, variants, groupIds.toSet())
+        return answer()
+    }
+
     override suspend fun invoke(
         previewId: String,
         groupIds: Set<Long>,
     ): Outcome<Long, SubscribeError> {
         subscribed += previewId to groupIds
+        return answer()
+    }
+
+    private suspend fun answer(): Outcome<Long, SubscribeError> {
         if (gates.isNotEmpty()) {
             gates.removeFirst()?.await()
         } else {
