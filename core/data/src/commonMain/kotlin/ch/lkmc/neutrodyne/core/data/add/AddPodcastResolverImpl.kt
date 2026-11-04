@@ -113,24 +113,25 @@ internal class AddPodcastResolverImpl(
         credentials: BasicCredentials,
     ): AddResolution = withContext(io) { resolveInner(input, credentials) }
 
-    /**
-     * `PodcastPreviewKey(feedUrl)`: a directory hit's direct preview (03 Preview and dedupe) —
-     * a live cached entry is reused, else the URL is fetched and parsed anew.
-     */
-    override suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError> =
+    /** Directory URLs are automatic discoveries, even when their first target is local. */
+    override suspend fun preview(feedUrl: String): AddResolution =
         withContext(io) {
             val entry = cache.findByUrl(feedUrl)
-            if (entry != null) return@withContext Outcome.Success(buildPreview(entry))
-            if (HostChecks.isYouTube(
-                    feedUrl,
-                )
+            if (entry != null) return@withContext AddResolution.Feed(buildPreview(entry))
+            when (
+                val result =
+                    fetchAndParse(
+                        feedUrl,
+                        feedUrl,
+                        null,
+                        schemeGuessed = false,
+                        mode = DiscoveryMode.VERIFY,
+                    )
             ) {
-                return@withContext Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
-            }
-            when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
-                is PreviewOutcome.Done -> Outcome.Success(buildPreview(cacheEntry(r.entry)))
-                is PreviewOutcome.Failed -> Outcome.Failure(r.error)
-                else -> Outcome.Failure(AddPodcastError.NotAFeed)
+                is PreviewOutcome.Done -> AddResolution.Feed(buildPreview(cacheEntry(result.entry)))
+                is PreviewOutcome.Channel -> AddResolution.YouTube(result.ref)
+                is PreviewOutcome.Failed -> AddResolution.Failure(result.error)
+                else -> AddResolution.Failure(AddPodcastError.NotAFeed)
             }
         }
 

@@ -48,6 +48,7 @@ import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -100,6 +101,14 @@ import kotlin.time.Duration.Companion.seconds
 @OptIn(ExperimentalTestApi::class)
 class ExternalYouTubeModeTest {
     @Test fun recordedSharedHandleAndImportedChannelsStayExternal() =
+        recordedJourney(
+            Route.Push(AddPodcastKey("@mkbhd")),
+        )
+
+    @Test fun directoryChannelPreviewHandsOffToAdd() =
+        recordedJourney(Route.Push(PodcastPreviewKey("https://youtube.com/@mkbhd")))
+
+    private fun recordedJourney(route: Route) =
         runComposeUiTest {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
@@ -137,7 +146,7 @@ class ExternalYouTubeModeTest {
                                 RootActions({}, {}, {}, {}, { false }),
                                 RootSlots(player = {}, userMessages = emptyFlow()),
                                 graph.entryInstallers,
-                                routes = flowOf(Route.Push(AddPodcastKey("@mkbhd"))),
+                                routes = flowOf(route),
                                 platform = BuildInfo.Platform.DESKTOP,
                             )
                         }

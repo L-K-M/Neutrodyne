@@ -50,9 +50,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
+import okhttp3.Dns
 import okio.Buffer
 import org.junit.Rule
 import java.io.File
+import java.net.InetAddress
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -90,7 +92,23 @@ class SubscribeFlowTest {
             kotlin.io.path
                 .createTempDirectory("nd-subscribe-test")
                 .toFile()
-        resolverBundle = newResolver(root, db, clock)
+        resolverBundle =
+            newResolver(
+                root,
+                db,
+                clock,
+                networkClients =
+                    newNetworkClients(
+                        baseDns =
+                            Dns { host ->
+                                if (host == "feeds.test") {
+                                    listOf(InetAddress.getByName("127.0.0.1"))
+                                } else {
+                                    Dns.SYSTEM.lookup(host)
+                                }
+                            },
+                    ),
+            )
         subscribeBundle =
             newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, scheduler, settings, clock)
     }
@@ -102,6 +120,14 @@ class SubscribeFlowTest {
     }
 
     private fun feedUrl(path: String = "/feed.xml") = server.url(path).toString()
+
+    private fun publicFeedUrl(path: String = "/feed.xml") =
+        server
+            .url(path)
+            .newBuilder()
+            .host("feeds.test")
+            .build()
+            .toString()
 
     private suspend fun resolvePreview(
         path: String = "/feed.xml",
@@ -515,25 +541,25 @@ class SubscribeFlowTest {
             server.enqueue(mockResponse(302, "", "Location" to "/cdn.xml"))
             server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
             val feedA =
-                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl("/a.xml")))
-            assertEquals(feedUrl("/a.xml"), feedA.preview.previewId)
+                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(publicFeedUrl("/a.xml")))
+            assertEquals(publicFeedUrl("/a.xml"), feedA.preview.previewId)
 
             server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e2")))))
             val previewC =
-                assertIs<Outcome.Success<ch.lkmc.neutrodyne.core.model.FeedPreview>>(
-                    resolverBundle.resolver.preview(feedUrl("/cdn.xml")),
-                ).value
+                assertIs<AddResolution.Feed>(
+                    resolverBundle.resolver.preview(publicFeedUrl("/cdn.xml")),
+                ).preview
 
-            assertEquals(feedUrl("/cdn.xml"), previewC.feedUrl)
-            assertEquals(feedUrl("/cdn.xml"), previewC.previewId)
+            assertEquals(publicFeedUrl("/cdn.xml"), previewC.feedUrl)
+            assertEquals(publicFeedUrl("/cdn.xml"), previewC.previewId)
             assertEquals(3, server.requestCount)
 
             val id =
                 assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(previewC.previewId, emptySet()))
                     .value
             val row = assertNotNull(db.podcastDao().byId(id))
-            assertEquals(feedUrl("/cdn.xml"), row.feedUrl)
-            assertEquals(UrlNormalizer.forIdentity(feedUrl("/cdn.xml")), row.feedKey)
+            assertEquals(publicFeedUrl("/cdn.xml"), row.feedUrl)
+            assertEquals(UrlNormalizer.forIdentity(publicFeedUrl("/cdn.xml")), row.feedKey)
         }
 
     @Test

@@ -2,11 +2,9 @@
 
 package ch.lkmc.neutrodyne.core.data
 
-import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
-import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
@@ -15,8 +13,10 @@ import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
+import okhttp3.Dns
 import org.junit.Rule
 import java.io.File
+import java.net.InetAddress
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
@@ -50,7 +50,23 @@ class AddPodcastResolverTest {
             kotlin.io.path
                 .createTempDirectory("nd-add-test")
                 .toFile()
-        bundle = newResolver(root, db, clock)
+        bundle =
+            newResolver(
+                root,
+                db,
+                clock,
+                networkClients =
+                    newNetworkClients(
+                        baseDns =
+                            Dns { host ->
+                                if (host == "feeds.test") {
+                                    listOf(InetAddress.getByName("127.0.0.1"))
+                                } else {
+                                    Dns.SYSTEM.lookup(host)
+                                }
+                            },
+                    ),
+            )
     }
 
     @AfterTest
@@ -60,6 +76,14 @@ class AddPodcastResolverTest {
     }
 
     private fun feedUrl(path: String = "/feed.xml") = server.url(path).toString()
+
+    private fun publicFeedUrl(path: String = "/feed.xml") =
+        server
+            .url(path)
+            .newBuilder()
+            .host("feeds.test")
+            .build()
+            .toString()
 
     // --- Input normalisation (03 steps 1–7) ---------------------------------------------------------
 
@@ -539,8 +563,8 @@ class AddPodcastResolverTest {
             assertIs<AddResolution.Feed>(bundle.resolver.resolve(feedUrl()))
             assertEquals(1, server.requestCount)
 
-            val cached = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl()))
-            assertEquals("Cached", cached.value.title)
+            val cached = assertIs<AddResolution.Feed>(bundle.resolver.preview(feedUrl()))
+            assertEquals("Cached", cached.preview.title)
             assertEquals(1, server.requestCount)
         }
 
@@ -549,9 +573,9 @@ class AddPodcastResolverTest {
         runTest {
             server.enqueue(mockResponse(body = rssBody(title = "Fresh")))
 
-            val r = bundle.resolver.preview(feedUrl())
+            val r = bundle.resolver.preview(publicFeedUrl())
 
-            val preview = assertIs<Outcome.Success<FeedPreview>>(r).value
+            val preview = assertIs<AddResolution.Feed>(r).preview
             assertEquals("Fresh", preview.title)
         }
 

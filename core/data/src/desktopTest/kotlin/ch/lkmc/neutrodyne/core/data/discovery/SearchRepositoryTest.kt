@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.fakePlatform
 import ch.lkmc.neutrodyne.core.data.mockResponse
 import ch.lkmc.neutrodyne.core.data.newDb
+import ch.lkmc.neutrodyne.core.data.newNetworkClients
 import ch.lkmc.neutrodyne.core.data.newResolver
 import ch.lkmc.neutrodyne.core.data.newSubscribe
 import ch.lkmc.neutrodyne.core.data.rssBody
@@ -18,6 +19,7 @@ import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.data.testClassifier
 import ch.lkmc.neutrodyne.core.data.testUserAgent
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
+import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -25,7 +27,6 @@ import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryAccess
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
-import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.ProviderFailure
 import ch.lkmc.neutrodyne.core.model.ProviderId
@@ -61,12 +62,14 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okio.ByteString.Companion.encodeUtf8
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import java.net.InetAddress
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -541,7 +544,13 @@ class SearchRepositoryTest {
     @Test fun searchArtworkReachesPreviewRefetchAndSubscribeWithoutStaleProviderReplay() =
         runBlocking {
             prefs.set(Keys.FYYD_ENABLED, false)
-            val feedUrl = server.url("/publisher").toString()
+            val feedUrl =
+                server
+                    .url("/publisher")
+                    .newBuilder()
+                    .host("feeds.test")
+                    .build()
+                    .toString()
             route = { request ->
                 if (request.target == "/publisher") {
                     mockResponse(body = rssBody(title = "Publisher"))
@@ -560,8 +569,24 @@ class SearchRepositoryTest {
                     .createTempDirectory("nd-directory-preview")
                     .toFile()
             try {
-                newResolver(root, db, clock, metadata = metadata).use { bundle ->
-                    val preview = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl)).value
+                newResolver(
+                    root,
+                    db,
+                    clock,
+                    metadata = metadata,
+                    networkClients =
+                        newNetworkClients(
+                            baseDns =
+                                Dns { host ->
+                                    if (host == "feeds.test") {
+                                        listOf(InetAddress.getByName("127.0.0.1"))
+                                    } else {
+                                        Dns.SYSTEM.lookup(host)
+                                    }
+                                },
+                        ),
+                ).use { bundle ->
+                    val preview = assertIs<AddResolution.Feed>(bundle.resolver.preview(feedUrl)).preview
                     assertEquals("Publisher", preview.title)
                     assertEquals("https://art.example/cover", preview.artworkUrl)
                     assertTrue(db.podcastDao().allForExport().isEmpty())
@@ -571,7 +596,7 @@ class SearchRepositoryTest {
                     val id = assertIs<Outcome.Success<Long>>(subscribe.useCase(preview.previewId, emptySet())).value
                     assertEquals("https://art.example/cover", db.podcastDao().byId(id)?.artworkUrl)
                     prefs.set(Keys.APPLE_ENABLED, false)
-                    val fresh = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl)).value
+                    val fresh = assertIs<AddResolution.Feed>(bundle.resolver.preview(feedUrl)).preview
                     assertNull(fresh.artworkUrl)
                 }
             } finally {

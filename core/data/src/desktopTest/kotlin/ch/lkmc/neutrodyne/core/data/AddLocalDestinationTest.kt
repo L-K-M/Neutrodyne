@@ -160,6 +160,17 @@ class AddLocalDestinationTest {
             assertEquals(0, lan.requestCount)
         }
 
+    @Test fun directoryPreviewNeverFetchesLocalTarget() =
+        runBlocking {
+            lan.enqueue(mockResponse(body = rssBody(title = "Private", items = arrayOf(rssItem("e1")))))
+            val result = bundle.resolver.preview(lan.url("/feed").toString())
+            assertEquals(
+                AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                assertIs<AddResolution.Failure>(result).error,
+            )
+            assertEquals(0, lan.requestCount)
+        }
+
     @Test fun typedLanUrlIsStillFetched() =
         runBlocking {
             server.enqueue(
