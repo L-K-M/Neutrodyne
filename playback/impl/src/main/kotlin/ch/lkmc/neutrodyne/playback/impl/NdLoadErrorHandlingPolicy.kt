@@ -5,6 +5,8 @@ import androidx.media3.common.C
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
+import ch.lkmc.neutrodyne.youtube.api.ResolveResult
+import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import ch.lkmc.neutrodyne.youtube.api.YouTubeResolveException
 import dev.zacsweers.metro.Inject
 import java.net.HttpURLConnection
@@ -13,7 +15,22 @@ import java.net.HttpURLConnection
 @Inject
 internal class NdLoadErrorHandlingPolicy : DefaultLoadErrorHandlingPolicy() {
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorInfo): Long {
-        val causes = generateSequence<Throwable>(loadErrorInfo.exception) { it.cause }.toList()
+        val causes = loadErrorInfo.exception.causeChain()
+        if (causes.any { it is YouTubeFormatChangedException }) return C.TIME_UNSET
+        causes.filterIsInstance<YouTubeResolveException>().firstOrNull()?.let { error ->
+            val result = error.result
+            return if (result is ResolveResult.Transient && result.kind in
+                setOf(
+                    TransientKind.NETWORK,
+                    TransientKind.TIMEOUT,
+                    TransientKind.ENGINE_UNAVAILABLE,
+                )
+            ) {
+                minOf((loadErrorInfo.errorCount - 1).coerceAtLeast(0) * 1000L, 5000L)
+            } else {
+                C.TIME_UNSET
+            }
+        }
         if (causes.any {
                 it is ContentChangedException || it is EpisodeGoneException ||
                     it is NoMediaException ||

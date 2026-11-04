@@ -89,6 +89,7 @@ interface DesktopAppGraph {
     val cleanupPlanner: Provider<CleanupPlanner>
     val downloadMover: Provider<DownloadMover>
     val downloadProgress: Provider<DownloadProgressSource>
+    val youtubeEngine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
 

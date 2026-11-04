@@ -16,7 +16,16 @@ interface YouTubeEngine {
 
 enum class PrewarmReason { PROJECTION, SCREEN, DOWNLOAD, SEARCH }
 
-enum class EngineAvailability { NOT_IN_THIS_APK, DISABLED, FAILED, STOPPED, PREPARING, STARTING, READY }
+enum class EngineAvailability {
+    NOT_IN_THIS_APK,
+    DISABLED,
+    FAILED,
+    STOPPED,
+    PREPARING,
+    STARTING,
+    READY,
+    NOT_YET_AVAILABLE,
+}
 
 enum class EngineVersionSource { BUNDLED }
 
