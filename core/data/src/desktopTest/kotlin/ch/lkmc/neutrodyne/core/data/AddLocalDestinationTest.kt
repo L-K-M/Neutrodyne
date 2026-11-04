@@ -23,6 +23,7 @@ import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 /**
  * 03 implementation note 2026-11-02: the add pipeline's automatic fetches never reach a local
@@ -101,6 +102,19 @@ class AddLocalDestinationTest {
         .toString()
 
     private fun notFound(request: RecordedRequest) = mockResponse(404, "no ${request.target}")
+
+    @Test fun oversizedNumericInputDoesNotCrashSharedOrTypedAdd() =
+        runBlocking {
+            val input = "http://99999999999.0.0.1/feed"
+            assertTrue(bundle.resolver.isLocalDestination(input))
+            assertEquals(
+                AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                assertIs<AddResolution.Failure>(bundle.resolver.resolveUnconfirmed(input)).error,
+            )
+            assertIs<AddResolution.Failure>(bundle.resolver.resolve(input))
+            assertEquals(0, server.requestCount)
+            assertEquals(0, lan.requestCount)
+        }
 
     @Test fun wordpressFallbackCannotReuseConsentForAnotherLocalUrl() =
         runBlocking {

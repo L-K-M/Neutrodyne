@@ -129,6 +129,9 @@ internal fun isLanAddress(address: InetAddress): Boolean {
 private const val IPV4_BYTES = 4
 private const val IPV6_BYTES = 16
 private const val V4_MAPPED_PREFIX_BYTES = 10
+private const val V4_EMBEDDED_OFFSET = 12
+private const val MULTICAST_V4_FIRST_OCTET = 224
+private const val MULTICAST_V6_PREFIX = 0xFF
 
 private fun isLanV4(
     b: ByteArray,
@@ -155,7 +158,8 @@ private fun isLanV6(b: ByteArray): Boolean {
 /**
  * The M7 pre-confirmation peer ranges (03 note 2026-11-02), wider than [isLanAddress]:
  * loopback and unspecified join RFC 1918, CGNAT `100.64/10`, link-local, ULA and the
- * IPv4-mapped forms. `PreConfirmationPeerGuard` judges the connected peer's `InetAddress`,
+ * IPv4-compatible and mapped forms, multicast, reserved IPv4 and limited broadcast.
+ * `PreConfirmationPeerGuard` judges the connected peer's `InetAddress`,
  * so DNS answers and redirect targets cannot launder a local destination — and only marked
  * calls pay for it, so a typed LAN feed still fetches.
  */
@@ -175,7 +179,7 @@ private fun isLocalPeerV4(
 ): Boolean {
     val b0 = b[offset].toInt() and 0xFF
     val b1 = b[offset + 1].toInt() and 0xFF
-    return b0 == 0 || b0 == 10 || b0 == 127 ||
+    return b0 == 0 || b0 == 10 || b0 == 127 || b0 >= MULTICAST_V4_FIRST_OCTET ||
         (b0 == 100 && b1 in 64..127) ||
         (b0 == 169 && b1 == 254) ||
         (b0 == 172 && b1 in 16..31) ||
@@ -187,11 +191,13 @@ private fun isLocalPeerV6(b: ByteArray): Boolean {
         (0 until V4_MAPPED_PREFIX_BYTES).all { b[it].toInt() == 0 } &&
             (b[V4_MAPPED_PREFIX_BYTES].toInt() and 0xFF) == 0xFF &&
             (b[V4_MAPPED_PREFIX_BYTES + 1].toInt() and 0xFF) == 0xFF
-    if (v4Mapped) return isLocalPeerV4(b, V4_MAPPED_PREFIX_BYTES + 2)
+    // The deprecated ::/96 spelling also needs the embedded IPv4 classification.
+    val v4Compatible = (0 until V4_EMBEDDED_OFFSET).all { b[it].toInt() == 0 }
+    if (v4Mapped || v4Compatible) return isLocalPeerV4(b, V4_EMBEDDED_OFFSET)
 
     val b0 = b[0].toInt() and 0xFF
     val b1 = b[1].toInt() and 0xFF
-    return (b0 and 0xFE) == 0xFC || (b0 == 0xFE && (b1 and 0xC0) == 0x80)
+    return b0 == MULTICAST_V6_PREFIX || (b0 and 0xFE) == 0xFC || (b0 == 0xFE && (b1 and 0xC0) == 0x80)
 }
 
 /**

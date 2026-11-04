@@ -16,6 +16,8 @@ public object LocalDestination {
     private const val IPV4_PARTS = 4
     private const val IPV4_MAPPED_PREFIX_GROUPS = 5
     private const val IPV4_MAPPED_MARKER = 0xFFFF
+    private const val MULTICAST_V4_FIRST_OCTET = 224
+    private const val MULTICAST_V6_PREFIX = 0xFF00
     private const val BYTE_MASK = 0xFF
     private const val ULA_MASK = 0xFE00
     private const val ULA_PREFIX = 0xFC00
@@ -26,7 +28,8 @@ public object LocalDestination {
      * True when [url] is an absolute URL whose host names a local destination:
      * `localhost`, `*.localhost` and `*.local`; the IPv4 literals of 0/8, 10/8, 100.64/10, 127/8,
      * 169.254/16, 172.16/12 and 192.168/16; the IPv6 literals `::`, `::1`, fc00::/7 and fe80::/10
-     * including their `::ffff:` IPv4-mapped forms; and ambiguous numeric hosts that cannot be
+     * including local IPv4-compatible (`::/96`) and IPv4-mapped (`::ffff:`) forms; multicast,
+     * reserved IPv4 and limited broadcast; and ambiguous numeric hosts that cannot be
      * normalized safely. Valid decimal shorthands are classified after normalization.
      * Public hostnames and
      * public dotted quads are not local. HTTP authorities use the same lenient splitter as
@@ -76,7 +79,10 @@ public object LocalDestination {
         }
         val parts = host.split('.')
         if (parts.size == IPV4_PARTS && parts.all { it.isNotEmpty() && it.all { c -> c in '0'..'9' } }) {
-            return isLocalIpv4(parts.map(String::toInt))
+            // Normalization currently bounds every octet, but this classifier must remain
+            // total if that contract changes. Unreadable numeric hosts stay conservative.
+            val octets = parts.map { it.toIntOrNull()?.takeIf { octet -> octet in 0..BYTE_MASK } ?: return true }
+            return isLocalIpv4(octets)
         }
         return false
     }
@@ -100,6 +106,9 @@ public object LocalDestination {
         when {
             // 0/8, 10/8, 127/8
             octets[0] == 0 || octets[0] == 10 || octets[0] == 127 -> true
+
+            // Multicast 224/4 and reserved 240/4, including limited broadcast.
+            octets[0] >= MULTICAST_V4_FIRST_OCTET -> true
 
             // CGNAT 100.64/10
             octets[0] == 100 && octets[1] in 64..127 -> true
@@ -138,8 +147,14 @@ public object LocalDestination {
                 true
             }
 
-            // ::ffff:a.b.c.d — the IPv4-mapped spelling gets the IPv4 ranges.
-            groups.take(IPV4_MAPPED_PREFIX_GROUPS).all { it == 0 } && groups[5] == IPV4_MAPPED_MARKER -> {
+            // ff00::/8 multicast
+            groups[0] and MULTICAST_V6_PREFIX == MULTICAST_V6_PREFIX -> {
+                true
+            }
+
+            // Both ::a.b.c.d (compatible) and ::ffff:a.b.c.d (mapped) use the IPv4 ranges.
+            groups.take(IPV4_MAPPED_PREFIX_GROUPS).all { it == 0 } &&
+                (groups[5] == 0 || groups[5] == IPV4_MAPPED_MARKER) -> {
                 isLocalIpv4(
                     listOf(
                         groups[6] shr 8,
