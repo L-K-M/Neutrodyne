@@ -27,11 +27,15 @@ import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelResolver
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
+import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -66,7 +70,19 @@ class ImportFetchRunnerTest {
     private val snapshots = FakeSnapshotScheduler()
     private val adapter = StubSourceAdapter()
     private val engine = engineFor(adapter)
-    private val runner = ImportFetchRunner(db, engine, snapshots, reports, clock)
+    private val runner =
+        ImportFetchRunner(
+            db,
+            engine,
+            snapshots,
+            reports,
+            clock,
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeChannelResolver(),
+            ch.lkmc.neutrodyne.core.data
+                .testImportCommitter(db, clock),
+            kotlin.random.Random(0),
+        )
 
     @AfterTest
     fun tearDown() {
@@ -528,7 +544,7 @@ class ImportFetchRunnerTest {
     // --- Unresolved YouTube rows ---------------------------------------------------------------------
 
     @Test
-    fun anUnresolvedYouTubeItemStaysExplicitlyUnsupported() =
+    fun anUnresolvedYouTubeFailureIsReportedTruthfully() =
         runTest {
             val sessionId = newSession()
             queueItem(
@@ -543,7 +559,7 @@ class ImportFetchRunnerTest {
             assertEquals(ImportFetchResult.COMPLETED, runner.run(sessionId, attempt = 0))
 
             assertTrue(adapter.calls.isEmpty())
-            assertItem(sessionId, 0, ImportItemStatus.YOUTUBE_UNSUPPORTED_YET)
+            assertItem(sessionId, 0, ImportItemStatus.FETCH_FAILED, "YOUTUBE_RESOLUTION_FAILED")
             assertSessionDone(sessionId)
         }
 
@@ -725,6 +741,173 @@ class ImportFetchRunnerTest {
             assertSessionDone(sessionId)
         }
 
+    @Test
+    fun resolvedQueueUsesIdOnlyThenNormalInitialRefresh() =
+        runTest {
+            val id = "UCBJycsmduvYEL83R_U4JriQ"
+            val resolver =
+                FakeYouTubeChannelResolver().apply {
+                    resolve = { _, _ -> ChannelResolution.Resolved(id, "Resolved", null, null, null, ResolvedVia.HTML) }
+                }
+            val sid =
+                newSession(
+                    options =
+                        ImportOptions(
+                            committedAt = MARKER,
+                            attemptMarkerAt = MARKER,
+                            itemYouTubeInputs =
+                                mapOf(0 to "@one"),
+                        ),
+                )
+            queueItem(sid, 0, "@one", null, kind = ImportItemKind.YOUTUBE, normalizedUrl = null)
+            adapter.results["https://www.youtube.com/feeds/videos.xml?channel_id=$id"] = adapterParsed(parsedFeed())
+            val engine = newRefresher(db, mapOf(SourceType.YOUTUBE_CHANNEL to adapter), clock, settings)
+            val runner =
+                ImportFetchRunner(
+                    db,
+                    engine,
+                    snapshots,
+                    reports,
+                    clock,
+                    resolver,
+                    testImportCommitter(db, clock),
+                    kotlin.random.Random(0),
+                )
+            assertEquals(ImportFetchResult.COMPLETED, runner.run(sid, 0))
+            assertEquals(MetadataDepth.ID_ONLY, resolver.calls.single().second)
+            assertEquals(1, adapter.calls.size)
+            assertItem(sid, 0, ImportItemStatus.SUBSCRIBED)
+            assertEquals(
+                id,
+                db
+                    .podcastDao()
+                    .allForExport()
+                    .single()
+                    .youtubeChannelId,
+            )
+            assertTrue(poster.posts.isEmpty())
+        }
+
+    @Test
+    fun resolutionConcurrencyIsTwoAndRestartRetainsQueue() =
+        runTest {
+            val entered =
+                java.util.concurrent.atomic
+                    .AtomicInteger()
+            val max =
+                java.util.concurrent.atomic
+                    .AtomicInteger()
+            val twoEntered = CompletableDeferred<Unit>()
+            val resolver =
+                FakeYouTubeChannelResolver().apply {
+                    resolve = { _, _ ->
+                        val active = entered.incrementAndGet()
+                        max.updateAndGet { maxOf(it, active) }
+                        if (active == 2) twoEntered.complete(Unit)
+                        try {
+                            twoEntered.await()
+                            kotlinx.coroutines.delay(100)
+                            ChannelResolution.NotFound
+                        } finally {
+                            entered.decrementAndGet()
+                        }
+                    }
+                }
+            val sid = newSession()
+            repeat(5) { queueItem(sid, it, "@channel$it", null, kind = ImportItemKind.YOUTUBE, normalizedUrl = null) }
+            val runner =
+                ImportFetchRunner(
+                    db,
+                    engine,
+                    snapshots,
+                    reports,
+                    clock,
+                    resolver,
+                    testImportCommitter(db, clock),
+                    kotlin.random.Random(0),
+                )
+            // Room uses a real dispatcher; keep the lookup timeout on real time as well.
+            val result = withContext(Dispatchers.Default) { runner.run(sid, 0) }
+            assertEquals(ImportFetchResult.COMPLETED, result)
+            assertEquals(2, max.get())
+            assertEquals(5, resolver.calls.size)
+            assertTrue(db.importDao().itemsOf(sid).all { it.status == ImportItemStatus.FETCH_FAILED })
+        }
+
+    @Test
+    fun cancellingResolutionLeavesDurableQueueForANewRunner() =
+        runTest {
+            val entered = CompletableDeferred<Unit>()
+            val resolver =
+                FakeYouTubeChannelResolver().apply {
+                    resolve = { _, _ ->
+                        entered.complete(Unit)
+                        kotlinx.coroutines.awaitCancellation()
+                    }
+                }
+            val sid = newSession()
+            queueItem(sid, 0, "@channel", null, kind = ImportItemKind.YOUTUBE, normalizedUrl = null)
+            val cancelled =
+                ImportFetchRunner(
+                    db,
+                    engine,
+                    snapshots,
+                    reports,
+                    clock,
+                    resolver,
+                    testImportCommitter(db, clock),
+                    kotlin.random.Random(0),
+                )
+            val job = launch(Dispatchers.Default) { cancelled.run(sid, 0) }
+            entered.await()
+            job.cancelAndJoin()
+            assertItem(sid, 0, ImportItemStatus.QUEUED)
+            assertTrue(db.podcastDao().allForExport().isEmpty())
+            val restarted =
+                ImportFetchRunner(
+                    db,
+                    engine,
+                    snapshots,
+                    reports,
+                    clock,
+                    FakeYouTubeChannelResolver(),
+                    testImportCommitter(db, clock),
+                    kotlin.random.Random(0),
+                )
+            assertEquals(ImportFetchResult.COMPLETED, restarted.run(sid, 1))
+            assertItem(sid, 0, ImportItemStatus.FETCH_FAILED, "YOUTUBE_RESOLUTION_FAILED")
+            assertSessionDone(sid)
+        }
+
+    @Test
+    fun doesNotResubscribeRemovedResolvedChannel() =
+        runTest {
+            val id = "UCBJycsmduvYEL83R_U4JriQ"
+            val canonical = "https://www.youtube.com/feeds/videos.xml?channel_id=$id"
+            val resolver =
+                FakeYouTubeChannelResolver().apply {
+                    resolve = { _, _ -> ChannelResolution.Resolved(id, "Channel", null, null, null, ResolvedVia.HTML) }
+                }
+            val sid = newSession()
+            // An unsubscribe's SET NULL keeps the previously resolved canonical URL as evidence.
+            queueItem(sid, 0, "@channel", null, kind = ImportItemKind.YOUTUBE, normalizedUrl = canonical)
+            val runner =
+                ImportFetchRunner(
+                    db,
+                    engine,
+                    snapshots,
+                    reports,
+                    clock,
+                    resolver,
+                    testImportCommitter(db, clock),
+                    kotlin.random.Random(0),
+                )
+            assertEquals(ImportFetchResult.COMPLETED, runner.run(sid, 0))
+            assertTrue(db.podcastDao().allForExport().isEmpty())
+            assertTrue(resolver.calls.isEmpty())
+            assertItem(sid, 0, ImportItemStatus.FETCH_FAILED, "NOT_ATTEMPTED")
+        }
+
     // --- Fixtures ------------------------------------------------------------------------------------
 
     private fun engineFor(stub: StubSourceAdapter) =
@@ -736,7 +919,19 @@ class ImportFetchRunnerTest {
             notifier = NewEpisodeNotifier(db, EffectiveSettingsResolverImpl(db, settings), poster),
         )
 
-    private fun runnerFor(stub: StubSourceAdapter) = ImportFetchRunner(db, engineFor(stub), snapshots, reports, clock)
+    private fun runnerFor(stub: StubSourceAdapter) =
+        ImportFetchRunner(
+            db,
+            engineFor(stub),
+            snapshots,
+            reports,
+            clock,
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeChannelResolver(),
+            ch.lkmc.neutrodyne.core.data
+                .testImportCommitter(db, clock),
+            kotlin.random.Random(0),
+        )
 
     private suspend fun pendingPodcast(feedUrl: String): Long =
         seedPodcast(

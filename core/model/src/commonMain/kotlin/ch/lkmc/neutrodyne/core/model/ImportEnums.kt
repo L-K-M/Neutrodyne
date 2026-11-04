@@ -6,7 +6,7 @@ package ch.lkmc.neutrodyne.core.model
  * `import_session.sourceFormat` (02 import_session; the 05 import sources; `URL_LIST` is appended
  * at M8, `TEXT` storage needs no migration). Unknown values read back as [OPML].
  */
-enum class ImportFormat { OPML, NEWPIPE_JSON, LIBRETUBE_JSON, TAKEOUT_CSV, NEUTRODYNE_BACKUP }
+enum class ImportFormat { OPML, NEWPIPE_JSON, LIBRETUBE_JSON, TAKEOUT_CSV, NEUTRODYNE_BACKUP, URL_LIST }
 
 /** `import_session.state` (02; the 05 import lifecycle). Unknown values read back as [DONE]. */
 enum class ImportState { PREVIEW, COMMITTED, FETCHING, DONE, CANCELLED }
