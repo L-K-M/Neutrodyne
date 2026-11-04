@@ -96,8 +96,8 @@ class FirstLinkMergerTest {
                         db = db,
                         client = server,
                         applier = applier(db),
+                        engine = engine(db, server),
                         clock = TestClock(now),
-                        nodeId = NodeId("0000000000000001"),
                     )
                 val result = merger.merge(FirstLinkChoice.MERGE)
                 assertTrue(result is FirstLinkResult.Completed)
@@ -109,6 +109,52 @@ class FirstLinkMergerTest {
                 val link = db.syncStateDao().get()
                 assertTrue(link?.enabled == true)
                 assertNotNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The bootstrap writes must run with capture already enabled: a Merge onto an empty account
+     * uploads this device's library with the rows' own timestamps (10 Merge steps 4-5).
+     */
+    @Test
+    fun mergeUploadsTheLocalLibraryWhenTheAccountIsEmpty() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                db.withWriteTransaction {
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                }
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = ScriptedClient(emptyList()),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList())),
+                        clock = TestClock(now),
+                    )
+                val result = merger.merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Completed)
+
+                val rows = db.syncOutboxDao().rows()
+                val feedUrl = rows.firstOrNull { it.coll == "podcast" && it.field == "feedUrl" }
+                assertNotNull(feedUrl, "rows=$rows")
+                assertTrue(feedUrl.hlc ushr 16 <= now)
+                assertTrue(
+                    rows.none { it.hlc ushr 16 > now + 1_000 },
+                    "bootstrap writes keep their row timestamps, rows=$rows",
+                )
             } finally {
                 db.close()
             }
@@ -170,11 +216,10 @@ class FirstLinkMergerTest {
                         db = db,
                         client = ScriptedClient(emptyList()),
                         applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList())),
                         clock = TestClock(now),
-                        nodeId = NodeId("0000000000000001"),
                     )
                 val resyncResult = merger.resync()
-                java.io.File("/tmp/resync-debug.log").appendText("result=$resyncResult\n")
                 assertTrue(resyncResult is FirstLinkResult.Completed)
 
                 val outboxRows = db.syncOutboxDao().rows()
@@ -191,6 +236,46 @@ class FirstLinkMergerTest {
                 db.close()
             }
         }
+
+    /** The engine the merge's push rounds run through, over the same scripted client. */
+    private fun engine(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        client: SyncClient,
+    ): SyncEngine {
+        val secrets = FakeSecretStore()
+        return SyncEngine(
+            db = db,
+            client = client,
+            applier = applier(db),
+            clock = TestClock(now),
+            secrets = secrets,
+            sharePasswords = { false },
+            address =
+                object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
+                    override suspend fun serverUrl(): String = "https://sync.example"
+
+                    override suspend fun username(): String? = null
+
+                    override suspend fun deviceName(): String? = null
+
+                    override suspend fun shareFeedPasswords(): Boolean = false
+
+                    override suspend fun syncPlaybackSettings(): Boolean = true
+
+                    override suspend fun setServerUrl(url: String?) = Unit
+
+                    override suspend fun setUsername(username: String?) = Unit
+
+                    override suspend fun setShareFeedPasswords(enabled: Boolean) = Unit
+
+                    override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
+                },
+            tokens =
+                SyncTokenStore(secrets).apply {
+                    kotlinx.coroutines.runBlocking { save("sync.example", "token") }
+                },
+        )
+    }
 
     private fun applier(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase): SyncApplier =
         SyncApplier(
