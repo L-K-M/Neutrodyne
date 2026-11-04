@@ -663,4 +663,33 @@
     <string name="chapter_number">Chapter %1$d</string>
     <string name="chapter_seek">Seek to %1$s</string>
     <string name="settings_update_available">Settings, update available</string>
+
+    <!-- Owner radio home design, 2026-11-04. -->
+    <string name="radio_menu">Menu</string>
+    <string name="radio_your_playlist">Your playlist</string>
+    <string name="radio_new_playlist">New playlist</string>
+    <string name="radio_episodes">Episodes</string>
+    <string name="radio_swipe">Swipe left to discard</string>
+    <string name="radio_removed">Removed from this playlist.</string>
+    <string name="radio_ready">READY TO PLAY</string>
+    <string name="radio_playing">NOW PLAYING</string>
+    <string name="radio_paused">PAUSED</string>
+    <string name="radio_cleared">PLAYLIST CLEARED</string>
+    <string name="radio_play">Play</string>
+    <string name="radio_pause">Pause</string>
+    <string name="radio_elapsed">Elapsed</string>
+    <string name="radio_playlists">Your playlists</string>
+    <string name="radio_create">Create playlist</string>
+    <string name="radio_name">Playlist name</string>
+    <string name="radio_podcasts">Choose podcasts</string>
+    <string name="radio_choose_note">Choose at least one podcast to add its episodes.</string>
+    <string name="radio_placeholder">e.g. Evening listening</string>
+    <string name="radio_all_clear">All clear.</string>
+    <string name="radio_no_episodes">No episodes left in this playlist.</string>
+    <string name="radio_nothing">Nothing queued</string>
+    <string name="radio_choose_other">Choose another playlist to listen.</string>
+    <string name="radio_release">Release</string>
+    <string name="radio_discard">to discard</string>
+    <string name="radio_elapsed_full">Elapsed: %1$d hours, %2$d minutes, %3$d seconds</string>
+    <string name="radio_meta">%1$d podcasts · %2$d episodes</string>
 </resources>

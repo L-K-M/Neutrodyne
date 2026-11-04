@@ -1,0 +1,10 @@
+{
+  "uniqueId": "neutrodyne:font-dosis",
+  "name": "Dosis font",
+  "website": "https://github.com/google/fonts/tree/main/ofl/dosis",
+  "developers": [],
+  "licenses": [
+    "OFL-1.1-dosis"
+  ],
+  "tag": "bundled"
+}
