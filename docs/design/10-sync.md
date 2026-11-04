@@ -1188,6 +1188,39 @@ Step 5's `captureAt` receives the frozen value as well as its pre-merge timestam
 
 AntennaPod's first sync uploads every played episode stamped with the current time ([SyncService at 9c7ffa1](https://github.com/AntennaPod/AntennaPod/blob/9c7ffa16736c020045571d274aef4cdcf0878100/net/sync/service/src/main/java/de/danoeh/antennapod/net/sync/service/SyncService.java#L228-L248)), which flips later "unplayed" marks on other devices; stamping with row timestamps avoids that (risk SR2).
 
+**Implementation note (2026-11-04, MS2, link flow).** The client link
+flow (`SyncControllerImpl`/`LinkFlowImpl` in `:sync:impl`) drives the link
+code, invite and password methods, the approve/confirm sheet's calls, the
+three first-link choices through `FirstLinkMerger`, unlink/
+"Delete my data on the server", and device rename/revoke, all on the existing
+`SyncClient`, `SyncTokenStore` and protocol DTOs; the Settings › Sync setup
+screen follows `LinkState` (`:feature:sync`, strings EN/DE). The empty-account
+upload is confirmed with a named step (`LinkState.ConfirmUpload`), so a wrong
+account never uploads silently. Deviations forced by the current code:
+
+- "Use the server's library on this device" replaces local-only podcasts,
+  groups, Up next and the session context through the shared removal paths;
+  it does not run 05's Replace port (05's `RestoreMerger` refuses the
+  `LINK_*` policies), and synced settings keep following the field merge.
+- "Use this device's library everywhere" stages the server snapshot without
+  applying it, captures this device's whole library, pushes until the outbox
+  drains and prunes with `account/reset {mode: "library"}` bound to the staged
+  cursor. Step 2's ID adoption and episode-history merge through
+  `LibraryMerger` are not implemented, so server episode records are not
+  merged into local history during that choice.
+- The second confirmation naming the effect on the other devices is not
+  shown; the choice screen offers the three options directly (the effect
+  counts need the staged pull, which the merger runs only after the choice).
+- A plain `http://` address to a public host is refused before the discovery
+  request rather than after it, so no cleartext request leaves the device;
+  loopback and local addresses still ask once.
+- Unlink's 5-s push budget runs on the injected IO dispatcher (a coroutine
+  timeout there is wall-clock, independent of test virtual time).
+- The bootstrap capture writes run with capture already enabled and the
+  pulled cursor adopted, so the upload of a Merge or an empty account keeps
+  the rows' own timestamps; a played literal travels as one wire pair with a
+  single clock, as 05's archive requires.
+
 ### Use the server's library on this device
 
 05's **Replace** with the server's records as the backup: local podcasts the server lacks are unsubscribed (D24), local-only groups deleted, state replaced, Up next and session replaced, settings replaced. The dialog first offers "Save a backup first" (05's backup flow). All local writes run with `applying = 1`; each applied record seeds its exact received raw fields, clocks and session `by` in `sync_clock` with the projection transaction. `hlc` is raised past every clock seen, then `enabled = 1` and `linkedAt` with the pulled cursor. Nothing is pushed except later local changes, which therefore order after the adopted state.
