@@ -42,7 +42,8 @@ object AllSettingKeys {
             PlaybackSettingKeys.acceptsRange(key, value) &&
             DownloadSettingKeys.acceptsRange(key, value) &&
             UpdateSettingKeys.acceptsRange(key, value) &&
-            DiscoverSettingKeys.acceptsValue(key, value)
+            DiscoverSettingKeys.acceptsValue(key, value) &&
+            YouTubeSettingKeys.acceptsRange(key, value)
 }
 
 /** The stored-type half of [AllSettingKeys.acceptsValue]; one branch per [SettingKey] subclass. */

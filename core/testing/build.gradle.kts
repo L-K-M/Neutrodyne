@@ -38,7 +38,11 @@ kotlin {
             implementation(libs.coil.core)
             api(libs.coil.test)
         }
+        // Host contracts are JVM-only; keep their fakes out of commonMain metadata.
+        androidMain { kotlin.srcDir("src/jvmSharedMain/kotlin") }
+        desktopMain { kotlin.srcDir("src/jvmSharedMain/kotlin") }
         androidMain.dependencies {
+            implementation(project(":youtube:engine"))
             implementation(libs.junit4)
             implementation(libs.truth)
             // TestSqliteDriverBindings: the framework driver for Robolectric tests (01 Test overrides)
@@ -47,6 +51,7 @@ kotlin {
             implementation(libs.androidx.sqlite.bundled)
         }
         desktopMain.dependencies {
+            implementation(project(":youtube:engine"))
             implementation(libs.junit4)
             implementation(libs.truth)
             // TestDb defaults to the bundled driver; it is `implementation` in :core:database.
