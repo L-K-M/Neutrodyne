@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="yt_long_form_note">Nur lange Videos; in den Podcast-Einstellungen änderbar</string>
+    <string name="yt_variants_note">Durch diesen Link ausgewählte Videos; in den Podcast-Einstellungen änderbar</string>
+    <string name="yt_rss_offer">Diese Sendung hat auch einen Podcast-Feed. Abonniere stattdessen den Podcast.</string>
+    <string name="yt_use_podcast">Podcast verwenden</string>
+    <string name="yt_not_found">Diesen YouTube-Kanal gibt es nicht oder er wurde entfernt.</string>
+    <string name="yt_playlist_unsupported">YouTube-Playlists kannst du noch nicht abonnieren.</string>
+    <string name="yt_network_error">YouTube ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut.</string>
+    <string name="yt_rate_limited">YouTube begrenzt die Anfragen aus deinem Netzwerk. Versuche es später erneut.</string>
+    <string name="yt_page_error">Diese YouTube-Seite konnte nicht gelesen werden. Füge den /channel/UC…-Link des Kanals oder den Link eines seiner Videos ein.</string>
+    <string name="yt_subscribe_owner">%1$s abonnieren</string>
+    <string name="yt_include_shorts">Shorts einschließen</string>
+    <string name="yt_include_live">Vergangene Livestreams einschließen</string>
+    <string name="yt_live_future_note">Das ändert künftige Abfragen. Bereits geladene vergangene Livestreams bleiben sichtbar. Ohne YouTube-Engine können Livestreams und Premieren als gewöhnliche Videos erscheinen.</string>
+    <string name="yt_empty_channel">Noch keine langen Videos. Dieser Kanal veröffentlicht möglicherweise nur Shorts oder Livestreams.</string>
+    <string name="yt_edit_input">Bearbeiten</string>
+</resources>

@@ -577,6 +577,8 @@ class SettingsScreensTest {
                                 ),
                                 desktopIntegration,
                                 Provider { FakePodcastRepository() },
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeCapabilitiesSource(),
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )
