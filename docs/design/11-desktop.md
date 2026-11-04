@@ -822,7 +822,9 @@ this reports a rejected start even though no remote playback service exists.
 Selection and persistence use `PlayStarter`, `QueueWindowPlanner`, `PositionSaver`, `PlaybackHistory`
 and `EffectivePlaybackSettings`; there is no second desktop queue algorithm.
 Effective speed and skip silence are set before `setWindow`, since preparation
-may prime decoded buffers before the device plays. Saves run every five seconds
+may prime decoded buffers before the device plays. The non-replaying engine
+event collector subscribes before preparation so early measured-duration
+metadata cannot be dropped. Saves run every five seconds
 while advancing and on pause, buffering stall, user seek, departure and shutdown.
 Measured duration goes through `PositionStore`; source/cache settings and maintenance
 use the existing device-local streaming cache preference.
