@@ -1846,6 +1846,28 @@
 -keep class ch.lkmc.neutrodyne.core.database.migration.AllMigrationsKt {
   public static androidx.room3.migration.Migration[] getALL_MIGRATIONS();
 }
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceDataStoreMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceDataStoreMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceDataStoreMetroFactory {
+  ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceDataStoreMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceSettingsStoreMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceSettingsStoreMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceSettingsStoreMetroFactory {
+  ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceSettingsStoreMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings {
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory$MetroFactory {
+  ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory {
+}
 -keep class ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs {
 }
 -keep class ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState {
@@ -2282,6 +2304,149 @@
 -keep class ch.lkmc.neutrodyne.di.DatabaseBindings {
 }
 -keep interface ch.lkmc.neutrodyne.download.api.LocalMediaIndex {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$IndexMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$IndexMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$IndexMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$IndexMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$LaneWorkerMetroFactory$Companion {
+  public kotlin.jvm.functions.Function2 laneWorker(ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$Factory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$LaneWorkerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$LaneWorkerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$QueueMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$QueueMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$QueueMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$QueueMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ReconcileWorkerMetroFactory$Companion {
+  public kotlin.jvm.functions.Function2 reconcileWorker(ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$Factory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ReconcileWorkerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ReconcileWorkerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RegistryMetroFactory {
+  public static ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RegistryMetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RootsMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RootsMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RootsMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RootsMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerPortMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerPortMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerPortMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerPortMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$WakeWorkerMetroFactory$Companion {
+  public kotlin.jvm.functions.Function2 wakeWorker(ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$Factory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$WakeWorkerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$WakeWorkerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility$MetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadComponents {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$Factory$Impl$Companion {
+  public dev.zacsweers.metro.Provider create(ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$MetroFactory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$Factory$Impl {
+  ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$Factory$Impl$Companion Companion;
+}
+-keep interface ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$Factory {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$Factory$Impl$Companion {
+  public dev.zacsweers.metro.Provider create(ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$MetroFactory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$Factory$Impl {
+  ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$Factory$Impl$Companion Companion;
+}
+-keep interface ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$Factory {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadReconcileWorker {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$Factory$Impl$Companion {
+  public dev.zacsweers.metro.Provider create(ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$MetroFactory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$Factory$Impl {
+  ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$Factory$Impl$Companion Companion;
+}
+-keep interface ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$Factory {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$MetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadWakeWorker {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.LocalMediaIndexImpl$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.LocalMediaIndexImpl$MetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.download.impl.LocalMediaIndexImpl$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.LocalMediaIndexImpl$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.LocalMediaIndexImpl {
 }
 -keep class ch.lkmc.neutrodyne.feature.discover.DirectoryViewModel$Factory$Impl$Companion {
   public dev.zacsweers.metro.Provider create(ch.lkmc.neutrodyne.feature.discover.DirectoryViewModel$MetroFactory);
@@ -2862,11 +3027,6 @@
 -keep class ch.lkmc.neutrodyne.notifications.UpdateNotifierContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.notifications.UpdateNotifierContributions {
-}
--keep class ch.lkmc.neutrodyne.playback.AndroidLocalMediaBindings$LocalMediaIndexMetroFactory {
-  public static ch.lkmc.neutrodyne.playback.AndroidLocalMediaBindings$LocalMediaIndexMetroFactory create();
-}
--keep class ch.lkmc.neutrodyne.playback.AndroidLocalMediaBindings {
 }
 -keep class ch.lkmc.neutrodyne.playback.api.NowPlaying {
   public long getEpisodeId();
