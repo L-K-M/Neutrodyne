@@ -64,6 +64,9 @@ class FfDemuxer
         /** The audio stream's time base, which converts a seek target to FFmpeg's units. */
         private val timeBase: Pair<Int, Int>
 
+        /** The audio stream's own duration in [timeBase] units, `AV_NOPTS_VALUE` when unknown. */
+        private val streamDuration: Long
+
         /** The audio stream's time base, for a caller converting timestamps. */
         val streamTimeBase: Pair<Int, Int> get() = timeBase
 
@@ -178,6 +181,7 @@ class FfDemuxer
                                 1 to AV_TIME_BASE
                             }
                         }
+                streamDuration = stream.readLong(layout, "AVStream", "duration")
                 codecParametersOf = stream.readAddress(layout, "AVStream", "codecpar")
                 audioTrack =
                     AudioTrackInfo(
@@ -208,11 +212,17 @@ class FfDemuxer
             return requireNotNull(AudioCodec.fromName(name)) { "FFmpeg reports $name, which D86 does not list" }
         }
 
-        /** The container duration, in milliseconds; null when the container does not know it. */
+        /**
+         * The media duration in milliseconds: the container's, else the selected audio stream's;
+         * null when neither is known. Preparation skips `avformat_find_stream_info`, which is what
+         * fills the container duration for headers like WAV, so the stream's own value covers it.
+         */
         private fun durationOf(): Long? {
             val units = formatContext.readLong(layout, "AVFormatContext", "duration")
-            if (units <= 0 || units == AV_NOPTS_VALUE) return null
-            return units / (AV_TIME_BASE / MILLIS_PER_SECOND)
+            if (units > 0 && units != AV_NOPTS_VALUE) return units / (AV_TIME_BASE / MILLIS_PER_SECOND)
+            if (streamDuration <= 0 || streamDuration == AV_NOPTS_VALUE) return null
+            val (num, den) = timeBase
+            return streamDuration * num * MILLIS_PER_SECOND / den
         }
 
         private fun chaptersOf(): List<EngineChapter> {
