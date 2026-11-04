@@ -226,6 +226,15 @@ without issuing transport commands, retaining D7's routes-only-navigate fence.
 A failed or consent-blocked start keeps any still-playing session controllable
 until its replacement starts.
 
+**Large text and time scales (2026-11-04).** Cabinet fitting includes font
+scale; when the controls and programme need more height, the whole assembly
+scrolls. The normal 56–60 dp transport cap is retained through 1.3× text and
+grows above that scale to keep its label inside. Content titles use at most
+two lines with ellipsis and retain their full accessible text. Deck fitting
+uses the measured player height independently of whether the deck is shown.
+The printed needle scale retains uncapped minutes and seconds; only the
+four-tube counter uses PO-53's capped hours format.
+
 **Implementation notes (2026-11-04).** The shared radio primitives and resources
 live in `:core:ui`; the production adapter lives in `:feature:feeds`. A queued
 episode outside the group's membership still drives the radio transport and

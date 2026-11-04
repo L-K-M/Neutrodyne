@@ -30,15 +30,18 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -76,6 +79,9 @@ internal fun RadioInsertDialog(
 ) {
     val name = form.name
     val chosen = form.chosen
+    val canCreate =
+        name.trim().isNotEmpty() && name.trim().count { !it.isLowSurrogate() } <= 40 &&
+            chosen.isNotEmpty() && !state.creating
     val focus = remember { FocusRequester() }
     val dismiss by rememberUpdatedState(onDismiss)
     LaunchedEffect(state.createdPlaylistId) {
@@ -150,16 +156,29 @@ internal fun RadioInsertDialog(
                                                 } else {
                                                     Modifier
                                                 },
-                                            ).clickable {
+                                            ).focusProperties { canFocus = true }
+                                            .clickable {
                                                 actions.selectPlaylist(playlist.id)
                                                 onDismiss()
-                                            }.padding(vertical = 16.dp),
+                                            }.testTag("radio_playlist_option_${playlist.id}")
+                                            .padding(vertical = 16.dp),
                                 )
                             }
                         }
-                        TextButton(onClick = {
-                            onMode(RadioInsert.CREATE)
-                        }, modifier = if (state.playlists.isEmpty()) Modifier.focusRequester(focus) else Modifier) {
+                        TextButton(
+                            onClick = {
+                                onMode(RadioInsert.CREATE)
+                            },
+                            modifier =
+                                if (state.playlists.isEmpty()) {
+                                    Modifier.focusRequester(focus).focusProperties {
+                                        canFocus =
+                                            true
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                        ) {
                             RadioText(stringResource(Res.string.radio_new_playlist), 14)
                         }
                     } else {
@@ -206,20 +225,25 @@ internal fun RadioInsertDialog(
                         }
                         TextButton(
                             onClick = { actions.createPlaylist(name, chosen) },
-                            enabled =
-                                name.trim().isNotEmpty() && name.trim().count {
-                                    !it.isLowSurrogate()
-                                } <= 40 && chosen.isNotEmpty() &&
-                                    !state.creating,
+                            enabled = canCreate,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("radio_create"),
-                        ) { RadioText(stringResource(Res.string.radio_create), 14, bold = true) }
+                        ) {
+                            RadioText(
+                                stringResource(Res.string.radio_create),
+                                14,
+                                bold = true,
+                                color = if (canCreate) Ink else Ink.copy(alpha = 0.4f),
+                            )
+                        }
                     }
                 }
             }
         }
         val windowFocused = LocalWindowInfo.current.isWindowFocused
-        LaunchedEffect(mode, windowFocused) {
+        val inputMode = LocalInputModeManager.current
+        LaunchedEffect(mode, windowFocused, inputMode) {
             if (windowFocused) {
+                if (mode == RadioInsert.CHOOSER) inputMode.requestInputMode(InputMode.Keyboard)
                 withFrameNanos { }
                 focus.requestFocus()
             }
