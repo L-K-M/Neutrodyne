@@ -54,6 +54,13 @@ class LinkFlowImpl : LinkFlow {
         _state.value = LinkState.Authorising
     }
 
+    fun confirmUpload(
+        accountName: String,
+        host: String,
+    ) {
+        _state.value = LinkState.ConfirmUpload(accountName, host)
+    }
+
     fun chooseFirstLink(
         localPodcasts: Int,
         localGroups: Int,
