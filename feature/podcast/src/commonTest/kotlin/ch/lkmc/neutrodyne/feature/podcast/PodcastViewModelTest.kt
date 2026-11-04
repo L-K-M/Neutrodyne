@@ -65,6 +65,12 @@ import kotlin.time.Duration.Companion.days
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PodcastViewModelTest : MainDispatcherTest() {
+    private val engine =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeEngine()
+    private val caps =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeCapabilitiesSource()
     private val downloads =
         ch.lkmc.neutrodyne.core.testing
             .FakeDownloadController()
@@ -104,14 +110,58 @@ class PodcastViewModelTest : MainDispatcherTest() {
         externalOpenService =
             ch.lkmc.neutrodyne.core.testing
                 .FakeYouTubeExternalOpen(),
-        capabilities =
-            ch.lkmc.neutrodyne.core.testing
-                .FakeYouTubeCapabilitiesSource(),
+        capabilities = caps,
+        engine = engine,
     )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun screenPrewarmWaitsForChannelAndRunsOncePerOpening() =
+        runTest {
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = true)
+            val model = viewModel()
+            model.onVisible()
+            runCurrent()
+            assertEquals(emptyList(), engine.prewarms)
+            podcasts.detail.value =
+                testPodcastDetail(7).copy(
+                    sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                )
+            runCurrent()
+            model.onVisible()
+            runCurrent()
+            assertEquals(listOf(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN), engine.prewarms)
+            model.onHidden()
+            model.onVisible()
+            runCurrent()
+            assertEquals(2, engine.prewarms.size)
+            model.onHidden()
+        }
+
+    @Test fun hiddenUnknownRssAndExternalChannelsNeverPrewarm() =
+        runTest {
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = true)
+            val model = viewModel()
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            podcasts.detail.value = testPodcastDetail(7)
+            runCurrent()
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            caps.capabilities.value = caps.capabilities.value.copy(inAppPlayback = false)
+            podcasts.detail.value =
+                testPodcastDetail(7).copy(
+                    sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                )
+            model.onVisible()
+            runCurrent()
+            model.onHidden()
+            assertEquals(emptyList(), engine.prewarms)
+        }
 
     private suspend fun FakeGroupRepository.createId(name: String): Long =
         (create(GroupDraft(name)) as Outcome.Success).value

@@ -7,11 +7,17 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.source.UnrecognizedInputFormatException
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.domain.YouTubeAvailabilityRecorder
+import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import ch.lkmc.neutrodyne.playback.api.StreamKind
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.core.RecoveryBudget
+import ch.lkmc.neutrodyne.youtube.api.ResolveResult
+import ch.lkmc.neutrodyne.youtube.api.TransientKind
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeResolveException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -33,6 +39,9 @@ internal class ErrorRecovery(
     private val isForeground: () -> Boolean,
     private val emitEvent: (PlaybackEvent) -> Unit,
     private val reportMissing: suspend (Long) -> Unit = {},
+    private val recorder: YouTubeAvailabilityRecorder,
+    private val capabilities: YouTubeCapabilitiesSource,
+    private val coreSeek: (() -> Unit) -> Unit,
     private val allowStream: suspend (Long) -> Boolean = { true },
 ) : Player.Listener {
     private data class Reconnect(
@@ -46,9 +55,12 @@ internal class ErrorRecovery(
     private var expiry: Job? = null
     private var reconnect: Reconnect? = null
     private val contentRetried = mutableSetOf<Long>()
+    private val formatRetried = mutableSetOf<Long>()
+    private var occurrence = 0L
     private val audioRetried = mutableSetOf<Long>()
     private val localRetried = mutableSetOf<Long>()
     private var missingRecovery: Job? = null
+    private var availabilityRecovery: Job? = null
     private val mutableIssue = MutableStateFlow<PlaybackIssue?>(null)
     val issue = mutableIssue.asStateFlow()
 
@@ -70,8 +82,90 @@ internal class ErrorRecovery(
         val id = live.episodeIdOrNull() ?: return
         checkPlayerThread(live)
         cancelReconnect()
+        availabilityRecovery?.cancel()
+        availabilityRecovery = null
         val causes = error.causeChain()
         val http = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
+        val changed = causes.filterIsInstance<YouTubeFormatChangedException>().firstOrNull()
+        val youtube = causes.filterIsInstance<YouTubeResolveException>().firstOrNull()
+        if (changed != null) {
+            if (formatRetried.add(id)) {
+                reprepare(id, PinRecovery.RELEASE, changed)
+            } else {
+                skip(id, UnplayableReason.YouTubeExtraction)
+            }
+            return
+        }
+        if (youtube != null) {
+            when (val result = youtube.result) {
+                is ResolveResult.Unavailable -> {
+                    val captured = occurrence
+                    availabilityRecovery?.cancel()
+                    availabilityRecovery =
+                        playerScope.launch {
+                            try {
+                                recorder.record(id, result.reason)
+                                if (player === live && live.episodeIdOrNull() == id && captured == occurrence) {
+                                    skip(id, UnplayableReason.YouTube(result.reason))
+                                }
+                            } catch (
+                                cancelled: CancellationException,
+                            ) {
+                                throw cancelled
+                            } catch (
+                                _: Exception,
+                            ) {
+                                if (player === live && captured == occurrence) pause()
+                            }
+                        }
+                }
+
+                is ResolveResult.Transient -> {
+                    when (result.kind) {
+                        TransientKind.EXTRACTION -> {
+                            skip(id, UnplayableReason.YouTubeExtraction)
+                        }
+
+                        TransientKind.BREAKER_OPEN -> {
+                            mutableIssue.value = PlaybackIssue.YOUTUBE_BREAKER_OPEN
+                            skip(id, UnplayableReason.YouTubeExtraction, skipRemoteYouTube = true)
+                        }
+
+                        TransientKind.RATE_LIMITED -> {
+                            mutableIssue.value = PlaybackIssue.YOUTUBE_RATE_LIMITED
+                            live.pause()
+                        }
+
+                        TransientKind.NETWORK, TransientKind.TIMEOUT, TransientKind.ENGINE_UNAVAILABLE -> {
+                            if (network.status.value.isConnected && network.status.value.isValidated) {
+                                pause()
+                            } else {
+                                awaitNetwork(live, id)
+                            }
+                        }
+                    }
+                }
+
+                ResolveResult.Unsupported -> {
+                    skip(
+                        id,
+                        UnplayableReason.YouTubeExternal(
+                            capabilities.capabilities.value.externalReason ?: ExternalReason.NOT_YET_AVAILABLE,
+                        ),
+                    )
+                }
+
+                is ResolveResult.Ok -> {
+                    pause()
+                }
+            }
+            return
+        }
+        if (resolver.streamKind(id) == StreamKind.YOUTUBE && http != null) {
+            // Exhausted media URL retries are never RSS authentication or missing-feed errors.
+            pause()
+            return
+        }
         val noMedia = causes.any { it is EpisodeGoneException || it is NoMediaException }
         when {
             error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND &&
@@ -95,7 +189,7 @@ internal class ErrorRecovery(
                                 live.pause()
                                 return@launch
                             }
-                            live.seekTo(position)
+                            coreSeek { live.seekTo(position) }
                             live.prepare()
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -141,19 +235,26 @@ internal class ErrorRecovery(
             }
 
             error.errorCode in NETWORK_CODES || causes.any { it is IOException } -> {
-                mutableIssue.value = PlaybackIssue.NETWORK_LOST
-                reconnect = Reconnect(id, clock.elapsedRealtime(), live.playWhenReady)
-                expiry =
-                    playerScope.launch {
-                        delay(FOREGROUND_WINDOW_MS)
-                        cancelReconnect()
-                    }
+                awaitNetwork(live, id)
             }
 
             else -> {
                 pause()
             }
         }
+    }
+
+    private fun awaitNetwork(
+        live: Player,
+        id: Long,
+    ) {
+        mutableIssue.value = PlaybackIssue.NETWORK_LOST
+        reconnect = Reconnect(id, clock.elapsedRealtime(), live.playWhenReady)
+        expiry =
+            playerScope.launch {
+                delay(FOREGROUND_WINDOW_MS)
+                cancelReconnect()
+            }
     }
 
     private fun reconnectIfAllowed() {
@@ -174,6 +275,7 @@ internal class ErrorRecovery(
     private fun reprepare(
         id: Long,
         releasePin: PinRecovery = PinRecovery.KEEP,
+        change: YouTubeFormatChangedException? = null,
     ) {
         val live = player ?: return
         if (!isForeground() || !budget.tryReprepare(id)) {
@@ -184,8 +286,8 @@ internal class ErrorRecovery(
             // Cancel loaders before invalidating the rendition; a new RSS pin resets its resource.
             val position = live.currentPosition.coerceAtLeast(0)
             live.stop()
-            resolver.unpin(id)
-            live.seekTo(position)
+            resolver.repin(id, change)
+            coreSeek { live.seekTo(position) }
         }
         live.prepare()
     }
@@ -193,6 +295,7 @@ internal class ErrorRecovery(
     private fun skip(
         id: Long,
         reason: UnplayableReason,
+        skipRemoteYouTube: Boolean = false,
     ) {
         val live = player ?: return
         if (!budget.trySkip()) {
@@ -205,7 +308,19 @@ internal class ErrorRecovery(
             mutableIssue.value = PlaybackIssue.PLAYER_ERROR
             return
         }
-        projector.advance()
+        if (skipRemoteYouTube) {
+            projector.advancePastRemoteYouTube { next ->
+                if (!budget.trySkip()) {
+                    pause()
+                    false
+                } else {
+                    emitEvent(PlaybackEvent.Skipped(next, index[next]?.title.orEmpty(), reason))
+                    true
+                }
+            }
+        } else {
+            projector.advance()
+        }
         // The projector prepares only after the arriving item's durable start seek/settings.
     }
 
@@ -225,11 +340,15 @@ internal class ErrorRecovery(
         mediaItem: androidx.media3.common.MediaItem?,
         reason: Int,
     ) {
+        occurrence++
+        availabilityRecovery?.cancel()
+        availabilityRecovery = null
         cancelReconnect()
         missingRecovery?.cancel()
         missingRecovery = null
         val id = player?.episodeIdOrNull()
         contentRetried.retainAll(setOfNotNull(id))
+        formatRetried.clear()
         audioRetried.retainAll(setOfNotNull(id))
         localRetried.retainAll(setOfNotNull(id))
     }
@@ -256,6 +375,10 @@ internal class ErrorRecovery(
         observing?.cancel()
         observing = null
         cancelReconnect()
+        occurrence++
+        availabilityRecovery?.cancel()
+        availabilityRecovery = null
+        formatRetried.clear()
         contentRetried.clear()
         audioRetried.clear()
         localRetried.clear()
@@ -297,9 +420,9 @@ internal class ErrorRecovery(
     }
 }
 
-private fun Throwable.causeChain(): List<Throwable> {
+internal fun Throwable.causeChain(): List<Throwable> {
     val seen = mutableSetOf<Throwable>()
     var next: Throwable? = this
-    while (next != null && seen.add(next)) next = next.cause
+    while (next != null && seen.size < 64 && seen.add(next)) next = next.cause
     return seen.toList()
 }
