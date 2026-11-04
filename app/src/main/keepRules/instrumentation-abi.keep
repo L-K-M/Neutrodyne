@@ -690,7 +690,7 @@
   public static org.jetbrains.compose.resources.StringResource getNav_library(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_up_next(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
--keep class ch.lkmc.neutrodyne.core.ui.resources.String7_commonMainKt {
+-keep class ch.lkmc.neutrodyne.core.ui.resources.String8_commonMainKt {
   public static org.jetbrains.compose.resources.StringResource getSettings(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
 -keep class ch.lkmc.neutrodyne.di.AndroidAppGraph$Factory$Impl {
