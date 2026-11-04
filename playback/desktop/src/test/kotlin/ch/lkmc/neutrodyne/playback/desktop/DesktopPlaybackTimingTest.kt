@@ -28,6 +28,8 @@ import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
+import ch.lkmc.neutrodyne.playback.engine.EngineEvent
+import ch.lkmc.neutrodyne.playback.engine.Gapless
 import ch.lkmc.neutrodyne.playback.engine.SpanCache
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -138,6 +140,22 @@ class DesktopPlaybackTimingTest {
             } finally {
                 fixture.close()
                 Files.delete(file)
+            }
+        }
+
+    @Test
+    fun metadataEmittedDuringPreparationIsNeverDropped() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                fixture.engine.onWindow = {
+                    fixture.engine.events.tryEmit(EngineEvent.TracksKnown(1, 80_000, emptyList(), Gapless(0, 0, 0)))
+                }
+                fixture.controller.play()
+                runCurrent()
+                assertEquals(80_000L, fixture.positions.measuredDurations[1])
+            } finally {
+                fixture.close()
             }
         }
 

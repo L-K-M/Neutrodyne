@@ -118,7 +118,7 @@ class DesktopNativePlaybackTest {
                                     "https://media.example/local.wav",
                                     null,
                                     null,
-                                    5_000,
+                                    120_000,
                                     null,
                                     null,
                                 ),
@@ -161,7 +161,12 @@ class DesktopNativePlaybackTest {
             val controller = DesktopPlaybackController(scope, clock, { runtime })
             try {
                 assertEquals(PlayResult.Started, controller.play())
-                withTimeout(10_000) { controller.nowPlaying.filter { it?.isPlaying == true }.first() }
+                withTimeout(10_000) {
+                    controller.nowPlaying
+                        .filter {
+                            it?.isPlaying == true && it.position.durationMs == 5_000L
+                        }.first()
+                }
                 controller.seekTo(1_200)
                 withTimeout(10_000) {
                     controller.nowPlaying
