@@ -1,0 +1,11 @@
+{
+  "method": "ping",
+  "payload": {
+    "ctx": {
+      "hl": "en",
+      "gl": "US",
+      "ua": "Neutrodyne synthetic test",
+      "ipFamily": "V4"
+    }
+  }
+}
