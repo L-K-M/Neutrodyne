@@ -53,6 +53,7 @@ data class PodcastDetail(
     /** `pagingNextUrl != null` — older pages may be fetched on demand (03). */
     val hasOlderPages: Boolean,
     val artworkAvgArgb: Int? = null,
+    val youtubeVariants: Int = YouTubeVariantBits.LONG_FORM,
 )
 
 /** The episode detail screen's data (position comes from `EpisodeLiveStateSource`, not here). */

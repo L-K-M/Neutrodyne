@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
 import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
+import ch.lkmc.neutrodyne.youtube.api.YouTubeThumbnails
 import ch.lkmc.neutrodyne.youtube.api.YtRef
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
@@ -112,11 +113,11 @@ internal class DefaultYouTubeChannelMetadata(
                 when (val result = resolved) {
                     is ChannelResolution.Resolved -> {
                         if (result.channelId != channelId) return@withPermit ChannelMetadataResult.FAILED
-                        val avatar = result.avatarUrl?.let(::avatar900)
+                        val avatar = result.avatarUrl?.let { YouTubeThumbnails.avatar(it) }
                         if (avatar == null && result.description == null && result.bannerUrl == null) {
                             return@withPermit ChannelMetadataResult.FAILED
                         }
-                        apply(id, avatar, result.bannerUrl, result.description)
+                        apply(id, avatar, result.bannerUrl, result.description?.let(::escapeChannelDescription))
                         ChannelMetadataResult.UPDATED
                     }
 
@@ -160,8 +161,6 @@ internal class DefaultYouTubeChannelMetadata(
         fun depth() = if (reason == ChannelMetadataReason.DETAIL) MetadataDepth.FULL else MetadataDepth.AVATAR
     }
 
-    private fun avatar900(url: String): String = AVATAR_SIZE.replace(url, "=s900")
-
     private companion object {
         const val CONCURRENCY = 2
         const val NEW_LIMIT = 100
@@ -171,6 +170,5 @@ internal class DefaultYouTubeChannelMetadata(
         const val TIMEOUT_MS = 20_000L
         const val JITTER_MIN_MS = 500L
         const val JITTER_MAX_MS = 1500L
-        val AVATAR_SIZE = Regex("=s[0-9]+")
     }
 }

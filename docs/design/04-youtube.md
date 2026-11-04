@@ -538,6 +538,16 @@ sequenceDiagram
 | `Failed(CONSENT_WALL or PAGE_UNREADABLE)` | "Couldn't read this YouTube page. Paste the channel's /channel/UC… link or a link to one of its videos." | Edit |
 | Typed name in external mode | "To add a YouTube channel, share it from the YouTube app or paste its link." | — |
 
+**Implementation note (2026-11-04, M8 current-code port).** Add and imports
+share `YouTubeSubscriptionWriter`: canonical identity, pending INITIAL state,
+new sync ID and memberships commit together, without handle aliases. Plain
+channel descriptions are escaped for the HTML storage column. Detail and
+refresh share the same metadata coordinator. RSS suggestions use only the
+enabled M7 directories and an eight-second deadline; late responses cannot
+restore edited/cancelled channel previews. Shorts settings invalidate current
+feed visibility; past-live settings affect future polls and retain recordings
+already ingested. All shell capabilities remain external.
+
 ### Prefer the show's RSS feed
 
 [PO-9](../PLAN.md#48-further-product-owner-decisions) default. When the preview opens and `youtube.suggest_rss` is on, `YouTubeChannelRepository.findRssAlternative(title)` queries 03's `SearchRepository` (enabled podcast directories only; never YouTube search) with an 8 s timeout. A hit matches when `norm(channelTitle)` equals `norm(collectionName)` or `norm(artistName)`, where `norm` = NFKC, lowercase, remove everything except letters and digits. The first match is shown as a card "This show also has a podcast feed — Subscribe to the podcast instead"; the preview is never blocked. The query only goes to directories the user already has enabled ([03 Search and discovery](03-feeds-and-discovery.md#search-and-discovery) privacy text applies).
