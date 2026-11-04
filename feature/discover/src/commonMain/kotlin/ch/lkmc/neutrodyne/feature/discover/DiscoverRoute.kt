@@ -57,6 +57,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.ndHorizontalScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.model.ChartGenre
+import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
@@ -88,7 +89,7 @@ internal fun DiscoverRoute(viewModel: DiscoverViewModel = metroViewModel()) {
     DiscoverScreen(state.copy(input = input), {
         input = it
         viewModel.inputChanged(it)
-    }, viewModel::retry, navigator, viewModel::loadChart)
+    }, viewModel::retry, navigator, viewModel::loadChart, viewModel::onProvidersVisible)
 }
 
 @Composable
@@ -98,6 +99,7 @@ internal fun DiscoverScreen(
     retry: () -> Unit,
     navigator: AppNavigator,
     onChartVisible: (ChartGenre?) -> Unit = {},
+    onProvidersVisible: (List<ProviderInfo>) -> Unit = {},
 ) {
     val focus = remember { FocusRequester() }
     val searchFocus = LocalDiscoverSearchFocus.current
@@ -153,7 +155,7 @@ internal fun DiscoverScreen(
                         }
                     },
         )
-        ProviderDisclosure(state.providers, Modifier.padding(horizontal = 16.dp))
+        ProviderDisclosure(state.providers, Modifier.padding(horizontal = 16.dp), onProvidersVisible)
         FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             NdAssistChip(
                 onClick = { navigator.push(AddPodcastKey(null)) },
