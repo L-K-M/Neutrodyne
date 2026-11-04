@@ -40,6 +40,7 @@ val shippedLocales =
         .filter { it.isNotEmpty() && !it.startsWith("#") }
 
 android {
+    sourceSets["main"].kotlin.srcDir(if (youtubeEngine) "src/youtubeEngine/kotlin" else "src/noYouTubeEngine/kotlin")
     defaultConfig {
         fun prop(name: String) = providers.gradleProperty(name).orElse("").get()
         buildConfigField("String", "REPO_URL", "\"${prop("neutrodyne.repoUrl")}\"")
@@ -67,6 +68,7 @@ android {
     sourceSets["androidTest"].kotlin.srcDir("../feeds/src/replay/kotlin")
     sourceSets["androidTest"].kotlin.srcDir("src/externalModeTest/kotlin")
     sourceSets["androidTest"].assets.srcDir("../youtube/impl/src/test/resources")
+    sourceSets["androidTest"].assets.srcDir("../youtube/engine/src/test/resources")
     // Exercise the device gate's decisions on the host without copying its implementation.
     sourceSets["androidTest"].kotlin.srcDir("src/restoreTest/kotlin")
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
@@ -128,7 +130,10 @@ dependencies {
     )) {
         implementation(project(module))
     }
-    if (youtubeEngine) implementation(project(":youtube:ytdlp"))
+    if (youtubeEngine) {
+        implementation(project(":youtube:ytdlp"))
+        implementation(project(":youtube:engine"))
+    }
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)

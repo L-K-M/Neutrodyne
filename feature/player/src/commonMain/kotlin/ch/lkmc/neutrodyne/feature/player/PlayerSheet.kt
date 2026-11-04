@@ -194,6 +194,7 @@ internal fun PlayerSheet(
     toggleTime: () -> Unit = {},
     share: (() -> Unit)? = null,
     retry: () -> Unit = toggle,
+    engineNotice: @Composable () -> Unit = {},
 ) {
     val now = ui.now
     val isSidePanel = slot.layout.playerPanel
@@ -532,6 +533,7 @@ internal fun PlayerSheet(
                         ) {
                             Spacer(Modifier.height(headerHeight + artworkHeight.dp + 16.dp))
                             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                                engineNotice()
                                 Text(
                                     now.title,
                                     style = MaterialTheme.typography.titleLarge,

@@ -71,6 +71,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 internal fun DownloadsSettingsPage(
     platform: PlatformKind,
     viewModel: DownloadsSettingsViewModel = metroViewModel(),
+    youtubeSettings: @Composable () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val storage by viewModel.storage.collectAsStateWithLifecycle()
@@ -89,6 +90,7 @@ internal fun DownloadsSettingsPage(
             },
         )
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            youtubeSettings()
             ManualDownloadSettings(platform, viewModel::selectRoot)
             DownloadSettingsRows(
                 ScopedSettingsView(

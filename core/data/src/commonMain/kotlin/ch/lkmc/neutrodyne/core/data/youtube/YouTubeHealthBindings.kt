@@ -15,11 +15,14 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.youtube.api.FeedOutcome
+import ch.lkmc.neutrodyne.youtube.api.YouTubeExtractionHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
+import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Inject
@@ -37,11 +40,13 @@ object YouTubeHealthBindings {
         settings: SettingsRepository,
         clock: Clock,
         @ApplicationScope scope: CoroutineScope,
-        db: NeutrodyneDatabase,
+        db: Provider<NeutrodyneDatabase>,
         scheduler: Provider<RefreshScheduler>,
-    ): YouTubeHealth =
-        DefaultYouTubeHealth(settings, clock, scope) {
-            val ids = db.podcastDao().youtubeChannelIds()
+        build: BuildInfo,
+        streams: Provider<YouTubeStreamResolver>,
+    ): YouTubeExtractionHealth =
+        DefaultYouTubeHealth(settings, clock, scope, build.versionCode, { streams().invalidateAll() }) {
+            val ids = db().podcastDao().youtubeChannelIds()
             if (ids.isNotEmpty()) {
                 scheduler().enqueueNow(
                     RefreshScope.Podcasts(ids),
@@ -51,6 +56,9 @@ object YouTubeHealthBindings {
                 )
             }
         }
+
+    @Provides
+    internal fun healthView(health: YouTubeExtractionHealth): YouTubeHealth = health
 
     @Provides
     @SingleIn(AppScope::class)
