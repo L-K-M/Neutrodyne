@@ -54,8 +54,12 @@ public fun NeutrodyneNavHost(
     directive: PaneScaffoldDirective,
     modifier: Modifier = Modifier,
 ) {
+    // The DI graph's multibound installer set is rebuilt on every access, so the parameter's
+    // identity churns on each recomposition while its bindings stay fixed for the process.
+    // Rebuilding the provider here would cascade into `panes` and the back-dispatch owner,
+    // whose re-attach would reorder the Back deque ahead of the player's handlers.
     val provider =
-        remember(installers) {
+        remember {
             entryProvider<NavKey> {
                 installers.forEach { install -> install() }
             }
