@@ -7,6 +7,10 @@
   <!-- Requested contextually only, never at launch -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+  <!-- Android 17 (target 37): a sync server on the local network. Asked in sync setup
+       (10 Local-network gate, D28); podcast feeds on the LAN stay unsupported. -->
+  <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
   <!-- ACRA's mail hand-off (09) -->
   <queries>
     <intent>

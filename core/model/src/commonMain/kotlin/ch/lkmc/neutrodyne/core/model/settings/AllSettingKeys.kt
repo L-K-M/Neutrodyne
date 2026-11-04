@@ -24,7 +24,8 @@ object AllSettingKeys {
             DownloadSettingKeys.ALL +
             BackupSettingKeys.ALL +
             DesktopSettingKeys.ALL +
-            UpdateSettingKeys.ALL
+            UpdateSettingKeys.ALL +
+            SyncSettingKeys.ALL
 
     /**
      * The shared write-side validation (05 Rules 4): [value]'s stored type must match the
