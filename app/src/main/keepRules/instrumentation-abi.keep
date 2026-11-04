@@ -223,6 +223,7 @@
   public long getPositionInWindow-F1C5BW0();
   public androidx.compose.ui.node.RootForTest getRoot();
   public long getSize-YbymL2g();
+  public boolean isRoot();
 }
 -keep class androidx.compose.ui.semantics.SemanticsOwner {
 }

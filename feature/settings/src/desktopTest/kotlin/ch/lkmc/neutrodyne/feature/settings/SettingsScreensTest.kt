@@ -4,11 +4,14 @@ package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -18,6 +21,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -50,6 +55,7 @@ import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
+import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
@@ -64,6 +70,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The M0a Settings screens driven through `NeutrodyneRoot` on the desktop JVM (01 S9 method): the
@@ -96,6 +103,30 @@ class SettingsScreensTest {
             onNodeWithText("Theme, dynamic colour and contrast").assertExists()
             onNodeWithText("About").assertExists()
             onNodeWithText("Licences").assertExists()
+        }
+
+    /** Visible clickables keep a 48dp layout after reaching the bottom of a compact Settings list. */
+    @Test
+    fun settingsHomeVisibleTargetsKeep48DpAfterScroll() =
+        runDesktopComposeUiTest(width = 320, height = 640) {
+            setSettingsRoot()
+            openSettings()
+            onNodeWithText("Licences").performScrollTo().assertIsDisplayed()
+            waitForIdle()
+            onAllNodes(hasClickAction(), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                // Scrolled-out rows have empty clipped bounds and cannot be tapped.
+                .filter { !it.boundsInRoot.isEmpty }
+                .forEach { node ->
+                    // Scroll clipping can expose part of a row. Check its actual clickable layout.
+                    val layout = node.layoutInfo
+                    val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
+                    assertTrue(
+                        layout.width >= minimum && layout.height >= minimum,
+                        "layout=${layout.width}x${layout.height} " +
+                            "role=${node.config.getOrNull(SemanticsProperties.Role)} minimum=${minimum}px",
+                    )
+                }
         }
 
     @Test
@@ -486,5 +517,5 @@ private val StubInstallers: Set<EntryProviderInstaller> =
 @Composable
 private fun TopBarStub(tab: TopLevelKey) {
     val title = if (tab == FeedsKey) stringResource(Res.string.nav_feeds) else tab.toString()
-    NdTopAppBar(title = title)
+    NdTopAppBar(title = title, actions = { SettingsGearButton() })
 }

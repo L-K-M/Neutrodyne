@@ -149,7 +149,11 @@ class YouTubeReleaseSmokeTest {
                     }
                 assertTrue(request is RequestResult.Queued && request.queued == 1)
                 withTimeout(60_000) {
-                    while (db.downloadDao().byEpisode(episodeId)?.state != DownloadState.COMPLETED) delay(100)
+                    while (db.downloadDao().byEpisode(episodeId)?.state != DownloadState.COMPLETED ||
+                        graph.localMediaIndex.localUriOrNull(episodeId) == null
+                    ) {
+                        delay(100)
+                    }
                 }
                 assertNotNull(graph.localMediaIndex.localUriOrNull(episodeId))
                 val expectedRanges = listOf("bytes=0-10485759", "bytes=10485760-${bytes.lastIndex}")
