@@ -210,9 +210,21 @@ are supplied. Menu (Menü) is the single owner-added label.
 to the first remaining playlist, or the empty radio if none remain. This
 adapts the old All-feed fallback to the group-only home. Undoing group deletion
 does not reselect that group, including while the fallback preference write
-is pending or has failed. Paging keeps the selected episode and its saved
-position when its page leaves the loaded window; live-row queries follow only
-the visible window plus its margin and selected episode, and release on exit.
+is pending or has failed. The shared preference retains the legacy All marker
+on deletion; home resolves it to its retained or first group so the existing
+All-feed browser's fallback remains intact. Paging keeps the selected episode
+and its saved position when its page leaves the loaded window; live-row
+queries follow only the visible window plus its margin and selected episode,
+and release on exit.
+
+**Playback ownership and routes (2026-11-04).** The radio follows active
+playback started on any screen, including before a playlist exists. Resuming
+a followed session retains its loaded context and queue; starting a browsed
+episode uses the selected group. Only an explicit playlist choice pauses.
+Incoming feed routes and passive preference/group changes reselect the view
+without issuing transport commands, retaining D7's routes-only-navigate fence.
+A failed or consent-blocked start keeps any still-playing session controllable
+until its replacement starts.
 
 **Implementation notes (2026-11-04).** The shared radio primitives and resources
 live in `:core:ui`; the production adapter lives in `:feature:feeds`. A queued

@@ -42,12 +42,15 @@ class RadioViewModelTest : MainDispatcherTest() {
     private val podcasts = FakePodcastRepository()
     private val rows = (1L..3L).map { RadioEpisode(it, "Episode $it", "Podcast", 60_000) }
 
-    private suspend fun TestScope.withRadio(block: suspend (RadioViewModel, Long) -> Unit) {
+    private suspend fun TestScope.withRadio(
+        repository: ch.lkmc.neutrodyne.core.domain.GroupRepository = groups,
+        block: suspend (RadioViewModel, Long) -> Unit,
+    ) {
         val id = (groups.create(GroupDraft("First"), setOf(1)) as Outcome.Success).value
         podcasts.tiles.value = listOf(testLibraryTile(1))
         val model =
             RadioViewModel(
-                groups,
+                repository,
                 feeds,
                 podcasts,
                 episodes,
@@ -233,6 +236,145 @@ class RadioViewModelTest : MainDispatcherTest() {
             }
         }
 
+    @Test fun playbackStartedOnAnotherScreenUsesTheRadioTransport() =
+        runTest {
+            withRadio { model, _ ->
+                val external = testNowPlaying(99).copy(isPlaying = true, context = null)
+                controller.state.nowPlaying.value = external
+                runCurrent()
+                assertEquals(99L, model.state.value.selectedId)
+                assertTrue(model.state.value.playing)
+                model.togglePlay()
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                    controller.calls.last(),
+                )
+                controller.state.nowPlaying.value = external.copy(isPlaying = false)
+                runCurrent()
+                model.togglePlay()
+                runCurrent()
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PLAY),
+                    controller.calls.last(),
+                )
+            }
+        }
+
+    @Test fun playbackRemainsControllableBeforeAnyPlaylistExists() =
+        runTest {
+            withRadio { model, id ->
+                groups.delete(id)
+                runCurrent()
+                assertNull(model.state.value.playlistId)
+                controller.state.nowPlaying.value = testNowPlaying(99).copy(isPlaying = true, context = null)
+                runCurrent()
+                assertEquals(
+                    99L,
+                    model.state.value.selected
+                        ?.id,
+                )
+                model.togglePlay()
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                    controller.calls.last(),
+                )
+            }
+        }
+
+    @Test fun incomingFeedSelectionOnlyNavigatesAndExplicitSwitchPauses() =
+        runTest {
+            withRadio { model, first ->
+                val second = (groups.create(GroupDraft("Second"), setOf(1)) as Outcome.Success).value
+                runCurrent()
+                controller.state.nowPlaying.value = testNowPlaying(1).copy(isPlaying = true, context = null)
+                runCurrent()
+                val callsBefore = controller.calls.size
+                val uuid =
+                    groups
+                        .observeGroups()
+                        .first()
+                        .first { it.id == second }
+                        .uuid
+                settings.set(
+                    ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys.FEEDS_SELECTED_SOURCE,
+                    ch.lkmc.neutrodyne.core.model.FeedSourceRef
+                        .Group(uuid)
+                        .encode(),
+                )
+                runCurrent()
+                model.onRows(second, listOf(RadioEpisode(20, "Other programme", "Podcast")))
+                assertEquals(callsBefore, controller.calls.size)
+                assertEquals(second, model.state.value.playlistId)
+                assertEquals(1L, model.state.value.selectedId)
+                model.selectPlaylist(first)
+                model.onRows(first, rows)
+                assertEquals(1L, model.state.value.selectedId)
+                assertFalse(model.state.value.playing)
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                    controller.calls.last(),
+                )
+                runCurrent()
+                settings.set(
+                    ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys.FEEDS_SELECTED_SOURCE,
+                    ch.lkmc.neutrodyne.core.model.FeedSourceRef
+                        .Group(uuid)
+                        .encode(),
+                )
+                runCurrent()
+                controller.state.nowPlaying.value = testNowPlaying(1).copy(isPlaying = false, context = null)
+                runCurrent()
+                model.onRows(second, listOf(RadioEpisode(20, "Other programme", "Podcast")))
+                assertEquals(20L, model.state.value.selectedId)
+                assertFalse(model.state.value.playing)
+            }
+        }
+
+    @Test fun failedSelectionKeepsAnExistingSessionControllable() =
+        runTest {
+            withRadio { model, _ ->
+                controller.state.nowPlaying.value = testNowPlaying(1).copy(isPlaying = true)
+                runCurrent()
+                controller.playResult = PlayResult.NeedsMeteredConsent(2)
+                model.selectEpisode(2)
+                runCurrent()
+                assertEquals(1L, model.state.value.selectedId)
+                assertTrue(model.state.value.playing)
+            }
+        }
+
+    @Test fun creatingTheFirstPlaylistPausesEvenWhenItsObserverRunsFirst() =
+        runTest {
+            val yielding =
+                object : ch.lkmc.neutrodyne.core.domain.GroupRepository by groups {
+                    override suspend fun create(
+                        draft: GroupDraft,
+                        memberIds: Set<Long>,
+                    ): Outcome<Long, ch.lkmc.neutrodyne.core.domain.GroupError> {
+                        val result = groups.create(draft, memberIds)
+                        kotlinx.coroutines.yield()
+                        return result
+                    }
+                }
+            withRadio(repository = yielding) { model, id ->
+                groups.delete(id)
+                runCurrent()
+                controller.state.nowPlaying.value = testNowPlaying(99).copy(isPlaying = true, context = null)
+                runCurrent()
+                val before = controller.calls.size
+                model.createPlaylist("Morning", setOf(1))
+                runCurrent()
+                assertEquals(before + 1, controller.calls.size)
+                assertEquals(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.PAUSE),
+                    controller.calls.last(),
+                )
+                model.onRows(requireNotNull(model.state.value.playlistId), rows)
+                assertEquals(1L, model.state.value.selectedId)
+                assertFalse(model.state.value.playing)
+            }
+        }
+
     @Test fun failedMeteredAlwaysDoesNotGrantConsent() =
         runTest {
             withRadio { model, _ ->
@@ -302,6 +444,11 @@ class RadioViewModelTest : MainDispatcherTest() {
                 val token = (groups.delete(id) as Outcome.Success).value
                 runCurrent()
                 assertEquals(second, model.state.value.playlistId)
+                assertEquals(
+                    ch.lkmc.neutrodyne.core.model.FeedSourceRef.All
+                        .encode(),
+                    settings.get(ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys.FEEDS_SELECTED_SOURCE),
+                )
                 groups.undoDelete(token)
                 runCurrent()
                 assertEquals(second, model.state.value.playlistId)

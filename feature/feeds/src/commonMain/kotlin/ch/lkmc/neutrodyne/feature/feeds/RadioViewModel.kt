@@ -83,6 +83,7 @@ public class RadioViewModel(
     private var initialized = false
     private var rejectedUuid: String? = null
     private var initialSelectionPending = true
+    private var selectionOrigin = SelectionOrigin.BROWSE
     private var undo: Removal? = null
     private var writing = false
     private var deferredRows: Rows? = null
@@ -135,12 +136,13 @@ public class RadioViewModel(
                     // Reject before the fallback write: Undo must not revive a deleted selection
                     // while that write is pending or if it fails.
                     rejectedUuid = uuid
-                    persistSelection(all.find { it.id == id })
+                    // The existing All-feed browser shares this preference and also falls back to All.
+                    persistSelection(null)
                 }
                 if (id !=
                     state.value.playlistId
                 ) {
-                    switchTo(id, if (initialized) PlaylistChange.SWITCH else PlaylistChange.INITIAL)
+                    switchTo(id, if (initialized) PlaylistChange.PASSIVE else PlaylistChange.INITIAL)
                 }
                 initialized = true
             }
@@ -169,8 +171,30 @@ public class RadioViewModel(
         viewModelScope.launch {
             playbackStates.nowPlaying.collect { now ->
                 val current = state.value
+                if (selectionOrigin == SelectionOrigin.SWITCHING_PLAYLIST) {
+                    if (now?.isPlaying == true) return@collect
+                    selectionOrigin = SelectionOrigin.BROWSE
+                }
+                val followingPlayback = selectionOrigin == SelectionOrigin.PLAYBACK
+                if (now?.isPlaying == true) {
+                    selectionOrigin = SelectionOrigin.PLAYBACK
+                    initialSelectionPending = false
+                }
                 if (now == null) {
-                    mutableState.value = current.copy(playing = false)
+                    selectionOrigin = SelectionOrigin.BROWSE
+                    val external = followingPlayback && current.episodes.none { it.id == current.selectedId }
+                    mutableState.value =
+                        if (external) {
+                            current.copy(
+                                selectedId = null,
+                                nowPlayingEpisode = null,
+                                elapsedMs = 0,
+                                playing = false,
+                                hasPlayed = false,
+                            )
+                        } else {
+                            current.copy(playing = false)
+                        }
                 } else if (now.episodeId == current.selectedId) {
                     mutableState.value =
                         current.copy(
@@ -186,9 +210,7 @@ public class RadioViewModel(
                             hasPlayed =
                                 current.hasPlayed || now.isPlaying,
                         )
-                } else if (now.isPlaying && now.context?.type == ContextType.GROUP &&
-                    now.context?.id == current.playlistId
-                ) {
+                } else if (now.isPlaying) {
                     mutableState.value =
                         current.copy(
                             selectedId = now.episodeId,
@@ -229,8 +251,7 @@ public class RadioViewModel(
         val engine = playbackStates.nowPlaying.value
         val active =
             engine?.takeIf {
-                it.isPlaying && it.context?.type == ContextType.GROUP &&
-                    it.context?.id == playlistId
+                it.isPlaying && selectionOrigin == SelectionOrigin.PLAYBACK
             }
         val selected =
             when {
@@ -289,6 +310,7 @@ public class RadioViewModel(
     public fun selectEpisode(id: Long) {
         if (id == state.value.selectedId || state.value.episodes.none { it.id == id }) return
         val playing = state.value.playing
+        selectionOrigin = SelectionOrigin.BROWSE
         mutableState.value =
             state.value.copy(
                 selectedId = id,
@@ -307,8 +329,10 @@ public class RadioViewModel(
             return
         }
         val now = playbackStates.nowPlaying.value
-        if (now?.episodeId == id && now.context?.type == ContextType.GROUP && now.context?.id == current.playlistId &&
-            id !in seeks
+        if (now?.episodeId == id && (
+                selectionOrigin == SelectionOrigin.PLAYBACK ||
+                    (now.context?.type == ContextType.GROUP && now.context?.id == current.playlistId)
+            ) && id !in seeks
         ) {
             playback.play(current.playlist?.let { UiText.Raw(it.name) }) { controller.play() }
         } else {
@@ -323,9 +347,36 @@ public class RadioViewModel(
             if (result == PlayResult.Started) {
                 seeks.remove(id)?.let(controller::seekTo)
                 if (state.value.selectedId == id) mutableState.value = state.value.copy(hasPlayed = true)
+            } else if (state.value.selectedId == id) {
+                recoverTransportAfterFailedStart()
             }
             result
         }
+    }
+
+    private fun recoverTransportAfterFailedStart() {
+        val active = playbackStates.nowPlaying.value?.takeIf { it.isPlaying }
+        if (active == null) {
+            selectionOrigin = SelectionOrigin.BROWSE
+            mutableState.value = state.value.copy(playing = false)
+            return
+        }
+        selectionOrigin = SelectionOrigin.PLAYBACK
+        initialSelectionPending = false
+        mutableState.value =
+            state.value.copy(
+                selectedId = active.episodeId,
+                nowPlayingEpisode =
+                    RadioEpisode(
+                        active.episodeId,
+                        active.title,
+                        active.podcastTitle,
+                        active.position.durationMs,
+                    ),
+                elapsedMs = active.position.positionMs,
+                playing = true,
+                hasPlayed = true,
+            )
     }
 
     public fun seek(positionMs: Long) {
@@ -365,19 +416,36 @@ public class RadioViewModel(
         id: Long?,
         change: PlaylistChange = PlaylistChange.SWITCH,
     ) {
+        val engine = playbackStates.nowPlaying.value
+        val pauseRequested = change == PlaylistChange.SWITCH || selectionOrigin == SelectionOrigin.SWITCHING_PLAYLIST
+        val loaded = engine?.takeIf { !pauseRequested && it.isPlaying }
+        selectionOrigin =
+            when {
+                loaded != null -> SelectionOrigin.PLAYBACK
+                pauseRequested && engine?.isPlaying == true -> SelectionOrigin.SWITCHING_PLAYLIST
+                else -> SelectionOrigin.BROWSE
+            }
         if (change == PlaylistChange.SWITCH) controller.pause()
-        initialSelectionPending = true
+        initialSelectionPending = loaded == null
         mutableState.value =
             state.value.copy(
                 playlistId = id,
                 episodes = emptyList(),
                 complete = false,
                 episodeCount = null,
-                selectedId = null,
-                nowPlayingEpisode = null,
-                elapsedMs = 0,
-                playing = false,
-                hasPlayed = false,
+                selectedId = loaded?.episodeId,
+                nowPlayingEpisode =
+                    loaded?.let {
+                        RadioEpisode(
+                            it.episodeId,
+                            it.title,
+                            it.podcastTitle,
+                            it.position.durationMs,
+                        )
+                    },
+                elapsedMs = loaded?.position?.positionMs ?: 0,
+                playing = loaded != null,
+                hasPlayed = loaded != null,
                 removed =
                     undo
                         ?.takeIf {
@@ -502,7 +570,16 @@ public class RadioViewModel(
                 is Outcome.Success -> {
                     undo = null
                     knownGroups = groups.observeGroups().first()
-                    selectPlaylist(result.value)
+                    val created = knownGroups.find { it.id == result.value }
+                    if (created == null) {
+                        mutableState.value =
+                            state.value.copy(creating = false, createError = UiText.Res(Res.string.write_failed))
+                        return@launch
+                    }
+                    // The repository observer can already have selected the first new group passively.
+                    // Creation remains an explicit switch, so it must still pause and select its first row.
+                    switchTo(created.id)
+                    persistSelection(created)
                     mutableState.value = state.value.copy(createdPlaylistId = result.value)
                 }
 
@@ -577,7 +654,9 @@ public class RadioViewModel(
         val complete: Boolean,
     )
 
-    private enum class PlaylistChange { INITIAL, SWITCH }
+    private enum class PlaylistChange { INITIAL, PASSIVE, SWITCH }
+
+    private enum class SelectionOrigin { BROWSE, PLAYBACK, SWITCHING_PLAYLIST }
 
     private data class Removal(
         val playlistId: Long,
