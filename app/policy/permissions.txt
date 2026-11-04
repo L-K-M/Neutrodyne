@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Unlicense
 # Exact expected uses-permission set of the :app release merged manifest (01 Manifest and permissions).
 # verifyManifestPermissions fails on any difference in either direction.
-# Declared by: INTERNET and ACCESS_NETWORK_STATE :core:network; POST_NOTIFICATIONS :app; FOREGROUND_SERVICE,
+# Declared by: INTERNET and ACCESS_NETWORK_STATE :core:network; ACCESS_LOCAL_NETWORK :sync:impl (a LAN sync
+# server, 10 Local-network gate); POST_NOTIFICATIONS :app; FOREGROUND_SERVICE,
 # RECEIVE_BOOT_COMPLETED and WAKE_LOCK merged by WorkManager (on :app and :core:common androidMain since M0a for
 # the worker factory; :download:impl and :playback:impl declare them again for their own code from M4/M6);
 # the DYNAMIC_RECEIVER permission merged by androidx.core.
+android.permission.ACCESS_LOCAL_NETWORK
 android.permission.ACCESS_NETWORK_STATE
 android.permission.FOREGROUND_SERVICE
 android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK
