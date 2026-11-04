@@ -47,6 +47,11 @@ class PortableYouTubePlayback(
         store.preparation.value = ch.lkmc.neutrodyne.youtube.engine.EnginePreparation.COMPILED
     }
 
+    /** Flips the durable enable flag so [capabilities] republishes like a real settings write. */
+    fun setEngineEnabled(enabled: Boolean) {
+        settings.state.value = settings.state.value.copy(enabled = enabled)
+    }
+
     fun prewarms(): List<ch.lkmc.neutrodyne.youtube.api.PrewarmReason> = transport.prewarms.toList()
 
     fun preparations(): Int = store.preparations
