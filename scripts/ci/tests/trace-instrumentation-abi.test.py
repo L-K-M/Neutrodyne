@@ -184,6 +184,7 @@ class MergeClassesTest(unittest.TestCase):
     def test_recorded_youtube_smoke_is_an_analysis_root(self):
         roots = (CI_DIR / "instrumentation-abi-roots.pro").read_text(encoding="utf-8")
         self.assertIn("-keep class ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest { *; }", roots)
+        self.assertIn("-keep @ch.lkmc.neutrodyne.core.testing.ReleaseSmoke class * { *; }", roots)
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
