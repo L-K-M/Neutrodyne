@@ -24,6 +24,8 @@ import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SuggestedGroups
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCounts
@@ -45,10 +47,12 @@ import ch.lkmc.neutrodyne.core.ui.DownloadAllController
 import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
 import ch.lkmc.neutrodyne.core.ui.PlaybackActions
 import ch.lkmc.neutrodyne.core.ui.PlayedActionOrigin
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.SwipeConfig
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -68,6 +72,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -89,6 +95,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
@@ -114,7 +121,16 @@ public class FeedsViewModel(
     platformInfo: PlatformInfo,
     @Dispatcher(Default) private val defaultDispatcher: CoroutineDispatcher,
     downloadController: DownloadController,
+    externalOpenService: YouTubeExternalOpen,
+    capabilities: YouTubeCapabilitiesSource,
+    private val youTubeHealth: YouTubeHealth,
 ) : ViewModel() {
+    public val feedHealth = youTubeHealth.state
+
+    public fun retryYouTubeFeeds() {
+        youTubeHealth.retryNow()
+    }
+
     public val suggestedGroups = SuggestedGroups(podcasts, groups, settings, viewModelScope)
 
     // Accessed from Main, like the ViewModel's callbacks and Compose pagingFor calls.
@@ -128,6 +144,14 @@ public class FeedsViewModel(
     private val reportedSources = mutableMapOf<FeedSourceRef, FeedSource>()
     private val baselines = MutableStateFlow<Map<FeedSource, Long>>(emptyMap())
     private val userMessages = UserMessages()
+    public val externalOpen =
+        ExternalOpenHandler(
+            viewModelScope,
+            userMessages,
+            mark = { externalOpenService.onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+            undo = { externalOpenService.undo(it) },
+            onFailure = ::reportWriteFailed,
+        )
     public val downloads =
         DownloadRequestHandler(
             viewModelScope,
@@ -343,6 +367,17 @@ public class FeedsViewModel(
                 hasGroups = selected.hasGroups,
                 prefs = prefs.takeIf { selected.tabs.isNotEmpty() && prefsSource == selected.source },
                 visitBaselines = visits.toImmutableMap(),
+            )
+        }.combine(capabilities.capabilities) { state, caps ->
+            state.copy(
+                rowCaps =
+                    RowCaps(
+                        caps.inAppPlayback,
+                        caps.downloads,
+                        caps.enrichment,
+                        null,
+                        state.offline,
+                    ),
             )
         }.stateIn(viewModelScope, SHARING, FeedsUiState())
 
@@ -614,6 +649,7 @@ public class FeedsViewModel(
         copyLinks.remove(id)
         swipeUndos.remove(id)
         playback.onMessageShown(id)
+        externalOpen.shown(id)
         userMessages.shown(id)
     }
 

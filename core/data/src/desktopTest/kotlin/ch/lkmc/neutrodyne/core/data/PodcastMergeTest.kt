@@ -699,6 +699,9 @@ class PodcastMergeTest {
                         Provider {
                             FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
                         },
+                    youTubeHealth =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeHealth(),
                 )
 
             repository.merge(loser, winner, ChangeOrigin.SYNC)

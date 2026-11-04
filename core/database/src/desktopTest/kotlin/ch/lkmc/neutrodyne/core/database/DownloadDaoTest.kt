@@ -36,6 +36,27 @@ class DownloadDaoTest {
 
     @After fun close() = db.close()
 
+    @Test fun externalChannelsCannotBeClaimedEvenWithRssTaggedDownloads() =
+        runTest {
+            val channel =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(id = 0, feedKey = "channel").copy(
+                        sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                        youtubeChannelId = "UCBR8-60-B28hp2BmDPdntcQ",
+                    ),
+                )
+            val episode =
+                db.episodeDao().insertStub(
+                    episodeEntity(id = 0, podcastId = channel, identityKey = "external"),
+                )
+            dao.insert(row(episode).copy(sourceKind = SourceKind.RSS_ENCLOSURE))
+            assertEquals(0, dao.claim(episode, "direct"))
+            assertEquals(0, dao.queuedNeeds(Lane.MANUAL, 100).queued)
+            assertTrue(dao.candidates(listOf(Lane.MANUAL), 100, true, true, false, 0).isEmpty())
+            assertNull(dao.claimNext(listOf(Lane.MANUAL), 100, true, true, false, "runner") { true })
+            assertNull(dao.byEpisode(episode)?.runnerToken)
+        }
+
     @Test fun stateAndOwnershipGuards() =
         runTest {
             val ids = seed()

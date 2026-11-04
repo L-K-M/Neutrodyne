@@ -43,11 +43,19 @@ DEVICE = {
 }
 
 
-def require_cases(reports, expected, label):
+EXTERNAL_NAMES = {"browserFailureSuccessfulOpenUndoAndSettings", "recordedSharedHandleAndImportedChannelsStayExternal"}
+EXTERNAL_HOST = {
+    "desktopApp/build/test-results/test": {"ch.lkmc.neutrodyne.desktop.di.ExternalYouTubeModeTest": EXTERNAL_NAMES},
+}
+EXTERNAL_DEVICE = {"ch.lkmc.neutrodyne.ExternalYouTubeModeTest": EXTERNAL_NAMES}
+
+
+def require_cases(reports, expected, label, exact=False):
     evidence = {(classname, name): [] for classname, names in expected.items() for name in names}
     for report in reports:
         for case in ET.parse(report).getroot().iter("testcase"):
-            key = (case.get("classname"), case.get("name", "").split("[")[0])
+            name = case.get("name", "")
+            key = (case.get("classname"), name if exact else name.split("[")[0])
             if key in evidence:
                 evidence[key].append((report, case))
     for (classname, name), cases in evidence.items():
@@ -56,7 +64,7 @@ def require_cases(reports, expected, label):
         report, case = cases[0]
         if any(case.find(tag) is not None for tag in ("skipped", "failure", "error")):
             raise ValueError(f"{label}: {classname}#{name} did not pass in {report}")
-    print(f"{label}: {len(evidence)} discovery cases passed, 0 skipped")
+    print(f"{label}: {len(evidence)} named cases passed, 0 skipped")
 
 
 def verify(root, devices):
@@ -72,13 +80,36 @@ def verify(root, devices):
         require_cases(reports, DEVICE, device)
 
 
+def verify_external(root, devices, variant="debug"):
+    if not devices:
+        for folder, cases in EXTERNAL_HOST.items():
+            require_cases((root / folder).rglob("*.xml"), cases, folder, exact=True)
+        return
+    for device in devices:
+        reports = []
+        for report in root.rglob("*.xml"):
+            parts = report.parts
+            task = device + variant.capitalize() + "AndroidTest"
+            connected = any(parts[i:i + 2] == ("connected", variant) for i in range(len(parts) - 1))
+            if (device == "connected" and connected) or (device != "connected" and (
+                task in parts or (device in parts and variant in parts)
+            )):
+                reports.append(report)
+        require_cases(reports, EXTERNAL_DEVICE, f"{device}/{variant} E8", exact=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--device", action="append", default=[])
+    parser.add_argument("--external-youtube", action="store_true", help="Require exact E8 results instead of M7")
+    parser.add_argument("--variant", choices=("debug", "release"), default="debug")
     args = parser.parse_args()
     try:
-        verify(args.root, args.device)
+        if args.external_youtube:
+            verify_external(args.root, args.device, args.variant)
+        else:
+            verify(args.root, args.device)
     except (ValueError, ET.ParseError, OSError) as error:
         parser.exit(1, f"{error}\n")
 

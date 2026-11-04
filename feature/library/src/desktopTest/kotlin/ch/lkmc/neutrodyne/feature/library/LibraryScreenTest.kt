@@ -880,6 +880,9 @@ class LibraryScreenTest {
                 groups,
                 feeds,
                 TestClock(),
+                youTubeHealth =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeHealth(),
             )
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare compose

@@ -120,7 +120,9 @@ jobs:
       # run on every nightly GMD (PLAN M7 AC4, AC7, AC8, AC10).
       - name: Require discovery cases on the nightly devices
         if: inputs.scope != 'youtube-smoke'
-        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
+        run: |
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --device api26 --device api33 --device api34 --device api36
       - name: Report failure
         if: ${{ !success() }}
         env:
@@ -295,6 +297,7 @@ jobs:
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
             python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
             python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --external-youtube --device connected
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -340,6 +343,7 @@ jobs:
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true :app:connectedReleaseAndroidTest
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
             python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --external-youtube --variant release --device connected
             # M5 W9: host-driven reboot evidence on the installed release app; the
             # instrumentation process exits before the host reboots the guest. Dispatch-only
             # (scope reboot) while this image's System UI builds no card after reboot (09).
@@ -434,7 +438,9 @@ jobs:
       - name: Require real release playback smoke
         run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36 --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
       - name: Require discovery cases in the release smoke
-        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
+        run: |
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -1056,3 +1062,36 @@ jobs:
         with:
           name: bmgr-download-exclusion-api${{ matrix.api }}
           path: build/bmgr-evidence/
+
+  youtube-canary:
+    # Feed availability is report-only; recorded PR tests remain independent of YouTube.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Bounded controls and feed variants
+        id: feeds
+        run: python3 scripts/ci/youtube-feed-canary.py --output youtube-feed-canary.json
+      - name: Report feed failure
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh youtube-canary
+      - name: Report feed recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh youtube-canary --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: youtube-feed-canary
+          path: youtube-feed-canary.json
+          if-no-files-found: error

@@ -77,6 +77,12 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             network,
             downloadController = downloads,
             liveStateSource = liveSource,
+            externalOpenService =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeExternalOpen(),
+            capabilities =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeCapabilitiesSource(),
         )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
