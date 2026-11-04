@@ -510,14 +510,58 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
   actual API36 and API37 release lanes before accepting a linkage repair.
   Fast assemble CI regenerates the focused ABI in check-only mode using
   [01's maintenance commands](01-foundation.md#release-build-and-baseline-profiles).
-  Presence fixtures pin the literal seven cases and reject each omission
+  Presence fixtures pin the literal smoke cases and reject each omission
   independently; the source check does not replace runtime linkage proof.
 
 - **M4 debug journey presence.** Non-release profiles of
   `assert-playback-tests.py` require both `UpNextJourneyTest` and
   `PlayJourneyTest` on each requested device, rejecting absent, skipped,
   failed, foreign or duplicate cases. E3 stays debug-only; the release
-  profile's seven-case smoke ABI is unchanged.
+  profile's then-seven-case smoke ABI was unchanged (M5 grows it to 14).
+
+- **M5 device evidence (2026-11-01).** The app-hosted playback gate
+  (`assert-playback-tests.py`) additionally requires, on each requested
+  device: sleep end-of-episode (queued tail, exactly-once played mark),
+  its metered-boundary collision variant (debug lanes), chapter and
+  754,000 ms timestamp seeks through the real session, both
+  `VideoAsAudioTest` decoder journeys (zero video decoders, rendered
+  audio, screen-off advance; alternate-audio routing keeps `isVideo`
+  metadata) and all three `CarLibraryDeviceTest` legacy browse/search/
+  hardware-skip cases. Release smoke adds the new `@ReleaseSmoke` cases,
+  growing the pinned smoke set to 14. Nightly and API 37 lanes also
+  require the one-minute screen-off listening timer (with a ≥ 60 s
+  duration check) and real ID3/Nero/QuickTime embedded-chapter
+  extraction; API 34 retains its 30-minute continuity case. The gate's
+  `--apk` option verifies every synthetic media/chapter fixture is
+  present and nonempty inside the selected app test APK. Longer streams
+  are assembled from the short fixture at runtime; the muxed
+  `h264_aac_8s.mp4` joins the committed fixtures.
+
+  The API 37 release leg runs `scripts/ci/playback-reboot.py` on dispatch
+  (`nightly.yml` scope `reboot`):
+  three independent instrumentation processes seed and pause a real
+  episode with pinned local artwork, end normally, then the host reboots
+  and unlocks the guest, disables networking, refuses a media session that
+  is playing or buffering, inspects the real SystemUI resumption card, and
+  taps its play action with the loopback source restored. It enables audio hardening `throw` after reboot and archives
+  phase output, screenshots, hierarchy dumps, package fingerprint and
+  logs under `app/build/reports/playback-reboot` (artifact:
+  `api37-playback-results`). The runner leaves these host-only phases out of
+  ordinary suites, and they are not counted among the required cases; the host rejects
+  any phase without exactly one non-skipped pass. An instrumentation
+  process never outlives the reboot. Audible fade/listening, DHU,
+  Bluetooth/AVRCP, and physical-headset checks remain manual acceptance
+  evidence and are never claimed by this wiring.
+
+  **Implementation note (2026-11-02).** The reboot leg is dispatch-only for
+  now. On the API 37 image the seed phase shows the System UI media card, the
+  reboot completes and the app keeps its saved session and position. After the
+  reboot, System UI binds the service, then releases it without building a
+  resumption card (runs 41389816470 and 41413587028). The service's recent
+  root returns the saved item to a System UI controller in
+  `PlaybackServiceTest.metadataOnlyServiceStartupDoesNotProjectPinPrepareOrRequestNetwork`.
+  Boot resumption therefore stays a physical-device check until this leg
+  passes.
 
 - **Instrumented hygiene:** orchestrator with `clearPackageData`. Locally, `connectedDebugAndroidTest` installs `ch.lkmc.neutrodyne.debug` beside the published app and never touches it; release-type runs and `:benchmark` install the published application ID and key, clear it after each test and uninstall it after the run, so they run only on an emulator or a device whose Neutrodyne holds nothing worth keeping ([01 Debug build type](01-foundation.md#debug-build-type); `CONTRIBUTING.md`'s testing section repeats it). In `debug` builds ACRA is not installed (its mailbox is forced empty, [D62](../PLAN.md#3-key-decisions)), and 01's `DebugToolsInitializer` turns LeakCanary's automatic heap dumps off while the system property below is set, so dumps never stall a device test. ACRA is **on** in the release build, so release-type runs switch it off: the runner `NeutrodyneTestRunner` (`:app/src/androidTest`, an `AndroidJUnitRunner`) sets the system property `neutrodyne.instrumentedTest=true` in `newApplication` before calling `super`, which instantiates the application and calls `attach`, and with it `attachBaseContext` ([AOSP Instrumentation](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/app/Instrumentation.java)); 01's call site skips `installAcra` while the property is set ([ACRA configuration](#acra-configuration)). **One exception, `YtxIsolationTest`** ([04 Testing](04-youtube.md#testing), PLAN M9 AC5, in the debug suite): its "no ACRA dialog" assertion needs ACRA as users have it, so its `@BeforeClass` calls `installAcra(application, mailTo = "ytx-isolation-test@invalid")` itself on the main thread — a test-only, non-empty address, so the assertion depends neither on PO-10 nor on the build type — and after each `:ytx` failure asserts that ACRA's `ACRA-unapproved` report directory ([ACRA `ReportLocator`](https://github.com/ACRA/acra/blob/master/acra-core/src/main/java/org/acra/file/ReportLocator.kt)) stays empty and that no `:acra` process runs. Unverified: that ACRA installed after `Application.onCreate` (its setup guide installs it in `attachBaseContext`, [ACRA BasicSetup](https://github.com/ACRA/acra/wiki/BasicSetup)) catches a later main-process crash fully (M9a check by hand; fallback: the assertion moves to `:benchmark`'s out-of-process system tests against a build with `-Pneutrodyne.acraMailto=ytx-isolation-test@invalid`). That ACRA is never installed in `:ytx` itself is `YtxProcessStartTest`'s probe (01), which is meaningful only where ACRA is installed: it is tagged `ReleaseSmoke` and runs in the release-type runs once PO-10 names the mailbox. The property is inert unless an instrumentation sets it inside the app's process (PLAN 7.2's test-hook rule), and R8 cannot remove a system-property read, so `release` needs no keep rule for it. Unverified: that the orchestrator calls `newApplication` in every test process (M0a check with a deliberate crash in a test). Library modules' device tests run no `NeutrodyneApplication`; `:benchmark`'s out-of-process tests leave ACRA on, and a crash fails them anyway.
 
@@ -1341,7 +1385,7 @@ enum class UpdateDisabledReason { DEV_BUILD, CHECKS_OFF }
 data class UpdateInfo(val versionName: String, val versionCode: Long, val minSdk: Int, val publishedAt: String,
                       val notes: String, val releaseUrl: String,
                       val apk: UpdateApk?,                       // Android: the entry for Build.SUPPORTED_ABIS[0], else null; desktop: null
-                      val desktopAsset: UpdateDesktopAsset?,     // desktop: DesktopAssetSelector's pick (11), else null; Android: null
+                      val desktopSelection: DesktopAssetSelection?, // desktop reason-bearing result; `desktopAsset` derived; Android: null
                       val server: UpdateServerInfo?)             // validated, unused by the apps in v1.0
 data class UpdateApk(val abi: String, val fileName: String, val url: String, val sizeBytes: Long, val sha256: String)
 data class UpdateDesktopAsset(val os: DesktopOs, val arch: DesktopArch, val kind: InstallKind, val fileName: String,
@@ -1424,12 +1468,12 @@ State rules (both apps unless marked):
 | `published`, `notes` | ISO-8601 UTC; `notes` equal to `changelogs/<versionCode>.txt` (≤ 500 characters) | shown as plain text, never as HTML or links |
 | `releaseUrl` | `{repoUrl}/releases/tag/{tag}` | the link rule below with path segments exactly `[owner, "Neutrodyne", "releases", "tag", "v{versionName}"]`, else `MANIFEST_INVALID` |
 | `apks[]` | exactly the three ABIs built, each `file` present in the release with matching `size` and `sha256`, `url` = `{repoUrl}/releases/download/{tag}/{file}` | every `url` passes the link rule with path segments exactly `[owner, "Neutrodyne", "releases", "download", "v{versionName}", file]` and `file` equal to that entry's `file`, else `MANIFEST_INVALID`; entries with an unknown `abi` are ignored; `sha256` 64 hexadecimal characters |
-| `desktop[]` (from M0b; absent before) | exactly the desktop packages of the release, per target the kinds listed above (no `windows/arm64` entries: Windows on Arm uses x64, [PO-40](../PLAN.md#48-further-product-owner-decisions)), each `file` present with matching `size` and `sha256`, `url` as for `apks[]`; `minOs` `"10.0"` on Windows and `"13.0"` on macOS, absent on Linux | the same link and hash rules; entries with an unknown `os`, `arch` or `kind` are ignored; `DesktopAssetSelector` picks one per 11's rules; Android ignores the field |
+| `desktop[]` (from M0b; absent before) | exactly the desktop packages of the release, per target the kinds listed above (no `windows/arm64` entries: Windows on Arm uses x64, [PO-40](../PLAN.md#48-further-product-owner-decisions)), each `file` present with matching `size` and `sha256`, `url` as for `apks[]`; `minOs` `"10.0"` on Windows and `"13.0"` on macOS, absent on Linux | the same link and hash rules; entries with an unknown `os`, `arch` or `kind` are ignored; `DesktopAssetSelector` picks one per 11's rules; Android validates the field but does not select from it |
 | `server` (from MS1; absent before) | `jar` like an asset entry; `image` = `ghcr.io/{owner}/neutrodyne-server@sha256:<index digest>` equal to the digest `server-image-manifest` attested; `minJava` 21 | parsed into `UpdateServerInfo` with the link rule for the JAR and a reference check (this repository's owner, image name `neutrodyne-server`, a digest, no tag); unused by the apps in v1.0; the server's own notice reads the manifest with its own parser ([10 Update notice](10-sync.md#update-notice)) |
 
-**Link rule.** A URL is accepted only when its scheme is `https`, its host and port are those of `BuildInfo.repoUrl` (`github.com`, 443), it has no user-info, query or fragment, and its raw path, split on `/` and each segment percent-decoded once, equals the expected segment list exactly; a segment that decodes to `.`, `..` or contains `/` or `\` rejects the manifest. Parsing uses Ktor's `Url` in common code (Unverified how it treats `%2e` forms, so the decoding and comparison are our own and tested, [Tests](#tests)). The app then never opens the manifest's string: it opens the URL rebuilt from `BuildInfo.repoUrl` and the validated components, so what it opens is always this repository's release page or release asset for the manifest's own version.
+**Link rule.** A URL is accepted only when its scheme is `https`, its host and port are those of `BuildInfo.repoUrl` (`github.com`, 443), it has no user-info, query or fragment, and its raw path, split on `/` and each segment percent-decoded once, equals the expected segment list exactly; a segment that decodes to `.`, `..` or contains `/` or `\` rejects the manifest. Parsing uses Ktor's `Url` in common code (Unverified how it treats `%2e` forms, so the decoding and comparison are our own and tested, [Tests](#tests)). The port may be written explicitly (`:443`) or omitted; raw path segments that are empty, repeat, or decode to `.`, `..`, `/` or `\` are rejected before any URL normalisation. Around the link rule the transport is guarded on 01's API client (`UpdateManifestGuard`, `UpdateManifestHopGuard`): the 64 KiB reader bound is independent of the response's length headers, the GET follows at most 5 redirect hops, and no hop carries credentials or cookies. The app then never opens the manifest's string: it opens the URL rebuilt from `BuildInfo.repoUrl` and the validated components, so what it opens is always this repository's release page or release asset for the manifest's own version.
 
-Unknown fields are ignored, so later schema-1 additions stay compatible; the whole manifest is ≤ 64 KB (larger → `MANIFEST_INVALID`; a full release lists ≈ 13 entries, a few KB). Removed with PO-31/PO-33: `prerelease`, `certSha256` and `previousCertSha256`.
+Unknown fields are ignored and unknown targets (ABIs, OSes, architectures, kinds) are skipped, so later schema-1 additions stay compatible, while malformed **known** data fails the manifest as a unit; the whole manifest is ≤ 64 KB (larger → `MANIFEST_INVALID`; a full release lists ≈ 13 entries, a few KB). Removed with PO-31/PO-33: `prerelease`, `certSha256` and `previousCertSha256`.
 
 The manifest is **not signed**, and need not be: the apps only show text and open links whose rebuilt form is this repository's release page or release asset for the manifest's own version, so a forged manifest could at worst point to another genuine release page or asset of this repository, or show wrong notes. It cannot make the apps install anything, because they install nothing. The SHA-256 on the card is informational: it comes from the same release as the file, so it reveals a damaged or swapped download, not a fake release. Integrity comes from GitHub — the release page, immutable releases, `SHA256SUMS` and the attestations ([Release assets](#release-assets)).
 
@@ -1650,7 +1694,7 @@ Removed 2026-10-05 (scope revision): the item about debuggable published builds 
 
 ### Network inventory
 
-IDs are stable; the in-app "What Neutrodyne connects to" list (Settings › Privacy, both apps) uses the same IDs and `PrivacyInventoryParityTest` (`:feature:settings`, `desktopTest`) fails when the IDs in `PRIVACY.md` and the in-app list differ. The Builds column says which artefacts make the connection: "all" (every APK and desktop build), "with engine" or "server".
+IDs are stable; the in-app "What Neutrodyne connects to" list (Settings › Privacy, both apps) is `PrivacyInventory` (`:core:ui`) and renders the 17 rows below from the same IDs, which `PRIVACY.md` carries as its table; `PrivacyInventoryParityTest` (`:feature:settings`, `desktopTest`) fails when the IDs in `PRIVACY.md` and the in-app list differ. The Builds column says which artefacts make the connection: "all" (every APK and desktop build), "with engine" or "server".
 
 | ID | Destination | Purpose | When | Builds | Default |
 |---|---|---|---|---|---|
@@ -2046,7 +2090,7 @@ Keys owned here ([01 DataStore files and typed setting keys](01-foundation.md#da
 
 On Android, `privacy.crash_reports` is mirrored into ACRA's own SharedPreferences file `acra` (`sharedPreferencesName` above), key `acra.enable` (`ACRA.PREF_ENABLE_ACRA`), by an `AppInitializer` (order 20, platform band) and on every change of the setting. ACRA reads that key when it initialises in `attachBaseContext` — long before DataStore can be read — and its `ErrorReporterImpl` listens for changes to it, so the switch takes effect immediately and survives process restarts (`ACRA.errorReporter.setEnabled(…)` alone would last only until the process dies). The `acra` file is outside the Auto Backup include list ([D34](../PLAN.md#3-key-decisions)), so a restored device starts enabled until the initializer mirrors the restored setting. `diagnostics.db_quick_check_failed_at` is 02's key.
 
-`updates.check_enabled` is portable (05's backup whitelist) and not synced; the other `updates.*` keys are device-bound state and never backed up or synced, so a restored phone shows the verification notice again where it applies, and a restored device or computer the first-run card unless the restored switch is already off. A restored `true` never overrides `Disabled(DEV_BUILD)` ([Update check](#modules-and-api)). Removed before any build had them (PO-31, PO-33): `updates.mode`, `updates.channel` and `updates.whats_new_version_code`.
+`updates.check_enabled` is portable (05's backup whitelist) and not synced; the other `updates.*` keys are device-bound state and never backed up or synced, so a restored phone shows the verification notice again where it applies, and a restored device or computer the first-run card unless the restored switch is already off. A restored `true` never overrides `Disabled(DEV_BUILD)` ([Update check](#modules-and-api)). On disk the nullable keys are `Int64` with `-1` = absent (`UpdateSettingKeys.ABSENT`): the timestamp keys `updates.last_check_at` and `updates.verification_notice_shown_at` permit zero, the version codes `updates.skipped_version_code` and `updates.notified_version_code` are positive or absent; only the portable Boolean `updates.check_enabled` travels in a backup and none of the keys syncs. Removed before any build had them (PO-31, PO-33): `updates.mode`, `updates.channel` and `updates.whats_new_version_code`.
 
 Settings › Privacy page content (09, both apps): crash-reports switch; "What Neutrodyne connects to" (the [inventory](#network-inventory) with each row's current state, e.g. Podcast Index "off — no key" or "on" (user key, or a project key under PO-3 option A), app update check "On" or "Off", YouTube-engine updates "Neutrodyne-approved", sync server "Not set up" or "Linked" with a link to Settings › Sync); links to the Discover providers (03), show-notes images (03), Settings › Updates and Settings › YouTube; "Privacy policy" (opens `PRIVACY.md`).
 

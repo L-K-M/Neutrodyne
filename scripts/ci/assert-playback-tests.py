@@ -10,14 +10,31 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 CLASS = "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest"
+VIDEO_CLASS = "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest"
+CAR_CLASS = "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest"
 SHORT = {
     "queueFirstStartSeekAndTransitionSave",
     "notificationTransportAndLocalArtwork",
     "focusLossAndNoisyPause",
     "serviceRecreationLoadsPausedAtSavedPosition",
+    "sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce",
+    "sleepEndOfEpisodeRespectsMeteredBoundary",
+    "chaptersAndTimestampSeekThroughRealSession",
 }
+VIDEO_CASES = {
+    "muxedH264AacAdvancesAudioWithScreenOffAndNoVideoDecoder",
+    "videoRequestsAudioAlternateAndKeepsVideoMetadata",
+}
+CAR_CASES = {
+    "legacyBrowserListsFourRootsAndQueuedGroupTapKeepsGroupContext",
+    "legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime",
+    "legacyHardwareSkipUsesIntervalsAndEpisodeModeAdvances",
+}
+TIMER = "screenOffListeningTimerExpiresAndRestoresVolume"
+EMBEDDED = "embeddedId3NeroAndQuickTimeChaptersReachSession"
 LONG = "screenOffStreamsForThirtyMinutesAndAdvances"
 HARDENING = "hardeningUiNotificationAndColdMediaKeyStarts"
+MIN_DURATION = {LONG: 1800, TIMER: 60}
 SOAK_DEVICES = {"api34"}
 FLAVOR_FOLDERS = {"debug", "release"}
 ACCESSIBILITY_MIN_API = 34
@@ -36,7 +53,13 @@ RELEASE_SMOKE = {
         "licencesListsLibraries",
     ),
     "ch.lkmc.neutrodyne.YtxReleaseSmokeTest": ("selftestAnswersThroughYtxServiceInTheApp",),
-    CLASS: ("notificationTransportAndLocalArtwork",),
+    CLASS: (
+        "notificationTransportAndLocalArtwork",
+        "sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce",
+        "chaptersAndTimestampSeekThroughRealSession",
+    ),
+    VIDEO_CLASS: tuple(sorted(VIDEO_CASES)),
+    CAR_CLASS: tuple(sorted(CAR_CASES)),
 }
 
 DOWNLOAD_CLASS = "ch.lkmc.neutrodyne.DownloadJourneyTest"
@@ -87,11 +110,13 @@ def expected_map(profile, device):
         # externalBackgroundStartDenialIsUnreachable runs in the external bgstart
         # lane; its aggregate asserts the case there (an instrumented target
         # cannot measure a denial).
-        expected = {CLASS: set(SHORT), QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]},
+        expected = {CLASS: set(SHORT), VIDEO_CLASS: set(VIDEO_CASES), CAR_CLASS: set(CAR_CASES), QUEUE_JOURNEY[0]: {QUEUE_JOURNEY[1]},
                     PLAY_JOURNEY[0]: {PLAY_JOURNEY[1]}}
         api = re.fullmatch(r"api([0-9]+)", device)
         if profile == "api37" or (api and int(api[1]) >= ACCESSIBILITY_MIN_API):
             expected[ATF_CONTROL[0]] = {ATF_CONTROL[1]}
+        if profile in ("nightly", "api37"):
+            expected[CLASS] |= {TIMER, EMBEDDED}
         if profile == "nightly" and device in SOAK_DEVICES:
             expected[CLASS].add(LONG)
         if profile == "api37":
@@ -108,7 +133,7 @@ def expected_cases(profile, device):
 
 
 def verify(root, profile, devices):
-    durations = {LONG: 1800, UIDT: 1200}
+    durations = {**MIN_DURATION, UIDT: 1200}
     for device in devices:
         expected = expected_map(profile, device)
         evidence = {

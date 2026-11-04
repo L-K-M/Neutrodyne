@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -20,6 +21,7 @@ import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name_empty
@@ -49,6 +51,8 @@ public data class AddPodcastUiState(
     val createdGroupId: Long? = null,
     val creatingGroup: Boolean = false,
     val groupError: UiText? = null,
+    /** Directory recipients as the settings see them; the search action's disclosure lists them. */
+    val providers: List<ProviderInfo> = emptyList(),
     /**
      * The identity of the newest resolve/subscribe attempt (UI review round 2). Completions
      * tagged with an older generation are dropped; the route closes only while [done]'s
@@ -76,6 +80,9 @@ public sealed interface AddSheetStep {
     public data class Input(
         val error: UiText? = null,
         val auth: Boolean = false,
+        val searchQuery: String? = null,
+        /** W5 renders the explicit consent action; it must never silently retry. */
+        val lookupRequired: AddResolution.LookupRequired? = null,
     ) : AddSheetStep
 
     /** "Looking up…" — the progress line; `cancelResolve` returns to [Input]. */
@@ -109,6 +116,7 @@ public class AddPodcastViewModel(
     private val resolver: AddPodcastResolver,
     private val subscribeUseCase: SubscribeUseCase,
     private val groups: GroupRepository,
+    search: SearchRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AddPodcastUiState())
     public val uiState: StateFlow<AddPodcastUiState> = mutableState.asStateFlow()
@@ -116,6 +124,11 @@ public class AddPodcastViewModel(
     init {
         viewModelScope.launch {
             groups.observeGroups().collect { rows -> mutableState.update { it.copy(groups = rows) } }
+        }
+        // The "Search for …" action's recipient disclosure (M7): the tap sends the query to
+        // every effective provider, so the recipient list must already be on screen.
+        viewModelScope.launch {
+            search.observeProviders().collect { list -> mutableState.update { it.copy(providers = list) } }
         }
     }
 
@@ -200,7 +213,22 @@ public class AddPodcastViewModel(
         runResolve { resolver.resolve(trimmed) }
     }
 
+    /**
+     * The prefill's automatic resolve (03 implementation note 2026-11-02): a shared local
+     * address is never fetched without a tap — the user sees the URL and submits it. A typed
+     * local URL still resolves on that tap through [resolve].
+     */
+    public fun autoResolve(input: String) {
+        if (resolver.isLocalDestination(input)) return
+        resolve(input)
+    }
+
     /** The `AuthRequired` retry (03 Basic auth): the same input, now with credentials. */
+    public fun lookupOnce() {
+        val required = (mutableState.value.step as? AddSheetStep.Input)?.lookupRequired ?: return
+        runResolve { resolver.lookupOnce(required.input) }
+    }
+
     public fun resolveWithCredentials(credentials: BasicCredentials) {
         val input = resolvedInput ?: return
         runResolve { resolver.resolve(input, credentials) }
@@ -313,6 +341,10 @@ public class AddPodcastViewModel(
             state.copy(
                 step =
                     when (resolution) {
+                        is AddResolution.LookupRequired -> {
+                            AddSheetStep.Input(lookupRequired = resolution)
+                        }
+
                         is AddResolution.Feed -> {
                             AddSheetStep.Preview(resolution.preview)
                         }
@@ -325,6 +357,7 @@ public class AddPodcastViewModel(
                             AddSheetStep.Input(
                                 error = AddPodcastText.describe(resolution.error),
                                 auth = resolution.error is AddPodcastError.AuthRequired,
+                                searchQuery = (resolution.error as? AddPodcastError.NotAUrl)?.query,
                             )
                         }
                     },

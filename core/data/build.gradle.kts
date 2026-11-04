@@ -8,6 +8,11 @@ plugins {
 }
 
 kotlin {
+    sourceSets.named("desktopTest") {
+        resources.srcDir(rootProject.file("feeds/src/test/resources"))
+        kotlin.srcDir(project.file("src/jvmTest/kotlin"))
+        kotlin.srcDir(rootProject.file("feeds/src/replay/kotlin"))
+    }
     // Host (Robolectric) tests: the WorkManager test-driver suite, the foreground observer and the
     // golden corpus on the platform parser (03 corpus leg b). The task is `testAndroidHostTest`.
     targets.named("android") {
@@ -17,6 +22,13 @@ kotlin {
     }
 
     sourceSets {
+        named("androidHostTest") {
+            resources.srcDir(rootProject.file("feeds/src/test/resources"))
+            kotlin.srcDir(rootProject.file("feeds/src/test/kotlin"))
+            kotlin.srcDir(project.file("src/jvmTest/kotlin"))
+            kotlin.srcDir(rootProject.file("feeds/src/replay/kotlin"))
+        }
+
         commonMain.dependencies {
             implementation(project(":core:domain"))
             implementation(project(":core:model"))
@@ -45,7 +57,12 @@ kotlin {
             implementation(libs.jna)
             implementation(libs.jna.platform)
         }
+        // The same socket-level transport suite exercises both actual island wrappers.
+        findByName("androidHostTest")?.kotlin?.srcDir("src/jvmTest/kotlin")
+        getByName("desktopTest").kotlin.srcDir("src/jvmTest/kotlin")
         findByName("androidHostTest")?.dependencies {
+            implementation(libs.okhttp.mockwebserver3)
+            implementation(libs.okhttp.tls)
             implementation(libs.robolectric)
             implementation(libs.junit4)
             implementation(libs.truth)
@@ -65,6 +82,7 @@ kotlin {
         // Wiring DataStoreBindings' providers in desktopTest mentions the DataStore type
         // (implementation deps of :core:datastore are otherwise invisible here).
         desktopTest.dependencies {
+            implementation(libs.okhttp.tls)
             implementation(libs.androidx.datastore.preferences.core)
             implementation(libs.androidx.paging.testing)
             implementation(libs.okhttp.mockwebserver3)

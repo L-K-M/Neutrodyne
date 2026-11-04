@@ -26,9 +26,12 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
+import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
+import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -39,6 +42,7 @@ import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -100,6 +104,13 @@ interface DesktopAppGraph {
 
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
+
+    val appUpdateChecker: AppUpdateChecker
+    val updateNotices: UpdateNotices
+
+    /** Discovery bindings remain safe to resolve before the database startup gate. */
+    val searchRepository: SearchRepository
+    val autodiscovery: Autodiscovery
 
     val networkMonitor: NetworkMonitor
 

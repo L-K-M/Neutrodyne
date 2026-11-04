@@ -31,6 +31,25 @@ class CoreClients(
     private val hints: DnsFamilyHints,
     @param:DebugInterceptors private val debugInterceptors: Set<Interceptor>,
 ) : ConnectionPoolEvictor {
+    /**
+     * The desktop-test seam (03 note 2026-11-02): the add pipeline's LAN refusal is syntactic,
+     * so discovery tests serve their MockWebServer under a fake public host that [baseDns] maps
+     * to loopback. The clients build during this delegation, so the Dns wrapper in `coreBuilder`
+     * reads [baseDns] per lookup — assigning it here still lands before the first request.
+     */
+    constructor(
+        ua: UserAgentInterceptor,
+        lanGuard: LocalNetworkGuard,
+        hints: DnsFamilyHints,
+        @DebugInterceptors debugInterceptors: Set<Interceptor>,
+        baseDns: Dns,
+    ) : this(ua, lanGuard, hints, debugInterceptors) {
+        this.baseDns = baseDns
+    }
+
+    /** `Dns.SYSTEM` in production; only the test seam rewrites it, before any lookup can run. */
+    private var baseDns: Dns = Dns.SYSTEM
+
     // Declared before the clients: property initializers run in order, and `coreBuilder` reads them.
     private val dispatcher =
         Dispatcher().apply {
@@ -44,7 +63,7 @@ class CoreClients(
             .Builder()
             .dispatcher(dispatcher)
             .connectionPool(pool)
-            .dns(lanGuard.dns(FamilyHintDns(Dns.SYSTEM, hints), mode))
+            .dns(lanGuard.dns(FamilyHintDns(Dns { hostname -> baseDns.lookup(hostname) }, hints), mode))
             .addInterceptor(lanGuard.interceptor(mode))
             .addInterceptor(ua)
             .apply { debugInterceptors.forEach(::addInterceptor) }

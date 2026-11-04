@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Synthetic recorded-response fixture, 2026-10-19. Unlicense. No live provider calls. -->
+<rss version="2.0"><channel><title>M7 Subscribe Journey</title><description>Offline journey fixture</description><link>https://example.test/show</link><item><guid>m7-e1</guid><title>First episode</title><pubDate>Mon, 19 Oct 2026 10:00:00 GMT</pubDate><description>A recorded episode summary.</description><enclosure url="https://example.test/episode.mp3" type="audio/mpeg" length="1000"/></item></channel></rss>

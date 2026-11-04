@@ -5,6 +5,11 @@ plugins {
 }
 
 kotlin {
+    sourceSets.named("desktopTest") {
+        resources.srcDir(project.file("src/test/resources"))
+        kotlin.srcDir(project.file("src/test/kotlin"))
+        kotlin.srcDir(project.file("src/replay/kotlin"))
+    }
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)

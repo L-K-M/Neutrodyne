@@ -21,6 +21,9 @@ internal data class FeedRequest(
     val maxBytes: Long = MAX_FEED_BYTES,
     /** Probes (autodiscovery) stop the body read after this many bytes. */
     val sniffOnlyBytes: Int? = null,
+    /** Add only: cancel an HTML response after this prefix; full feed limits are unchanged. */
+    val htmlReadLimit: Long? = null,
+    val purpose: FeedRequestPurpose = FeedRequestPurpose.REFRESH,
     /** Not-yet-stored credentials (add flow, `setCredentials` probe). */
     val credentials: BasicCredentials? = null,
 )
@@ -106,3 +109,22 @@ internal val FOLLOWABLE_STATUSES = setOf(301, 302, 303, 307, 308)
 /** The Accept header of every feed request (03 Request rules). */
 internal const val FEED_ACCEPT =
     "application/rss+xml, application/atom+xml;q=0.9, application/xml;q=0.8, text/xml;q=0.8, */*;q=0.5"
+
+/** Add/edit must reject YouTube even when a publisher redirects there. */
+internal enum class FeedRequestPurpose {
+    REFRESH,
+    ADD,
+
+    /**
+     * An add request the user did not name (autodiscovery candidates and probes, 03 note
+     * 2026-11-02): no hop may point into the local network — unlike [ADD], where only a
+     * non-local first URL forbids later local hops, so a typed LAN feed still works.
+     */
+    ADD_DISCOVERED,
+}
+
+/** Add's pre-M8 policy rejection, distinguished from transport errors by the resolver. */
+internal val ADD_YOUTUBE_REJECTED = NetError.Other("youtube")
+
+/** Add's local-destination refusal, mapped to `LocalNetworkUnsupported` by the resolver. */
+internal val ADD_LOCAL_REJECTED = NetError.Other("local")

@@ -45,6 +45,12 @@ import dev.zacsweers.metro.SingleIn
 object DesktopDataBindings {
     /** kxml2 through `META-INF/services` discovery (the `PullParserFactory` doc). */
     @Provides
+    @SingleIn(AppScope::class)
+    fun autodiscovery(): ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery =
+        ch.lkmc.neutrodyne.feeds.jvm.html
+            .JsoupAutodiscovery()
+
+    @Provides
     fun pullParserFactory(): PullParserFactory = PullParserFactory.Discovered
 
     @Provides

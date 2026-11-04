@@ -30,8 +30,14 @@ public interface PlatformActions {
     /** Desktop only: "Show in Explorer / Finder / Files". */
     public val reveal: RevealInFolder?
 
+    /** Android 31+ app link preferences; null on older Android and desktop. */
+    public val appleLinks: AppleLinkSettings? get() = null
+
     /** Android 13+ only; `null` on the desktop and on API < 33. */
     public val notifications: NotificationPermissionRequester?
+
+    /** Android help action. False leaves the bundled steps available when OEM settings are absent. */
+    public val developerOptions: (() -> Boolean)? get() = null
 }
 
 /** How an external-URL open ended. */
@@ -113,4 +119,9 @@ public enum class SystemSettingsTarget { STORAGE, BACKGROUND_DATA, APP_DETAILS }
 
 public fun interface SystemSettingsOpener {
     public fun open(target: SystemSettingsTarget): Boolean
+}
+
+/** Opens Android's app-specific Open by default preferences after an explicit tap. */
+public fun interface AppleLinkSettings {
+    public fun openSettings(): OpenResult
 }

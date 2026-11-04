@@ -57,6 +57,7 @@ internal class EngineRig(
     val dao = db.downloadDao()
     val conditions = MutableStateFlow(Conditions(true, true, true, true, true))
     val roots = TestRoots()
+    val faults = FaultFiles()
     val files = OkioDownloadFileSystem(roots, faults, dispatcher)
     val deletes = DeferredDeletes(JournalTestStore(), files, roots, dao::allRows)
     val verification = DownloadFiles(files, roots, PlatformSriHasher(roots, faults), PlatformLocalUris(), deletes)

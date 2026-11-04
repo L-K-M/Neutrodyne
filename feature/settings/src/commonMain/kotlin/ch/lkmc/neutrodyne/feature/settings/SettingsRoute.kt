@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 
@@ -20,6 +21,7 @@ internal fun SettingsRoute(
     settings: SettingsRepository,
     dynamicColorSupport: DynamicColorSupport,
     platform: PlatformKind,
+    updateTarget: UpdateRuntimeTarget,
 ) {
     when (key.page) {
         SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform)
@@ -27,6 +29,9 @@ internal fun SettingsRoute(
         SettingsPage.PLAYBACK -> PlaybackPage(platform)
         SettingsPage.DOWNLOADS -> DownloadsSettingsPage(platform)
         SettingsPage.DESKTOP -> DownloadsSettingsPage(platform, page = SettingsPage.DESKTOP)
+        SettingsPage.UPDATES -> UpdatesPage(buildInfo, updateTarget, key.openRelease)
+        SettingsPage.DISCOVER -> DiscoverPage()
+        SettingsPage.PRIVACY -> PrivacyPage()
         SettingsPage.ABOUT -> AboutPage(buildInfo)
         else -> AppearancePage(settings, dynamicColorSupport, platform)
     }

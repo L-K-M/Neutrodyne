@@ -67,7 +67,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -121,6 +121,8 @@ jobs:
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
+          python3 scripts/ci/tests/playback-reboot.test.py
+          python3 scripts/ci/tests/assert-discovery-tests.test.py
           python3 scripts/ci/tests/trace-instrumentation-abi.test.py
           python3 scripts/ci/tests/emulator-acceleration.test.py
           python3 scripts/ci/tests/gmd-device-budget.test.py
@@ -130,6 +132,7 @@ jobs:
           python3 scripts/ci/tests/assert-download-tests.test.py
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
+          python3 scripts/ci/tests/update-json.test.py
 
   unit:
     runs-on: ubuntu-24.04
@@ -145,7 +148,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -162,13 +165,18 @@ jobs:
         run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
       - name: Room schema drift
         run: test -z "$(git status --porcelain -- core/database/schemas)" || { echo "::error::Room schema changed without a committed version"; git status --porcelain -- core/database/schemas; exit 1; }
+      # M7 evidence gate: the shared replay, desktop journeys, host replays and
+      # both screenshot surfaces must have executed, unskipped, in this job's XML.
+      - name: Require discovery cases in the host XML
+        run: python3 scripts/ci/assert-discovery-tests.py .
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
+        if: always()
         with:
           name: unit-reports
           path: |
             **/build/reports/tests/
             **/build/outputs/roborazzi/
+            **/build/test-results/
 
   assemble:
     runs-on: ubuntu-24.04
@@ -184,7 +192,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -269,7 +277,7 @@ jobs:
           python-version: "3.14"
       - name: Free disk space (09 instrumented preamble)
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/.ghcup
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -294,7 +302,11 @@ jobs:
         timeout-minutes: 45
         run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest ciGroupAndroidDeviceTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
       - name: Require playback cases on both CI devices
-        run: python3 scripts/ci/assert-playback-tests.py ci app/build/outputs/androidTest-results --device api26 --device api36
+        run: python3 scripts/ci/assert-playback-tests.py ci app/build/outputs/androidTest-results --device api26 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+      # M7 evidence gate: the four share/deep-link journeys and the five shared
+      # replay cases must pass on each CI device (PLAN M7 AC4, AC7, AC8, AC10).
+      - name: Require discovery cases on both CI devices
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # Always upload, not only on failure: instrumented-device proofs on reviewable PRs are
         # verified from the per-device result XML, which only exists if success uploads too.

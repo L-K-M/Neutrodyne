@@ -565,6 +565,8 @@ internal class DownloadControllerImpl(
         const val MANUAL_PRIORITY = 100
         const val NEXT_PRIORITY = 200
         const val BIND_CHUNK = 500
+        const val MIN_ENCLOSURE_BYTES = 100_000L
+        const val BYTES_PER_MILLISECOND = 16L
         const val NOTICE_PROBE_MS = 30_000L
         val HLS_TYPES =
             setOf(

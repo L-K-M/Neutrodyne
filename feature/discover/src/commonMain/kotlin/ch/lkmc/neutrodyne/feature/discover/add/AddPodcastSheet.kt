@@ -55,6 +55,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
+import ch.lkmc.neutrodyne.core.model.FeedCandidateSource
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.asString
@@ -68,6 +69,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_auth_password
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_show
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_username
 import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_episodes
+import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_source_alternate_link
+import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_source_apple_anchor
+import ch.lkmc.neutrodyne.core.ui.resources.add_candidate_source_same_site_anchor
 import ch.lkmc.neutrodyne.core.ui.resources.add_choose_title
 import ch.lkmc.neutrodyne.core.ui.resources.add_empty_feed
 import ch.lkmc.neutrodyne.core.ui.resources.add_episodes_count
@@ -75,6 +79,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_field_label
 import ch.lkmc.neutrodyne.core.ui.resources.add_helper
 import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
 import ch.lkmc.neutrodyne.core.ui.resources.add_looking_up
+import ch.lkmc.neutrodyne.core.ui.resources.add_lookup_once
 import ch.lkmc.neutrodyne.core.ui.resources.add_might_be_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.add_open
 import ch.lkmc.neutrodyne.core.ui.resources.add_paste
@@ -82,10 +87,13 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_private
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribe
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribing
 import ch.lkmc.neutrodyne.core.ui.resources.add_title
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_search_for
 import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
 import ch.lkmc.neutrodyne.core.ui.resources.membership_create
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name
 import ch.lkmc.neutrodyne.core.ui.resources.membership_new
+import ch.lkmc.neutrodyne.feature.discover.ProviderDisclosure
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -105,8 +113,11 @@ internal fun AddPodcastSheet(
     initialInput: String?,
     state: AddPodcastUiState,
     onResolve: (String) -> Unit,
+    onAutoResolve: (String) -> Unit = onResolve,
     onCredentials: (BasicCredentials) -> Unit,
     onCancelResolve: () -> Unit,
+    onSearch: (String) -> Unit = {},
+    onLookupOnce: () -> Unit = {},
     onInputChange: (String) -> Unit,
     onCandidate: (String) -> Unit,
     onSubscribe: (Set<Long>) -> Unit,
@@ -134,10 +145,10 @@ internal fun AddPodcastSheet(
     val focusRequester = remember { FocusRequester() }
 
     // A pre-filled input (deep link, restored field) resolves at once; the VM dedupes remounts.
-    val currentOnResolve by rememberUpdatedState(onResolve)
+    val currentOnAutoResolve by rememberUpdatedState(onAutoResolve)
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
-        if (input.isNotBlank()) currentOnResolve(input)
+        if (input.isNotBlank()) currentOnAutoResolve(input)
     }
 
     val step = state.step
@@ -220,6 +231,18 @@ internal fun AddPodcastSheet(
 
         when (step) {
             is AddSheetStep.Input -> {
+                if (step.lookupRequired != null) {
+                    NdTextButton(stringResource(Res.string.add_lookup_once), onLookupOnce)
+                }
+                if (step.searchQuery != null) {
+                    // The tap sends the query to every effective provider — disclose them first
+                    // (the same text Discover's search field shows, 03 note 2026-11-02).
+                    ProviderDisclosure(state.providers)
+                    NdTextButton(
+                        stringResource(Res.string.discovery_search_for, step.searchQuery),
+                        { onSearch(step.searchQuery) },
+                    )
+                }
                 if (step.auth) {
                     AuthFields(
                         username = username,
@@ -394,6 +417,14 @@ private fun AuthFields(
     }
 }
 
+/** The chooser's localized source label — the enum name is an implementation detail (M7). */
+private fun candidateSourceLabel(source: FeedCandidateSource): StringResource =
+    when (source) {
+        FeedCandidateSource.ALTERNATE_LINK -> Res.string.add_candidate_source_alternate_link
+        FeedCandidateSource.APPLE_ANCHOR -> Res.string.add_candidate_source_apple_anchor
+        FeedCandidateSource.SAME_SITE_ANCHOR -> Res.string.add_candidate_source_same_site_anchor
+    }
+
 /** A `Choose` row: title and "N episodes · source" (08 Add podcast sheet). */
 @Composable
 private fun CandidateRow(
@@ -408,7 +439,7 @@ private fun CandidateRow(
                     candidate.episodeCount?.let {
                         pluralStringResource(Res.plurals.add_candidate_episodes, it, it)
                     },
-                    candidate.source,
+                    stringResource(candidateSourceLabel(candidate.source)),
                 ).joinToString(" · "),
             )
         },

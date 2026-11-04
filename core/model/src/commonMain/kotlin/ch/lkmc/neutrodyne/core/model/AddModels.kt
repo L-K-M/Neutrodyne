@@ -37,12 +37,19 @@ data class PreviewEpisode(
     val isVideo: Boolean,
 )
 
+/**
+ * Where an add-sheet candidate was found (03 Autodiscovery): the UI localises these values —
+ * the enum name is never user-visible. Mirrors `feeds`' `DiscoverySource`, which `:core:model`
+ * cannot see (`:feeds` has no module dependencies).
+ */
+enum class FeedCandidateSource { ALTERNATE_LINK, APPLE_ANCHOR, SAME_SITE_ANCHOR }
+
 /** One autodiscovery or directory candidate the sheet may offer (03; M7 fills the lists). */
 data class FeedCandidate(
     val url: String,
     val title: String?,
     val episodeCount: Int?,
-    val source: String,
+    val source: FeedCandidateSource,
 )
 
 /**

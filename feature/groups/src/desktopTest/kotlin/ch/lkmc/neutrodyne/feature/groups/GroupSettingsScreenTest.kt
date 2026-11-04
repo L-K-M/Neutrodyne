@@ -197,7 +197,7 @@ class GroupSettingsScreenTest {
     @Test fun manageOverflowOpensGroupSettings() =
         runComposeUiTest {
             val id = group.id
-            val vm = GroupsManageViewModel(groups)
+            val vm = GroupsManageViewModel(groups, FakePodcastRepository(), FakeSettingsRepository())
             store.put("manage", vm)
             setPage { GroupsManageRoute(vm) }
             onNodeWithTag("groupMenu$id").performClick()

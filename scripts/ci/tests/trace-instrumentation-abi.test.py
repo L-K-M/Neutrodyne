@@ -35,7 +35,7 @@ HEADER = (
     "# SPDX-License-Identifier: Unlicense\n"
     "# Release instrumentation is a separately compiled client of the shipped APK.\n"
     "# Preserve its exact call surface in every build, not a test-only variant.\n"
-    "# Traced with R8 " + VERSION + " from the seven smoke cases, runner and test framework.\n"
+    "# Traced with R8 " + VERSION + " from the release smoke cases, runner and test framework.\n"
     "# Other code remains eligible for shrinking and optimization.\n"
 )
 BODY = (
@@ -70,6 +70,9 @@ ANALYSIS_ROOT_ENTRIES = {
     for name in (
         "ch.lkmc.neutrodyne.NeutrodyneTestRunner",
         "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
+        "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
+        "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
+        "ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest",
         "androidx.test.runner.AndroidJUnitRunner",
         "androidx.test.ext.junit.runners.AndroidJUnit4",
         "org.junit.Test",

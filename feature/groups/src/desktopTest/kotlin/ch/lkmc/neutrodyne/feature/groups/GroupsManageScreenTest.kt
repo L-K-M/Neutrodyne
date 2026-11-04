@@ -42,13 +42,17 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.model.CategoryCount
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import kotlinx.coroutines.runBlocking
 import java.util.Locale
@@ -75,6 +79,8 @@ class GroupsManageScreenTest {
             }
         }
     private val store = ViewModelStore()
+    private val podcasts = FakePodcastRepository()
+    private val settings = FakeSettingsRepository()
     private lateinit var vm: GroupsManageViewModel
 
     @BeforeTest fun setUp() {
@@ -298,8 +304,9 @@ class GroupsManageScreenTest {
 
     @Test fun suggestedGroupsCardSitsAboveTheEmptyState() =
         runComposeUiTest {
+            podcasts.categoryCounts.value = listOf(CategoryCount("News", listOf(1, 2)))
             setManager()
-            val card = onNodeWithText("Create your first group").assertIsDisplayed()
+            val card = onNodeWithText("Group podcasts into feeds").assertIsDisplayed()
             val empty = onNodeWithText("No groups yet").assertIsDisplayed()
             assertTrue(
                 card.fetchSemanticsNode().boundsInRoot.top <
@@ -307,11 +314,18 @@ class GroupsManageScreenTest {
             )
         }
 
-    @Test fun suggestedGroupsCardOpensTheNewGroupEditor() =
+    @Test fun suggestedGroupsCardCreatesMembersInManageGroups() =
         runComposeUiTest {
+            podcasts.categoryCounts.value = listOf(CategoryCount("News", listOf(1, 2)))
             setManager()
-            onNodeWithText("Create your first group").performClick()
-            assertEquals(GroupEditKey(null), vm.consumeNavigation())
+            onNodeWithText("News (2)").performClick()
+            onNodeWithText("Create groups").performClick()
+            waitUntil { groups.groups.value.size == 1 && !vm.suggestedGroups.state.value.busy }
+            assertEquals(
+                setOf(1L, 2L),
+                groups.members.value.values
+                    .single(),
+            )
         }
 
     @Test fun undoIsOfferedBeforeAnotherGroupCanBeDeleted() =
@@ -369,6 +383,7 @@ class GroupsManageScreenTest {
     private fun ComposeUiTest.setManager(
         content: @Composable () -> Unit = {
             val state by vm.uiState.collectAsStateWithLifecycle()
+            val suggestions by vm.suggestedGroups.state.collectAsStateWithLifecycle()
             GroupsManageScreen(
                 state,
                 vm::startDrag,
@@ -382,10 +397,20 @@ class GroupsManageScreenTest {
                 vm::delete,
                 {},
                 vm::retry,
+                suggestedGroups = {
+                    SuggestedGroupsCard(
+                        suggestions.suggestions,
+                        suggestions.selected,
+                        suggestions.busy,
+                        vm.suggestedGroups::toggle,
+                        vm.suggestedGroups::create,
+                        vm.suggestedGroups::dismiss,
+                    )
+                },
             )
         },
     ) {
-        vm = GroupsManageViewModel(repository)
+        vm = GroupsManageViewModel(repository, podcasts, settings)
         store.put("manage", vm)
         // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare scene has none.
         val resumed =

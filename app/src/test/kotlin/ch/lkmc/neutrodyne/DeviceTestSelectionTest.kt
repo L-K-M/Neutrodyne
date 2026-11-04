@@ -20,15 +20,15 @@ class DeviceTestSelectionTest {
     fun unseededOreoSelectsExactlyTheSupportedCases() {
         for (sdk in listOf(26, 27)) {
             assertThat(select(sdk = sdk).getString("notClass")?.split(','))
-                .containsExactly(RESTORE, RELABEL, YTX, ATF)
+                .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, YTX, ATF)
         }
     }
 
     @Test
     fun modernDevicesKeepLocaleAndPythonAcceptanceChecks() {
-        assertThat(select(sdk = 33).getString("notClass")?.split(',')).containsExactly(RESTORE, ATF)
+        assertThat(select(sdk = 33).getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE, ATF)
         for (sdk in listOf(34, 36)) {
-            assertThat(select(sdk = sdk).getString("notClass")).isEqualTo(RESTORE)
+            assertThat(select(sdk = sdk).getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE)
         }
     }
 
@@ -43,22 +43,37 @@ class DeviceTestSelectionTest {
     }
 
     @Test
+    fun deniedNotificationLegRunsOnlyWhereThePermissionIsRuntime() {
+        assertThat(select(sdk = 32).getString("notClass")?.split(',')).contains(NOTIFY_DENIED)
+        assertThat(select(sdk = 33).getString("notClass")?.split(',')).doesNotContain(NOTIFY_DENIED)
+    }
+
+    @Test
     fun supportedOreoAbiKeepsPythonCheck() {
         assertThat(select(sdk = 26, abi = "arm64-v8a").getString("notClass")?.split(','))
-            .containsExactly(RESTORE, RELABEL, ATF)
+            .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, ATF)
     }
 
     @Test
     fun pieKeepsPythonCheck() {
         assertThat(select(sdk = 28).getString("notClass")?.split(','))
-            .containsExactly(RESTORE, RELABEL, ATF)
+            .containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, RELABEL, ATF)
     }
 
     @Test
     fun shippedGermanKeepsRelabelCheckOnOreo() {
         val arguments = Bundle()
         selectSupportedDeviceTests(arguments, 26, "arm64-v8a", listOf("en-US", "de-DE"), false)
-        assertThat(arguments.getString("notClass")?.split(',')).containsExactly(RESTORE, ATF)
+        assertThat(arguments.getString("notClass")?.split(',')).containsExactly(REBOOT, RESTORE, NOTIFY_DENIED, ATF)
+    }
+
+    @Test
+    fun rebootPhasesRunOnlyUnderTheHostDriver() {
+        assertThat(select(sdk = 36).getString("notClass").orEmpty().split(',')).contains(REBOOT)
+
+        val driven = Bundle().apply { putString("hostReboot", "true") }
+        selectSupportedDeviceTests(driven, 36, "x86_64", listOf("en-US"), false)
+        assertThat(driven.getString("notClass").orEmpty().split(',')).doesNotContain(REBOOT)
     }
 
     @Test
@@ -110,7 +125,10 @@ class DeviceTestSelectionTest {
     ): Bundle = Bundle().also { selectSupportedDeviceTests(it, sdk, abi, listOf("en-US"), seeded) }
 
     private companion object {
+        const val REBOOT = "ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest"
         const val RESTORE = "ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest"
+        const val NOTIFY_DENIED =
+            "ch.lkmc.neutrodyne.UpdateNotificationDeviceTest#deniedPermissionDoesNotPostOrRequestPermission"
         const val RELABEL = "ch.lkmc.neutrodyne.PerAppLanguageTest#perAppLanguageRelabelsTheDestinations"
         const val YTX = "ch.lkmc.neutrodyne.YtxReleaseSmokeTest"
         const val ATF = "ch.lkmc.neutrodyne.AccessibilityChecksTest"

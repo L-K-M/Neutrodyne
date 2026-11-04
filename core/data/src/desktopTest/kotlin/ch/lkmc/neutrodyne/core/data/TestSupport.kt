@@ -9,6 +9,10 @@ import ch.lkmc.neutrodyne.core.data.add.PreviewCache
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntryResolver
 import ch.lkmc.neutrodyne.core.data.add.SubscribeUseCaseImpl
+import ch.lkmc.neutrodyne.core.data.discovery.AppleDirectoryClient
+import ch.lkmc.neutrodyne.core.data.discovery.DirectoryMetadataCache
+import ch.lkmc.neutrodyne.core.data.discovery.DirectorySettings
+import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexDirectoryClient
 import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
@@ -41,9 +45,14 @@ import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.model.ChartGenre
+import ch.lkmc.neutrodyne.core.model.DirectoryAccess
+import ch.lkmc.neutrodyne.core.model.DirectoryHit
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
+import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -64,6 +73,7 @@ import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import dev.zacsweers.metro.Provider
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import okio.FileSystem
@@ -555,8 +565,12 @@ internal fun newResolver(
     credentials: CredentialLookup = CredentialLookup.None,
     io: CoroutineDispatcher = Dispatchers.IO,
     parser: FeedParser = XmlPullFeedParser.discovered(),
+    apple: AppleDirectoryClient = unusedApple,
+    podcastIndex: PodcastIndexDirectoryClient = unusedPodcastIndex,
+    metadata: DirectoryMetadataCache = newDirectoryMetadata(clock),
+    networkClients: NetworkClients = newNetworkClients(credentials),
 ): ResolverBundle {
-    val bundle = newFetcher(root, credentials, clock)
+    val bundle = newFetcher(root, credentials, clock, networkClients)
     val cache = PreviewCache(clock)
     val resolver =
         AddPodcastResolverImpl(
@@ -569,6 +583,12 @@ internal fun newResolver(
             db = db,
             clock = clock,
             io = io,
+            metadata = metadata,
+            apple = apple,
+            podcastIndex = podcastIndex,
+            autodiscovery =
+                ch.lkmc.neutrodyne.feeds.jvm.html
+                    .JsoupAutodiscovery(),
         )
     return ResolverBundle(resolver, cache, bundle.tempFiles, bundle)
 }
@@ -701,3 +721,32 @@ internal val unusedPreviewResolver =
         override suspend fun resolveEntry(feedUrl: String): Outcome<PreviewEntry, AddPodcastError> =
             error("Unexpected preview resolution")
     }
+
+internal val unusedApple =
+    object : AppleDirectoryClient {
+        override suspend fun search(
+            query: String,
+            country: String,
+        ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = error("Unexpected search")
+
+        override suspend fun lookup(
+            ids: ImmutableList<String>,
+            access: DirectoryAccess,
+        ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = Outcome.Failure(ProviderStatus.Disabled)
+
+        override suspend fun charts(
+            genre: ChartGenre?,
+            country: String,
+        ): Outcome<ImmutableList<DirectoryHit>, ProviderStatus> = error("Unexpected chart")
+    }
+internal val unusedPodcastIndex =
+    object : PodcastIndexDirectoryClient {
+        override suspend fun lookup(feedId: String): Outcome<DirectoryHit?, ProviderStatus> =
+            Outcome.Failure(ProviderStatus.Disabled)
+    }
+
+private fun newDirectoryMetadata(clock: TestClock): DirectoryMetadataCache {
+    val secrets = FakeSecretStore()
+    val settings = DirectorySettings(FakeSettingsRepository(), { secrets }, testBuildInfo(), fakePlatform())
+    return DirectoryMetadataCache(clock, settings)
+}

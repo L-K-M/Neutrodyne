@@ -65,6 +65,7 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.model.CategoryCount
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -78,6 +79,7 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.DiscoverSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
@@ -183,46 +185,64 @@ class FeedsScreenTest {
         }
 
     @Test
-    fun suggestedGroupCardShowsWithSubscriptionsAndNoGroups() =
-        runComposeUiTest {
-            setFeeds(state = FeedsUiState(hasSubscriptions = true))
-            onNodeWithText("Create your first group").assertIsDisplayed()
-        }
-
-    @Test
-    fun suggestedGroupCardHiddenWithoutSubscriptions() =
-        runComposeUiTest {
-            setFeeds(state = FeedsUiState(hasSubscriptions = false))
-            onNodeWithText("Create your first group").assertDoesNotExist()
-        }
-
-    @Test
-    fun hiddenGroupsStillHideTheSuggestedGroupCard() =
+    fun categoryCardShowsThroughTheFeedsRoute() =
         runComposeUiTest {
             val fixture = PagerFixture()
-            // The card is gated on any group existing, not on a tab being visible.
-            fixture.groups.groups.value =
-                fixture.groups.groups.value
-                    .map { it.copy(showAsTab = false) }
+            fixture.groups.groups.value = emptyList()
+            fixture.podcasts.categoryCounts.value = listOf(CategoryCount("News", listOf(1, 2)))
             fixture.feeds.tabs.value = listOf(FeedTab(FeedSource.All, "All", null, null, null))
-            setContent { fixture.Content() }
+            setContent { fixture.Content(FeedContent.ROUTE) }
             fixture.awaitSelected(this, 0)
-            onNodeWithText("Create your first group").assertDoesNotExist()
+            onNodeWithText("News (2)").assertIsDisplayed()
+            onNodeWithText("Not now").performClick()
+            waitUntil { runBlocking { fixture.settings.get(DiscoverSettingKeys.SUGGESTED_GROUPS_DISMISSED) } }
+            onNodeWithText("News (2)").assertDoesNotExist()
             fixture.close()
         }
 
     @Test
-    fun suggestedGroupCardPushesGroupEditThroughTheRoute() =
+    fun noSuggestionsHideTheCardWithoutSubscriptions() =
+        runComposeUiTest {
+            setFeeds(state = FeedsUiState(hasSubscriptions = false))
+            onNodeWithText("Group podcasts into feeds").assertDoesNotExist()
+        }
+
+    @Test
+    fun noMatchingSuggestionsHideTheCardWithHiddenGroups() =
         runComposeUiTest {
             val fixture = PagerFixture()
-            fixture.groups.groups.value = emptyList()
+            fixture.groups.groups.value =
+                fixture.groups.groups.value
+                    .map { it.copy(showAsTab = false) }
             fixture.feeds.tabs.value = listOf(FeedTab(FeedSource.All, "All", null, null, null))
             setContent { fixture.Content(FeedContent.ROUTE) }
             fixture.awaitSelected(this, 0)
-            onNodeWithText("Create your first group").performClick()
+            onNodeWithText("Group podcasts into feeds").assertDoesNotExist()
+            fixture.close()
+        }
+
+    @Test
+    fun selectedCategoryCreatesGroupMembersThroughTheFeedsRoute() =
+        runComposeUiTest {
+            val fixture = PagerFixture()
+            fixture.groups.groups.value = emptyList()
+            fixture.podcasts.categoryCounts.value = listOf(CategoryCount("News", listOf(1, 2)))
+            fixture.feeds.tabs.value = listOf(FeedTab(FeedSource.All, "All", null, null, null))
+            setContent { fixture.Content(FeedContent.ROUTE) }
+            fixture.awaitSelected(this, 0)
+            onNodeWithText("News (2)").performClick()
+            onNodeWithText("Create groups").performClick()
+            waitUntil { fixture.groups.groups.value.size == 1 && !fixture.model.suggestedGroups.state.value.busy }
             assertEquals(
-                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(GroupEditKey(null))),
-                fixture.navigator.calls,
+                setOf(1L, 2L),
+                fixture.groups.members.value.values
+                    .single(),
+            )
+            assertEquals(
+                "News",
+                fixture.groups.groups.value
+                    .single()
+                    .name,
             )
             fixture.close()
         }
@@ -985,6 +1005,7 @@ private class PagerFixture {
     val feeds = FakeFeedRepository(clock)
     val episodes = FakeEpisodeRepository()
     val groups = FakeGroupRepository(clock)
+    val podcasts = FakePodcastRepository().apply { tiles.value = listOf(testLibraryTile(1)) }
     val settings = FakeSettingsRepository()
     val refresh = FakeRefreshController()
     val snackbar = SnackbarHostState()
@@ -1073,7 +1094,7 @@ private class PagerFixture {
                     episodes,
                     refresh,
                     FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
-                    FakePodcastRepository().apply { tiles.value = listOf(testLibraryTile(1)) },
+                    podcasts,
                     clock,
                     FakeEpisodeLiveStateSource(),
                     groups,

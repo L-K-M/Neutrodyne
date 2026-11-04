@@ -22,11 +22,26 @@ interface AddPodcastResolver {
         credentials: BasicCredentials,
     ): AddResolution
 
+    /** Explicit one-call consent, without changing the Apple preference. */
+    suspend fun lookupOnce(input: String): AddResolution
+
     /** `PodcastPreviewKey(feedUrl)` (directory results): reuses a cached entry or fetches anew. */
     suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError>
+
+    /**
+     * True when [input] normalises to an `http(s)` URL on the local network (03 implementation
+     * note 2026-11-02): the sheet must not auto-fetch such a prefill — a local destination is
+     * fetched only on the user's explicit tap.
+     */
+    fun isLocalDestination(input: String): Boolean
 }
 
 sealed interface AddResolution {
+    data class LookupRequired(
+        val input: String,
+        val provider: ch.lkmc.neutrodyne.core.model.ProviderId,
+    ) : AddResolution
+
     data class Feed(
         val preview: FeedPreview,
     ) : AddResolution

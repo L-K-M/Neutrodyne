@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContract
@@ -104,6 +105,7 @@ internal class AndroidPlatformActions(
                 false
             }
         }
+    override val developerOptions: () -> Boolean = { openDeveloperOptions(context) }
 
     override val urls: ExternalUrlOpener =
         ExternalUrlOpener { url ->
@@ -174,6 +176,9 @@ internal class AndroidPlatformActions(
 
     // "Show in folder" is a desktop action (08 Modules).
     override val reveal: RevealInFolder? = null
+
+    override val appleLinks: AppleLinkSettings? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) AndroidAppleLinkSettings(context) else null
 
     override val notifications: NotificationPermissionRequester? =
         if (Build.VERSION.SDK_INT < NOTIFICATION_PERMISSION_SDK) {
@@ -270,3 +275,34 @@ internal class PendingResult<T> {
 /** Maps the launcher's `Uri` result onto the caller's `String` continuation. */
 private fun <T, R> Continuation<R>.contramap(map: (T) -> R): Continuation<T> =
     Continuation(context) { result -> resumeWith(result.map(map)) }
+
+/** Some OEMs hide Developer options before it is enabled; About phone is the documented fallback. */
+internal fun openDeveloperOptions(context: Context): Boolean {
+    for (action in listOf(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS, Settings.ACTION_DEVICE_INFO_SETTINGS)) {
+        try {
+            context.startActivity(Intent(action))
+            return true
+        } catch (_: ActivityNotFoundException) {
+            // Try the next system screen; offline instructions remain if neither exists.
+        }
+    }
+    return false
+}
+
+/** No domain approval is assumed: this opens the user's own app-link preferences. */
+internal class AndroidAppleLinkSettings(
+    private val context: Context,
+) : AppleLinkSettings {
+    override fun openSettings(): OpenResult =
+        try {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null),
+                ),
+            )
+            OpenResult.OPENED
+        } catch (_: ActivityNotFoundException) {
+            OpenResult.NO_HANDLER
+        }
+}

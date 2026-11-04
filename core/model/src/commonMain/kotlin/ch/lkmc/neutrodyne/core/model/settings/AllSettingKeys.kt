@@ -18,11 +18,13 @@ object AllSettingKeys {
     val list: List<SettingKey<*>> =
         AppearanceSettingKeys.ALL +
             FeedsSettingKeys.ALL +
+            DiscoverSettingKeys.ALL +
             GroupsSettingKeys.ALL +
             PlaybackSettingKeys.ALL +
             DownloadSettingKeys.ALL +
             BackupSettingKeys.ALL +
-            DesktopSettingKeys.ALL
+            DesktopSettingKeys.ALL +
+            UpdateSettingKeys.ALL
 
     /**
      * The shared write-side validation (05 Rules 4): [value]'s stored type must match the
@@ -35,7 +37,10 @@ object AllSettingKeys {
         key: SettingKey<*>,
         value: Any,
     ): Boolean =
-        acceptsStoredType(key, value) && PlaybackSettingKeys.acceptsRange(key, value) &&
+        acceptsStoredType(key, value) &&
+            PlaybackSettingKeys.acceptsRange(key, value) &&
+            UpdateSettingKeys.acceptsRange(key, value) &&
+            DiscoverSettingKeys.acceptsValue(key, value) &&
             DownloadSettingKeys.acceptsRange(key, value)
 }
 
@@ -82,6 +87,7 @@ internal val NO_SYNC_PREFIXES: Set<String> =
         "ui.",
         "desktop.",
         "updates.",
+        "discover.",
         "downloads.",
         "sync.",
     )

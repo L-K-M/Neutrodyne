@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
+        description: "full | downloads (M6a journeys on API26/33/34/36) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
         default: full
 
 permissions:
@@ -68,7 +68,7 @@ jobs:
         run: |
           # Apply access to the existing node; udev alone left it inaccessible.
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -116,6 +116,11 @@ jobs:
       - name: Require explicitly selected M6a journeys
         if: inputs.scope == 'downloads'
         run: python3 scripts/ci/assert-playback-tests.py downloads app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+      # M7 evidence gate: the share/deep-link journeys and the shared replay cases
+      # run on every nightly GMD (PLAN M7 AC4, AC7, AC8, AC10).
+      - name: Require discovery cases on the nightly devices
+        if: inputs.scope != 'youtube-smoke'
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
       - name: Report failure
         if: ${{ !success() }}
         env:
@@ -195,7 +200,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    if: inputs.scope == '' || inputs.scope == 'full'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'reboot'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -212,7 +217,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -240,6 +245,7 @@ jobs:
           test -n "$(find app/build/outputs/apk/debug -name 'app-*-debug.apk' -print -quit)" || { echo "::error::debug app APKs missing"; exit 1; }
           test -n "$(find app/build/outputs/apk/release -name 'app-*-release.apk' -print -quit)" || { echo "::error::release app APKs missing"; exit 1; }
       - name: Debug suite on the API 37 16 KB image
+        if: inputs.scope != 'reboot'
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: "37.0"
@@ -288,6 +294,7 @@ jobs:
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
             python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -329,8 +336,14 @@ jobs:
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
             test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
-            ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
+            # AGP uninstalls both APKs after a connected run; the reboot driver below needs them.
+            ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true :app:connectedReleaseAndroidTest
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected
+            # M5 W9: host-driven reboot evidence on the installed release app; the
+            # instrumentation process exits before the host reboots the guest. Dispatch-only
+            # (scope reboot) while this image's System UI builds no card after reboot (09).
+            if [ "${{ inputs.scope }}" = reboot ]; then python3 scripts/ci/playback-reboot.py --hardening; fi
             sha256sum "$RELEASE_ABI_TARGET_APK" > "$RELEASE_ABI_TARGET_SHA"
             scripts/ci/system-tests.sh smoke connected
       # The device log of both emulator steps, for diagnosing a failed run (system_server state).
@@ -352,6 +365,7 @@ jobs:
             benchmark/build/outputs/androidTest-results/
             benchmark/build/reports/androidTests/
             benchmark/build/reports/system-tests/
+            app/build/reports/playback-reboot/
             ${{ runner.temp }}/logcat-api37-*.txt
             ${{ env.RELEASE_ABI_TARGET_SHA }}
           if-no-files-found: error
@@ -397,7 +411,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -419,6 +433,8 @@ jobs:
           sha256sum --check "$RELEASE_ABI_TARGET_SHA"
       - name: Require real release playback smoke
         run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36 --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+      - name: Require discovery cases in the release smoke
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -476,7 +492,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -554,7 +570,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -684,7 +700,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -849,13 +865,16 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
       # 09's deep pass over the capped-heap suites the PR gate samples: 1,000
       # seeded iterations per fixture inside the 128 MB `mutationTest` heap.
       # The parses run single-fork, so this is tens of minutes of wall time.
+      - name: Update manifest fixture tests
+        run: python3 scripts/ci/tests/update-json.test.py
+
       - name: Mutation robustness, 1,000 iterations per fixture
         # Leaves the job's last 15 minutes for the failure report and upload.
         timeout-minutes: 75

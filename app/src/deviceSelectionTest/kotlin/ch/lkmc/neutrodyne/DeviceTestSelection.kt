@@ -17,6 +17,18 @@ internal fun selectSupportedDeviceTests(
             if (!seededRestore) {
                 put("ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest", "requires firstLaunchSeed=restore")
             }
+            if (arguments.getString("hostReboot") != "true") {
+                put(
+                    "ch.lkmc.neutrodyne.playback.impl.RebootResumptionTest",
+                    "runs only under scripts/ci/playback-reboot.py",
+                )
+            }
+            if (sdk < Build.VERSION_CODES.TIRAMISU) {
+                put(
+                    "ch.lkmc.neutrodyne.UpdateNotificationDeviceTest#deniedPermissionDoesNotPostOrRequestPermission",
+                    "POST_NOTIFICATIONS is a runtime permission from API 33",
+                )
+            }
             if (sdk < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 put("ch.lkmc.neutrodyne.AccessibilityChecksTest", "ATF requires API 34+")
             }

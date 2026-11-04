@@ -38,9 +38,14 @@ import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.model.AlreadySubscribed
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
+import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
+import ch.lkmc.neutrodyne.core.model.FeedCandidateSource
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.ProviderId
+import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
+import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -72,7 +77,8 @@ class AddPodcastSheetTest {
         ch.lkmc.neutrodyne.core.testing
             .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
+    private val search = FakeSearchRepository()
+    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups, search) }
     private var openedPodcast: Long? = null
     private var dismissed = false
 
@@ -219,8 +225,8 @@ class AddPodcastSheetTest {
             resolver.nextResolution =
                 AddResolution.Choose(
                     listOf(
-                        FeedCandidate("https://a/feed.xml", "Feed A", 10, "html"),
-                        FeedCandidate("https://b/feed.xml", "Feed B", 5, "html"),
+                        FeedCandidate("https://a/feed.xml", "Feed A", 10, FeedCandidateSource.ALTERNATE_LINK),
+                        FeedCandidate("https://b/feed.xml", "Feed B", 5, FeedCandidateSource.SAME_SITE_ANCHOR),
                     ),
                 )
             setSheet()
@@ -249,8 +255,8 @@ class AddPodcastSheetTest {
             resolver.nextResolution =
                 AddResolution.Choose(
                     listOf(
-                        FeedCandidate("https://a/feed.xml", "Feed A", 10, "html"),
-                        FeedCandidate("https://b/feed.xml", "Feed B", 5, "html"),
+                        FeedCandidate("https://a/feed.xml", "Feed A", 10, FeedCandidateSource.ALTERNATE_LINK),
+                        FeedCandidate("https://b/feed.xml", "Feed B", 5, FeedCandidateSource.SAME_SITE_ANCHOR),
                     ),
                 )
             val resolves = mutableListOf<String>()
@@ -483,10 +489,81 @@ class AddPodcastSheetTest {
             assertTrue(dismissed)
         }
 
+    /**
+     * 03 implementation note 2026-11-02: a shared LAN URL opens the sheet with the text visible
+     * but does not resolve on its own — a local destination is fetched only on the user's tap.
+     */
+    @Test
+    fun localPrefillDoesNotAutoResolveButTapStillResolves() =
+        runComposeUiTest {
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview())
+            setSheet(initialInput = "http://192.168.1.1/feed")
+            waitForIdle()
+            assertEquals(emptyList(), resolver.inputs)
+
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+            assertEquals(listOf("http://192.168.1.1/feed"), resolver.inputs)
+        }
+
+    /**
+     * The "Search for …" action sends the query to every effective provider (M7): the recipient
+     * list is visible on the action before the tap — here with Podcast Index keyed and fyyd off.
+     */
+    @Test
+    fun searchActionDisclosesEffectiveRecipients() =
+        runComposeUiTest {
+            setSheet(
+                stateOverride =
+                    AddPodcastUiState(
+                        step = AddSheetStep.Input(searchQuery = "medical history"),
+                        providers =
+                            listOf(
+                                ProviderInfo(ProviderId.APPLE, true),
+                                ProviderInfo(
+                                    ProviderId.PODCAST_INDEX,
+                                    true,
+                                    keySource = DirectoryKeySource.USER,
+                                ),
+                                ProviderInfo(ProviderId.FYYD, false),
+                            ),
+                    ),
+            )
+            onNodeWithText("Searches are sent to Apple, Podcast Index").assertIsDisplayed()
+            onNodeWithText("Search for ‘medical history’").assertIsDisplayed()
+        }
+
+    /** The chooser shows the localized source label, never the enum identifier (M7). */
+    @Test
+    fun candidateSourceIsLocalizedNotTheEnumName() =
+        runComposeUiTest {
+            resolver.nextResolution =
+                AddResolution.Choose(
+                    listOf(
+                        FeedCandidate(
+                            "https://a/feed.xml",
+                            "Feed A",
+                            10,
+                            FeedCandidateSource.ALTERNATE_LINK,
+                        ),
+                    ),
+                )
+            setSheet()
+
+            feedField().performTextInput("https://example.com")
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+
+            onNodeWithText("Feed A").assertIsDisplayed()
+            onNodeWithText("Linked feed", substring = true).assertIsDisplayed()
+            assertTrue(onAllNodes(hasText("ALTERNATE_LINK")).fetchSemanticsNodes().isEmpty())
+        }
+
     private fun ComposeUiTest.setSheet(
         initialInput: String? = null,
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
         onResolve: (String) -> Unit = viewModel::resolve,
+        onAutoResolve: (String) -> Unit = viewModel::autoResolve,
         stateOverride: AddPodcastUiState? = null,
         onSubscribe: (Set<Long>) -> Unit = viewModel::subscribe,
     ) {
@@ -505,6 +582,7 @@ class AddPodcastSheetTest {
                             initialInput = initialInput,
                             state = stateOverride ?: state,
                             onResolve = onResolve,
+                            onAutoResolve = onAutoResolve,
                             onCredentials = viewModel::resolveWithCredentials,
                             onCancelResolve = viewModel::cancelResolve,
                             onInputChange = viewModel::onInputChanged,

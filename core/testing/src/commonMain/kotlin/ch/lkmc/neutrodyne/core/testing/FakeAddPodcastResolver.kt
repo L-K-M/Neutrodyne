@@ -8,6 +8,9 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedPreview
+import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
+import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
+import ch.lkmc.neutrodyne.feeds.identity.LocalDestination
 import kotlinx.coroutines.CompletableDeferred
 
 /**
@@ -41,8 +44,21 @@ class FakeAddPodcastResolver : AddPodcastResolver {
         return nextResolution
     }
 
+    val oneTimeInputs = mutableListOf<String>()
+
+    override suspend fun lookupOnce(input: String): AddResolution {
+        oneTimeInputs += input
+        gate?.await()
+        return nextResolution
+    }
+
     override suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError> {
         inputs += "preview:$feedUrl"
         return nextPreview
     }
+
+    /** The real normalisation + predicate: the UI tests exercise the same classification. */
+    override fun isLocalDestination(input: String): Boolean =
+        (AddInputNormalizer.normalize(input) as? NormalizedInput.Url)
+            ?.let { LocalDestination.isLocal(it.url) } == true
 }

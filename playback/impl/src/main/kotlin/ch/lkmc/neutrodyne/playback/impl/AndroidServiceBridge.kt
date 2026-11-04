@@ -547,6 +547,14 @@ internal class AndroidServiceBridge(
 
     override suspend fun dismiss() =
         commands.withLock {
+            // A command queued behind another can resume after detach released the
+            // player; the durable session clear stays valid but the released player
+            // must not be touched.
+            if (detached) {
+                ports.sessions.clearCurrent(null, access.clock.now())
+                access.gate.clearPending()
+                return@withLock
+            }
             cancelPending()
             pausePlayer()
             projector.beginOwnWrite()

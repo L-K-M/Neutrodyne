@@ -14,6 +14,10 @@ import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -23,6 +27,7 @@ import okio.Buffer
 import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
 import okio.ForwardingFileSystem
+import okio.ForwardingSink
 import okio.Path
 import okio.Sink
 import org.junit.After
@@ -757,6 +762,42 @@ class FeedFetcherTest {
             assertThat(size).isAtLeast(1024L)
             assertThat(size).isLessThan(body.length.toLong())
             FileSystem.SYSTEM.delete(outcome.file)
+        }
+
+    @Test fun completedBodyCancellationKeepsTransportOwnership() =
+        runBlocking {
+            setUpRoot()
+            server.enqueue(mockResponse(body = rssBody()))
+            lateinit var owner: Job
+            val observed =
+                object : ForwardingFileSystem(FileSystem.SYSTEM) {
+                    override fun sink(
+                        file: Path,
+                        mustCreate: Boolean,
+                    ): Sink =
+                        object : ForwardingSink(super.sink(file, mustCreate)) {
+                            override fun close() {
+                                super.close()
+                                owner.cancel()
+                            }
+                        }
+                }
+            val clients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent())
+            try {
+                val temps = FeedTempFiles(storagePathsFor(root), FileSystem.SYSTEM)
+                val service = FeedFetcher(clients, temps, observed, testClassifier, CredentialLookup.None, clock)
+                owner =
+                    launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+                        val result = service.fetch(request(server.url("/feed.xml").toString()))
+                        if (result is FetchOutcome.Body) temps.delete(result.file)
+                    }
+                owner.start()
+                owner.join()
+                assertThat(owner.isCancelled).isTrue()
+                assertThat(File(root, "cache/feeds").list()?.toList().orEmpty()).isEmpty()
+            } finally {
+                clients.close()
+            }
         }
 
     // --- Credentials --------------------------------------------------------------------------------

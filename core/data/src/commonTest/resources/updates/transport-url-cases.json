@@ -1,0 +1,15 @@
+{
+  "restApiHost": "api.github.com",
+  "invalidManifestEndpoint": "https://api.github.com/releases/latest",
+  "rejectedRedirects": [
+    "https://evil.org/x",
+    "https://github.com.evil.org/x",
+    "https://api.github.com/repos/x",
+    "http://github.com/x",
+    "https://github.com:444/x",
+    "https://user:pass@github.com/x",
+    "https://release-assets.githubusercontent.com:444/x",
+    "https://github.com/x?q=secret",
+    "https://github.com/x#fragment"
+  ]
+}
