@@ -113,8 +113,13 @@ class SettingsScreensTest {
             waitForIdle()
             onAllNodes(hasClickAction(), useUnmergedTree = true)
                 .fetchSemanticsNodes()
-                // Scrolled-out rows have empty clipped bounds and cannot be tapped.
-                .filter { !it.boundsInRoot.isEmpty }
+                // Scrolled-out rows have empty clipped bounds and cannot be tapped; a row clipped
+                // to a sliver at the scroll edge is not a visible target either.
+                .filter {
+                    !it.boundsInRoot.isEmpty &&
+                        it.boundsInRoot.width + 0.5f >= it.layoutInfo.width &&
+                        it.boundsInRoot.height + 0.5f >= it.layoutInfo.height
+                }
                 .forEach { node ->
                     val bounds = node.boundsInRoot
                     val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
