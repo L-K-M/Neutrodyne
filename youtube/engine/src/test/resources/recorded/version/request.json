@@ -1,0 +1,11 @@
+{
+  "method": "version",
+  "payload": {
+    "ctx": {
+      "hl": "en",
+      "gl": "US",
+      "ua": "Neutrodyne synthetic test",
+      "ipFamily": "V4"
+    }
+  }
+}

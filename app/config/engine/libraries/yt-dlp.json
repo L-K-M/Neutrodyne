@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:yt-dlp",
+  "name": "yt-dlp",
+  "description": "Unmodified official zipimport release.",
+  "website": "https://github.com/yt-dlp/yt-dlp",
+  "developers": [],
+  "licenses": [
+    "Unlicense"
+  ],
+  "artifactVersion": "2026.08.19",
+  "tag": "bundled"
+}
