@@ -376,7 +376,7 @@ class SyncControllerImpl(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            Unit
+            lastRoundProblem.value = classify(failure)
         }
         address.serverUrl()?.let { url -> runCatching { client.logout() } }
         db.syncStateDao().unlink()
@@ -557,7 +557,7 @@ class SyncControllerImpl(
             } catch (failure: SyncProblemException) {
                 when (failure.error) {
                     AUTHORIZATION_PENDING -> {
-                        Unit
+                        continue
                     }
 
                     SLOW_DOWN -> {
