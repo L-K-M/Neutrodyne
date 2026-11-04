@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
+import org.gradle.api.tasks.testing.Test
 plugins {
     alias(libs.plugins.neutrodyne.kmp.library)
     alias(libs.plugins.neutrodyne.metro)
@@ -58,8 +59,14 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(project(":core:testing"))
             implementation(libs.robolectric)
+            implementation(libs.androidx.test.runner)
             implementation(libs.junit4)
             implementation(libs.truth)
         }
     }
+}
+
+// The pinned runner invokes these deliberately failing controls inside UidtDeviceSelectionTest.
+tasks.withType<Test>().configureEach {
+    exclude("ch/lkmc/neutrodyne/download/impl/UidtDeviceSelectionTest\$FailureFixture.class")
 }
