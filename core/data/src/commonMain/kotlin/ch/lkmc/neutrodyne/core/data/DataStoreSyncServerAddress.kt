@@ -21,7 +21,33 @@ internal class DataStoreSyncServerAddress(
 
     override suspend fun username(): String? = settings.get(SyncSettingKeys.USERNAME).takeIf { it.isNotBlank() }
 
+    override suspend fun deviceName(): String? = settings.get(SyncSettingKeys.DEVICE_NAME).takeIf { it.isNotBlank() }
+
     override suspend fun shareFeedPasswords(): Boolean = settings.get(SyncSettingKeys.SHARE_FEED_PASSWORDS)
 
     override suspend fun syncPlaybackSettings(): Boolean = settings.get(SyncSettingKeys.SYNC_PLAYBACK_SETTINGS)
+
+    override suspend fun setServerUrl(url: String?) {
+        if (url.isNullOrBlank()) {
+            settings.reset(SyncSettingKeys.SERVER_URL)
+        } else {
+            settings.set(SyncSettingKeys.SERVER_URL, url)
+        }
+    }
+
+    override suspend fun setUsername(username: String?) {
+        if (username.isNullOrBlank()) {
+            settings.reset(SyncSettingKeys.USERNAME)
+        } else {
+            settings.set(SyncSettingKeys.USERNAME, username)
+        }
+    }
+
+    override suspend fun setShareFeedPasswords(enabled: Boolean) {
+        settings.set(SyncSettingKeys.SHARE_FEED_PASSWORDS, enabled)
+    }
+
+    override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
+        settings.set(SyncSettingKeys.SYNC_PLAYBACK_SETTINGS, enabled)
+    }
 }
