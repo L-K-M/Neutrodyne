@@ -3,13 +3,13 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
-import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
-import ch.lkmc.neutrodyne.core.domain.IngestionEvents
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.data.discovery.DirectoryHttp
 import ch.lkmc.neutrodyne.core.data.discovery.DirectorySettings
 import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexDirectoryClient
 import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexSearchProvider
+import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
+import ch.lkmc.neutrodyne.core.domain.IngestionEvents
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
@@ -23,6 +23,7 @@ object DataBindings {
     // A container exposes the port across modules while the emitting bus stays internal.
     @Provides
     internal fun ingestionEvents(impl: IngestionEventBus): IngestionEvents = impl
+
     // Provider bindings keep the concrete search service internal while sharing its lookup instance.
     @Provides
     @SingleIn(AppScope::class)

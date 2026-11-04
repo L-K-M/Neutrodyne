@@ -144,7 +144,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 playbackController = playbackController,
                 playbackState = playbackState,
                 openHandler = openHandler,
-                    failedDownloads = failedDownloads,
+                failedDownloads = failedDownloads,
                 updateChecker = updateChecker,
                 updateNotices = updateNotices,
                 settings = settings,
@@ -366,7 +366,7 @@ internal fun NeutrodyneWindowContent(
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
-                    failedDownloads = failedDownloads,
+            failedDownloads = failedDownloads,
             state =
                 RootUiState.READY.copy(
                     startup = startup,
