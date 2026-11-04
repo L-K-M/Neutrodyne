@@ -14,10 +14,12 @@ import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.OwnerType
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.feeds.identity.TitleMatch
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.parse.EnclosureTypes
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEntryRules
 import kotlinx.serialization.json.Json
 import kotlin.math.abs
 import kotlin.math.min
@@ -53,7 +55,8 @@ internal class PreparedItem(
     val pubDayUtc: Long?,
     /** `titleNorm + "|" + pubDayUtc` — pass-2 tier C's map key. */
     val titleDayKey: String?,
-    val contentHash: Long,
+    private val baseContentHash: Long,
+    private val sourceType: SourceType,
     /** The non-empty stored title (03 Accepted items: date, then file name, then `…`). */
     val title: String,
     /** Null when it would duplicate the podcast cover (03 Episode artwork). */
@@ -82,6 +85,22 @@ internal class PreparedItem(
      * pass and take the insert/duplicate path, so neither owner's user state is arbitrated away.
      */
     var unresolved: Boolean = false
+
+    private val stickyShort: Boolean get() = matchedTo?.isShort == true || hint?.isShort == true
+
+    val contentHash: Long
+        get() =
+            if (sourceType == SourceType.YOUTUBE_CHANNEL) {
+                YouTubeEntryRules.contentHash(
+                    episode.title,
+                    episode.pubDate,
+                    episode.rawPubDate,
+                    episode.descriptionHtml,
+                    stickyShort,
+                )
+            } else {
+                baseContentHash
+            }
 
     private val parsedIsVideo: Boolean get() = EnclosureTypes.isVideo(episode.primaryEnclosure?.effectiveType)
 
@@ -164,7 +183,7 @@ internal class PreparedItem(
             chaptersUrl = episode.chaptersUrl,
             chaptersType = episode.chaptersType,
             availability = hint?.availability,
-            isShort = hint?.isShort,
+            isShort = if (sourceType == SourceType.YOUTUBE_CHANNEL) stickyShort else hint?.isShort,
             // 04 owns isVideo for externalMediaId rows; RSS rows take the parsed value.
             isVideo = if (episode.externalMediaId != null) hint?.isVideo else parsedIsVideo,
         )
