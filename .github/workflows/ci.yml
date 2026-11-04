@@ -157,7 +157,7 @@ jobs:
       # :youtube:ytdlp:shimTest :youtube:ytdlp-desktop:shimTestStdio
       # -Proborazzi.test.verify=true --continue
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
-        run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
+        run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue
       - name: Room schema drift
         run: test -z "$(git status --porcelain -- core/database/schemas)" || { echo "::error::Room schema changed without a committed version"; git status --porcelain -- core/database/schemas; exit 1; }
       # M7 evidence gate: the shared replay, desktop journeys, host replays and
