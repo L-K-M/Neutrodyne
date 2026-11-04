@@ -10,6 +10,7 @@ interface YouTubeHealth {
 
     suspend fun awaitLoaded()
 
+    /** Non-reserving view; AllowTrial never consumes the sole half-open trial. */
     fun extractionGate(nowMs: Long): ExtractionGate
 
     fun reportExtraction(outcome: ExtractionOutcome)
