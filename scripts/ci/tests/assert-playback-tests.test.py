@@ -12,6 +12,7 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 RELEASE_SMOKE = {
+    "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest": ("resolvesAndDownloadsRecordedAudioThroughYtx",),
     "ch.lkmc.neutrodyne.SmokeTest": (
         "fiveLabelledDestinations",
         "destinationsSurviveRotationAndDarkMode",
@@ -39,6 +40,15 @@ ATF_CONTROL = ("ch.lkmc.neutrodyne.AccessibilityChecksTest",
 
 
 class PlaybackEvidenceTest(unittest.TestCase):
+    def test_youtube_engine_cases_are_required_on_supported_device_legs(self):
+        smoke = ('ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest', 'resolvesAndDownloadsRecordedAudioThroughYtx')
+        isolation = ('ch.lkmc.neutrodyne.YtxIsolationTest', 'killedHungAndCrashingHostsLeaveMainPlaybackRunning')
+        self.assertNotIn(smoke, gate.expected_cases('ci', 'api26'))
+        for profile, device in [('ci', 'api36'), ('api37', 'connected')]:
+            self.assertIn(smoke, gate.expected_cases(profile, device))
+            self.assertIn(isolation, gate.expected_cases(profile, device))
+        self.assertIn(smoke, gate.expected_cases('release', 'api36'))
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -58,6 +68,8 @@ class PlaybackEvidenceTest(unittest.TestCase):
             for name in cases:
                 ET.SubElement(suite, "testcase", classname=classname, name=name, time="1")
         ui = [QUEUE_JOURNEY, PLAY_JOURNEY]
+        if profile == "api37" or (device.startswith("api") and int(device[3:]) >= 28):
+            ui += [gate.YOUTUBE_SMOKE, gate.YTX_ISOLATION]
         if device in ("api34", "api36", "api37"):
             ui.append(ATF_CONTROL)
         for classname, name in ui:
@@ -191,7 +203,7 @@ class PlaybackEvidenceTest(unittest.TestCase):
 
     def test_release_smoke_abi_is_fixed(self):
         self.assertEqual(RELEASE_SMOKE, gate.RELEASE_SMOKE)
-        self.assertEqual(14, sum(map(len, gate.RELEASE_SMOKE.values())))
+        self.assertEqual(15, sum(map(len, gate.RELEASE_SMOKE.values())))
 
     def test_release_requires_the_full_smoke_suite(self):
         for names in RELEASE_SMOKE.values():
