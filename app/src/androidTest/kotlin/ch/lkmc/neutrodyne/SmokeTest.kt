@@ -28,7 +28,6 @@ import ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
-import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
 import ch.lkmc.neutrodyne.core.ui.resources.settings
@@ -74,7 +73,7 @@ class SmokeTest {
     }
 
     @Test
-    fun settingsOpensAndBackReturnsToTheTab() {
+    fun settingsOpensAndBackReturnsToTheRadio() {
         compose.enableAccessibilityChecks()
         openSettings()
         clearSystemErrorDialogs()
@@ -143,15 +142,8 @@ class SmokeTest {
     }
 
     private fun openSettings() {
-        // The database opens on IO: Compose can be idle while the root still shows its
-        // startup gate. Resolve the label on each poll so a locale recreation cannot stale it.
-        compose.waitUntil(STARTUP_TIMEOUT_MS) {
-            compose
-                .onAllNodesWithContentDescription(text(Res.string.settings))
-                .fetchSemanticsNodes(atLeastOneRootRequired = false)
-                .isNotEmpty()
-        }
-        compose.onAllNodesWithContentDescription(text(Res.string.settings)).onFirst().performClick()
+        openMenu()
+        compose.onNodeWithTag("nav_settings").performClick()
         compose.waitForIdle()
     }
 
@@ -195,17 +187,34 @@ class SmokeTest {
             Build.SUPPORTED_32_BIT_ABIS.firstOrNull()
         }
 
+    private fun openMenu() {
+        compose.waitUntil(STARTUP_TIMEOUT_MS) {
+            compose
+                .onAllNodes(
+                    androidx.compose.ui.test
+                        .hasTestTag("radio_menu"),
+                ).fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .isNotEmpty()
+        }
+        compose.onNodeWithTag("radio_menu").performClick()
+    }
+
     private fun assertDestinations() {
+        compose.onNodeWithTag(TAG_FEEDS).assertIsDisplayed()
+        compose.onNodeWithTag("nav_feeds").assertDoesNotExist()
+        openMenu()
         for ((tag, label) in DESTINATIONS) {
             // The label must belong to the destination itself; the selected tab's title repeats it in the top bar
             compose.onNodeWithTag(tag).assertIsDisplayed().assert(hasText(text(label)))
         }
+        pressBack()
+        compose.onNodeWithTag(TAG_FEEDS).assertIsDisplayed()
     }
 
     private fun text(resource: StringResource): String = runBlocking { getString(resource) }
 
     private companion object {
-        const val TAG_FEEDS = "nav_feeds"
+        const val TAG_FEEDS = "radio_home"
         const val STARTUP_TIMEOUT_MS = 10_000L
         const val FOCUS_EVIDENCE_TAG = "BackFocusEvidence"
         const val FOCUS_DUMP_TIMEOUT_SECONDS = 5
@@ -218,11 +227,11 @@ class SmokeTest {
 
         val DESTINATIONS =
             listOf(
-                TAG_FEEDS to Res.string.nav_feeds,
                 "nav_library" to Res.string.nav_library,
                 "nav_up_next" to Res.string.nav_up_next,
                 "nav_downloads" to Res.string.nav_downloads,
                 "nav_discover" to Res.string.nav_discover,
+                "nav_settings" to Res.string.settings,
             )
     }
 }

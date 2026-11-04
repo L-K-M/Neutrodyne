@@ -19,9 +19,6 @@ import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.HingePolicy
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldValue
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
-import androidx.compose.material3.adaptive.navigationsuite.rememberNavigationSuiteScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -35,11 +32,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -64,20 +62,16 @@ import androidx.navigationevent.NavigationEventInput
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.navigationevent.compose.rememberNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.PlatformSystemBarAppearance
-import ch.lkmc.neutrodyne.core.designsystem.components.NdNavItem
-import ch.lkmc.neutrodyne.core.designsystem.components.NdNavigationSuiteScaffold
-import ch.lkmc.neutrodyne.core.designsystem.components.defaultSuiteType
-import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.StatusBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.statusBarAppearanceFor
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
-import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
-import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.core.navigation.FeedBrowserKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
@@ -86,7 +80,6 @@ import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
-import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
 import ch.lkmc.neutrodyne.core.ui.navigation.NeutrodyneNavHost
@@ -94,23 +87,17 @@ import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
 import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
-import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
-import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
-import ch.lkmc.neutrodyne.core.ui.resources.nav_library
-import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
-import org.jetbrains.compose.resources.stringResource
 
 /**
  * The one root composable both shells host (01 Navigation, 08 Destinations): `MainActivity`'s
  * `setContent` and 11's `NeutrodyneWindow` call it with the shell-owned [state], [actions],
- * [slots] and the Metro-contributed [installers]. It owns the theme, the navigation suite with its
- * five destinations and the rail's Settings gear, the shared [NeutrodyneNavHost], the startup gate,
+ * [slots] and the Metro-contributed [installers]. It owns the theme, the
+ * radio home and retained destination stacks, the shared [NeutrodyneNavHost], the startup gate,
  * root banners/notices, the `player` slot (mini sheet vs side panel per [ndPaneLayout]) and the
  * snackbar host for [RootSlots.userMessages].
  *
@@ -151,8 +138,6 @@ public fun NeutrodyneRoot(
             ThemeMode.LIGHT -> false
             ThemeMode.DARK -> true
         }
-    PlatformSystemBarAppearance(statusBarAppearanceFor(dark))
-
     NeutrodyneTheme(prefs = prefs, system = systemUi) {
         CompositionLocalProvider(
             LocalAppNavigator provides navigation,
@@ -164,6 +149,7 @@ public fun NeutrodyneRoot(
         ) {
             when (val gate = state.startup) {
                 StartupGateState.Pending, is StartupGateState.Failed -> {
+                    PlatformSystemBarAppearance(statusBarAppearanceFor(dark))
                     StartupGate(gate, actions, modifier)
                 }
 
@@ -185,7 +171,16 @@ public fun NeutrodyneRoot(
                                 is Route.SelectFeed -> {
                                     if (actions.selectFeedSource(route.groupUuid)) {
                                         collapseRequest++
-                                        navigation.open(FeedsKey, emptyList())
+                                        navigation.open(
+                                            FeedsKey,
+                                            if (route.groupUuid ==
+                                                null
+                                            ) {
+                                                listOf(FeedBrowserKey)
+                                            } else {
+                                                emptyList()
+                                            },
+                                        )
                                     } else {
                                         launch { snackbarHost.showSnackbar(getString(Res.string.write_failed)) }
                                     }
@@ -209,6 +204,7 @@ public fun NeutrodyneRoot(
                         navigation,
                         snackbarHost,
                         platform,
+                        statusBarAppearanceFor(dark),
                         modifier,
                         expandRequest,
                         collapseRequest,
@@ -229,6 +225,7 @@ private fun ReadyRoot(
     navigation: NavigationState,
     snackbarHost: SnackbarHostState,
     platform: BuildInfo.Platform,
+    appBarAppearance: StatusBarAppearance,
     modifier: Modifier = Modifier,
     expandRequest: Int = 0,
     collapseRequest: Int = 0,
@@ -248,40 +245,30 @@ private fun ReadyRoot(
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
     var measuredContentBottomPx by remember { mutableFloatStateOf(0f) }
     var viewportBottomPx by remember { mutableFloatStateOf(0f) }
-    val suiteState = rememberNavigationSuiteScaffoldState()
+    val radioHome = navigation.selectedTab == FeedsKey && navigation.stack(FeedsKey).lastOrNull() == FeedsKey
+    PlatformSystemBarAppearance(
+        if (radioHome && !expandedSettled) StatusBarAppearance.LightIcons else appBarAppearance,
+    )
     val hideSuite = state.hasNowPlaying && expandedSettled && contentBottomPx > 0f
-    // Settling can admit a measurement without triggering another layout.
     val dockBottomToCommit =
-        if ((!expandedSettled || contentBottomPx == 0f) && !suiteState.isAnimating &&
-            suiteState.currentValue == NavigationSuiteScaffoldValue.Visible
+        if (!expandedSettled ||
+            contentBottomPx == 0f
         ) {
             measuredContentBottomPx.takeIf { it > 0f }
         } else {
             null
         }
     SideEffect { dockBottomToCommit?.let { contentBottomPx = it } }
-    val reducedMotion = LocalReducedMotion.current
     val focusManager = LocalFocusManager.current
-    LaunchedEffect(hideSuite, reducedMotion, focusManager) {
+    LaunchedEffect(hideSuite, focusManager) {
         if (hideSuite) focusManager.clearFocus(force = true)
-
-        if (reducedMotion) {
-            suiteState.snapTo(
-                if (hideSuite) NavigationSuiteScaffoldValue.Hidden else NavigationSuiteScaffoldValue.Visible,
-            )
-        } else if (hideSuite) {
-            suiteState.hide()
-        } else {
-            suiteState.show()
-        }
     }
     LaunchedEffect(state.hasNowPlaying) {
         if (!state.hasNowPlaying) expandedSettled = false
     }
-    val suiteType = defaultSuiteType()
     val windowInfo = currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)
     val density = LocalDensity.current
-    val dockBottomInsetPx = if (isRailSuite(suiteType)) WindowInsets.navigationBars.getBottom(density).toFloat() else 0f
+    val dockBottomInsetPx = WindowInsets.navigationBars.getBottom(density).toFloat()
     val windowWidthDp =
         with(density) {
             LocalWindowInfo.current.containerSize.width
@@ -289,7 +276,7 @@ private fun ReadyRoot(
                 .value
                 .toInt()
         }
-    val navChromeDp = if (isRailSuite(suiteType)) RAIL_WIDTH_DP else 0
+    val navChromeDp = 0
     val layout =
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
@@ -343,8 +330,22 @@ private fun ReadyRoot(
     }
 
     val importContentFocus = remember { FocusRequester() }
+    val rootKeyFocus = remember { FocusRequester() }
+    var rootHasFocus by remember { mutableStateOf(false) }
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(rootHasFocus, windowFocused) {
+        if (platform == BuildInfo.Platform.DESKTOP && windowFocused && !rootHasFocus) {
+            // A removed snackbar or menu action can leave no focused key-event target.
+            // Wait for explicit launcher/field restoration before taking the fallback.
+            withFrameNanos { }
+            if (!rootHasFocus) rootKeyFocus.requestFocus()
+        }
+    }
+    LaunchedEffect(navigation.selectedTab, navigation.stack(navigation.selectedTab).lastOrNull(), hideSuite) {
+        rootKeyFocus.requestFocus()
+    }
     val discoverSearchFocus = remember { DiscoverSearchFocus() }
-    val miniInset = if (!layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
+    val miniInset = if (!radioHome && !layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
         LocalDiscoverSearchFocus provides discoverSearchFocus,
         LocalPaneLayout provides layout,
@@ -355,6 +356,8 @@ private fun ReadyRoot(
                 modifier
                     .fillMaxSize()
                     .testTagsAsResourceId()
+                    .focusRequester(rootKeyFocus)
+                    .onFocusChanged { rootHasFocus = it.hasFocus }
                     .onGloballyPositioned { viewportBottomPx = it.boundsInRoot().bottom }
                     .onKeyEvent { event ->
                         if (platform == BuildInfo.Platform.DESKTOP && navigation.selectedTab == DiscoverKey &&
@@ -379,21 +382,10 @@ private fun ReadyRoot(
                                 dispatch = actions.playbackKey,
                             )
                         }
-                    },
+                    }.focusable(),
         ) {
-            NdNavigationSuiteScaffold(
-                items = navItems(),
-                selected = navigation.tabs.indexOf(navigation.selectedTab),
-                onSelect = { index -> navigation.selectTab(navigation.tabs[index]) },
-                suiteType = suiteType,
-                footer = { SettingsGearButton() },
-                state = suiteState,
-                modifier =
-                    Modifier
-                        .focusProperties {
-                            onEnter = { if (hideSuite) cancelFocusChange() }
-                        }.focusGroup()
-                        .then(if (hideSuite) Modifier.clearAndSetSemantics {} else Modifier),
+            Box(
+                Modifier.fillMaxSize().focusGroup().then(if (hideSuite) Modifier.clearAndSetSemantics {} else Modifier),
             ) {
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
@@ -406,7 +398,9 @@ private fun ReadyRoot(
                                     navigation.selectedTab == LibraryKey,
                             importResume = { available ->
                                 val top = navigation.stack(navigation.selectedTab).lastOrNull()
-                                slots.importResume(available && (top == FeedsKey || top == LibraryKey)) { id ->
+                                slots.importResume(
+                                    available && (top == FeedsKey || top == FeedBrowserKey || top == LibraryKey),
+                                ) { id ->
                                     // The banner's focused button disappears on push; retain a key-event target.
                                     importContentFocus.requestFocus()
                                     navigation.push(ImportKey(id.toString()))
@@ -431,7 +425,7 @@ private fun ReadyRoot(
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }
-                            if (layout.playerPanel) {
+                            if (!radioHome && layout.playerPanel) {
                                 slots.player(PlayerSlotState(layout, navigateFromPlayer))
                             }
                         }
@@ -444,6 +438,8 @@ private fun ReadyRoot(
                     slots.player(
                         PlayerSlotState(
                             layout = layout,
+                            presentation =
+                                if (radioHome) PlayerPresentation.RADIO_HOME else PlayerPresentation.STANDARD,
                             navigate = navigateFromPlayer,
                             contentBottomPx = contentBottomPx,
                             expandRequest = expandRequest,
@@ -485,52 +481,6 @@ private fun ReadyRoot(
         }
     }
 }
-
-/** Rail suite types take 96 dp off the window's content width (08 Adaptive layouts). */
-private fun isRailSuite(suiteType: NavigationSuiteType): Boolean =
-    when (suiteType) {
-        NavigationSuiteType.WideNavigationRailCollapsed,
-        NavigationSuiteType.WideNavigationRailExpanded,
-        NavigationSuiteType.NavigationRail,
-        -> true
-
-        else -> false
-    }
-
-@Composable
-private fun navItems(): List<NdNavItem> =
-    listOf(
-        NdNavItem(
-            label = stringResource(Res.string.nav_feeds),
-            icon = NdIcons.DynamicFeed,
-            iconSelected = NdIcons.DynamicFeedFilled,
-            testTag = "nav_feeds",
-        ),
-        NdNavItem(
-            label = stringResource(Res.string.nav_library),
-            icon = NdIcons.GridView,
-            iconSelected = NdIcons.GridViewFilled,
-            testTag = "nav_library",
-        ),
-        NdNavItem(
-            label = stringResource(Res.string.nav_up_next),
-            icon = NdIcons.QueueMusic,
-            iconSelected = NdIcons.QueueMusicFilled,
-            testTag = "nav_up_next",
-        ),
-        NdNavItem(
-            label = stringResource(Res.string.nav_downloads),
-            icon = NdIcons.Download,
-            iconSelected = NdIcons.DownloadFilled,
-            testTag = "nav_downloads",
-        ),
-        NdNavItem(
-            label = stringResource(Res.string.nav_discover),
-            icon = NdIcons.Explore,
-            iconSelected = NdIcons.ExploreFilled,
-            testTag = "nav_discover",
-        ),
-    )
 
 /**
  * The root key chords (08 Keyboard and mouse): the bubbling phase — after the focused element —
@@ -635,8 +585,6 @@ private class DesktopBackInput : NavigationEventInput() {
         return true
     }
 }
-
-private val RAIL_WIDTH_DP = 96
 
 /** `LocalMiniPlayerInset` while the docked mini player shows (08: 80 dp reserved). */
 private val MINI_PLAYER_HEIGHT = 80.dp

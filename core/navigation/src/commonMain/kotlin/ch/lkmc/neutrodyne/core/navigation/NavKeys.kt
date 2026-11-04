@@ -11,9 +11,13 @@ import kotlinx.serialization.Serializable
 @Serializable
 public sealed interface TopLevelKey : NavKey
 
-/** The All feed and one page per group. The start tab: back from another tab's root returns here. */
+/** Radio home; retains its serialized identity for existing saved back stacks. */
 @Serializable
 public data object FeedsKey : TopLevelKey
+
+/** The existing All feed, reached by its notification route above radio home. */
+@Serializable
+public data object FeedBrowserKey : NavKey
 
 /** The cover grid of subscriptions, the Groups view and selection mode. */
 @Serializable

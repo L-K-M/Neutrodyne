@@ -65,13 +65,13 @@ internal class PaneSceneContinuityHostTest : NdNavHostHarness() {
         val installers =
             setOf<EntryProviderInstaller>(
                 {
-                    entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) {
+                    entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) {
                         var text by remember { mutableStateOf("") }
                         Column {
                             TextField(text, { text = it }, Modifier.testTag("focused-list-field"))
                         }
                     }
-                    entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { Text("library") }
+                    entry<FeedsKey> { Text("radio") }
                     entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) { Text("queue") }
                     entry<DownloadsKey>(metadata = NdSceneMetadata.paneList()) { Text("downloads") }
                     entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) { Text("discover") }
@@ -79,6 +79,8 @@ internal class PaneSceneContinuityHostTest : NdNavHostHarness() {
                 },
             )
         setFixedHost(installers = installers, directive = TwoPaneDirective)
+        rule.runOnUiThread { navigation.selectTab(LibraryKey) }
+        settle()
         rule.onNodeWithTag("focused-list-field").performClick().assertIsFocused()
         rule.runOnUiThread { navigation.push(SettingsKey(SettingsPage.ABOUT)) }
         settle()

@@ -60,6 +60,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -104,6 +105,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.chapter_number
 import ch.lkmc.neutrodyne.core.ui.resources.summary_video
+import ch.lkmc.neutrodyne.core.ui.root.PlayerPresentation
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_back
@@ -239,7 +241,17 @@ internal fun PlayerSheet(
             state.resetDismissed()
         }
     }
-    Box(modifier.fillMaxSize()) {
+    // Keep transport events, consent and external expand requests alive on home while
+    // the collapsed mini player is unplaced beneath the radio's own controls.
+    val hideCollapsed = slot.presentation == PlayerPresentation.RADIO_HOME && !state.canCollapse
+    Box(
+        modifier.fillMaxSize().layout { measurable, constraints ->
+            val measured = measurable.measure(constraints)
+            layout(measured.width, measured.height) {
+                if (!hideCollapsed) measured.place(0, 0)
+            }
+        },
+    ) {
         // Only the frontmost player layer owns Back.
         PlayerBackHandler(
             state,

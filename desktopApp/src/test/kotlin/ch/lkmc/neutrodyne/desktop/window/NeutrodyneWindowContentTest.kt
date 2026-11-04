@@ -84,11 +84,12 @@ class NeutrodyneWindowContentTest {
     }
 
     @Test
-    fun fiveDestinationsAreLabelled() =
+    fun radioMenuLabelsEveryDestination() =
         runComposeUiTest {
             setWindowContent()
 
-            for (tag in listOf("nav_feeds", "nav_library", "nav_up_next", "nav_downloads", "nav_discover")) {
+            onNodeWithTag("radio_menu").performClick()
+            for (tag in listOf("nav_library", "nav_up_next", "nav_downloads", "nav_discover", "nav_settings")) {
                 onNodeWithTag(tag).assertIsDisplayed()
             }
         }
@@ -106,6 +107,7 @@ class NeutrodyneWindowContentTest {
             runBlocking { graph.databaseOpener.awaitOpen() }
             setWindowContent()
 
+            onNodeWithTag("radio_menu").performClick()
             onNodeWithTag("nav_library").performClick()
             waitUntil("the Library ViewModel loads", TIMEOUT_MS) {
                 onAllNodesWithText("Your feeds live here").fetchSemanticsNodes().isNotEmpty()
@@ -119,8 +121,14 @@ class NeutrodyneWindowContentTest {
             setWindowContent()
 
             // Two gears exist in a rail suite: the footer's and the feeds stub's top-bar one.
-            onAllNodesWithContentDescription("Settings").onFirst().performClick()
-            onNodeWithText("Appearance").assertExists()
+            onNodeWithTag("radio_menu").performClick()
+            onNodeWithTag("nav_settings").performClick()
+            onNode(
+                androidx.compose.ui.test
+                    .hasText("Appearance") and
+                    androidx.compose.ui.test
+                        .hasClickAction(),
+            ).assertExists()
 
             onAllNodesWithText("About").onFirst().performClick()
             onNodeWithText("Neutrodyne").assertExists()
@@ -146,12 +154,12 @@ class NeutrodyneWindowContentTest {
                     settings = settings,
                 )
             }
-            onAllNodesWithContentDescription("Update available").onFirst().assertExists()
+            onAllNodesWithContentDescription("Settings, update available", substring = true).onFirst().assertExists()
             onNodeWithText("Turn off").performClick()
             waitUntil("the disclosure is durably dismissed", TIMEOUT_MS) { notices.pending.value == null }
             assertThat(runBlocking { settings.get(UpdateSettingKeys.CHECK_ENABLED) }).isFalse()
             runOnIdle { checker.state.value = UpdateCheckState.Idle(0) }
-            onAllNodesWithContentDescription("Update available").assertCountEquals(0)
+            onAllNodesWithContentDescription("Settings, update available", substring = true).assertCountEquals(0)
             onNodeWithText("Turn off").assertDoesNotExist()
         }
 
@@ -159,7 +167,8 @@ class NeutrodyneWindowContentTest {
     fun updateSettingsAndBundledHelpOpenThroughTheProductionGraph() =
         runComposeUiTest {
             setWindowContent()
-            onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            onNodeWithTag("radio_menu").performClick()
+            onNodeWithTag("nav_settings").performClick()
             onNodeWithText("Updates").performClick()
             onNodeWithTag("updates-page").assertExists()
             onNodeWithText("Install & updates").performScrollTo().performClick()
@@ -240,7 +249,8 @@ class NeutrodyneWindowContentTest {
         runComposeUiTest {
             setWindowContent()
 
-            onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            onNodeWithTag("radio_menu").performClick()
+            onNodeWithTag("nav_settings").performClick()
             onAllNodesWithText("Licences").onFirst().performClick()
 
             // The desktop source loads the generated aboutlibraries.json off the classpath. The

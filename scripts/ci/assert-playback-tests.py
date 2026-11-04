@@ -47,7 +47,7 @@ RELEASE_SMOKE = {
     "ch.lkmc.neutrodyne.SmokeTest": (
         "fiveLabelledDestinations",
         "destinationsSurviveRotationAndDarkMode",
-        "settingsOpensAndBackReturnsToTheTab",
+        "settingsOpensAndBackReturnsToTheRadio",
         "aboutShowsVersionAndAbi",
         "licencesListsLibraries",
     ),

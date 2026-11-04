@@ -87,6 +87,7 @@ class NavKeySerializersTest {
         val expectedKeys: Set<KClass<*>> =
             setOf(
                 FeedsKey::class,
+                FeedBrowserKey::class,
                 LibraryKey::class,
                 UpNextKey::class,
                 DownloadsKey::class,
@@ -126,6 +127,7 @@ class NavKeySerializersTest {
         val sampleKeys: List<NavKey> =
             listOf(
                 FeedsKey,
+                FeedBrowserKey,
                 LibraryKey,
                 UpNextKey,
                 DownloadsKey,

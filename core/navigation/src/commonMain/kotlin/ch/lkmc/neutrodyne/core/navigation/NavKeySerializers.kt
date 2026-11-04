@@ -16,6 +16,7 @@ public object NavKeySerializers {
         SerializersModule {
             polymorphic(NavKey::class) {
                 subclass(FeedsKey::class)
+                subclass(FeedBrowserKey::class)
                 subclass(LibraryKey::class)
                 subclass(UpNextKey::class)
                 subclass(DownloadsKey::class)
