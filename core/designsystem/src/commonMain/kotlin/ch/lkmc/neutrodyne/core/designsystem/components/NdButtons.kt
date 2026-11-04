@@ -102,7 +102,11 @@ public fun NdIconButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    IconButton(onClick = onClick, modifier = modifier, enabled = enabled) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier.sizeIn(minWidth = ICON_BUTTON_MINIMUM_SIZE, minHeight = ICON_BUTTON_MINIMUM_SIZE),
+        enabled = enabled,
+    ) {
         Icon(icon, contentDescription = contentDescription)
     }
 }
