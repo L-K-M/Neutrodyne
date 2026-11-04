@@ -237,13 +237,15 @@ internal class MediaLibraryTree(
         }
     }
 
+    // Lists and validates browse children. The downloads node shows every completed download,
+    // played or not (06 Browse tree); PlayStarter builds its own play context for a start.
     private suspend fun browseSpec(parent: String): PlayContextSpec =
         if (parent == DOWNLOADS) {
             PlayContextSpec(
                 ContextType.DOWNLOADS,
                 null,
                 FeedOrder.NEWEST_FIRST,
-                FeedFilters(unplayedOnly = true).toFlags(),
+                FeedFilters().toFlags(),
                 MediaFilter.ALL,
                 null,
                 false,
