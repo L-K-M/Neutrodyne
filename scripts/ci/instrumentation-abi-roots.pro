@@ -9,6 +9,8 @@
 -keep class ch.lkmc.neutrodyne.SmokeTest { *; }
 -keep class ch.lkmc.neutrodyne.YtxReleaseSmokeTest { *; }
 -keep class ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest { *; }
+# Match the device runner's class-marked release smoke selection.
+-keep @ch.lkmc.neutrodyne.core.testing.ReleaseSmoke class * { *; }
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest {
     public <init>();
     @org.junit.Before <methods>;
