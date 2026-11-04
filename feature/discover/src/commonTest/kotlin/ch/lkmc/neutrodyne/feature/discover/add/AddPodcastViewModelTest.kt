@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelResolver
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
@@ -32,6 +33,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -50,6 +52,7 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
     private val subscribe = FakeSubscribeUseCase()
     private val channelResolver = FakeYouTubeChannelResolver()
     private val channels = FakeYouTubeChannelRepository()
+    private val capabilities = FakeYouTubeCapabilitiesSource()
     private val channel =
         ChannelResolution.Resolved(
             "UCBR8-60-B28hp2BmDPdntcQ",
@@ -69,6 +72,7 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             search,
             channelResolver,
             channels,
+            capabilities,
         )
     }
 
@@ -140,7 +144,7 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
                         return alternative
                     }
                 }
-            val vm = AddPodcastViewModel(resolver, subscribe, groups, search, channelResolver, slow)
+            val vm = AddPodcastViewModel(resolver, subscribe, groups, search, channelResolver, slow, capabilities)
             resolver.nextResolution = AddResolution.YouTube(YtRef.Handle("@channel"))
             channelResolver.resolve = { _, _ -> channel }
             vm.resolve("@channel")
@@ -188,6 +192,22 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertEquals("https://www.youtube.com/channel/${channel.channelId}", resolver.inputs.last())
             assertIs<AddSheetStep.Channel>(viewModel.uiState.value.step)
+        }
+
+    @Test
+    fun channelSearchFlagFollowsTheCapabilityFlowOffOnOff() =
+        runTest {
+            // The sheet's affordance gate mirrors the live capability (W10 D2): the observed
+            // flow off → on → off must flip `channelSearch` each time, not just the first.
+            viewModel.uiState.value.also { assertFalse(it.channelSearch) }
+            capabilities.capabilities.value =
+                capabilities.capabilities.value.copy(channelSearch = true, externalReason = null)
+            runCurrent()
+            assertTrue(viewModel.uiState.value.channelSearch)
+            capabilities.capabilities.value =
+                capabilities.capabilities.value.copy(channelSearch = false)
+            runCurrent()
+            assertFalse(viewModel.uiState.value.channelSearch)
         }
 
     @Test

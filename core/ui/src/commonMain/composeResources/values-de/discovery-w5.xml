@@ -41,4 +41,14 @@
     <string name="discovery_genre_religion">Religion</string>
     <string name="discovery_genre_government">Regierung</string>
     <string name="discovery_genre_leisure">Freizeit</string>
+    <string name="youtube_search_for">Auf YouTube nach „%1$s“ suchen</string>
+    <string name="youtube_search_empty">Keine YouTube-Kanäle für „%1$s“ gefunden</string>
+    <string name="youtube_search_unavailable">YouTube-Kanal-Suche ist nicht verfügbar</string>
+    <string name="youtube_search_error">Kanal-Suche fehlgeschlagen</string>
+    <string name="youtube_search_more">Weitere Kanäle laden</string>
+    <string name="youtube_verified">Verifiziert</string>
+    <plurals name="youtube_subscriber_count">
+        <item quantity="one">%1$d Abonnent</item>
+        <item quantity="other">%1$d Abonnenten</item>
+    </plurals>
 </resources>
