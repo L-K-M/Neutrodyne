@@ -48,6 +48,17 @@ class LocalNetworkPermissionGate(
     /** Classifies the host: `.local` by name, else the active network's resolved addresses. */
     fun classify(host: String): LocalNetworkClassification {
         if (host.endsWith(".local", ignoreCase = true)) return LocalNetworkClassification.Local
+        // An IP literal needs no resolution (and DNS itself needs the permission).
+        runCatching { java.net.InetAddress.getByName(host) }.getOrNull()?.let { literal ->
+            return if (isLocalAddress(
+                    literal,
+                )
+            ) {
+                LocalNetworkClassification.Local
+            } else {
+                LocalNetworkClassification.NotLocal
+            }
+        }
         val addresses = resolve(host)
         return if (addresses.isNotEmpty() && addresses.all { isLocalAddress(it) }) {
             LocalNetworkClassification.Local
