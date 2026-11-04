@@ -2,6 +2,12 @@
 package ch.lkmc.neutrodyne.playback.engine
 
 import ch.lkmc.neutrodyne.core.testing.FakeDesktopSourceResolver
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
@@ -13,6 +19,7 @@ import org.junit.Rule
 import java.lang.foreign.MemorySegment
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,6 +59,26 @@ class FfAudioEngineTest {
                 }
                 await("end of item") { engine.state.value == EngineState.Ended }
                 assertTrue(abs(engine.positionMs() - 2_000) <= 50)
+            }
+        }
+    }
+
+    // The container duration stays unset because preparation skips avformat_find_stream_info, so
+    // the demuxer must fall back to the audio stream's duration (MD1a.2 stores it as measured).
+    @Test
+    fun tracksKnownReportsTheMediaDuration() {
+        engine().use { engine ->
+            val known = CompletableFuture<EngineEvent.TracksKnown>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.TracksKnown>().collect { known.complete(it) }
+            }
+            try {
+                engine.setWindow(listOf(item), 0, null)
+                val durationMs = known.get(10, TimeUnit.SECONDS).durationMs
+                assertTrue(durationMs != null && abs(durationMs - 2_000) <= 20, "duration: $durationMs")
+            } finally {
+                scope.cancel()
             }
         }
     }
