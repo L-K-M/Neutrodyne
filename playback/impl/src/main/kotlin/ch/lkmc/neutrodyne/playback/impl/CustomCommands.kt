@@ -43,6 +43,12 @@ internal object CustomCommands {
     fun encode(request: StartRequest): Bundle =
         Bundle().apply {
             when (request) {
+                is StartRequest.Downloads -> {
+                    putString("contextType", "DOWNLOADS")
+                    request.startEpisodeId?.let { putLong("startEpisodeId", it) }
+                    request.positionMs?.let { putLong("startPositionMs", it) }
+                }
+
                 StartRequest.Resume -> {
                     putString("mode", "RESUME")
                 }
@@ -111,6 +117,7 @@ internal object CustomCommands {
             return StartRequest.Resume
         }
         val type = args.getString("contextType") ?: return StartRequest.Episode(requireNotNull(episode), position)
+        if (type == "DOWNLOADS") return StartRequest.Downloads(episode, position)
         val source =
             when (type) {
                 "ALL" -> FeedSource.All
