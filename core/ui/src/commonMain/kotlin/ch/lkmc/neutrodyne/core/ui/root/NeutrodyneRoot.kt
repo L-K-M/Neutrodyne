@@ -301,8 +301,8 @@ private fun ReadyRoot(
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
             navChromeDp = navChromeDp,
-            // M4 uses the sheet at every width; MD1/M10 activate the side panel.
-            hasNowPlaying = false,
+            // Desktop MD1 activates the shared panel; Android's adaptive player remains M10.
+            hasNowPlaying = state.hasNowPlaying && platform == BuildInfo.Platform.DESKTOP,
             panelHidden = state.playerPanelHidden,
         )
     // The pane directive keeps the library's spacing/hinge values; only the partition count is ours.
@@ -439,7 +439,13 @@ private fun ReadyRoot(
                                 )
                             }
                             if (layout.playerPanel) {
-                                slots.player(PlayerSlotState(layout, navigateFromPlayer))
+                                slots.player(
+                                    PlayerSlotState(
+                                        layout,
+                                        navigateFromPlayer,
+                                        hidePanel = actions.hidePlayerPanel,
+                                    ),
+                                )
                             }
                         }
                     }
@@ -455,6 +461,11 @@ private fun ReadyRoot(
                             contentBottomPx = contentBottomPx,
                             expandRequest = expandRequest,
                             collapseRequest = collapseRequest + playerNavigationRequests,
+                            revealPanel =
+                                actions.revealPlayerPanel.takeIf {
+                                    platform == BuildInfo.Platform.DESKTOP &&
+                                        windowWidthDp >= PLAYER_PANEL_MIN_WINDOW_DP
+                                },
                             onExpandedSettled = { expandedSettled = it },
                         ),
                     )

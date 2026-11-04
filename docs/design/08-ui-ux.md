@@ -1763,6 +1763,17 @@ Other states: `DOWNLOADING` "{p} %" in rows and "{12.3 MB} of {48.0 MB} · {1.2 
 
 Serves R4.7, R4.8, R5.2, R5.5, R5.7, R8.5, N4. Delivered in M4 (sheet, mini and full player, speed sheet), M5 (sleep sheet, chapters tab, timestamp seeks), M9a (YouTube issue banners), M10 (artwork tint, side panel, tabletop, landscape), MD1 (the same player on the desktop, usually as the side panel), MS3 (the "Continue on this device" card and the "Marked played on" line, [Sync screens](#sync-screens)). Honours [D56](../PLAN.md#3-key-decisions), [D43](../PLAN.md#3-key-decisions), [D84](../PLAN.md#3-key-decisions). Behaviour behind every button is 06's common Player API ([06 UI boundary](06-playback.md#ui-boundary), [06 Shared playback core](06-playback.md#shared-playback-core)), served by Media3 on Android and by 11's `DesktopPlaybackController` on the desktop; `:feature:player` is common code with no Media3 type in v1.0 (06 [No Media3 in features](06-playback.md#no-media3-in-features-v10)).
 
+**MD1a.2 implementation note (2026-11-04).** Desktop playback activates the
+shared player's side-panel presentation at 840 dp (360 dp wide, or 412 dp from
+1,200 dp). It reuses the sheet's full-player content and tabs with a fixed
+expanded presentation, no sheet drag or Back ownership, and artwork capped at
+320 dp. Closing the panel durably sets the device-bound, never-synced
+`ui.player_panel_hidden` key; the mini player's expand action reopens it.
+The ordinary sheet remains below 840 dp. Resizing and hiding change only the
+presentation, without preparing or seeking audio. Android's wider adaptive
+player, tabletop, tint and landscape completeness remain M10. This supersedes
+the desktop part of the M4 boundary below and adds no home/navigation design.
+
 ### Structure and states
 
 **M4 implementation boundary (2026-10-29).** Use the sheet at every width,
