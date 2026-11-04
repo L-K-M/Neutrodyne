@@ -152,6 +152,12 @@ class SyncInertTest {
                 channels = channels,
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
+                channelWriter =
+                    ch.lkmc.neutrodyne.core.data.youtube.YouTubeSubscriptionWriterImpl(
+                        db,
+                        clock,
+                        ProtocolOrderKeys,
+                    ),
                 newSyncId = { Uuid.random().toString() },
             )
         val merger =

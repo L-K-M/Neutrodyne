@@ -45,7 +45,7 @@ internal class YouTubeSubscriptionWriterImpl(
         duplicatePolicy: YouTubeDuplicatePolicy,
         customTitle: String?,
     ): Outcome<YouTubeSubscription, SubscribeError> {
-        require(YouTubeVariantBits.isValid(variants))
+        if (!YouTubeVariantBits.isValid(variants)) return Outcome.Failure(SubscribeError.InvalidUrl)
         val url = YouTubeFeedUrls.canonical(channel.channelId)
         val key = UrlNormalizer.forIdentity(url) ?: return Outcome.Failure(SubscribeError.InvalidUrl)
         return suspendRunCatching {
@@ -80,6 +80,7 @@ internal class YouTubeSubscriptionWriterImpl(
                             initialFetch = true,
                             subscribedAt = now,
                             nextRefreshAt = now,
+                            guidCoverageSince = now,
                             pagingComplete = true,
                         ),
                     )

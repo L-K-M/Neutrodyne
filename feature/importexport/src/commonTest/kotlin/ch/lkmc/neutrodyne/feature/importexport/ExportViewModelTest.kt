@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ExportFormat
 import ch.lkmc.neutrodyne.core.model.ExportLayout
 import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.model.GroupDraft
@@ -87,6 +88,22 @@ class ExportViewModelTest : MainDispatcherTest() {
         passwords: Int = 0,
         shareUri: String? = "content://provider/export/file.opml",
     ) = PreparedExport("neutrodyne-subscriptions.opml", "text/x-opml", shareUri, 3, privateLinks, passwords)
+
+    @Test
+    fun newPipeSelectionIsFullExportOnly() =
+        runTest {
+            val vm = viewModel()
+            val destinations = Destinations()
+            advanceUntilIdle()
+            vm.setFormat(ExportFormat.NEWPIPE_JSON)
+            vm.export(ExportAction.SAVE, destinations.api)
+            assertEquals(ExportFormat.NEWPIPE_JSON, exports.prepareRequests.single().format)
+            val group = viewModel(7)
+            advanceUntilIdle()
+            group.setFormat(ExportFormat.NEWPIPE_JSON)
+            assertFalse(group.uiState.value.fullExport)
+            assertEquals(ExportFormat.OPML, group.uiState.value.format)
+        }
 
     @Test fun exportPreparesOnceWithTheChosenOptionsAndWritesThemBack() =
         runTest {

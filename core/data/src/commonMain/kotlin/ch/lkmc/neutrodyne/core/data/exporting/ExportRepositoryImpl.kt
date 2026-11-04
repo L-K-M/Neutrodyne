@@ -10,12 +10,14 @@ import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
+import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.ExportFormat
 import ch.lkmc.neutrodyne.core.model.ExportLayout
 import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.model.PreparedExport
 import ch.lkmc.neutrodyne.feeds.opml.OpmlLayout
 import ch.lkmc.neutrodyne.feeds.opml.OpmlWriter
+import ch.lkmc.neutrodyne.feeds.youtube.NewPipeSubscriptions
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineDispatcher
@@ -42,18 +44,41 @@ internal class ExportRepositoryImpl(
     private val destination: ExportDestination,
     storagePaths: StoragePaths,
     private val fileSystem: FileSystem,
+    private val buildInfo: BuildInfo,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) : ExportRepository {
     private val exportDir: Path = exportDirOf(storagePaths)
 
     override suspend fun prepare(request: ExportRequest): Outcome<PreparedExport, ExportError> {
-        // M8 delivers NEWPIPE_JSON; nothing in M3 can request it, so this is a caller bug.
-        require(request.format == ExportFormat.OPML) { "unsupported export format ${request.format}" }
+        require(request.format != ExportFormat.NEWPIPE_JSON || request.groupId == null) {
+            "NewPipe export is full-library only"
+        }
+        val newPipe = request.format == ExportFormat.NEWPIPE_JSON
 
         // A deleted group is the one failure the sealed ExportError has no case for; Io is the
         // closest — the file could not be produced.
-        val built = exporter.build(request) ?: return Outcome.Failure(ExportError.Io)
-        val path = preparedFile(built.fileName) ?: return Outcome.Failure(ExportError.Io)
+        val built =
+            exporter.build(if (newPipe) request.copy(includeYouTube = true, includePasswords = false) else request)
+                ?: return Outcome.Failure(ExportError.Io)
+        val fileName =
+            if (newPipe) {
+                built.fileName.replace("neutrodyne-subscriptions-", "neutrodyne-youtube-").removeSuffix(".opml") +
+                    ".json"
+            } else {
+                built.fileName
+            }
+        val channels =
+            if (newPipe) {
+                built.document.feeds
+                    .filter {
+                        it.youtube
+                    }.map {
+                        NewPipeSubscriptions.Channel(it.xmlUrl.substringAfter("channel_id="), it.displayTitle.orEmpty())
+                    }
+            } else {
+                emptyList()
+            }
+        val path = preparedFile(fileName) ?: return Outcome.Failure(ExportError.Io)
         val layout =
             when (request.layout) {
                 ExportLayout.GROUPED -> OpmlLayout.GROUPED
@@ -65,19 +90,25 @@ internal class ExportRepositoryImpl(
                     fileSystem.createDirectories(exportDir)
                     // A same-name predecessor (a same-day re-export) is replaced — 05's
                     // "each export also deletes older files with the same name".
-                    fileSystem.write(path) { OpmlWriter.write(this, built.document, layout) }
-                    destination.shareUri(built.fileName)
+                    fileSystem.write(path) {
+                        if (newPipe) {
+                            NewPipeSubscriptions.write(this, buildInfo.versionName, buildInfo.versionCode, channels)
+                        } else {
+                            OpmlWriter.write(this, built.document, layout)
+                        }
+                    }
+                    destination.shareUri(fileName)
                 }
             }
         if (written.isFailure) return Outcome.Failure(ExportError.Io)
         return Outcome.Success(
             PreparedExport(
-                fileName = built.fileName,
-                mimeType = OPML_MIME_TYPE,
+                fileName = fileName,
+                mimeType = if (newPipe) "application/json" else OPML_MIME_TYPE,
                 shareUri = written.getOrNull(),
-                feeds = built.document.feeds.size,
-                privateLinks = built.privateLinks,
-                passwords = built.passwords,
+                feeds = if (newPipe) channels.size else built.document.feeds.size,
+                privateLinks = if (newPipe) 0 else built.privateLinks,
+                passwords = if (newPipe) 0 else built.passwords,
             ),
         )
     }

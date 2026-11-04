@@ -170,6 +170,6 @@ internal class DesktopOpenHandler(
         private const val MAX_INPUT_BYTES = 4 * 1024
         private const val MAX_OPEN_FILE_BYTES = 64L * 1024 * 1024
         private const val TAG = "DesktopOpenHandler"
-        private val IMPORT_EXTENSIONS = setOf("opml", "xml", "zip")
+        private val IMPORT_EXTENSIONS = setOf("opml", "xml", "zip", "json", "csv", "txt", "tgz")
     }
 }
