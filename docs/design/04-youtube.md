@@ -852,7 +852,11 @@ Serves R3.1 (search), R3.5, R3.6, R8.6, N5, N8. Delivered in M0a (module stubs p
 **Implementation note (2026-11-04, M9a current-code port).** The Android shell
 now binds the shared engine to `BinderYtxTransport` and the two-worker
 `YtxService`. The verified bundle stays at 2026.08.19 with yt-dlp-ejs 0.8.0.
-`engine-prepare` extracts and compiles it before playback admission. The host
+`engine-prepare` extracts and compiles it before playback admission. Android's
+ZIP reader requires a local header at byte zero. Extraction validates the
+archive first, then opens a bounded temporary copy without the zipapp shebang
+prefix. The pinned official archive remains unchanged and the copy is deleted
+after extraction, including on failure. The host
 uses the credential-free `CoreClients.youtube` lane, per-call IP-family
 pinning and per-call socket cancellation. The transport checks loaded engine
 settings before binding, retains hang watchdogs after caller cancellation and
