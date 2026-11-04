@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop
 
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.window.application
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.IntentRouter
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.RouteInput
@@ -308,7 +310,12 @@ internal object DesktopShell {
             // MPRIS Quit reaches the same clean-exit path as the tray's Quit item; Compose
             // ends the application on the event thread.
             graph.shellActions.quit = { java.awt.EventQueue.invokeLater { exitApplication() } }
+            val rowArt =
+                graph.settingsRepository
+                    .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
+                    .collectAsState(initial = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
             NeutrodyneWindow(
+                rowArt = rowArt.value,
                 installers = graph.entryInstallers,
                 failedDownloads =
                     kotlinx.coroutines.flow.flow {

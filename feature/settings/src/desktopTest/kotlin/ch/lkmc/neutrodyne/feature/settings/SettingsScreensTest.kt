@@ -56,6 +56,7 @@ import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.testing.FakeDesktopIntegration
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadController
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -73,6 +74,7 @@ import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.collections.immutable.persistentListOf
@@ -562,6 +564,7 @@ class SettingsScreensTest {
                                         .Android("arm64-v8a", 34),
                                 ),
                                 desktopIntegration,
+                                Provider { FakePodcastRepository() },
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )
