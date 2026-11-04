@@ -2,12 +2,10 @@
 
 package ch.lkmc.neutrodyne.core.testing
 
-import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
-import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
 import ch.lkmc.neutrodyne.feeds.discovery.NormalizedInput
 import ch.lkmc.neutrodyne.feeds.identity.LocalDestination
@@ -20,8 +18,7 @@ import kotlinx.coroutines.CompletableDeferred
  */
 class FakeAddPodcastResolver : AddPodcastResolver {
     var nextResolution: AddResolution = AddResolution.Failure(AddPodcastError.NotAFeed)
-    var nextPreview: Outcome<FeedPreview, AddPodcastError> =
-        Outcome.Failure(AddPodcastError.NotAFeed)
+    var nextPreview: AddResolution = AddResolution.Failure(AddPodcastError.NotAFeed)
 
     /** Set to suspend resolves until completed; `null` passes through. */
     var gate: CompletableDeferred<Unit>? = null
@@ -61,7 +58,7 @@ class FakeAddPodcastResolver : AddPodcastResolver {
         return nextResolution
     }
 
-    override suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError> {
+    override suspend fun preview(feedUrl: String): AddResolution {
         inputs += "preview:$feedUrl"
         return nextPreview
     }

@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.podcast
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
@@ -14,6 +15,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -35,7 +37,7 @@ class PodcastPreviewViewModelTest : MainDispatcherTest() {
     @Test
     fun previewIsReadOnlyUntilConfirmationAndPassesGroupIds() =
         runTest {
-            resolver.nextPreview = Outcome.Success(PREVIEW)
+            resolver.nextPreview = AddResolution.Feed(PREVIEW)
             val vm = model()
             advanceUntilIdle()
             assertEquals(listOf("preview:${PREVIEW.feedUrl}"), resolver.inputs)
@@ -50,9 +52,25 @@ class PodcastPreviewViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun youtubePreviewHandsOffOnceWithoutSubscribingAsRss() =
+        runTest {
+            resolver.nextPreview = AddResolution.YouTube(YtRef.Handle("some.name"))
+            val vm = model()
+            advanceUntilIdle()
+            assertNull(vm.state.value.preview)
+            assertNull(vm.state.value.fetchError)
+            vm.subscribe(setOf(2))
+            advanceUntilIdle()
+            assertTrue(subscribe.subscribed.isEmpty())
+            assertEquals(PREVIEW.feedUrl, vm.consumeYouTubeInput())
+            assertNull(vm.consumeYouTubeInput())
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
     fun recreatedViewModelFetchesMemoryOnlyPreviewAgain() =
         runTest {
-            resolver.nextPreview = Outcome.Success(PREVIEW)
+            resolver.nextPreview = AddResolution.Feed(PREVIEW)
             val first = model()
             advanceUntilIdle()
             first.viewModelScope.cancel()
@@ -66,13 +84,13 @@ class PodcastPreviewViewModelTest : MainDispatcherTest() {
     @Test
     fun fetchAndSubscribeFailuresAreExplicitAndRetryable() =
         runTest {
-            resolver.nextPreview = Outcome.Failure(AddPodcastError.NoMedia)
+            resolver.nextPreview = AddResolution.Failure(AddPodcastError.NoMedia)
             val vm = model()
             advanceUntilIdle()
             assertEquals(AddPodcastError.NoMedia, vm.state.value.fetchError)
             vm.subscribe(emptySet())
             assertTrue(subscribe.subscribed.isEmpty())
-            resolver.nextPreview = Outcome.Success(PREVIEW)
+            resolver.nextPreview = AddResolution.Feed(PREVIEW)
             vm.retry()
             advanceUntilIdle()
             subscribe.nextOutcome = Outcome.Failure(SubscribeError.Storage)
@@ -86,14 +104,14 @@ class PodcastPreviewViewModelTest : MainDispatcherTest() {
     @Test
     fun exactDuplicatesOpenWithoutSubscribingAndRaceDuplicateStaysOpenable() =
         runTest {
-            resolver.nextPreview = Outcome.Success(PREVIEW.copy(alreadySubscribed = AlreadySubscribed(7, true)))
+            resolver.nextPreview = AddResolution.Feed(PREVIEW.copy(alreadySubscribed = AlreadySubscribed(7, true)))
             val vm = model()
             advanceUntilIdle()
             vm.subscribe(emptySet())
             assertTrue(subscribe.subscribed.isEmpty())
             assertEquals(7L, vm.state.value.openId)
             vm.viewModelScope.cancel()
-            resolver.nextPreview = Outcome.Success(PREVIEW)
+            resolver.nextPreview = AddResolution.Feed(PREVIEW)
             subscribe.nextOutcome = Outcome.Failure(SubscribeError.AlreadySubscribed(9))
             val race = model()
             advanceUntilIdle()
@@ -117,7 +135,7 @@ class PodcastPreviewViewModelTest : MainDispatcherTest() {
                         error("Synthetic storage failure")
                     }
                 }
-            resolver.nextPreview = Outcome.Success(PREVIEW)
+            resolver.nextPreview = AddResolution.Feed(PREVIEW)
             val vm = PodcastPreviewViewModel(PREVIEW.feedUrl, resolver, subscribe, failing)
             advanceUntilIdle()
             vm.createGroup("Tech")
@@ -132,7 +150,7 @@ class PodcastPreviewViewModelTest : MainDispatcherTest() {
     @Test
     fun inlineGroupsUseRepositoryValidationAndCanBeSelectedImmediately() =
         runTest {
-            resolver.nextPreview = Outcome.Success(PREVIEW)
+            resolver.nextPreview = AddResolution.Feed(PREVIEW)
             val vm = model()
             advanceUntilIdle()
             vm.createGroup(" ")

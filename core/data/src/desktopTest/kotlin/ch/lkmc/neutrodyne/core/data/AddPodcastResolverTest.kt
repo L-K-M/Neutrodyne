@@ -2,11 +2,9 @@
 
 package ch.lkmc.neutrodyne.core.data
 
-import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
-import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.discovery.AddInputNormalizer
@@ -569,8 +567,8 @@ class AddPodcastResolverTest {
             assertIs<AddResolution.Feed>(bundle.resolver.resolve(feedUrl()))
             assertEquals(1, server.requestCount)
 
-            val cached = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl()))
-            assertEquals("Cached", cached.value.title)
+            val cached = assertIs<AddResolution.Feed>(bundle.resolver.preview(feedUrl()))
+            assertEquals("Cached", cached.preview.title)
             assertEquals(1, server.requestCount)
         }
 
@@ -581,7 +579,7 @@ class AddPodcastResolverTest {
 
             val r = bundle.resolver.preview(publicFeedUrl())
 
-            val preview = assertIs<Outcome.Success<FeedPreview>>(r).value
+            val preview = assertIs<AddResolution.Feed>(r).preview
             assertEquals("Fresh", preview.title)
         }
 

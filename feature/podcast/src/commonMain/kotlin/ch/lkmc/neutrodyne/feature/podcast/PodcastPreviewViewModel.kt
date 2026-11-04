@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
+import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
@@ -46,6 +47,7 @@ internal data class PodcastPreviewState(
     val subscribing: Boolean = false,
     val openId: Long? = null,
     val doneId: Long? = null,
+    val youTubeInput: String? = null,
 )
 
 /** Only the resolver's bounded memory cache is read until the explicit Subscribe action. */
@@ -78,6 +80,7 @@ internal class PodcastPreviewViewModel
                     fetchError = null,
                     subscribeError = null,
                     openId = null,
+                    youTubeInput = null,
                 )
             }
             resolveJob =
@@ -86,19 +89,27 @@ internal class PodcastPreviewViewModel
                     ensureActive()
                     mutableState.update {
                         when (result) {
-                            is Outcome.Success -> {
+                            is AddResolution.Feed -> {
                                 it.copy(
                                     loading = false,
-                                    preview = result.value,
+                                    preview = result.preview,
                                     openId =
-                                        result.value.alreadySubscribed
+                                        result.preview.alreadySubscribed
                                             ?.takeIf { hit -> hit.exact }
                                             ?.podcastId,
                                 )
                             }
 
-                            is Outcome.Failure -> {
+                            is AddResolution.YouTube -> {
+                                it.copy(youTubeInput = feedUrl)
+                            }
+
+                            is AddResolution.Failure -> {
                                 it.copy(loading = false, fetchError = result.error)
+                            }
+
+                            else -> {
+                                it.copy(loading = false, fetchError = AddPodcastError.NotAFeed)
                             }
                         }
                     }
@@ -180,6 +191,12 @@ internal class PodcastPreviewViewModel
                     }
                 }
             }
+        }
+
+        fun consumeYouTubeInput(): String? {
+            val input = mutableState.value.youTubeInput ?: return null
+            mutableState.update { it.copy(youTubeInput = null) }
+            return input
         }
 
         fun consumeDone(): Long? {
