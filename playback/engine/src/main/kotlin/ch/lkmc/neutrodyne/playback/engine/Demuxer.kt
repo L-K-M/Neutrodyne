@@ -189,7 +189,7 @@ class MemoryByteSource(
  * the channel; a read on a closed source returns -1 rather than throwing, so the
  * engine's abort path stays exception-free.
  */
-class FileChannelByteSource(
+class FileByteSource(
     path: Path,
 ) : ByteSource {
     private val channel = FileChannel.open(path, StandardOpenOption.READ)
@@ -200,6 +200,7 @@ class FileChannelByteSource(
         dst: MemorySegment,
         maxBytes: Int,
     ): Int {
+        require(position >= 0 && maxBytes > 0 && dst.byteSize() >= maxBytes)
         if (!channel.isOpen) return -1
         val buffer = ByteBuffer.allocate(minOf(maxBytes, MAX_READ))
         var read = 0
@@ -234,5 +235,8 @@ class FileChannelByteSource(
 
 /** Opens the file source the resolver hands the engine (11 Sources and SpanCache). */
 class PathByteSourceFactory : FileByteSourceFactory {
-    override fun open(path: Path): ByteSource = FileChannelByteSource(path)
+    override fun open(path: Path): ByteSource = FileByteSource(path)
 }
+
+/** Compatibility name for the MD0 corpus and diagnostic instrument. */
+typealias FileChannelByteSource = FileByteSource
