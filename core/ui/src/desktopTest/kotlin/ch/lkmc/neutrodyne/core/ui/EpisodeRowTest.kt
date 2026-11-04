@@ -62,6 +62,24 @@ class EpisodeRowTest {
     }
 
     @Test
+    fun largeTextPlacesTransportBelowTheTitle() =
+        runDesktopComposeUiTest(width = 360, height = 400) {
+            setRow(testEpisodeRow(1), fontScale = 2f)
+            val title = onNodeWithText("Episode 1", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val play = onNodeWithContentDescription("Play", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue(play.top >= title.bottom, "Large-text transport overlaps the text row: title=$title play=$play")
+        }
+
+    @Test
+    fun wideRowsStayCenteredWithinTheReadingWidth() =
+        runDesktopComposeUiTest(width = 1400, height = 400) {
+            setRow(testEpisodeRow(1))
+            val row = onNodeWithText("Episode 1").fetchSemanticsNode().boundsInRoot
+            assertTrue(row.width <= 720f, "Row exceeds the reading width: $row")
+            assertTrue(kotlin.math.abs(row.center.x - 700f) < 1f, "Row is not centered: $row")
+        }
+
+    @Test
     fun dateBlockFitsDayAndMonthAtLargeText() =
         runDesktopComposeUiTest(width = 400, height = 400) {
             // Same artwork key as the podcast -> the date block leads, not a cover.

@@ -23,8 +23,9 @@
     <string name="library_empty_body">Subscriptions you add appear here as cover tiles.</string>
     <string name="up_next_empty_title">Nothing up next</string>
     <string name="up_next_empty_body">Add episodes with Play next or Play last.</string>
-    <string name="downloads_empty_title">No downloads</string>
-    <string name="downloads_empty_body">Downloaded episodes are listed here.</string>
+    <string name="downloads_auto_settings">Auto-download settings</string>
+    <string name="downloads_empty_title">Downloaded episodes play offline</string>
+    <string name="downloads_empty_body">Use an episode’s Download action to save it here.</string>
     <string name="discover_empty_title">Find something new</string>
     <string name="discover_empty_body">Search the podcast directories, charts or add a feed by URL.</string>
 
@@ -663,4 +664,6 @@
     <string name="chapter_number">Chapter %1$d</string>
     <string name="chapter_seek">Seek to %1$s</string>
     <string name="settings_update_available">Settings, update available</string>
+    <string name="feeds_empty_group">No podcasts in '%1$s' yet</string>
+    <string name="feeds_add_podcasts">Add podcasts</string>
 </resources>

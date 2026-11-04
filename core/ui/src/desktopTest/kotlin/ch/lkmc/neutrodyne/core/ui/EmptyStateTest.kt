@@ -4,13 +4,17 @@ package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -74,6 +78,47 @@ class EmptyStateTest {
             }
             onNodeWithText("Search").performScrollTo().assertIsDisplayed().performClick()
             assertTrue(clicked)
+        }
+
+    @Test
+    fun ordinaryOnboardingStaysVerticallyCentered() =
+        runDesktopComposeUiTest(width = 1000, height = 700) {
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    EmptyState(NdIcons.Download, "Nothing here", "Start with a podcast")
+                }
+            }
+            val title = onNodeWithText("Nothing here").fetchSemanticsNode().boundsInRoot
+            assertTrue(title.center.y in 300f..450f, "Onboarding is top-aligned: $title")
+        }
+
+    @Test
+    fun shortWindowAtDoubleFontKeepsEveryActionReachable() =
+        runDesktopComposeUiTest(width = 360, height = 240) {
+            var clicks = 0
+            setContent {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        EmptyState(
+                            NdIcons.GridView,
+                            "Your feeds live here",
+                            "Long onboarding text. ".repeat(8),
+                            showBrandMark = true,
+                            actionLabel = "Search podcasts",
+                            onAction = { clicks++ },
+                            secondaryLabel = "Import subscriptions",
+                            onSecondary = { clicks++ },
+                            tertiaryLabel = "Add by URL or YouTube link",
+                            onTertiary = { clicks++ },
+                        )
+                    }
+                }
+            }
+            onNodeWithTag("onboarding-brand-mark").assertExists()
+            listOf("Search podcasts", "Import subscriptions", "Add by URL or YouTube link").forEach {
+                onNodeWithText(it).performScrollTo().assertIsDisplayed().performClick()
+            }
+            assertTrue(clicks == 3)
         }
 
     @Test

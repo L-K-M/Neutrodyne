@@ -8,20 +8,26 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.art.MonogramSpec
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
+import coil3.compose.asPainter
 
 /**
  * 08 "CoverArt and CoverTile": an [ArtworkRef] rendered through Coil's multiplatform
@@ -63,11 +69,22 @@ public fun CoverArt(
         return
     }
 
-    val placeholder =
-        avgArgb?.let(::Color) ?: Color(painter.backgroundArgb)
+    val placeholder = rememberPlaceholderPainter(avgArgb?.let(::Color) ?: Color(painter.backgroundArgb))
     val request =
         remember(ref, tier, aspect, crossfade, density, context) {
             Covers.request(context, ref, tier, density, aspect, crossfade)
+        }
+    val imageLoader = SingletonImageLoader.get(context)
+    // AsyncImage's explicit loading/error painters otherwise replace Coil's cached THUMB.
+    // Retain only this request's byte version; an old version is never a fallback for new art.
+    val thumb =
+        remember(request, imageLoader) {
+            request.placeholderMemoryCacheKey?.let {
+                imageLoader.memoryCache
+                    ?.get(it)
+                    ?.image
+                    ?.asPainter(context)
+            }
         }
     Box(
         modifier
@@ -76,9 +93,10 @@ public fun CoverArt(
     ) {
         AsyncImage(
             model = request,
+            imageLoader = imageLoader,
             contentDescription = contentDescription,
-            placeholder = ColorPainter(placeholder),
-            error = painter,
+            placeholder = thumb ?: placeholder,
+            error = thumb ?: painter,
             fallback = painter,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -88,3 +106,18 @@ public fun CoverArt(
 
 /** `ArtworkKeys.monogram` rows — painted live instead of loaded (08 Monograms and mosaics). */
 private const val MONOGRAM_KEY_PREFIX = "m-"
+
+/** Colour-only backfill must repaint an in-flight request without changing its byte identity. */
+@Composable
+private fun rememberPlaceholderPainter(color: Color): Painter {
+    val current by rememberUpdatedState(color)
+    return remember {
+        object : Painter() {
+            override val intrinsicSize: Size = Size.Unspecified
+
+            override fun DrawScope.onDraw() {
+                drawRect(current)
+            }
+        }
+    }
+}

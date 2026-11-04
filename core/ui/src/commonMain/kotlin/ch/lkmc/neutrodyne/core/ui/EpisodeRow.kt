@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -26,8 +29,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +47,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -63,6 +69,9 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_check_again
@@ -141,9 +150,14 @@ public fun EpisodeRow(
             label to { onAction(action) }
         } + additionalActions
 
-    EpisodeSwipe(row, caps.swipe, onAction, modifier) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+    // Relax the outer fill constraint before applying the reading-width cap, then center it.
+    EpisodeSwipe(
+        row,
+        caps.swipe,
+        onAction,
+        modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = ROW_MAX_WIDTH),
+    ) {
+        EpisodeRowLayout(
             modifier =
                 Modifier
                     .fillMaxWidth()
@@ -185,6 +199,7 @@ public fun EpisodeRow(
                                 }
                             }
                     }.combinedClickable(
+                        role = Role.Button,
                         onClick = {
                             val action =
                                 if (selected == null) EpisodeAction.Open(row.id) else EpisodeAction.Select(row.id)
@@ -194,8 +209,17 @@ public fun EpisodeRow(
                             focusRequester.requestFocus()
                             onAction(EpisodeAction.Select(row.id))
                         },
-                    ).alpha(if (dimmed) DIMMED_ALPHA else 1f)
-                    .padding(horizontal = ROW_PADDING_H, vertical = ROW_PADDING_V),
+                    ).padding(horizontal = ROW_PADDING_H, vertical = ROW_PADDING_V),
+            trailing = {
+                TrailingSlot(
+                    row = row,
+                    live = live,
+                    caps = caps,
+                    onAction = onAction,
+                    showOverflow = hovered || focused || menuOpen,
+                    onOpenMenu = { menuOpen = true },
+                )
+            },
         ) {
             LeadingSlot(row, style)
             Column(
@@ -224,7 +248,7 @@ public fun EpisodeRow(
                         row.title,
                         style = MaterialTheme.typography.titleSmall,
                         color =
-                            if (row.playedAt != null) {
+                            if (dimmed || row.playedAt != null) {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             } else {
                                 MaterialTheme.colorScheme.onSurface
@@ -239,14 +263,6 @@ public fun EpisodeRow(
                 ProgressLine(row, live)
                 StatusLine(row, live, caps, nowMs)
             }
-            TrailingSlot(
-                row = row,
-                live = live,
-                caps = caps,
-                onAction = onAction,
-                showOverflow = hovered || focused || menuOpen,
-                onOpenMenu = { menuOpen = true },
-            )
         }
 
         Box(Modifier.align(Alignment.CenterEnd)) {
@@ -264,6 +280,30 @@ public fun EpisodeRow(
         }
     }
 }
+
+/** Keep one merged focus stop while transport moves below text at large font scales. */
+@Composable
+private fun EpisodeRowLayout(
+    trailing: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val stacked = LocalDensity.current.fontScale >= LARGE_TEXT_FONT_SCALE
+    val currentTrailing by rememberUpdatedState(trailing)
+    val transport = remember { movableContentOf { currentTrailing() } }
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            content()
+            if (!stacked) transport()
+        }
+        if (stacked) {
+            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) { transport() }
+        }
+    }
+}
+
+private const val LARGE_TEXT_FONT_SCALE = 1.5f
+private val ROW_MAX_WIDTH = 720.dp
 
 /** The row's action list (08's custom-actions catalogue), shared by menu and semantics. */
 @Composable
@@ -408,6 +448,8 @@ private fun LeadingSlot(
     row: EpisodeRow,
     style: EpisodeRowStyle,
 ) {
+    // Unavailable art is decorative; the readable metadata must retain full text contrast.
+    val artworkAlpha = if (row.availability == Availability.AVAILABLE) 1f else DIMMED_ALPHA
     when (style) {
         EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE -> {
             if (row.sourceType != SourceType.RSS) {
@@ -415,7 +457,13 @@ private fun LeadingSlot(
                 CoverArt(
                     ref = row.artwork,
                     monogram = rememberMonogram(row.title),
-                    modifier = Modifier.size(width = VIDEO_THUMB_WIDTH, height = COVER_SIZE),
+                    modifier =
+                        Modifier
+                            .size(
+                                width = VIDEO_THUMB_WIDTH,
+                                height = COVER_SIZE,
+                            ).alpha(artworkAlpha)
+                            .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
                     aspect = CoverAspect.WIDE_16_9,
                     avgArgb = row.artworkAvgArgb,
                 )
@@ -423,7 +471,11 @@ private fun LeadingSlot(
                 CoverArt(
                     ref = row.artwork,
                     monogram = rememberMonogram(row.podcastTitle),
-                    modifier = Modifier.size(COVER_SIZE),
+                    modifier =
+                        Modifier
+                            .size(COVER_SIZE)
+                            .alpha(artworkAlpha)
+                            .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
                     avgArgb = row.artworkAvgArgb,
                 )
             }
@@ -434,7 +486,11 @@ private fun LeadingSlot(
                 CoverArt(
                     ref = row.artwork,
                     monogram = rememberMonogram(row.podcastTitle),
-                    modifier = Modifier.size(COVER_SIZE),
+                    modifier =
+                        Modifier
+                            .size(COVER_SIZE)
+                            .alpha(artworkAlpha)
+                            .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
                     avgArgb = row.artworkAvgArgb,
                 )
             } else {
