@@ -363,6 +363,16 @@ Selection mode registers its handler inside the screen's entry (composed inside 
 
 **Expanded Back (PR73, [issue #75](https://github.com/L-K-M/Neutrodyne/issues/75)).** `PopUntilScaffoldValueChange` retains its existing boundary targets and removal counts, including removing both extra entries from Home → About → Episode 1 → Episode 2 to reach About. When the scaffold has no internal boundary, `NavDisplay` targets the preceding real stack entry instead. This fixes Android's two-pane no-op in Feeds and the Library history drain without switching globally to `PopLatest`. Tab-root fallback remains unchanged. One event-level handler applies a live target/count once per dispatched Back, including completion-only system Back; successive events each get their own plan. NavDisplay and Material handlers drive preview seeking rather than navigation completion. Predictive Back captures the originating tab and its unsaved selection generation. The first tab change cancels native seeking and invalidates completion, even after returning to the origin or switching twice before composition; neither history changes. Current entry, selection, overlay and player handlers retain their Back precedence.
 
+**Implementation note (2026-11-04, M10 current-code port):** Shared artwork
+uses the existing Nav3 entry clock and destination-scoped keys. Coexisting
+panes, prefetched pager neighbours and reduced motion do not register shared
+art. HERO requests retain the same byte version's decoded THUMB while
+loading or failing; colour-only backfill repaints the placeholder without
+changing request identity. Android frame captures cover loading, failure,
+version changes, pop and predictive cancellation. Status-icon ownership is
+scoped to the painted header or the player while it reaches the status
+strip; navigation icons follow the app scheme.
+
 ### Transitions and shared elements
 
 - Owner decision (2026-10-10, PR73; implementation 2026-10-11): tab switches are instant; forward pushes cover from the layout end; Back wipes toward that end, revealing the preceding content. Navigation uses `NeutrodyneMotion.navigation`, a constant-speed 200 ms spec. The same pair applies to expanded pane swaps such as Settings › About → Licences → Back, with the unchanged list stationary. Same-class `pushDetail` replacement covers forward; another push during a cover retargets to the newest detail. Sheet and dialog overlays keep the platform default. Reduced motion snaps navigation and pane animations ([Motion](#tokens)).
@@ -1501,6 +1511,21 @@ enum class CoverAspect { SQUARE, WIDE_16_9 }
 
 `PodcastHeader` (`:core:ui`) is the first item of the podcast screen's `LazyColumn` and scrolls away; a pinned transparent `NdTopAppBar` overlays it and fades its container and title in as `firstVisibleItemScrollOffset` passes the cover's bottom (simpler and more robust than nested-scroll large app bars with a 300 dp header). Background: vertical gradient from the artwork scheme's `primaryContainer` (top) to `surface` at 70 % of the header height. Cover 160 dp, 24 dp corners, `dropShadow` in the seed colour at 30 % (M10). YouTube: the banner (`podcast.bannerUrl`, never pinned, 04) fills the top 6:1 strip behind the avatar with a 40 % bottom scrim; without a banner (offline, missing): the avatar blurred (`Modifier.blur(24.dp)`, API 31+) or the artwork gradient below 31. Group chips are `NdInputChip`s with the group dot; the trailing "x" removes the membership (snackbar with Undo) and "+ Group" opens `AddToGroupsKey(listOf(id))`.
 
+**Implementation note (2026-11-04, M10 current-code port):** The shared
+scaffold measures the toolbar before composing the header inset, so the
+artwork gradient extends behind pinned chrome without a first-frame inset
+jump. The lazy viewport retains its top padding for exact restored and
+programmatic episode anchors; only the header paints upward into that
+space. The measured cover bottom controls the toolbar title. Background
+entries, coexisting panes, a player side panel, offline banners, selection
+and pinned errors retain opaque app chrome. The overlay uses a 60 % black scrim and white
+controls, replacing the 40 % toolbar sketch: even a white cover leaves more
+than 5.7:1 contrast. Chrome roles switch together at the cover boundary
+instead of fading over unknown pixels. Rendered toolbar contrast is tested
+at normal and 200 % text. Glyph-only buttons reserve a real 48 dp clickable
+layout, matching tooltip buttons; a regression reproduced the old 40 dp
+inner layout.
+
 ### Show notes renderer
 
 `@Composable fun LazyListScope.showNotes(notes: ShowNotes, ...)` (`:core:ui`) emits one lazy item per block of 03's `:core:model` mirror (`ShowNotes`, `ShowNoteBlock`, `ShowNoteSpan`, [03 Sanitiser and block model](03-feeds-and-discovery.md#sanitiser-and-block-model)), so a 2,000-block note never composes at once.
@@ -2170,7 +2195,7 @@ Algorithm of `ArtworkSchemeCache.build(seed, dark, contrast)` (LRU 16 entries, c
 4. **Tone clamp:** in dark mode, if the tone of `primaryContainer` is > 40, replace `primaryContainer`/`onPrimaryContainer` with tones 30/90 of `TonalPalette.fromHueAndChroma(hct.hue, max(hct.chroma, 16.0))` (a near-white cover yields a container tone ≤ 40, M10 acceptance 4). Light mode keeps the seed tone.
 5. Pure black applies afterwards to surfaces only.
 
-`ArtworkRoles` (animated; the other roles snap): `primary`, `onPrimary`, `primaryContainer`, `onPrimaryContainer`, `secondaryContainer`, `onSecondaryContainer`, `surface`, `onSurface`, `onSurfaceVariant`, `surfaceContainerHigh`, `surfaceContainerHighest`, `outlineVariant`. Text is never drawn on raw artwork: it sits on scheme surfaces or behind a ≥ 60 % scrim. Unverified (M10 day one): the exact `com.materialkolor` package names and constructor signatures of `SchemeContent`, `TonalPalette` and `MaterialDynamicColors` in 5.0.1 (the port may add a spec-version parameter).
+`ArtworkRoles` (animated; the other roles snap): `primary`, `onPrimary`, `primaryContainer`, `onPrimaryContainer`, `secondaryContainer`, `onSecondaryContainer`, `surface`, `onSurface`, `onSurfaceVariant`, `surfaceContainerHigh`, `surfaceContainerHighest`, `outlineVariant`. Text is never drawn on raw artwork: it sits on scheme surfaces or behind a ≥ 60 % scrim. Package and constructor compatibility with 5.0.1 is covered by M10's compiled brand, artwork-scheme and extractor tests.
 
 ### ArtColors tones for monograms and groups
 
@@ -2217,7 +2242,8 @@ Every Material 3 component used by features is wrapped in `:core:designsystem` s
 
 | Wrapper | Wraps | Notes |
 |---|---|---|
-| `NdTopAppBar` | `TopAppBar` (experimental) | parameters `title`, `navigation`, `actions`, `elevated: Boolean`; no `TopAppBarScrollBehavior` |
+| `NdTopAppBar` | `TopAppBar` (experimental) | parameters `title`, `navigation`, `actions`, `elevated: Boolean`, `appearance: NdTopAppBarAppearance` (surface or artwork overlay); no `TopAppBarScrollBehavior` |
+| `NdScaffold` | `Scaffold` | measures pinned chrome before content; the caller places its insets in the scrolling header or body |
 | `NdModalBottomSheet`, `NdDialog` | `ModalBottomSheet` (experimental), `AlertDialog` | used by 01's overlay scene strategies and screens |
 | `NdSearchBar` | `SearchBar` (experimental) | Discover |
 | `NdTooltipIconButton`, `NdIconButton` | `TooltipBox` (experimental), `IconButton` | every icon-only button has a tooltip and a content description |
@@ -2386,6 +2412,23 @@ runOnce(deadline):                             // Android: elapsedRealtime + 8 m
 
 Triggers: 03 (subscribe; `artworkUrl` changed), 04 (`YouTubeSourceAdapter.afterIngest` and `ensureChannelArt` when a channel avatar changes `artworkKey`, [04 Channel metadata refresh](04-youtube.md#channel-metadata-refresh)), 05 (import commit and restore for inserted podcasts), 07 (`COMPLETED` with episode art), an `AppInitializer` at order 300 (one request per process start, M4; on the desktop the lane's first tick), and from M10 an observer of 02's `GroupDao.observeMosaics()` (debounced 10 s). Title changes of monogram podcasts are picked up by the next run because the descriptor contains the initials and hue.
 
+**Implementation note (2026-11-04, M10 current-code port):** Android samples
+owned software pixels before MCU quantization on the Default dispatcher.
+Already-pinned artwork with missing colour metadata is backfilled locally;
+publication checks the original row and byte digest under the file lock and
+writer transaction. Colour-only changes keep the byte version. Completed
+monochrome results have a null seed and a non-null average, so they do not
+retry or inherit a podcast tint. Player and header observations are keyed by
+item identity and obtain the repository lazily after the startup gate.
+
+Android group mosaics are rendered from the current ordered member snapshot
+to local 512 px JPEGs. Publication rechecks that snapshot in a writer
+transaction; source changes are debounced for ten seconds without reacting
+to the mosaic's own output. Auto browse, search and item metadata use the
+persisted mosaic version in local content URIs. Desktop raster hosting
+continues to belong to MD1; shared extraction and persistence rules are
+covered on the desktop JVM.
+
 ### Colour extraction
 
 `ArtworkColorExtractor` (`:core:artwork` common, M10, `@Dispatcher(Default)`; on the desktop the lane's `limitedParallelism(2)`): scale the decoded image to 112 × 112 and read its pixels through `ArtworkCodec`, `QuantizerCelebi.quantize(pixels, 128)`, `Score.score(result, desired = 1, fallbackColorArgb = null).firstOrNull()` → `seedArgb` (an empty result means near-monochrome art: `seedArgb = null`, so the UI keeps the app scheme instead of MCU's default blue); `avgArgb` = mean of pixels with alpha ≥ 128 in sRGB. Values are computed once per stored version and persisted, never in composition ([D57](../PLAN.md#3-key-decisions); MCU behaviour per [MaterialKolor MCU sources](https://github.com/jordond/MaterialKolor/tree/main/material-color-utilities/src/commonMain/kotlin/com/materialkolor)). Monogram rasters store the RASTER background as both seed and average (a monogram podcast gets a matching tint); mosaics store no seed.
@@ -2529,6 +2572,18 @@ A 384 px ARGB thumb is ≈ 590 KB, 20 visible tiles ≈ 12 MB; a 1024 px hero �
 ## Adaptive layouts
 
 Serves R5.7, R8.9, N7. Delivered in M0 (no locks, edge-to-edge, navigation suite; M0b the desktop window), M10 (panes, side panel, tabletop, landscape player; [PO-19](../PLAN.md#48-further-product-owner-decisions) default), MD4 (desktop window sizes, keyboard, mouse, context menus, scrollbars). The same width classes, pane directive and player layouts serve phones, tablets, foldables and desktop windows. Window classes come from `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)` (on the desktop computed from the window's size in dp; Unverified that the 1.3.0-rc01 desktop artefact accepts the parameter, spike S9); breakpoints (dp): compact < 600 ≤ medium < 840 ≤ expanded < 1,200 ≤ large < 1,600 ≤ extra-large; height compact < 480 ([window size classes](https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes)).
+
+**Implementation note (2026-11-04, M10 current-code port):** The root now
+activates the existing side-panel directive from `hasNowPlaying`, moves one
+player composition between sheet and panel, and passes window-relative dp
+hinges from Material Adaptive. The panel preference stays in device settings;
+closing it returns to the mini player and expanding the mini player reopens
+it on wide windows. Landscape and tabletop controls scroll independently of
+the artwork region. Shared episode rows cap their reading width at 720 dp
+and move transport below the text from 150 % font scale. Library density is
+portable, backed up, excluded from sync, and applied to both grid segments.
+The older W6 focus checkpoint was explicitly unaccepted and is not restored;
+current navigation ownership and Back behaviour remain the baseline.
 
 ### Layout per width class
 
@@ -2683,6 +2738,22 @@ Serves N4, R5 (all), R8.10. Delivered with every UI milestone; audit and the ful
 | Continue on this device card (MS3) | Play; Dismiss |
 | Devices row (MS2) | Rename; Remove |
 
+**Implementation note (2026-11-04, M10 current-code port):** Cover tiles
+expose Open and Select independently of menu entries. The row checklist
+covers each playback/download/wait state, and instrumented Compose suites
+enable framework checks on supported APIs. The M10 instrumented row pass
+performs real clicks as well as custom actions in light, dark and pure black
+at normal and 200 % text, including unavailable rows. A rendered-pixel
+regression found 3.16:1 metadata contrast from fading an entire unavailable
+row. Only decorative artwork is now faded; readable text keeps the theme's
+full-contrast roles. Host tests are separate evidence and do not claim ATF, TalkBack
+or Switch Access coverage. Physical-device and screen-reader checks remain
+release checklist items. The inherited desktop Settings diagnostic now checks
+measured clickable layout size: a 72 dp row can have a 16 dp fragment inside
+the scroll viewport. Licences separately must be fully visible at 48 dp and
+clickable, and a real 40 dp fixture must still fail the layout gate. Device
+ATF checks remain unchanged.
+
 ### Automated checks
 
 - Android: API 34+ instrumented Compose tests enable `ui-test-junit4-accessibility` checks for labels, contrast, touch targets and traversal. Use real actions or `tryPerformAccessibilityChecks()`; custom semantics actions alone do not establish ATF coverage. AndroidX does not support these checks under Robolectric. Host semantics/goldens remain separate evidence; do not suppress ATF checks. The instrumented suite gates N4 and M10 acceptance 2 ([Compose accessibility testing](https://developer.android.com/develop/ui/compose/accessibility/testing), [09 test configuration](09-quality-and-release.md#compose-ui-and-screenshot-tests)).
@@ -2706,6 +2777,14 @@ R8.10, risk [U3](../PLAN.md#8-risks-and-mitigations); 11 owns the bridges and th
 ## Onboarding and empty states
 
 Serves R1.1, R2.1, R3.1, R5.4, R6.2, R6.6, R7.7, R7.9, N4. Delivered in M1 (Feeds/Library empty states), M2 (group states), M3 (import banners), M7 (Discover onboarding, suggested groups), M10 (illustrations), M11a (first-run card), MS2 (sync banners); the same on both apps except where marked. No multi-step wizard: the empty states are the onboarding.
+
+**Implementation note (2026-11-04, M10 current-code port):** The shared
+empty state scrolls when large text exceeds the viewport. Library and Feeds
+include the brand mark; filtered feeds name the group and offer Clear
+filters, and the empty queue retains its group suggestions. Downloads uses
+the scrolling onboarding state with an Auto-download settings link. Its
+lists and storage summary still await the in-flight M6a UI on current main;
+the M10 screenshots exercise the destination that exists at this checkpoint.
 
 ### Empty states
 
@@ -2961,6 +3040,26 @@ Shared screens are written once against `:core:testing` fakes and run as `runCom
 | `ArtworkSyncWorkerTest` (Android, WorkManager `TestDriver`) and `DesktopArtworkLaneTest` (desktop, `TestClock`) | the worker hosts the runner with the 8-min deadline and its continuation; the lane runs only when flagged and online, without a deadline, and yields after each batch; desktop monogram rasters exist for podcasts without artwork (the OS media sessions need them) | M4, MD1 |
 | `DesktopImageMemoryTest` (desktop) | the 96 MB cache; trimmed to a quarter while the window is hidden and restored on show | MD1 |
 
+**Implementation note (2026-11-04, M10 current-code port):** M10 adds a
+shared row-state inventory, brand/cover/monogram subjects, three synthetic
+player artworks, adaptive player presentations and fixed-data snapshots of
+the screens currently present. Android screen captures span compact, medium,
+expanded, large and tabletop-sized viewports; the player fixture supplies a
+real horizontal half-open hinge for its tabletop case. Desktop components
+use the same fixtures and Linux-recorded goldens. The `FULL` nightly adds the
+remaining theme/font variants; pseudo-locale captures exercise generated
+Compose strings, rather than only changing layout direction.
+
+KMP libraries have one Android resource variant. Consequently,
+`-Pneutrodyne.pseudoLocales=true` creates a generated copy of each Compose
+resource tree containing `en-XA` and `ar-XB` for verification builds. Normal
+builds use the original tree. Unit-test variants remain enabled; release APK
+packaging and desktop installer tasks reject the flag, and the published APK
+scanner also rejects pseudo-locale Compose assets. This replaces the design's
+strictly app-debug-only generation mechanism without putting test resources
+in any published artifact. CI unit, record and full-screenshot jobs select
+the verification resource tree explicitly.
+
 ### Screenshot matrix
 
 Two golden sets, both reviewed in PRs: the **Android set** (Roborazzi on Robolectric) and, from M0b, the **desktop set** (`roborazzi-compose-desktop` on the Linux x64 CI runner, so fonts and rendering are those of one pinned environment; M10 AC8, MD4 AC2). 09 owns the record/verify switch, storage and the tiers: `ScreenshotTier.PR` captures every subject in light and dark at font scale 1.0 LTR plus one stress variant (dark, 2.0, `ar-XB`); `ScreenshotTier.FULL` (nightly) adds the remaining columns below ([09 Compose UI and screenshot tests](09-quality-and-release.md#compose-ui-and-screenshot-tests)). Determinism: `dynamicColor = false`, `fakeImageLoader`, `TestClock`, animations frozen. The pseudo-locales `en-XA` and `ar-XB` exist only in the Android set: `:app` generates them only in its `debug` build type, so they never reach a published APK (09 decides the mechanism, [09 Localisation](09-quality-and-release.md#localisation)); the desktop set has no pseudo-locales and checks RTL by forcing `LocalLayoutDirection` with English strings.
@@ -2978,6 +3077,16 @@ Two golden sets, both reviewed in PRs: the **Android set** (Roborazzi on Robolec
 | Brand (M0b, M10) | the in-app mark on the startup gate and in About × light/dark/pure black; the brand scheme's surfaces, primary and containers in a fixed sample screen × light/dark × contrast 0.0/1.0 (both sets) |
 | **Desktop set** (M10, MD4) | the shared components of M10 AC8 (`EpisodeRow` states × light/dark × font 1.0/1.5 via a density override, `CoverTile`, monograms, the players with the three reference artworks); the five destinations, Podcast detail, Settings home, Settings › Desktop, Settings › Updates (desktop card with each install kind, no asset, `minOs` too high) and the Install & updates help (macOS, Windows and Linux sections open) at window widths 600, 900 and 1,400 dp × light/dark (MD4 AC2); an open context menu on a row, hover and focus states of a row, the scrollbar on a list (MD4) |
 
+**Implementation note (2026-11-04, M10 current-code port):** Because current
+main has not yet received M6b's test module, M10 introduces the unpublished
+`:benchmark` host with `benchmarkRelease` matching. Its shell-permissioned
+seed receiver refuses a nonempty unmarked installation and creates 300
+locally pinned synthetic covers, 50,000 episodes, 20 groups and a durable
+paused item without starting audio. It exists only in `benchmarkRelease`.
+Journeys cover cold start, cover-grid/feed flings, group swipes and player
+expansion; `benchmark-dryrun` runs them on CI. Emulator timings do not prove
+PB3. Reference-phone jank measurement remains open until that device run.
+
 ### Performance journeys
 
 Defined here, run by 09's `:benchmark` module against `benchmarkRelease` — the published release configuration made profileable, the budgets' gate ([PLAN D2](../PLAN.md#3-key-decisions), [D96](../PLAN.md#3-key-decisions)) — each with a seeded database (02's `SeedDatabase`, 300 podcasts, 50,000 episodes, 20 groups; budgets PB1–PB5 and PB9 are 09's): `ColdStartToFeeds` (cold start to the first Feeds page; `ReportDrawnWhen` marks full display), `CoverGridFling` (3 flings over the 300-tile Library grid; jank < 1 %, M10 acceptance 7, from M10), `AllFeedFling` (flings through the All feed with day headers), `GroupPagerSwipe` (10 pager swipes across groups), `PlayerExpandCollapse` (5 expand/collapse cycles with a seeded current episode), `PodcastOpen` (Library tile → podcast screen content, M11b, PB9). UI Automator finds nodes through the root's `testTagsAsResourceId`; test tags: `feeds_pager`, `feed_list`, `library_grid`, `mini_player`, `player_sheet`, `podcast_list`. The same journeys drive `:benchmark`'s `BaselineProfileGenerator` (M11b), whose baseline and startup profiles ship in the release APKs ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)). The desktop has no Macrobenchmark: its first frame, RSS and playback-start budgets (PB24–PB28) are measured by 11 on the reference laptops with the smoke mode ([11 Budgets PB24–PB29](11-desktop.md#budgets-pb24pb29)); this document adds no desktop journey of its own.
@@ -2987,6 +3096,19 @@ Defined here, run by 09's `:benchmark` module against `benchmarkRelease` — the
 Per release (09 checklist): TalkBack and Switch Access pass; 200 % font; Arabic RTL; keyboard-only navigation on a ChromeOS or desktop-mode device; foldable emulator in tabletop and book posture; grid → podcast transition frame review (M10 acceptance 5); airplane mode with downloaded episodes (artwork present everywhere, N6). From M0b: the brand icon under circle and squircle masks and as a themed icon on Android 13+, the notification icon, and the desktop icons on each OS (PLAN M0 AC15; MD5 adds the installed icons, the macOS Dock on 13–15 and 26, and every tray). From MD4: 11's desktop checklist on macOS (VoiceOver), Windows (NVDA, Narrator recorded) and Linux (keyboard only), window resizes across 696, 840 and 1,200 dp, context menus and hover on a touchpad and a mouse ([11 MD4 manual checklist](11-desktop.md#md4-manual-checklist)). From MS2/MS3: linking a phone and a computer with a code, the held-changes dialog after unsubscribing 11 of 50 podcasts elsewhere, "Continue on this device" in both directions (10's cross-device checklist, PLAN M11 AC14). From M9a: Settings › YouTube on a 32-bit device (the `armeabi-v7a` APK shows the `NOT_IN_THIS_APK` card) and turning the engine off and on mid-session. From M11a: 09's device checklist for the update check (PLAN M11 acceptance 3 and 6): the notification, the gear badge, both links opening the browser, the downloaded APK installing over the running app with Android's installer on API 26 and API 37, and an `armeabi-v7a` install on a 64-bit phone linking the `arm64-v8a` APK; the help page's commands and file names compared with the release they name; from Google's global rollout (2027), the GOOGLE_PLAY card compared with what Android's installer shows on an enforcing device. From M11a/MD5 on the desktop: "Download for this computer" opening the right asset per install kind, and the help's per-OS steps compared with 11's walkthroughs (MD5 AC5).
 
 ### Fixtures
+
+**Implementation note (2026-11-04, M10 current-code port):** The component
+matrix packs two labelled row states per image to keep the 09 file budget
+while covering all three themes and all three font scales in both LTR and
+ar-XB in FULL. It creates three owned 512 px gradients, colourful, monochrome and
+near-white, through native Android and Skia bitmap adapters. It waits for
+the rendered target surface colour before capture, including mini-player
+tint, so Default-dispatcher palette work cannot race a golden. The host
+pixel check samples below Android's opaque test status bar. Host activities
+use a NoActionBar theme like the app, so a native test title bar cannot
+obscure the player header. The full
+artwork-pipeline fixture expansion below remains separate from these UI
+samples.
 
 Synthetic only (no third-party artwork): `ArtworkFixtures` in `core/artwork/src/commonTest/` (pixels written with each platform's codec) generates at test time a colourful 1400 px gradient JPEG, a monochrome 1400 px PNG, a near-white 1400 px JPEG, a transparent 512 px logo PNG, a 100 px PNG, a 5000 px JPEG and a letterboxed 480 × 360 "hqdefault" JPEG; `not_an_image.html` is a committed 1 KB text file. The three Roborazzi reference artworks are drawn by the same generator. The brand tests use only the owner's committed `media-sources/` files.
 
