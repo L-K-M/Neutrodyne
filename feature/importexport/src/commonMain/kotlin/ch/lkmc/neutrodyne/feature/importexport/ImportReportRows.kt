@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportReportSection
@@ -139,7 +140,11 @@ internal fun ImportRowActions(
     onRemove: () -> Unit,
 ) {
     val section = item.reportSection()
-    if (item.podcastId == null || section !in ACTION_SECTIONS) return
+    if ((item.podcastId == null && item.kind != ImportItemKind.YOUTUBE) ||
+        section !in ACTION_SECTIONS
+    ) {
+        return
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (section == ImportReportSection.ATTENTION) {
             NdTextButton(

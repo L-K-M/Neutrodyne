@@ -38,15 +38,6 @@ object DesktopYouTubeBindingsModule {
 
     @Provides fun channelSearch(): YouTubeChannelSearch = search
 
-    @Provides
-    @SingleIn(AppScope::class)
-    fun channelResolver(
-        clients: NeutrodyneHttpClients,
-        reader: YouTubeFeedMetadataReader,
-        extractor: ExtractorChannelLookup,
-    ): YouTubeChannelResolver =
-        DefaultYouTubeChannelResolver(clients, reader, extractor) { Locale.getDefault().toLanguageTag() }
-
     @Provides fun channelLookup(): ExtractorChannelLookup = lookup
 
     @Provides

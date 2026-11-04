@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemFilter
+import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportReportSection
@@ -434,7 +435,7 @@ internal class ImportViewModel
 
         private val ImportItemView.canFixUp: Boolean
             get() =
-                podcastId != null &&
+                (podcastId != null || kind == ImportItemKind.YOUTUBE) &&
                     reportSection() in FIXABLE_SECTIONS &&
                     !(status == ImportItemStatus.FETCH_FAILED && errorDetail == IMPORT_DEFERRED_DETAIL)
 
