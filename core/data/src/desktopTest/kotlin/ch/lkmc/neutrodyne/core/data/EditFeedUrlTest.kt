@@ -44,7 +44,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import mockwebserver3.MockResponse
 import mockwebserver3.junit4.MockWebServerRule
+import okhttp3.Dns
 import org.junit.Rule
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -65,7 +67,21 @@ class EditFeedUrlTest {
         kotlin.io.path
             .createTempDirectory("nd-edit-feed")
             .toFile()
-    private val resolver = newResolver(root, db, clock)
+    private val testDns =
+        Dns { host ->
+            if (host == EDIT_HOST) listOf(InetAddress.getByName("127.0.0.1")) else Dns.SYSTEM.lookup(host)
+        }
+    private val resolver =
+        newResolver(
+            root,
+            db,
+            clock,
+            networkClients =
+                newNetworkClients(
+                    baseDns = testDns,
+                    isLocalPeer = NO_LOCAL_PEER,
+                ),
+        )
     private val scheduler = FakeRefreshScheduler()
     private val adapter = stubAdapter()
 
@@ -126,7 +142,14 @@ class EditFeedUrlTest {
         root.deleteRecursively()
     }
 
-    private fun url(path: String = "/new") = server.url(path).toString()
+    // Redirect fixtures represent public feeds; LAN refusals are covered by AddLocalDestinationTest.
+    private fun url(path: String = "/new") =
+        server
+            .url(path)
+            .newBuilder()
+            .host(EDIT_HOST)
+            .build()
+            .toString()
 
     private fun origin(url: String) = requireNotNull(UrlNormalizer.origin(url))
 
@@ -293,7 +316,7 @@ class EditFeedUrlTest {
     fun permanentRedirectUserinfoIsNeverPersisted() =
         runTest {
             val id = seedPodcast(db, url("/old"))
-            val target = "http://u:p@${server.hostName}:${server.port}/new"
+            val target = "http://u:p@${EDIT_HOST}:${server.port}/new"
             server.enqueue(mockResponse(301, "", "Location" to target))
             server.enqueue(mockResponse(body = body()))
             assertEquals(Outcome.Success(Unit), repository.editFeedUrl(id, url("/typed")))
@@ -535,7 +558,7 @@ class EditFeedUrlTest {
         runTest {
             val id = seedPodcast(db, url("/old"))
             server.enqueue(mockResponse(body = body()))
-            val input = "http://u:p%40ss@${server.hostName}:${server.port}/new"
+            val input = "http://u:p%40ss@${EDIT_HOST}:${server.port}/new"
             assertEquals(Outcome.Success(Unit), repository.editFeedUrl(id, input))
             assertEquals("Basic dTpwQHNz", server.takeRequest().headers["Authorization"])
             val stored = assertNotNull(db.podcastDao().byId(id))
@@ -553,7 +576,12 @@ class EditFeedUrlTest {
 
             // The refresh run's fetcher resolves the credential by the feed's request origin.
             server.enqueue(mockResponse(body = rssBody(title = "Refreshed")))
-            newRssAdapter(root, clock, credentials = store).use { bundle ->
+            newRssAdapter(
+                root,
+                clock,
+                credentials = store,
+                networkClients = newNetworkClients(credentials = store, baseDns = testDns),
+            ).use { bundle ->
                 val refreshEngine =
                     newRefresher(
                         db,
@@ -574,7 +602,7 @@ class EditFeedUrlTest {
         runTest {
             val id = seedPodcast(db, url("/old"))
             server.enqueue(mockResponse(404, "Missing"))
-            val input = "http://u:p@${server.hostName}:${server.port}/new"
+            val input = "http://u:p@${EDIT_HOST}:${server.port}/new"
             assertEquals(
                 Outcome.Failure(AddPodcastError.Http(404)),
                 repository.editFeedUrl(id, input),
@@ -681,7 +709,7 @@ class EditFeedUrlTest {
             server.enqueue(mockResponse(body = body()))
             // The userinfo `put` commits before the write transaction; the abort rolls both
             // back — no `credential` row may outlive a failed commit (03's cleanup rule).
-            val input = "http://u:p@${server.hostName}:${server.port}/new"
+            val input = "http://u:p@${EDIT_HOST}:${server.port}/new"
             assertTrue(runCatching { repository.editFeedUrl(id, input) }.isFailure)
             assertEquals(before, db.podcastDao().byId(id))
             assertTrue(db.podcastDao().aliases(id).isEmpty())
@@ -782,6 +810,7 @@ class EditFeedUrlTest {
         }
 
     private companion object {
+        const val EDIT_HOST = "edit.test"
         const val NOW = 1_791_964_800_000L
         const val DAY = 86_400_000L
     }

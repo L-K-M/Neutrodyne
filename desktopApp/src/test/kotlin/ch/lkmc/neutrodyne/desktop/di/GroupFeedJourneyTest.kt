@@ -306,6 +306,8 @@ private class JourneyFixture {
 /** Use the shell's graph contributions without exposing repository implementations. */
 @DependencyGraph(AppScope::class, bindingContainers = [DesktopYouTubeBindingsModule::class])
 internal interface M2JourneyGraph {
+    val imageLoaderFactory: ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory
+
     val groups: GroupRepository
     val feeds: ch.lkmc.neutrodyne.core.domain.FeedRepository
     val entryInstallers: Set<EntryProviderInstaller>

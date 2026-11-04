@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedCandidateSource
 import ch.lkmc.neutrodyne.core.model.FeedPreview
+import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
@@ -422,6 +423,59 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             assertEquals(7L, viewModel.consumeDone()?.podcastId)
             assertNull(viewModel.uiState.value.done)
             assertNull(viewModel.consumeDone())
+        }
+
+    /**
+     * Prefill/deep-link resolution is the no-tap path (03 note 2026-11-02): it goes through
+     * `resolveUnconfirmed` so every request — the first hop included — is fetched marked.
+     */
+    @Test
+    fun autoResolveUsesTheMarkedPath() =
+        runTest {
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.autoResolve("https://example.com/feed")
+            advanceUntilIdle()
+
+            assertEquals(listOf("https://example.com/feed"), resolver.unconfirmedInputs)
+            assertTrue(resolver.inputs.isEmpty())
+            assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step)
+        }
+
+    /**
+     * The peer turned out local: the transport's refusal is no error — the field keeps the
+     * URL and waits for the tap that resolves it as an explicitly submitted one.
+     */
+    @Test
+    fun autoResolveLocalPeerWaitsForTheTap() =
+        runTest {
+            resolver.nextResolution =
+                AddResolution.Failure(
+                    AddPodcastError.Network(NetError.LocalNetworkUnsupported),
+                )
+            viewModel.autoResolve("https://public.example.com/feed")
+            advanceUntilIdle()
+
+            val step = assertIs<AddSheetStep.Input>(viewModel.uiState.value.step)
+            assertNull(step.error)
+            assertTrue(step.searchQuery == null)
+
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.resolve("https://public.example.com/feed")
+            advanceUntilIdle()
+            assertEquals(listOf("https://public.example.com/feed"), resolver.inputs)
+            assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step)
+        }
+
+    /** Other failures from the no-tap path still surface as errors, not as wait-for-tap. */
+    @Test
+    fun autoResolveOtherFailuresStillShowTheError() =
+        runTest {
+            resolver.nextResolution = AddResolution.Failure(AddPodcastError.NotAFeed)
+            viewModel.autoResolve("https://example.com/feed")
+            advanceUntilIdle()
+
+            val step = assertIs<AddSheetStep.Input>(viewModel.uiState.value.step)
+            assertTrue(step.error != null)
         }
 
     @Test

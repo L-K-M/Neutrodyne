@@ -49,6 +49,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
     fun debounceEmitsAt600ButNot599() =
         runTest {
             val vm = DiscoverViewModel(repository, groups)
+            runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             vm.state.test {
                 awaitItem()
                 vm.inputChanged("news")
@@ -69,6 +71,7 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         runTest {
             val vm = DiscoverViewModel(repository, groups)
             runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             for (input in listOf(
                 "ab",
                 "https://private.test/feed?token=secret",
@@ -98,6 +101,7 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             }
             val vm = DiscoverViewModel(repository, groups)
             runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             vm.inputChanged("old")
             advanceTimeBy(600)
             runCurrent()
@@ -127,12 +131,17 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
                     override fun observeGroups(): Flow<List<Group>> = flow { awaitCancellation() }
                 }
             val vm = DiscoverViewModel(repository, pendingGroups)
+            runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             vm.inputChanged("news")
             advanceUntilIdle()
             repository.providers.value =
                 repository.providers.value
                     .map { it.copy(configurationVersion = 1) }
                     .toImmutableList()
+            advanceUntilIdle()
+            assertEquals(listOf("news"), repository.queries)
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             advanceUntilIdle()
             assertEquals(listOf("news", "news"), repository.queries)
             vm.viewModelScope.cancel()
@@ -144,6 +153,7 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             repository.chartAnswer = Outcome.Failure(ProviderStatus.RateLimited)
             val vm = DiscoverViewModel(repository, groups)
             runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             vm.loadChart(null)
             runCurrent()
             assertTrue(
@@ -158,6 +168,9 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
                     .toImmutableList()
             advanceUntilIdle()
             vm.loadChart(null)
+            advanceUntilIdle()
+            assertEquals(listOf("news"), repository.queries)
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             advanceUntilIdle()
             assertEquals(listOf("news", "news"), repository.queries)
             assertEquals(2, repository.chartRequests.size)
@@ -212,10 +225,100 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
             vm.viewModelScope.cancel()
         }
 
+    /**
+     * The disclosure race (M7): a DirectoryKey opened while the provider configuration is
+     * still loading must not dispatch a search — the recipients are unknown to the screen.
+     * Once the list lands it is in state before the first query leaves.
+     */
+    @Test
+    fun directoryDispatchesOnlyAfterProvidersAreKnown() =
+        runTest {
+            repository.providersGate = CompletableDeferred()
+            val vm = DirectoryViewModel(DirectoryKey("news", null), repository)
+            runCurrent()
+            assertNull(vm.state.value.providers)
+            assertTrue(repository.queries.isEmpty())
+            vm.retry()
+            advanceUntilIdle()
+            assertTrue(repository.queries.isEmpty())
+            repository.providersGate!!.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(repository.providers.value, vm.state.value.providers)
+            assertTrue(repository.queries.isEmpty())
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
+            advanceUntilIdle()
+            assertEquals(listOf("news"), repository.queries)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun directoryWaitsForItsDisclosureToBeComposed() =
+        runTest {
+            val vm = DirectoryViewModel(DirectoryKey("news", null), repository)
+            advanceUntilIdle()
+            assertEquals(repository.providers.value, vm.state.value.providers)
+            assertTrue(repository.queries.isEmpty())
+            vm.retry()
+            advanceUntilIdle()
+            assertTrue(repository.queries.isEmpty())
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
+            advanceUntilIdle()
+            assertEquals(listOf("news"), repository.queries)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun discoverWaitsForProvidersBeforeSearching() =
+        runTest {
+            repository.providersGate = CompletableDeferred()
+            val vm = DiscoverViewModel(repository, groups)
+            vm.inputChanged("medical history")
+            advanceUntilIdle()
+            assertTrue(repository.queries.isEmpty())
+            repository.providersGate!!.complete(Unit)
+            advanceUntilIdle()
+            assertTrue(repository.queries.isEmpty())
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
+            advanceTimeBy(599)
+            assertTrue(repository.queries.isEmpty())
+            advanceTimeBy(1)
+            runCurrent()
+            assertEquals(listOf("medical history"), repository.queries)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun discoverIgnoresStaleAndRepeatedDisclosureAcknowledgements() =
+        runTest {
+            val vm = DiscoverViewModel(repository, groups)
+            runCurrent()
+            val previous = checkNotNull(vm.state.value.providers)
+            vm.onProvidersVisible(previous)
+            vm.inputChanged("news")
+            advanceUntilIdle()
+            repository.providers.value = previous.map { it.copy(configurationVersion = 1) }.toImmutableList()
+            runCurrent()
+            vm.retry()
+            vm.inputChanged("history")
+            vm.onProvidersVisible(previous)
+            advanceUntilIdle()
+            assertEquals(listOf("news"), repository.queries)
+            val current = checkNotNull(vm.state.value.providers)
+            vm.onProvidersVisible(current)
+            advanceUntilIdle()
+            assertEquals(listOf("news", "history"), repository.queries)
+            vm.onProvidersVisible(current)
+            advanceUntilIdle()
+            assertEquals(listOf("news", "history"), repository.queries)
+            vm.viewModelScope.cancel()
+        }
+
     @Test
     fun directoryExplicitShortQueryIsNotDebouncedAndIgnoresGenre() =
         runTest {
             val vm = DirectoryViewModel(DirectoryKey("AI", "invalid"), repository)
+            runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             runCurrent()
             assertEquals(listOf("AI"), repository.queries)
             assertFalse(vm.state.value.loading)
@@ -228,6 +331,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         runTest {
             for (key in listOf(DirectoryKey("", "invalid"), DirectoryKey("https://private.test/x", null))) {
                 val vm = DirectoryViewModel(key, repository)
+                runCurrent()
+                vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
                 advanceUntilIdle()
                 assertTrue(vm.state.value.invalid)
                 vm.viewModelScope.cancel()
@@ -241,6 +346,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
         runTest {
             repository.chartAnswer = Outcome.Failure(ProviderStatus.Failed(NetError.Offline))
             val vm = DirectoryViewModel(DirectoryKey("", ChartGenre.NEWS.id), repository)
+            runCurrent()
+            vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
             advanceUntilIdle()
             assertEquals(ProviderStatus.Failed(NetError.Offline), vm.state.value.chartError)
             repository.chartAnswer = Outcome.Success(persistentListOf(hit))
@@ -270,6 +377,8 @@ class DiscoveryViewModelTest : MainDispatcherTest() {
                     )
                 repository.searchAnswer = { flowOf(answer) }
                 val vm = DirectoryViewModel(DirectoryKey("news", null), repository)
+                runCurrent()
+                vm.onProvidersVisible(checkNotNull(vm.state.value.providers))
                 advanceUntilIdle()
                 assertEquals(answer, vm.state.value.results)
                 assertEquals(!answer.complete, vm.state.value.loading)

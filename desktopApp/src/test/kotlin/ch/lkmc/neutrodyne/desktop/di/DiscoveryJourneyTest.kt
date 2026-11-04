@@ -42,6 +42,11 @@ import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.network.okhttp.CoreClients
+import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
+import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
+import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
+import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
@@ -81,8 +86,11 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.Dns
+import okhttp3.Interceptor
 import org.junit.Test
 import java.io.File
+import java.net.InetAddress
 import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -124,6 +132,16 @@ class DiscoveryJourneyTest {
                     )
                     server.start()
                     val url = server.url("/feed.xml").toString()
+                    // The directory hit's feed URL is provider-supplied, so `preview()` fetches
+                    // it marked (03 note 2026-11-02): a public spelling keeps the string check
+                    // off while the graph's stub DNS lands on this server.
+                    val hitUrl =
+                        server
+                            .url("/feed.xml")
+                            .newBuilder()
+                            .host(JOURNEY_HOST)
+                            .build()
+                            .toString()
                     val groupId =
                         runBlocking {
                             (
@@ -137,7 +155,11 @@ class DiscoveryJourneyTest {
                             SearchResults(
                                 query,
                                 persistentListOf(
-                                    DirectoryHit(url, "Directory show", providers = persistentSetOf(ProviderId.APPLE)),
+                                    DirectoryHit(
+                                        hitUrl,
+                                        "Directory show",
+                                        providers = persistentSetOf(ProviderId.APPLE),
+                                    ),
                                 ),
                                 persistentMapOf(ProviderId.APPLE to ProviderStatus.Ok),
                                 true,
@@ -254,20 +276,55 @@ class DiscoveryJourneyTest {
         }
 
     private enum class Entry { ADD, PREVIEW }
+
+    private companion object {
+        const val JOURNEY_HOST = "journey.test"
+    }
 }
 
 @BindingContainer
-private class DiscoveryJourneyBindings(
+internal class DiscoveryJourneyBindings(
     private val db: NeutrodyneDatabase,
     private val clock: Clock,
     private val scope: CoroutineScope,
     private val search: SearchRepository,
+    private val localPeerPort: () -> Int = { -1 },
 ) {
     @Provides fun search(): SearchRepository = search
 
     @Provides fun database(): NeutrodyneDatabase = db
 
     @Provides fun clock(): Clock = clock
+
+    /**
+     * The real client family on the graph's own bindings (03 note 2026-11-02): `journey.test`
+     * resolves to the MockWebServer's loopback so marked preview fetches run the production
+     * path. Privacy journeys identify their LAN recorder by port and a named DNS answer,
+     * so all sockets can bind the portable 127.0.0.1 loopback address.
+     */
+    @Provides fun coreClients(
+        ua: UserAgentInterceptor,
+        lanGuard: LocalNetworkGuard,
+        hints: DnsFamilyHints,
+        @DebugInterceptors debugInterceptors: Set<Interceptor>,
+    ): CoreClients =
+        CoreClients(
+            ua,
+            lanGuard,
+            hints,
+            debugInterceptors,
+            baseDns =
+                Dns { host ->
+                    if (host == "lan.journey.test") {
+                        listOf(InetAddress.getByAddress(host, byteArrayOf(127, 0, 0, 1)))
+                    } else if (host == "journey.test" || host.endsWith(".journey.test")) {
+                        listOf(InetAddress.getByName("127.0.0.1"))
+                    } else {
+                        Dns.SYSTEM.lookup(host)
+                    }
+                },
+            isLocalPeer = { peer -> peer.hostString == "lan.journey.test" || peer.port == localPeerPort() },
+        )
 
     @Provides @ApplicationScope
     fun scope(): CoroutineScope = scope
@@ -279,7 +336,7 @@ private class DiscoveryJourneyBindings(
     @Provides fun network(): NetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
 }
 
-private val DiscoveryJourneyPlatformActions =
+internal val DiscoveryJourneyPlatformActions =
     object : PlatformActions {
         override val urls = ExternalUrlOpener { OpenResult.OPENED }
         override val share = null

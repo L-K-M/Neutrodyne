@@ -16,6 +16,7 @@ kotlin {
             implementation(libs.graphics.shapes)
             implementation(project.dependencies.platform(libs.coil.bom))
             implementation(libs.coil.compose)
+            implementation(libs.coil.network.core)
             implementation(libs.kotlinx.collections.immutable)
         }
         androidMain.dependencies {
