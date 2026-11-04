@@ -66,6 +66,60 @@ class FirstLinkMerger(
         }
     }
 
+    /**
+     * Full resync (10 Cursor semantics and resync): pull every page from the beginning, apply it
+     * against `sync_clock` and the outbox, then re-assert every known field with its original
+     * literal value and complete clock (counter and origin node included). A newer pending local
+     * intent stays untouched.
+     */
+    suspend fun resync(): FirstLinkResult {
+        val roundId = clock.now()
+        return try {
+            val applied = pullAndApply(roundId)
+            reassert()
+            FirstLinkResult.Completed(applied)
+        } catch (failure: Exception) {
+            FirstLinkResult.Failed(failure.message ?: "resync failed")
+        }
+    }
+
+    private suspend fun reassert() {
+        for (row in db.syncClockDao().all()) {
+            val raw = runCatching { SyncJson.decodeFromString<RawSyncRecord>(row.clocks) }.getOrNull() ?: continue
+            if (db.syncOutboxDao().rowsFor(row.coll, listOf(row.rid)).isNotEmpty()) continue
+            db.withWriteTransaction {
+                db.syncStateDao().withApplying {
+                    for ((name, field) in raw.state.fields) {
+                        val clock = field.c ?: continue
+                        db
+                            .syncOutboxDao()
+                            .captureStored(
+                                row.coll,
+                                row.rid,
+                                name,
+                                clock.packed,
+                                clock.nodeId.value,
+                                field.v.toString(),
+                            )
+                    }
+                    raw.state.growSets.forEach { (name, values) ->
+                        val clock = raw.state.maxClock ?: return@forEach
+                        db
+                            .syncOutboxDao()
+                            .captureStored(
+                                row.coll,
+                                row.rid,
+                                name,
+                                clock.packed,
+                                clock.nodeId.value,
+                                values.sorted().joinToString(prefix = "[", postfix = "]") { "\"$it\"" },
+                            )
+                    }
+                }
+            }
+        }
+    }
+
     private suspend fun mergeBoth(roundId: Long): FirstLinkResult {
         seedLocalState()
         val applied = pullAndApply(roundId)
