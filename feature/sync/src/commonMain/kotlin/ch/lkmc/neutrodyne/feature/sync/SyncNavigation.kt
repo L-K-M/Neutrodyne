@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncController
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoSet
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 
 /** Contributes `:feature:sync`'s nav entries (08 Sync screens). */
@@ -20,13 +21,13 @@ import dev.zacsweers.metro.Provides
 object SyncNavigation {
     @Provides
     @IntoSet
-    fun entries(syncController: SyncController): EntryProviderInstaller =
+    fun entries(syncController: Provider<SyncController>): EntryProviderInstaller =
         {
             entry<SyncSettingsKey>(metadata = NdSceneMetadata.paneDetail()) {
-                SyncSettingsScreen(syncController)
+                SyncSettingsScreen(syncController())
             }
             entry<SyncSetupKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
-                SyncSetupScreen(syncController, key.serverUrl)
+                SyncSetupScreen(syncController(), key.serverUrl)
             }
         }
 }
