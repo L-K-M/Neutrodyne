@@ -72,6 +72,15 @@ sealed interface LinkState {
 
     data object Authorising : LinkState
 
+    /**
+     * The account has no library yet, so this device would upload: the step names the account, so
+     * a mistyped or guessed code never uploads silently (10 First-link choices).
+     */
+    data class ConfirmUpload(
+        val accountName: String,
+        val host: String,
+    ) : LinkState
+
     data class ChooseFirstLink(
         val localPodcasts: Int,
         val localGroups: Int,
