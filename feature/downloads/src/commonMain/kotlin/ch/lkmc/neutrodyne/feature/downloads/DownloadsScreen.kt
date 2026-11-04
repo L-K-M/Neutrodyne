@@ -142,6 +142,7 @@ internal fun DownloadsScreen(
     onReload: () -> Unit,
     onNotice: (DownloadNotice) -> Unit,
     onReveal: ((Long) -> Unit)? = null,
+    engineNotice: @Composable () -> Unit = {},
 ) {
     val list = rememberLazyListState()
     val rows = state.overview
@@ -158,6 +159,7 @@ internal fun DownloadsScreen(
     )
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(title = stringResource(Res.string.nav_downloads), actions = { SettingsGearButton() })
+        engineNotice()
         LazyColumn(
             state = list,
             modifier = Modifier.weight(1f),
@@ -370,6 +372,7 @@ private fun DownloadEntryRow(
     onShare: ((Long, String) -> Unit)?,
     onSelect: (Long) -> Unit,
     onReveal: ((Long) -> Unit)? = null,
+    engineNotice: @Composable () -> Unit = {},
     selectionMode: DownloadSelectionMode = DownloadSelectionMode.BROWSE,
 ) {
     val status =

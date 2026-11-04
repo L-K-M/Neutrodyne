@@ -1,0 +1,7 @@
+<resources>
+    <string name="youtube_breaker_banner">Die YouTube-Wiedergabe funktioniert vorübergehend nicht. Neutrodyne versucht es automatisch erneut.</string>
+    <string name="youtube_try_now">Jetzt versuchen</string>
+    <string name="youtube_alert_channel">App-Hinweise</string>
+    <string name="youtube_alert_title">YouTube-Wiedergabe vorübergehend gestört</string>
+    <string name="youtube_alert_text">Neutrodyne kann YouTube-Streams gerade nicht lesen. Automatischer neuer Versuch um %1$s.</string>
+</resources>

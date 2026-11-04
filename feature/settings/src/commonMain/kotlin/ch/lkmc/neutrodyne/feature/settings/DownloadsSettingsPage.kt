@@ -64,6 +64,7 @@ internal fun DownloadsSettingsPage(
     platform: PlatformKind,
     page: SettingsPage = SettingsPage.DOWNLOADS,
     viewModel: DownloadsSettingsViewModel = metroViewModel(),
+    youtubeSettings: @Composable () -> Unit = {},
 ) {
     val desktopFolder = page == SettingsPage.DESKTOP
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -89,6 +90,7 @@ internal fun DownloadsSettingsPage(
             },
         )
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            if (!desktopFolder) youtubeSettings()
             if (!desktopFolder) {
                 ManualDownloadSettings(platform, viewModel::selectRoot)
                 DownloadSettingsRows(

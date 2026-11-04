@@ -10,10 +10,12 @@ import ch.lkmc.neutrodyne.SnapshotNowReceiver
 import ch.lkmc.neutrodyne.core.artwork.ArtworkProviderGraph
 import ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.update.UpdateCheckWorker
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DescriptionFormat
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
+import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.model.ExportRequest
@@ -50,7 +52,10 @@ import ch.lkmc.neutrodyne.notifications.AndroidGroupChannelSync
 import ch.lkmc.neutrodyne.notifications.AndroidImportReportPoster
 import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.impl.PlaybackServiceInjector
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
+import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
+import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
@@ -236,19 +241,30 @@ class AndroidAppGraphTest {
             // Dismiss is a durable command; it is deliberately not invoked by a graph-construction test.
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
             assertThat(graph.youtubeEngine).isSameInstanceAs(graph.youtubeEngine)
-            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION)
-            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+            graph.youtubeEngine.prewarm(PrewarmReason.PROJECTION)
+            graph.youtubeEngine.prewarm(PrewarmReason.SCREEN)
             graph.youtubeEngine.retryStart()
+            val bundled = graph.buildInfo.youTubeEngineBundled
             assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
-                ch.lkmc.neutrodyne.youtube.api.EngineAvailability.NOT_YET_AVAILABLE,
+                if (bundled) {
+                    EngineAvailability.PREPARING
+                } else {
+                    EngineAvailability.NOT_IN_THIS_APK
+                },
             )
-            assertThat(graph.youtubeEngine.status.value.version).isNull()
+            assertThat(graph.youtubeEngine.status.value.version).isEqualTo(if (bundled) "2026.08.19" else null)
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
-            assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
-            assertThat(
-                graph.youtubeCapabilities.capabilities.value.externalReason,
-            ).isEqualTo(ExternalReason.NOT_YET_AVAILABLE)
-            assertThat(graph.youtubeStreamResolver.resolveAudio("id", AudioPref())).isEqualTo(ResolveResult.Unsupported)
+            assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isEqualTo(bundled)
+            assertThat(graph.youtubeCapabilities.capabilities.value.externalReason)
+                .isEqualTo(if (bundled) null else ExternalReason.NOT_IN_THIS_APK)
+            assertThat(graph.youtubeStreamResolver.resolveAudio("id", AudioPref()))
+                .isEqualTo(
+                    if (ch.lkmc.neutrodyne.BuildConfig.YOUTUBE_ENGINE) {
+                        ResolveResult.Unavailable(Availability.UNAVAILABLE)
+                    } else {
+                        ResolveResult.Unsupported
+                    },
+                )
             graph.youtubeStreamResolver.invalidate("id")
             graph.youtubeStreamResolver.invalidateAll()
             assertThat(graph.initializers).isNotEmpty()
@@ -266,7 +282,7 @@ class AndroidAppGraphTest {
         val service =
             ch.lkmc.neutrodyne.playback.impl
                 .NeutrodynePlaybackService()
-        (graph as ch.lkmc.neutrodyne.playback.impl.PlaybackServiceInjector).inject(service)
+        (graph as PlaybackServiceInjector).inject(service)
         assertThat(service.access).isNotNull()
         assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
     }
@@ -292,7 +308,7 @@ class AndroidAppGraphTest {
     fun updateWorkerFactoryAndStartupStayLazyBeforeDatabaseOpen() {
         val app: Application = RuntimeEnvironment.getApplication()
         val worker =
-            TestListenableWorkerBuilder<ch.lkmc.neutrodyne.core.data.update.UpdateCheckWorker>(
+            TestListenableWorkerBuilder<UpdateCheckWorker>(
                 app,
             ).setWorkerFactory(graph.workerFactory)
                 .build()
@@ -406,6 +422,12 @@ class AndroidAppGraphTest {
     @Test
     fun exportRepositoryPreparesThroughTheFileProviderSeam() =
         runBlocking {
+            // FileProvider caches roots by authority across Robolectric application directories.
+            // Resolve this test's manifest roots again before checking the real share URI.
+            androidx.core.content.FileProvider::class.java.getDeclaredField("sCache").apply {
+                isAccessible = true
+                (get(null) as MutableMap<*, *>).clear()
+            }
             graph.databaseOpener.awaitOpen()
             try {
                 val prepared =
@@ -510,6 +532,11 @@ class AndroidAppGraphTest {
                 "DownloadCleanupInitializer" to 200..200,
                 "DownloadReconcileInitializer" to 210..210,
                 "DownloadObserversInitializer" to 310..310,
+                "EngineStatusInitializer" to 150..150,
+                "YouTubeNetworkInitializer" to 150..150,
+                "EnginePreparationObserver" to 210..210,
+                "YouTubeBreakerNotifier" to 200..200,
+                "EngineFilesCleanup" to 300..300,
             )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */
