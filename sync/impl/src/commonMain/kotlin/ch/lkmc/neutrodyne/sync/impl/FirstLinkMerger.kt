@@ -224,7 +224,7 @@ class FirstLinkMerger(
                     }
 
                     else -> {
-                        Unit
+                        continue
                     }
                 }
             }
