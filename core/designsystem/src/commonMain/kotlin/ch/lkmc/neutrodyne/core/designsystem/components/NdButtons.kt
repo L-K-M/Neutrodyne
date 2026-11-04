@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.designsystem.components
 
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -19,6 +20,7 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 
 /**
  * The colour role of a text action (08 Dialogs: destructive confirms draw in the error colour;
@@ -122,8 +124,15 @@ public fun NdTooltipIconButton(
         tooltip = { PlainTooltip { Text(tooltip) } },
         state = rememberTooltipState(),
     ) {
-        IconButton(onClick = onClick, modifier = modifier, enabled = enabled) {
+        IconButton(
+            onClick = onClick,
+            // Keep the clickable layout at 48dp instead of relying on touch expansion.
+            modifier = modifier.sizeIn(minWidth = ICON_BUTTON_MINIMUM_SIZE, minHeight = ICON_BUTTON_MINIMUM_SIZE),
+            enabled = enabled,
+        ) {
             Icon(icon, contentDescription = tooltip)
         }
     }
 }
+
+private val ICON_BUTTON_MINIMUM_SIZE = 48.dp

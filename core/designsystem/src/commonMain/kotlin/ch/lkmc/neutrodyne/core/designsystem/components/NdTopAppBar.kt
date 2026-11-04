@@ -11,6 +11,7 @@ import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 
 /**
  * Standard top app bar (08 Nd wrappers): flat `surface` until [elevated] (scrolled) raises it to
@@ -29,7 +30,8 @@ public fun NdTopAppBar(
 ) {
     TopAppBar(
         title = { Text(title, style = MaterialTheme.typography.titleLarge) },
-        modifier = modifier,
+        // Pinned chrome must win overlap with off-screen semantics from scrolling siblings.
+        modifier = modifier.zIndex(PINNED_BAR_Z_INDEX),
         navigationIcon = navigation,
         actions = actions,
         colors = ndTopAppBarColors(elevated),
@@ -49,3 +51,5 @@ private fun ndTopAppBarColors(elevated: Boolean): TopAppBarColors =
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
         )
     }
+
+private const val PINNED_BAR_Z_INDEX = 1f
