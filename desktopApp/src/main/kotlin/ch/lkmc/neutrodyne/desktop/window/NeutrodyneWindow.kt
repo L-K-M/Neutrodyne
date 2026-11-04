@@ -66,10 +66,10 @@ import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
-import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -347,6 +347,10 @@ internal fun NeutrodyneWindowContent(
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
     val nowPlaying by playbackState.nowPlaying.collectAsState()
+    val panelHidden by (
+        settings?.observe(ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
+            ?: kotlinx.coroutines.flow.flowOf(false)
+    ).collectAsState(initial = false)
     val updates =
         if (updateChecker != null && updateNotices != null && settings != null) {
             rememberUpdateRootPresentation(updateChecker, updateNotices, settings)
@@ -403,6 +407,7 @@ internal fun NeutrodyneWindowContent(
                 RootUiState.READY.copy(
                     startup = startup,
                     hasNowPlaying = nowPlaying != null,
+                    playerPanelHidden = panelHidden,
                     settingsBadge = updates?.badge ?: false,
                     notice = updates?.notice,
                 ),
