@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.database
 
+import ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
 import java.io.ByteArrayOutputStream
 import java.util.zip.DataFormatException
 import java.util.zip.Deflater
@@ -11,6 +12,7 @@ actual object EpisodeDescriptionCodec {
     actual fun encode(
         text: String,
         format: DescriptionFormat,
+        completeness: DescriptionCompleteness,
     ): ByteArray {
         val utf8 = text.encodeToByteArray()
         // Aligned bound: a caller exceeding the producer cap (a custom ParseLimits) must be
@@ -18,7 +20,9 @@ actual object EpisodeDescriptionCodec {
         require(utf8.size <= MAX_DECODED_BYTES) {
             "episode_description input exceeds the 2 MiB codec bound"
         }
-        if (utf8.size < COMPRESS_ABOVE_BYTES) return byteArrayOf(rawTag(format)) + utf8
+        if (utf8.size < COMPRESS_ABOVE_BYTES && completeness == DescriptionCompleteness.UNKNOWN) {
+            return byteArrayOf(rawTag(format)) + utf8
+        }
 
         val deflater = Deflater(Deflater.DEFAULT_COMPRESSION, true)
         try {
@@ -33,6 +37,7 @@ actual object EpisodeDescriptionCodec {
             }
             out.write(deflatedTag(format).toInt())
             buffer.writeTo(out)
+            out.write(descriptionCompletenessTrailer(completeness))
             return out.toByteArray()
         } finally {
             deflater.end()
@@ -47,7 +52,7 @@ actual object EpisodeDescriptionCodec {
             }
 
             DEFLATED_TAG -> {
-                DecodedDescription(inflate(bytes.copyOfRange(1, bytes.size)), DescriptionFormat.HTML)
+                inflate(bytes.copyOfRange(1, bytes.size), DescriptionFormat.HTML)
             }
 
             RAW_TEXT_TAG -> {
@@ -55,7 +60,7 @@ actual object EpisodeDescriptionCodec {
             }
 
             DEFLATED_TEXT_TAG -> {
-                DecodedDescription(inflate(bytes.copyOfRange(1, bytes.size)), DescriptionFormat.PLAIN_TEXT)
+                inflate(bytes.copyOfRange(1, bytes.size), DescriptionFormat.PLAIN_TEXT)
             }
 
             else -> {
@@ -83,7 +88,10 @@ actual object EpisodeDescriptionCodec {
         return bytes.copyOfRange(1, bytes.size).decodeToString()
     }
 
-    private fun inflate(deflated: ByteArray): String {
+    private fun inflate(
+        deflated: ByteArray,
+        format: DescriptionFormat,
+    ): DecodedDescription {
         val inflater = Inflater(true)
         try {
             inflater.setInput(deflated)
@@ -105,7 +113,11 @@ actual object EpisodeDescriptionCodec {
                 // past it is a corruption or hostility signal, not show notes.
                 check(out.size() <= MAX_DECODED_BYTES) { TOO_BIG }
             }
-            return out.toByteArray().decodeToString()
+            return DecodedDescription(
+                out.toByteArray().decodeToString(),
+                format,
+                storedDescriptionCompleteness(deflated, inflater.remaining),
+            )
         } finally {
             inflater.end()
         }
