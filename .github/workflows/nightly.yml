@@ -1255,14 +1255,15 @@ jobs:
       - name: Pinned shim channel lookup, resolve and media chunk
         run: python3 scripts/ci/youtube-engine-canary.py
       - name: Bounded controls and feed variants
+        if: always()
         id: feeds
         run: python3 scripts/ci/youtube-feed-canary.py --output youtube-feed-canary.json
-      - name: Report feed failure
+      - name: Report YouTube canary failure
         if: ${{ failure() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh youtube-canary
-      - name: Report feed recovery
+      - name: Report YouTube canary recovery
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
