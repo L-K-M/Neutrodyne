@@ -250,8 +250,9 @@ class FfAudioEngine internal constructor(
         source?.abort()
         resolveJob?.cancel()
         output?.stop()
-        clock = null
+        // A reader that sees the detached clock must already see this anchor.
         anchorMs.set(positionMs)
+        clock = null
         outputReady = false
         silenceJumps.clear()
         current?.let {

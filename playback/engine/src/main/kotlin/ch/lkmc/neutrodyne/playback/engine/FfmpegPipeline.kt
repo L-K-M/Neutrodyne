@@ -54,6 +54,10 @@ class FfmpegPipeline
 
         /** Decodes the whole item and returns the PCM of every block in order. */
         fun decodeAll(): List<AudioFrame> {
+            // The MD0 corpus also rewinds the exposed demuxer/decoder directly.
+            // Start a fresh bulk drain at their cursor, independent of the last EOF.
+            draining = false
+            resamplerDrained = false
             val blocks = mutableListOf<AudioFrame>()
             while (true) blocks += readFrame() ?: break
             return blocks
