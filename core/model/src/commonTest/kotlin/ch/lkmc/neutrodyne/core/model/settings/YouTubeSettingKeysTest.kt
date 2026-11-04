@@ -22,7 +22,7 @@ class YouTubeSettingKeysTest {
                 "youtube.auto_download",
                 "youtube.auto_download_keep_latest",
             )
-        assertEquals(18, YouTubeSettingKeys.ALL.size)
+        assertEquals(19, YouTubeSettingKeys.ALL.size)
         for (key in YouTubeSettingKeys.ALL) {
             assertTrue(key in AllSettingKeys.list)
             assertEquals(if (key.name in portable) SettingsFile.PORTABLE else SettingsFile.DEVICE, key.file)
