@@ -6,15 +6,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -39,7 +35,6 @@ import org.jetbrains.compose.resources.stringResource
  * Settings › Sync (08 Sync screens). The body follows [SyncController.status]; while
  * `NotConfigured` the only sync UI anywhere is this screen (R7.1).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncSettingsScreen(
     controller: SyncController,
@@ -47,18 +42,15 @@ fun SyncSettingsScreen(
 ) {
     val status by controller.status.collectAsStateWithLifecycle()
     val syncing by controller.syncing.collectAsStateWithLifecycle()
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = { TopAppBar(title = { Text(stringResource(Res.string.sync_title)) }) },
-    ) { padding ->
-        Column(
-            modifier =
-                Modifier
-                    .padding(padding)
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+    Column(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(stringResource(Res.string.sync_title), style = MaterialTheme.typography.titleLarge)
+        run {
             when (val current = status) {
                 is SyncStatus.NotConfigured -> {
                     Text(stringResource(Res.string.sync_intro), style = MaterialTheme.typography.bodyMedium)
