@@ -8,7 +8,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.junit4.MockWebServerRule
-import okhttp3.OkHttpClient
 import okio.Buffer
 import org.junit.Rule
 import java.lang.foreign.MemorySegment
@@ -235,7 +234,7 @@ class FfAudioEngineTest {
                     sources[1L to 1] = ResolvedSource.Http(server.url("/renewed").toString(), emptyMap(), item.cacheKey)
                 }
             val cache = SpanCache(directory)
-            val client = OkHttpClient()
+            val client = testMediaClient()
             engine(resolver) { resolved ->
                 val source = resolved as ResolvedSource.Http
                 HttpByteSource(client, source.url, source.headers, cache, source.cacheKey)
