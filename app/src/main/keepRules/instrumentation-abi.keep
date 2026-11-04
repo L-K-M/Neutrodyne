@@ -590,6 +590,13 @@
 }
 -keep class ch.lkmc.neutrodyne.core.artwork.AndroidArtworkContentUrisContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.artwork.AndroidArtworkPixelSamplerContributions$ToAppScope$ProvidesAndroidArtworkPixelSamplerMetroFactory {
+  public static ch.lkmc.neutrodyne.core.artwork.AndroidArtworkPixelSamplerContributions$ToAppScope$ProvidesAndroidArtworkPixelSamplerMetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.AndroidArtworkPixelSamplerContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.AndroidArtworkPixelSamplerContributions {
+}
 -keep class ch.lkmc.neutrodyne.core.artwork.AndroidImageMemoryPolicyContributions$ToAppScope$ProvidesAndroidImageMemoryPolicyMetroFactory {
   public static ch.lkmc.neutrodyne.core.artwork.AndroidImageMemoryPolicyContributions$ToAppScope$ProvidesAndroidImageMemoryPolicyMetroFactory create();
 }
@@ -630,7 +637,7 @@
   public dev.zacsweers.metro.Provider getArtworkProviderAccess();
 }
 -keep class ch.lkmc.neutrodyne.core.artwork.ArtworkSyncRunner$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.artwork.ArtworkSyncRunner$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.artwork.ArtworkSyncRunner$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.artwork.ArtworkSyncRunner$MetroFactory {
   ch.lkmc.neutrodyne.core.artwork.ArtworkSyncRunner$MetroFactory$Companion Companion;
@@ -654,7 +661,7 @@
 -keep interface ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker$Factory {
 }
 -keep class ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker$MetroFactory {
   ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker$MetroFactory$Companion Companion;
@@ -674,6 +681,30 @@
 -keep interface ch.lkmc.neutrodyne.core.artwork.ImageMemoryPolicy {
 }
 -keep interface ch.lkmc.neutrodyne.core.artwork.ImageNetworkComponent {
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicRenderer$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.artwork.MosaicRenderer$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicRenderer$MetroFactory {
+  ch.lkmc.neutrodyne.core.artwork.MosaicRenderer$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicRenderer {
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicSources$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.artwork.MosaicSources$MetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicSources$MetroFactory {
+  ch.lkmc.neutrodyne.core.artwork.MosaicSources$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicSources {
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicSync$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.artwork.MosaicSync$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicSync$MetroFactory {
+  ch.lkmc.neutrodyne.core.artwork.MosaicSync$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.artwork.MosaicSync {
 }
 -keep class ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory {
   public <init>(ch.lkmc.neutrodyne.core.artwork.ImageNetworkComponent, ch.lkmc.neutrodyne.core.artwork.ImageMemoryPolicy, dev.zacsweers.metro.Provider, ch.lkmc.neutrodyne.core.common.StoragePaths);
@@ -1485,6 +1516,10 @@
 -keep class ch.lkmc.neutrodyne.core.data.refresh.WorkManagerRefreshSchedulerContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.WorkManagerRefreshSchedulerContributions {
+}
+-keep class ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.repo.ArtworkRepositoryImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.repo.EpisodeLiveStateSourceImplContributions$ToAppScope$ProvidesEpisodeLiveStateSourceImplMetroFactory$Companion {
   public static ch.lkmc.neutrodyne.core.data.repo.EpisodeLiveStateSourceImplContributions$ToAppScope$ProvidesEpisodeLiveStateSourceImplMetroFactory create$default(ch.lkmc.neutrodyne.core.data.repo.EpisodeLiveStateSourceImplContributions$ToAppScope$ProvidesEpisodeLiveStateSourceImplMetroFactory$Companion, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, int, java.lang.Object);
