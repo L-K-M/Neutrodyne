@@ -11,6 +11,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicInteger
@@ -20,17 +21,20 @@ import kotlin.test.assertNull
 
 /**
  * The M7 actual-peer guard end to end (03 note 2026-11-02): [server] is the public stand-in on
- * `127.0.0.1`, [lan] the LAN recorder on `127.0.0.2`, and the seam narrows "local peer" to the
- * recorder's address — exactly the split the add pipeline's fake-DNS tests use. A marked call
+ * `127.0.0.1`, as is [lan] on a separate port. Named DNS answers and the LAN port distinguish
+ * the recorder without requiring a second loopback alias on macOS. A marked call
  * must fail before the request is written; `lan.requestCount == 0` proves the refusal.
  */
 class PreConfirmationPeerGuardTest {
     private val server = MockWebServer()
     private val lan = MockWebServer()
+    private val lanAddress = InetAddress.getByAddress(LAN_HOST, byteArrayOf(127, 0, 0, 1))
+
+    private fun isLocalPeer(peer: InetSocketAddress) = peer.hostString == LAN_HOST || peer.port == lan.port
 
     @Before fun setup() {
         server.start()
-        lan.start(InetAddress.getByName(LAN_ADDR), server.port)
+        lan.start(InetAddress.getByName("127.0.0.1"), 0)
     }
 
     @After fun teardown() {
@@ -41,7 +45,7 @@ class PreConfirmationPeerGuardTest {
     private fun clients(): NetworkClients =
         newNetworkClients(
             baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1")) },
-            isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+            isLocalPeer = ::isLocalPeer,
         )
 
     private fun publicUrl(path: String): okhttp3.HttpUrl =
@@ -117,15 +121,15 @@ class PreConfirmationPeerGuardTest {
     }
 
     @Test fun localImageRedirectOpensNoSocket() {
-        ServerSocket(0, 1, InetAddress.getByName(LAN_ADDR)).use { recorder ->
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { recorder ->
             val target = "http://redirect-peer.test:${recorder.localPort}/action"
             val clients =
                 newNetworkClients(
                     baseDns =
                         Dns { host ->
-                            listOf(InetAddress.getByName(if (host == "public.test") "127.0.0.1" else LAN_ADDR))
+                            listOf(if (host == "public.test") InetAddress.getByName("127.0.0.1") else lanAddress)
                         },
-                    isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                    isLocalPeer = ::isLocalPeer,
                 )
             server.enqueue(mockResponse(302, "", "Location" to target))
             val publicUrl =
@@ -145,8 +149,8 @@ class PreConfirmationPeerGuardTest {
     @Test fun mixedDnsAnswersCannotOpenTheLocalRecorder() {
         val clients =
             newNetworkClients(
-                baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1"), InetAddress.getByName(LAN_ADDR)) },
-                isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1"), lanAddress) },
+                isLocalPeer = ::isLocalPeer,
             )
         server.enqueue(mockResponse(body = "public stand-in"))
         val target =
@@ -171,9 +175,9 @@ class PreConfirmationPeerGuardTest {
             newNetworkClients(
                 baseDns =
                     Dns {
-                        listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR))
+                        listOf(if (lookups.getAndIncrement() == 0) InetAddress.getByName("127.0.0.1") else lanAddress)
                     },
-                isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                isLocalPeer = ::isLocalPeer,
             )
         server.enqueue(mockResponse(body = "public stand-in"))
         val target =
@@ -195,7 +199,7 @@ class PreConfirmationPeerGuardTest {
     @Test fun rebindingBetweenPreflightAndConnectOpensNoSocket() {
         MockWebServer().use { publicServer ->
             publicServer.start()
-            ServerSocket(publicServer.port, 1, InetAddress.getByName(LAN_ADDR)).use { recorder ->
+            ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { recorder ->
                 for (kind in listOf(HttpClientKind.FEED, HttpClientKind.IMAGE)) {
                     val lookups = AtomicInteger()
                     val clients =
@@ -203,12 +207,16 @@ class PreConfirmationPeerGuardTest {
                             baseDns =
                                 Dns {
                                     listOf(
-                                        InetAddress.getByName(
-                                            if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR,
-                                        ),
+                                        if (lookups.getAndIncrement() ==
+                                            0
+                                        ) {
+                                            InetAddress.getByName("127.0.0.1")
+                                        } else {
+                                            lanAddress
+                                        },
                                     )
                                 },
-                            isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                            isLocalPeer = ::isLocalPeer,
                         )
                     val client = clients[kind]
                     publicServer.enqueue(mockResponse(body = "public stand-in"))
@@ -216,6 +224,7 @@ class PreConfirmationPeerGuardTest {
                         publicServer
                             .url("/feed")
                             .newBuilder()
+                            .port(recorder.localPort)
                             .host("rebound.test")
                             .build()
                     assertFailsWith<LocalNetworkUnsupportedException> {
@@ -255,12 +264,15 @@ class PreConfirmationPeerGuardTest {
             newNetworkClients(
                 baseDns =
                     Dns {
-                        listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) LAN_ADDR else "127.0.0.1"))
+                        listOf(if (lookups.getAndIncrement() == 0) lanAddress else InetAddress.getByName("203.0.113.1"))
                     },
-                isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                isLocalPeer = { peer ->
+                    peer.hostString == LAN_HOST ||
+                        (peer.port == lan.port && peer.address?.isLoopbackAddress == true)
+                },
             )
         val target =
-            server
+            lan
                 .url("/feed")
                 .newBuilder()
                 .host("pooled.test")
@@ -303,6 +315,6 @@ class PreConfirmationPeerGuardTest {
     }
 
     private companion object {
-        const val LAN_ADDR = "127.0.0.2"
+        const val LAN_HOST = "lan.test"
     }
 }

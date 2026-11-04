@@ -288,6 +288,7 @@ internal class DiscoveryJourneyBindings(
     private val clock: Clock,
     private val scope: CoroutineScope,
     private val search: SearchRepository,
+    private val localPeerPort: () -> Int = { -1 },
 ) {
     @Provides fun search(): SearchRepository = search
 
@@ -298,8 +299,8 @@ internal class DiscoveryJourneyBindings(
     /**
      * The real client family on the graph's own bindings (03 note 2026-11-02): `journey.test`
      * resolves to the MockWebServer's loopback so marked preview fetches run the production
-     * path, and no peer counts as local — the guard's refusal coverage lives in
-     * `PreConfirmationPeerGuardTest`/`AddLocalDestinationTest`.
+     * path. Privacy journeys identify their LAN recorder by port and a named DNS answer,
+     * so all sockets can bind the portable 127.0.0.1 loopback address.
      */
     @Provides fun coreClients(
         ua: UserAgentInterceptor,
@@ -315,14 +316,14 @@ internal class DiscoveryJourneyBindings(
             baseDns =
                 Dns { host ->
                     if (host == "lan.journey.test") {
-                        listOf(InetAddress.getByName("127.0.0.2"))
+                        listOf(InetAddress.getByAddress(host, byteArrayOf(127, 0, 0, 1)))
                     } else if (host == "journey.test" || host.endsWith(".journey.test")) {
                         listOf(InetAddress.getByName("127.0.0.1"))
                     } else {
                         Dns.SYSTEM.lookup(host)
                     }
                 },
-            isLocalPeer = { peer -> peer.address?.hostAddress == "127.0.0.2" },
+            isLocalPeer = { peer -> peer.hostString == "lan.journey.test" || peer.port == localPeerPort() },
         )
 
     @Provides @ApplicationScope

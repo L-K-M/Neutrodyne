@@ -70,6 +70,7 @@ import java.io.File
 import java.net.InetAddress
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -116,9 +117,11 @@ class DiscoveryPrivacyJourneyTest {
                         ProviderInfo(ProviderId.FYYD, false),
                     ).toImmutableList()
             }
+            val localPeerPort = AtomicInteger(-1)
             val graph =
-                createDynamicGraphFactory<M2JourneyGraph.Factory>(DiscoveryJourneyBindings(db, clock, scope, search))
-                    .create(dirs, build, reporter)
+                createDynamicGraphFactory<M2JourneyGraph.Factory>(
+                    DiscoveryJourneyBindings(db, clock, scope, search, localPeerPort = localPeerPort::get),
+                ).create(dirs, build, reporter)
             val failures = ConcurrentLinkedQueue<Throwable>()
             val original = graph.imageLoaderFactory.newImageLoader(PlatformContext.INSTANCE)
             val loader =
@@ -142,7 +145,8 @@ class DiscoveryPrivacyJourneyTest {
                     val lanConnections = ConnectionCountingSocketFactory()
                     MockWebServer().apply { serverSocketFactory = lanConnections }.use { lan ->
                         server.start()
-                        lan.start(InetAddress.getByName("127.0.0.2"), server.port)
+                        lan.start(InetAddress.getByName("127.0.0.1"), 0)
+                        localPeerPort.set(lan.port)
                         lan.enqueue(MockResponse.Builder().body("LAN honeypot").build())
                         val publicFeed = publicUrl(server, "/feed.xml")
                         val localArt = lan.url("/private-art.png").toString()

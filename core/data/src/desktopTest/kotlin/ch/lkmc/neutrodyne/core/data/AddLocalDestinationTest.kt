@@ -29,7 +29,8 @@ import kotlin.test.assertIs
  * destination — a shared page cannot turn alternates, candidate redirects or its own 302 into a
  * LAN request — while a *typed* LAN URL still fetches (PLAN's LAN rule is Android-only).
  * [server] answers the fake public [TEST_HOST] through the stub DNS below; [lan] is a second
- * server bound to `127.0.0.2` at [server]'s port, standing in for a LAN destination — so a
+ * server bound to `127.0.0.1` on its own port, standing in for a LAN destination. A named
+ * DNS answer distinguishes its peer during route selection without a macOS loopback alias, so a
  * public host spelled [LAN_HOST] that resolves there simulates a DNS-rebound LAN peer, and
  * both the HTTP request count and accepted TCP socket count stay zero.
  */
@@ -39,10 +40,12 @@ class AddLocalDestinationTest {
     private val lanConnections = ConnectionCountingSocketFactory()
     private val lan = MockWebServer().apply { serverSocketFactory = lanConnections }
 
+    private val lanAddress = InetAddress.getByAddress(LAN_HOST, byteArrayOf(127, 0, 0, 1))
+
     private val testDns =
         Dns { host ->
             if (host == LAN_HOST || host.endsWith(".$LAN_HOST")) {
-                listOf(InetAddress.getByName(LAN_ADDR))
+                listOf(lanAddress)
             } else if (host == TEST_HOST || host.endsWith(".$TEST_HOST")) {
                 listOf(InetAddress.getByName("127.0.0.1"))
             } else {
@@ -53,7 +56,6 @@ class AddLocalDestinationTest {
     private companion object {
         const val TEST_HOST = "page.test"
         const val LAN_HOST = "lan.test"
-        const val LAN_ADDR = "127.0.0.2"
     }
 
     private val clock = TestClock()
@@ -66,7 +68,7 @@ class AddLocalDestinationTest {
 
     @Before fun setup() {
         server.start()
-        lan.start(InetAddress.getByName(LAN_ADDR), server.port)
+        lan.start(InetAddress.getByName("127.0.0.1"), 0)
         bundle =
             newResolver(
                 root,
@@ -75,9 +77,8 @@ class AddLocalDestinationTest {
                 networkClients =
                     newNetworkClients(
                         baseDns = testDns,
-                        // Only the LAN recorder's address is "local" here: `server`'s stand-in
-                        // host must stay reachable for the typed/probe paths that still fetch.
-                        isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                        // DNS names cover route checks (port zero); the port covers connected peers.
+                        isLocalPeer = { peer -> peer.hostString == LAN_HOST || peer.port == lan.port },
                     ),
             )
     }
@@ -120,7 +121,7 @@ class AddLocalDestinationTest {
             val lookups = AtomicInteger()
             val rebindDns =
                 Dns {
-                    listOf(InetAddress.getByName(if (lookups.getAndIncrement() == 0) "127.0.0.1" else LAN_ADDR))
+                    listOf(if (lookups.getAndIncrement() == 0) InetAddress.getByName("127.0.0.1") else lanAddress)
                 }
             // The inferred URL must choose a fresh route after the public feed closes its socket.
             server.enqueue(
@@ -137,7 +138,7 @@ class AddLocalDestinationTest {
                 networkClients =
                     newNetworkClients(
                         baseDns = rebindDns,
-                        isLocalPeer = { peer -> peer.address?.hostAddress == LAN_ADDR },
+                        isLocalPeer = { peer -> peer.hostString == LAN_HOST || peer.port == lan.port },
                     ),
             ).use { rebound ->
                 val result = rebound.resolver.resolve(url("/feed"))
@@ -390,7 +391,7 @@ class AddLocalDestinationTest {
                             mockResponse(
                                 body =
                                     "<html><head><link rel='alternate' type='application/rss+xml' " +
-                                        "href='http://%31%32%37.0.0.2:${server.port}/action'></head></html>",
+                                        "href='http://%31%32%37.0.0.1:${lan.port}/action'></head></html>",
                             )
                         } else {
                             notFound(request)
@@ -414,7 +415,7 @@ class AddLocalDestinationTest {
                             mockResponse(
                                 body =
                                     "<html><head><link rel='alternate' type='application/rss+xml' " +
-                                        "href='http://１２７.０.０.２:${server.port}/action'></head></html>",
+                                        "href='http://１２７.０.０.１:${lan.port}/action'></head></html>",
                             )
                         } else {
                             notFound(request)
