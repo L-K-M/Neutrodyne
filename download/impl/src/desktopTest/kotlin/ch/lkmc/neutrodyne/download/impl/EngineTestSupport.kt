@@ -8,10 +8,14 @@ import androidx.sqlite.SQLiteStatement
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.model.SourceKind
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCleanupPlanner
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeAvailabilityRecorder
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeHealth
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -21,6 +25,7 @@ import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
 import ch.lkmc.neutrodyne.download.api.ShareableFile
 import ch.lkmc.neutrodyne.download.api.StorageUsage
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
@@ -57,13 +62,21 @@ internal class EngineRig(
     val dao = db.downloadDao()
     val conditions = MutableStateFlow(Conditions(true, true, true, true, true))
     val roots = TestRoots()
-    val faults = FaultFiles()
     val files = OkioDownloadFileSystem(roots, faults, dispatcher)
     val deletes = DeferredDeletes(JournalTestStore(), files, roots, dao::allRows)
     val verification = DownloadFiles(files, roots, PlatformSriHasher(roots, faults), PlatformLocalUris(), deletes)
     val progress = DownloadProgressHub(scope.backgroundScope, clock)
     val source = FakeTransferSource(SourceKind.RSS_ENCLOSURE)
-    val youtube = FakeTransferSource(SourceKind.YOUTUBE)
+    val youtube =
+        FakeTransferSource(SourceKind.YOUTUBE).apply {
+            identityFor = {
+                db
+                    .episodeDao()
+                    .downloadSources(listOf(it.episodeId))
+                    .singleOrNull()
+                    ?.youtubeIdentity()
+            }
+        }
     val indexed = ConcurrentHashMap<Long, String>()
     val completed = Collections.synchronizedList(mutableListOf<Long>())
     val events = mutableListOf<String>()
@@ -72,6 +85,13 @@ internal class EngineRig(
     var resets = 0
     var mayClaim = true
     val cleanup = FakeCleanupPlanner()
+    val caps =
+        FakeYouTubeCapabilitiesSource().apply {
+            capabilities.value = YouTubeCapabilities(true, true, true, true, true, null)
+        }
+    val youtubeHealth = FakeYouTubeHealth()
+    val recorder = FakeYouTubeAvailabilityRecorder()
+    val youtubeRules = YouTubeEngineRules(db, caps, youtubeHealth, deletes, clock)
     val scheduler =
         object : DownloadScheduler {
             override suspend fun ensureScheduled(lane: Lane) {
@@ -160,6 +180,8 @@ internal class EngineRig(
             cleanup,
             { mayClaim },
             { 1.0 },
+            youtubeRules,
+            recorder,
         )
     val controller =
         DownloadControllerImpl(
@@ -174,6 +196,7 @@ internal class EngineRig(
             disk,
             FakePlaybackMediaLookup(),
             { false },
+            capabilities = caps,
         )
 
     suspend fun seed(
@@ -213,13 +236,55 @@ internal class EngineRig(
         }
     }
 
+    suspend fun seedYouTube(
+        count: Int = 1,
+        videoIdPrefix: String = "ytvideo",
+        transform: (DownloadEntity) -> DownloadEntity = { it },
+    ): List<Long> {
+        val channel =
+            db.podcastDao().insertPodcast(
+                podcastEntity {
+                    copy(
+                        sourceType = SourceType.YOUTUBE_CHANNEL,
+                        youtubeChannelId = "UC" + "a".repeat(21) + "A",
+                    )
+                },
+            )
+        return (1..count).map { n ->
+            val videoId = "$videoIdPrefix${n.toString().padStart(4, '0')}".take(11)
+            val id =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = channel) {
+                        copy(externalMediaId = videoId, enclosureUrl = null, enclosureType = null)
+                    },
+                )
+            dao.insert(
+                transform(
+                    DownloadEntity(
+                        id,
+                        Lane.MANUAL,
+                        State.QUEUED,
+                        priority = 100,
+                        requestedAt = n.toLong(),
+                        sourceKind = SourceKind.YOUTUBE,
+                        sourceRef = videoId,
+                        rootId = "old",
+                        allowMetered = true,
+                    ),
+                ),
+            )
+            id
+        }
+    }
+
     suspend fun row(id: Long) = assertNotNull(dao.byEpisode(id))
 
     suspend fun audit() {
         db.useWriterConnection { connection ->
             connection.usePrepared("CREATE TABLE engine_audit(state TEXT NOT NULL)") { it.step() }
             connection.usePrepared(
-                "CREATE TRIGGER engine_audit_update AFTER UPDATE ON download BEGIN INSERT INTO engine_audit VALUES(new.state); END",
+                "CREATE TRIGGER engine_audit_update AFTER UPDATE ON download " +
+                    "BEGIN INSERT INTO engine_audit VALUES(new.state); END",
             ) { it.step() }
         }
     }
@@ -244,6 +309,7 @@ internal class FakeTransferSource(
     val starts = Channel<Long>(Channel.UNLIMITED)
     val calls = Collections.synchronizedList(mutableListOf<Long>())
     var beforePrepare: suspend (DownloadEntity, PartFile) -> Prepared? = { _, _ -> null }
+    var identityFor: suspend (DownloadEntity) -> YouTubeDownloadIdentity? = { null }
     var action: suspend (TransferPlan, PartFile, ProgressSink) -> TransferResult = { plan, part, sink ->
         sink.started(TransferMetadata(plan.offset, 4096, "audio/mpeg", "\"tag\"", null))
         if (part.length() == 0L) part.append(mediaBytes(), 4096)
@@ -254,8 +320,10 @@ internal class FakeTransferSource(
     override suspend fun prepare(
         row: DownloadEntity,
         part: PartFile,
+        attempt: TransferAttempt,
     ): Prepared {
         beforePrepare(row, part)?.let { return it }
+        attempt.identity = identityFor(row)
         return Prepared.Go(
             TransferPlan(row.episodeId, row.sourceRef, part.length(), row.totalBytes, row.etag),
             part.rootId,
@@ -268,6 +336,7 @@ internal class FakeTransferSource(
         plan: TransferPlan,
         part: PartFile,
         sink: ProgressSink,
+        attempt: TransferAttempt,
     ): TransferResult {
         calls += plan.episodeId
         starts.send(plan.episodeId)

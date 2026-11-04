@@ -14,8 +14,10 @@ import ch.lkmc.neutrodyne.core.domain.CleanupReason
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.IngestionEvents
 import ch.lkmc.neutrodyne.core.domain.RefreshController
+import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.EffectiveAutoDownload
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +48,7 @@ internal class DesktopDownloadObservers(
     private val device: DeviceSettingsStore,
     private val db: Lazy<NeutrodyneDatabase>,
     private val poker: () -> JobLanePoker,
+    private val capabilities: Lazy<YouTubeCapabilitiesSource>,
     @param:ApplicationScope private val scope: CoroutineScope,
 ) : AppInitializer {
     override val order = 310
@@ -81,6 +84,16 @@ internal class DesktopDownloadObservers(
             db.value.playSessionDao().observeCurrentEpisodeId().distinctUntilChanged().collect {
                 if (device.get(DownloadSettingKeys.MOVE_TARGET).isNotEmpty()) poker().poke(DesktopMoveLane.NAME)
             }
+        }
+        scope.launch {
+            capabilities.value.capabilities
+                .map { it.downloads to it.externalReason }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    components.value.claimMutex.withLock { components.value.youtubeRules.syncLocked() }
+                    for (lane in DownloadLane.entries) poker().poke(DesktopDownloadLane.name(lane))
+                }
         }
     }
 
