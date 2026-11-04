@@ -47,7 +47,7 @@ internal class PreConfirmationPeerGuard(
     }
 
     private companion object {
-        val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
+        val REDIRECT_STATUSES = setOf(300, 301, 302, 303, 307, 308)
     }
 }
 

@@ -86,6 +86,25 @@ class PreConfirmationPeerGuardTest {
         assertEquals(0, lan.requestCount)
     }
 
+    @Test fun multipleChoicesRedirectToLocalLiteralOpensNoSocket() {
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { recorder ->
+            val clients =
+                newNetworkClients(
+                    baseDns = Dns { listOf(InetAddress.getByName("127.0.0.1")) },
+                    isLocalPeer = { it.port == recorder.localPort },
+                )
+            server.enqueue(mockResponse(300, "", "Location" to "http://127.0.0.1:${recorder.localPort}/action"))
+            assertFailsWith<LocalNetworkUnsupportedException> {
+                clients.image
+                    .newCall(marked(publicUrl("/art")))
+                    .execute()
+                    .use { }
+            }
+            assertEquals(1, server.requestCount)
+            assertZeroConnections(recorder)
+        }
+    }
+
     @Test fun markedNonCanonicalLocalUrlsAreRefusedOnFeedAndImageClients() {
         val clients = newNetworkClients()
         for (client in listOf(clients.feed, clients.image)) {
