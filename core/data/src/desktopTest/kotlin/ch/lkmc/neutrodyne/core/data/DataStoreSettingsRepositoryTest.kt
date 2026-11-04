@@ -89,6 +89,12 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
         return DataStoreSettingsRepository(
             settingsStore = DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory)),
             deviceSettingsStore = DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+            syncPort =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeSettingsSyncPort(),
+            clock =
+                ch.lkmc.neutrodyne.core.testing
+                    .TestClock(),
         )
     }
 

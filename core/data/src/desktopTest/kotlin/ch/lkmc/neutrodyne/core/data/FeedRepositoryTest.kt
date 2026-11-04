@@ -297,6 +297,9 @@ class FeedRepositoryTest {
             DataStoreSettingsRepository(
                 DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory)),
                 DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeSettingsSyncPort(),
+                clock,
             )
         repo = FeedRepositoryImpl(db, settings, clock)
     }
