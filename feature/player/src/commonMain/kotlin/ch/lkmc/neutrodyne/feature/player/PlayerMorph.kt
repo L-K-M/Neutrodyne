@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.player
 
 internal const val MIN_PLAYER_HEADER_HEIGHT_DP = 56f
+internal const val MAX_PLAYER_ART_DP = 480f
 
 /** Geometry in dp, measured from the full window rather than the navigation suite's changing size. */
 internal data class PlayerGeometry(
@@ -12,6 +13,7 @@ internal data class PlayerGeometry(
     val artworkAspect: Float = 1f,
     val startInset: Float = 0f,
     val headerHeight: Float = MIN_PLAYER_HEADER_HEIGHT_DP,
+    val artworkLimit: Float = MAX_PLAYER_ART_DP,
 )
 
 internal data class PlayerMorph(
@@ -38,7 +40,7 @@ internal data class PlayerMorph(
                 minOf(
                     (geometry.width - ART_MARGIN).coerceAtLeast(MINI_ART),
                     geometry.height * ART_HEIGHT_FRACTION,
-                    MAX_ART,
+                    geometry.artworkLimit,
                 )
             return PlayerMorph(
                 inset = mix(geometry.startInset + SHEET_INSET, 0f, p),
@@ -66,7 +68,6 @@ internal data class PlayerMorph(
         private const val MINI_ART = 48f
         private const val ART_MARGIN = 48f
         private const val ART_HEIGHT_FRACTION = 0.45f
-        private const val MAX_ART = 480f
         private const val MINI_FADE_END = 0.2f
         private const val FULL_FADE_START = 0.6f
         private const val BACKGROUND_FADE_END = 0.3f

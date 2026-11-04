@@ -120,6 +120,7 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_expand
 import ch.lkmc.neutrodyne.feature.player.resources.player_file_missing
 import ch.lkmc.neutrodyne.feature.player.resources.player_forward
 import ch.lkmc.neutrodyne.feature.player.resources.player_forward_value
+import ch.lkmc.neutrodyne.feature.player.resources.player_hide_panel
 import ch.lkmc.neutrodyne.feature.player.resources.player_mark_skip
 import ch.lkmc.neutrodyne.feature.player.resources.player_metered_blocked
 import ch.lkmc.neutrodyne.feature.player.resources.player_minutes
@@ -195,6 +196,8 @@ internal fun PlayerSheet(
     retry: () -> Unit = toggle,
 ) {
     val now = ui.now
+    val isSidePanel = slot.layout.playerPanel
+    val surfaceState = if (isSidePanel) remember { PlayerSheetState(PlayerSheetValue.Expanded) } else state
     val reducedMotion = LocalReducedMotion.current
     val motion = if (reducedMotion) SheetMotion.IMMEDIATE else SheetMotion.ANIMATED
     val scope = rememberCoroutineScope()
@@ -208,7 +211,7 @@ internal fun PlayerSheet(
     LaunchedEffect(ui.chapters.isEmpty()) {
         if (ui.chapters.isEmpty() && selectedTab == PlayerTab.CHAPTERS) selectedTabName = PlayerTab.UP_NEXT.name
     }
-    val expanded = state.settledExpanded && now != null
+    val expanded = !isSidePanel && surfaceState.settledExpanded && now != null
     val settled by rememberUpdatedState(slot.onExpandedSettled)
     val dismissPaused by rememberUpdatedState(dismiss)
     SideEffect { settled(expanded) }
@@ -217,34 +220,43 @@ internal fun PlayerSheet(
     LaunchedEffect(slot.expandRequest, now?.episodeId) {
         if (slot.expandRequest > consumedExpand && now != null) {
             consumedExpand = slot.expandRequest
-            state.expand(motion)
+            val reveal = slot.revealPanel
+            if (reveal != null) reveal() else surfaceState.expand(motion)
         }
     }
     var consumedCollapse by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(slot.collapseRequest) {
         if (slot.collapseRequest > consumedCollapse) {
             consumedCollapse = slot.collapseRequest
-            state.collapse(motion)
+            surfaceState.collapse(motion)
         }
     }
     LaunchedEffect(now == null) {
-        if (now == null) state.collapse(SheetMotion.IMMEDIATE)
+        if (now == null) surfaceState.collapse(SheetMotion.IMMEDIATE)
     }
     LaunchedEffect(expanded) {
         if (!expanded) panelState.collapse(motion)
     }
-    LaunchedEffect(state.drag.settledValue) {
-        if (state.drag.settledValue == PlayerSheetValue.Dismissed) {
+    LaunchedEffect(surfaceState.drag.settledValue) {
+        if (surfaceState.drag.settledValue == PlayerSheetValue.Dismissed) {
             dismissPaused()
-            state.resetDismissed()
+            surfaceState.resetDismissed()
         }
     }
-    Box(modifier.fillMaxSize()) {
+    val playerModifier =
+        if (isSidePanel) {
+            modifier.width(slot.layout.playerPanelWidthDp.dp).testTag("player_side_panel")
+        } else {
+            modifier
+        }
+    Box(playerModifier.fillMaxSize()) {
         // Only the frontmost player layer owns Back.
-        PlayerBackHandler(
-            state,
-            if (panelState.canCollapse) PlayerBackAvailability.INACTIVE else PlayerBackAvailability.ACTIVE,
-        )
+        if (!isSidePanel) {
+            PlayerBackHandler(
+                surfaceState,
+                if (panelState.canCollapse) PlayerBackAvailability.INACTIVE else PlayerBackAvailability.ACTIVE,
+            )
+        }
         // Keep Back ownership while the closing panel leaves the visible composition.
         PlayerBackHandler(panelState)
         // Consent may arrive before nowPlaying exists, so it must outlive the visible sheet.
@@ -284,14 +296,17 @@ internal fun PlayerSheet(
         val paused = !now.isPlaying && !now.playWhenReady
         val contextTitle = now.context?.takeIf { it.type != ContextType.EXTERNAL }?.title
         val nowPlayingLabel = stringResource(Res.string.player_now)
-        val expand: () -> Unit = { scope.launch { state.expand(motion) } }
-        val collapse: () -> Unit = { scope.launch { state.collapse(motion) } }
+        val expand: () -> Unit = {
+            val reveal = slot.revealPanel
+            if (reveal != null) reveal() else scope.launch { surfaceState.expand(motion) }
+        }
+        val collapse: () -> Unit = { scope.launch { surfaceState.collapse(motion) } }
         val navigate: (NavKey) -> Unit = { key ->
             if (key == SpeedKey || key == SleepTimerKey) {
                 slot.navigate(key)
             } else {
                 scope.launch {
-                    state.collapse(motion)
+                    surfaceState.collapse(motion)
                     slot.navigate(key)
                 }
             }
@@ -301,16 +316,21 @@ internal fun PlayerSheet(
             val heightPx = with(density) { maxHeight.toPx() }
             val bottomInset = with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
             val contentBottom = slot.contentBottomPx.takeIf { it > 0f } ?: heightPx
-            val collapsedPx = (contentBottom - with(density) { MINI_ANCHOR_SPACE.toPx() }).coerceAtLeast(0f)
+            val collapsedPx =
+                if (isSidePanel) {
+                    0f
+                } else {
+                    (contentBottom - with(density) { MINI_ANCHOR_SPACE.toPx() }).coerceAtLeast(0f)
+                }
             val dismissDistance = with(density) { DISMISS_DISTANCE.toPx() }
             LaunchedEffect(collapsedPx, paused, dismissDistance) {
-                state.setAnchors(
+                surfaceState.setAnchors(
                     collapsedPx,
                     dismissDistance,
                     if (paused) SheetDismissal.ALLOWED else SheetDismissal.BLOCKED,
                 )
             }
-            val progress = state.progress
+            val progress = if (isSidePanel) 1f else surfaceState.progress
             val statusBar =
                 with(density) {
                     WindowInsets.statusBars
@@ -346,6 +366,7 @@ internal fun PlayerSheet(
                         if (wideArt) WIDE_ART_ASPECT else 1f,
                         startInset = (maxWidth.value - slot.layout.contentWidthDp).coerceAtLeast(0f),
                         headerHeight = headerHeight.value,
+                        artworkLimit = if (isSidePanel) PANEL_ART_LIMIT_DP else MAX_PLAYER_ART_DP,
                     ),
                 )
             val panelHeight =
@@ -355,11 +376,11 @@ internal fun PlayerSheet(
             val artworkHeight = morph.artworkHeight
             val dragModifier =
                 Modifier.anchoredDraggable(
-                    state.drag,
+                    surfaceState.drag,
                     Orientation.Vertical,
                     flingBehavior =
                         AnchoredDraggableDefaults.flingBehavior(
-                            state = state.drag,
+                            state = surfaceState.drag,
                             positionalThreshold = { it * SETTLE_FRACTION },
                             animationSpec = NeutrodyneMotion.spatial(reducedMotion),
                         ),
@@ -367,7 +388,7 @@ internal fun PlayerSheet(
             val topPx =
                 collapsedPx * (1f - progress) +
                     (
-                        state.drag.offset
+                        surfaceState.drag.offset
                             .takeIf { it.isFinite() && it > collapsedPx }
                             ?.minus(collapsedPx) ?: 0f
                     )
@@ -380,7 +401,7 @@ internal fun PlayerSheet(
                         .fillMaxWidth()
                         .height(sheetHeight)
                         .testTag("player_sheet"),
-                shape = RoundedCornerShape(morph.corner.dp),
+                shape = RoundedCornerShape(if (isSidePanel) 0.dp else morph.corner.dp),
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 color =
                     lerp(
@@ -392,7 +413,11 @@ internal fun PlayerSheet(
                 // Pointer ownership follows the settled anchor, so fading controls cannot cancel a drag.
                 Box(
                     Modifier.fillMaxSize().then(
-                        if (state.drag.settledValue != PlayerSheetValue.Expanded) dragModifier else Modifier,
+                        if (!isSidePanel && surfaceState.drag.settledValue != PlayerSheetValue.Expanded) {
+                            dragModifier
+                        } else {
+                            Modifier
+                        },
                     ),
                 ) {
                     if (progress < MINI_SEMANTICS_END) {
@@ -719,7 +744,7 @@ internal fun PlayerSheet(
                             .height(headerHeight)
                             .graphicsLayer { alpha = morph.controlsAlpha }
                             .then(
-                                if (state.drag.settledValue == PlayerSheetValue.Expanded) {
+                                if (!isSidePanel && surfaceState.drag.settledValue == PlayerSheetValue.Expanded) {
                                     dragModifier.clickable(onClick = collapse)
                                 } else {
                                     Modifier
@@ -728,7 +753,11 @@ internal fun PlayerSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (progress > FULL_SEMANTICS_START) {
-                            NdIconButton(collapse, NdIcons.Close, collapseLabel)
+                            NdIconButton(
+                                if (isSidePanel) slot.hidePanel else collapse,
+                                NdIcons.Close,
+                                if (isSidePanel) stringResource(Res.string.player_hide_panel) else collapseLabel,
+                            )
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     nowPlayingLabel,
@@ -769,7 +798,7 @@ internal fun PlayerSheet(
                                     morph.artworkX.dp,
                                     morph.artworkY.dp,
                                 ).size(morph.artworkSize.dp, artworkHeight.dp)
-                                .then(dragModifier)
+                                .then(if (isSidePanel) Modifier else dragModifier)
                                 .testTag("playerArtwork"),
                     )
                     if (now.issue != null || now.phase == PlayerPhase.ERROR) {
@@ -1052,3 +1081,5 @@ private val CHAPTER_TICK_WIDTH = 1.dp
 private const val SETTLE_FRACTION = 0.5f
 private const val MINI_SEMANTICS_END = 0.2f
 private const val FULL_SEMANTICS_START = 0.6f
+
+private const val PANEL_ART_LIMIT_DP = 320f

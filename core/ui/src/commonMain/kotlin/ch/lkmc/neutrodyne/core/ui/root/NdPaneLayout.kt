@@ -15,7 +15,7 @@ public fun ndPaneLayout(
     hasNowPlaying: Boolean,
     panelHidden: Boolean,
 ): PaneLayout {
-    val panel = windowWidthDp >= PANEL_MIN_WINDOW_DP && hasNowPlaying && !panelHidden
+    val panel = windowWidthDp >= PLAYER_PANEL_MIN_WINDOW_DP && hasNowPlaying && !panelHidden
     val panelDp =
         if (!panel) {
             0
@@ -31,11 +31,11 @@ public fun ndPaneLayout(
             content >= TWO_PANE_MIN_CONTENT_DP -> 2
             else -> 1
         }
-    return PaneLayout(partitions, panel, content)
+    return PaneLayout(partitions, panel, content, panelDp)
 }
 
 /** The side panel appears from 840 dp of window width (08 Desktop windows). */
-private const val PANEL_MIN_WINDOW_DP = 840
+internal const val PLAYER_PANEL_MIN_WINDOW_DP = 840
 
 /** The wide 412 dp panel is used from 1,200 dp of window width; 360 dp below. */
 private const val WIDE_PANEL_MIN_WINDOW_DP = 1200

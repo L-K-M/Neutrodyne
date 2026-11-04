@@ -82,6 +82,8 @@ public data class PlayerSlotState(
     /** Repeated deep links and navigation requests must remain observable. */
     val expandRequest: Int = 0,
     val collapseRequest: Int = 0,
+    val revealPanel: (() -> Unit)? = null,
+    val hidePanel: () -> Unit = {},
     /** The sheet hides navigation only after settling over it. */
     val onExpandedSettled: (Boolean) -> Unit = {},
 )
@@ -145,6 +147,8 @@ public class RootActions(
     public val userMessageAction: (Long) -> Unit = {},
     /** Persist the pager selection through the shell's settings service before opening Feeds. */
     public val selectFeedSource: suspend (String?) -> Boolean = { false },
+    public val hidePlayerPanel: () -> Unit = {},
+    public val revealPlayerPanel: () -> Unit = {},
 )
 
 /**
