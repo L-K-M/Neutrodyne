@@ -118,6 +118,7 @@ class SpanCache(
         private var storedValidator = index.validator
         private val spans = TreeMap(index.spans)
         private val memory = TreeMap<Long, ByteArray>()
+        private val memoryOrder = linkedSetOf<Long>()
         private var persistent = true
 
         internal val isPersistent: Boolean get() = synchronized(this@SpanCache) { persistent }
@@ -200,7 +201,15 @@ class SpanCache(
             }
             if (!persistent) {
                 memory[position] = bytes.copyOf()
-                while (memory.values.sumOf { it.size.toLong() } > MEMORY_BYTES) memory.pollFirstEntry()
+                memoryOrder.remove(position)
+                memoryOrder.add(position)
+                // The newest fetch can be behind every cached offset after a
+                // seek. Evict old writes, never the just-fetched lower prefix.
+                while (memory.values.sumOf { it.size.toLong() } > MEMORY_BYTES) {
+                    val oldest = memoryOrder.first()
+                    memoryOrder.remove(oldest)
+                    memory.remove(oldest)
+                }
             }
         }
 
@@ -210,6 +219,7 @@ class SpanCache(
                 deleteOwnedDirectory(path)
                 spans.clear()
                 memory.clear()
+                memoryOrder.clear()
                 totalLength = null
                 storedValidator = null
             }
