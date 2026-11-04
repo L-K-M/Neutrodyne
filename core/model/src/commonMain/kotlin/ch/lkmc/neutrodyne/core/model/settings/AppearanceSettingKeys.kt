@@ -84,8 +84,16 @@ public object AppearanceSettingKeys {
             values = persistentListOf(PlayerTimeDisplay.REMAINING, PlayerTimeDisplay.TOTAL),
         )
 
+    val YOUTUBE_ROW_ART =
+        SettingKey.Choice(
+            "appearance.youtube_row_art",
+            YouTubeRowArt.VIDEO_THUMBNAIL,
+            persistentListOf(YouTubeRowArt.VIDEO_THUMBNAIL, YouTubeRowArt.CHANNEL_AVATAR),
+        )
+
     public val ALL: List<SettingKey<*>> =
         listOf(
+            YOUTUBE_ROW_ART,
             THEME,
             DYNAMIC_COLOR,
             LIBRARY_TITLES,

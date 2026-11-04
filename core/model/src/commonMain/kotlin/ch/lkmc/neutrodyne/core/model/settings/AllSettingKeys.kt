@@ -19,6 +19,7 @@ object AllSettingKeys {
         AppearanceSettingKeys.ALL +
             FeedsSettingKeys.ALL +
             DiscoverSettingKeys.ALL +
+            YouTubeSettingKeys.ALL +
             GroupsSettingKeys.ALL +
             PlaybackSettingKeys.ALL +
             DownloadSettingKeys.ALL +
@@ -87,6 +88,7 @@ internal val NO_SYNC_PREFIXES: Set<String> =
         "ui.",
         "desktop.",
         "updates.",
+        "youtube.",
         "discover.",
         "downloads.",
         "sync.",
