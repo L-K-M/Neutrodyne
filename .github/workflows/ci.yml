@@ -206,9 +206,8 @@ jobs:
       # owns the daemon because test code may not spawn processes (rule 17).
       - name: Session bus for the MPRIS test
         run: sudo apt-get update -qq && sudo apt-get install -y -qq dbus-daemon
-      # TODO: add `:youtube:ytdlp:shimTest` and
-      # `:youtube:ytdlp-desktop:shimTestStdio` (MD3) as their milestones land —
-      # 09's full line: ./gradlew allTests test mutationTest
+      # TODO: add `:youtube:ytdlp-desktop:shimTestStdio` (MD3) when its
+      # milestone lands — 09's full line: ./gradlew allTests test mutationTest
       # :youtube:ytdlp:shimTest :youtube:ytdlp-desktop:shimTestStdio
       # -Proborazzi.test.verify=true --continue
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
@@ -226,7 +225,7 @@ jobs:
           # JAVA_TOOL_OPTIONS is inherited by every JVM this step forks:
           # the daemon and each test worker. Existing options are kept.
           export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR"
-          dbus-run-session -- ./gradlew allTests test mutationTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue
+          dbus-run-session -- ./gradlew allTests test mutationTest :youtube:ytdlp:shimTest :youtube:ytdlp:preparedShimTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue
       # A desktop test worker that dies mid-suite leaves no test XML — the
       # debug crash-fast path writes crash-<UTC>.txt under <root>/state and
       # then halt(1)s, and /tmp was never inside the unit-reports glob.
