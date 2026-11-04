@@ -124,6 +124,7 @@ private fun PlayerRouteContent(
     val seekEpisodeId = ui.now?.episodeId
     PlayerSheet(
         ui = ui,
+        setPanelHidden = vm::setPanelHidden,
         position = position,
         slot = slot,
         positionAt = vm::positionAt,
