@@ -6,6 +6,11 @@ plugins {
 }
 
 kotlin {
+    targets.named("android") {
+        (this as com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget).apply {
+            withHostTest { }
+        }
+    }
     sourceSets {
         commonTest.dependencies {
             implementation(libs.kotlinx.serialization.json)
@@ -17,6 +22,13 @@ kotlin {
         }
         findByName("androidMain")?.dependencies {
             implementation(libs.androidx.work.runtime)
+        }
+        findByName("androidHostTest")?.dependencies {
+            implementation(libs.robolectric)
+            implementation(libs.junit4)
+            implementation(libs.androidx.test.ext.junit)
+            implementation(libs.androidx.test.runner)
+            implementation(project(":core:testing"))
         }
         commonMain.dependencies {
             implementation(project(":sync:api"))
