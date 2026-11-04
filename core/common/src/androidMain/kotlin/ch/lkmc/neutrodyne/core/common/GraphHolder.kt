@@ -12,3 +12,8 @@ interface GraphHolder {
     /** The `AndroidAppGraph` — cast to the component's injector interface at each call site. */
     val graph: Any
 }
+
+/** Isolated engine graph, available only in the :ytx process. */
+interface YtxGraphHolder {
+    val engineGraph: Any
+}

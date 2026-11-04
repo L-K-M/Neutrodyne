@@ -57,3 +57,11 @@ def cancel(call_id):
         event = _calls.get(call_id)
         if event is not None:
             event.set()
+
+
+def wire_call(method, payload, remaining_ms, call_id):
+    """Structured errors keep Java independent of PyException traceback formatting."""
+    try:
+        return [call(method, payload, remaining_ms, call_id), None]
+    except ShimError as error:
+        return [None, error.code]
