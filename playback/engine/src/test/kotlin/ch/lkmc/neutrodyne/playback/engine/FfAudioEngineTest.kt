@@ -12,8 +12,6 @@ import okhttp3.OkHttpClient
 import okio.Buffer
 import org.junit.Rule
 import java.lang.foreign.MemorySegment
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
@@ -136,7 +134,7 @@ class FfAudioEngineTest {
 
     @Test
     fun silenceGapKeepsTheLiveReferenceTimeline() {
-        val file = writeWave(parityInput("speech"))
+        val file = writeTestWave(parityInput("speech"))
         try {
             for (speed in listOf(0.5f, 1f, 2f, 3f)) {
                 engine(resolver(file)).use { engine ->
@@ -299,25 +297,6 @@ class FfAudioEngineTest {
                 else -> "linux-x64"
             }
         return Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")), "playback/native/build/$kind/$target")
-    }
-
-    private fun writeWave(pcm: ByteArray): Path {
-        val buffer = ByteBuffer.allocate(44 + pcm.size).order(ByteOrder.LITTLE_ENDIAN)
-        buffer
-            .put("RIFF".toByteArray())
-            .putInt(36 + pcm.size)
-            .put("WAVEfmt ".toByteArray())
-            .putInt(16)
-            .putShort(1)
-            .putShort(2)
-            .putInt(RATE)
-            .putInt(RATE * 4)
-            .putShort(4)
-            .putShort(16)
-            .put("data".toByteArray())
-            .putInt(pcm.size)
-            .put(pcm)
-        return Files.createTempFile("engine-silence", ".wav").also { Files.write(it, buffer.array()) }
     }
 
     private class BlockedSource(
