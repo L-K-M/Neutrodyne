@@ -86,8 +86,12 @@ tasks.withType<Test>().configureEach {
 }
 
 // The profile consumer creates this build type after the application DSL is evaluated.
-// Fixture helpers must never enter debug, release or another published runtime.
+// Fixture helpers must never enter debug, release or another published runtime. Their own
+// test libraries stay out too: Licensee validates this variant's classpath, and junit
+// (EPL-1.0) and truth's URL-licensed asm transitive are not on D3's allow-list.
 configurations.matching { it.name == "benchmarkReleaseImplementation" }.configureEach {
+    exclude(group = "junit", module = "junit")
+    exclude(group = "com.google.truth", module = "truth")
     dependencies.add(project.dependencies.project(mapOf("path" to ":core:testing")))
 }
 
