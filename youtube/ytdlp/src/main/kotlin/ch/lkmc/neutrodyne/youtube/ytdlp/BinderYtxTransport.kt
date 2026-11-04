@@ -36,7 +36,9 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -134,9 +136,13 @@ class BinderYtxTransport internal constructor(
                     }
                 }
                 return call.result.await()
-            } catch (cancelled: CancellationException) {
+            } catch (_: CancellationException) {
                 cancel(id)
-                throw cancelled
+                // Startup can be cancelled by host death while this caller remains active.
+                // Preserve caller cancellation and otherwise return the host's structured error.
+                currentCoroutineContext().ensureActive()
+                finish(id, null, "ENGINE_UNAVAILABLE")
+                return call.result.await()
             } catch (_: Exception) {
                 finish(id, null, "ENGINE_UNAVAILABLE")
                 return call.result.await()
