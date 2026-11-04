@@ -96,6 +96,20 @@ class BinderYtxTransportTest {
             assertEquals(HostExit.START_FAILED, f.transport.status.value.lastExit)
         }
 
+    @Test fun deathBeforeStartupPingIsAnEngineFailureAndAllowsRestart() =
+        runTest {
+            val f = Fixture(this)
+            f.endpoint.ping = false
+            val call = async { runCatching { f.call(40_000) }.exceptionOrNull() }
+            runCurrent()
+            f.connection.died()
+            assertEquals("ENGINE_UNAVAILABLE", (call.await() as? YtxCallException)?.code)
+            f.endpoint.ping = true
+            f.endpoint.answer = true
+            assertEquals("{}", f.call(1000))
+            assertEquals(2, f.connection.binds)
+        }
+
     @Test fun unpreparedPlaybackNeverStartsOrCompilesTheHost() =
         runTest {
             val f = Fixture(this)
