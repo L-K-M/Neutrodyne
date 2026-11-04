@@ -241,6 +241,17 @@ abstract class SyncOutboxDao(
         }
     }
 
+    /** Deletes one field row regardless of its clock (a rekey marker). */
+    suspend fun deleteField(
+        coll: String,
+        rid: String,
+        field: String,
+    ) {
+        db.syncWriter { connection ->
+            connection.execute("DELETE FROM sync_outbox WHERE coll = ? AND rid = ? AND field = ?", coll, rid, field)
+        }
+    }
+
     suspend fun deleteIfUnchanged(
         coll: String,
         rid: String,
