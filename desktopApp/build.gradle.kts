@@ -400,3 +400,16 @@ tasks.register("md0ProbeImage") {
         logger.lifecycle("Owner-only MD0 image: ${directory.resolve("image")}")
     }
 }
+
+// Controller/UI tests share the JDK 25 hardware-free engine double.
+kotlin.sourceSets.named("test") {
+    kotlin.srcDir(rootProject.file("core/testing/src/desktopEngineMain/kotlin"))
+}
+
+tasks.matching { it.name == "run" }.configureEach {
+    dependsOn(":playback:native:buildFfmpeg", ":playback:native:buildNdmedia")
+}
+
+tasks.withType<JavaExec>().matching { it.name == "run" }.configureEach {
+    systemProperty("neutrodyne.rootDir", rootProject.layout.projectDirectory.asFile.absolutePath)
+}

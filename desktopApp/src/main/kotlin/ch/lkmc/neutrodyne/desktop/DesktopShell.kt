@@ -234,6 +234,8 @@ internal object DesktopShell {
                 lock = lock,
                 fileSink = fileSink,
                 stopServices = {
+                    runCatching { runBlocking { graph.desktopPlaybackController.shutdown() } }
+                        .onFailure { Log.w(TAG, it) { "playback shutdown failed" } }
                     stopServices(
                         // Only an opened database means band 200 can have started the runner;
                         // resolving it otherwise would wait on, or rethrow, the open.
@@ -276,6 +278,7 @@ internal object DesktopShell {
                 viewModelFactory = graph.metroViewModelFactory,
                 playbackController = graph.playbackController,
                 playbackState = graph.playbackStateSource,
+                settingsRepository = graph.settingsRepository,
                 onQuitRequest = ::exitApplication,
             )
         }

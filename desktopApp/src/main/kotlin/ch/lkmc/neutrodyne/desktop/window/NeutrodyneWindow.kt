@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -25,6 +26,8 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.rememberWindowState
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
@@ -32,7 +35,9 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
@@ -63,6 +68,7 @@ import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import java.awt.Desktop
@@ -97,6 +103,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     viewModelFactory: MetroViewModelFactory,
     playbackController: PlaybackController,
     playbackState: PlaybackStateSource,
+    settingsRepository: SettingsRepository,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
 ) {
@@ -134,6 +141,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 viewModelFactory = viewModelFactory,
                 playbackController = playbackController,
                 playbackState = playbackState,
+                settingsRepository = settingsRepository,
                 openHandler = openHandler,
             )
         }
@@ -293,7 +301,24 @@ internal fun NeutrodyneWindowContent(
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
     openHandler: DesktopOpenHandler? = null,
+    settingsRepository: SettingsRepository? = null,
 ) {
+    val panelHidden by remember(settingsRepository) {
+        settingsRepository?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN) ?: flowOf(false)
+    }.collectAsState(false)
+    val panelScope = rememberCoroutineScope()
+    val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
+        panelScope.launch {
+            suspendRunCatching {
+                settingsRepository?.set(
+                    AppearanceSettingKeys.PLAYER_PANEL_HIDDEN,
+                    visibility == PlayerPanelVisibility.HIDDEN,
+                )
+            }.onSuccess { result ->
+                if (result is Outcome.Failure) Log.w("DesktopPlayer") { "Player panel preference write failed" }
+            }.onFailure { Log.w("DesktopPlayer", it) { "Player panel preference write failed" } }
+        }
+    }
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
     val nowPlaying by playbackState.nowPlaying.collectAsState()
@@ -301,7 +326,15 @@ internal fun NeutrodyneWindowContent(
     // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
     // remembered (they were all-no-op until the banner stream landed).
     val actions =
-        remember(platformActions, dataDir, onRetryStartup, banners, playbackController, playbackState) {
+        remember(
+            platformActions,
+            dataDir,
+            onRetryStartup,
+            banners,
+            playbackController,
+            playbackState,
+            settingsRepository,
+        ) {
             RootActions(
                 retryStartup = onRetryStartup,
                 dismissNotice = {},
@@ -315,6 +348,8 @@ internal fun NeutrodyneWindowContent(
                 // A banner's "Open" reports here — the notifier maps it back to the
                 // notification's route (11 Notifications' in-app fallback).
                 userMessageAction = { id -> banners?.messageAction(id) },
+                hidePlayerPanel = { setPanelVisibility(PlayerPanelVisibility.HIDDEN) },
+                revealPlayerPanel = { setPanelVisibility(PlayerPanelVisibility.SHOWN) },
             )
         }
     val slots =
@@ -340,7 +375,12 @@ internal fun NeutrodyneWindowContent(
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
-            state = RootUiState.READY.copy(startup = startup, hasNowPlaying = nowPlaying != null),
+            state =
+                RootUiState.READY.copy(
+                    startup = startup,
+                    hasNowPlaying = nowPlaying != null,
+                    playerPanelHidden = panelHidden,
+                ),
             actions = actions,
             slots = slots,
             installers = installers,
@@ -349,3 +389,5 @@ internal fun NeutrodyneWindowContent(
         )
     }
 }
+
+private enum class PlayerPanelVisibility { SHOWN, HIDDEN }

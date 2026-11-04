@@ -70,6 +70,15 @@ class DesktopAppGraphTest {
     }
 
     @Test
+    fun desktopPlaybackAcceptsCommandsAfterDatabaseOpen() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            assertThat(graph.playbackController.play()).isEqualTo(PlayResult.NothingToPlay())
+            graph.desktopPlaybackController.shutdown()
+            graph.databaseOpener.requireDatabase().close()
+        }
+
+    @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
@@ -107,12 +116,7 @@ class DesktopAppGraphTest {
                 graph.playbackStateSource.sleepTimer.value,
             ).isEqualTo(SleepTimerState.Off)
             assertThat(graph.playbackStateSource.currentChapter.value).isNull()
-            assertThat(graph.playbackController.playEpisode(1)).isEqualTo(PlayResult.ServiceUnavailable)
-            assertThat(graph.playbackController.playEpisodeAt(1, 20)).isEqualTo(PlayResult.ServiceUnavailable)
-            assertThat(
-                graph.playbackController.playFeed(FeedSource.All, FeedFilters(), FeedOrder.NEWEST_FIRST),
-            ).isEqualTo(PlayResult.ServiceUnavailable)
-            assertThat(graph.playbackController.play()).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(graph.playbackController::class.simpleName).isEqualTo("DesktopPlaybackController")
             graph.playbackController.pause()
             graph.playbackController.dismiss()
             assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)

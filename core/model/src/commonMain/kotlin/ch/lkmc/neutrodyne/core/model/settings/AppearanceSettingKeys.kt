@@ -84,6 +84,9 @@ public object AppearanceSettingKeys {
             values = persistentListOf(PlayerTimeDisplay.REMAINING, PlayerTimeDisplay.TOTAL),
         )
 
+    /** Player side-panel visibility is device-bound and never synced (08, MD1a.2). */
+    public val PLAYER_PANEL_HIDDEN = SettingKey.Bool("ui.player_panel_hidden", false, SettingsFile.DEVICE)
+
     public val ALL: List<SettingKey<*>> =
         listOf(
             THEME,
@@ -98,5 +101,6 @@ public object AppearanceSettingKeys {
             LIBRARY_SEGMENT,
             MINI_PLAYER_SKIP,
             PLAYER_TIME,
+            PLAYER_PANEL_HIDDEN,
         )
 }

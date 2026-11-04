@@ -69,6 +69,8 @@ interface DesktopAppGraph {
 
     val initializers: Set<AppInitializer>
 
+    val desktopPlaybackController: ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController
+
     val playbackController: PlaybackController
     val playbackStateSource: PlaybackStateSource
     val playbackMaintenance: PlaybackMaintenance

@@ -179,7 +179,10 @@ class SettingKeyTest {
         assertEquals("all", feed.default)
         assertEquals("ui.library_group_filter", library.name)
         assertEquals("", library.default)
-        for (key in listOf(feed, library)) {
+        val panel = AppearanceSettingKeys.PLAYER_PANEL_HIDDEN
+        assertEquals("ui.player_panel_hidden", panel.name)
+        assertEquals(false, panel.default)
+        for (key in listOf(feed, library, panel)) {
             assertTrue(key in AllSettingKeys.list)
             assertEquals(SettingsFile.DEVICE, key.file)
             assertEquals(false, key.synced)

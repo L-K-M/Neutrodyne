@@ -60,4 +60,5 @@
         <item quantity="one">%1$d Sekunde</item>
         <item quantity="other">%1$d Sekunden</item>
     </plurals>
+    <string name="player_hide_panel">Player-Seitenbereich ausblenden</string>
 </resources>
