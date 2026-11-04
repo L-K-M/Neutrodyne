@@ -7,11 +7,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
@@ -22,7 +24,12 @@ import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoSet
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 
 /**
  * Contributes `:feature:settings`'s nav entries into the `Set<EntryProviderInstaller>`
@@ -47,8 +54,20 @@ public object SettingsNavigation {
         checker: AppUpdateChecker,
         notices: UpdateNotices,
         runtime: UpdateRuntimeInputs,
+        podcasts: Provider<PodcastRepository>,
     ): EntryProviderInstaller =
         {
+            // Entries are injected before the startup gate opens the database. Resolve the
+            // service only when the Appearance page collects its library after that gate.
+            val hasChannels =
+                flow {
+                    emitAll(
+                        podcasts()
+                            .observeLibraryTiles(null)
+                            .map { tiles -> tiles.any { it.sourceType == SourceType.YOUTUBE_CHANNEL } }
+                            .distinctUntilChanged(),
+                    )
+                }
             // 08: the wallpaper-colour row exists only where Android 12+ can serve it.
             val dynamicColorSupport =
                 if (platformInfo.kind == PlatformKind.ANDROID &&
@@ -66,6 +85,7 @@ public object SettingsNavigation {
                                 settingsRepository,
                                 dynamicColorSupport,
                                 platformInfo.kind,
+                                hasChannels,
                             )
                         },
                     ),
@@ -80,6 +100,7 @@ public object SettingsNavigation {
                     dynamicColorSupport,
                     platformInfo.kind,
                     runtime.target,
+                    hasChannels,
                 )
             }
             entry<InstallHelpKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
