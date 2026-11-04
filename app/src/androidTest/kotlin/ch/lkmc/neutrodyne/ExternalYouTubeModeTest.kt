@@ -60,9 +60,11 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
+import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -86,6 +88,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
+import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.createDynamicGraphFactory
@@ -142,7 +145,10 @@ class ExternalYouTubeModeTest {
                         .use { it.readText() }
                 }
             val settings = FakeSettingsRepository()
-            runBlocking { settings.set(DownloadSettingKeys.AUTO_DOWNLOAD, true) }
+            runBlocking {
+                settings.set(DownloadSettingKeys.AUTO_DOWNLOAD, true)
+                settings.set(YouTubeSettingKeys.ENGINE_ENABLED, false)
+            }
             val graph =
                 createDynamicGraphFactory<AndroidAppGraph.Factory>(
                     RecordedJourneyBindings(db, clock, scope, replay, settings),
@@ -257,7 +263,7 @@ class ExternalYouTubeModeTest {
                     assertEquals(emptyList(), db.downloadDao().allRows())
                 }
                 assertEquals(
-                    ExternalReason.NOT_YET_AVAILABLE,
+                    ExternalReason.DISABLED_BY_USER,
                     graph.youtubeCapabilities.capabilities.value.externalReason,
                 )
                 // Fail both subscription variants/fallbacks and the real monitor's controls.
@@ -395,8 +401,8 @@ class ExternalYouTubeModeTest {
                 onAllNodesWithText(outage).assertCountEquals(1)
                 onAllNodesWithContentDescription("Settings").onFirst().performClick()
                 onNodeWithText("YouTube").performClick()
-                onNodeWithText("YouTube plays in the app in a later version").assertExists()
-                onNodeWithText("Play YouTube in the app").assertDoesNotExist()
+                onNodeWithText("YouTube engine turned off").assertExists()
+                onNodeWithText("Play YouTube in the app").assertExists()
             } finally {
                 runOnIdle { showing = false }
                 waitForIdle()
@@ -435,9 +441,17 @@ private class ExternalModeBindings(
     @Provides @ApplicationScope
     fun scope(): CoroutineScope = scope
 
-    @Provides fun settings(): SettingsRepository = FakeSettingsRepository()
+    @Provides fun settings(): SettingsRepository =
+        FakeSettingsRepository().apply {
+            runBlocking { set(YouTubeSettingKeys.ENGINE_ENABLED, false) }
+        }
 
     @Provides fun refresh(): RefreshController = FakeRefreshController()
+
+    @Provides fun engineSettings(): EngineSettings =
+        FakeEngineSettings().apply {
+            state.value = state.value.copy(enabled = false)
+        }
 
     @Provides fun network(): NetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.OFFLINE)
 }
@@ -498,6 +512,11 @@ private class RecordedJourneyBindings(
     fun scope(): CoroutineScope = scope
 
     @Provides fun settings(): SettingsRepository = settings
+
+    @Provides fun engineSettings(): EngineSettings =
+        FakeEngineSettings().apply {
+            state.value = state.value.copy(enabled = false)
+        }
 
     @Provides fun network(): NetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
 
