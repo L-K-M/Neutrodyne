@@ -9,6 +9,8 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * `SettingsKey(page)` dispatch (08 Settings screens). [SettingsPage.APPEARANCE] also serves the
@@ -22,9 +24,10 @@ internal fun SettingsRoute(
     dynamicColorSupport: DynamicColorSupport,
     platform: PlatformKind,
     updateTarget: UpdateRuntimeTarget,
+    hasChannels: Flow<Boolean> = flowOf(false),
 ) {
     when (key.page) {
-        SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform)
+        SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
         SettingsPage.FEEDS -> FeedsPage(platform)
         SettingsPage.PLAYBACK -> PlaybackPage(platform)
         SettingsPage.DOWNLOADS -> DownloadsSettingsPage(platform)
@@ -33,6 +36,6 @@ internal fun SettingsRoute(
         SettingsPage.PRIVACY -> PrivacyPage()
         SettingsPage.DESKTOP -> DownloadsSettingsPage(platform, page = SettingsPage.DESKTOP)
         SettingsPage.ABOUT -> AboutPage(buildInfo)
-        else -> AppearancePage(settings, dynamicColorSupport, platform)
+        else -> AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
     }
 }

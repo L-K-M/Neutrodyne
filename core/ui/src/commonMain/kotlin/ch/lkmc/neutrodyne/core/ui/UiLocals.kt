@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.ui
 import androidx.compose.runtime.staticCompositionLocalOf
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import kotlin.time.TimeSource
 
 /**
@@ -33,3 +34,7 @@ private object UiSystemClock : Clock {
 /** Which platform the UI runs on — picks per-platform copy (07's storage wording, 11's labels). */
 public val LocalPlatformKind: androidx.compose.runtime.ProvidableCompositionLocal<PlatformKind> =
     staticCompositionLocalOf { PlatformKind.ANDROID }
+
+/** Appearance › YouTube row art; shells collect the persisted choice once for all rows. */
+public val LocalYouTubeRowArt: androidx.compose.runtime.ProvidableCompositionLocal<YouTubeRowArt> =
+    staticCompositionLocalOf { YouTubeRowArt.VIDEO_THUMBNAIL }

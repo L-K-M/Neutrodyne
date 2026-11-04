@@ -49,6 +49,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -66,6 +67,7 @@ import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
+import dev.zacsweers.metro.Provider
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.flow.emptyFlow
@@ -393,6 +395,7 @@ class SettingsScreensTest {
                                     ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
                                         .Android("arm64-v8a", 34),
                                 ),
+                                Provider { FakePodcastRepository() },
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )
