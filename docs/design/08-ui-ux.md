@@ -206,6 +206,14 @@ interaction and keep the create header/action fixed while fields scroll.
 All supplied English labels follow brief section 5 exactly; German resources
 are supplied. Menu (Menü) is the single owner-added label.
 
+**Selection fallback (2026-11-04).** Deleting the selected group falls back
+to the first remaining playlist, or the empty radio if none remain. This
+adapts the old All-feed fallback to the group-only home. Undoing group deletion
+does not reselect that group, including while the fallback preference write
+is pending or has failed. Paging keeps the selected episode and its saved
+position when its page leaves the loaded window; live-row queries follow only
+the visible window plus its margin and selected episode, and release on exit.
+
 **Implementation notes (2026-11-04).** The shared radio primitives and resources
 live in `:core:ui`; the production adapter lives in `:feature:feeds`. A queued
 episode outside the group's membership still drives the radio transport and
