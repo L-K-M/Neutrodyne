@@ -31,6 +31,11 @@ class CanaryTests(unittest.TestCase):
         self.assertEqual(canary.CHUNK, result['chunkBytes'])
         self.assertNotIn('https://', json.dumps(result))
 
+    def test_feed_probe_runs_after_an_engine_probe_failure(self):
+        workflow = (Path(__file__).resolve().parents[3] / '.github/workflows/nightly.yml').read_text()
+        feed_step = workflow.split('- name: Bounded controls and feed variants', 1)[1].split('- name:', 1)[0]
+        self.assertIn('if: always()', feed_step)
+
     def test_empty_or_oversize_media_never_reports_success(self):
         for size in (0, canary.CHUNK + 1):
             with self.subTest(size=size), self.assertRaises(ValueError):
