@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
+import ch.lkmc.neutrodyne.core.navigation.FeedBrowserKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
@@ -363,7 +364,12 @@ internal val SHEET_COLOR = Color(0xFF5D4037)
 internal val TwoPaneDirective = PaneScaffoldDirective.Default.copy(maxHorizontalPartitions = 2)
 
 private fun MutableSet<EntryProviderInstaller>.addRootPages() {
-    add { entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { Sentinel(FEEDS_COLOR, FEEDS_TAG) } }
+    add { entry<FeedsKey> { Sentinel(FEEDS_COLOR, FEEDS_TAG) } }
+    add {
+        entry<FeedBrowserKey>(metadata = NdSceneMetadata.paneList()) {
+            Sentinel(FEEDS_COLOR, "feed-browser-pane")
+        }
+    }
     add {
         entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) {
             Sentinel(LIBRARY_COLOR, LIBRARY_TAG)

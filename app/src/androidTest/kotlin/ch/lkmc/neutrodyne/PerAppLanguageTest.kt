@@ -14,6 +14,7 @@ import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -70,7 +71,10 @@ class PerAppLanguageTest {
         )
 
         // Baseline: the GMDs boot en-US.
+        compose.onNodeWithTag("radio_menu").performClick()
         compose.onNodeWithTag("nav_library").assertIsDisplayed().assert(hasText("Library"))
+        androidx.test.espresso.Espresso
+            .pressBack()
 
         compose.runOnUiThread {
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(GERMAN))
@@ -86,13 +90,14 @@ class PerAppLanguageTest {
         try {
             compose.waitUntil(RELABEL_TIMEOUT_MS) {
                 compose
-                    .onAllNodesWithText("Bibliothek")
+                    .onAllNodesWithText("Menü")
                     .fetchSemanticsNodes(atLeastOneRootRequired = false)
                     .isNotEmpty()
             }
         } catch (e: ComposeTimeoutException) {
             throw AssertionError("German labels did not appear: ${localeChain()}", e)
         }
+        compose.onNodeWithTag("radio_menu").performClick()
         compose.onNodeWithTag("nav_library").assertIsDisplayed().assert(hasText("Bibliothek"))
         compose.onNodeWithTag("nav_up_next").assertIsDisplayed().assert(hasText("Als Nächstes"))
         compose.onNodeWithTag("nav_discover").assertIsDisplayed().assert(hasText("Entdecken"))
@@ -108,7 +113,7 @@ class PerAppLanguageTest {
         compose.activityRule.scenario.moveToState(Lifecycle.State.DESTROYED)
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
-        val nodes = compose.onAllNodesWithText("Bibliothek")
+        val nodes = compose.onAllNodesWithText("Menü")
         assertThat(nodes.fetchSemanticsNodes(atLeastOneRootRequired = false)).isEmpty()
         assertThat(assertThrows(IllegalStateException::class.java) { nodes.fetchSemanticsNodes() })
             .hasMessageThat()

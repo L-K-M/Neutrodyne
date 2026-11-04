@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.feeds
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.core.navigation.FeedBrowserKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import dev.zacsweers.metro.BindingContainer
@@ -23,7 +24,8 @@ public object FeedsNavigation {
     @IntoSet
     public fun entries(): EntryProviderInstaller =
         {
-            entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsRoute() }
+            entry<FeedsKey> { RadioRoute() }
+            entry<FeedBrowserKey>(metadata = NdSceneMetadata.paneList()) { FeedsRoute() }
             entry<AllGroupsKey>(metadata = NdSceneMetadata.halfHeightBottomSheet()) { AllGroupsRoute() }
         }
 }

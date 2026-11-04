@@ -70,6 +70,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -122,6 +123,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.chapter_number
 import ch.lkmc.neutrodyne.core.ui.resources.summary_video
+import ch.lkmc.neutrodyne.core.ui.root.PlayerPresentation
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_back
@@ -288,7 +290,12 @@ internal fun PlayerSheet(
         ui.colors?.seedArgb,
         if (expanded || slot.layout.playerPanel) ArtworkSurface.FULL else ArtworkSurface.MINI,
     ) {
-        Box(modifier.fillMaxSize()) {
+        Box(modifier.fillMaxSize().layout { measurable, constraints ->
+            val measured = measurable.measure(constraints)
+            layout(measured.width, measured.height) {
+                if (slot.presentation != PlayerPresentation.RADIO_HOME || state.canCollapse) measured.place(0, 0)
+            }
+        }) {
             // Only the frontmost player layer owns Back.
             PlayerBackHandler(
                 state,

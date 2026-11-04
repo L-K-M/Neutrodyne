@@ -245,14 +245,14 @@ class DiscoveryJourneyTest {
                         },
                     )
                     if (entry == Entry.PREVIEW) {
-                        onNodeWithTag("nav_discover").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                        onNodeWithText("Add by URL").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
                         repeat(2) {
                             onNodeWithTag("nav_discover").performKeyInput { pressKey(Key.Escape) }
                             waitForIdle()
                         }
                         onNodeWithText("history").assertDoesNotExist()
-                        onNodeWithTag("nav_discover").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
-                        onNodeWithTag("nav_discover").performKeyInput {
+                        onNodeWithText("Add by URL").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                        onRoot().performKeyInput {
                             keyDown(Key.CtrlLeft)
                             pressKey(Key.F)
                             keyUp(Key.CtrlLeft)

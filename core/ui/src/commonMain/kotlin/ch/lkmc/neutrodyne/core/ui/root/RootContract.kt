@@ -94,6 +94,7 @@ public data class ReconnectBanner(
     public val profile: ReconnectProfile
         get() = ReconnectProfile(serverUrl, username)
 }
+public enum class PlayerPresentation { STANDARD, RADIO_HOME }
 
 /** What the `player` slot needs: the current pane layout and how to navigate from the player. */
 @Immutable
@@ -102,7 +103,8 @@ public data class PlayerSlotState(
     val layout: PaneLayout,
     /** Selects a top-level tab, or pushes another key onto the selected tab's stack. */
     val navigate: (NavKey) -> Unit,
-    /** Content bottom in root pixels, held while the navigation suite is hidden. */
+    val presentation: PlayerPresentation = PlayerPresentation.STANDARD,
+    /** Content bottom in root pixels, held while the full player covers content. */
     val contentBottomPx: Float = 0f,
     /** Repeated deep links and navigation requests must remain observable. */
     val expandRequest: Int = 0,

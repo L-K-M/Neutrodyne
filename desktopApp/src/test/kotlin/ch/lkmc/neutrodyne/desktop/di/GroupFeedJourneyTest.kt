@@ -7,11 +7,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
@@ -19,10 +22,14 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.AppScope
@@ -43,6 +50,7 @@ import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -108,55 +116,52 @@ class GroupFeedJourneyTest {
             var showing by mutableStateOf(true)
             try {
                 setContent { if (showing) fixture.Content() }
-                awaitNode(hasTestTag("nav_library"))
+                awaitNode(hasTestTag("radio_menu"))
+                onNodeWithTag("radio_menu").performClick()
                 onNodeWithTag("nav_library").performClick()
                 awaitNode(hasText("+ New group"))
                 onNodeWithText("+ New group").performClick()
                 createGroup("Science", listOf(1, 2))
-                onNodeWithTag("nav_feeds").performClick()
                 val science = fixture.group("Science")
-                awaitNode(hasTestTag(science.tabTag()))
+                onRoot().performKeyInput { pressKey(Key.Escape) }
+                awaitNode(hasTestTag("radio_playlist"))
+                onNodeWithTag("radio_playlist").performClick()
+                onNode(hasText("Science") and hasAnyAncestor(hasTestTag("radio_insert"))).performClick()
+                awaitNode(hasTestTag("radio_episode_1") and hasText("Unplayed member"))
+                onNodeWithText("Played member").assertDoesNotExist()
+                onNodeWithText("Outside group").assertDoesNotExist()
                 onNodeWithTag("suggested-groups").assertDoesNotExist()
-                assertCount(science, 1)
 
-                onNodeWithTag(science.tabTag()).performClick()
-                awaitNode(science.row("Unplayed member"))
-                awaitNode(science.row("Played member"))
-                onNode(science.row("Outside group")).assertDoesNotExist()
-                onNode(science.pageNode("Unplayed")).performClick()
-                awaitAbsent(science.row("Played member"))
-                onNode(science.row("Unplayed member")).assertIsDisplayed()
-                assertCount(science, 1)
-                onNode(science.row("Unplayed member") and hasClickAction())
-                    .performCustomAccessibilityActionWithLabel("Mark played")
-                awaitNode(science.pageNode("You're all caught up"))
-                assertCount(science, 0)
-                onNode(science.pageNode("Show played episodes")).performClick()
-                awaitNode(science.row("Unplayed member"))
-                awaitNode(science.row("Played member"))
-                assertCount(science, 0)
+                // Discard uses persistent played state. Undo restores its chronological place.
+                onNodeWithTag("radio_episode_1").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                onNodeWithTag("radio_episode_1").performKeyInput { pressKey(Key.Delete) }
+                awaitNode(hasText("All clear."))
+                assertEquals(0, runBlocking { fixture.graph.feeds.countUnplayed(FeedSource.Group(science.id), null) })
+                onNodeWithText("Undo").performClick()
+                awaitNode(hasTestTag("radio_episode_1") and hasText("Unplayed member"))
+                assertEquals(1, runBlocking { fixture.graph.feeds.countUnplayed(FeedSource.Group(science.id), null) })
 
                 openManager()
                 onNodeWithText("New group", useUnmergedTree = true).performClick()
                 createGroup("News", listOf(3))
                 val news = fixture.group("News")
                 awaitNode(hasTestTag("groupRow${news.id}"))
-                onNodeWithTag("groupRow${news.id}")
-                    .performCustomAccessibilityActionWithLabel("Move up")
+                onNodeWithTag("groupRow${news.id}").performCustomAccessibilityActionWithLabel("Move up")
                 waitUntil(timeoutMillis = TIMEOUT_MS) {
                     onNodeWithTag("groupRow${news.id}").fetchSemanticsNode().boundsInRoot.top <
                         onNodeWithTag("groupRow${science.id}").fetchSemanticsNode().boundsInRoot.top
                 }
-                onNodeWithContentDescription("Back").performClick()
-                awaitNode(hasTestTag(news.tabTag()))
-                assertTrue(
-                    onNodeWithTag(news.tabTag()).fetchSemanticsNode().boundsInRoot.left <
-                        onNodeWithTag(science.tabTag()).fetchSemanticsNode().boundsInRoot.left,
-                )
-                onNodeWithTag(science.tabTag()).assertIsSelected()
-                assertCount(news, 1)
                 assertEquals(listOf(news.id, science.id), fixture.groups().map { it.id })
-
+                onRoot().performKeyInput { pressKey(Key.Escape) }
+                onRoot().performKeyInput { pressKey(Key.Escape) }
+                onNodeWithTag("radio_playlist").assertTextContains("Science")
+                onNodeWithTag("radio_playlist").performClick()
+                val picker = hasAnyAncestor(hasTestTag("radio_insert"))
+                assertTrue(
+                    onNode(hasText("News") and picker).fetchSemanticsNode().boundsInRoot.top <
+                        onNode(hasText("Science") and picker).fetchSemanticsNode().boundsInRoot.top,
+                )
+                onNode(hasText("News") and picker).performKeyInput { pressKey(Key.Escape) }
                 openManager()
                 onNodeWithTag("groupMenu${science.id}").performClick()
                 onNodeWithText("Delete group").performClick()
@@ -164,11 +169,10 @@ class GroupFeedJourneyTest {
                 awaitNode(hasText("Group deleted"))
                 onNodeWithText("Undo").performClick()
                 awaitNode(hasTestTag("groupRow${science.id}"))
-                onNodeWithContentDescription("Back").performClick()
-                awaitNode(hasTestTag(science.tabTag()))
-                // Deletion falls back to All; restoring a group must not reselect it (08).
-                onNodeWithTag("feed-tab:all").assertIsSelected()
-                assertCount(science, 0)
+                onRoot().performKeyInput { pressKey(Key.Escape) }
+                onRoot().performKeyInput { pressKey(Key.Escape) }
+                onNodeWithTag("radio_playlist").assertTextContains("News")
+                assertEquals(1, runBlocking { fixture.graph.feeds.countUnplayed(FeedSource.Group(science.id), null) })
                 val restored = fixture.group("Science")
                 assertEquals(science.id, restored.id)
                 assertEquals(science.uuid, restored.uuid)
@@ -207,25 +211,11 @@ class GroupFeedJourneyTest {
     }
 
     private fun ComposeUiTest.openManager() {
-        onNodeWithContentDescription("All groups").performClick()
-        awaitNode(hasText("Manage groups"))
+        onNodeWithTag("radio_menu").performClick()
+        onNodeWithTag("nav_library").performClick()
+        onNodeWithContentDescription("More actions").performClick()
         onNodeWithText("Manage groups").performClick()
         awaitNode(hasTestTag("groupsManageList"))
-    }
-
-    private fun ComposeUiTest.assertCount(
-        group: Group,
-        count: Int,
-    ) {
-        awaitNode(hasTestTag(group.tabTag()))
-        waitUntil(timeoutMillis = TIMEOUT_MS) {
-            onAllNodes(
-                androidx.compose.ui.test
-                    .hasContentDescription("${group.name}, $count unplayed, 0 new") and
-                    hasAnyAncestor(hasTestTag(group.tabTag())),
-                useUnmergedTree = true,
-            ).fetchSemanticsNodes().isNotEmpty()
-        }
     }
 
     private fun ComposeUiTest.awaitNode(matcher: SemanticsMatcher) {
@@ -319,6 +309,7 @@ internal interface M2JourneyGraph {
     val imageLoaderFactory: ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory
 
     val groups: GroupRepository
+    val feeds: ch.lkmc.neutrodyne.core.domain.FeedRepository
     val entryInstallers: Set<EntryProviderInstaller>
     val metroViewModelFactory: MetroViewModelFactory
 
