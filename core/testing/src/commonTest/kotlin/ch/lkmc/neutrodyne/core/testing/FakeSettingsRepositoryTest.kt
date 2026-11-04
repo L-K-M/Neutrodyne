@@ -5,7 +5,11 @@ package ch.lkmc.neutrodyne.core.testing
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -30,6 +34,24 @@ class FakeSettingsRepositoryTest : SettingsRepositoryContract() {
 
             assertEquals(Outcome.Success(Unit), fake.set(portableBool, true))
             assertEquals(true, fake.get(portableBool))
+        }
+
+    @Test
+    fun concurrentDirectoryAndHealthReadsKeepEveryCall() =
+        runTest {
+            val fake = FakeSettingsRepository()
+            val start = CompletableDeferred<Unit>()
+            val readers =
+                List(8) {
+                    async(Dispatchers.Default) {
+                        start.await()
+                        repeat(1_000) { fake.get(portableBool) }
+                    }
+                }
+            start.complete(Unit)
+            readers.awaitAll()
+            assertEquals(8_000, fake.calls.size)
+            assertEquals(setOf("get(feeds.notify_new_episodes)"), fake.calls.toSet())
         }
 
     @Test
