@@ -384,6 +384,9 @@ abstract class SyncClockDao(
         rid: String,
     ): SyncClockEntity?
 
+    @Query("SELECT * FROM sync_clock")
+    abstract suspend fun all(): List<SyncClockEntity>
+
     @Query("SELECT COUNT(*) FROM sync_clock")
     abstract suspend fun count(): Int
 
