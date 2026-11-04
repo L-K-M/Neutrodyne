@@ -41,6 +41,26 @@ licence used as Apache-2.0). No bundled component beyond what `licensee*` report
   - `sqlite-bundled`'s JNI library compiles in SQLite (public domain).
 - **XmlPull API inside kxml2** (desktop) — public domain, next to kxml2's own MIT-style licence.
 
+## Radio fonts (Android and desktop)
+
+The shared radio bundles fonts from the [Google Fonts repository](https://github.com/google/fonts),
+under SIL Open Font License 1.1 (OFL-1.1):
+
+- **Barlow 400/500/600/700**, Copyright 2017 The Barlow Project Authors
+  (https://github.com/jpt/barlow).
+- **Courier Prime 400/700**, Copyright 2015 The Courier Prime Project Authors
+  (https://github.com/quoteunquoteapps/CourierPrime).
+- **Dosis 300**, Copyright 2011 The Dosis Project Authors
+  (https://github.com/googlefonts/dosis-vf). The static 300-weight instance is
+  generated from the Google Fonts variable font with FontTools.
+
+Each family's complete upstream OFL text, including its copyright statement,
+is shipped in the Licences screen through `app/config/licenses/OFL-1.1-*.json`
+and `desktopApp/config/licenses/OFL-1.1-*.json`; manual entries in both libraries
+roots identify the font bundles. The owner-supplied wood, paper, metal and
+transparent valve deck are project assets and need no third-party notice.
+Reference photographs are not bundled.
+
 ## Python components (Android, `youtube/ytdlp/python-components.lock`)
 
 The `:app` APKs bundle the Chaquopy-hosted CPython engine stack; each entry has a manual

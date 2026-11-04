@@ -206,6 +206,30 @@ interaction and keep the create header/action fixed while fields scroll.
 All supplied English labels follow brief section 5 exactly; German resources
 are supplied. Menu (Menü) is the single owner-added label.
 
+**Implementation notes (2026-11-04).** The shared radio primitives and resources
+live in `:core:ui`; the production adapter lives in `:feature:feeds`. A queued
+episode outside the group's membership still drives the radio transport and
+counter while the programme remains the group's unplayed feed. Paused resume
+uses the existing context so Up next is retained. An explicit discard that
+clears the playlist stops playback; a natural queue transition keeps the
+existing playback rules. The mini sheet stays mounted for consent and external
+expand requests but its collapsed content is unplaced on radio home. The
+serialized `FeedsKey` remains the home identity for saved-stack compatibility.
+The existing All-feed notification route opens the existing Feeds screen as
+`FeedBrowserKey` over home, with its mini player and Back behavior preserved;
+group notification routes select their playlist on the radio.
+
+A paused browse selection never starts audio just to show or seek it. A needle
+seek on an unloaded selection is retained locally and sent through
+`PlaybackController.seekTo` after its first accepted group start; loaded
+playback seeks immediately. Counts come from the repository while paging is
+incomplete; a total duration is shown only when all durations are known and
+the feed is fully loaded, avoiding a partial sum presented as the total.
+Dosis is a static 300-weight instance of the Google Fonts variable source;
+all three families retain their complete upstream OFL texts in both notices
+roots. The canonical asset ownership and excluded reference photos remain as
+specified above.
+
 Responsive dimensions are dp after system insets: stacked below 600; two
 columns from 600, programme left and speaker/player right; tighter insets
 below 370; compact header/player below 800 high; deck stowed below 660.
