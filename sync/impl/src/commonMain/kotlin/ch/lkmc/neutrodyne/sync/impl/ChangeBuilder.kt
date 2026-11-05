@@ -112,8 +112,9 @@ class ChangeBuilder(
             }
 
             "auth" -> {
+                // Pushed only while the switch is on; never sent as null (10 Feed passwords).
                 if (sharePasswords()) {
-                    source.authField(rid)?.let { fields["auth"] = it.withClock(clock) }
+                    authValue(source, rid, row)?.let { fields["auth"] = it.withClock(clock) }
                 }
             }
 
@@ -160,6 +161,32 @@ class ChangeBuilder(
                 as? RecordId.Episode
                 ?: return null
         return ChangeDto(coll = collection.wire, id = from.toWire(), op = "rekey", to = to.toWire())
+    }
+
+    /**
+     * The wire `auth` of one row: a replay row may carry the protected marker — hydrate it from
+     * its store entry (full resync obeys the sharing switch here too) and omit the field when the
+     * snapshot is gone; every other row reads the live credential.
+     */
+    private suspend fun authValue(
+        source: SourceReader,
+        rid: String,
+        row: SyncOutboxEntity,
+    ): FieldValue? {
+        val literal = row.value?.let(::parsed)
+        val storeKey = literal?.let(::authMarkerKey)
+        if (storeKey != null) {
+            val stored = secrets.get(storeKey) ?: return null
+            return FieldValue(
+                JsonObject(
+                    buildMap {
+                        put("u", JsonPrimitive(stored.username))
+                        put("p", JsonPrimitive(stored.secret.concatToString()))
+                    },
+                ),
+            )
+        }
+        return source.authField(rid)
     }
 
     private fun parseJsonObject(text: String): JsonObject? =

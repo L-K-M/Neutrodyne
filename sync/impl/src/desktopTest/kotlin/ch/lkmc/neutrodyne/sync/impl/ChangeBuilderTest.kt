@@ -212,6 +212,72 @@ class ChangeBuilderTest {
         }
 
     @Test
+    fun aStarRowCarriesTheCredentialOriginAndAuthWhileSharingIsOn() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                seed(db)
+                linkCredential(db)
+                secrets.podcastCredentialIds.value = mapOf(1L to 1L)
+                secrets.put("https://example.com/feed", "anna", "hunter2".toCharArray())
+                db.syncOutboxDao().upsert(row("podcast", podcastSyncId, "*", null, 1L))
+
+                val on = ChangeBuilder(db, secrets) { true }.build(db.syncOutboxDao().rows()).single()
+                assertEquals(
+                    "https://example.com/feed",
+                    on.fields
+                        .getValue("credentialOrigin")
+                        .v
+                        .content(),
+                )
+                val auth = assertNotNull(on.fields["auth"]).v.jsonObject()
+                assertEquals("anna", auth["u"]!!.content())
+                assertEquals("hunter2", auth["p"]!!.content())
+
+                // Sharing off: the origin still travels; the secret never does.
+                val off = ChangeBuilder(db, secrets) { false }.build(db.syncOutboxDao().rows()).single()
+                assertEquals(
+                    "https://example.com/feed",
+                    off.fields
+                        .getValue("credentialOrigin")
+                        .v
+                        .content(),
+                )
+                assertFalse("auth" in off.fields)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aReplayedAuthMarkerIsHydratedAtPushTime() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                seed(db)
+                val storeKey = pendingAuthOrigin("acc", podcastSyncId, "01a3185c5000000a-0000000000000002")
+                secrets.put(storeKey, "anna", "replayed".toCharArray())
+                db.syncOutboxDao().upsert(
+                    row("podcast", podcastSyncId, "auth", authMarker(storeKey).toString(), 1L)
+                        .copy(captureKind = ch.lkmc.neutrodyne.core.database.SyncCaptureKind.REPLAY),
+                )
+
+                val on = ChangeBuilder(db, secrets) { true }.build(db.syncOutboxDao().rows()).single()
+                val auth = assertNotNull(on.fields["auth"]).v.jsonObject()
+                assertEquals("anna", auth["u"]!!.content())
+                assertEquals("replayed", auth["p"]!!.content())
+
+                // A marker whose snapshot is gone, or sharing off: the field is omitted.
+                secrets.remove(storeKey)
+                assertTrue(ChangeBuilder(db, secrets) { true }.build(db.syncOutboxDao().rows()).isEmpty())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun groupMemberAndUpNextFieldsReadTheirSources() =
         runTest {
             val db = TestDb.inMemory()
@@ -262,6 +328,27 @@ class ChangeBuilderTest {
         value: String?,
         hlc: Long,
     ) = SyncOutboxEntity(coll, rid, field, hlc, node, value = value)
+
+    /** Links podcast 1 to a credential row for the feed origin, with triggers silenced. */
+    private suspend fun linkCredential(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying {
+                val id =
+                    db
+                        .credentialDao()
+                        .putByOrigin(
+                            ch.lkmc.neutrodyne.core.database.CredentialEntity(
+                                origin = "https://example.com/feed",
+                                username = "anna",
+                                secretCipher = null,
+                                iv = null,
+                                createdAt = 1,
+                            ),
+                        )
+                db.podcastDao().setCredentialId(1, id)
+            }
+        }
+    }
 
     private suspend fun seed(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
         db.withWriteTransaction {
