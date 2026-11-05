@@ -1067,6 +1067,46 @@ The controller applies 06's recovery rules ([06 Error recovery](06-playback.md#e
 - **System sleep** ([Power](#power-suspend-wake-and-idle-sleep)): pause and save on `Suspending`; nothing resumes on wake.
 - **Start-up:** the controller loads `play_session` and the saved position and publishes `NowPlaying` with phase `NOT_LOADED` and `isPlaying = false`; nothing is resolved, fetched or decoded until the user presses Play, a media key or the tray's Play (R8.4).
 
+**MD1b implementation note (2026-11-05).** The recovery slice implements the
+table above and the device-loss reaction. The controller owns
+`RecoveryBudget`: a skip-type failure (HTTP, auth, format, no media,
+content changed) emits `PlaybackEvent.Skipped` and advances; after five
+consecutive skips, or when no successor exists, it pauses with
+`PLAYER_ERROR`. A network failure keeps the item, publishes
+`NETWORK_LOST` and re-prepares once a validated connection returns within
+the 10-min foreground window. A missing local file re-resolves to the
+stream at the same position and holds `LOCAL_FILE_MISSING` until
+playback resumes (the engine's error state is replaced by the re-prepare,
+so the issue is carried separately). A successor whose preparation fails
+at the boundary is skipped and the following item is tried.
+
+Deviations from the contracts above, forced by the implementation:
+
+- `EngineError.ContentChanged` is new. The engine re-resolves a
+  `ContentChangedException` once (dropping the cache resource); the second
+  failure maps to it, and the controller skips with
+  `UnplayableReason.Http(416)`, 06's mapping for a DAI length change.
+- `AudioEngine.onDeviceRemoved()` is new (default no-op). MD2's route
+  monitor reports a removed device through it; `FfAudioEngine` discards
+  its output, emits `DeviceLost` and enters `Error(Output)`, so the next
+  play opens the default device. The `AudioRouteMonitor`/`RouteEvent`
+  contracts live in `:desktop:system` as drawn; `NoOpAudioRouteMonitor`
+  is the MD1b placeholder until MD2 binds the per-OS monitor.
+- `NdOutput` now implements the new `AudioOutput` seam in
+  `:playback:native`, which the engine holds so its open/write/start
+  fault paths are testable without hardware; `NdOutputException` carries
+  ndmedia's negative `ND_E_*` code so the engine can distinguish a device
+  failure (`ND_E_DEVICE`) from a bad back-end.
+- "A second failure shows 'No audio output device'": the shared 06 error
+  rows have no such issue, so the controller keeps publishing
+  `PLAYER_ERROR` (the shared UI's retry action) and records the repeated
+  failure internally. No new string or issue was added.
+- A first-decode seek now lands one guard interval (50 ms) earlier. FFmpeg
+  keeps the encoder-delay skip (`avctx->delay`, from the track's initial
+  padding) across `avcodec_flush_buffers`, so a seek made before any
+  decoded frame is dropped; the guard keeps the requested position out of
+  that first frame, and the sample drop below still lands on it.
+
 ### MD0 spike and the libmpv fallback
 
 Spike S18 = milestone MD0 ([PLAN MD0](../PLAN.md#md0-desktop-audio-engine-spike)), before any desktop playback work (risk [T19](../PLAN.md#8-risks-and-mitigations)).
