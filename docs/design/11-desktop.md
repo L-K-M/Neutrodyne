@@ -628,6 +628,18 @@ Commands are coalesced on `nd-playback`; seeks are rate-limited to 10 per second
 
 No session bus (some minimal window managers) → MPRIS is disabled and diagnostics say so.
 
+**Implementation notes (2026-11-05, MD2's OS slice).** `LinuxMprisSession` is the
+production session now: `PropertiesChanged` is signalled for the properties a publish
+actually changed (`PlaybackStatus`, `Metadata`, `Rate`; `Position` never, per spec),
+the published `Rate` is clamped onto the advertised 0.5–3.0 window, `Raise()`/`Quit()`
+reach the shell's activator and clean-exit path, and `OpenUri` answers
+`org.freedesktop.DBus.Error.NotSupported`. Two deltas against the table:
+`CanGoNext` reflects the window's next-item presence (a one-item queue answers false
+instead of the blanket true, so shells do not offer a dead Next button), and `Volume`
+round-trips the stored value but does not yet reach `GainStage` — the shared
+`PlaybackController` API has no volume member in v1.0, so wiring it waits for one
+rather than inventing a private path to the engine.
+
 ### Power: suspend, wake and idle sleep
 
 | | Windows | macOS | Linux |
@@ -641,6 +653,44 @@ Policy (R8.4, N2):
 1. `IdleSleepInhibitor.acquire` exactly while `isPlaying`; release on pause, end, error, sleep-timer stop and quit. A user-initiated sleep or a closed lid is never blocked (none of these mechanisms can block it).
 2. `Suspending` → pause, save the position (`PositionSaver` event save), close open HTTP sources. The 5-s periodic save bounds the loss when the notice comes late.
 3. `Resumed` → evict pooled connections, poke the lanes ([Wake and restart catch-up](#wake-and-restart-catch-up)); the output device is re-opened only at the next play; **nothing resumes by itself**; a YouTube URL that answers 403 after an IP change is re-resolved by the normal path ([06 Error recovery](06-playback.md#error-recovery), [04 Playback integration](04-youtube.md#playback-integration)).
+
+**Implementation notes (2026-11-05, MD2's OS slice).** The idle-sleep row's Linux cell
+ships as the portal with **flag 8 (Idle)**, not the printed "flag 4 (suspend)": the
+portal's flags are 1 Logout, 2 User Switch, 4 Suspend, 8 Idle, and flag 4 would block a
+user-initiated sleep, which policy row 1 forbids. logind's own `Inhibit("idle", …)`
+cannot substitute: it hands back a unix file descriptor, and dbus-java 5.2.2's
+transports report no descriptor passing (`DefaultSocketProvider` returns false for
+`isFileDescriptorPassingSupported`, verified), the same limitation the notices row
+already records for delay inhibitors. `LinuxIdleSleepInhibitor` holds the portal's
+`Request` handle and closes it on release; a bus without the portal logs and plays
+without inhibition. macOS and Windows ship `PendingIdleSleepInhibitor` until
+`ndmedia` grows `nd_power_keep_awake` — no new native code was written in this slice,
+and the first `acquire` logs what is missing.
+
+The Windows/macOS notices cell ships through the hooks the shim already exposes:
+`nd_session_poll` delivers `SUSPEND`/`RESUME` session events (the `PBT_APMSUSPEND` and
+`NSWorkspaceWillSleep` paths of the MD0 shim), which `OsPowerMonitor` maps onto
+`PowerEvent`s and fans out to the runner, the network monitor and the playback
+`PowerPolicy`. Where the native session cannot open — a headless JVM, a missing
+library — the monitor binds no notices and says so in its status: wake detection then
+rests on the runner's >90 s wall/monotonic drift ([Wake and restart
+catch-up](#wake-and-restart-catch-up)). The AWT `SystemSleepListener` variant stays
+unused. `PowerPolicy` bounds its post-pause settle at 2 s: the paused publication it
+waits for follows the event position save in the controller's serialized lane, and a
+notice that loses that race falls back to the periodic save.
+
+Two residuals from the MD0 review's unknown-event finding: `NativeSystemMediaSession`
+classifies polled events through an exhaustive `when`, so a kind added to the native
+enum without a decision there is a compile error rather than a silently dropped event,
+but the *raw* code-to-kind parse — where an unknown native code really surfaces —
+still lives in `NativeMediaSession.poll` (`:playback:native`, under concurrent MD1b
+edit in this slice); naming the code there is left to the engine lane. And the shim's
+current `nd_session_publish` ABI carries title, artist, duration, position, rate and
+play state only, so SMTC and Now Playing publish without artwork (Thumbnail and
+`MPMediaItemArtwork` need native work); MPRIS publishes `mpris:artUrl` from the pinned
+artwork as specified. `RemoteCommand.SetRate` is logged and dropped until the shared
+controller grows 06's non-persisting external-speed seam; published `Rate` is clamped
+to the advertised 0.5–3.0 window on every OS.
 
 ### Audio-route monitoring
 
