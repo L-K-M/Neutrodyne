@@ -381,6 +381,8 @@ Serves R7.4, R7.5, R8.5 (cross-device resume), N1, N2. Delivered in MS2 (port, r
 
 **Up next from sync.** `SyncApplier` adds, moves and removes `queue_entry` rows — never the current item and never an effectively played episode ([10 Episode-state rules](10-sync.md#episode-state-rules) rule 1). Like UI edits they do not bump the generation, so the projector diffs them without touching index 0.
 
+**Implementation note (2026-11-05, MS2).** Android's `PlaybackSyncBridge` (`:playback:impl`) implements the port as specified above: `active` is published from the player (`null` while no service runs or the phase is `NOT_LOADED`), the `PAUSED`/`STOPPED`/`TRANSITIONED` boundaries are emitted after the matching pause save, transition or session transaction commits (the teardown flush's `STOPPED` precedes `active = null`), `onRemoteMarkedPlayed` freezes synchronously through `RemotePlayedGuard` with the lift on the item change or the stored row becoming unplayed again, and the paused-item pickup runs on both resume paths (the UI `play()`'s already-current start and `beforePlay` for media keys, the notification, Bluetooth and Auto). The desktop graph keeps `NoPlaybackSync` until `DesktopPlaybackController` lands with MD1a.2 after it merges.
+
 Core tests run in `commonTest` on the desktop JVM with `TestClock` and the `:core:testing` fakes; both adapters' suites pass M4 AC1, AC2 and AC6 through the core (PLAN M4 AC17, M5 AC8, MD1 AC1 and AC3, MS3 AC2 and AC3; [Testing](#testing)).
 
 ---
