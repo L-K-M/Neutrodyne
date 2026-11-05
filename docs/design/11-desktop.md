@@ -852,6 +852,18 @@ use virtual time, Compose tests use the existing desktop setup, and the native
 controller boundary runs with `EngineBackend.NULL` in the desktop CI matrix.
 No audible, physical-device or soak acceptance is claimed here.
 
+**MD1b implementation note (2026-11-04).** Chapters and the sleep timer now
+take the shared core's path: `TracksKnown` carries `EpisodeChapter` rows with
+06's source (the demuxer maps MP3 containers to ID3 and the mov/MP4 family to
+MP4, and drops chapter metadata of containers outside the priority table), the
+controller replaces them per source in `ChapterRepository`, observes the
+winning rows through `ChapterIndex`, and drives `nextChapter` /
+`previousChapter` from it. `SleepTimerCore` counts while the engine advances,
+drives `setFade` at its 500-ms step, and its end-of-episode state completes the
+item in place through `PlaySessionStore.markBoundaryPlayed`. The earlier
+"Off/null until MD1b" statement is superseded; download-time chapter
+extraction (`DesktopChapterExtractor`) remains M6.
+
 ### Engine thread and commands
 
 `FfAudioEngine` owns one platform thread, `nd-engine`, and a second, `nd-prepare`, that opens the next item's source, demuxer and decoder so a slow network open never stalls output. Commands from `nd-playback` go into a lock-free queue; the engine thread drains it between blocks. Because `nd-engine` may sit in a blocking AVIO read (up to the 30-s source wait) while the ring plays out, play and pause act on the device outside the queue through a **desired-state register** (2026-10-05): `nd-playback` writes an atomic `wantPlaying` with a generation number for both commands and then calls `nd_out_start` or `nd_out_stop` itself (miniaudio allows starting and stopping a device from any thread except its data callback, [miniaudio](https://github.com/mackron/miniaudio)), so the user hears play and pause at once — play starts the ring's buffered audio even while a read blocks — and the read simply continues; after every drain and before every `nd_out_start` it might make (a transition, a device re-open), the engine re-applies `wantPlaying` idempotently, so an older queued command can never restart a device the user has paused since (the earlier queued `play` with a no-op `pause` could: Play then Pause during a 30-s read left audio playing while the UI said paused); `seekTo` and `setWindow` raise the pipeline's interrupt flag and call `ByteSource.abort()`, so the blocked read returns `AVERROR_EXIT` within one 1-s wait slice and the engine reopens at the new position.
