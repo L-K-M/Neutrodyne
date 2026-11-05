@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.youtube.engine
 
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStorePaths
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -26,6 +27,8 @@ import kotlin.test.assertTrue
 class BundledEngineStoreTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    private val clock = TestClock()
+
     @org.junit.After fun allowCleanup() {
         temporary.root.walkTopDown().forEach { it.setWritable(true, true) }
     }
@@ -35,10 +38,10 @@ class BundledEngineStoreTest {
             val store = store()
             store.loadStatus()
             assertFalse(paths.root.toFile().exists())
-            assertNull(store.hostLibDir())
+            assertNull(store.hostPrepared()?.libDir)
             assertEquals(EnginePreparation.UNPREPARED, store.preparation.value)
             val prepared = store.prepareBundled()
-            assertEquals(prepared.libDir, store.hostLibDir())
+            assertEquals(prepared.libDir, store.hostPrepared()?.libDir)
             assertEquals(EnginePreparation.PREPARING, store.preparation.value)
             assertTrue(File(prepared.libDir.toFile(), "yt_dlp/version.py").isFile)
             val versionFile = File(prepared.libDir.toFile(), "yt_dlp/version.py").toPath()
@@ -71,7 +74,7 @@ class BundledEngineStoreTest {
             restarted.loadStatus()
             assertEquals(EnginePreparation.COMPILED, restarted.preparation.value)
             assertEquals(first, restarted.prepareBundled())
-            assertEquals(first.libDir, restarted.hostLibDir())
+            assertEquals(first.libDir, restarted.hostPrepared()?.libDir)
         }
 
     @Test fun appAndPythonMinorChangesReextractSources() =
@@ -79,7 +82,7 @@ class BundledEngineStoreTest {
             compileFixture(store().prepareBundled())
             val appUpdate = store(2)
             appUpdate.loadStatus()
-            assertNull(appUpdate.hostLibDir())
+            assertNull(appUpdate.hostPrepared()?.libDir)
             val updated = appUpdate.prepareBundled()
             assertTrue(File(updated.libDir.toFile(), "yt_dlp/__init__.py").exists())
             compileFixture(updated)
@@ -116,7 +119,7 @@ class BundledEngineStoreTest {
             File(paths.root.toFile(), "active.json.tmp").writeText("ignored")
             val next = store()
             next.loadStatus()
-            assertNull(next.hostLibDir())
+            assertNull(next.hostPrepared()?.libDir)
             next.prepareBundled()
             assertTrue(File(first.libDir.toFile(), "yt_dlp/__init__.py").isFile)
             assertFalse(File(first.libDir.toFile(), ".compiled-3.14").exists())
@@ -141,7 +144,7 @@ class BundledEngineStoreTest {
                 bytecode.setWritable(true, true)
                 assertTrue(bytecode.delete())
                 next.loadStatus()
-                assertNull(next.hostLibDir())
+                assertNull(next.hostPrepared()?.libDir)
             }
         }
 
@@ -149,11 +152,11 @@ class BundledEngineStoreTest {
         runTest {
             val store = store()
             val jobs = List(10) { async { store.prepareBundled() } }
-            assertNull(store.hostLibDir())
+            assertNull(store.hostPrepared()?.libDir)
             val observer =
                 async(kotlinx.coroutines.Dispatchers.Default) {
                     while (jobs.any { !it.isCompleted }) {
-                        store.hostLibDir()?.let { lib ->
+                        store.hostPrepared()?.libDir?.let { lib ->
                             assertTrue(File(lib.toFile(), "yt_dlp/version.py").isFile)
                             assertTrue(File(lib.toFile(), "yt_dlp_ejs/_version.py").isFile)
                         }
@@ -174,7 +177,7 @@ class BundledEngineStoreTest {
             val store = store()
             assertFails { store.prepareBundled() }
             assertEquals(EnginePreparation.FAILED, store.preparation.value)
-            assertNull(store.hostLibDir())
+            assertNull(store.hostPrepared()?.libDir)
             assertFalse(File(paths.root.toFile(), "active.json").exists())
             arm(paths)
             assertNotNull(store.prepareBundled())
@@ -199,7 +202,7 @@ class BundledEngineStoreTest {
         assertTrue(File(target, "yt_dlp_ejs/yt/solver/lib.min.js").readText().contains("Version: 6.1.4"))
     }
 
-    private fun store(code: Int = 1) = BundledEngineStore(paths, code)
+    private fun store(code: Int = 1) = BundledEngineStore(paths, code, clock)
 
     private val paths by lazy {
         FakeEngineStorePaths().apply {

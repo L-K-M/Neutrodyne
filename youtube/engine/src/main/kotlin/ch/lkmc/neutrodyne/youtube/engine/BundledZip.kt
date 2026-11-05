@@ -24,7 +24,7 @@ internal object BundledZip {
         archive: File,
         destination: File,
         version: String,
-        ejsVersion: String,
+        ejsVersion: String?,
     ) {
         require(archive.length() in 1..MAX_ZIP_BYTES) { "Bundle size limit" }
         val bytes = archive.readBytes()
@@ -80,12 +80,21 @@ internal object BundledZip {
         require(info.lineSequence().any { it == "ORIGIN = 'yt-dlp/yt-dlp'" })
         require(info.lineSequence().any { it == "CHANNEL = 'stable'" })
         require(info.lineSequence().any { it == "__version__ = '$version'" })
-        require(
-            File(destination, "yt_dlp_ejs/_version.py").readText().lineSequence().any {
-                it ==
-                    "__version__ = version = '$ejsVersion'"
-            },
-        )
+        // The manifest pins the ejs version (APPROVED); UPSTREAM_STABLE takes whatever the release bundles.
+        if (ejsVersion != null) {
+            require(
+                File(destination, "yt_dlp_ejs/_version.py").readText().lineSequence().any {
+                    it ==
+                        "__version__ = version = '$ejsVersion'"
+                },
+            )
+        } else {
+            require(
+                File(destination, "yt_dlp_ejs/_version.py").readText().lineSequence().any {
+                    it.startsWith("__version__ = version = '") && it.endsWith("'")
+                },
+            )
+        }
     }
 
     private data class Directory(

@@ -11,4 +11,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.okio)
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp)
+    testImplementation(libs.okhttp.mockwebserver3)
 }

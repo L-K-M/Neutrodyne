@@ -28,6 +28,10 @@ class YtDlpClient(
     private val lock = Any()
     private val queue = mutableListOf<Waiter>()
     private var running = 0
+    private val mutablePending = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /** Queued plus admitted engine operations; the updater's idle wait requires this to reach 0. */
+    val pendingOperations: kotlinx.coroutines.flow.StateFlow<Int> = mutablePending
 
     init {
         scope.launch { transport.status.collect { synchronized(lock) { drain() }.release() } }
@@ -51,6 +55,7 @@ class YtDlpClient(
             return withTimeoutOrNull(remaining) {
                 synchronized(lock) {
                     queue += waiter
+                    mutablePending.value = queue.size + running
                     drain()
                 }.release()
                 waiter.ready.await()
@@ -64,6 +69,7 @@ class YtDlpClient(
             synchronized(lock) {
                 queue.remove(waiter)
                 if (waiter.admitted) running--
+                mutablePending.value = queue.size + running
                 drain()
             }.release()
         }
@@ -114,6 +120,7 @@ class YtDlpClient(
             running++
             admitted += next
         }
+        mutablePending.value = queue.size + running
         return admitted
     }
 
