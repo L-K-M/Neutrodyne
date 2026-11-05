@@ -390,6 +390,8 @@ internal class BackupStager(
             warnings = warnings,
             linkedServerHost = snapshot.linkedServerHost,
             writtenOn = staged.manifest.app.platform,
+            podcastKeys = staged.library().podcasts.mapTo(HashSet()) { it.key },
+            groupNames = staged.library().groups.map { it.name },
         )
     }
 

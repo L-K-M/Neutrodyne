@@ -14,6 +14,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -38,6 +39,7 @@ import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
@@ -68,9 +70,18 @@ import ch.lkmc.neutrodyne.core.ui.resources.restore_phase_validate
 import ch.lkmc.neutrodyne.core.ui.resources.restore_preview
 import ch.lkmc.neutrodyne.core.ui.resources.restore_progress
 import ch.lkmc.neutrodyne.core.ui.resources.restore_queue
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_all_devices
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_all_devices_help
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_checking
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_effect
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_offline
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_this_device
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_this_device_help
+import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_title
 import ch.lkmc.neutrodyne.core.ui.resources.restore_redownload
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace_effect
+import ch.lkmc.neutrodyne.core.ui.resources.restore_replace_everywhere
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace_title
 import ch.lkmc.neutrodyne.core.ui.resources.restore_settings
 import ch.lkmc.neutrodyne.core.ui.resources.restore_title
@@ -193,7 +204,7 @@ internal fun RestoreSessionRoute(
                 }
 
                 !requested -> {
-                    RestorePreview(state, viewModel::selectMode, viewModel::setCategory)
+                    RestorePreview(state, viewModel::selectMode, viewModel::setCategory, viewModel::selectReach)
                     NdButton(stringResource(Res.string.restore_action), {
                         scope.launch { viewModel.requestRestore() }
                     }, enabled = !state.busy)
@@ -201,6 +212,40 @@ internal fun RestoreSessionRoute(
                 }
             }
         }
+    }
+    if (state.checkingServerLibrary) {
+        NdDialog(
+            onDismissRequest = viewModel::cancelAllDevices,
+            title = stringResource(Res.string.restore_reach_title),
+            text = stringResource(Res.string.restore_reach_checking, state.preview?.linkedServerHost.orEmpty()),
+        )
+    }
+    state.allDevicesEffect?.let { effect ->
+        NdDialog(
+            onDismissRequest = viewModel::cancelAllDevices,
+            title = stringResource(Res.string.restore_reach_title),
+            text =
+                stringResource(
+                    Res.string.restore_reach_effect,
+                    effect.podcastsToRemove,
+                    effect.groupsToRemove,
+                ),
+            confirm =
+                NdDialogAction(stringResource(Res.string.restore_replace_everywhere), NdActionRole.DESTRUCTIVE) {
+                    scope.launch { viewModel.confirmAllDevices() }
+                },
+            dismiss =
+                NdDialogAction(
+                    stringResource(Res.string.action_cancel),
+                    onClick = viewModel::cancelAllDevices,
+                ),
+        )
+    }
+    if (state.serverLibraryUnavailable) {
+        NdBanner(
+            message = stringResource(Res.string.restore_reach_offline, state.preview?.linkedServerHost.orEmpty()),
+            icon = NdIcons.Info,
+        )
     }
     if (state.confirmingReplace) {
         val preview = state.preview ?: return
@@ -238,6 +283,7 @@ private fun RestorePreview(
     state: RestoreUiState,
     onMode: (RestoreMode) -> Unit,
     onCategory: (RestoreCategory, Boolean) -> Unit,
+    onReach: (LinkedRestoreReach) -> Unit,
 ) {
     val preview = state.preview ?: return
     Column {
@@ -287,6 +333,45 @@ private fun RestorePreview(
             ) {
                 Checkbox(selected, onCheckedChange = null, enabled = !state.busy)
                 Text(stringResource(label))
+            }
+        }
+        if (state.asksReach) {
+            Text(
+                stringResource(Res.string.restore_reach_title),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            LinkedRestoreReach.entries.forEach { reach ->
+                val reachLabel =
+                    when (reach) {
+                        LinkedRestoreReach.THIS_DEVICE -> Res.string.restore_reach_this_device
+                        LinkedRestoreReach.ALL_DEVICES -> Res.string.restore_reach_all_devices
+                    }
+                val reachHelp =
+                    when (reach) {
+                        LinkedRestoreReach.THIS_DEVICE -> Res.string.restore_reach_this_device_help
+                        LinkedRestoreReach.ALL_DEVICES -> Res.string.restore_reach_all_devices_help
+                    }
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            state.linkedReach == reach,
+                            enabled = !state.busy,
+                            role = Role.RadioButton,
+                            onClick = { onReach(reach) },
+                        ).padding(vertical = 8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(state.linkedReach == reach, onClick = null, enabled = !state.busy)
+                        Text(stringResource(reachLabel))
+                    }
+                    Text(
+                        stringResource(reachHelp),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 48.dp),
+                    )
+                }
             }
         }
     }

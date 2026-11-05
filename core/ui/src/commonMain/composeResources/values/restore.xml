@@ -30,4 +30,14 @@
         <item quantity="one">%1$d unknown backup entry was ignored.</item>
         <item quantity="other">%1$d unknown backup entries were ignored.</item>
     </plurals>
+    <string name="restore_reach_title">Replace the library on…</string>
+    <string name="restore_reach_this_device">This device only (recommended)</string>
+    <string name="restore_reach_this_device_help">Unlinks this device first. Your other devices and the server keep their library. Linking again with Merge would bring it back.</string>
+    <string name="restore_reach_all_devices">All synced devices</string>
+    <string name="restore_reach_all_devices_help">Replaces the library on the server and on your other devices.</string>
+    <string name="restore_reach_checking">Checking %1$s…</string>
+    <string name="restore_reach_offline">Needs a connection to %1$s</string>
+    <string name="restore_reach_effect">Other devices will remove %1$d podcasts and %2$d groups when they next sync; devices ask first when this exceeds their limits. Listening history merges by date, so newer plays on other devices stay.</string>
+    <string name="restore_replace_everywhere">Replace everywhere</string>
 </resources>
+

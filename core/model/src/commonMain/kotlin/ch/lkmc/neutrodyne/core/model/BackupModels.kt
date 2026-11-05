@@ -59,6 +59,9 @@ data class BackupPreview(
     val linkedServerHost: String?,
     /** `AppInfoV1.platform`, for "made on Android" in the preview. */
     val writtenOn: String?,
+    /** The backup's identity sets, for the ALL_DEVICES reach question's server comparison. */
+    val podcastKeys: Set<String> = emptySet(),
+    val groupNames: List<String> = emptyList(),
 )
 
 data class BackupSummary(
