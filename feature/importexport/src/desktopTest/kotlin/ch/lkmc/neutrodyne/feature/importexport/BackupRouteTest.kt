@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeBackupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakeLinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -278,7 +279,8 @@ class BackupRouteTest {
                         emitAll(imports.observeSession(sessionId))
                     }
             }
-        restoreViewModel = RestoreViewModel(id, backups, delayed, FakePlaybackController(), appScope)
+        restoreViewModel =
+            RestoreViewModel(id, backups, delayed, FakePlaybackController(), FakeLinkedRestoreCoordinator(), appScope)
         viewModels.put("restore", restoreViewModel)
         return ImportUiState(loaded = true, session = session)
     }
