@@ -395,6 +395,37 @@ class PlaybackSyncBridgeTest {
         }
     }
 
+    /**
+     * The device regression: after an explicit start position the controller dispatches play()
+     * while the new item is still buffering, and the resume path read an absent stored row as a
+     * reset to 0 — seeking the fresh item back to the start. An absent row is nothing written.
+     */
+    @Test fun anAbsentStoredRowIsNeverPickedUp() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            h.seedCurrent()
+            val player = h.playerFactory.create()
+            val bridge =
+                AndroidServiceBridge(player, h.run { h.access.open() }, h.access, h.scope, { true }, {}, player::pause)
+            bridge.attach()
+            try {
+                pumpUntil { player.mediaItemCount == 1 }
+                // The applied start (40 s) is the saver's reference; the row then disappears.
+                h.positions.positions.value =
+                    mapOf(1L to StoredPosition(1, 40_000, h.clock.now() + 1, null))
+                h.run { bridge.start(StartRequest.Episode(1, 40_000), StartOrigin.UI) }
+                assertEquals(40_000L, player.currentPosition)
+                h.positions.positions.value = emptyMap()
+
+                assertTrue(h.run { bridge.beforePlay(StartOrigin.EXTERNAL) })
+                assertEquals(40_000L, player.currentPosition, "an absent row is never a reset")
+                assertTrue(h.store.calls.isEmpty())
+            } finally {
+                bridge.detach()
+                player.release()
+            }
+        }
+    }
+
     // --- STOPPED from the explicit dismiss and stop paths ---------------------------------------
 
     @Test fun stopEmitsStoppedAfterTheFlush() {
