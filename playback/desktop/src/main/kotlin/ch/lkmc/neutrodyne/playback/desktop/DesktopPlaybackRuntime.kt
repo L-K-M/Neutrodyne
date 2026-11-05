@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.desktop
 
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
@@ -24,6 +25,7 @@ class DesktopPlaybackRuntime(
     internal val media: PlaybackMediaLookup,
     internal val positions: PositionStore,
     internal val capabilities: YouTubeCapabilitiesSource,
+    internal val chapterRepository: ChapterRepository,
     internal val resolver: DesktopEpisodeSourceResolver,
     internal val cache: SpanCache,
     internal val engine: AudioEngine,

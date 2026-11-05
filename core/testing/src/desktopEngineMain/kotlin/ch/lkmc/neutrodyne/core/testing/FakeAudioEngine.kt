@@ -21,6 +21,8 @@ class FakeAudioEngine : AudioEngine {
         private set
     var skipSilence: Boolean = false
         private set
+    var fade: Float = 1f
+        private set
     var closed: Boolean = false
         private set
     val commands = mutableListOf<String>()
@@ -103,7 +105,10 @@ class FakeAudioEngine : AudioEngine {
 
     override fun setVolume(linear: Float) = Unit
 
-    override fun setFade(factor: Float) = Unit
+    override fun setFade(factor: Float) {
+        commands += "fade"
+        fade = factor
+    }
 
     override fun positionMs(): Long = position
 

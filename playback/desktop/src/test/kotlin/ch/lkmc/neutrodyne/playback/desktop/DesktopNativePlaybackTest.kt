@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.desktop
 
+import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -62,28 +64,7 @@ class DesktopNativePlaybackTest {
             val caps = FakeYouTubeCapabilitiesSource()
             val resolver = DesktopEpisodeSourceResolver(local, caps, FakeYouTubeStreamResolver(), clock)
             val cache = SpanCache(directory.resolve("cache"))
-            val platform =
-                ch.lkmc.neutrodyne.core.testing
-                    .FakePlatformInfo()
-            val clients =
-                NetworkClients(
-                    ch.lkmc.neutrodyne.core.network.okhttp.CoreClients(
-                        ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor(
-                            ch.lkmc.neutrodyne.core.common
-                                .UserAgentProvider(platform, "0.1.0", "https://example.com/repo"),
-                        ),
-                        ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard(
-                            ch.lkmc.neutrodyne.core.common
-                                .LocalNetworkAccess(),
-                            platform,
-                        ),
-                        ch.lkmc.neutrodyne.core.network.okhttp
-                            .DnsFamilyHints(),
-                        emptySet(),
-                    ),
-                    ch.lkmc.neutrodyne.core.network.okhttp
-                        .AuthInterceptor { ch.lkmc.neutrodyne.core.common.CredentialLookup.None },
-                )
+            val clients = mediaClients()
             val engine =
                 FfAudioEngine(
                     root.resolve("playback/native/build/ffmpeg/$target"),
@@ -153,6 +134,7 @@ class DesktopNativePlaybackTest {
                     media,
                     positions,
                     caps,
+                    FakeChapterRepository(),
                     resolver,
                     cache,
                     engine,
@@ -184,6 +166,164 @@ class DesktopNativePlaybackTest {
                 directory.toFile().deleteRecursively()
             }
         }
+
+    @Test
+    fun embeddedChaptersFromTheCorpusFixturesReachTheSharedRepository() =
+        runBlocking {
+            val root = Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")))
+            val target = requireNotNull(System.getProperty("neutrodyne.nativeTarget"))
+            val corpus = root.resolve("playback/engine/src/test/resources/media")
+            val fixtures =
+                listOf(
+                    ChapterFixture("id3chap_3s.mp3", ChapterSource.ID3, listOf("Intro", "Middle", "Outro")),
+                    ChapterFixture("m4a_chapters_3s.m4a", ChapterSource.MP4, listOf("First", "Second", "Third")),
+                )
+            for (fixture in fixtures) {
+                val directory = Files.createTempDirectory("md1b-chapters")
+                val file = directory.resolve(fixture.name)
+                Files.copy(corpus.resolve(fixture.name), file)
+                val clock = TestClock()
+                val local = FakeLocalMediaIndex().apply { files[1] = file.toUri().toString() }
+                val caps = FakeYouTubeCapabilitiesSource()
+                val resolver = DesktopEpisodeSourceResolver(local, caps, FakeYouTubeStreamResolver(), clock)
+                val cache = SpanCache(directory.resolve("cache"))
+                val engine =
+                    FfAudioEngine(
+                        root.resolve("playback/native/build/ffmpeg/$target"),
+                        root.resolve("playback/native/build/ndmedia/$target"),
+                        resolver,
+                        mediaClients(),
+                        cache,
+                        EngineBackend.NULL,
+                    )
+                val positions = FakePositionStore()
+                val queue =
+                    FakeQueueRepository().apply {
+                        queue.value = VirtualQueue(1, QueueItem(1, QueueOrigin.CURRENT), emptyList(), emptyList())
+                    }
+                val sessions = FakePlaySessionStore().apply { this.queue = queue.queue.value }
+                val row = testEpisodeRow(1)
+                val media =
+                    FakePlaybackMediaLookup().apply {
+                        items.value =
+                            mapOf(
+                                1L to
+                                    PlaybackMediaInfo(
+                                        1,
+                                        row.podcastId,
+                                        row.title,
+                                        row.podcastTitle,
+                                        row.artwork,
+                                        row.sourceType,
+                                        row.availability,
+                                        false,
+                                        "https://media.example/$fixture.name",
+                                        null,
+                                        null,
+                                        120_000,
+                                        null,
+                                        null,
+                                    ),
+                            )
+                    }
+                val chapters = FakeChapterRepository()
+                val runtime =
+                    DesktopPlaybackRuntime(
+                        PlayStarter(
+                            FakePlayContextResolver(),
+                            queue,
+                            sessions,
+                            media,
+                            positions,
+                            caps,
+                            local,
+                            FakeNetworkMonitor(),
+                            clock,
+                            StartPositionRule(),
+                            PlayedRule(),
+                        ),
+                        QueueWindowPlanner(
+                            queue,
+                            caps,
+                            positions,
+                            local,
+                            clock,
+                            WindowDiff(),
+                            StartPositionRule(),
+                            PlayedRule(),
+                        ),
+                        PositionSaver(positions, clock, PlayedRule()),
+                        EffectivePlaybackSettings(
+                            FakeEffectiveSettingsResolver(),
+                            FakeScopeSettingsRepository(),
+                            FakeSettingsRepository(),
+                        ),
+                        sessions,
+                        queue,
+                        media,
+                        positions,
+                        caps,
+                        chapters,
+                        resolver,
+                        cache,
+                        engine,
+                    )
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+                val controller = DesktopPlaybackController(scope, clock, { runtime })
+                try {
+                    assertEquals(PlayResult.Started, controller.play())
+                    controller.pause()
+                    withTimeout(10_000) {
+                        chapters.rows.filter { it[1]?.isNotEmpty() == true }.first()
+                    }
+                    val rows = chapters.rows.value[1].orEmpty()
+                    assertEquals(fixture.titles, rows.map { it.title })
+                    assertTrue(rows.all { it.source == fixture.source })
+                    withTimeout(10_000) {
+                        controller.currentChapter.filter { it != null }.first()
+                    }
+                    controller.nextChapter()
+                    withTimeout(10_000) {
+                        controller.nowPlaying.filter { it?.position?.positionMs == 1_000L }.first()
+                    }
+                    assertEquals(1, controller.currentChapter.value?.index)
+                } finally {
+                    controller.shutdown()
+                    scope.cancel()
+                    directory.toFile().deleteRecursively()
+                }
+            }
+        }
+
+    private data class ChapterFixture(
+        val name: String,
+        val source: ChapterSource,
+        val titles: List<String>,
+    )
+
+    private fun mediaClients(): NetworkClients {
+        val platform =
+            ch.lkmc.neutrodyne.core.testing
+                .FakePlatformInfo()
+        return NetworkClients(
+            ch.lkmc.neutrodyne.core.network.okhttp.CoreClients(
+                ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor(
+                    ch.lkmc.neutrodyne.core.common
+                        .UserAgentProvider(platform, "0.1.0", "https://example.com/repo"),
+                ),
+                ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard(
+                    ch.lkmc.neutrodyne.core.common
+                        .LocalNetworkAccess(),
+                    platform,
+                ),
+                ch.lkmc.neutrodyne.core.network.okhttp
+                    .DnsFamilyHints(),
+                emptySet(),
+            ),
+            ch.lkmc.neutrodyne.core.network.okhttp
+                .AuthInterceptor { ch.lkmc.neutrodyne.core.common.CredentialLookup.None },
+        )
+    }
 
     private fun wave(): ByteArray {
         val frames = 22_050 * 5
