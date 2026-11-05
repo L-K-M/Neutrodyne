@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeHealth
 import ch.lkmc.neutrodyne.core.testing.FakeYtxTransport
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.youtube.api.BreakerState
 import ch.lkmc.neutrodyne.youtube.api.EngineAvailability
 import ch.lkmc.neutrodyne.youtube.api.EngineVersionSource
@@ -155,6 +156,7 @@ class YtDlpEngineTest {
                         f.preflight,
                         identity,
                         f.health,
+                        f.clock,
                         backgroundScope,
                     )
                 runCurrent()
@@ -483,9 +485,14 @@ class YtDlpEngineTest {
         healthDelegate: YouTubeExtractionHealth = FakeYouTubeHealth(),
     ) {
         val transport = FakeYtxTransport()
-        val store = FakeEngineStore().also { it.preparation.value = EnginePreparation.COMPILED }
+        val store =
+            FakeEngineStore().also {
+                it.preparation.value = EnginePreparation.COMPILED
+                it.active.value = EngineActive("2026.08.19", "2026.08.19", null, 0)
+            }
         val preflight = FakeEnginePlatformPreflight().also { it.result = limitation }
         val health = healthDelegate
+        val clock = TestClock()
         val engine =
             YtDlpEngine(
                 transport,
@@ -494,6 +501,7 @@ class YtDlpEngineTest {
                 preflight,
                 CompileMarker(42, "2026.08.19", "3.14"),
                 health,
+                clock,
                 scope.backgroundScope,
             )
 

@@ -82,10 +82,12 @@ object YouTubeBindingsModule {
     fun store(
         paths: AndroidEngineStorePaths,
         identity: CompileMarker,
+        clock: Clock,
     ): EngineStore =
         BundledEngineStore(
             paths,
             identity.appVersionCode,
+            clock,
         )
 
     @Provides
@@ -149,8 +151,9 @@ object YouTubeBindingsModule {
         preflight: EnginePlatformPreflight,
         identity: CompileMarker,
         health: YouTubeHealth,
+        clock: Clock,
         @ApplicationScope scope: CoroutineScope,
-    ): YtDlpEngine = YtDlpEngine(transport, store, settings, preflight, identity, health, scope)
+    ): YtDlpEngine = YtDlpEngine(transport, store, settings, preflight, identity, health, clock, scope)
 
     @Provides fun capabilities(engine: YtDlpEngine): YouTubeCapabilitiesSource = engine
 
