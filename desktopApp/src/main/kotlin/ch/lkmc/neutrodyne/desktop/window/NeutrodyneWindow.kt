@@ -41,6 +41,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -145,12 +146,12 @@ internal fun ApplicationScope.NeutrodyneWindow(
     }
 
     Window(
-        onCloseRequest = { requestClose(onQuitRequest) { hidden = it } },
+        onCloseRequest = { requestClose(onQuitRequest, { hidden = it }, activator) },
         state = state,
         visible = !hidden && appearance != null,
         title = stringResource(Res.string.window_title),
         icon = icon,
-        onKeyEvent = { event -> windowShortcut(event) { requestClose(onQuitRequest) { hidden = it } } },
+        onKeyEvent = { event -> windowShortcut(event) { requestClose(onQuitRequest, { hidden = it }, activator) } },
     ) {
         // Set the AWT background during apply, before Window's visibility side effect.
         DisposableEffect(window, dark, prefs.pureBlack) {
@@ -228,10 +229,12 @@ internal fun rememberNeutrodyneWindowState(): WindowState {
 private fun requestClose(
     onQuitRequest: () -> Unit,
     setHidden: (Boolean) -> Unit,
+    activator: WindowActivator,
 ) {
-    when (closeRequestOutcome(CloseBehaviour.QUIT_WHEN_IDLE, busy = false)) {
+    when (closeRequestOutcome(CloseBehaviour.QUIT_WHEN_IDLE, busy = false, SystemTray.isSupported())) {
         CloseOutcome.QUIT -> onQuitRequest()
         CloseOutcome.HIDE_TO_TRAY -> setHidden(true)
+        CloseOutcome.ICONIFY -> activator.iconify()
     }
 }
 
