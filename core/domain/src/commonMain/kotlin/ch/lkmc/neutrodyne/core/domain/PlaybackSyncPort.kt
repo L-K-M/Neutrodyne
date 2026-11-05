@@ -5,11 +5,15 @@ package ch.lkmc.neutrodyne.core.domain
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
-/** What the sync engine needs to know about the local player (10 Scheduling on Android). */
-data class PlaybackSyncActive(
+/**
+ * The loaded current item, playing or paused (06 Sync interplay: `ActivePlayback`); `null` in
+ * [PlaybackSyncPort.active] while nothing is loaded.
+ */
+data class ActivePlayback(
+    val episodeId: Long,
     val isPlaying: Boolean,
-    /** The loaded current item's episode, when one is loaded (10's `ActivePlayback`). */
-    val episodeId: Long? = null,
+    /** The wall clock of [episodeId] becoming current (`currentSince`), as the adapter owns it. */
+    val sinceMs: Long,
 )
 
 /** A player boundary that triggers a round (10 Scheduling on Android). */
@@ -26,10 +30,11 @@ sealed interface PlaybackSyncEvent {
 /**
  * The playback side of 10 Client sync engine: the scheduler observes [active] and [events], and
  * the applier reports a winning remote played mark through [onRemoteMarkedPlayed]. The player is
- * never stopped, seeked or skipped by sync (R7.5).
+ * never stopped, seeked or skipped by sync (R7.5). Each event is emitted only after the matching
+ * position save or transition transaction has committed.
  */
 interface PlaybackSyncPort {
-    val active: StateFlow<PlaybackSyncActive>
+    val active: StateFlow<ActivePlayback?>
 
     val events: Flow<PlaybackSyncEvent>
 
@@ -43,9 +48,9 @@ interface PlaybackSyncPort {
     )
 }
 
-/** The M1a binding: playback is not wired to sync until MS2. */
+/** The dormant binding: no player reports to sync (06's `PlaybackSyncBridge`, 11's controller). */
 object NoPlaybackSync : PlaybackSyncPort {
-    override val active = kotlinx.coroutines.flow.MutableStateFlow(PlaybackSyncActive(false))
+    override val active = kotlinx.coroutines.flow.MutableStateFlow<ActivePlayback?>(null)
 
     override val events: Flow<PlaybackSyncEvent> =
         kotlinx.coroutines.flow.flowOf()

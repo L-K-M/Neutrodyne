@@ -158,11 +158,9 @@ class SyncEngine(
     suspend fun releaseDeferred() {
         val active = playback.active.value
         val playingRid =
-            if (active.isPlaying) {
-                active.episodeId?.let { episodeId ->
-                    db.episodeDao().byId(episodeId)?.let { episode ->
-                        db.podcastDao().byId(episode.podcastId)?.syncId
-                    }
+            if (active?.isPlaying == true) {
+                db.episodeDao().byId(active.episodeId)?.let { episode ->
+                    db.podcastDao().byId(episode.podcastId)?.syncId
                 }
             } else {
                 null
