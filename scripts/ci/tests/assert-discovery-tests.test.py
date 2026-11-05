@@ -72,13 +72,17 @@ class DiscoveryEvidenceTest(unittest.TestCase):
     def test_a_dropped_initialization_error_fails_every_device_lane(self):
         for device in ("api26", "api36"):
             self.report(f"{device}DebugAndroidTest", gate.DEVICE)
-        hidden = self.root / "api26DebugAndroidTest" / "logcat-ch.lkmc.neutrodyne.SubscribeJourneyTest-initializationError.txt"
+            self.report(f"managedDevice/debug/{device}", gate.EXTERNAL_DEVICE)
+        hidden = self.root / "api26DebugAndroidTest" / "logcat-ch.lkmc.neutrodyne.ExternalYouTubeModeTest-initializationError.txt"
         hidden.write_text("")
-        with self.assertRaises(ValueError) as caught:
-            gate.verify(self.root, ["api26", "api36"])
-        self.assertIn("SubscribeJourneyTest-initializationError", str(caught.exception))
+        for verify in (gate.verify, gate.verify_external):
+            with self.subTest(verify=verify.__name__):
+                with self.assertRaises(ValueError) as caught:
+                    verify(self.root, ["api26", "api36"])
+                self.assertIn("ExternalYouTubeModeTest-initializationError", str(caught.exception))
         hidden.unlink()
         gate.verify(self.root, ["api26", "api36"])
+        gate.verify_external(self.root, ["api26", "api36"])
 
 
 class ExternalEvidenceTest(unittest.TestCase):
