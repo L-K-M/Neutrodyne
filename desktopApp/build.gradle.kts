@@ -273,7 +273,6 @@ extensions
         if (smokeRun.get()) jvmArgs("-Dneutrodyne.smoke=true")
     }
 
-<<<<<<< HEAD
 // Test-only MD0 instrument; no entry point or fixture enters the app image.
 tasks.register<JavaExec>("md0Probe") {
     group = "verification"
