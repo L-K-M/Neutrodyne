@@ -63,13 +63,11 @@ class LinuxMprisSession private constructor(
         speedPresets: List<Float>,
     ) {
         val changed = mutableMapOf<String, Variant<*>>()
-        if (nowPlaying?.title != published?.title ||
-            nowPlaying?.episodeId != published?.episodeId ||
-            nowPlaying?.podcastTitle != published?.podcastTitle ||
-            artworkUrl(nowPlaying) != artworkUrl(published) ||
-            lengthOf(nowPlaying) != lengthOf(published)
-        ) {
-            changed["Metadata"] = Variant(metadata())
+        val metadata = metadataOf(nowPlaying)
+        if (metadata != metadataOf(published)) {
+            // Maps need the explicit a{sv} signature: dbus-java cannot infer element types
+            // from a Variant's runtime value (the artist array's "as" is the same rule).
+            changed["Metadata"] = Variant(metadata, METADATA_SIGNATURE)
         }
         val status = playbackStatus(nowPlaying)
         if (status != playbackStatus(published)) changed["PlaybackStatus"] = Variant(status)
@@ -178,7 +176,7 @@ class LinuxMprisSession private constructor(
 
     override fun setShuffle(shuffle: Boolean) = Unit
 
-    override fun getMetadata(): Map<String, Variant<*>> = metadata()
+    override fun getMetadata(): Map<String, Variant<*>> = metadataOf(published)
 
     override fun getVolume() = volume
 
@@ -211,21 +209,21 @@ class LinuxMprisSession private constructor(
             else -> "Paused"
         }
 
-    private fun metadata(): Map<String, Variant<*>> {
-        val item = published ?: return emptyMap()
-        return buildMap {
-            put("mpris:trackid", Variant(DBusPath("$TRACK_PATH/${item.episodeId}")))
-            put("xesam:title", Variant(item.title))
-            // Collections inside a Variant need the explicit signature; the
-            // marshaller cannot infer the element type of listOf(x).
-            put("xesam:artist", Variant(listOf(item.podcastTitle), "as"))
-            put("xesam:album", Variant(item.podcastTitle))
-            artworkUrl(item)?.let { put("mpris:artUrl", Variant(it)) }
-            lengthOf(item)?.let { put("mpris:length", Variant(it * US_PER_MS)) }
+    private fun metadataOf(item: NowPlaying?): Map<String, Variant<*>> =
+        if (item == null) {
+            emptyMap()
+        } else {
+            buildMap {
+                put("mpris:trackid", Variant(DBusPath("$TRACK_PATH/${item.episodeId}")))
+                put("xesam:title", Variant(item.title))
+                // Collections inside a Variant need the explicit signature; the
+                // marshaller cannot infer the element type of listOf(x).
+                put("xesam:artist", Variant(listOf(item.podcastTitle), "as"))
+                put("xesam:album", Variant(item.podcastTitle))
+                item.artwork.url?.let { put("mpris:artUrl", Variant(it)) }
+                lengthOf(item)?.let { put("mpris:length", Variant(it * US_PER_MS)) }
+            }
         }
-    }
-
-    private fun artworkUrl(item: NowPlaying?): String? = item?.artwork?.url
 
     private fun lengthOf(item: NowPlaying?): Long? = item?.position?.durationMs
 
@@ -257,6 +255,7 @@ class LinuxMprisSession private constructor(
         private const val DEFAULT_RATE = 1.0
         private const val COMMAND_BUFFER = 64
         private const val TRACK_PATH = "/ch/lkmc/neutrodyne/episode"
+        private const val METADATA_SIGNATURE = "a{sv}"
 
         /** The desktop-entry id 11's table pins; the entry file carries `.desktop`. */
         private const val DESKTOP_ENTRY = "ch.lkmc.neutrodyne"

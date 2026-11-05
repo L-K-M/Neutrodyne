@@ -9,7 +9,6 @@ import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
-import org.freedesktop.dbus.exceptions.DBusException
 import org.freedesktop.dbus.interfaces.DBusInterface
 import org.freedesktop.dbus.interfaces.DBusSigHandler
 import org.freedesktop.dbus.interfaces.Properties
@@ -184,7 +183,7 @@ class LinuxMprisSessionTest {
     fun wrongTrackCannotSeekTheCurrentEpisode() =
         runBlocking {
             assumeTrue("private session bus required", System.getenv("DBUS_SESSION_BUS_ADDRESS") != null)
-            LinuxMprisSession.open().use { session ->
+            LinuxMprisSession.open(System.getenv("DBUS_SESSION_BUS_ADDRESS")).use { session ->
                 session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
                 session.SetPosition(DBusPath("/not/the/current/track"), 1_000_000)
                 kotlin.test.assertNull(withTimeoutOrNull(100) { session.commands.first() })
@@ -194,7 +193,7 @@ class LinuxMprisSessionTest {
     @Test
     fun aNonFiniteRateCannotEnterTheCommandStream() {
         assumeTrue("private session bus required", System.getenv("DBUS_SESSION_BUS_ADDRESS") != null)
-        LinuxMprisSession.open().use { session ->
+        LinuxMprisSession.open(System.getenv("DBUS_SESSION_BUS_ADDRESS")).use { session ->
             kotlin.test.assertFailsWith<IllegalArgumentException> { session.setRate(Double.NaN) }
             assertTrue(session.getRate().isFinite())
         }
@@ -203,7 +202,7 @@ class LinuxMprisSessionTest {
     @Test
     fun openUriAnswersNotSupported() {
         assumeTrue("private session bus required", System.getenv("DBUS_SESSION_BUS_ADDRESS") != null)
-        LinuxMprisSession.open().use { session ->
+        LinuxMprisSession.open(System.getenv("DBUS_SESSION_BUS_ADDRESS")).use { session ->
             session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
             DBusConnectionBuilder
                 .forAddress(System.getenv("DBUS_SESSION_BUS_ADDRESS"))
@@ -211,10 +210,10 @@ class LinuxMprisSessionTest {
                 .use { client ->
                     val failure =
                         runCatching { client.player().OpenUri("https://example.test/x.mp3") }.exceptionOrNull()
+                    // dbus-java maps the error name onto its errors.NotSupported class.
                     assertTrue(
                         "expected org.freedesktop.DBus.Error.NotSupported, got $failure",
-                        failure is DBusException &&
-                            failure.message?.contains("NotSupported") == true,
+                        failure is org.freedesktop.dbus.errors.NotSupported,
                     )
                 }
         }
