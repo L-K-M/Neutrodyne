@@ -614,9 +614,9 @@ class FirstLinkMerger(
                 d =
                     record.match?.date?.let {
                         runCatching {
-                            java.time.Instant
+                            kotlin.time.Instant
                                 .parse(it)
-                                .toEpochMilli()
+                                .toEpochMilliseconds()
                         }.getOrNull()
                     },
                 u = record.match?.enc,
