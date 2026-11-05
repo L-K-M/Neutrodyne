@@ -88,7 +88,14 @@ internal class PodcastDeduper(
         }
         val queueSource = changes.resolve(RecordKey(SyncCollection.UPNEXT, from))
         val queueTarget = changes.resolve(RecordKey(SyncCollection.UPNEXT, to))
-        if (queueSource != queueTarget) changes.move(queueSource, queueTarget)
+        if (queueSource != queueTarget) {
+            // Clients read an UPNEXT record without `in` as queued: an unqueued episode only routes.
+            if (changes.record(queueSource) == null) {
+                changes.routeUnseen(queueSource, queueTarget)
+            } else {
+                changes.move(queueSource, queueTarget)
+            }
+        }
         return target
     }
 

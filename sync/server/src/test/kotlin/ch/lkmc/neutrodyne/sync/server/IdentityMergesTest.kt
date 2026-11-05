@@ -198,6 +198,34 @@ class IdentityMergesTest {
         }
 
     @Test
+    fun rekeyOfAnUnqueuedEpisodeCreatesNoUpNextRecord() =
+        runBlocking {
+            val f = WriterFixture()
+            val old = episode()
+            val new = episode(episode = "g:new")
+            val queueOld = old.copy(collection = SyncCollection.UPNEXT)
+            val queueNew = new.copy(collection = SyncCollection.UPNEXT)
+            f.push(f.write(old, "fav", JsonPrimitive(true)))
+            val change = ChangeDto("episode", old.id.toWire(), op = "rekey", to = new.id.toWire())
+            assertEquals(
+                "merged",
+                f
+                    .push(change)
+                    .results
+                    .single()
+                    .status,
+            )
+            // Clients read an UPNEXT record without `in` as queued, so none may appear here.
+            f.store.read(1) {
+                assertNull(record(queueNew))
+                assertFalse(record(queueOld)?.raw?.let { !RecordMerger.isDead(it) } == true)
+            }
+            // The old queue key still routes to the new one for a later write.
+            f.push(f.write(queueOld, "in", JsonPrimitive(true), f.clock(1)))
+            assertEquals(JsonPrimitive(true), f.raw(queueNew).fields["in"]!!.v)
+        }
+
+    @Test
     fun conflictingRekeyCannotReassignAnAuthoritativeIdentity() =
         runBlocking {
             val f = WriterFixture()
