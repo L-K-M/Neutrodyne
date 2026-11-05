@@ -1,0 +1,9 @@
+{
+  "uniqueId": "neutrodyne:ffmpeg",
+  "name": "ffmpeg",
+  "artifactVersion": "9.0.2",
+  "description": "MD0 native spike component; production native bundling begins in MD1.",
+  "licenses": [
+    "LGPL-2.1-or-later"
+  ]
+}

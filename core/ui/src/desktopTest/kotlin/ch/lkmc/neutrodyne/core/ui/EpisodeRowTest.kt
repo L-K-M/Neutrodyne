@@ -182,6 +182,7 @@ class EpisodeRowTest {
                 listOf(
                     "Download",
                     "Download now",
+                    "Download actions",
                     "Cancel download",
                     "Pause download",
                     "Resume download",
@@ -191,7 +192,7 @@ class EpisodeRowTest {
 
             downloadState = DownloadState.QUEUED
             waitForIdle()
-            assertEquals(listOf("Cancel download"), downloadActionLabels(downloadLabels))
+            assertEquals(listOf("Download actions"), downloadActionLabels(downloadLabels))
 
             downloadState = DownloadState.RESOLVING
             waitForIdle()

@@ -1823,6 +1823,15 @@ The planned keys `updates.mode`, `updates.channel` and `updates.whats_new_versio
 
 ### After restore
 
+**Implementation note (2026-10-19, M6a).** Restore Replace invokes the domain
+`DownloadLifecycle.beforeLibraryReplace` before its destructive pre-step, removing
+local download rows and journaling their files without dismissal tombstones.
+The existing visible Replace confirmation and playback pause remain required.
+The report's re-download offer filters missing episodes, completed downloads and
+YouTube hints, then calls MANUAL request only on a user tap. Metered ASK is answered
+through the same controller consent path; restore itself never starts transfers.
+
+
 - Restored podcasts fetch through `import-{sessionId}` with `initialFetch = 1`: no `isNew`, no notifications, no auto-download storm ([D66](../PLAN.md#3-key-decisions)); 07 sets `autoDownloadEligibleAfter` when policies resolve to enabled, so nothing is backfilled ([D67](../PLAN.md#3-key-decisions)).
 - The report is the import report of the restore session; podcasts with `AUTH_REQUIRED` show "Enter password" (stored credentials are bound to their device — an Android Keystore key, a DPAPI blob or a `0600` file — and never move, [03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore)).
 - **Re-download offer** (M6): transactions B record the episode IDs of `dl = true` lines in `ImportOptions.redownloadIds` (newest `d` first, at most 2,000); those that still exist and have no `COMPLETED` download → the report shows "Re-download 23 episodes (about 1.1 GB)" (size as in `downloadAllEstimate`); tapping calls `DownloadController.request(ids, DownloadLane.MANUAL, allowMetered = null)` from the visible screen (Android: UIDT must be scheduled while visible, [07 Runners and scheduling](07-downloads.md#runners-and-scheduling); desktop: the `downloads-manual` lane, [07 Desktop runners](07-downloads.md#desktop-runners)). YouTube lines are skipped while `YouTubeCapabilitiesSource.capabilities.value.downloads` is false (external mode).

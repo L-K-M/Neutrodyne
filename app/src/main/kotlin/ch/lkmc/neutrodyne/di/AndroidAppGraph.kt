@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
@@ -23,6 +24,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -31,6 +33,7 @@ import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.impl.DownloadComponentsInjector
 import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
@@ -51,7 +54,7 @@ import kotlinx.coroutines.CoroutineScope
  * (D73): `:ytx` builds [YtxGraph], `:acra` builds nothing.
  */
 @DependencyGraph(AppScope::class, bindingContainers = [YouTubeBindingsModule::class])
-interface AndroidAppGraph {
+interface AndroidAppGraph : DownloadComponentsInjector {
     val application: Application
 
     @ApplicationScope
@@ -61,6 +64,7 @@ interface AndroidAppGraph {
 
     val playbackController: PlaybackController
     val playbackStateSource: PlaybackStateSource
+    val refreshController: RefreshController
     val playbackMaintenance: PlaybackMaintenance
     val localMediaIndex: LocalMediaIndex
     val youtubeCapabilities: YouTubeCapabilitiesSource
@@ -72,6 +76,9 @@ interface AndroidAppGraph {
     val playSessionStore: Provider<PlaySessionStore>
     val positionStore: Provider<PositionStore>
     val playbackMediaLookup: Provider<PlaybackMediaLookup>
+    val chapterRepository: Provider<ChapterRepository>
+
+    val downloadController: Provider<ch.lkmc.neutrodyne.download.api.DownloadController>
 
     val workerFactory: WorkerFactory
 

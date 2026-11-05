@@ -383,6 +383,9 @@ private class AllGroupsSheetFixture {
                     FakePlaybackStateSource(),
                     testPlatformInfo,
                     dispatcher,
+                    downloadController =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeDownloadController(),
                 ).also {
                     feedModel = it
                     store.put("feeds", it)

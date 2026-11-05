@@ -59,11 +59,27 @@ def require_cases(reports, expected, label):
     print(f"{label}: {len(evidence)} discovery cases passed, 0 skipped")
 
 
+def require_no_initialization_errors(root):
+    """Fail on GMD logcat runs of a class JUnit4 refused to construct.
+
+    A non-void test method makes JUnit4 invalidate the whole class; the orchestrator then
+    runs a pseudo-case `initializationError`, which the managed-device result XML drops
+    while the Gradle task stays green (2026-11-04). The per-test logcat file is the only
+    surviving evidence, so any such file must fail the gate with the class it names.
+    """
+    hidden = sorted(
+        {path.name[len("logcat-"):-len(".txt")] for path in root.rglob("logcat-*-initializationError.txt")}
+    )
+    if hidden:
+        raise ValueError(f"classes reported initializationError, never executed: {', '.join(hidden)}")
+
+
 def verify(root, devices):
     if not devices:
         for folder, cases in HOST.items():
             require_cases((root / folder).rglob("*.xml"), cases, folder)
         return
+    require_no_initialization_errors(root)
     for device in devices:
         reports = (report for report in root.rglob("*.xml") if device == "connected" or any(
             re.fullmatch(re.escape(device) + r"(?:Debug|Release)AndroidTest", part) or part == device

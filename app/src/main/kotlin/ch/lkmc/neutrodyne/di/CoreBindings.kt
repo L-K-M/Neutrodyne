@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.platform.AndroidBuildInfo
 import ch.lkmc.neutrodyne.platform.AndroidPlatformInfo
 import ch.lkmc.neutrodyne.platform.AndroidUpdateRuntimeInputs
@@ -95,5 +96,14 @@ object CoreBindings {
             ): String = OrderKey.between(previous, next)
 
             override fun rewrite(count: Int): List<String> = OrderKey.rewrite(count)
+        }
+
+    @Provides
+    @ch.lkmc.neutrodyne.download.impl.DownloadErrorText
+    fun downloadErrorText(): suspend (ch.lkmc.neutrodyne.core.model.DownloadError?) -> String =
+        {
+            ch.lkmc.neutrodyne.core.ui.DownloadStatusText
+                .errorText(it)
+                .resolve()
         }
 }

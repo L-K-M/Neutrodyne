@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation3.runtime.NavKey
 import androidx.navigationevent.NavigationEvent
@@ -102,6 +103,7 @@ import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
 import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_failed_badge
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
@@ -113,6 +115,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -145,6 +148,7 @@ public fun NeutrodyneRoot(
     platform: BuildInfo.Platform = BuildInfo.Platform.ANDROID,
     initialTab: TopLevelKey = FeedsKey,
     routes: Flow<Route> = emptyFlow(),
+    failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     val rootViewModelOwner = LocalViewModelStoreOwner.current
     val backOwner = LocalNavigationEventDispatcherOwner.current ?: rememberNavigationEventDispatcherOwner()
@@ -221,6 +225,7 @@ public fun NeutrodyneRoot(
                         modifier,
                         expandRequest,
                         collapseRequest,
+                        failedDownloads,
                     )
                 }
             }
@@ -241,7 +246,9 @@ private fun ReadyRoot(
     modifier: Modifier = Modifier,
     expandRequest: Int = 0,
     collapseRequest: Int = 0,
+    failedDownloads: Flow<Int> = emptyFlow(),
 ) {
+    val failedDownloadCount by failedDownloads.collectAsStateWithLifecycle(initialValue = 0)
     var expandedSettled by remember { mutableStateOf(false) }
     var playerNavigationRequests by rememberSaveable { mutableIntStateOf(0) }
     var lastPlayerTab by remember { mutableStateOf(navigation.selectedTab) }
@@ -413,7 +420,7 @@ private fun ReadyRoot(
                     },
         ) {
             NdNavigationSuiteScaffold(
-                items = navItems(),
+                items = navItems(failedDownloadCount),
                 selected = navigation.tabs.indexOf(navigation.selectedTab),
                 onSelect = { index -> navigation.selectTab(navigation.tabs[index]) },
                 suiteType = suiteType,
@@ -543,7 +550,7 @@ private fun isRailSuite(suiteType: NavigationSuiteType): Boolean =
     }
 
 @Composable
-private fun navItems(): List<NdNavItem> =
+private fun navItems(failedDownloads: Int): List<NdNavItem> =
     listOf(
         NdNavItem(
             label = stringResource(Res.string.nav_feeds),
@@ -568,6 +575,13 @@ private fun navItems(): List<NdNavItem> =
             icon = NdIcons.Download,
             iconSelected = NdIcons.DownloadFilled,
             testTag = "nav_downloads",
+            badgeCount = failedDownloads,
+            badgeDescription =
+                pluralStringResource(
+                    Res.plurals.downloads_failed_badge,
+                    failedDownloads,
+                    failedDownloads,
+                ),
         ),
         NdNavItem(
             label = stringResource(Res.string.nav_discover),

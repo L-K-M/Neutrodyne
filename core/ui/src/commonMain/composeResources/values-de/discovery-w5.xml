@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: Unlicense -->
 <resources>
     <string name="discovery_search">Podcasts suchen oder Link einfügen</string>
+    <string name="discovery_providers_loading">Verzeichnisanbieter werden geladen…</string>
     <string name="discovery_disclosure">Suchanfragen werden an %1$s gesendet</string>
     <string name="discovery_disabled">Aktiviere ein Verzeichnis in den Entdecken-Einstellungen</string>
     <string name="discovery_top">Beliebte Podcasts</string>

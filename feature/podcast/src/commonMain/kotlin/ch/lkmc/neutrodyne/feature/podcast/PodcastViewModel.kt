@@ -33,10 +33,13 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.Group
+import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.withCapabilities
+import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
@@ -51,6 +54,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_undo
 import ch.lkmc.neutrodyne.core.ui.resources.membership_changed
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed_from_group
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.Assisted
@@ -96,10 +100,27 @@ public class PodcastViewModel
         network: NetworkMonitor,
         liveStateSource: EpisodeLiveStateSource,
         clock: Clock,
+        downloadController: DownloadController,
     ) : ViewModel() {
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
         private val userMessages = UserMessages()
+        public val downloads =
+            DownloadRequestHandler(
+                viewModelScope,
+                downloadController,
+                userMessages,
+                allowAlways = {
+                    check(
+                        settings.set(DownloadSettingKeys.MANUAL_METERED, ManualMeteredPolicy.ALWAYS) is Outcome.Success,
+                    )
+                },
+                markNotificationPrompted = {
+                    check(settings.set(DownloadSettingKeys.NOTIFICATION_PROMPTED, true) is Outcome.Success)
+                },
+                onFailure = ::reportWriteFailed,
+            )
+
         private val visibleIds = MutableStateFlow<Set<Long>>(emptySet())
 
         /** Shown Undo snackbar's message id → the membership it may restore (05 Membership). */
@@ -195,6 +216,10 @@ public class PodcastViewModel
                     }
                 }
 
+                is EpisodeAction.DownloadToggle -> {
+                    downloads.toggle(action.episodeId)
+                }
+
                 is EpisodeAction.PlayNext -> {
                     playback.playNext(listOf(action.episodeId))
                 }
@@ -203,7 +228,7 @@ public class PodcastViewModel
                     playback.playLast(listOf(action.episodeId))
                 }
 
-                // DownloadToggle needs the download engine (M6).
+                // Availability checks need the YouTube engine (M8).
                 else -> {
                     Unit
                 }

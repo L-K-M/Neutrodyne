@@ -52,6 +52,7 @@ public fun CoverArt(
     avgArgb: Int? = null,
     title: String? = null,
     contentDescription: String? = null,
+    networkPolicy: CoverNetworkPolicy = CoverNetworkPolicy.SUBSCRIBED,
 ) {
     val context = LocalPlatformContext.current
     val density = LocalDensity.current
@@ -71,8 +72,8 @@ public fun CoverArt(
 
     val placeholder = rememberPlaceholderPainter(avgArgb?.let(::Color) ?: Color(painter.backgroundArgb))
     val request =
-        remember(ref, tier, aspect, crossfade, density, context) {
-            Covers.request(context, ref, tier, density, aspect, crossfade)
+        remember(ref, tier, aspect, crossfade, density, context, networkPolicy) {
+            Covers.request(context, ref, tier, density, aspect, crossfade, networkPolicy)
         }
     val imageLoader = SingletonImageLoader.get(context)
     // AsyncImage's explicit loading/error painters otherwise replace Coil's cached THUMB.

@@ -54,7 +54,7 @@ class CarLibraryTest {
         }
     }
 
-    @Test fun groupTapRetainsContextAndRejectsForgedStaleAndDownloadsParents() {
+    @Test fun groupAndDownloadsTapsRetainContextAndRejectStaleParents() {
         LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
             h.run {
                 h.opener.awaitOpen()
@@ -103,6 +103,18 @@ class CarLibraryTest {
                         0,
                     )
                 }
+                db.downloadDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database
+                        .downloadEntity(episode),
+                )
+                val downloads =
+                    assertIs<StartRequest.Downloads>(
+                        h.tree.startRequest(listOf(item("episode:$episode@downloads")), 0, 42_000),
+                    )
+                assertEquals(episode, downloads.startEpisodeId)
+                assertEquals(42_000L, downloads.positionMs)
+                val downloaded = h.tree.children("downloads", 0, 100).map { it.mediaId }
+                assertEquals(listOf("episode:$episode@downloads"), downloaded)
                 db.groupDao().deleteGroup(group)
                 assertFailsWith<IllegalArgumentException> {
                     h.tree.startRequest(
@@ -111,6 +123,33 @@ class CarLibraryTest {
                         0,
                     )
                 }
+            }
+        }
+    }
+
+    // 06 Browse tree: the downloads node lists completed downloads newest first, played or not,
+    // like the Downloads screen; only its play context skips played episodes.
+    @Test fun downloadsNodeListsPlayedAndUnplayedCompletedDownloads() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            h.run {
+                h.opener.awaitOpen()
+                val db = h.opener.requireDatabase()
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val older = db.episodeDao().insertStub(episodeEntity(podcastId = podcast, sortDate = 10))
+                val newer = db.episodeDao().insertStub(episodeEntity(podcastId = podcast, sortDate = 20))
+                h.lookup.items.value = mapOf(older to media(id = older), newer to media(id = newer))
+                for (id in listOf(older, newer)) {
+                    db.downloadDao().insert(
+                        ch.lkmc.neutrodyne.core.testing.database
+                            .downloadEntity(id),
+                    )
+                }
+                db.episodeStateDao().upsert(EpisodeStateEntity(older, playedAt = 1, updatedAt = 1))
+
+                assertEquals(
+                    listOf("episode:$newer@downloads", "episode:$older@downloads"),
+                    h.tree.children("downloads", 0, 100).map { it.mediaId },
+                )
             }
         }
     }

@@ -3,6 +3,8 @@ package ch.lkmc.neutrodyne
 
 import android.os.Build
 import android.os.Process
+import android.os.StrictMode
+import android.os.SystemClock
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.assert
@@ -10,7 +12,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
@@ -35,10 +37,12 @@ import ch.lkmc.neutrodyne.core.ui.resources.settings
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
-import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestRule
 import org.junit.runner.RunWith
+import org.junit.runners.model.Statement
 
 /**
  * E0 (09 End-to-end journeys, PLAN M0 AC4): five labelled destinations, rotation and a dark-mode switch survive,
@@ -51,9 +55,65 @@ class SmokeTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
 
-    @After
+    private var originalVmPolicy: StrictMode.VmPolicy? = null
+
+    /**
+     * `ActivityScenario.recreate()` keeps the destroyed activity reachable until the
+     * relaunch completes; StrictMode's activity-leak heuristic counts it and the debug
+     * policy kills the process (a relaunch false positive, API 26 logcat). The relaunch
+     * can still be in flight when the Compose rule tears the activity down, so the
+     * relaxed policy must outlive `@After`: this rule has a higher order than the
+     * Compose rule and restores the app's policy after its teardown.
+     */
+    @get:Rule(order = 1)
+    val relaxActivityLeakDetection =
+        TestRule { base, _ ->
+            object : Statement() {
+                override fun evaluate() {
+                    // The app's debug initializers run asynchronously; replacing the policy
+                    // before they set it would be overwritten again.
+                    waitForAppVmPolicy()
+                    originalVmPolicy = StrictMode.getVmPolicy()
+                    Log.i("SmokeTestPolicy", "app policy=$originalVmPolicy")
+                    StrictMode.setVmPolicy(
+                        StrictMode.VmPolicy
+                            .Builder()
+                            .detectLeakedClosableObjects()
+                            .detectLeakedSqlLiteObjects()
+                            .detectLeakedRegistrationObjects()
+                            .detectFileUriExposure()
+                            .penaltyLog()
+                            .penaltyDeath()
+                            .build(),
+                    )
+                    try {
+                        base.evaluate()
+                    } finally {
+                        Log.i("SmokeTestPolicy", "restore policy=$originalVmPolicy")
+                        originalVmPolicy?.let(StrictMode::setVmPolicy)
+                        originalVmPolicy = null
+                    }
+                }
+            }
+        }
+
+    private fun waitForAppVmPolicy() {
+        val deadline = SystemClock.elapsedRealtime() + 5_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val policy = StrictMode.getVmPolicy().toString()
+            val mask = policy.substringAfter("mask=").removeSuffix("]").trim()
+            if (mask != "0") return
+            Thread.sleep(50)
+        }
+    }
+
+    @Before
     fun resetNightMode() {
+        // Reset before the journey, not after it: resetting after the test would
+        // trigger a configuration-change relaunch while the Compose rule is tearing
+        // the activity down, outside the relaxed policy's lifetime.
         compose.runOnUiThread { AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM) }
+        compose.waitForIdle()
     }
 
     @Test

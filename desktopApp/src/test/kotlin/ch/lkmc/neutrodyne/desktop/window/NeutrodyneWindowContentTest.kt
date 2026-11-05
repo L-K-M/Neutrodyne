@@ -241,7 +241,7 @@ class NeutrodyneWindowContentTest {
             setWindowContent()
 
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
 
             // The desktop source loads the generated aboutlibraries.json off the classpath. The
             // list is lazy and the OpenJDK entry sits in "Bundled components" at its end, so the

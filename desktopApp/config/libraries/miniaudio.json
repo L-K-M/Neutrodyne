@@ -1,0 +1,9 @@
+{
+  "uniqueId": "neutrodyne:miniaudio",
+  "name": "miniaudio",
+  "artifactVersion": "0.11.22",
+  "description": "MD0 native spike component; production native bundling begins in MD1.",
+  "licenses": [
+    "MIT-0-miniaudio"
+  ]
+}

@@ -27,10 +27,19 @@ class FakeAddPodcastResolver : AddPodcastResolver {
     var gate: CompletableDeferred<Unit>? = null
 
     val inputs = mutableListOf<String>()
+
+    /** Inputs resolved through [resolveUnconfirmed] — the no-tap path (03 note 2026-11-02). */
+    val unconfirmedInputs = mutableListOf<String>()
     val credentialInputs = mutableListOf<Pair<String, BasicCredentials>>()
 
     override suspend fun resolve(input: String): AddResolution {
         inputs += input
+        gate?.await()
+        return nextResolution
+    }
+
+    override suspend fun resolveUnconfirmed(input: String): AddResolution {
+        unconfirmedInputs += input
         gate?.await()
         return nextResolution
     }
