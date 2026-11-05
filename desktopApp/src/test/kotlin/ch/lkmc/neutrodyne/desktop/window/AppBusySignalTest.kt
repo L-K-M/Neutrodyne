@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.window
 
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.OpenResult
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadController
@@ -71,6 +72,35 @@ class AppBusySignalTest {
             assertThat(seen.last()).isTrue()
 
             nowPlaying.value = testNowPlaying().copy(isPlaying = false)
+            assertThat(seen.last()).isFalse()
+        }
+
+    @Test
+    fun `the download side follows a database reopen`() =
+        runTest {
+            val opened = DatabaseOpenState.Opened(OpenResult(created = false, recovered = null))
+            downloads.busy.value = true
+            openState.value = opened
+            val seen = collectBusy()
+            assertThat(seen.last()).isTrue()
+
+            // A failed open (01's recovery gate) runs the old controller down; no database
+            // means no transfer can run, so the signal must not stay stuck at busy.
+            openState.value =
+                DatabaseOpenState.Failed(
+                    DatabaseOpenException(
+                        DatabaseOpenException.Reason.IO,
+                        IllegalStateException("disk went away"),
+                    ),
+                )
+            assertThat(seen.last()).isFalse()
+
+            // "Try again" succeeds: the fresh controller's transfers are followed again.
+            downloads.busy.value = true
+            openState.value = DatabaseOpenState.Opened(OpenResult(created = true, recovered = null))
+            assertThat(seen.last()).isTrue()
+
+            downloads.busy.value = false
             assertThat(seen.last()).isFalse()
         }
 
