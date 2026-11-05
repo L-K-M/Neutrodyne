@@ -106,6 +106,7 @@ internal class RestoreMerger(
         policy: MergePolicy,
         categories: Set<RestoreCategory>,
         captureWithBackupTimes: Boolean = false,
+        suppressCapture: Boolean = false,
         progress: (done: Int, total: Int) -> Unit = { _, _ -> },
         onApplied: (suspend (MergedRecord) -> Unit)? = null,
     ): LibraryMergeResult {
@@ -113,7 +114,7 @@ internal class RestoreMerger(
         // Linked writes (link policies, linked restore) suppress the capture triggers; the
         // explicit captures below still land — captureAt/captureLiteral answer to `enabled`
         // alone, never `applying`.
-        val suppressCapture = link || captureWithBackupTimes
+        val suppress = link || captureWithBackupTimes || suppressCapture
         val library = staged.library()
         val now = clock.now()
 
@@ -141,7 +142,7 @@ internal class RestoreMerger(
                     matchedGroupIds,
                     categories,
                     now,
-                    suppressCapture,
+                    suppress,
                 )
             } else {
                 emptyList()
@@ -263,7 +264,7 @@ internal class RestoreMerger(
                 }
                 // Linked execution suppresses the triggers (05): link policies and a linked
                 // Merge restore run transaction A inside `withApplying`.
-                if (suppressCapture) {
+                if (suppress) {
                     db.syncStateDao().withApplying { block() }
                 } else {
                     block()

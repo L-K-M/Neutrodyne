@@ -186,6 +186,7 @@ class BackupCrossPlatformTest {
                 refresh = FakeRefreshController(),
                 channels = channels,
                 snapshots = FakeSnapshotScheduler(),
+                linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
                 clock = clock,
                 io = Dispatchers.IO,
             )
