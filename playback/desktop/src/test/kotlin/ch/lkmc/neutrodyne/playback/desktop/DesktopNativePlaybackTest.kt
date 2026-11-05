@@ -286,7 +286,9 @@ class DesktopNativePlaybackTest {
                     withTimeout(10_000) {
                         controller.nowPlaying.filter { it?.position?.positionMs == 1_000L }.first()
                     }
-                    assertEquals(1, controller.currentChapter.value?.index)
+                    withTimeout(10_000) {
+                        controller.currentChapter.filter { it?.index == 1 }.first()
+                    }
                 } finally {
                     controller.shutdown()
                     scope.cancel()
