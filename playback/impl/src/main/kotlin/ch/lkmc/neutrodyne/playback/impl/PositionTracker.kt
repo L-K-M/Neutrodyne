@@ -32,6 +32,8 @@ internal class PositionTracker(
     private val applicationScope: CoroutineScope,
     private val streamSource: (Long) -> PositionSource = { PositionSource.STREAM },
     private val reportFailure: (Exception) -> Unit = { android.util.Log.w(TAG, "Position save failed") },
+    private val onCurrentChanged: (Long?) -> Unit = {},
+    private val afterPauseSave: () -> Unit = {},
 ) : Player.Listener {
     private var player: Player? = null
     private var ticker: Job? = null
@@ -70,10 +72,12 @@ internal class PositionTracker(
         loadedDurationMs = durationMs
         currentSinceMs = clock.now()
         saver.load(episodeId, currentSinceMs, streamSource(episodeId), replay, allowed)
+        onCurrentChanged(episodeId)
     }
 
-    fun startPositionApplied() {
-        saver.startPositionApplied()
+    /** The applied position (the durable start seek) becomes the saver's pickup reference. */
+    fun startPositionApplied(appliedPositionMs: Long? = null) {
+        saver.startPositionApplied(appliedPositionMs ?: player?.currentPosition?.coerceAtLeast(0))
         if (player?.isPlaying == true) onIsPlayingChanged(true)
     }
 
@@ -81,6 +85,7 @@ internal class PositionTracker(
         loadedId = null
         loadedDurationMs = null
         saver.clear()
+        onCurrentChanged(null)
     }
 
     /** Suppress only synchronous setup seeks; user seeks keep the explicit reset semantics. */
@@ -138,7 +143,9 @@ internal class PositionTracker(
         if (isPlaying) {
             playerScope.launch(start = CoroutineStart.UNDISPATCHED) { result(saver.onPlaying()) }
         } else {
-            flush(PositionFlushReason.PAUSE)
+            // 06 Sync interplay: the Paused boundary reaches sync only after this pause save
+            // committed, so the round it starts carries the final position.
+            flush(PositionFlushReason.PAUSE, afterSave = afterPauseSave)
         }
     }
 
@@ -149,14 +156,20 @@ internal class PositionTracker(
         if (!playWhenReady) flush(PositionFlushReason.PAUSE)
     }
 
-    fun flush(reason: PositionFlushReason): PositionCapture? {
+    fun flush(
+        reason: PositionFlushReason,
+        afterSave: (() -> Unit)? = null,
+    ): PositionCapture? {
         val snapshot = capture() ?: return null
-        if (reason != PositionFlushReason.DESTROY) persist(snapshot)
+        if (reason != PositionFlushReason.DESTROY) persist(snapshot, afterSave)
         return snapshot
     }
 
     /** Call with flush(DESTROY) captured on main, before releasing/cancelling the service. */
-    fun detach(teardownSnapshot: PositionCapture? = capture()): Job? {
+    fun detach(
+        teardownSnapshot: PositionCapture? = capture(),
+        after: () -> Unit = {},
+    ): Job? {
         player?.let {
             checkPlayerThread(it)
             it.removeListener(this)
@@ -169,12 +182,20 @@ internal class PositionTracker(
         return teardownSnapshot?.let { snapshot ->
             applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 withContext(NonCancellable) { result(saver.flush(snapshot)) }
+                // 06 `onDestroy`: the flush's Stopped follows the save, before `active = null`.
+                after()
             }
         }
     }
 
-    private fun persist(snapshot: PositionCapture) {
-        playerScope.launch(start = CoroutineStart.UNDISPATCHED) { result(saver.flush(snapshot)) }
+    private fun persist(
+        snapshot: PositionCapture,
+        afterSave: (() -> Unit)? = null,
+    ) {
+        playerScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            result(saver.flush(snapshot))
+            afterSave?.invoke()
+        }
     }
 
     private fun result(result: PositionSaveResult) {

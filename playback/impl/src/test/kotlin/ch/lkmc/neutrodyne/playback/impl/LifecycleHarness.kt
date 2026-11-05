@@ -114,6 +114,10 @@ internal class LifecycleHarness(
     val scopes = FakeScopeSettingsRepository(settings = settings)
     val effective = EffectivePlaybackSettings(FakeEffectiveSettingsResolver(), scopes, settings)
     val history = PlaybackHistory()
+    val guard =
+        ch.lkmc.neutrodyne.playback.core
+            .RemotePlayedGuard()
+    val sync = PlaybackSyncBridge(guard, Provider { positions }, scope)
     private val sources = SourceHarness(File(app.cacheDir, "lifecycle-cache"))
     val index = sources.index
     val resolver = sources.resolver
@@ -262,6 +266,8 @@ internal class LifecycleHarness(
             local,
             capabilities,
             history,
+            guard,
+            sync,
             scope,
             Dispatchers.IO,
             opener,
