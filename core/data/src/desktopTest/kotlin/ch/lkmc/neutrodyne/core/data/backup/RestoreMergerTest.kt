@@ -192,6 +192,57 @@ class RestoreMergerTest {
             assertEquals("onUuidChanged($localUuid, $recordUuid)", channels.calls.single())
         }
 
+    /**
+     * 10 "Use this device's library everywhere" step 2 (LINK_HISTORY): a matched podcast
+     * adopts the record's `syncId`, a `nameKey`-matched group the record's `uuid`; every
+     * other server record — podcasts, groups, members — is not applied, so nothing is
+     * inserted, no field is written and nothing reaches the outbox.
+     */
+    @Test
+    fun linkHistoryAdoptsMatchedIdsAndAppliesNoLibraryRecord() =
+        runTest {
+            link()
+            val local =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://a/feed") { copy(customTitle = "Local") },
+                )
+            val localUuid = Uuid.random().toString()
+            val localGroup =
+                db.groupDao().insert(groupEntity(name = "News", uuid = localUuid, orderKey = "0.5"))
+            val recordSyncId = "00000000-0000-4000-8000-0000000000cc"
+            val recordUuid = "00000000-0000-4000-8000-0000000000dd"
+            val staged =
+                stagedOf(
+                    podcasts =
+                        listOf(
+                            podcastV1("https://a/feed").copy(syncId = recordSyncId, customTitle = "Record"),
+                            // Server-only podcast: the prune removes it, never a local insert.
+                            podcastV1("https://b/feed"),
+                        ),
+                    groups =
+                        listOf(
+                            groupV1(uuid = recordUuid, name = "News", orderKey = "0.7"),
+                            groupV1(uuid = "00000000-0000-4000-8000-0000000000ee", name = "New group"),
+                        ),
+                )
+
+            val summary = merger.mergeLibrary(staged, MergePolicy.LINK_HISTORY, ALL_CATEGORIES).summary
+
+            assertEquals(recordSyncId, db.podcastDao().byId(local)!!.syncId)
+            assertEquals("Local", db.podcastDao().byId(local)!!.customTitle, "no podcast field is applied")
+            assertEquals(1, db.podcastDao().allForExport().size, "the server-only podcast is not inserted")
+            assertEquals(recordUuid, db.groupDao().groupById(localGroup)!!.uuid)
+            assertEquals("onUuidChanged($localUuid, $recordUuid)", channels.calls.single())
+            assertEquals(1, db.groupDao().groupsInOrder().size, "the server-only group is not inserted")
+            assertEquals("0.5", db.groupDao().groupById(localGroup)!!.orderKey, "the local look stays")
+            assertEquals(0, countSql("SELECT COUNT(*) FROM podcast_url_alias"))
+            assertEquals(1, summary.podcastsMatched)
+            assertEquals(0, summary.podcastsAdded)
+            assertEquals(1, summary.groupsMatched)
+            assertEquals(0, summary.groupsAdded)
+            assertTrue(db.syncOutboxDao().rows().isEmpty(), "rows=${db.syncOutboxDao().rows()}")
+        }
+
     @Test fun restoreDropsInvalidAutoKeepLatestInsteadOfActivatingIt() =
         runTest {
             val staged =

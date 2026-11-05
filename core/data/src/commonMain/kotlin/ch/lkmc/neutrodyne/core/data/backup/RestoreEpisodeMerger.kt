@@ -97,8 +97,13 @@ internal class RestoreEpisodeMerger(
         onApplied: (suspend (MergedRecord) -> Unit)? = null,
     ): EpisodeMergeResult {
         val link = policy == MergePolicy.LINK_MERGE || policy == MergePolicy.LINK_REPLACE
+        // The First-link rules (stub rule, onUnmatched, capture suppression) serve the
+        // history-only policy too: unmatched lines of known podcasts park for the next ingest.
+        val linkRules = link || policy == MergePolicy.LINK_HISTORY
         val history = RestoreCategory.HISTORY in categories
-        val upNext = RestoreCategory.UP_NEXT in categories
+        // 10 "Use this device's library everywhere" step 2: history merges by time; the
+        // staged Up next list and session are records this choice does not apply.
+        val upNext = RestoreCategory.UP_NEXT in categories && policy != MergePolicy.LINK_HISTORY
         if (!history && !upNext) return EpisodeMergeResult(MergeSummary(0, 0, 0, 0, 0, 0, 0, 0), emptyList())
         val now = clock.now()
         val podcastIdByKey = settled.podcastIdByKey
@@ -134,7 +139,7 @@ internal class RestoreEpisodeMerger(
                                     ?: index.match(line.matchHints())
                             if (episodeId == null) {
                                 val canStub =
-                                    if (link) {
+                                    if (linkRules) {
                                         line.canStubLink(referenced)
                                     } else {
                                         line.canStub(history, referenced)
@@ -147,7 +152,7 @@ internal class RestoreEpisodeMerger(
                                     }
                                 if (episodeId == null) {
                                     unmatched++
-                                    if (link) {
+                                    if (linkRules) {
                                         val syncId = syncIdOf(podcastId, syncIdByPodcastId)
                                         if (syncId != null) {
                                             unmatchedRecords += syncId to canonicalKey(line.k, line.kv)
@@ -180,7 +185,7 @@ internal class RestoreEpisodeMerger(
                                         }
                                     }
 
-                                    MergePolicy.LINK_MERGE -> {
+                                    MergePolicy.LINK_MERGE, MergePolicy.LINK_HISTORY -> {
                                         linkMergeEpisode(
                                             podcastId,
                                             episodeId,
@@ -204,7 +209,7 @@ internal class RestoreEpisodeMerger(
                         }
                     }
                 }
-                if (link || captureWithBackupTimes || suppressCapture) {
+                if (linkRules || captureWithBackupTimes || suppressCapture) {
                     db.syncStateDao().withApplying { block() }
                 } else {
                     block()
