@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne
 import android.os.Build
 import android.os.Process
 import android.os.StrictMode
+import android.os.SystemClock
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.assert
@@ -62,7 +63,9 @@ class SmokeTest {
         // debug policy kills the process (a relaunch false positive, API 26 logcat).
         // The SmokeTest journeys do not test activity leaks, so run them without that
         // one heuristic and restore the app's policy afterwards.
+        waitForAppVmPolicy()
         originalVmPolicy = StrictMode.getVmPolicy()
+        Log.i("SmokeTestPolicy", "app policy=$originalVmPolicy")
         StrictMode.setVmPolicy(
             StrictMode.VmPolicy
                 .Builder()
@@ -76,8 +79,21 @@ class SmokeTest {
         )
     }
 
+    /** The app's debug initializers run asynchronously; replacing the policy before they
+     * set it would be overwritten again. */
+    private fun waitForAppVmPolicy() {
+        val deadline = SystemClock.elapsedRealtime() + 5_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val policy = StrictMode.getVmPolicy().toString()
+            val mask = policy.substringAfter("mask=").removeSuffix("]").trim()
+            if (mask != "0") return
+            Thread.sleep(50)
+        }
+    }
+
     @After
     fun resetNightMode() {
+        Log.i("SmokeTestPolicy", "restore policy=$originalVmPolicy")
         originalVmPolicy?.let(StrictMode::setVmPolicy)
         originalVmPolicy = null
         compose.runOnUiThread { AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM) }
