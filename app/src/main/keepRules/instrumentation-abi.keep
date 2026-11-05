@@ -4643,6 +4643,8 @@
 -keep class kotlin.jvm.internal.Ref$IntRef {
 }
 -keep class kotlin.jvm.internal.Ref$LongRef {
+  public <init>();
+  long element;
 }
 -keep class kotlin.jvm.internal.Ref$ObjectRef {
   public <init>();
