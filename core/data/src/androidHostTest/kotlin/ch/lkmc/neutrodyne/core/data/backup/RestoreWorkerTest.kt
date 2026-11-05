@@ -369,6 +369,7 @@ class RestoreWorkerTest {
             refresh = refresh,
             channels = channels,
             snapshots = snapshots,
+            linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
             clock = clock,
             io = Dispatchers.IO,
         )
