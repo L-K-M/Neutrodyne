@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Inject
@@ -50,6 +51,8 @@ public class PlaybackServiceAccess internal constructor(
     internal val local: LocalMediaIndex,
     internal val capabilities: YouTubeCapabilitiesSource,
     internal val history: PlaybackHistory,
+    internal val remoteGuard: RemotePlayedGuard,
+    internal val sync: PlaybackSyncBridge,
     @ApplicationScope internal val applicationScope: CoroutineScope,
     @Dispatcher(NeutrodyneDispatchers.IO) internal val io: CoroutineDispatcher,
     private val opener: DatabaseOpener,
