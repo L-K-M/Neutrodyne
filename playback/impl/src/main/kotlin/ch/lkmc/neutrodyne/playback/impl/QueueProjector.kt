@@ -526,6 +526,12 @@ internal class QueueProjector(
         val live = player ?: return
         val arrivalId = live.episodeIdOrNull() ?: return
         val arrival = entries.firstOrNull { it.item.episodeId == arrivalId } ?: return
+        // An own start (or a foreign write) already made this arrival the durable current: the
+        // item-change callback is a late echo of that installation, not a transition. Media3 can
+        // deliver it after the own-write bracket closed, and committing it again would bump the
+        // generation twice and re-seek the arrival to its start rule, overriding an explicit
+        // start position.
+        if (committedRevision.currentEpisodeId == arrivalId) return
         val departed = entries.firstOrNull { "episode:${it.item.episodeId}" == oldPosition.mediaItem?.mediaId }
         val exit = skipExit
         skipExit = null
