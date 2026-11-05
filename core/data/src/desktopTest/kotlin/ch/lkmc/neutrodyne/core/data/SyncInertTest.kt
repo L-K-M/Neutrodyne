@@ -195,6 +195,7 @@ class SyncInertTest {
                 refresh = FakeRefreshController(),
                 channels = channels,
                 snapshots = FakeSnapshotScheduler(),
+                linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
                 clock = clock,
                 io = Dispatchers.IO,
             )
@@ -364,6 +365,56 @@ class SyncInertTest {
                 )
 
                 assertSyncInert(harness.db)
+            } finally {
+                harness.db.close()
+            }
+        }
+
+    /**
+     * 10's table: an OPML import on a linked device is captured like any local change —
+     * through the triggers, presence and memberships included, no `applying` wrap.
+     */
+    @Test
+    fun anImportCommitWhileLinkedReachesTheOutbox() =
+        runTest {
+            val harness = newHarness()
+            try {
+                harness.db
+                    .syncStateDao()
+                    .upsert(
+                        ch.lkmc.neutrodyne.core.database.SyncStateEntity(
+                            serverUrl = "https://sync.example.com",
+                            enabled = true,
+                            nodeId = "0000000000000001",
+                            hlc = 1L shl 16,
+                            linkedAt = 1L,
+                        ),
+                    )
+
+                createAndConfirm(
+                    harness,
+                    opmlBytes(
+                        groups = listOf("news"),
+                        feeds = listOf(FEED_TWO to listOf("news")),
+                    ),
+                )
+
+                val rows = harness.db.syncOutboxDao().rows()
+                val inserted = checkNotNull(harness.db.podcastDao().byFeedKey(feedKey(FEED_TWO)))
+                assertTrue(
+                    rows.any { it.coll == "podcast" && it.rid == inserted.syncId && it.field == "*" },
+                    "the inserted podcast's presence captured, rows=$rows",
+                )
+                val group =
+                    harness.db
+                        .groupDao()
+                        .groupsInOrder()
+                        .single { it.name == "news" }
+                assertTrue(rows.any { it.coll == "group" && it.rid == group.uuid }, "rows=$rows")
+                assertTrue(
+                    rows.any { it.coll == "member" && it.rid == group.uuid + inserted.syncId },
+                    "the membership captured, rows=$rows",
+                )
             } finally {
                 harness.db.close()
             }

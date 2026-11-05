@@ -91,6 +91,7 @@ internal class RestoreEpisodeMerger(
         categories: Set<RestoreCategory>,
         episodeTotal: Int = 0,
         captureWithBackupTimes: Boolean = false,
+        suppressCapture: Boolean = false,
         progress: (done: Int, total: Int) -> Unit = { _, _ -> },
         onUnmatched: (suspend (podcastSyncId: String, identityKey: String) -> Unit)? = null,
         onApplied: (suspend (MergedRecord) -> Unit)? = null,
@@ -196,7 +197,7 @@ internal class RestoreEpisodeMerger(
                         }
                     }
                 }
-                if (link || captureWithBackupTimes) {
+                if (link || captureWithBackupTimes || suppressCapture) {
                     db.syncStateDao().withApplying { block() }
                 } else {
                     block()
@@ -224,6 +225,7 @@ internal class RestoreEpisodeMerger(
                 now,
                 captureWithBackupTimes,
                 syncIdByPodcastId,
+                suppressCapture,
             )
         }
         return EpisodeMergeResult(
@@ -457,6 +459,7 @@ internal class RestoreEpisodeMerger(
         now: Long,
         captureWithBackupTimes: Boolean = false,
         syncIdByPodcastId: MutableMap<Long, String> = HashMap(),
+        suppressCapture: Boolean = false,
     ) {
         val link = policy == MergePolicy.LINK_MERGE || policy == MergePolicy.LINK_REPLACE
         db.withWriteTransaction {
@@ -514,7 +517,7 @@ internal class RestoreEpisodeMerger(
                     )
                 }
             }
-            if (link || captureWithBackupTimes) {
+            if (link || captureWithBackupTimes || suppressCapture) {
                 db.syncStateDao().withApplying { block() }
             } else {
                 block()
