@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import java.lang.foreign.MemorySegment
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -23,8 +24,8 @@ interface Demuxer : AutoCloseable {
     /** Container duration in milliseconds, or null when unknown. */
     val durationMs: Long?
 
-    /** Container chapters, in milliseconds from the start of the item. */
-    val chapters: List<EngineChapter>
+    /** Container chapters, in milliseconds from the start of the item, with their source. */
+    val chapters: List<EpisodeChapter>
 
     /** Container trimming information for the audio track. */
     val gapless: Gapless

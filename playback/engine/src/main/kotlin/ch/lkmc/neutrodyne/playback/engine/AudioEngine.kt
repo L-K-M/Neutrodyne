@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -123,7 +124,7 @@ sealed interface EngineEvent {
     data class TracksKnown(
         val episodeId: Long,
         val durationMs: Long?,
-        val chapters: List<EngineChapter>,
+        val chapters: List<EpisodeChapter>,
         val gapless: Gapless,
     ) : EngineEvent
 
@@ -139,13 +140,6 @@ enum class TransitionReason { AUTO, SEEK_TO_ITEM, SKIP }
 
 /** Why the position jumped without a user-visible seek (11 Engine contracts). */
 enum class DiscontinuityReason { SEEK, SILENCE_SKIP }
-
-/** One container chapter, in milliseconds from the start of the item (06 Chapters). */
-data class EngineChapter(
-    val startMs: Long,
-    val endMs: Long,
-    val title: String?,
-)
 
 /**
  * Container trimming information the demuxer reports (11 Demux and decode). The

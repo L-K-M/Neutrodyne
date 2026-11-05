@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -40,7 +42,8 @@ class FfmpegCorpusTest {
         val decodedSamples: Long,
         val rawSamples: Long,
         val container: String,
-        val chapters: List<EngineChapter>,
+        val chapters: List<EpisodeChapter>,
+        val expectedSource: ChapterSource,
         val expectedChapters: List<CorpusChapter>,
         val seekErrorMs: Long,
         val durationMs: Long?,
@@ -72,6 +75,8 @@ class FfmpegCorpusTest {
                             rawSamples = pipeline.rawDecodedSamples,
                             container = pipeline.demuxer.containerName,
                             chapters = pipeline.demuxer.chapters,
+                            expectedSource =
+                                if (entry.container == "mp4") ChapterSource.MP4 else ChapterSource.ID3,
                             expectedChapters = entry.chapters,
                             seekErrorMs = seekError(pipeline, entry),
                             durationMs = pipeline.demuxer.durationMs,
@@ -307,6 +312,10 @@ class FfmpegCorpusTest {
                 "expected ${measurement.expectedChapters.size}"
         }
         measurement.chapters.zip(measurement.expectedChapters).forEachIndexed { index, (actual, expected) ->
+            if (actual.source != measurement.expectedSource) {
+                return "${measurement.file} chapter $index is ${actual.source}, " +
+                    "expected ${measurement.expectedSource}"
+            }
             if (actual.title != expected.title) {
                 return "${measurement.file} chapter $index is '${actual.title}', expected '${expected.title}'"
             }
