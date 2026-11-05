@@ -2720,7 +2720,7 @@
 -keep class ch.lkmc.neutrodyne.feature.downloads.DownloadsViewModel {
 }
 -keep class ch.lkmc.neutrodyne.feature.downloads.DownloadsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsViewModelMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.downloads.DownloadsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.downloads.DownloadsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.downloads.DownloadsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsViewModelMetroFactory {
   ch.lkmc.neutrodyne.feature.downloads.DownloadsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsViewModelMetroFactory$Companion Companion;
@@ -2826,7 +2826,7 @@
 -keep interface ch.lkmc.neutrodyne.feature.groups.GroupSettingsViewModel$Factory {
 }
 -keep class ch.lkmc.neutrodyne.feature.groups.GroupSettingsViewModel$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.feature.groups.GroupSettingsViewModel$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.feature.groups.GroupSettingsViewModel$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.feature.groups.GroupSettingsViewModel$MetroFactory {
   ch.lkmc.neutrodyne.feature.groups.GroupSettingsViewModel$MetroFactory$Companion Companion;
@@ -3088,6 +3088,18 @@
 -keep class ch.lkmc.neutrodyne.feature.settings.DownloadSettingsViewModelContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.feature.settings.DownloadSettingsViewModelContributions {
+}
+-keep class ch.lkmc.neutrodyne.feature.settings.DownloadsSettingsViewModel {
+}
+-keep class ch.lkmc.neutrodyne.feature.settings.DownloadsSettingsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsSettingsViewModelMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.feature.settings.DownloadsSettingsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsSettingsViewModelMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.feature.settings.DownloadsSettingsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsSettingsViewModelMetroFactory {
+  ch.lkmc.neutrodyne.feature.settings.DownloadsSettingsViewModelContributions$ToAppScope$ProvideIntoMapDownloadsSettingsViewModelMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.feature.settings.DownloadsSettingsViewModelContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.feature.settings.DownloadsSettingsViewModelContributions {
 }
 -keep class ch.lkmc.neutrodyne.feature.settings.FeedsSettingsViewModel {
 }
