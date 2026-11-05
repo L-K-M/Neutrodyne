@@ -21,6 +21,15 @@ sealed interface SyncStatus {
         val serverUrl: String,
     ) : SyncStatus
 
+    /**
+     * An all-synced-devices Replace restore is pending (05 Restore while linked): the restore
+     * session, not the first-link choices, is the resume point, and Settings › Sync says so
+     * instead of offering the choices (08).
+     */
+    data class FinishingRestore(
+        val serverUrl: String,
+    ) : SyncStatus
+
     /** Linked; [problem] replaces the first status line while set. */
     data class Linked(
         val serverUrl: String,

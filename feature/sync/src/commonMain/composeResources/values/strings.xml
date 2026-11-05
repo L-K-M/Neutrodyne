@@ -9,6 +9,8 @@
   <string name="sync_what_syncs">Synced: subscriptions, groups, played state, positions, favourites, Up next and synced settings. Never synced: downloads, artwork and feed contents.</string>
   <string name="sync_reconnect">Reconnect to %1$s to keep syncing.</string>
   <string name="sync_finish_link">Finish linking to %1$s.</string>
+  <string name="sync_finishing_restore">Finishing restore…</string>
+  <string name="sync_finishing_restore_body">A restore that replaces the library on every synced device hasn\'t finished. It continues the next time Neutrodyne opens; unlinking here abandons it and keeps this device\'s library.</string>
   <string name="sync_revoked">This device was unlinked from %1$s.</string>
 
   <string name="sync_share_passwords">Share feed passwords</string>

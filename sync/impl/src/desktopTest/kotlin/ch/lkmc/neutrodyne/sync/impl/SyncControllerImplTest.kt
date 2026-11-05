@@ -854,6 +854,47 @@ class SyncControllerImplTest {
             }
         }
 
+    /**
+     * 05 Restore while linked: a token without `linkedAt` is `LinkUnfinished`, but a pending
+     * ALL_DEVICES Replace session turns the status into `FinishingRestore` — the restore, not
+     * the first-link choices, is the resume point. A THIS_DEVICE session changes nothing.
+     */
+    @Test
+    fun aPendingAllDevicesRestoreShowsFinishingRestore() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.address.updateServerUrl(serverUrl)
+                h.db.withWriteTransaction {
+                    h.db.syncStateDao().upsert(
+                        ch.lkmc.neutrodyne.core.database.SyncStateEntity(
+                            serverUrl = serverUrl,
+                            accountId = ACCOUNT_ID,
+                            deviceId = DEVICE_ID,
+                            nodeId = "0000000000000001",
+                        ),
+                    )
+                }
+                h.controller.refreshStatus()
+                assertTrue(h.controller.status.value is SyncStatus.LinkUnfinished)
+
+                h.seedRestoreSession(reach = "ALL_DEVICES")
+                h.controller.refreshStatus()
+                val finishing = h.controller.status.value as SyncStatus.FinishingRestore
+                assertEquals(serverUrl, finishing.serverUrl)
+
+                h.db.withWriteTransaction {
+                    val dao = h.db.importDao()
+                    dao.backupPreviewSessions().forEach { dao.deleteSession(it.id) }
+                }
+                h.seedRestoreSession(reach = "THIS_DEVICE")
+                h.controller.refreshStatus()
+                assertTrue(h.controller.status.value is SyncStatus.LinkUnfinished, "${h.controller.status.value}")
+            } finally {
+                h.close()
+            }
+        }
+
     private fun harness(scope: TestScope): Harness = Harness(scope, now)
 
     /**
@@ -1110,6 +1151,24 @@ private class Harness(
             )
         }
         tokens.save("sync.example", "nds_test")
+    }
+
+    /** A `PREVIEW` backup session whose options request a Replace with [reach]. */
+    suspend fun seedRestoreSession(reach: String) {
+        db.withWriteTransaction {
+            db
+                .importDao()
+                .insertSession(
+                    ch.lkmc.neutrodyne.core.database.ImportSessionEntity(
+                        createdAt = now,
+                        sourceFormat = ch.lkmc.neutrodyne.core.model.ImportFormat.NEUTRODYNE_BACKUP,
+                        state = ch.lkmc.neutrodyne.core.model.ImportState.PREVIEW,
+                        payloadPath = "import/1.bin",
+                        optionsJson =
+                            """{"restoreMode":"REPLACE","restoreRequestedAt":$now,"linkedReach":"$reach"}""",
+                    ),
+                )
+        }
     }
 
     /** Puts one podcast row in the outbox, as an un-pushed local edit would. */

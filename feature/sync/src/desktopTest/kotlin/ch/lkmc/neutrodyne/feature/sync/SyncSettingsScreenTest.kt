@@ -87,6 +87,21 @@ class SyncSettingsScreenTest {
             onNode(isToggleable()).assertIsOff()
         }
 
+    /**
+     * 08 Sync screens: while an ALL_DEVICES restore session is pending, the body shows
+     * "Finishing restore…" instead of the first-link choices.
+     */
+    @Test
+    fun aPendingAllDevicesRestoreShowsFinishingRestore() =
+        runComposeUiTest {
+            val controller =
+                FakeSyncController(SyncStatus.FinishingRestore("https://sync.example.org"))
+            setPage { SyncSettingsScreen(controller) }
+
+            onNodeWithText("Finishing restore…").assertIsDisplayed()
+            onNodeWithText("Finish linking to https://sync.example.org.").assertDoesNotExist()
+        }
+
     private fun linkedStatus(): SyncStatus.Linked =
         SyncStatus.Linked(
             serverUrl = "https://sync.example.org",

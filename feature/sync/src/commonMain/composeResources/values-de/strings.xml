@@ -9,6 +9,8 @@
   <string name="sync_what_syncs">Synchronisiert: Abos, Gruppen, Wiedergabestatus, Positionen, Favoriten, Warteschlange und synchronisierte Einstellungen. Nie synchronisiert: Downloads, Bilder und Feed-Inhalte.</string>
   <string name="sync_reconnect">Verbinde dich erneut mit %1$s, um weiter zu synchronisieren.</string>
   <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>
+  <string name="sync_finishing_restore">Wiederherstellung läuft zu Ende…</string>
+  <string name="sync_finishing_restore_body">Eine Wiederherstellung, die die Mediathek auf allen synchronisierten Geräten ersetzt, ist noch nicht fertig. Sie wird beim nächsten Start von Neutrodyne fortgesetzt; wer die Verknüpfung hier trennt, bricht sie ab und behält die Mediathek dieses Geräts.</string>
   <string name="sync_revoked">Dieses Gerät wurde von %1$s getrennt.</string>
 
   <string name="sync_share_passwords">Feed-Passwörter teilen</string>

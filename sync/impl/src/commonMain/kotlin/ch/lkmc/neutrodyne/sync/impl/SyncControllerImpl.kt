@@ -75,6 +75,22 @@ private const val UNLINK_PUSH_BUDGET_MS = 5_000L
 private const val DELETE_CONFIRMATION = "DELETE"
 private const val RESET_MODE_PURGE = "purge"
 
+/** `ImportOptions` enum names a pending restore's options carry (05). */
+private const val RESTORE_MODE_REPLACE = "REPLACE"
+private const val REACH_ALL_DEVICES = "ALL_DEVICES"
+
+/**
+ * The restore-intent fields of `import_session.optionsJson` sync reads (05 Restore while
+ * linked): a minimal mirror of `:core:data`'s own JSON, unreachable by module rule; unknown
+ * fields are ignored, so a later milestone's options decode unchanged.
+ */
+@kotlinx.serialization.Serializable
+private data class RestoreIntentOptions(
+    val restoreMode: String? = null,
+    val restoreRequestedAt: Long? = null,
+    val linkedReach: String? = null,
+)
+
 /** 10 Errors: `lastError` marker the scheduler and status map treat as a revoked link. */
 internal const val SYNC_ERROR_REVOKED = "Revoked"
 
@@ -187,7 +203,13 @@ class SyncControllerImpl(
                 }
 
                 state.deviceId != null && state.linkedAt == null -> {
-                    SyncStatus.LinkUnfinished(url)
+                    // 05 Restore while linked: an ALL_DEVICES Replace session pending here is the
+                    // resume point, so the status says so instead of offering the link choices.
+                    if (pendingAllDevicesRestore()) {
+                        SyncStatus.FinishingRestore(url)
+                    } else {
+                        SyncStatus.LinkUnfinished(url)
+                    }
                 }
 
                 // A linked database without a token: a copied data directory or a restored install.
@@ -894,6 +916,28 @@ class SyncControllerImpl(
         return classify(failure)
     }
 
+    /**
+     * 05 Restore while linked: a `PREVIEW` backup session with an ALL_DEVICES Replace request
+     * (`restoreRequestedAt` present, `linkedReach` ALL_DEVICES). The options mirror decodes
+     * only the three fields sync needs — `:core:data`'s own mirror is out of reach by module
+     * rule, and unknown fields stay ignored.
+     */
+    private suspend fun pendingAllDevicesRestore(): Boolean {
+        for (session in db.importDao().backupPreviewSessions()) {
+            val encoded = session.optionsJson ?: continue
+            val options =
+                runCatching {
+                    SyncJson.decodeFromString<RestoreIntentOptions>(encoded)
+                }.getOrNull() ?: continue
+            if (options.restoreRequestedAt != null && options.restoreMode == RESTORE_MODE_REPLACE &&
+                options.linkedReach == REACH_ALL_DEVICES
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
     private suspend fun refreshHeld() {
         _heldChanges.value =
             db.syncHeldDao().all().mapNotNull { row ->
@@ -907,7 +951,8 @@ class SyncControllerImpl(
                     deviceName = null,
                     podcastTitles =
                         summary?.get("podcasts")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                    groupNames = summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
+                    groupNames =
+                        summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
                 )
             }
     }
