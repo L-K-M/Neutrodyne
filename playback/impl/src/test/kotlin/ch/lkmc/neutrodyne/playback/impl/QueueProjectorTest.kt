@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.playback.impl
 
 import android.app.Application
 import android.os.Looper
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.datasource.DataSpec
 import androidx.room3.withWriteTransaction
@@ -302,6 +303,53 @@ class QueueProjectorTest {
                 assertEquals(63_000L, f.player.currentPosition)
                 assertFalse(f.player.calls.contains("set"))
                 assertFalse(f.player.calls.contains("prepare"))
+            } finally {
+                f.close()
+            }
+        }
+
+    /**
+     * An item-change discontinuity that Media3 delivers only after the own-write bracket closed
+     * (seen on device while the player was still buffering a seek) is an echo of that own start,
+     * not a transition: the session already carries the arrival as current. Committing it again
+     * re-seeked the arrival to its start rule, overriding the start's explicit position.
+     */
+    @Test fun aLateDiscontinuityEchoOfAnOwnStartKeepsTheStartsPosition() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                val ids = f.seed(2)
+                f.attach()
+                f.start(listOf(ids[0]), 0)
+                awaitAdapter { f.player.ids() == listOf(ids[0]) }
+
+                f.start(listOf(ids[1]), 754_000)
+                awaitAdapter { f.player.ids().first() == ids[1] }
+                assertEquals(754_000L, f.player.currentPosition)
+                val generation = f.sessions.virtualQueue(20).generation
+
+                val outgoingItem = f.factory.build(f.lookup.get(ids[0])!!)
+                val arrivalItem = f.factory.build(f.lookup.get(ids[1])!!)
+                val outgoing =
+                    Player.PositionInfo(null, 0, outgoingItem, null, 0, 30_000, 30_000, C.INDEX_UNSET, C.INDEX_UNSET)
+                val arrival =
+                    Player.PositionInfo(null, 0, arrivalItem, null, 0, 754_000, 754_000, C.INDEX_UNSET, C.INDEX_UNSET)
+                f.projector.onPositionDiscontinuity(outgoing, arrival, Player.DISCONTINUITY_REASON_SEEK)
+                awaitAdapter { true }
+
+                assertEquals("the echo must not override the start position", 754_000L, f.player.currentPosition)
+                assertEquals(
+                    "the echo must not commit a second transition",
+                    generation,
+                    f.sessions.virtualQueue(20).generation,
+                )
+                assertEquals(
+                    ids[1],
+                    f.sessions
+                        .virtualQueue(20)
+                        .current!!
+                        .episodeId,
+                )
             } finally {
                 f.close()
             }
