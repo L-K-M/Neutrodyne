@@ -53,31 +53,34 @@ class SmokeTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
 
+    private var originalVmPolicy: StrictMode.VmPolicy? = null
+
     @Before
-    fun allowRelaunchOverlap() {
-        relaxActivityInstanceLimit(2)
+    fun relaxActivityLeakDetection() {
+        // ActivityScenario.recreate() keeps the destroyed activity reachable until the
+        // relaunch completes; StrictMode's activity-leak heuristic counts it and the
+        // debug policy kills the process (a relaunch false positive, API 26 logcat).
+        // The SmokeTest journeys do not test activity leaks, so run them without that
+        // one heuristic and restore the app's policy afterwards.
+        originalVmPolicy = StrictMode.getVmPolicy()
+        StrictMode.setVmPolicy(
+            StrictMode.VmPolicy
+                .Builder()
+                .detectLeakedClosableObjects()
+                .detectLeakedSqlLiteObjects()
+                .detectLeakedRegistrationObjects()
+                .detectFileUriExposure()
+                .penaltyLog()
+                .penaltyDeath()
+                .build(),
+        )
     }
 
     @After
     fun resetNightMode() {
-        relaxActivityInstanceLimit(1)
+        originalVmPolicy?.let(StrictMode::setVmPolicy)
+        originalVmPolicy = null
         compose.runOnUiThread { AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM) }
-    }
-
-    /**
-     * `ActivityScenario.recreate()` keeps the destroyed activity reachable until the
-     * relaunch completes; StrictMode's activity-leak heuristic counts it and the debug
-     * policy kills the process (a relaunch false positive on API 26). The public API has
-     * no per-class limit, so reflect the hidden setter, which API 28+ blocks; there the
-     * relaunch path does not reproduce the violation.
-     */
-    private fun relaxActivityInstanceLimit(limit: Int) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) return
-        runCatching {
-            StrictMode::class.java
-                .getMethod("setClassInstanceLimit", Class::class.java, Int::class.javaPrimitiveType)
-                .invoke(null, MainActivity::class.java, limit)
-        }
     }
 
     @Test
