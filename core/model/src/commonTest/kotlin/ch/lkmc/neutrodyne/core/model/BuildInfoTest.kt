@@ -16,7 +16,7 @@ class BuildInfoTest {
             platform = BuildInfo.Platform.DESKTOP,
             repoUrl = "https://github.com/L-K-M/Neutrodyne",
             updateManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/latest/download/update.json",
-            engineManifestUrl = "https://l-k-m.github.io/Neutrodyne/engine/ytdlp-approved.json",
+            engineManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/download/engine-approvals/ytdlp-approved.json",
             youTubeEngineBundled = true,
             desktop =
                 BuildInfo.Desktop(
