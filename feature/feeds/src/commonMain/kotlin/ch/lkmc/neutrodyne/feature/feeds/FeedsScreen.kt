@@ -67,9 +67,12 @@ import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_podcasts
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_caught_up
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_clear_filters
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_empty_body
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_empty_group
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_import
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_mark_all_played
@@ -104,6 +107,8 @@ internal fun FeedPage(
     onVisibleIds: (Set<Long>) -> Unit = {},
     visitBaseline: Long? = null,
     selection: EpisodeSelectionController? = null,
+    emptyGroupName: String? = null,
+    onEditEmptyGroup: () -> Unit = {},
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         NdPullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh) {
@@ -111,6 +116,7 @@ internal fun FeedPage(
                 EmptyState(
                     icon = NdIcons.DynamicFeed,
                     title = stringResource(Res.string.feeds_onboarding_title),
+                    showBrandMark = true,
                     body = stringResource(Res.string.feeds_empty_body),
                     actionLabel = stringResource(Res.string.feeds_search),
                     onAction = onSearch,
@@ -123,6 +129,8 @@ internal fun FeedPage(
                 FeedList(
                     state = state,
                     selection = selection,
+                    emptyGroupName = emptyGroupName,
+                    onEditEmptyGroup = onEditEmptyGroup,
                     items = items,
                     live = live,
                     onVisibleIds = onVisibleIds,
@@ -153,6 +161,8 @@ private fun FeedList(
     onMarkAllPlayedClick: () -> Unit,
     visitBaseline: Long?,
     selection: EpisodeSelectionController?,
+    emptyGroupName: String?,
+    onEditEmptyGroup: () -> Unit,
 ) {
     val selectedIds =
         selection
@@ -183,6 +193,16 @@ private fun FeedList(
         )
         return
     }
+    if (items.itemCount == 0 && refreshState is LoadState.NotLoading && emptyGroupName != null) {
+        EmptyState(
+            NdIcons.GridView,
+            stringResource(Res.string.feeds_empty_group, emptyGroupName),
+            "",
+            actionLabel = stringResource(Res.string.feeds_add_podcasts),
+            onAction = onEditEmptyGroup,
+        )
+        return
+    }
     if (items.itemCount == 0 && refreshState is LoadState.NotLoading) {
         EmptyState(
             icon = NdIcons.CheckCircle,
@@ -190,7 +210,13 @@ private fun FeedList(
             body = "",
             actionLabel =
                 if (state.filters != FeedFilters()) {
-                    stringResource(Res.string.feeds_show_played)
+                    stringResource(
+                        if (state.filters == FeedFilters(unplayedOnly = true)) {
+                            Res.string.feeds_show_played
+                        } else {
+                            Res.string.feeds_clear_filters
+                        },
+                    )
                 } else {
                     null
                 },
@@ -226,7 +252,7 @@ private fun FeedList(
         // failure has no footer at all, and keeping both surfaces duplicated the error at
         // the list end.
         LoadErrorBanner(items)
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().testTag("feed-list")) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().testTag("feed_list")) {
             offlineBannerItem(state.offline)
             item(key = "header", contentType = "header") {
                 FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick)

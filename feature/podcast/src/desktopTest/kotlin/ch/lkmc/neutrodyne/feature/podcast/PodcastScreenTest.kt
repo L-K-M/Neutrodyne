@@ -16,12 +16,15 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
@@ -54,6 +57,8 @@ import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
+import ch.lkmc.neutrodyne.core.navigation.PaneLayout
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -63,6 +68,7 @@ import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.core.ui.navigation.LocalHeaderSystemBarsEnabled
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
 import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
@@ -732,6 +738,71 @@ class PodcastScreenTest {
             onNodeWithText("+ Group").assertIsDisplayed()
         }
 
+    @Test
+    fun artworkHeaderExtendsBehindThePinnedToolbar() =
+        runComposeUiTest {
+            setPodcast(
+                PodcastUiState(loaded = true, detail = testPodcastDetail(7)),
+                rows = (1L..20).map { testEpisodeRow(it, podcastId = 7) },
+            )
+            val header = onNodeWithTag("podcast_header").fetchSemanticsNode().boundsInRoot
+            val bar = onNodeWithTag("podcast_toolbar").fetchSemanticsNode().boundsInRoot
+            assertTrue(header.top < bar.bottom, "The artwork header does not extend behind the toolbar: $header $bar")
+        }
+
+    @Test
+    fun toolbarTitleAppearsWhenTheCoverScrollsAway() =
+        runComposeUiTest {
+            val listState = LazyListState()
+            setPodcast(
+                PodcastUiState(loaded = true, detail = testPodcastDetail(7, displayTitle = "Pinned title")),
+                rows = (1L..20).map { testEpisodeRow(it, podcastId = 7) },
+                listState = listState,
+            )
+            listState.scrollToItem(0, 220)
+            waitForIdle()
+            onNode(hasText("Pinned title") and hasAnyAncestor(hasTestTag("podcast_toolbar"))).assertIsDisplayed()
+        }
+
+    @Test
+    fun coexistingAndBackgroundHeadersReserveOpaqueToolbarSpace() {
+        for (scene in HeaderScene.entries) {
+            runComposeUiTest {
+                val panes =
+                    when (scene) {
+                        HeaderScene.COEXISTING -> PaneLayout(2, false, 1024)
+                        HeaderScene.PLAYER_PANEL -> PaneLayout(1, true, 384)
+                        HeaderScene.BACKGROUND -> PaneLayout(1, false, 1024)
+                    }
+                setPodcast(
+                    PodcastUiState(loaded = true, detail = testPodcastDetail(7)),
+                    rows = (1L..20).map { testEpisodeRow(it, podcastId = 7) },
+                    paneLayout = panes,
+                    headerForeground = scene != HeaderScene.BACKGROUND,
+                )
+                val header = onNodeWithTag("podcast_header").fetchSemanticsNode().boundsInRoot
+                val bar = onNodeWithTag("podcast_toolbar").fetchSemanticsNode().boundsInRoot
+                assertTrue(header.top >= bar.bottom, "$scene must keep opaque chrome: $header $bar")
+            }
+        }
+    }
+
+    @Test
+    fun episodeAnchorsStayBelowThePinnedToolbar() =
+        runComposeUiTest {
+            val listState = LazyListState()
+            setPodcast(
+                PodcastUiState(loaded = true, detail = testPodcastDetail(7)),
+                rows = (1L..20).map { testEpisodeRow(it, podcastId = 7, title = "Anchored episode $it") },
+                listState = listState,
+            )
+            listState.scrollToItem(1)
+            waitForIdle()
+            val row = onNodeWithText("Anchored episode 1").fetchSemanticsNode().boundsInRoot
+            val bar = onNodeWithTag("podcast_toolbar").fetchSemanticsNode().boundsInRoot
+            assertTrue(row.top >= bar.bottom, "The episode anchor is covered by the toolbar: $row $bar")
+        }
+
     private fun ComposeUiTest.setPodcast(
         state: PodcastUiState,
         rows: List<EpisodeRow> = emptyList(),
@@ -757,6 +828,8 @@ class PodcastScreenTest {
         onConfirmUnsubscribe: () -> Unit = {},
         onDismissUnsubscribe: () -> Unit = {},
         onRemoveGroup: (Group) -> Unit = {},
+        paneLayout: PaneLayout = PaneLayout(1, false, 1024),
+        headerForeground: Boolean = true,
     ): LazyPagingItems<EpisodeRow> {
         lateinit var pagingItems: LazyPagingItems<EpisodeRow>
         val feed: Flow<PagingData<EpisodeRow>> =
@@ -765,6 +838,8 @@ class PodcastScreenTest {
             }.flow
         setContent {
             CompositionLocalProvider(
+                LocalPaneLayout provides paneLayout,
+                LocalHeaderSystemBarsEnabled provides headerForeground,
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalUiClock provides TestClock(),
                 LocalAppNavigator provides navigator,
@@ -964,3 +1039,5 @@ private val TestPlatformActions =
         override val reveal = null
         override val notifications = null
     }
+
+private enum class HeaderScene { COEXISTING, PLAYER_PANEL, BACKGROUND }

@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.LocalSharedArtEnabled
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all_groups
@@ -105,6 +106,7 @@ internal fun FeedsScreen(
     onVisitStart: (FeedSource) -> Unit = {},
     onVisitEnd: (FeedSource) -> Unit = {},
     onAllGroups: () -> Unit = {},
+    onEditGroup: (Long) -> Unit = {},
     suggestedGroups: @Composable () -> Unit = {},
     selection: EpisodeSelectionController? = null,
     onPlayEpisode: ((FeedSource, Long) -> Unit)? = null,
@@ -289,7 +291,7 @@ internal fun FeedsScreen(
             key = { tabs[it].ref.encode() },
             userScrollEnabled = !state.rowSwipe,
             modifier =
-                Modifier.weight(1f).testTag("feeds-pager").semantics {
+                Modifier.weight(1f).testTag("feeds_pager").semantics {
                     customActions =
                         listOf(
                             CustomAccessibilityAction(nextLabel) { movePage(1) },
@@ -314,6 +316,7 @@ internal fun FeedsScreen(
                     // A prefetched neighbour must not report the selected page as drawn.
                     CompositionLocalProvider(
                         LocalDrawnReporter provides drawnReporter.takeIf { entry.ref == settledRef },
+                        LocalSharedArtEnabled provides (entry.ref == settledRef && !pager.isScrollInProgress),
                     ) {
                         FeedPage(
                             state = state.copy(filters = prefs.filters.copy(minSortDate = null)),
@@ -334,6 +337,12 @@ internal fun FeedsScreen(
                                 }
                             },
                             onMarkAllPlayedClick = { onMarkAllPlayedClick(source) },
+                            emptyGroupName =
+                                entry.tab.title.takeIf {
+                                    (source as? FeedSource.Group)?.groupId in
+                                        state.emptyGroupIds
+                                },
+                            onEditEmptyGroup = { (source as? FeedSource.Group)?.let { onEditGroup(it.groupId) } },
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,
                             onImport = onImport,
