@@ -3,7 +3,9 @@
 package ch.lkmc.neutrodyne.sync.impl
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
@@ -18,6 +20,7 @@ import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CoroutineScope
 
 /** The sync engine's graph bindings (10 Client sync engine, 01 Dependency injection). */
 @ContributesTo(AppScope::class)
@@ -104,6 +107,32 @@ object SyncBindings {
             tokens = tokens,
             activity = activity,
             gate = gate,
+        )
+
+    /**
+     * 10 Scheduling: the shared trigger engine; the platform contributes its [SyncScheduleHooks]
+     * (WorkManager on Android, the `sync` lane on the desktop) and the start-up initializer
+     * calls `start()`.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncScheduler(
+        db: NeutrodyneDatabase,
+        engine: SyncEngine,
+        playback: PlaybackSyncPort,
+        network: NetworkMonitor,
+        clock: Clock,
+        @ApplicationScope scope: CoroutineScope,
+        hooks: SyncScheduleHooks,
+    ): SyncScheduler =
+        SyncScheduler(
+            db = db,
+            round = { reason -> engine.round(reason) },
+            playback = playback,
+            network = network,
+            clock = clock,
+            scope = scope,
+            hooks = hooks,
         )
 
     /** The first-link merge; the controller drives it from the link state machine. */
