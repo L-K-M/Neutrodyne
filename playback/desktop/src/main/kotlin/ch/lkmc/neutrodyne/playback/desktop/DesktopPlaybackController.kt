@@ -240,6 +240,9 @@ class DesktopPlaybackController(
         positionMs: Long,
     ): PlayResult = start(StartRequest.Episode(episodeId, positionMs))
 
+    override suspend fun playDownloads(startEpisodeId: Long?): PlayResult =
+        start(StartRequest.Downloads(startEpisodeId))
+
     override suspend fun playFeed(
         source: FeedSource,
         filters: FeedFilters,

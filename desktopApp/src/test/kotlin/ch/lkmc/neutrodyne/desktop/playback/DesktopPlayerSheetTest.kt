@@ -44,7 +44,7 @@ class DesktopPlayerSheetTest {
                                 viewModelFactory = fixture.graph.metroViewModelFactory,
                                 playbackController = fixture.controller,
                                 playbackState = fixture.controller,
-                                settingsRepository = fixture.graph.settingsRepository,
+                                settings = fixture.graph.settingsRepository,
                             )
                         }
                     }
