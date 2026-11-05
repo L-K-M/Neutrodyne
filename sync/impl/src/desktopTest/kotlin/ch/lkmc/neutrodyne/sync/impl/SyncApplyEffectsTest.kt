@@ -171,9 +171,7 @@ class SyncApplyEffectsTest {
 
                 val drain = effects(db, FakeSettingsSyncPort(), secrets)
                 val draining =
-                    kotlinx.coroutines.GlobalScope.launch(
-                        start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED,
-                    ) {
+                    launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                         drain.drainPasswords()
                     }
                 kotlinx.coroutines.yield()
