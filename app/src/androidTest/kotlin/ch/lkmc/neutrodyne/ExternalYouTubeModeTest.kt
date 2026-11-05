@@ -26,6 +26,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.lifecycle.SavedStateHandle
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.CoroutineWorker
@@ -173,7 +174,20 @@ class ExternalYouTubeModeTest {
                         }
                     }
                 }
-                waitUntil(20_000) { onAllNodesWithText("MKBHD & Studio").fetchSemanticsNodes().isNotEmpty() }
+                // The channel resolver's own 20-second budget targets real hardware (04's
+                // resolution budgets, PB18); a cold interpreter-mode API 26 CI emulator can burn
+                // it on first-ever class loading. The sheet's Retry affordance recovers exactly
+                // as a user would; every further assertion still proves the engine-off journey.
+                // The keyboard goes first: while the IME is open the API 26 dialog recomposition
+                // can leave the failure row's buttons absent, which would make Retry unreachable.
+                Espresso.closeSoftKeyboard()
+                waitUntil(timeoutMillis = PREVIEW_RECOVERY_TIMEOUT_MS) {
+                    val resolved = onAllNodesWithText("MKBHD & Studio").fetchSemanticsNodes().isNotEmpty()
+                    if (!resolved && onAllNodesWithText(NETWORK_FAILURE_TEXT).fetchSemanticsNodes().isNotEmpty()) {
+                        onNodeWithText(RETRY_LABEL).performClick()
+                    }
+                    resolved
+                }
                 assertEquals(emptyList(), runBlocking { db.podcastDao().allForExport() })
                 val checkbox = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
                 onNode(hasText("Journey group") and checkbox).performClick()
@@ -386,6 +400,15 @@ class ExternalYouTubeModeTest {
                 Locale.setDefault(previous)
             }
         }
+
+    private companion object {
+        const val PREVIEW_RECOVERY_TIMEOUT_MS = 90_000L
+
+        // Locale.ENGLISH is forced above, so the EN sheet copy (yt_network_error, action_retry)
+        // is exact — including the typographic apostrophe.
+        const val NETWORK_FAILURE_TEXT = "Couldn’t reach YouTube. Check your connection and try again."
+        const val RETRY_LABEL = "Retry"
+    }
 }
 
 @BindingContainer
