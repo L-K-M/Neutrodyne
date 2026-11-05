@@ -769,6 +769,18 @@ stateDiagram-v2
 5. A library reset by another device ("Use this device's library everywhere") reaches other devices as the removals of everything the resetting device lacks, and is held there when those exceed the thresholds — the second confirmation on the resetting device says so ([Use this device's library everywhere](#use-this-devices-library-everywhere)).
 6. The guard sees what one round pulls. Removals made one by one while both devices are online arrive in separate rounds and pass individually, which matches deliberate clean-ups; a device that was offline sees them together and asks.
 
+**Implementation note (2026-11-05, MS2 final slice).** Rules 2 and 4 run
+as specified: the round's verdict skips DEFERRED rows, the below-threshold
+branch applies the staged removals (clock re-check included) instead of
+dropping them, and a removal of the playing podcast stages its own
+DEFERRED row that `SyncEngine` releases on a `Stopped`/`Transition`
+boundary, at the start of every round, and never for the podcast still
+playing. `PlaybackSyncActive` gained the loaded item's `episodeId` so the
+applier and the release can name the playing podcast; until 06's
+`PlaybackSyncBridge` binds a real `PlaybackSyncPort` (the graph still
+binds `NoPlaybackSync`), the deferral is dormant in production — removals
+apply directly, exactly as before this note.
+
 ### Now playing and handoff
 
 - `session/current` holds the current episode reference and the play context of the device that last wrote it (`by`). The writing device pushes it with the position cadence; the current item is never in Up next, so without the session record the episode playing on the phone would vanish from the desktop's queue view.
@@ -1309,9 +1321,7 @@ account never uploads silently. Deviations forced by the current code:
 **Update (2026-11-05, MS2 restore slice).** The first two deviations are
 resolved: Merge and "Use the server's library" now run 05's
 `mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) as the note above records,
-and the staging-file resume exists. The remaining bullets stand, and
-"Use this device's library everywhere" step 2 (ID adoption and the
-episode-history merge) is still open. Restore-while-linked (05's rules)
+and the staging-file resume exists. Restore-while-linked (05's rules)
 is implemented: a linked Merge runs `applying = 1` with `captureAt` at
 the backup's timestamps (presence fields take a fresh literal tick), a
 THIS_DEVICE Replace unlinks first through the `LinkedRestoreCoordinator`
@@ -1320,6 +1330,29 @@ and an ALL_DEVICES Replace keeps the claim-time `linkedAt` clear and
 runs the upload/push/prune steps in the restore's finish before the
 session commits — a failure there leaves the durable request, and a
 re-run replays the idempotent restore and this step.
+
+**Update (2026-11-05, MS2 final slice).** "Use this device's library
+everywhere" step 2 is implemented: the staging pull seeds this device's
+rows into `sync_clock` at their own timestamps (freezing the pre-merge
+values), the same staging directory runs through `mergeStaged` under a
+new `LINK_HISTORY` policy (05's mergers: a matched podcast adopts the
+record's `syncId`, a `nameKey`-matched group the record's `uuid`, the
+episode lines of podcasts this device has merge by the First-link
+timestamp rules — unmatched lines of known podcasts park; nothing else
+is applied, no podcast, group, member, Up next, session or settings
+record), the received records fold into `sync_clock`, and the capture
+pass re-sends exactly the episode fields the local side won at their
+frozen timestamps beside the fresh `captureAll` rows of the rest of the
+library. The remaining bullets above stand (the second confirmation,
+`http://` refusal and the unlink budget are unchanged). Two adjacent
+gaps from earlier slices close with it: the acknowledgement path now
+merges the exact sent fields into `sync_clock` raw state (a sent `auth`
+as its feed-origin marker only), and the mass-change guard's
+below-threshold branch applies staged removals (re-checking their
+clocks) instead of dropping them. The step 3 synced-settings captures
+(each synced key's literal `v` with clocks ≥ `t0`) remain open — the
+settings port offers no bulk read; a local edit after the link captures
+and converges them anyway.
 
 ### Use the server's library on this device
 
