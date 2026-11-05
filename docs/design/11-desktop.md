@@ -763,7 +763,7 @@ sealed interface EngineState {
     data class Error(val episodeId: Long, val error: EngineError) : EngineState
 }
 sealed interface EngineEvent {
-    data class ItemTransition(val fromEpisodeId: Long?, val toEpisodeId: Long, val reason: TransitionReason) : EngineEvent // AUTO, SEEK_TO_ITEM, SKIP
+    data class ItemTransition(val fromEpisodeId: Long?, val fromPositionMs: Long, val toEpisodeId: Long, val reason: TransitionReason) : EngineEvent // AUTO, SEEK_TO_ITEM, SKIP; fromPositionMs is the outgoing item's audible boundary position (MD1b)
     data class Discontinuity(val episodeId: Long, val reason: DiscontinuityReason, val fromMs: Long, val toMs: Long) : EngineEvent // SEEK, SILENCE_SKIP
     data class TracksKnown(val episodeId: Long, val durationMs: Long?, val chapters: List<EpisodeChapter>, val gapless: Gapless) : EngineEvent
     data class DeviceRerouted(val deviceName: String) : EngineEvent
@@ -1004,9 +1004,26 @@ The ports are direct translations of Apache-2.0 code: the ported files keep thei
 
 1. When the current item's remaining media time drops below 10 s (or the demuxer reaches end of file for an unknown duration), `nd-prepare` opens the next window item: source, demuxer, decoder, input resampler.
 2. At the current item's end the engine trims the outgoing padding and the incoming delay and keeps writing the next item's PCM into the same ring; the device never stops.
-3. `ItemTransition(from, to, AUTO)` is emitted when `framesPlayed` passes the first marker of the new item, so the UI, the OS session and the position save follow what is audible.
+3. `ItemTransition(from, to, AUTO)` is emitted when `framesPlayed` passes the first marker of the new item, so the UI, the OS session and the position save follow what is audible. The event carries the outgoing item's audible boundary position, because the engine has already handed the ring over when it fires; this mirrors Media3's `oldPosition.positionMs` at `onPositionDiscontinuity` (MD1b).
 4. A next item that is remote and not yet prepared plays silence and reports `Buffering` for its time to first byte. A next item that fails to prepare is skipped with 06's rules (`Skipped` event) and the following one is tried.
 5. Goal: no gap longer than 50 ms and no device restart (MD1 AC4).
+
+**MD1b implementation note (2026-11-04).** `FfAudioEngine` keeps one clock and
+one output for the whole chain: when the current item's remaining media time
+drops below 10 s (`PREPARE_AHEAD_MS`), `nd-prepare` opens the next window item,
+and at the current item's end the engine closes the outgoing pipeline and
+keeps writing the arrival's PCM into the same ring. The device is never stopped,
+so the seam is only the decoder's own latency; the transition event fires at
+the same latency-adjusted ring position the clock reports. The outgoing
+padding and the incoming delay are the demuxer/decoder's gapless trimming
+(11 Demux and decode), so the engine adds no second trim. The engine keeps the
+outgoing item in its window until the controller's diff removes it, so the
+planner's prefix `Remove` and the arrival's prepared source survive; a tail
+edit during the preparation window drops the stale prepare and prepares the
+new successor. A next item that is not prepared at the boundary plays the ring
+out and reports `Buffering` until its first byte; a failed prepare stops the
+chain with `EngineState.Error` (error recovery and skipping remain a later
+slice).
 
 The controller then marks the outgoing item played when `PlayedRule` says so, saves the outgoing position first and advances Up next ([06 Queue and play context](06-playback.md#queue-and-play-context)).
 
