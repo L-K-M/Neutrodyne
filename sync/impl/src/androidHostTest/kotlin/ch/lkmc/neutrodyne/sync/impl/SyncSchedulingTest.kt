@@ -355,6 +355,16 @@ class SyncSchedulingTest {
             sharePasswords = { false },
             address = FakeSyncServerAddress(serverUrl = "https://sync.example"),
             tokens = tokens,
+            effects =
+                SyncApplyEffects(
+                    db = db,
+                    settings = FakeSettingsSyncPort(),
+                    secrets = secrets,
+                    coordinator =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeCredentialCommitCoordinator(),
+                ),
+            notices = SyncNoticeBus(),
         )
     }
 

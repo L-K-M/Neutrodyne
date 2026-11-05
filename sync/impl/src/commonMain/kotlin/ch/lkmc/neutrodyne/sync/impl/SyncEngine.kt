@@ -43,6 +43,8 @@ class SyncEngine(
     private val sharePasswords: () -> Boolean,
     private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress,
     private val tokens: SyncTokenStore,
+    private val effects: SyncApplyEffects,
+    private val notices: SyncNoticeBus,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -62,6 +64,9 @@ class SyncEngine(
         if (serverUrl == null || token == null) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
+        // 10 Durable apply effects: recover journaled settings and credentials at each start,
+        // before pushing or reconciling — a committed cursor must never strand their effects.
+        effects.drain()
         var pushed = 0
         var applied = 0
         var stale = 0
@@ -69,6 +74,7 @@ class SyncEngine(
         var pulled = 0
         var held = 0
         val roundId = clock.now()
+        val passwordNeeded = LinkedHashSet<Long>()
 
         // Reasons that never pull on their own: a round with nothing to push is a no-op.
         val noPullReasons = setOf(SyncRoundReason.OUTBOX, SyncRoundReason.PLAYBACK)
@@ -91,10 +97,7 @@ class SyncEngine(
             pushed += changes.size
             db.withWriteTransaction { handleResults(changes, response.results) }
             applied += response.records.size
-            val page = applier.applyPage(response.records, roundId)
-            stale += page.stale
-            held += page.held
-            pulled += response.records.size
+            pulled += drainPage(response.records, roundId, passwordNeeded)
             raiseHlc(response.records)
             storeCursor(response.cursor)
             var hasMore = response.hasMore
@@ -103,13 +106,20 @@ class SyncEngine(
                 guard++
                 val next = client.changes(response.cursor, ProtocolLimits.MAX_RECORDS)
                 applied += next.records.size
-                pulled += next.records.size
-                applier.applyPage(next.records, roundId)
+                pulled += drainPage(next.records, roundId, passwordNeeded)
                 raiseHlc(next.records)
                 storeCursor(next.cursor)
                 hasMore = next.hasMore
             }
             if (db.syncOutboxDao().count() == 0) break
+        }
+
+        if (passwordNeeded.isNotEmpty()) {
+            // Once per pull, not once per page (10 Feed passwords).
+            notices.post(
+                ch.lkmc.neutrodyne.sync.api.SyncNotice
+                    .FeedPasswordNeeded(passwordNeeded.toList()),
+            )
         }
 
         val batch = MassChangeGuard.evaluate(db, roundId, localPodcastCount())
@@ -121,6 +131,18 @@ class SyncEngine(
         }
         db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastSyncAt = clock.now())) }
         return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
+    }
+
+    /** Applies one pulled page and drains its durable effects; returns the record count. */
+    private suspend fun drainPage(
+        records: List<RecordDto>,
+        roundId: Long,
+        passwordNeeded: MutableSet<Long>,
+    ): Int {
+        val page = applier.applyPage(records, roundId)
+        passwordNeeded += page.passwordNeeded
+        effects.drain()
+        return records.size
     }
 
     private suspend fun handleResults(

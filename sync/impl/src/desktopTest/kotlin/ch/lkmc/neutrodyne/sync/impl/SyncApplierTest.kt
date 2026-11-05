@@ -241,7 +241,6 @@ class SyncApplierTest {
             }
         }
 
-
     @Test
     fun aReceivedAuthIsStagedProtectedAndJournaledAsPendingAuth() =
         runTest {
@@ -271,11 +270,24 @@ class SyncApplierTest {
                 // Raw state carries the marker and the reference; no plaintext anywhere in Room.
                 val raw = rawRecord(db, podcastSyncId)
                 assertNotNull(raw)
-                assertEquals(stagedKey, authMarkerKey(raw.state.fields.getValue("auth").v))
+                assertEquals(
+                    stagedKey,
+                    authMarkerKey(
+                        raw.state.fields
+                            .getValue("auth")
+                            .v,
+                    ),
+                )
                 assertEquals(stagedKey, raw.pendingAuth?.reference)
                 assertEquals("https://example.com", raw.pendingAuth?.credentialOrigin)
                 assertEquals(stagedKey, raw.authReference?.storeKey)
-                assertFalse(db.syncClockDao().get("podcast", podcastSyncId)!!.clocks.contains("hunter2"))
+                assertFalse(
+                    db
+                        .syncClockDao()
+                        .get("podcast", podcastSyncId)!!
+                        .clocks
+                        .contains("hunter2"),
+                )
             } finally {
                 db.close()
             }
@@ -403,10 +415,26 @@ class SyncApplierTest {
                 val raw = rawRecord(db, podcastSyncId)
                 assertNotNull(raw)
                 assertNull(raw.pendingAuth, "the local credential is already installed; nothing to drain")
-                assertEquals("https://example.com", authMarkerKey(raw.state.fields.getValue("auth").v))
+                assertEquals(
+                    "https://example.com",
+                    authMarkerKey(
+                        raw.state.fields
+                            .getValue("auth")
+                            .v,
+                    ),
+                )
                 assertEquals("https://example.com", raw.authReference?.storeKey)
-                assertNull(secrets.get(pendingAuthOrigin("acc-1", podcastSyncId, remoteClock)), "the losing candidate left the staging store")
-                assertFalse(db.syncClockDao().get("podcast", podcastSyncId)!!.clocks.contains("remote-secret"))
+                assertNull(
+                    secrets.get(pendingAuthOrigin("acc-1", podcastSyncId, remoteClock)),
+                    "the losing candidate left the staging store",
+                )
+                assertFalse(
+                    db
+                        .syncClockDao()
+                        .get("podcast", podcastSyncId)!!
+                        .clocks
+                        .contains("remote-secret"),
+                )
             } finally {
                 db.close()
             }
