@@ -154,11 +154,11 @@ class AndroidStartupRecoveryTest {
                 "FirstLaunchRestoreInitializer",
                 "CredentialLoadInitializer",
                 "DownloadIndexInitializer",
+                // 10 Scheduling on Android arms `sync-periodic` and `SyncScheduler` at 200,
+                // behind the opened database like the other scheduling-band initializers.
+                "SyncSchedulingInitializer",
                 "PeriodicRefreshInitializer",
                 "RefreshForegroundObserverInitializer",
-                // 10 Scheduling on Android sits at 240: it reconciles `sync-periodic`, starts
-                // `SyncScheduler` and registers its observer only behind an opened database.
-                "SyncSchedulingInitializer",
             )
     }
 }
