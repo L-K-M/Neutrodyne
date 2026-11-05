@@ -82,8 +82,9 @@ class AndroidStartupRecoveryTest {
             }
             pumpUntil { initializers.isCompleted }
             assertIs<DatabaseOpenState.Opened>(graph.databaseOpener.openState.value)
-            // Refresh and the lazy player connection each install one process observer.
-            assertEquals(1 to 2, periodicWork().size to (lifecycle.observerCount - observersBefore))
+            // Refresh, the lazy player connection and the sync foreground trigger each install
+            // one process observer.
+            assertEquals(1 to 3, periodicWork().size to (lifecycle.observerCount - observersBefore))
             val work = periodicWork().single()
 
             // The gate and concurrent open callers only reopen the gate, never rerun bands.
@@ -93,7 +94,7 @@ class AndroidStartupRecoveryTest {
             }
             pumpFor(100)
             assertEquals(work.id, periodicWork().single().id)
-            assertEquals(observersBefore + 2, lifecycle.observerCount)
+            assertEquals(observersBefore + 3, lifecycle.observerCount)
             assertEquals(
                 POST_OPEN_INITIALIZERS.map { it to graph.databaseOpener.openState.value },
                 postOpenRuns,
@@ -153,6 +154,9 @@ class AndroidStartupRecoveryTest {
                 "CredentialLoadInitializer",
                 "PeriodicRefreshInitializer",
                 "RefreshForegroundObserverInitializer",
+                // 10 Scheduling on Android sits at 240: it reconciles `sync-periodic`, starts
+                // `SyncScheduler` and registers its observer only behind an opened database.
+                "SyncSchedulingInitializer",
             )
     }
 }
