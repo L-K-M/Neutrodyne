@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.download.impl
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.datastore.SettingStore
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
@@ -35,8 +36,15 @@ internal class DesktopStorageRoots(
     override suspend fun current(): String {
         val path = settings.get(DesktopSettingKeys.DOWNLOADS_DIR)
         if (path.isEmpty()) return DEFAULT_ROOT
+        // A repoint writes the registry before the folder setting (no multi-key write exists), so a
+        // crash between the two leaves the setting naming an unregistered path. New downloads then
+        // use the default folder until a folder is chosen again; registered roots keep resolving.
         return registry().entries.firstOrNull { it.value == path }?.key
-            ?: error("Current download folder is not registered")
+            ?: DEFAULT_ROOT.also {
+                Log.w(
+                    TAG,
+                ) { "Download folder setting is not registered; using the default folder" }
+            }
     }
 
     override suspend fun setCurrent(
@@ -286,6 +294,7 @@ internal class DesktopStorageRoots(
 
     companion object {
         const val DEFAULT_ROOT = "dir:default"
+        private const val TAG = "DesktopStorageRoots"
         private const val LOW_SPACE_BYTES = 1024 * 1024
         private const val MAX_FAT_FILE_BYTES = 0xffff_ffffL
         private const val REPOINT_MIN_FILES = 3

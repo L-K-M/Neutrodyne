@@ -1002,6 +1002,8 @@ Choosing a folder (`FilePicker` of `:core:ui`, 08):
 
 Validation before the folder is accepted: it exists or can be created; a probe file `.neutrodyne-probe` can be created, written and deleted; it is not inside the installation directory, `<cache>` or `<state>`; free space is shown in the confirmation. A folder that fails shows the reason and keeps the previous setting.
 
+**Implementation note (2026-11-05, M6b review).** Re-pointing a registered folder to its new mount path writes the folder registry first and `desktop.downloads_dir` second; the settings store has no multi-key write. A crash between the two leaves `desktop.downloads_dir` naming a path the registry no longer holds. `DesktopStorageRoots.current()` then logs a warning and answers the default folder: new downloads go there until a folder is chosen again, and every registered root, including the re-pointed one, keeps resolving.
+
 ### Change folder
 
 "Change folder…" (Settings › Desktop, R8.8) asks "Move {n} downloads ({size}) to {folder}?" with **Move** (default) and **Leave them where they are**, and calls 07's `changeRoot(rootId, moveExisting)`. New downloads use the new folder at once; queued and paused rows follow it at their next prepare.

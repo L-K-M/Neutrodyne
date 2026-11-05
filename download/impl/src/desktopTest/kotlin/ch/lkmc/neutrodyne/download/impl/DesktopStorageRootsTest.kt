@@ -142,6 +142,18 @@ class DesktopStorageRootsTest {
             )
         }
 
+    @Test fun unregisteredFolderSettingFallsBackToTheDefaultFolder() =
+        rootsTest { f ->
+            val chosen = f.parent.resolve("chosen")
+            val registered = assertIs<FolderRootResult.Ok>(f.roots.registerFolderRoot(chosen.toString())).root
+            // A repoint interrupted between its registry and folder-setting writes.
+            f.store.set(DesktopSettingKeys.DOWNLOADS_DIR, f.parent.resolve("unmounted").toString())
+            assertEquals("dir:default", f.roots.current())
+            assertTrue(f.roots.list().any { it.rootId == "dir:default" })
+            f.roots.prune(setOf(registered.rootId))
+            assertNotNull(f.roots.resolve(registered.rootId))
+        }
+
     @Test fun packagedLauncherProtectsWholeInstallation() =
         rootsTest { f ->
             val previous = System.getProperty("jpackage.app-path")
