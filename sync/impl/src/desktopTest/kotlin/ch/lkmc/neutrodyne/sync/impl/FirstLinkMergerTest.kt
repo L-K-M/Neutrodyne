@@ -45,6 +45,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okio.FileSystem
 import okio.Path.Companion.toPath
+import okio.buffer
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -343,14 +344,132 @@ class FirstLinkMergerTest {
             }
         }
 
+    /**
+     * "Use this device's library everywhere" step 2: the port runs under LINK_HISTORY, the
+     * episode fields the local side won are re-sent at their frozen pre-merge timestamps, the
+     * library itself uploads with fresh `*` captures, and the prune is bound to the staged
+     * cursor before `linkedAt` lands.
+     */
+    @Test
+    fun useDeviceRunsLinkHistoryAndCapturesEpisodeWinnersAtTheirOwnTimes() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                // The local row carries the record's own ID, so the seed and the received
+                // record fold per field; its episode mark (October) beats the record's.
+                val podcastId =
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(
+                                ch.lkmc.neutrodyne.core.testing.database.episodeEntity(
+                                    podcastId = podcastId,
+                                    identityKey = "g:one",
+                                ) { copy(guid = "one") },
+                            ),
+                        ).single()
+                db.episodeStateDao()
+                    .ensure(EpisodeStateEntity(episodeId, playedAt = october + 100_000L, updatedAt = october + 100_000L))
+                val client = CountingClient(listOf(podcastRecord(), episodeRecord()))
+                val merger = mergerOf(db, client, library)
+
+                val result = merger.merge(FirstLinkChoice.USE_DEVICE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertEquals(MergePolicy.LINK_HISTORY, library.calls.single().policy)
+                val rows = db.syncOutboxDao().rows()
+                assertTrue(rows.any { it.coll == "podcast" && it.field == "*" }, "rows=$rows")
+                // The local-won played pair re-sends at its own frozen timestamp, not `now`.
+                val played = rows.single { it.coll == "episode" && it.field == "played" }
+                assertEquals(october + 100_000L, played.hlc ushr 16)
+                assertTrue(played.value!!.contains("\"playedAt\":${october + 100_000L}"), "literal=${played.value}")
+                // The server-won `pos` (the record's October position) is never echoed.
+                assertTrue(rows.none { it.coll == "episode" && it.field == "pos" }, "rows=$rows")
+                // Prune last, bound to the staged cursor, then the link completes.
+                assertEquals(1, client.resetCalls)
+                assertEquals("c:00000001:1", client.resetBeforeCursor)
+                assertNotNull(db.syncStateDao().get()?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Durable apply effects: the first link stages every pulled password in the protected
+     * store before its records reach the staging file, so the cache directory holds markers —
+     * never a plaintext credential.
+     */
+    @Test
+    fun theStagingFileHoldsAuthMarkersNeverPlaintext() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device, accountId = "acc-1")
+                val secrets = FakeSecretStore()
+                val authRecord =
+                    RecordDto(
+                        coll = "podcast",
+                        id = JsonPrimitive(podcastSyncId),
+                        seq = 1,
+                        by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                        fields =
+                            mapOf(
+                                "feedUrl" to FieldValue(JsonPrimitive("https://example.com/feed"), clock(october)),
+                                "subscribed" to FieldValue(JsonPrimitive(true), clock(october)),
+                                "auth" to
+                                    FieldValue(
+                                        buildJsonObject {
+                                            put("u", "anna")
+                                            put("p", "hunter2")
+                                        },
+                                        clock(october),
+                                    ),
+                            ),
+                    )
+                val client = CountingClient(listOf(authRecord))
+                val merger = mergerOf(db, client, library, secrets)
+                // A failing port call stands in for a crash: the staging file survives it.
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val stagingFile = "$cache/sync-link-$device.jsonl".toPath()
+                val text = fileSystem.source(stagingFile).buffer().use { it.readUtf8() }
+                assertTrue(!text.contains("hunter2"), "no plaintext password on disk: $text")
+                assertTrue(
+                    text.contains("sync:pending:acc-1:$podcastSyncId:"),
+                    "the staged marker rides in place of the secret: $text",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
     // --- Fixtures -----------------------------------------------------------------------------------
 
     private fun mergerOf(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         client: SyncClient,
         library: FakeLibraryMerger,
+        forcedSecrets: FakeSecretStore? = null,
     ): FirstLinkMerger {
-        val secrets = FakeSecretStore()
+        val secrets = forcedSecrets ?: FakeSecretStore()
         return FirstLinkMerger(
             db = db,
             client = client,
@@ -386,6 +505,7 @@ class FirstLinkMergerTest {
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         enabled: Boolean = false,
         deviceId: String? = null,
+        accountId: String? = null,
     ) {
         db.withWriteTransaction {
             db
@@ -394,6 +514,7 @@ class FirstLinkMergerTest {
                     SyncStateEntity(
                         enabled = enabled,
                         deviceId = deviceId,
+                        accountId = accountId,
                         nodeId = "0000000000000001",
                         hlc = 1L shl 16,
                     ),
@@ -524,6 +645,12 @@ private class CountingClient(
     var changesCalls = 0
         private set
 
+    var resetCalls = 0
+        private set
+
+    var resetBeforeCursor: String? = null
+        private set
+
     override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()
 
     override suspend fun login(
@@ -604,7 +731,24 @@ private class CountingClient(
         confirm: String,
         mode: String,
         beforeCursor: String?,
-    ): AccountSummary = unsupported()
+    ): AccountSummary {
+        resetCalls++
+        resetBeforeCursor = beforeCursor
+        return AccountSummary(
+            username = "anna",
+            counts =
+                ch.lkmc.neutrodyne.sync.protocol.dto.LibraryCountsDto(
+                    podcasts = 0,
+                    groups = 0,
+                    episodes = 0,
+                    upnext = 0,
+                    settings = 0,
+                ),
+            devices = 1,
+            quotaRecords = 0,
+            records = 0,
+        )
+    }
 
     private fun unsupported(): Nothing = throw UnsupportedOperationException()
 }

@@ -89,8 +89,10 @@ private data class EpisodeParkHints(
  * land in a staging file on disk (`sync-link-<deviceId>.jsonl` in the cache directory, so a
  * 50,000-record account never sits in memory), are mapped to the staging directory's four
  * archive-named entries, and merge under the `LINK_*` policies — the one rules table that
- * serves restores and the first link (D92). "Use this device's library everywhere" uploads
- * first, pushes until the outbox drains and prunes last, unchanged.
+ * serves restores and the first link (D92). "Use this device's library everywhere" runs the
+ * same port under `LINK_HISTORY` first (step 2: matched podcasts and groups adopt the
+ * server's IDs, the episode history merges by time), then uploads with fresh clocks and
+ * prunes last.
  *
  * Staging resume (10 Merge step 1): a run interrupted after the pull finds the staging file
  * complete (its end marker carries the cursor) and reuses it instead of pulling again; the
@@ -315,11 +317,31 @@ class FirstLinkMerger(
         roundId: Long,
         onProgress: (LinkPhase, Int, Int) -> Unit,
     ): FirstLinkResult {
-        // Upload first: stage the server snapshot (never applied), adopt its cursor and clocks,
-        // then capture this device's whole library.
+        // Upload first: stage the server snapshot, adopt its IDs and merge its episode history
+        // into this device's rows (step 2), then capture this device's whole library.
         val pull = pullStaged(roundId, resume = true, onProgress)
+        // The seeds freeze the pre-merge values and timestamps: after the episode-history
+        // merge, only the fields the local side won still carry this node's stamps, and
+        // capturing them re-sends exactly those frozen values (10 step 3).
+        seedLocalRows()
+        val staged = mapToStagingDirectory(pull)
+        val hints = staged.parkHints
+        val outcome =
+            libraryMerger.mergeStaged(
+                stagingDir = staged.dir.toString(),
+                policy = MergePolicy.LINK_HISTORY,
+                onUnmatched = { podcastSyncId, identityKey -> park(podcastSyncId, identityKey, hints) },
+                progress = { done, total -> onProgress(LinkPhase.DOWNLOADING, done, total) },
+            )
+        if (outcome !is ch.lkmc.neutrodyne.core.common.Outcome.Success<*>) {
+            return FirstLinkResult.Failed("mergeStaged failed: $outcome")
+        }
+        mergeReceivedClocks(pull.records)
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         captureLocalLibrary()
+        // Episode state the local side won is re-sent at its own frozen timestamp; the
+        // `captureAll` rows above are newer, so non-episode records never double-capture.
+        captureLocalWinners()
         captureSharedPasswords()
         pushOutbox(onProgress)
         // Prune last: the server drops everything this upload did not re-assert, so no device can
