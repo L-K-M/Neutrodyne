@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineItem
 import ch.lkmc.neutrodyne.playback.engine.EngineState
 import ch.lkmc.neutrodyne.playback.engine.EngineWindowDiff
+import ch.lkmc.neutrodyne.playback.engine.TransitionReason
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -45,7 +46,10 @@ class FakeAudioEngine : AudioEngine {
 
     override fun updateWindow(diff: EngineWindowDiff) {
         commands += "diff"
-        items = diff.applyTo(items, items.getOrNull(currentIndex)?.episodeId)
+        val current = items.getOrNull(currentIndex)?.episodeId
+        items = diff.applyTo(items, current)
+        // The real engine tracks its current by identity; the fake keeps an index.
+        currentIndex = current?.let { id -> items.indexOfFirst { it.episodeId == id } } ?: 0
     }
 
     override fun play() {
@@ -67,6 +71,19 @@ class FakeAudioEngine : AudioEngine {
 
     fun end() {
         state.value = EngineState.Ended
+    }
+
+    /**
+     * Mirrors the production engine's automatic transition (11 Transitions): the
+     * window keeps the outgoing item, the current advances and the event carries
+     * the audible boundary position.
+     */
+    fun transition(toEpisodeId: Long) {
+        val from = items.getOrNull(currentIndex)?.episodeId
+        events.tryEmit(EngineEvent.ItemTransition(from, position, toEpisodeId, TransitionReason.AUTO))
+        currentIndex = items.indexOfFirst { it.episodeId == toEpisodeId }
+        position = 0
+        state.value = EngineState.Ready(toEpisodeId, playing)
     }
 
     override fun seekTo(positionMs: Long) {

@@ -10,13 +10,19 @@ import ch.lkmc.neutrodyne.playback.engine.EngineWindowDiff
 import ch.lkmc.neutrodyne.playback.engine.MovedItem
 import ch.lkmc.neutrodyne.playback.engine.PlacedItem
 
-/** Player-dispatcher confined translation; all selection/diff rules stay in playback:core. */
+/**
+ * Player-dispatcher confined translation; all selection/diff rules stay in
+ * playback:core. The engine keeps the outgoing item in its window until the
+ * controller's diff removes it, so [currentEpisodeId] is the engine's real
+ * current: after an automatic transition it is the arrival, not `items.first()`.
+ */
 internal class DesktopQueueProjector(
     private val engine: AudioEngine,
     private val resolver: DesktopEpisodeSourceResolver,
 ) {
     var entries: List<WindowEntry> = emptyList()
         private set
+
     private var items: List<EngineItem> = emptyList()
     var generation: Long = 0
         private set
@@ -25,18 +31,25 @@ internal class DesktopQueueProjector(
         queue: VirtualQueue,
         desired: List<WindowEntry>,
         operations: List<WindowOp>,
+        currentEpisodeId: Long?,
     ) {
         val replacement = operations.filterIsInstance<WindowOp.SetAll>().singleOrNull()
         if (replacement != null || operations.any { it == WindowOp.Clear }) {
             items = desired.map(resolver::project)
             engine.setWindow(items, 0, replacement?.startPositionMs)
         } else {
-            // Retain current's source even if a feed refresh changes its URL or a download finishes.
+            // Retain the engine current's source even if a feed refresh changes its
+            // URL or a download finishes; every other entry is re-projected.
+            val existing = items.associateBy { it.episodeId }
             val next =
-                desired.mapIndexed { index, entry ->
-                    if (index == 0) items.first() else resolver.project(entry)
+                desired.map { entry ->
+                    if (entry.item.episodeId == currentEpisodeId) {
+                        existing[entry.item.episodeId] ?: resolver.project(entry)
+                    } else {
+                        resolver.project(entry)
+                    }
                 }
-            val current = items.firstOrNull()?.episodeId
+            val current = currentEpisodeId
             val wanted = next.map { it.episodeId }.toSet()
             val removed = items.filter { it.episodeId !in wanted }.map { it.episodeId }.toSet()
             val working = items.filter { it.episodeId !in removed }.toMutableList()
