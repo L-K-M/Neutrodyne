@@ -101,6 +101,37 @@ class SyncApplyEffectsTest {
             }
         }
 
+    /**
+     * 10 Durable apply effects: a pending remote setting never clobbers a newer local intent —
+     * the drain skips DataStore and clears the marker, and the intent's own push converges the
+     * account on the newer value.
+     */
+    @Test
+    fun aPendingSettingLosesToANewerLocalIntent() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val port = FakeSettingsSyncPort()
+                val applier = applier(db, port)
+                applier.applyPage(settingPage(PlaybackSettingKeys.SKIP_BACK_MS.name, "15000"), roundId = now)
+                // A round raises the local clock past the page; the user's edit then records
+                // its intent with that newer clock, before the drain runs.
+                db.syncStateDao().raiseHlc(Hlc.of(now, 1, remote).packed)
+                SettingsCapture(db, port).install()
+                db.withWriteTransaction {
+                    port.recordLocal(PlaybackSettingKeys.SKIP_BACK_MS, 20_000L)
+                }
+
+                effects(db, port).drainSettings()
+
+                assertTrue(port.applied.isEmpty(), "applied=${port.applied}")
+                assertNull(pendingSetting(db, PlaybackSettingKeys.SKIP_BACK_MS.name))
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun aPendingAuthInstallsThroughTheStoreWithoutACapture() =
         runTest {

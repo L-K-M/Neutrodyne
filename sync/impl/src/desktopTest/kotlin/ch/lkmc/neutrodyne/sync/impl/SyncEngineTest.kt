@@ -116,6 +116,85 @@ class SyncEngineTest {
             }
         }
 
+    /**
+     * 10 Outbox and coalescing: the acknowledgement merges the exact sent fields into
+     * `sync_clock` raw state with their sent clocks, so the accepted values survive without a
+     * redelivery and a resync replay compares against them.
+     */
+    @Test
+    fun anAcknowledgedPushMergesItsSentFieldsIntoRawState() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                val podcast = a.db.podcastDao().bySyncId(syncId("0a"))!!
+                val episode =
+                    a.addEpisode(
+                        podcast.id,
+                        "g:one",
+                        enclosureUrl = "https://cdn.example.com/one.mp3",
+                    )
+                a.markPlayed(episode)
+
+                a.round()
+
+                val raw = a.db.syncClockDao().get("episode", syncId("0a") + "g:one")
+                assertTrue(raw != null, "the ack seeded the raw state")
+                val state =
+                    ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                        .decodeFromString<RawSyncRecord>(raw!!.clocks)
+                        .state
+                val played = state.fields["played"]
+                assertTrue(played != null, "fields=${state.fields.keys}")
+                assertEquals(true, (played!!.v as? kotlinx.serialization.json.JsonPrimitive)?.content == "true")
+                assertEquals("000000000000000a", played.c?.nodeId?.value, "the sent clock's origin rides along")
+            } finally {
+                a.close()
+            }
+        }
+
+    /**
+     * A pushed `auth` keeps only its protected representation when acknowledged: the raw state
+     * carries the feed-origin marker, never the plaintext that left the device (10 Durable
+     * apply effects).
+     */
+    @Test
+    fun anAcknowledgedAuthKeepsOnlyItsProtectedMarker() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server, sharePasswords = true)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                val podcast = a.db.podcastDao().bySyncId(syncId("0a"))!!
+                val credentialId =
+                    a.secrets.put("https://a.example", "anna", "hunter2".toCharArray()) ?: 0L
+                a.secrets.podcastCredentialIds.value = mapOf(podcast.id to credentialId)
+                a.db.withWriteTransaction {
+                    a.db.syncOutboxDao().captureIntent("podcast", syncId("0a"), "auth", "null")
+                }
+
+                a.round()
+
+                val raw = a.db.syncClockDao().get("podcast", syncId("0a"))
+                assertTrue(raw != null, "the ack seeded the raw state")
+                assertTrue(!raw!!.clocks.contains("hunter2"), "no plaintext password in Room: ${raw.clocks}")
+                val state =
+                    ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                        .decodeFromString<RawSyncRecord>(raw.clocks)
+                        .state
+                val auth = state.fields["auth"]!!
+                assertEquals(
+                    "https://a.example",
+                    (auth.v as? kotlinx.serialization.json.JsonObject)?.get("ref")
+                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content },
+                    "the marker names the feed origin: ${auth.v}",
+                )
+            } finally {
+                a.close()
+            }
+        }
+
     @Test
     fun aGroupAndMembershipConverge() =
         runTest {
@@ -248,6 +327,7 @@ class SyncEngineTest {
     private class Device(
         val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         val client: SyncClient,
+        sharePasswords: Boolean = false,
     ) {
         val clock = TestClock(NOW)
         val secrets = FakeSecretStore()
@@ -278,7 +358,7 @@ class SyncEngineTest {
                     ),
                 clock = clock,
                 secrets = secrets,
-                sharePasswords = { false },
+                sharePasswords = { sharePasswords },
                 address =
                     object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
                         override suspend fun serverUrl(): String = "https://sync.example"
@@ -397,6 +477,7 @@ class SyncEngineTest {
     private suspend fun device(
         name: String,
         server: InMemorySyncServer,
+        sharePasswords: Boolean = false,
     ): Device {
         val db = TestDb.inMemory()
         db.withWriteTransaction {
@@ -404,7 +485,7 @@ class SyncEngineTest {
                 .syncStateDao()
                 .upsert(SyncStateEntity(enabled = true, nodeId = name.padStart(16, '0'), hlc = 1L shl 16))
         }
-        return Device(db, InMemorySyncClient(server))
+        return Device(db, InMemorySyncClient(server), sharePasswords)
     }
 
     private fun syncId(name: String): String = "00000000-0000-4000-8000-${name.padStart(12, '0')}"

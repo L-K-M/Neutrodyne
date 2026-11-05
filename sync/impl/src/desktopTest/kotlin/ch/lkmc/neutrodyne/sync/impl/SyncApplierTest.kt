@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -136,9 +137,126 @@ class SyncApplierTest {
                         roundId = now,
                     )
                 assertEquals(1, result.held)
-                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1)
+                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1, now = now)
                 assertNull(held, "one removal of one is below the thresholds")
+                assertNull(
+                    db.podcastDao().bySyncId(podcastSyncId),
+                    "below the thresholds the staged removal is applied",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Mass-change guard rule 4: a removal of the podcast loaded in a playing player defers
+     * into its own held row — playback is never interrupted (R7.5), the guard's threshold
+     * verdict ignores it, and it applies once the player stops.
+     */
+    @Test
+    fun aRemovalOfThePlayingPodcastDefersUntilPlaybackEnds() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+
+                val result =
+                    applier.applyPage(
+                        listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                        roundId = now,
+                    )
+                assertEquals(1, result.held)
+                assertNotNull(db.podcastDao().bySyncId(podcastSyncId), "the playing podcast stays")
+                assertNull(
+                    MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1, now = now),
+                    "a deferred removal never joins the round's verdict",
+                )
                 assertNotNull(db.podcastDao().bySyncId(podcastSyncId))
+
+                playback.setPlaying(false)
+                MassChangeGuard.releaseDeferred(db, playingPodcastRid = null, now = now)
+                assertNull(db.podcastDao().bySyncId(podcastSyncId), "the removal applies after playback")
+                assertEquals(0, db.syncHeldDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A paused player holds no deferral: only a playing one is never interrupted. */
+    @Test
+    fun aPausedPlayerDoesNotDeferTheRemoval() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val applier = applier(db, playback = FakePlaybackSyncPort(playing = false, episodeId = episodeId))
+
+                applier.applyPage(
+                    listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                    roundId = now,
+                )
+
+                assertNull(
+                    MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1, now = now),
+                )
+                assertNull(db.podcastDao().bySyncId(podcastSyncId), "a paused player applies at once")
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A deferred removal a newer remote value overturned is dropped, not applied. */
+    @Test
+    fun aDeferredRemovalDropsWhenANewerValueOverturnsIt() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+                applier.applyPage(
+                    listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                    roundId = now,
+                )
+
+                // A newer revival wins the stored clocks while the removal is still deferred.
+                applier.applyPage(
+                    listOf(
+                        podcastRecord(
+                            podcastSyncId,
+                            "subscribed" to FieldValue(JsonPrimitive(true), clock(99).toString()),
+                        ),
+                    ),
+                    roundId = now + 1,
+                )
+
+                playback.setPlaying(false)
+                MassChangeGuard.releaseDeferred(db, playingPodcastRid = null, now = now)
+                assertNotNull(db.podcastDao().bySyncId(podcastSyncId), "the revival survives")
+                assertEquals(0, db.syncHeldDao().count())
             } finally {
                 db.close()
             }
@@ -159,7 +277,7 @@ class SyncApplierTest {
                     }
                 assertEquals(11, applier.applyPage(removals, roundId = now).held)
 
-                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 50)
+                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 50, now = now)
                 assertNotNull(held)
                 assertEquals(11, held.podcasts.size)
                 assertEquals(50, db.podcastDao().allForExport().size)
@@ -587,6 +705,7 @@ class SyncApplierTest {
     private fun applier(
         db: NeutrodyneDatabase,
         secrets: FakeSecretStore = FakeSecretStore(),
+        playback: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort = NoPlaybackSync,
     ): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
@@ -594,7 +713,7 @@ class SyncApplierTest {
             clock = TestClock(now),
             secrets = secrets,
             settings = settings,
-            playback = NoPlaybackSync,
+            playback = playback,
             syncIngestHook = SyncIngestHook.None,
             channelSync =
                 object : GroupChannelSync {

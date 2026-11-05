@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.PlaybackSyncEvent
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import kotlinx.coroutines.CancellationException
@@ -66,6 +67,8 @@ class SyncScheduler(
     private val clock: Clock,
     @param:ApplicationScope private val scope: CoroutineScope,
     private val hooks: SyncScheduleHooks,
+    /** The engine's deferred-removal release (10 Mass-change guard rule 4). */
+    private val releaseDeferred: suspend () -> Unit = {},
 ) {
     /** Serializes this scheduler's rounds; the engine's own mutex covers rounds from other callers. */
     private val roundMutex = Mutex()
@@ -95,7 +98,18 @@ class SyncScheduler(
             db.invalidationTracker.createFlow(OUTBOX_TABLE).collect { onOutboxChanged() }
         }
         scope.launch {
-            playback.events.collect { onPlaybackBoundary() }
+            playback.events.collect { event ->
+                // 10 Mass-change guard rule 4: a removal deferred while playing applies when
+                // the player stops or the item changes (a pause keeps the item current).
+                when (event) {
+                    PlaybackSyncEvent.Stopped, is PlaybackSyncEvent.Transition -> {
+                        if (isLinked()) releaseDeferred()
+                    }
+
+                    PlaybackSyncEvent.Paused -> {}
+                }
+                onPlaybackBoundary()
+            }
         }
         scope.launch {
             playback.active.collectLatest { active ->
