@@ -267,6 +267,16 @@ abstract class SyncOutboxDao(
         }
     }
 
+    /**
+     * 10 Feed passwords: turning the switch off drops the pending `auth` rows of a collection —
+     * they can never be pushed while sharing is off, and turning it on re-captures fresh ones.
+     */
+    @Query("DELETE FROM sync_outbox WHERE coll = :coll AND field = :field")
+    abstract suspend fun deleteFieldOf(
+        coll: String,
+        field: String,
+    )
+
     suspend fun deleteIfUnchanged(
         coll: String,
         rid: String,

@@ -33,6 +33,7 @@ class FakeSyncController(
     override val heldChanges = MutableStateFlow<List<MassChangePrompt>>(emptyList())
     override val remoteSession = MutableStateFlow<RemoteSessionOffer?>(null)
     override val syncing = MutableStateFlow(false)
+    override val shareFeedPasswords = MutableStateFlow(false)
 
     private val _notices = MutableSharedFlow<SyncNotice>(extraBufferCapacity = 16)
     override val notices: Flow<SyncNotice> = _notices

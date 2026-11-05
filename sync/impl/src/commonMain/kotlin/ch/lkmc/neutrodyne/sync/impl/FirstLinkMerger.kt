@@ -114,6 +114,7 @@ class FirstLinkMerger(
     storagePaths: StoragePaths,
     private val settings: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort,
     private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
+    private val sharePasswords: () -> Boolean,
     private val coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     private val effects: SyncApplyEffects,
     private val clock: Clock,
@@ -172,6 +173,7 @@ class FirstLinkMerger(
             val pull = pullStaged(roundId, resume = false) { _, _, _ -> }
             adoptPulledState(pull.cursor, pull.maxClockPacked)
             captureLocalLibrary()
+            captureSharedPasswords()
             pushOutbox { _, _, _ -> }
             client.reset(DELETE_CONFIRMATION, RESET_MODE_LIBRARY, pull.cursor)
             completeLink()
@@ -256,6 +258,7 @@ class FirstLinkMerger(
         // admitted while the local winners are re-stamped with their own times.
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         captureLocalWinners()
+        captureSharedPasswords()
         journalPendingSettings(pull.records)
         effects.drain()
         pushOutbox(onProgress)
@@ -317,6 +320,7 @@ class FirstLinkMerger(
         val pull = pullStaged(roundId, resume = true, onProgress)
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         captureLocalLibrary()
+        captureSharedPasswords()
         pushOutbox(onProgress)
         // Prune last: the server drops everything this upload did not re-assert, so no device can
         // observe a half-replaced library.
@@ -813,6 +817,17 @@ class FirstLinkMerger(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * 10 Feed passwords: while the switch is on, a whole-library upload carries every podcast's
+     * `auth` too — one capture per credentialed podcast, as a switch-on does.
+     */
+    private suspend fun captureSharedPasswords() {
+        if (!sharePasswords()) return
+        for (syncId in db.podcastDao().syncIdsWithCredentials()) {
+            db.withWriteTransaction { db.syncOutboxDao().captureIntent("podcast", syncId, "auth", "null") }
         }
     }
 

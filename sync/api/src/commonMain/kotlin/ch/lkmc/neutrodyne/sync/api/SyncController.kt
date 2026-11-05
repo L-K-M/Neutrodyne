@@ -97,5 +97,8 @@ interface SyncController {
     /** 10 Settings: persist the device-local switches (Settings › Sync). */
     suspend fun setSyncPlaybackSettings(enabled: Boolean)
 
+    /** This device's "Share feed passwords" switch, for the settings row's state. */
+    val shareFeedPasswords: StateFlow<Boolean>
+
     suspend fun setShareFeedPasswords(enabled: Boolean)
 }
