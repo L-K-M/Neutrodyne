@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Unlicense
+"""Canary pipeline script tests — no live GitHub or YouTube traffic.
+
+Every network tool (`curl`, `gpg`, `unzip`) is PATH-stubbed; signing tests
+generate throwaway Ed25519 keys in temp dirs via the real openssl. The
+workflow-shape tests parse the committed YAML.
+"""
+
+import base64
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[3]
+SCRIPTS = ROOT / 'scripts/engine'
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), SCRIPTS / f'{name}.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+latest = load('latest-ytdlp-tag')
+manifest_tool = load('make-engine-manifest')
+sign_tool = load('sign-engine-manifest')
+edsig = load('edsig')
+
+
+class CandidateSelectionTests(unittest.TestCase):
+    def test_stable_tag_parsed_from_redirect(self):
+        location = 'https://github.com/yt-dlp/yt-dlp/releases/tag/2026.09.01'
+        self.assertEqual('2026.09.01', latest.tag_from_location(location))
+        self.assertEqual('2026.09.01', latest.latest_tag(lambda url: location))
+
+    def test_rebuild_prerelease_and_foreign_locations_rejected(self):
+        for location in (
+            'https://github.com/yt-dlp/yt-dlp/releases/tag/2026.09.01.1',
+            'https://github.com/yt-dlp/yt-dlp/releases/tag/2026.09.01-rc',
+            'https://example.com/yt-dlp/releases/tag/2026.09.01',
+            'https://github.com/yt-dlp/yt-dlp/releases/tag/nightly',
+            '',
+        ):
+            with self.subTest(location=location):
+                self.assertIsNone(latest.tag_from_location(location))
+
+    def test_empty_redirect_means_no_candidate(self):
+        self.assertIsNone(latest.latest_tag(lambda url: ''))
+
+
+class BumpStub:
+    """A PATH where curl serves fixtures and gpg only verifies 'GOOD' sigs."""
+
+    FINGERPRINT = 'AC0CBBE6848D6A873464AF4E57CF65933B5A7581'
+
+    def __init__(self, root):
+        self.dir = Path(root)
+        self.bin = self.dir / 'bin'
+        self.bin.mkdir()
+        self.served = self.dir / 'served'
+        self.served.mkdir()
+        self.downloads = {}
+
+    def serve(self, name, content):
+        path = self.served / name
+        path.write_bytes(content if isinstance(content, bytes) else content.encode())
+        self.downloads[name] = path
+        return path
+
+    def install(self, good_signature=b'GOOD', ejs='0.8.0'):
+        curl = self.bin / 'curl'
+        curl.write_text(
+            '#!/bin/sh\n'
+            'dest=""\n'
+            'for last; do :; done\n'
+            'while [ $# -gt 0 ]; do\n'
+            '    [ "$1" = "-o" ] && { dest=$2; shift 2; continue; }\n'
+            '    shift\n'
+            'done\n'
+            f'cp "{self.served}/$(basename "$last")" "$dest"\n'
+        )
+        curl.chmod(curl.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        gpg = self.bin / 'gpg'
+        gpg.write_text(
+            '#!/bin/sh\n'
+            'case " $* " in\n'
+            '    *" --import "*) exit 0 ;;\n'
+            'esac\n'
+            'sig=""; doc=""\n'
+            'while [ $# -gt 0 ]; do\n'
+            '    case "$1" in\n'
+            '        --verify) sig=$2; doc=$3; shift 3 ;;\n'
+            '        *) shift ;;\n'
+            '    esac\n'
+            'done\n'
+            f'if grep -q GOOD "$sig" 2>/dev/null; then\n'
+            f'    echo "[GNUPG:] VALIDSIG {self.FINGERPRINT} x"\n'
+            '    exit 0\n'
+            'fi\n'
+            'exit 1\n'
+        )
+        gpg.chmod(gpg.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        unzip = self.bin / 'unzip'
+        unzip.write_text(
+            '#!/bin/sh\n'
+            f'echo "__version__ = version = \'{ejs}\'"\n'
+        )
+        unzip.chmod(unzip.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    def env(self):
+        env = dict(os.environ)
+        env['PATH'] = f'{self.bin}:{os.environ["PATH"]}'
+        env['GNUPGHOME'] = str(self.dir / 'gnupg')
+        return env
+
+
+class BumpTests(unittest.TestCase):
+    """Signature and hash failures must never stage a candidate."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.stub = BumpStub(self.tmp)
+        self.stub.install()
+        # A minimal fake engine dir: bump overwrites it wholesale.
+        self.engine = self.tmp / 'engine'
+        self.engine.mkdir()
+        self.engine.joinpath('bundled.json').write_text(
+            json.dumps({'version': '2000.01.01', 'tag': '2000.01.01',
+                        'sha256': '0' * 64, 'ejsVersion': '0.0.0'}))
+        # The stub curl serves basename(url): expanded_assets/<tag> and the
+        # three release assets land under these fixture names.
+        self.lockfile = self.tmp / 'python-components.lock'
+        self.lockfile.write_text(
+            '[[component]]\nname = "yt-dlp"\nversion = "2000.01.01"\n'
+            'origin = "https://github.com/yt-dlp/yt-dlp/releases/download/2000.01.01/yt-dlp"\n'
+            'licence = "Unlicense"\nkind = "python"\n'
+            '[[component]]\nname = "yt-dlp-ejs"\nversion = "0.0.0"\n'
+            'origin = "https://github.com/yt-dlp/yt-dlp/releases/download/2000.01.01/yt-dlp"\n'
+            'licence = "Unlicense"\nkind = "python"\n'
+            '[[component]]\nname = "meriyah"\nversion = "6.1.4"\n'
+            'origin = "https://github.com/yt-dlp/yt-dlp/releases/download/2000.01.01/yt-dlp"\n'
+            'licence = "ISC"\nkind = "python"\n')
+        self.stub.serve(
+            '2026.09.01',
+            '<a href="/yt-dlp/yt-dlp/releases/download/2026.09.01/yt-dlp">x</a>\n'
+            '<a href="/yt-dlp/yt-dlp/releases/download/2026.09.01/SHA2-256SUMS">x</a>\n'
+            '<a href="/yt-dlp/yt-dlp/releases/download/2026.09.01/SHA2-256SUMS.sig">x</a>\n')
+
+    def run_bump(self, engine_dir=None):
+        env = self.stub.env()
+        env['ND_ENGINE_DIR'] = str(engine_dir or self.engine)
+        script = SCRIPTS / 'bump-ytdlp.sh'
+        # ND_ overrides keep the fixture out of the real checkout; the
+        # lockfile path is derived from the engine dir's parent's lock name.
+        return subprocess.run(
+            ['sh', str(script), '2026.09.01', '--force'],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_signature_failure_stages_nothing(self):
+        archive = self.stub.serve('yt-dlp', 'archive-bytes')
+        import hashlib
+        digest = hashlib.sha256(b'archive-bytes').hexdigest()
+        self.stub.serve('SHA2-256SUMS', f'{digest}  yt-dlp\n')
+        self.stub.serve('SHA2-256SUMS.sig', 'FORGED')
+        result = self.run_bump()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('does not verify', result.stderr)
+        self.assertFalse((self.engine / 'yt-dlp').exists())
+
+    def test_hash_failure_stages_nothing(self):
+        self.stub.serve('yt-dlp', 'archive-bytes')
+        self.stub.serve('SHA2-256SUMS', '0' * 64 + '  yt-dlp\n')
+        self.stub.serve('SHA2-256SUMS.sig', 'GOOD')
+        result = self.run_bump()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('does not match', result.stderr)
+        self.assertFalse((self.engine / 'yt-dlp').exists())
+
+    def test_candidate_selection_and_staging(self):
+        self.stub.serve('yt-dlp', 'archive-bytes')
+        import hashlib
+        digest = hashlib.sha256(b'archive-bytes').hexdigest()
+        self.stub.serve('SHA2-256SUMS', f'{digest}  yt-dlp\n')
+        self.stub.serve('SHA2-256SUMS.sig', 'GOOD')
+        result = self.run_bump()
+        self.assertEqual(0, result.returncode, result.stderr)
+        bundled = json.loads((self.engine / 'bundled.json').read_text())
+        self.assertEqual('2026.09.01', bundled['version'])
+        self.assertEqual(digest, bundled['sha256'])
+        self.assertEqual('0.8.0', bundled['ejsVersion'])
+
+
+class ManifestTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.keys = self.tmp / 'keys'
+        self.keys.mkdir()
+        subprocess.run(
+            ['openssl', 'genpkey', '-algorithm', 'ED25519', '-out', str(self.tmp / 'key.pem')],
+            check=True, capture_output=True)
+        self.public = edsig.public_key_of(self.tmp / 'key.pem')
+        (self.keys / 'engine-manifest-ed25519.pub').write_text(self.public + '\n')
+        self.pem = (self.tmp / 'key.pem').read_bytes()
+        self.bundled = self.tmp / 'bundled.json'
+        self.bundled.write_text(json.dumps({
+            'version': '2026.09.01', 'tag': '2026.09.01',
+            'sha256': 'a' * 64, 'ejsVersion': '0.8.0'}))
+
+    def run_make(self, *args):
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / 'make-engine-manifest.py'), *args],
+            capture_output=True, text=True)
+
+    def sign_doc(self, document):
+        sig = self.tmp / 'doc.sig'
+        subprocess.run(
+            ['openssl', 'pkeyutl', '-sign', '-rawin', '-inkey', str(self.tmp / 'key.pem'),
+             '-in', str(document), '-out', str(sig)], check=True, capture_output=True)
+        return base64.b64encode(sig.read_bytes()).decode()
+
+    def write_current(self, sequence=5, version='2026.08.19', revoked=None):
+        current = self.tmp / 'current.json'
+        current.write_text(json.dumps({
+            'schema': 1, 'sequence': sequence, 'issuedAt': '2026-08-20T00:00:00Z',
+            'ytdlp': {'version': version, 'tag': version, 'repo': 'yt-dlp/yt-dlp',
+                      'asset': 'yt-dlp', 'sha256': 'b' * 64, 'ejsVersion': '0.8.0'},
+            'shimApi': {'min': 1, 'max': 1}, 'revoked': revoked or []}))
+        sig = self.tmp / 'current.json.sig'
+        sig.write_text(self.sign_doc(current) + '\n')
+        return current, sig
+
+    def test_bootstrap_writes_sequence_one(self):
+        out = self.tmp / 'm.json'
+        result = self.run_make(
+            '--bootstrap', '--bundled', str(self.bundled), '--out', str(out),
+            '--now', '2026-09-02T00:00:00Z', '--keys-dir', str(self.keys))
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads(out.read_text())
+        self.assertEqual(1, manifest['schema'])
+        self.assertEqual(1, manifest['sequence'])
+        self.assertEqual('2026-09-02T00:00:00Z', manifest['issuedAt'])
+        self.assertEqual('2026.09.01', manifest['ytdlp']['version'])
+        self.assertEqual('a' * 64, manifest['ytdlp']['sha256'])
+        self.assertEqual({'min': 1, 'max': 1}, manifest['shimApi'])
+        self.assertEqual([], manifest['revoked'])
+
+    def test_sequence_increments_and_revoked_union(self):
+        current, sig = self.write_current(revoked=['2026.01.01'])
+        out = self.tmp / 'm.json'
+        result = self.run_make(
+            '--current', str(current), '--current-sig', str(sig),
+            '--bundled', str(self.bundled), '--out', str(out),
+            '--revoke', '2026.02.02', '--now', '2026-09-02T00:00:00Z',
+            '--keys-dir', str(self.keys))
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads(out.read_text())
+        self.assertEqual(6, manifest['sequence'])
+        self.assertEqual(['2026.01.01', '2026.02.02'], manifest['revoked'])
+
+    def test_tampered_current_manifest_is_rejected(self):
+        current, _ = self.write_current()
+        # A current manifest re-signed by nobody we pin: signature absent.
+        unsigned = self.tmp / 'bad-sig'
+        unsigned.write_text(base64.b64encode(b'0' * 64).decode() + '\n')
+        out = self.tmp / 'm.json'
+        result = self.run_make(
+            '--current', str(current), '--current-sig', str(unsigned),
+            '--bundled', str(self.bundled), '--out', str(out),
+            '--keys-dir', str(self.keys))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('does not verify', result.stderr)
+        self.assertFalse(out.exists())
+
+    def test_candidate_below_bundled_floor_is_rejected(self):
+        current, sig = self.write_current()
+        result = self.run_make(
+            '--current', str(current), '--current-sig', str(sig),
+            '--bundled', str(self.bundled), '--out', str(self.tmp / 'm.json'),
+            '--floor', '2026.10.01', '--keys-dir', str(self.keys))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('below', result.stderr)
+
+    def test_revoke_only_keeps_current_candidate(self):
+        current, sig = self.write_current()
+        out = self.tmp / 'm.json'
+        result = self.run_make(
+            '--current', str(current), '--current-sig', str(sig),
+            '--keep-candidate', '--revoke', '2026.08.19',
+            '--out', str(out), '--now', '2026-09-02T00:00:00Z',
+            '--keys-dir', str(self.keys))
+        # Revoking the approved version itself is refused.
+        self.assertNotEqual(0, result.returncode)
+        current2, sig2 = self.write_current(version='2026.08.18')
+        result = self.run_make(
+            '--current', str(current2), '--current-sig', str(sig2),
+            '--keep-candidate', '--revoke', '2026.09.01',
+            '--out', str(out), '--now', '2026-09-02T00:00:00Z',
+            '--keys-dir', str(self.keys))
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = json.loads(out.read_text())
+        self.assertEqual('2026.08.18', manifest['ytdlp']['version'])
+        self.assertEqual(['2026.09.01'], manifest['revoked'])
+
+    def test_heartbeat_document(self):
+        out = self.tmp / 'hb.json'
+        result = self.run_make(
+            '--heartbeat', '--sequence', '7', '--out', str(out),
+            '--now', '2026-09-02T01:02:03Z')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            {'kind': 'heartbeat', 'lastRunAt': '2026-09-02T01:02:03Z', 'sequence': 7},
+            json.loads(out.read_text()))
+
+
+class SigningTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.keys = self.tmp / 'keys'
+        self.keys.mkdir()
+        subprocess.run(
+            ['openssl', 'genpkey', '-algorithm', 'ED25519', '-out', str(self.tmp / 'key.pem')],
+            check=True, capture_output=True)
+        (self.keys / 'engine-manifest-ed25519.pub').write_text(
+            edsig.public_key_of(self.tmp / 'key.pem') + '\n')
+        self.doc = self.tmp / 'm.json'
+        self.doc.write_text('{"schema":1}\n')
+
+    def run_sign(self, env_extra=None):
+        env = dict(os.environ)
+        env.pop('NEUTRODYNE_ENGINE_MANIFEST_KEY', None)
+        env.pop('TEST_MANIFEST_KEY', None)
+        env.update(env_extra or {})
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / 'sign-engine-manifest.py'),
+             str(self.doc), '--key-env', 'TEST_MANIFEST_KEY',
+             '--keys-dir', str(self.keys)],
+            capture_output=True, text=True, env=env)
+
+    def test_dry_run_without_secret(self):
+        result = self.run_sign()
+        self.assertEqual(77, result.returncode)
+        self.assertIn('dry-run', result.stdout)
+        self.assertFalse(self.doc.with_suffix('.json.sig').exists())
+
+    def test_signs_and_verifies_against_committed_slot(self):
+        pem_b64 = base64.b64encode((self.tmp / 'key.pem').read_bytes()).decode()
+        result = self.run_sign({'TEST_MANIFEST_KEY': pem_b64})
+        self.assertEqual(0, result.returncode, result.stderr)
+        sig_file = Path(str(self.doc) + '.sig')
+        self.assertTrue(sig_file.exists())
+        signature = sig_file.read_text().strip()
+        self.assertTrue(
+            edsig.verify_detached(self.doc.read_bytes(), signature, self.keys))
+
+    def test_unpinned_key_is_refused(self):
+        other = self.tmp / 'other.pem'
+        subprocess.run(
+            ['openssl', 'genpkey', '-algorithm', 'ED25519', '-out', str(other)],
+            check=True, capture_output=True)
+        result = self.run_sign({'TEST_MANIFEST_KEY': base64.b64encode(other.read_bytes()).decode()})
+        self.assertEqual(1, result.returncode)
+        self.assertIn('not one of the committed', result.stderr)
+        self.assertFalse(Path(str(self.doc) + '.sig').exists())
+
+
+class GateTests(unittest.TestCase):
+    """canary.sh emits candidate outputs only when the gate is green."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.engine = self.tmp / 'engine'
+        self.engine.mkdir()
+        self.engine.joinpath('bundled.json').write_text(json.dumps({
+            'version': '2026.09.01', 'tag': '2026.09.01',
+            'sha256': 'c' * 64, 'ejsVersion': '0.8.0'}))
+        self.out = self.tmp / 'candidate.env'
+
+    def run_canary(self, gate):
+        env = dict(os.environ)
+        env['ND_ENGINE_DIR'] = str(self.engine)
+        env['CANARY_GATE_CMD'] = gate
+        return subprocess.run(
+            ['sh', str(SCRIPTS / 'canary.sh'), '--staged', '--out', str(self.out)],
+            capture_output=True, text=True, env=env)
+
+    def test_green_gate_emits_candidate(self):
+        result = self.run_canary('true')
+        self.assertEqual(0, result.returncode, result.stderr)
+        values = dict(
+            line.split('=', 1) for line in self.out.read_text().splitlines())
+        self.assertEqual('2026.09.01', values['version'])
+        self.assertEqual('c' * 64, values['sha256'])
+        self.assertEqual('0.8.0', values['ejsVersion'])
+
+    def test_self_test_failure_blocks_the_candidate(self):
+        result = self.run_canary('false')
+        self.assertNotEqual(0, result.returncode)
+        self.assertFalse(self.out.exists())
+
+
+class WorkflowShapeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.workflow = (ROOT / '.github/workflows/engine-canary.yml').read_text()
+
+    def test_schedule_dispatch_and_concurrency(self):
+        self.assertIn("cron: '23 */6 * * *'", self.workflow.replace('"', "'"))
+        self.assertIn('workflow_dispatch:', self.workflow)
+        self.assertIn('group: engine-canary', self.workflow)
+        self.assertIn('cancel-in-progress: false', self.workflow)
+        for name in ('tag', 'revoke', 'bootstrap'):
+            self.assertRegex(self.workflow, rf'(?m)^\s+{name}:', name)
+
+    def test_never_triggers_on_pull_requests(self):
+        self.assertNotIn('pull_request', self.workflow)
+        self.assertNotIn('youtube.com', self.workflow)
+
+    def test_approve_needs_gate_and_uses_environment(self):
+        self.assertRegex(self.workflow, r'approve:\s*\n(?:.*\n)*?\s+needs:.*gate')
+        self.assertIn('environment: engine-approval', self.workflow)
+        self.assertIn('NEUTRODYNE_ENGINE_MANIFEST_KEY', self.workflow)
+
+    def test_deploy_uploads_release_assets(self):
+        self.assertIn('engine-approvals', self.workflow)
+        self.assertIn('gh release upload', self.workflow)
+        self.assertIn('--prerelease', self.workflow)
+
+    def test_approve_signs_the_gated_candidate_not_the_checkout(self):
+        # approve works on a clean checkout whose bundled.json is the old
+        # floor; the manifest must be built from the gate's staged metadata.
+        self.assertIn('name: engine-candidate', self.workflow)
+        self.assertIn('--bundled candidate/bundled.json', self.workflow)
+
+    def test_approve_runs_on_a_skipped_gate_but_never_a_failed_one(self):
+        approve = self.workflow.split('  approve:', 1)[1].split('  deploy:', 1)[0]
+        condition = next(line for line in approve.splitlines() if 'if:' in line)
+        self.assertIn("'success'", condition)
+        self.assertIn("'skipped'", condition)
+        self.assertNotIn("!= 'failure'", condition)
+
+    def test_keepalive_reenables_the_canary(self):
+        keepalive = (ROOT / '.github/workflows/keepalive.yml').read_text()
+        self.assertIn('engine-canary.yml', keepalive)
+
+
+if __name__ == '__main__':
+    unittest.main()
