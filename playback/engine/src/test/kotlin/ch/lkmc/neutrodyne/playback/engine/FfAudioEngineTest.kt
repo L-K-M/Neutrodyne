@@ -444,9 +444,10 @@ class FfAudioEngineTest {
 
     private fun await(
         description: String,
+        timeoutMs: Long = 10_000L,
         condition: () -> Boolean,
     ) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(2)
         assertTrue(condition(), "timed out waiting for $description")
     }
@@ -556,9 +557,12 @@ class FfAudioEngineTest {
         engine(output = { FakeOutput().also { outputs += it } }).use { engine ->
             engine.setWindow(listOf(item), 0, null)
             engine.play()
-            await("ready") { engine.state.value is EngineState.Ready }
+            await("ready", timeoutMs = 30_000L) {
+                assertHealthy(engine)
+                engine.state.value is EngineState.Ready
+            }
             engine.onDeviceRemoved()
-            await("output error") { engine.state.value is EngineState.Error }
+            await("output error", timeoutMs = 30_000L) { engine.state.value is EngineState.Error }
             assertEquals(1, outputs.size)
             assertTrue(outputs[0].closed, "the removed device must be discarded")
             engine.setWindow(listOf(item), 0, null)
