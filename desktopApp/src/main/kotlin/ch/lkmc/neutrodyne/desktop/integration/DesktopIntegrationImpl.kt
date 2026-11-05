@@ -52,6 +52,11 @@ class DesktopIntegrationImpl(
 @ContributesTo(AppScope::class)
 @BindingContainer
 object DesktopIntegrationBindings {
+    /**
+     * 08's S8 optional binding: `:feature:settings` asks for `DesktopIntegration?` — a nullable
+     * type is its own binding — so the desktop's impl is provided under the nullable type and
+     * Android binds `null`.
+     */
     @Provides
-    fun desktopIntegration(impl: DesktopIntegrationImpl): DesktopIntegration = impl
+    fun desktopIntegration(impl: DesktopIntegrationImpl): DesktopIntegration? = impl
 }
