@@ -4296,6 +4296,7 @@
   public static boolean isBlank(java.lang.CharSequence);
   public static kotlin.sequences.Sequence lineSequence(java.lang.CharSequence);
   public static java.lang.String removePrefix(java.lang.String, java.lang.CharSequence);
+  public static java.lang.String removeSuffix(java.lang.String, java.lang.CharSequence);
   public static java.util.List split$default(java.lang.CharSequence, char[], boolean, int, int, java.lang.Object);
   public static java.lang.String substringAfter$default(java.lang.String, java.lang.String, java.lang.String, int, java.lang.Object);
   public static java.lang.String substringBefore$default(java.lang.String, char, java.lang.String, int, java.lang.Object);
