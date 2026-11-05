@@ -100,6 +100,7 @@ int main(int argc, char **argv) {
     struct_begin("AVStream", sizeof(AVStream), ND_ALIGNOF(AVStream));
     FIELD(AVStream, codecpar);
     FIELD(AVStream, time_base);
+    FIELD(AVStream, duration);
     FIELD_LAST(AVStream, discard);
     struct_end();
 

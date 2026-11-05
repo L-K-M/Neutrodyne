@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: Unlicense
+package ch.lkmc.neutrodyne.playback.desktop
+
+import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
+import ch.lkmc.neutrodyne.core.model.QueueItem
+import ch.lkmc.neutrodyne.core.model.QueueOrigin
+import ch.lkmc.neutrodyne.core.model.VirtualQueue
+import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
+import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
+import ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex
+import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePlayContextResolver
+import ch.lkmc.neutrodyne.core.testing.FakePlaySessionStore
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
+import ch.lkmc.neutrodyne.core.testing.FakePositionStore
+import ch.lkmc.neutrodyne.core.testing.FakeQueueRepository
+import ch.lkmc.neutrodyne.core.testing.FakeScopeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeStreamResolver
+import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
+import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings
+import ch.lkmc.neutrodyne.playback.core.PlayStarter
+import ch.lkmc.neutrodyne.playback.core.PlayedRule
+import ch.lkmc.neutrodyne.playback.core.PositionSaver
+import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.StartPositionRule
+import ch.lkmc.neutrodyne.playback.core.WindowDiff
+import ch.lkmc.neutrodyne.playback.engine.EngineBackend
+import ch.lkmc.neutrodyne.playback.engine.FfAudioEngine
+import ch.lkmc.neutrodyne.playback.engine.SpanCache
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.junit.Test
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/** Production FFmpeg/controller boundary, explicitly using miniaudio's null output. */
+class DesktopNativePlaybackTest {
+    @Test
+    fun localPlaybackSeekAndQuitPersistTheNativeTimeline() =
+        runBlocking {
+            val root = Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")))
+            val target = requireNotNull(System.getProperty("neutrodyne.nativeTarget"))
+            val directory = Files.createTempDirectory("md1a2-native")
+            val file = directory.resolve("local.wav")
+            Files.write(file, wave())
+            val clock = TestClock()
+            val local = FakeLocalMediaIndex().apply { files[1] = file.toUri().toString() }
+            val caps = FakeYouTubeCapabilitiesSource()
+            val resolver = DesktopEpisodeSourceResolver(local, caps, FakeYouTubeStreamResolver(), clock)
+            val cache = SpanCache(directory.resolve("cache"))
+            val platform =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakePlatformInfo()
+            val clients =
+                NetworkClients(
+                    ch.lkmc.neutrodyne.core.network.okhttp.CoreClients(
+                        ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor(
+                            ch.lkmc.neutrodyne.core.common
+                                .UserAgentProvider(platform, "0.1.0", "https://example.com/repo"),
+                        ),
+                        ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard(
+                            ch.lkmc.neutrodyne.core.common
+                                .LocalNetworkAccess(),
+                            platform,
+                        ),
+                        ch.lkmc.neutrodyne.core.network.okhttp
+                            .DnsFamilyHints(),
+                        emptySet(),
+                    ),
+                    ch.lkmc.neutrodyne.core.network.okhttp
+                        .AuthInterceptor { ch.lkmc.neutrodyne.core.common.CredentialLookup.None },
+                )
+            val engine =
+                FfAudioEngine(
+                    root.resolve("playback/native/build/ffmpeg/$target"),
+                    root.resolve("playback/native/build/ndmedia/$target"),
+                    resolver,
+                    clients,
+                    cache,
+                    EngineBackend.NULL,
+                )
+            val positions = FakePositionStore()
+            val queue =
+                FakeQueueRepository().apply {
+                    this.queue.value =
+                        VirtualQueue(1, QueueItem(1, QueueOrigin.CURRENT), emptyList(), emptyList())
+                }
+            val sessions = FakePlaySessionStore().apply { this.queue = queue.queue.value }
+            val row = testEpisodeRow(1)
+            val media =
+                FakePlaybackMediaLookup().apply {
+                    items.value =
+                        mapOf(
+                            1L to
+                                PlaybackMediaInfo(
+                                    1,
+                                    row.podcastId,
+                                    row.title,
+                                    row.podcastTitle,
+                                    row.artwork,
+                                    row.sourceType,
+                                    row.availability,
+                                    false,
+                                    "https://media.example/local.wav",
+                                    null,
+                                    null,
+                                    120_000,
+                                    null,
+                                    null,
+                                ),
+                        )
+                }
+            val rule = PlayedRule()
+            val start = StartPositionRule()
+            val runtime =
+                DesktopPlaybackRuntime(
+                    PlayStarter(
+                        FakePlayContextResolver(),
+                        queue,
+                        sessions,
+                        media,
+                        positions,
+                        caps,
+                        local,
+                        FakeNetworkMonitor(),
+                        clock,
+                        start,
+                        rule,
+                    ),
+                    QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), start, rule),
+                    PositionSaver(positions, clock, rule),
+                    EffectivePlaybackSettings(
+                        FakeEffectiveSettingsResolver(),
+                        FakeScopeSettingsRepository(),
+                        FakeSettingsRepository(),
+                    ),
+                    sessions,
+                    queue,
+                    media,
+                    positions,
+                    caps,
+                    resolver,
+                    cache,
+                    engine,
+                )
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val controller = DesktopPlaybackController(scope, clock, { runtime })
+            try {
+                assertEquals(PlayResult.Started, controller.play())
+                withTimeout(10_000) {
+                    controller.nowPlaying
+                        .filter {
+                            it?.isPlaying == true && it.position.durationMs == 5_000L
+                        }.first()
+                }
+                controller.seekTo(1_200)
+                withTimeout(10_000) {
+                    controller.nowPlaying
+                        .filter {
+                            it?.isPlaying == true &&
+                                it.position.positionMs >= 1_200
+                        }.first()
+                }
+                controller.shutdown()
+                assertTrue(requireNotNull(positions.positions.value[1]).positionMs in 1_200..5_000)
+                assertEquals(5_000L, positions.measuredDurations[1])
+            } finally {
+                controller.shutdown()
+                scope.cancel()
+                directory.toFile().deleteRecursively()
+            }
+        }
+
+    private fun wave(): ByteArray {
+        val frames = 22_050 * 5
+        val bytes = frames * 2
+        return ByteBuffer
+            .allocate(44 + bytes)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .apply {
+                put("RIFF".toByteArray())
+                putInt(36 + bytes)
+                put("WAVEfmt ".toByteArray())
+                putInt(16)
+                putShort(1)
+                putShort(1)
+                putInt(22_050)
+                putInt(44_100)
+                putShort(2)
+                putShort(16)
+                put("data".toByteArray())
+                putInt(bytes)
+                repeat(frames) { putShort((if (it % 40 < 20) 1_000 else -1_000).toShort()) }
+            }.array()
+    }
+}

@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -32,7 +33,9 @@ import androidx.compose.ui.window.rememberWindowState
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NotificationKind
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
@@ -46,6 +49,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
@@ -87,6 +91,7 @@ import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
@@ -482,12 +487,25 @@ internal fun NeutrodyneWindowContent(
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
 ) {
+    val panelScope = rememberCoroutineScope()
+    val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
+        panelScope.launch {
+            suspendRunCatching {
+                settings?.set(
+                    AppearanceSettingKeys.PLAYER_PANEL_HIDDEN,
+                    visibility == PlayerPanelVisibility.HIDDEN,
+                )
+            }.onSuccess { result ->
+                if (result is Outcome.Failure) Log.w("DesktopPlayer") { "Player panel preference write failed" }
+            }.onFailure { Log.w("DesktopPlayer", it) { "Player panel preference write failed" } }
+        }
+    }
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
     val nowPlaying by playbackState.nowPlaying.collectAsState()
     val panelHidden by (
-        settings?.observe(ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
-            ?: kotlinx.coroutines.flow.flowOf(false)
+        settings?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
+            ?: flowOf(false)
     ).collectAsState(initial = false)
     val updates =
         if (updateChecker != null && updateNotices != null && settings != null) {
@@ -500,7 +518,15 @@ internal fun NeutrodyneWindowContent(
     // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
     // remembered (they were all-no-op until the banner stream landed).
     val actions =
-        remember(platformActions, dataDir, onRetryStartup, banners, playbackController, playbackState) {
+        remember(
+            platformActions,
+            dataDir,
+            onRetryStartup,
+            banners,
+            playbackController,
+            playbackState,
+            settings,
+        ) {
             RootActions(
                 retryStartup = onRetryStartup,
                 dismissNotice = { currentUpdates?.dismiss?.invoke(it) },
@@ -515,6 +541,8 @@ internal fun NeutrodyneWindowContent(
                 // A banner's "Open" reports here — the notifier maps it back to the
                 // notification's route (11 Notifications' in-app fallback).
                 userMessageAction = { id -> banners?.messageAction(id) },
+                hidePlayerPanel = { setPanelVisibility(PlayerPanelVisibility.HIDDEN) },
+                revealPlayerPanel = { setPanelVisibility(PlayerPanelVisibility.SHOWN) },
             )
         }
     val slots =
@@ -561,3 +589,5 @@ internal fun NeutrodyneWindowContent(
 }
 
 private const val APPEARANCE_GATE_MS = 1_000L
+
+private enum class PlayerPanelVisibility { SHOWN, HIDDEN }

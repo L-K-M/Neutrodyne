@@ -813,6 +813,47 @@ fun interface DecoderFactory { fun create(track: AudioTrackInfo): Decoder }
 
 `EngineState` maps to `:playback:api`'s `PlayerPhase`: `Idle` → `NOT_LOADED`, `Buffering` → `BUFFERING`, `Ready` → `READY`, `Ended` → `ENDED`, `Error` → `ERROR` with `PlaybackIssue` per [Engine errors and recovery](#engine-errors-and-recovery). `StreamKind` is `LOCAL`, `STREAM` or `YOUTUBE` from the `ResolvedSource`.
 
+**MD1a.2 implementation note (2026-11-04).** The desktop now contributes
+`DesktopPlaybackController` to the existing shared player and Up next routes.
+It creates its database-backed runtime after the open gate, restores saved
+metadata without preparing output, and serializes commands, queue projection
+and engine observations across suspending writes. Arrival tickets prevent a
+newer pause, dismiss or start from dispatching an older suspended start. The
+shared `PlayStarter` can return `ServiceUnavailable` for a stale session or persistence failure;
+this reports a rejected start even though no remote playback service exists.
+Selection and persistence use `PlayStarter`, `QueueWindowPlanner`, `PositionSaver`, `PlaybackHistory`
+and `EffectivePlaybackSettings`; there is no second desktop queue algorithm.
+Effective speed and skip silence are set before `setWindow`, since preparation
+may prime decoded buffers before the device plays. The non-replaying engine
+event collector subscribes before preparation so early measured-duration
+metadata cannot be dropped. Saves run every five seconds
+while advancing and on pause, buffering stall, user seek, departure and shutdown.
+Measured duration goes through `PositionStore`; source/cache settings and maintenance
+use the existing device-local streaming cache preference.
+
+The current engine has no prepared-next transition. At `Ended` the controller
+commits the outgoing departure and promotes the next shared-core queue item,
+then opens it normally. This supplies MD1a.2's queue progression without claiming
+MD1b's gap or device-restart bounds. `DesktopEpisodeSourceResolver` retains the
+projected enclosure and length, prefers a completed local file at first open,
+and falls back to that enclosure if the file was already missing. Reconnects
+retain the chosen source kind even when a download completes meanwhile. M6 still
+owns the completed-file index binding; the shell currently supplies its empty index. YouTube resolution
+is available behind the existing capability gate, which remains external until
+MD3. New RSS connections retain MD1a.1's fresh-cache-resource rule.
+
+The existing shared sheet chooses its desktop side panel or mini-player layout;
+this work adds no home or navigation UI and remains compatible with the radio
+home lane. `:desktopApp:run` builds and locates this host's native libraries.
+Release-image native bundling, the release source bundle, gapless preparation,
+chapter enrichment/navigation, sleep-timer controls, retry/device-loss handling
+and OS sessions remain in MD1b/MD2. Until MD1b, the controller exposes the default
+Off/null sleep/chapter state. Sync ports remain MS2/MS3 work. Controller tests
+use real Room repositories with explicit fake-engine milestones; timing tests
+use virtual time, Compose tests use the existing desktop setup, and the native
+controller boundary runs with `EngineBackend.NULL` in the desktop CI matrix.
+No audible, physical-device or soak acceptance is claimed here.
+
 ### Engine thread and commands
 
 `FfAudioEngine` owns one platform thread, `nd-engine`, and a second, `nd-prepare`, that opens the next item's source, demuxer and decoder so a slow network open never stalls output. Commands from `nd-playback` go into a lock-free queue; the engine thread drains it between blocks. Because `nd-engine` may sit in a blocking AVIO read (up to the 30-s source wait) while the ring plays out, play and pause act on the device outside the queue through a **desired-state register** (2026-10-05): `nd-playback` writes an atomic `wantPlaying` with a generation number for both commands and then calls `nd_out_start` or `nd_out_stop` itself (miniaudio allows starting and stopping a device from any thread except its data callback, [miniaudio](https://github.com/mackron/miniaudio)), so the user hears play and pause at once — play starts the ring's buffered audio even while a read blocks — and the read simply continues; after every drain and before every `nd_out_start` it might make (a transition, a device re-open), the engine re-applies `wantPlaying` idempotently, so an older queued command can never restart a device the user has paused since (the earlier queued `play` with a no-op `pause` could: Play then Pause during a 30-s read left audio playing while the UI said paused); `seekTo` and `setWindow` raise the pipeline's interrupt flag and call `ByteSource.abort()`, so the blocked read returns `AVERROR_EXIT` within one 1-s wait slice and the engine reopens at the new position.
