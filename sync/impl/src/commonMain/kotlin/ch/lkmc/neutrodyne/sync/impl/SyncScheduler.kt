@@ -113,7 +113,7 @@ class SyncScheduler(
         }
         scope.launch {
             playback.active.collectLatest { active ->
-                if (!active.isPlaying) return@collectLatest
+                if (active?.isPlaying != true) return@collectLatest
                 while (true) {
                     delay(PLAYING_TICK_MS)
                     onPlaybackTick()
