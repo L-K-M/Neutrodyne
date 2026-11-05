@@ -182,7 +182,7 @@ class BinderYtxTransport internal constructor(
                     if (!settings.state.value.enabled) fail("ENGINE_UNAVAILABLE")
                     Result.success(
                         withTimeout(if (compiling) YtxLimits.COMPILE_MS else YtxLimits.START_MS) {
-                            if (store.hostLibDir() == null) fail("ENGINE_UNAVAILABLE")
+                            if (store.hostPrepared() == null) fail("ENGINE_UNAVAILABLE")
                             val endpoint =
                                 connection.bind { synchronized(lock) { if (epoch == generation) stop(HostExit.CRASH) } }
                             synchronized(lock) {
@@ -385,12 +385,13 @@ private class AndroidYtxConnection(
                 }
             }
         binding = connection
+        val prepared = store.hostPrepared() ?: throw YtxCallException("ENGINE_UNAVAILABLE")
         val intent =
             Intent(context, YtxService::class.java)
                 .setAction(YtxService.ENGINE_BIND)
-                .putExtra(YtxService.LIB_DIR, store.hostLibDir().toString())
-                .putExtra(YtxService.APP_VERSION, identity.appVersionCode)
-                .putExtra(YtxService.ENGINE_VERSION, identity.engineVersion)
+                .putExtra(YtxService.LIB_DIR, prepared.libDir.toString())
+                .putExtra(YtxService.APP_VERSION, prepared.marker.appVersionCode)
+                .putExtra(YtxService.ENGINE_VERSION, prepared.marker.engineVersion)
         YtxTestHooks.attach(intent)
         if (!context.bindService(
                 intent,
