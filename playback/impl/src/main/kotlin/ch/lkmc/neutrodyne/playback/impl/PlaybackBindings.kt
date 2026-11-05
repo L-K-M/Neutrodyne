@@ -27,6 +27,10 @@ public object PlaybackBindings {
 
     @Provides internal fun maintenance(value: StreamingCache): PlaybackMaintenance = value
 
+    /** 06 Sync interplay: the Android `PlaybackSyncPort` is the playback service's bridge. */
+    @Provides
+    internal fun playbackSyncPort(bridge: PlaybackSyncBridge): ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort = bridge
+
     @Provides @IntoSet
     internal fun gate(value: MeteredStreamingGate): StartGate = value
 

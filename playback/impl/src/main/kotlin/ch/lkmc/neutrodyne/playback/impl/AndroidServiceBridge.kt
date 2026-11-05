@@ -70,6 +70,10 @@ internal class AndroidServiceBridge(
                     PositionSource.STREAM
                 }
             },
+            // 06 rule 3: the freeze lifts when the item stops being current, and every save
+            // transaction re-reads the guard's gate.
+            onCurrentChanged = access.remoteGuard::currentChanged,
+            afterPauseSave = access.sync::paused,
         )
     private val applier = EffectivePlaybackApplier(ports.effective, scope)
     private val arbiter = EndOfItemPauseArbiter(player)
@@ -94,6 +98,7 @@ internal class AndroidServiceBridge(
             tracker,
             applier,
             access.history,
+            access.remoteGuard,
             access.clock,
             // Schedule initial collection after attach so a pending session start can reserve it.
             CoroutineScope(scope.coroutineContext + Dispatchers.Main),
@@ -102,6 +107,8 @@ internal class AndroidServiceBridge(
             resumePolicy = { access.prefs.current.value.resumePolicy },
             pauseAtBoundary = { arbiter.sleepTimerArmed || arbiter.blockBeforeNext },
             boundaryCompleted = { access.hub.event(PlaybackEvent.MarkedPlayed(it)) },
+            afterTransition = access.sync::transitioned,
+            afterSessionEnd = access.sync::stopped,
         )
     private val recovery =
         ErrorRecovery(
@@ -140,6 +147,9 @@ internal class AndroidServiceBridge(
         applier.attach(player)
         player.addListener(this)
         recovery.attach(player)
+        // 06 Creation and destruction step 7: the sync bridge publishes `active` and receives
+        // the boundary events; a remote freeze re-projects through the player thread.
+        access.sync.attach(notifyPlayer = projector::requestReproject)
         jobs +=
             scope.launch {
                 combine(
@@ -275,7 +285,7 @@ internal class AndroidServiceBridge(
                         )
                         handedOff = true
                     } else {
-                        outcome.seekPositionMs?.let(player::seekTo)
+                        outcome.seekPositionMs?.let(player::seekTo) ?: pickUpPausedItem()
                     }
                     PlayResult.Started
                 }
@@ -378,6 +388,7 @@ internal class AndroidServiceBridge(
                 reportRefusal(refusal)
                 return@withLock false
             }
+            pickUpPausedItem()
             smartResume.resume()
             serviceIssue = null
             boundaryPaused = false
@@ -534,6 +545,7 @@ internal class AndroidServiceBridge(
             } finally {
                 player.stop()
                 stopService()
+                access.sync.stopped()
             }
         }
 
@@ -563,6 +575,7 @@ internal class AndroidServiceBridge(
                 access.gate.clearPending()
                 serviceIssue = null
                 stopService()
+                generation?.let { access.sync.stopped() }
             } finally {
                 projector.endOwnWrite(generation)
             }
@@ -602,6 +615,9 @@ internal class AndroidServiceBridge(
     private fun publish() {
         if (detached) return
         val id = player.episodeIdOrNull()
+        // 06 Sync interplay: `active` names the loaded item (NOT_LOADED means nothing plays).
+        val loaded = id != null && player.playbackState != Player.STATE_IDLE
+        access.sync.updateActive(id?.takeIf { loaded }, player.isPlaying, tracker.currentSinceMs)
         val row = id?.let { access.index[it] }
         current.value =
             row?.let {
@@ -655,10 +671,28 @@ internal class AndroidServiceBridge(
         projector.detach()
         recovery.detach()
         player.removeListener(this)
-        tracker.detach(snapshot)
+        // The teardown job emits the flush's Stopped; the bridge then clears `active`.
+        val teardown = tracker.detach(snapshot) { access.sync.stopped() }
+        access.sync.detachAfter(teardown)
         access.applicationScope.launch(Dispatchers.Main.immediate, start = CoroutineStart.UNDISPATCHED) {
             withContext(NonCancellable) { applier.detach() }
         }
+    }
+
+    /**
+     * 06 Sync interplay rule 4: before a paused, loaded item resumes, a stored position that
+     * diverges by more than 1 s from the last one the saver wrote or applied (a reset to 0
+     * included) is sought first — a core seek, so it writes nothing and never seeks a playing
+     * device.
+     */
+    private suspend fun pickUpPausedItem() {
+        val live = player ?: return
+        val id = live.episodeIdOrNull() ?: return
+        if (live.isPlaying) return
+        val stored = ports.positions.observe(id).first()
+        val target = ports.saver.pickupPositionMs(stored?.positionMs) ?: return
+        tracker.coreSeek { live.seekTo(target) }
+        ports.saver.pickupApplied(target)
     }
 
     private enum class StartApplication { COMMAND, MEDIA3 }

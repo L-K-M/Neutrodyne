@@ -25,9 +25,6 @@ import kotlinx.coroutines.CoroutineScope
 @BindingContainer
 object SyncBindings {
     @Provides
-    fun playbackSyncPort(): PlaybackSyncPort = ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
-
-    @Provides
     @SingleIn(AppScope::class)
     fun syncTokenStore(secrets: SecretStore): SyncTokenStore = SyncTokenStore(secrets)
 
