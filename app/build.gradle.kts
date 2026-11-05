@@ -200,6 +200,9 @@ dependencies {
     testImplementation(libs.androidx.work.testing)
     testImplementation(libs.androidx.media3.session)
     testImplementation(project(":feeds:jvm"))
+    // The MS2 playback-sync end-to-end test composes the real engine harness over the real
+    // bridge; both live behind `implementation` edges that never reach the test classpath.
+    testImplementation(project(":core:testing"))
     testImplementation(libs.kotlinx.serialization.json)
 }
 
