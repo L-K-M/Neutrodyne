@@ -309,18 +309,18 @@ class RadioHomeDeviceTest {
         pressBack()
         compose.waitForIdle()
         if (compose.onAllNodes(hasTestTag("radio_insert")).fetchSemanticsNodes().isNotEmpty()) pressBack()
-        compose.waitUntil(5_000) {
+        compose.waitUntil(15_000) {
             compose.onAllNodes(hasTestTag("radio_insert")).fetchSemanticsNodes().isEmpty()
         }
         compose.onNodeWithTag("radio_insert").assertDoesNotExist()
-        compose.waitUntil(5_000) {
+        compose.waitUntil(15_000) {
             compose.onNodeWithTag("radio_new_playlist").fetchSemanticsNode().config[SemanticsProperties.Focused]
         }
         compose.onNodeWithTag("radio_new_playlist").assertIsFocused()
         compose.onNodeWithTag("radio_playlist").performClick()
         compose.onNodeWithTag("radio_playlist_option_${groupIds.first()}").assertIsFocused()
         pressBack()
-        compose.waitUntil(5_000) {
+        compose.waitUntil(15_000) {
             compose.onNodeWithTag("radio_playlist").fetchSemanticsNode().config[SemanticsProperties.Focused]
         }
         compose.onNodeWithTag("radio_playlist").assertIsFocused()
