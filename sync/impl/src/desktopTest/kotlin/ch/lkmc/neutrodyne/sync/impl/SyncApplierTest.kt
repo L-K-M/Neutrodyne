@@ -359,6 +359,103 @@ class SyncApplierTest {
             }
         }
 
+    /**
+     * 10 Episode-state rules rule 2: a winning played mark that makes the merged episode
+     * effectively played reports to the loaded player before it is projected; an older mark
+     * hidden by a newer listening position derives to in-progress and reports nothing.
+     */
+    @Test
+    fun aWinningPlayedMarkForTheLoadedItemReportsBeforeProjection() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                val otherId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:two")))
+                        .single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(true),
+                            "playedAt" to int(9L),
+                            "pos" to pos(0, reset = true),
+                        ),
+                        // The same winning mark for an episode no player has loaded.
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:two",
+                            MatchHints(guid = "two"),
+                            "played" to bool(true),
+                            "playedAt" to int(9L),
+                        ),
+                    ),
+                    roundId = now,
+                )
+
+                assertEquals(listOf(episodeId to deviceId), playback.remotePlayed)
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+                assertEquals(9L, db.episodeStateDao().byEpisode(otherId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anOlderMarkHiddenByANewerListeningPositionReportsNothing() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+
+                // The newer listening position first, then the older played mark.
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(podcastSyncId, "g:one", MatchHints(guid = "one"), "pos" to pos(1_200L)),
+                    ),
+                    roundId = now,
+                )
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to FieldValue(JsonPrimitive(true), clock(5).toString()),
+                            "playedAt" to int(5L),
+                        ),
+                    ),
+                    roundId = now + 1,
+                )
+
+                assertTrue(playback.remotePlayed.isEmpty(), "a hidden mark freezes no saver")
+                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt, "it derives to in-progress")
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun aReceivedAuthIsStagedProtectedAndJournaledAsPendingAuth() =
         runTest {

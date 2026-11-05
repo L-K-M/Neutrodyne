@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
  */
 @SingleIn(AppScope::class)
 @Inject
-internal class PlaybackSyncBridge(
+public class PlaybackSyncBridge(
     private val guard: RemotePlayedGuard,
     private val positions: Provider<PositionStore>,
     @param:ApplicationScope private val scope: CoroutineScope,
@@ -57,12 +57,12 @@ internal class PlaybackSyncBridge(
     // --- service side (player thread) -----------------------------------------------------------
 
     /** 06 Creation and destruction step 7: called with `stateHub.attach`; [notifyPlayer] re-projects. */
-    fun attach(notifyPlayer: () -> Unit) {
+    public fun attach(notifyPlayer: () -> Unit) {
         this.notifyPlayer = notifyPlayer
     }
 
     /** Publishes the loaded item; a null [episodeId] is "nothing loaded" (06's `ActivePlayback`). */
-    fun updateActive(
+    public fun updateActive(
         episodeId: Long?,
         isPlaying: Boolean,
         sinceMs: Long,
@@ -70,15 +70,15 @@ internal class PlaybackSyncBridge(
         activeState.value = episodeId?.let { ActivePlayback(it, isPlaying, sinceMs) }
     }
 
-    fun paused() {
+    public fun paused() {
         boundaries.tryEmit(PlaybackSyncEvent.Paused)
     }
 
-    fun stopped() {
+    public fun stopped() {
         boundaries.tryEmit(PlaybackSyncEvent.Stopped)
     }
 
-    fun transitioned(episodeId: Long) {
+    public fun transitioned(episodeId: Long) {
         boundaries.tryEmit(PlaybackSyncEvent.Transition(episodeId))
     }
 
@@ -86,7 +86,7 @@ internal class PlaybackSyncBridge(
      * 06 `onDestroy`: `active = null` after the flush's `Stopped` — the teardown job emits it once
      * its `NonCancellable` save completes, so waiting for the job keeps the ordering.
      */
-    fun detachAfter(teardown: Job?) {
+    public fun detachAfter(teardown: Job?) {
         notifyPlayer = null
         scope.launch {
             teardown?.join()
