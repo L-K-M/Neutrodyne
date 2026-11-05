@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.data.discovery.DirectoryHttp
 import ch.lkmc.neutrodyne.core.data.discovery.DirectorySettings
 import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexDirectoryClient
 import ch.lkmc.neutrodyne.core.data.discovery.PodcastIndexSearchProvider
+import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
+import ch.lkmc.neutrodyne.core.domain.IngestionEvents
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
@@ -29,6 +31,10 @@ object DataBindings {
 
     @Provides
     internal fun podcastIndexClient(provider: PodcastIndexSearchProvider): PodcastIndexDirectoryClient = provider
+
+    // A container exposes the port across modules while the emitting bus stays internal.
+    @Provides
+    internal fun ingestionEvents(impl: IngestionEventBus): IngestionEvents = impl
 
     /** The real file system for feed temp files; tests substitute fakes. */
     @Provides

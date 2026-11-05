@@ -7,6 +7,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaConstants
+import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.FeedQueryBuilder
@@ -21,6 +22,7 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.GroupCounts
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextSpec
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.playback.core.StartRequest
@@ -74,12 +76,9 @@ internal class MediaLibraryTree(
                 }
 
                 GROUPS -> {
-                    db.groupDao().groupsInOrder().map { groupFolder(db, it) }
-                }
-
-                // M6 replaces this source with completed, verified files and enables Downloads starts.
-                DOWNLOADS -> {
-                    emptyList()
+                    db.groupDao().groupsInOrder().map { group ->
+                        groupFolder(group)
+                    }
                 }
 
                 PODCASTS -> {
@@ -87,8 +86,7 @@ internal class MediaLibraryTree(
                 }
 
                 else -> {
-                    val request = contextRequest(parentId)
-                    val spec = request.spec()
+                    val spec = browseSpec(parentId)
                     val ids =
                         db
                             .feedDao()
@@ -117,7 +115,7 @@ internal class MediaLibraryTree(
         opener.awaitOpen()
         if (mediaId.startsWith("group:")) {
             val id = positiveId(mediaId.removePrefix("group:"))
-            return database().groupDao().groupById(id)?.let { groupFolder(database(), it) }
+            return database().groupDao().groupById(id)?.let { groupFolder(it) }
         }
         if (mediaId.startsWith("podcast:")) {
             val id = positiveId(mediaId.removePrefix("podcast:"))
@@ -143,7 +141,7 @@ internal class MediaLibraryTree(
                 .filter {
                     it.name.contains(query, ignoreCase = true)
                 }.take(SEARCH_LIMIT)
-                .map { folder("group:${it.id}", it.name) }
+                .map { groupFolder(it) }
         val podcasts =
             db
                 .podcastDao()
@@ -186,6 +184,10 @@ internal class MediaLibraryTree(
                 StartRequest.Episode(selected.id, position)
             }
 
+            DOWNLOADS -> {
+                StartRequest.Downloads(selected.id, position)
+            }
+
             else -> {
                 contextRequest(selected.parent).copy(
                     startEpisodeId = selected.id,
@@ -226,7 +228,7 @@ internal class MediaLibraryTree(
             ) { "Episode left Up next" }
             return
         }
-        val spec = contextRequest(parent).spec()
+        val spec = browseSpec(parent)
         require(
             database()
                 .feedDao()
@@ -237,6 +239,23 @@ internal class MediaLibraryTree(
             "Episode is outside the requested context"
         }
     }
+
+    // Lists and validates browse children. The downloads node shows every completed download,
+    // played or not (06 Browse tree); PlayStarter builds its own play context for a start.
+    private suspend fun browseSpec(parent: String): PlayContextSpec =
+        if (parent == DOWNLOADS) {
+            PlayContextSpec(
+                ContextType.DOWNLOADS,
+                null,
+                FeedOrder.NEWEST_FIRST,
+                FeedFilters().toFlags(),
+                MediaFilter.ALL,
+                null,
+                false,
+            )
+        } else {
+            contextRequest(parent).spec()
+        }
 
     private suspend fun contextRequest(parent: String): StartRequest.Feed {
         val db = database()
@@ -340,20 +359,10 @@ internal class MediaLibraryTree(
 
     private fun youtubePlayable(): Boolean = capabilities.capabilities.value.inAppPlayback
 
-    /** One group folder shape for `children(GROUPS)` and `item("group:*")`: the first member's cover. */
-    private suspend fun groupFolder(
-        db: NeutrodyneDatabase,
-        group: PodcastGroupEntity,
-    ): MediaItem {
-        val art =
-            db
-                .groupDao()
-                .membersOf(group.id)
-                .firstOrNull()
-                ?.podcastId
-                ?.let { db.podcastDao().byId(it) }
-                ?.artworkKey
-        return folder("group:${group.id}", group.name, artworkKey = art)
+    private suspend fun groupFolder(group: PodcastGroupEntity): MediaItem {
+        val key = ArtworkKeys.mosaic(group.uuid)
+        val version = database().artworkDao().byKey(key)?.version ?: 0
+        return folder("group:${group.id}", group.name, artworkKey = key, artworkVersion = version)
     }
 
     private fun podcastFolder(row: PodcastEntity): MediaItem =
@@ -364,6 +373,7 @@ internal class MediaLibraryTree(
         title: String,
         style: Int = LIST,
         artworkKey: String? = null,
+        artworkVersion: Int = 0,
     ): MediaItem =
         MediaItem
             .Builder()
@@ -380,7 +390,7 @@ internal class MediaLibraryTree(
                             putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE, LIST)
                             putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE, style)
                         },
-                    ).apply { artworkKey?.let { setArtworkUri(items().artworkUri(it)) } }
+                    ).apply { artworkKey?.let { setArtworkUri(items().artworkUri(it, artworkVersion)) } }
                     .build(),
             ).build()
 
@@ -419,7 +429,7 @@ internal class MediaLibraryTree(
             val match =
                 requireNotNull(
                     Regex(
-                        "episode:([1-9][0-9]*)(?:@(upnext|group:[1-9][0-9]*|podcast:[1-9][0-9]*))?",
+                        "episode:([1-9][0-9]*)(?:@(upnext|downloads|group:[1-9][0-9]*|podcast:[1-9][0-9]*))?",
                     ).matchEntire(value),
                 ) {
                     "Invalid episode identity"

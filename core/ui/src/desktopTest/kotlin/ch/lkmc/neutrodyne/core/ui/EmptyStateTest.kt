@@ -2,8 +2,14 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -12,6 +18,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import kotlin.math.abs
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -21,6 +28,54 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class EmptyStateTest {
+    @Test
+    fun allOnboardingActionsRemainReachableInAShortWindow() =
+        runDesktopComposeUiTest(width = 320, height = 180) {
+            val clicked = mutableListOf<String>()
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    EmptyState(
+                        icon = NdIcons.Download,
+                        title = "Your feeds live here",
+                        body = "Search for podcasts, import subscriptions or add a feed URL.",
+                        actionLabel = "Search",
+                        onAction = { clicked += "Search" },
+                        secondaryLabel = "Import",
+                        onSecondary = { clicked += "Import" },
+                        tertiaryLabel = "Add by URL",
+                        onTertiary = { clicked += "Add by URL" },
+                    )
+                }
+            }
+            for (label in listOf("Search", "Import", "Add by URL")) {
+                onNodeWithText(label).performScrollTo().assertIsDisplayed().performClick()
+            }
+            assertEquals(listOf("Search", "Import", "Add by URL"), clicked)
+        }
+
+    @Test
+    fun aLazyParentKeepsOwnershipOfScrolling() =
+        runDesktopComposeUiTest(width = 320, height = 180) {
+            var clicked = false
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        item {
+                            EmptyState(
+                                icon = NdIcons.Download,
+                                title = "Nothing here",
+                                body = "Add a podcast to get started.",
+                                actionLabel = "Search",
+                                onAction = { clicked = true },
+                            )
+                        }
+                    }
+                }
+            }
+            onNodeWithText("Search").performScrollTo().assertIsDisplayed().performClick()
+            assertTrue(clicked)
+        }
+
     @Test
     fun bodyStaysInsideTheFourHundredDpCapOnWideWindows() =
         runDesktopComposeUiTest(width = 1000, height = 700) {

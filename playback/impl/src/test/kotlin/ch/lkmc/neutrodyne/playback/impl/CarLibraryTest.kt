@@ -9,6 +9,7 @@ import androidx.media3.session.MediaBrowser
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeAltEnclosureEntity
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
@@ -53,7 +54,7 @@ class CarLibraryTest {
         }
     }
 
-    @Test fun groupTapRetainsContextAndRejectsForgedStaleAndDownloadsParents() {
+    @Test fun groupAndDownloadsTapsRetainContextAndRejectStaleParents() {
         LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
             h.run {
                 h.opener.awaitOpen()
@@ -102,6 +103,18 @@ class CarLibraryTest {
                         0,
                     )
                 }
+                db.downloadDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database
+                        .downloadEntity(episode),
+                )
+                val downloads =
+                    assertIs<StartRequest.Downloads>(
+                        h.tree.startRequest(listOf(item("episode:$episode@downloads")), 0, 42_000),
+                    )
+                assertEquals(episode, downloads.startEpisodeId)
+                assertEquals(42_000L, downloads.positionMs)
+                val downloaded = h.tree.children("downloads", 0, 100).map { it.mediaId }
+                assertEquals(listOf("episode:$episode@downloads"), downloaded)
                 db.groupDao().deleteGroup(group)
                 assertFailsWith<IllegalArgumentException> {
                     h.tree.startRequest(
@@ -110,6 +123,33 @@ class CarLibraryTest {
                         0,
                     )
                 }
+            }
+        }
+    }
+
+    // 06 Browse tree: the downloads node lists completed downloads newest first, played or not,
+    // like the Downloads screen; only its play context skips played episodes.
+    @Test fun downloadsNodeListsPlayedAndUnplayedCompletedDownloads() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            h.run {
+                h.opener.awaitOpen()
+                val db = h.opener.requireDatabase()
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val older = db.episodeDao().insertStub(episodeEntity(podcastId = podcast, sortDate = 10))
+                val newer = db.episodeDao().insertStub(episodeEntity(podcastId = podcast, sortDate = 20))
+                h.lookup.items.value = mapOf(older to media(id = older), newer to media(id = newer))
+                for (id in listOf(older, newer)) {
+                    db.downloadDao().insert(
+                        ch.lkmc.neutrodyne.core.testing.database
+                            .downloadEntity(id),
+                    )
+                }
+                db.episodeStateDao().upsert(EpisodeStateEntity(older, playedAt = 1, updatedAt = 1))
+
+                assertEquals(
+                    listOf("episode:$newer@downloads", "episode:$older@downloads"),
+                    h.tree.children("downloads", 0, 100).map { it.mediaId },
+                )
             }
         }
     }
@@ -335,7 +375,25 @@ class CarLibraryTest {
                     ControllerHostIdentity(h.app.packageManager),
                 )
             val session = MediaLibrarySession.Builder(h.app, exo, callback).build()
-            val browser = h.run { MediaBrowser.Builder(h.app, session.token).buildAsync().await() }
+            val notifications = Channel<String>(Channel.UNLIMITED)
+            val browser =
+                h.run {
+                    MediaBrowser
+                        .Builder(h.app, session.token)
+                        .setListener(
+                            object : MediaBrowser.Listener {
+                                override fun onChildrenChanged(
+                                    browser: MediaBrowser,
+                                    parentId: String,
+                                    itemCount: Int,
+                                    params: LibraryParams?,
+                                ) {
+                                    notifications.trySend(parentId)
+                                }
+                            },
+                        ).buildAsync()
+                        .await()
+                }
             try {
                 h.run {
                     val params =
@@ -380,6 +438,37 @@ class CarLibraryTest {
                             .isEmpty(),
                     )
                     assertTrue(browser.getChildren("unknown", 0, 100, null).await().resultCode < 0)
+                    val db = h.opener.requireDatabase()
+                    val group = groupEntity(name = "Auto mosaic", orderKey = "a0")
+                    val groupId = db.groupDao().insert(group)
+                    val key = "g-${group.uuid}"
+                    db.artworkDao().upsert(ArtworkEntity(key, version = 1))
+                    assertEquals(0, browser.subscribe("groups", null).await().resultCode)
+                    withTimeout(5_000) { while (notifications.receive() != "groups") Unit }
+                    db.artworkDao().upsert(ArtworkEntity(key, version = 2))
+                    withTimeout(5_000) { while (notifications.receive() != "groups") Unit }
+                    val folder =
+                        browser
+                            .getChildren("groups", 0, 100, null)
+                            .await()
+                            .value!!
+                            .single()
+                    assertEquals("content://synthetic.artwork/$key?v=2", folder.mediaMetadata.artworkUri.toString())
+                    val uri = folder.mediaMetadata.artworkUri
+                    assertEquals(
+                        uri,
+                        h.tree
+                            .item("group:$groupId")!!
+                            .mediaMetadata.artworkUri,
+                    )
+                    assertEquals(
+                        uri,
+                        h.tree
+                            .search("Auto mosaic")
+                            .single()
+                            .mediaMetadata.artworkUri,
+                    )
+                    assertEquals(0, browser.unsubscribe("groups").await().resultCode)
                     assertEquals(0, exo.mediaItemCount)
                 }
             } finally {

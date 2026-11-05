@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.DownloadEntryRow
 import ch.lkmc.neutrodyne.core.database.DownloadSourceRow
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.DownloadRootRegistration
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -62,6 +63,8 @@ internal class DownloadControllerImpl(
     private val activity: Flow<Long> = flowOf(0L),
     private val hasActiveTransfers: () -> Boolean = { false },
     private val noticeSources: suspend () -> NoticeSources = { NoticeSources() },
+    private val busy: Flow<Boolean> = flowOf(false),
+    private val rootRegistration: DownloadRootRegistration? = null,
 ) : DownloadController {
     private val dao = db.downloadDao()
 
@@ -335,7 +338,13 @@ internal class DownloadControllerImpl(
         dao.observeLiveFor(listOf(episodeId)).map { dao.byEpisode(episodeId)?.status() }.distinctUntilChanged()
 
     override fun observeAll(): Flow<DownloadsOverview> =
-        combine(dao.observeEntries(), files.observeStorage(), network.status, noticePulse) { rows, storage, status, _ ->
+        combine(
+            dao.observeEntries(),
+            files.observeStorage(),
+            network.status,
+            noticePulse,
+            files.observeNotices(),
+        ) { rows, storage, status, _, fileNotices ->
             val ordered =
                 rows.sortedWith(
                     compareByDescending<DownloadEntryRow> { it.download.priority }
@@ -359,7 +368,7 @@ internal class DownloadControllerImpl(
                             )
                     }.map { it.entry() },
                 storage,
-                notices(rows, storage, status),
+                notices(rows, storage, status) + fileNotices,
             )
         }.distinctUntilChanged()
 
@@ -391,6 +400,7 @@ internal class DownloadControllerImpl(
             if (rows.any { it.download.missingForStorage() } || roots.resolve(storage.rootId) == null) {
                 add(DownloadNotice.ROOT_UNAVAILABLE)
             }
+            if (storage.autoBlockedByCap) add(DownloadNotice.CAP_REACHED)
             if (storage.orphanBytes > 0) add(DownloadNotice.ORPHAN_FILES)
         }
 
@@ -405,8 +415,9 @@ internal class DownloadControllerImpl(
     override fun observeFailedCount() = dao.observeFailedCount().distinctUntilChanged()
 
     override fun observeBusy(): Flow<Boolean> =
-        combine(dao.observeEntries(), network.status, activity) { rows, status, _ ->
-            hasActiveTransfers() ||
+        combine(dao.observeEntries(), network.status, activity, busy) { rows, status, _, moveBusy ->
+            moveBusy ||
+                hasActiveTransfers() ||
                 rows.any { entry ->
                     val row = entry.download
                     row.state in ACTIVE_STATES || (
@@ -426,13 +437,12 @@ internal class DownloadControllerImpl(
     override suspend fun storageRoots() = roots.list()
 
     override suspend fun registerFolderRoot(absolutePath: String) =
-        FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
+        rootRegistration?.registerFolderRoot(absolutePath) ?: roots.registerFolderRoot(absolutePath)
 
     override suspend fun changeRoot(
         rootId: String,
         mode: RootChangeMode,
-    ): RootChangeResult =
-        if (mode == RootChangeMode.MOVE_EXISTING) RootChangeResult.Unsupported else files.changeRoot(rootId, mode)
+    ): RootChangeResult = rootRegistration?.changeRoot(rootId, mode) ?: files.changeRoot(rootId, mode)
 
     override suspend fun deleteOrphanFiles() = files.deleteOrphanFiles()
 
@@ -508,12 +518,7 @@ internal class DownloadControllerImpl(
             }
         }
 
-        fun estimate(): Long? =
-            length?.takeIf { it >= MIN_ENCLOSURE_BYTES }
-                ?: row.durationMs?.takeIf { it > 0 }?.let {
-                    it.coerceAtMost(Long.MAX_VALUE / BYTES_PER_MILLISECOND) *
-                        BYTES_PER_MILLISECOND
-                }
+        fun estimate(): Long? = downloadEstimate(length, row.durationMs)
     }
 
     private fun DownloadEntity.status() =
@@ -545,6 +550,7 @@ internal class DownloadControllerImpl(
             sortDate,
             playedAt != null,
             isFavorite,
+            artworkAvgArgb,
         )
 
     private enum class RequestMode(
@@ -560,8 +566,6 @@ internal class DownloadControllerImpl(
         const val MANUAL_PRIORITY = 100
         const val NEXT_PRIORITY = 200
         const val BIND_CHUNK = 500
-        const val MIN_ENCLOSURE_BYTES = 100_000L
-        const val BYTES_PER_MILLISECOND = 16L
         const val NOTICE_PROBE_MS = 30_000L
         val HLS_TYPES =
             setOf(

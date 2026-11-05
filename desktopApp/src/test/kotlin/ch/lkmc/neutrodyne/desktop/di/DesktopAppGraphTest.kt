@@ -139,6 +139,15 @@ class DesktopAppGraphTest {
     }
 
     @Test
+    fun desktopPlaybackAcceptsCommandsAfterDatabaseOpen() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            assertThat(graph.playbackController.play()).isEqualTo(PlayResult.NothingToPlay())
+            graph.desktopPlaybackController.shutdown()
+            graph.databaseOpener.requireDatabase().close()
+        }
+
+    @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
@@ -154,6 +163,9 @@ class DesktopAppGraphTest {
                 for ((binding, expectedName) in bindings) {
                     assertThat(binding::class.simpleName).isEqualTo(expectedName)
                 }
+                assertThat(graph.downloadController()::class.simpleName).isEqualTo("DownloadControllerImpl")
+                assertThat(graph.downloadProgress()::class.simpleName).isEqualTo("DownloadProgressHub")
+                assertThat(graph.downloadController()).isSameInstanceAs(graph.downloadController())
                 assertThat(graph.queueRepository()).isSameInstanceAs(graph.queueRepository())
                 assertThat(graph.playContextResolver()).isSameInstanceAs(graph.playContextResolver())
                 assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
@@ -176,17 +188,14 @@ class DesktopAppGraphTest {
                 graph.playbackStateSource.sleepTimer.value,
             ).isEqualTo(SleepTimerState.Off)
             assertThat(graph.playbackStateSource.currentChapter.value).isNull()
-            assertThat(graph.playbackController.playEpisode(1)).isEqualTo(PlayResult.ServiceUnavailable)
-            assertThat(graph.playbackController.playEpisodeAt(1, 20)).isEqualTo(PlayResult.ServiceUnavailable)
-            assertThat(
-                graph.playbackController.playFeed(FeedSource.All, FeedFilters(), FeedOrder.NEWEST_FIRST),
-            ).isEqualTo(PlayResult.ServiceUnavailable)
-            assertThat(graph.playbackController.play()).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(graph.playbackController::class.simpleName).isEqualTo("DesktopPlaybackController")
             graph.playbackController.pause()
             graph.playbackController.dismiss()
             assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)
             graph.playbackMaintenance.clearStreamingCache()
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+            assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
+            assertThat(graph.localMediaChanges).isSameInstanceAs(graph.localMediaIndex)
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
             assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
             assertThat(
@@ -331,7 +340,12 @@ class DesktopAppGraphTest {
                 .single()
                 .order
         assertThat(dbOrder).isLessThan(orders.getValue("CredentialLoadInitializer"))
+        assertThat(orders.getValue("DesktopDownloadIndexInitializer")).isEqualTo(130)
+        assertThat(orders.getValue("DesktopDeferredDeletesInitializer")).isEqualTo(310)
+        assertThat(orders.getValue("DesktopDownloadAlerts")).isEqualTo(310)
         assertThat(orders.getValue("CredentialLoadInitializer"))
+            .isLessThan(orders.getValue("DesktopDownloadIndexInitializer"))
+        assertThat(orders.getValue("DesktopDownloadIndexInitializer"))
             .isLessThan(orders.getValue("DesktopRunnerInitializer"))
     }
 

@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.model.MergedRecord
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
@@ -43,6 +44,7 @@ import ch.lkmc.neutrodyne.feeds.backup.QueueV1
 import ch.lkmc.neutrodyne.feeds.backup.SessionV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import ch.lkmc.neutrodyne.feeds.backup.UpNextRefV1
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.test.runTest
 import okio.Buffer
 import okio.source
@@ -81,6 +83,10 @@ class RestoreEpisodeMergerTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
     private val episodes =
         RestoreEpisodeMerger(
@@ -1462,6 +1468,10 @@ class RestoreEpisodeMergerTest {
             channelSync = channels,
             orderKeys = ProtocolOrderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
 
     private fun realEpisodes(): RestoreEpisodeMerger =

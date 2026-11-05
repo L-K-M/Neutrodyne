@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
+import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.core.CurrentAction
@@ -34,7 +35,6 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -81,9 +81,11 @@ internal class QueueProjector(
     private val afterTransition: (Long) -> Unit = {},
     /** 06 Sync interplay: fired after the end-of-session transaction committed. */
     private val afterSessionEnd: () -> Unit = {},
+    private val localChanges: LocalMediaChanges? = null,
 ) : Player.Listener {
     private var player: Player? = null
     private var observing: Job? = null
+    private var observingLocal: Job? = null
     private val writes = mutableSetOf<Job>()
     private val mutex = Mutex()
     private val eventWrites = Mutex()
@@ -156,6 +158,14 @@ internal class QueueProjector(
         checkPlayerThread(player)
         this.player = player
         player.addListener(this)
+        observingLocal =
+            playerScope.launch {
+                localChanges?.changes?.collect { changed ->
+                    if (entries.any { it.item.episodeId in changed && it.item.episodeId != player.episodeIdOrNull() }) {
+                        if (latest != null) refresh()
+                    }
+                }
+            }
         observing =
             playerScope.launch {
                 try {
@@ -870,6 +880,8 @@ internal class QueueProjector(
         observedMedia = emptyMap()
         observing?.cancel()
         observing = null
+        observingLocal?.cancel()
+        observingLocal = null
         externalTimeout?.cancel()
         externalTimeout = null
         external = null

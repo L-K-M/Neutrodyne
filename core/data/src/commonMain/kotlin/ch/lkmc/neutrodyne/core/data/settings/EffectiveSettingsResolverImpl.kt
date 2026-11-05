@@ -8,17 +8,22 @@ import ch.lkmc.neutrodyne.core.database.PodcastScopeRow
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.EffectiveAutoDownload
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.model.SettingSource
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 @Inject
@@ -27,6 +32,7 @@ import kotlinx.coroutines.flow.map
 internal class EffectiveSettingsResolverImpl(
     db: NeutrodyneDatabase,
     private val settings: SettingsRepository,
+    private val capabilities: YouTubeCapabilitiesSource? = null,
 ) : EffectiveSettingsResolver {
     private val dao = db.scopeSettingsDao()
 
@@ -72,6 +78,41 @@ internal class EffectiveSettingsResolverImpl(
             .map { views ->
                 views.mapValues { it.value.refresh() }
             }.distinctUntilChanged()
+
+    override suspend fun autoDownload(podcastIds: Collection<Long>): Map<Long, EffectiveAutoDownload> =
+        dao.podcastScopes(podcastIds).resolveAutoDownload(
+            settings.scopeDefaults(),
+            capabilities?.capabilities?.value?.downloads == true,
+        )
+
+    override fun observeAutoDownload(): Flow<Map<Long, EffectiveAutoDownload>> =
+        combine(
+            dao.observeAllPodcastScopes(),
+            settings.observeScopeDefaults(),
+            capabilities?.capabilities?.map { it.downloads }?.distinctUntilChanged() ?: flowOf(false),
+        ) { rows, defaults, downloads ->
+            rows.resolveAutoDownload(defaults, downloads)
+        }.distinctUntilChanged()
+
+    private fun List<PodcastScopeRow>.resolveAutoDownload(
+        defaults: SettingOverrides,
+        downloads: Boolean,
+    ): Map<Long, EffectiveAutoDownload> =
+        groupBy { it.podcastId }.mapValues { (_, rows) ->
+            if (rows.first().sourceType != SourceType.RSS && !downloads) {
+                EffectiveAutoDownload(
+                    false,
+                    requireNotNull(defaults.autoDownloadKeepLatest),
+                    requireNotNull(defaults.autoDownloadNetwork),
+                    requireNotNull(defaults.autoDownloadRequireCharging),
+                    requireNotNull(defaults.includeVideoInAutoDownload),
+                    requireNotNull(defaults.deleteAfterPlayed),
+                    SettingSource.NotSupported,
+                )
+            } else {
+                rows.resolvePodcast(defaults).autoDownload()
+            }
+        }
 
     private fun observe(rows: Flow<List<PodcastScopeRow>>): Flow<Map<Long, ScopedSettingsView>> =
         combine(rows, settings.observeScopeDefaults()) { current, defaults -> current.resolve(defaults) }

@@ -75,6 +75,24 @@ internal class OkioDownloadFileSystem(
         files.atomicMove(checked(rootId, from), checked(rootId, to))
     }
 
+    override suspend fun sameStore(
+        sourceRoot: String,
+        targetRoot: String,
+    ): Boolean =
+        withContext(io) {
+            if (files != FileSystem.SYSTEM) return@withContext false
+            platformSameStore(checked(sourceRoot, "").toString(), checked(targetRoot, "").toString())
+        }
+
+    override suspend fun moveBetweenRoots(
+        sourceRoot: String,
+        from: String,
+        targetRoot: String,
+        to: String,
+    ) = withContext(io) {
+        files.atomicMove(checked(sourceRoot, from), checked(targetRoot, to))
+    }
+
     private fun info(
         relative: String,
         absolute: Path,
@@ -180,6 +198,11 @@ internal expect fun localDate(epochMillis: Long): String
 internal expect fun httpDateMillis(value: String): Long?
 
 internal expect fun pathPlatform(): PathPlatform
+
+internal expect fun platformSameStore(
+    source: String,
+    target: String,
+): Boolean
 
 internal expect class PlatformLocalUris() : LocalUris {
     override fun fileUri(absolutePath: String): String

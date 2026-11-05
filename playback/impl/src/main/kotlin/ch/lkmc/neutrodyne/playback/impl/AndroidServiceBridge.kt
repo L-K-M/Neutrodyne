@@ -109,6 +109,7 @@ internal class AndroidServiceBridge(
             boundaryCompleted = { access.hub.event(PlaybackEvent.MarkedPlayed(it)) },
             afterTransition = access.sync::transitioned,
             afterSessionEnd = access.sync::stopped,
+            localChanges = access.localChanges,
         )
     private val recovery =
         ErrorRecovery(
@@ -121,6 +122,13 @@ internal class AndroidServiceBridge(
             scope,
             isForeground,
             access.hub::event,
+            reportMissing = { access.missingLocalMedia().reportFileMissing(it) },
+            allowStream = { id ->
+                val row = ports.lookup.get(id)
+                val refusal = row?.let { access.gate.check(it, null) }
+                refusal?.let { access.hub.event(PlaybackEvent.StartRefused(it)) }
+                row != null && refusal == null
+            },
         )
     private val current = MutableStateFlow<NowPlaying?>(null)
     override val nowPlaying = current.asStateFlow()

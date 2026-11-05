@@ -12,11 +12,14 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.MissingLocalMediaReporter
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.api.LocalMediaReadiness
 import ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings
 import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
@@ -62,11 +65,15 @@ public class PlaybackServiceAccess internal constructor(
     private val positions: Provider<PositionStore>,
     private val lookup: Provider<PlaybackMediaLookup>,
     private val items: Provider<MediaItemFactory>,
-    private val chapters: Provider<ChapterRepository>,
+    internal val chapters: Provider<ChapterRepository>,
+    internal val localChanges: LocalMediaChanges,
+    internal val missingLocalMedia: Provider<MissingLocalMediaReporter>,
+    private val localReadiness: LocalMediaReadiness,
 ) {
     internal suspend fun open(): PlaybackPorts =
         withContext(io) {
             awaitDatabase()
+            localReadiness.awaitReady()
             prefs.start(applicationScope)
             prefs.awaitReady()
             PlaybackPorts(

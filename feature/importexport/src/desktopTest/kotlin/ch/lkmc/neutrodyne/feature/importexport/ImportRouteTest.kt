@@ -29,11 +29,16 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -66,6 +71,7 @@ import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.ImportWarning
+import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
@@ -76,6 +82,7 @@ import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -617,6 +624,7 @@ class ImportRouteTest {
         key: ImportKey,
         viewModel: ImportViewModel? = null,
         visible: State<Boolean> = mutableStateOf(true),
+        miniPlayerInset: Dp = 0.dp,
     ) {
         val sessionId = key.sessionId.toLongOrNull() ?: -1L
         val vm =
@@ -637,6 +645,7 @@ class ImportRouteTest {
                     LocalAppNavigator provides navigator,
                     LocalSnackbarHost provides host,
                     LocalPlatformActions provides actions,
+                    LocalMiniPlayerInset provides miniPlayerInset,
                 ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                         val saved = rememberSaveableStateHolder()
@@ -656,6 +665,12 @@ class ImportRouteTest {
                                             playbackController,
                                             FakeLinkedRestoreCoordinator(),
                                             appScope,
+                                            ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
+                                                ch.lkmc.neutrodyne.core.testing
+                                                    .FakeDownloadController(),
+                                                ch.lkmc.neutrodyne.core.testing
+                                                    .FakePlaybackMediaLookup(),
+                                            ),
                                         ),
                                     )
                                 }
@@ -1072,6 +1087,26 @@ class ImportRouteTest {
             waitUntil(timeoutMillis = 5_000) { backups.restoreRequests.size == 1 }
             assertEquals(1, playback.pauseCalls)
             assertTrue(imports.calls.none { it.startsWith("confirm(") })
+        }
+
+    @Test fun backupPreviewKeepsActionsAboveTheMiniPlayer() =
+        runDesktopComposeUiTest(width = 320, height = 640) {
+            backups.inspectOutcome = Outcome.Success(restorePreview())
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            val miniPlayerInset = 80.dp
+            setRouteContent(ImportKey(id.toString()), miniPlayerInset = miniPlayerInset)
+            waitUntil { onAllNodesWithText("Cancel").fetchSemanticsNodes().isNotEmpty() }
+            val cancel = onNodeWithText("Cancel").performScrollTo().assertIsDisplayed().fetchSemanticsNode()
+            val playerTop =
+                onRoot().fetchSemanticsNode().boundsInRoot.bottom -
+                    with(cancel.layoutInfo.density) { miniPlayerInset.toPx() }
+            assertTrue(cancel.boundsInRoot.bottom <= playerTop, "Cancel must remain above the docked player")
+            onNodeWithText("Settings").performScrollTo().assertIsOff().performClick()
+            onNodeWithText("Settings").assertIsOn()
+            onNodeWithText("Restore").performScrollTo().performClick()
+            waitUntil { backups.restoreRequests.size == 1 }
+            val request = backups.restoreRequests.single().second
+            assertTrue(RestoreCategory.SETTINGS in request.categories)
         }
 
     @Test fun replacePausesPlaybackOnTheMainDispatcher() =

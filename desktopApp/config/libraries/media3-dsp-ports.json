@@ -1,0 +1,11 @@
+{
+  "uniqueId": "neutrodyne:media3-dsp-ports",
+  "name": "Media3 audio processor ports",
+  "artifactVersion": "1.11.1",
+  "description": "Kotlin ports of Sonic and SilenceSkippingAudioProcessor. Modified by Neutrodyne, 2026.",
+  "website": "https://github.com/androidx/media",
+  "licenses": [
+    "Apache-2.0",
+    "media3-dsp-ports-credit"
+  ]
+}

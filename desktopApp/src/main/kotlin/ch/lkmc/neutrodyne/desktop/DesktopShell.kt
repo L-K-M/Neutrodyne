@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.desktop.shell.SessionState
 import ch.lkmc.neutrodyne.desktop.shell.ShellDialogs
 import ch.lkmc.neutrodyne.desktop.shell.ShutdownCoordinator
 import ch.lkmc.neutrodyne.desktop.shell.SingleInstanceLock
+import ch.lkmc.neutrodyne.desktop.window.AppBusySignal
 import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
 import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindow
 import ch.lkmc.neutrodyne.desktop.window.WindowActivator
@@ -234,6 +235,8 @@ internal object DesktopShell {
                 lock = lock,
                 fileSink = fileSink,
                 stopServices = {
+                    runCatching { runBlocking { graph.desktopPlaybackController.shutdown() } }
+                        .onFailure { Log.w(TAG, it) { "playback shutdown failed" } }
                     stopServices(
                         // Only an opened database means band 200 can have started the runner;
                         // resolving it otherwise would wait on, or rethrow, the open.
@@ -257,14 +260,26 @@ internal object DesktopShell {
         )
 
         // Step 6: the window on the AWT event thread. `application` returns when the window
-        // closes — the M0b close rule: nothing is busy, so a close request quits — and the
-        // clean shutdown runs before main returns. The content is gated on the database open
-        // (band 100 above) exactly like Android's StartupGate.
+        // closes — a visible close runs 11's close rule over `desktop.close_behaviour` and
+        // the busy signal, a hidden idle quit or a Quit item ends it here too — and the
+        // clean shutdown runs before main returns. The content is gated on the database
+        // open (band 100 above) exactly like Android's StartupGate.
         // 11 Notifications' fallback: banner taps route through the root's navigator.
         graph.bannerNotifier.routeDispatch = menuActions::applyRoute
+        val busySignal =
+            AppBusySignal(
+                nowPlaying = graph.playbackStateSource.nowPlaying,
+                openState = graph.databaseOpener.openState,
+                downloads = { graph.downloadController() },
+            )
         application {
             NeutrodyneWindow(
                 installers = graph.entryInstallers,
+                failedDownloads =
+                    kotlinx.coroutines.flow.flow {
+                        graph.databaseOpener.awaitOpen()
+                        graph.downloadController().observeFailedCount().collect { emit(it) }
+                    },
                 openHandler = openHandler,
                 menuActions = menuActions,
                 banners = graph.bannerNotifier,
@@ -277,6 +292,8 @@ internal object DesktopShell {
                 playbackController = graph.playbackController,
                 playbackState = graph.playbackStateSource,
                 syncFocusPoke = graph.syncFocusPoke::poke,
+                busySignal = busySignal,
+                clock = DesktopClock,
                 updateChecker = graph.appUpdateChecker,
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,

@@ -192,6 +192,7 @@ internal class AdapterFixture(
             resumePolicy = { resumePolicy },
             afterTransition = sync::transitioned,
             afterSessionEnd = sync::stopped,
+            localChanges = local,
         )
 
     fun attach() {

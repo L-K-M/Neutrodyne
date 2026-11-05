@@ -63,6 +63,30 @@ abstract class PodcastDao(
     @Query("SELECT id FROM podcast WHERE id IN (:ids)")
     protected abstract suspend fun existingIdsChunk(ids: List<Long>): List<Long>
 
+    /** The planner pass reads only its own column and subscription time, at the bind limit. */
+    suspend fun autoDownloadWatermarks(ids: Collection<Long>): List<AutoDownloadWatermark> =
+        ids.distinct().chunked(BIND_CHUNK).flatMap { autoDownloadWatermarkChunk(it) }
+
+    @Query("SELECT id, subscribedAt, autoDownloadEligibleAfter FROM podcast WHERE id IN (:ids)")
+    protected abstract suspend fun autoDownloadWatermarkChunk(ids: List<Long>): List<AutoDownloadWatermark>
+
+    /** Caller groups equal values and commits the complete pass before persisting its baseline. */
+    suspend fun setAutoDownloadWatermarks(
+        ids: List<Long>,
+        eligibleAfter: Long?,
+    ) {
+        ids.distinct().chunked(BIND_CHUNK).forEach { setAutoDownloadWatermarkChunk(it, eligibleAfter) }
+    }
+
+    @Query(
+        "UPDATE podcast SET autoDownloadEligibleAfter = :eligibleAfter WHERE id IN (:ids)" +
+            " AND autoDownloadEligibleAfter IS NOT :eligibleAfter",
+    )
+    protected abstract suspend fun setAutoDownloadWatermarkChunk(
+        ids: List<Long>,
+        eligibleAfter: Long?,
+    )
+
     @Query("SELECT * FROM podcast WHERE feedKey = :feedKey")
     abstract suspend fun byFeedKey(feedKey: String): PodcastEntity?
 
@@ -111,6 +135,12 @@ abstract class PodcastDao(
 
     @Query("SELECT * FROM podcast WHERE id = :id")
     abstract fun observeById(id: Long): Flow<PodcastEntity?>
+
+    @Query(
+        "SELECT p.*, COALESCE(a.version, 0) AS artworkVersion, a.avgArgb AS artworkAvgArgb" +
+            " FROM podcast p LEFT JOIN artwork a ON a.key = p.artworkKey WHERE p.id = :id",
+    )
+    abstract fun observeWithArtwork(id: Long): Flow<PodcastArtworkRow?>
 
     @Query("SELECT * FROM podcast_url_alias WHERE podcastId = :podcastId")
     abstract fun observeAliases(podcastId: Long): Flow<List<PodcastUrlAliasEntity>>
@@ -554,4 +584,11 @@ abstract class PodcastDao(
 data class DirectorySubscription(
     val url: String,
     val podcastId: Long,
+)
+
+/** The watermark pass never rewrites unrelated podcast metadata or sync fields. */
+data class AutoDownloadWatermark(
+    val id: Long,
+    val subscribedAt: Long,
+    val autoDownloadEligibleAfter: Long?,
 )

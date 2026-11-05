@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.database.SyncStateDao
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -37,6 +38,7 @@ import ch.lkmc.neutrodyne.core.model.NetworkPolicy
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.feeds.backup.CredentialV1
 import ch.lkmc.neutrodyne.feeds.backup.GroupV1
@@ -46,6 +48,7 @@ import ch.lkmc.neutrodyne.feeds.backup.OverridesV1
 import ch.lkmc.neutrodyne.feeds.backup.PodcastV1
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.uuid.Uuid
 
@@ -81,6 +84,7 @@ internal class RestoreMerger(
     private val channelSync: GroupChannelSync,
     private val orderKeys: OrderKeys,
     private val clock: Clock,
+    private val downloads: Provider<DownloadLifecycle>,
 ) {
     private val backupDao get() = db.backupDao()
     private val podcastDao get() = db.podcastDao()
@@ -380,6 +384,7 @@ internal class RestoreMerger(
         now: Long,
         suppressCapture: Boolean,
     ): List<String> {
+        downloads().beforeLibraryReplace()
         val localOnly = podcastDao.allForExport().map { it.id }.filter { it !in matchedPodcastIds }
         if (localOnly.isNotEmpty()) {
             if (suppressCapture) {
@@ -786,7 +791,25 @@ internal class RestoreMerger(
         local = scopeDao.forGroup(groupId)?.o,
         staged = staged,
         policy = policy,
-        upsert = { scopeDao.upsertGroup(PodcastGroupSettingsEntity(groupId, it)) },
+        upsert = { row ->
+            // Restores obey the same dependent-field invariant as interactive group writes.
+            val next =
+                if (row.autoDownload == true) {
+                    row
+                } else {
+                    row.copy(
+                        autoDownloadKeepLatest = null,
+                        autoDownloadNetwork = null,
+                        autoDownloadRequireCharging = null,
+                        includeVideoInAutoDownload = null,
+                    )
+                }
+            if (next == ScopeOverrides()) {
+                scopeDao.deleteGroup(groupId)
+            } else {
+                scopeDao.upsertGroup(PodcastGroupSettingsEntity(groupId, next))
+            }
+        },
         delete = { scopeDao.deleteGroup(groupId) },
     )
 
@@ -1171,7 +1194,7 @@ private fun OverridesV1.toScopeOverrides(): ScopeOverrides =
         introSkipMs = introSkipMs,
         outroSkipMs = outroSkipMs,
         autoDownload = autoDownload,
-        autoDownloadKeepLatest = autoDownloadKeepLatest,
+        autoDownloadKeepLatest = autoDownloadKeepLatest?.takeIf { it in DownloadSettingKeys.KEEP_LATEST_RANGE },
         autoDownloadNetwork = enumNamed<NetworkPolicy>(autoDownloadNetwork),
         autoDownloadRequireCharging = autoDownloadRequireCharging,
         deleteAfterPlayed = enumNamed<DeleteAfter>(deleteAfterPlayed),

@@ -55,6 +55,11 @@ import ch.lkmc.neutrodyne.core.ui.resources.back
 import ch.lkmc.neutrodyne.core.ui.resources.restore_action
 import ch.lkmc.neutrodyne.core.ui.resources.restore_choose_another
 import ch.lkmc.neutrodyne.core.ui.resources.restore_credentials
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_allow
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_cancel
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_failed
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_metered
+import ch.lkmc.neutrodyne.core.ui.resources.restore_download_wifi
 import ch.lkmc.neutrodyne.core.ui.resources.restore_history
 import ch.lkmc.neutrodyne.core.ui.resources.restore_linked
 import ch.lkmc.neutrodyne.core.ui.resources.restore_merge
@@ -73,6 +78,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_offline
 import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_this_device
 import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_this_device_help
 import ch.lkmc.neutrodyne.core.ui.resources.restore_reach_title
+import ch.lkmc.neutrodyne.core.ui.resources.restore_redownload
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace_effect
 import ch.lkmc.neutrodyne.core.ui.resources.restore_replace_everywhere
@@ -85,6 +91,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.restore_warn_ignored_entries
 import ch.lkmc.neutrodyne.core.ui.resources.restore_warn_skipped_lines
 import ch.lkmc.neutrodyne.core.ui.resources.restore_written_android
 import ch.lkmc.neutrodyne.core.ui.resources.restore_written_desktop
+import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
@@ -113,7 +120,37 @@ internal fun RestoreSessionRoute(
     val restoreError = state.error ?: (progress as? RestoreProgress.Failed)?.error?.takeIf { failed }
     // Persisted committed work already belongs to the report, even after progress-flow loss.
     if (!preview && !failed) {
-        report()
+        Column {
+            if (state.redownloadIds.isNotEmpty()) {
+                NdButton(
+                    label = stringResource(Res.string.restore_redownload, state.redownloadIds.size),
+                    onClick = { scope.launch { viewModel.redownload(requester = actions.notifications) } },
+                    enabled = !state.busy,
+                )
+            }
+            if (state.downloadFailed) Text(stringResource(Res.string.restore_download_failed))
+            report()
+            if (state.meteredDownload) {
+                NdDialog(
+                    title = stringResource(Res.string.restore_download_metered),
+                    onDismissRequest = viewModel::dismissMeteredDownload,
+                    confirm =
+                        NdDialogAction(stringResource(Res.string.restore_download_allow)) {
+                            scope.launch { viewModel.redownload(true, actions.notifications) }
+                        },
+                    dismiss =
+                        NdDialogAction(
+                            stringResource(Res.string.restore_download_cancel),
+                            onClick = viewModel::dismissMeteredDownload,
+                        ),
+                ) {
+                    NdTextButton(
+                        label = stringResource(Res.string.restore_download_wifi),
+                        onClick = { scope.launch { viewModel.redownload(false, actions.notifications) } },
+                    )
+                }
+            }
+        }
         return
     }
     Scaffold(topBar = {
@@ -122,6 +159,7 @@ internal fun RestoreSessionRoute(
         Column(
             Modifier
                 .padding(padding)
+                .padding(bottom = LocalMiniPlayerInset.current)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),

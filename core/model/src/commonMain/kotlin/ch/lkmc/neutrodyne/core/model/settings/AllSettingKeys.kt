@@ -40,6 +40,7 @@ object AllSettingKeys {
     ): Boolean =
         acceptsStoredType(key, value) &&
             PlaybackSettingKeys.acceptsRange(key, value) &&
+            DownloadSettingKeys.acceptsRange(key, value) &&
             UpdateSettingKeys.acceptsRange(key, value) &&
             DiscoverSettingKeys.acceptsValue(key, value)
 }

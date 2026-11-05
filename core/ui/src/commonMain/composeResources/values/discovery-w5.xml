@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: Unlicense -->
 <resources>
     <string name="discovery_search">Search podcasts or paste a link</string>
+    <string name="discovery_providers_loading">Loading directory providers…</string>
     <string name="discovery_disclosure">Searches are sent to %1$s</string>
     <string name="discovery_disabled">Enable a directory in Discover settings</string>
     <string name="discovery_top">Top podcasts</string>

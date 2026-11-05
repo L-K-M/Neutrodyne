@@ -37,6 +37,7 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                     FakePlaybackController(),
                     FakeLinkedRestoreCoordinator(),
                     backgroundScope,
+                    restoreDownloads(),
                 )
             runCurrent()
             vm.requestRestore()
@@ -90,6 +91,7 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                     FakePlaybackController(),
                     FakeLinkedRestoreCoordinator(),
                     backgroundScope,
+                    restoreDownloads(),
                 )
             runCurrent()
             assertTrue(vm.uiState.value.requested)
@@ -118,6 +120,7 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                     FakePlaybackController(),
                     FakeLinkedRestoreCoordinator(),
                     backgroundScope,
+                    restoreDownloads(),
                 )
             runCurrent()
             backups.restoreProgress.value = RestoreProgress.Running(id, "library", 0, 12)
@@ -128,3 +131,11 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
 }
 
 private const val PREVIOUS_SESSION_ID = 99L
+
+private fun restoreDownloads() =
+    ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController(),
+        ch.lkmc.neutrodyne.core.testing
+            .FakePlaybackMediaLookup(),
+    )
