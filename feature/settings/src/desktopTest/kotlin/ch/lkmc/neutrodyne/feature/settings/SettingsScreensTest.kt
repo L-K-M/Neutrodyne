@@ -119,8 +119,7 @@ class SettingsScreensTest {
                     !it.boundsInRoot.isEmpty &&
                         it.boundsInRoot.width + 0.5f >= it.layoutInfo.width &&
                         it.boundsInRoot.height + 0.5f >= it.layoutInfo.height
-                }
-                .forEach { node ->
+                }.forEach { node ->
                     val bounds = node.boundsInRoot
                     val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
                     assertTrue(
