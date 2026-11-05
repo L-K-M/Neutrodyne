@@ -721,6 +721,37 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun turningShareOnCapturesOneAuthRowPerCredentialedPodcastAndOffStopsIt() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                h.linkCredential()
+
+                h.controller.setShareFeedPasswords(true)
+                val authRows =
+                    h.db
+                        .syncOutboxDao()
+                        .rows()
+                        .filter { it.field == "auth" }
+                assertEquals(listOf(PODCAST_SYNC_ID), authRows.map { it.rid })
+                assertTrue(h.controller.shareFeedPasswords.value)
+
+                // Turning it off pushes nothing: the pending rows cannot leave while off.
+                h.controller.setShareFeedPasswords(false)
+                assertTrue(
+                    h.db
+                        .syncOutboxDao()
+                        .rows()
+                        .none { it.field == "auth" },
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun unlinkRemovesTheAccountsProtectedSnapshots() =
         runTest {
             val h = harness(this)
@@ -947,6 +978,7 @@ private class Harness(
             storagePaths = testStoragePaths(),
             settings = FakeSettingsSyncPort(),
             secrets = secrets,
+            sharePasswords = { flags.sharePasswords },
             coordinator =
                 ch.lkmc.neutrodyne.core.testing
                     .FakeCredentialCommitCoordinator(),
@@ -1090,6 +1122,31 @@ private class Harness(
     }
 
     suspend fun tokenStoreContains(host: String): Boolean = tokens.load(host) != null
+
+    /** Links the local podcast to a credential row, with triggers silenced. */
+    suspend fun linkCredential() {
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying {
+                val id =
+                    db
+                        .credentialDao()
+                        .putByOrigin(
+                            ch.lkmc.neutrodyne.core.database.CredentialEntity(
+                                origin = "https://example.com/feed",
+                                username = "anna",
+                                secretCipher = null,
+                                iv = null,
+                                createdAt = 1,
+                            ),
+                        )
+                db
+                    .podcastDao()
+                    .allForExport()
+                    .single()
+                    .let { db.podcastDao().setCredentialId(it.id, id) }
+            }
+        }
+    }
 
     fun close() {
         controllerJob.cancel()

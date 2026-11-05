@@ -132,6 +132,10 @@ class SyncControllerImpl(
     private val _notices = MutableSharedFlow<SyncNotice>(extraBufferCapacity = 16)
     override val notices: Flow<SyncNotice> = _notices
 
+    /** The device's "Share feed passwords" switch (10 Settings); the settings screen binds it. */
+    private val _shareFeedPasswords = MutableStateFlow(false)
+    override val shareFeedPasswords: StateFlow<Boolean> = _shareFeedPasswords.asStateFlow()
+
     /** The running flow's cancellation handle and the answers the flow waits for. */
     private var linkJob: Job? = null
     private var insecureDecision: CompletableDeferred<Boolean>? = null
@@ -159,6 +163,7 @@ class SyncControllerImpl(
         val url = address.serverUrl()
         val state = db.syncStateDao().get()
         val token = url?.let { tokenStore.load(hostOf(it)) }
+        _shareFeedPasswords.value = address.shareFeedPasswords()
         _status.value =
             when {
                 url == null || state == null -> {
@@ -489,6 +494,25 @@ class SyncControllerImpl(
     override suspend fun setShareFeedPasswords(enabled: Boolean) {
         address.setShareFeedPasswords(enabled)
         flags.sharePasswords = enabled
+        _shareFeedPasswords.value = enabled
+        if (enabled) {
+            captureSharedPasswords()
+        } else {
+            // Turning it off pushes nothing: the pending rows can never leave while off, and a
+            // later switch-on re-captures fresh ones (10 Feed passwords).
+            db.syncOutboxDao().deleteFieldOf("podcast", "auth")
+        }
+    }
+
+    /**
+     * 10 Feed passwords: turning the switch on pushes `auth` for every podcast with a credential —
+     * one capture per podcast, so acknowledged fields from before the switch ride again.
+     */
+    private suspend fun captureSharedPasswords() {
+        if (db.syncStateDao().get()?.enabled != true) return
+        for (syncId in db.podcastDao().syncIdsWithCredentials()) {
+            db.withWriteTransaction { db.syncOutboxDao().captureIntent("podcast", syncId, "auth", "null") }
+        }
     }
 
     private suspend fun runLink(

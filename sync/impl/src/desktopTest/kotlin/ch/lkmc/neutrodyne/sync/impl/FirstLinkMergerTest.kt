@@ -360,6 +360,7 @@ class FirstLinkMergerTest {
             storagePaths = paths,
             settings = FakeSettingsSyncPort(),
             secrets = secrets,
+            sharePasswords = { false },
             coordinator =
                 ch.lkmc.neutrodyne.core.testing
                     .FakeCredentialCommitCoordinator(),

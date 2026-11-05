@@ -314,6 +314,10 @@ abstract class PodcastDao(
     @Query("UPDATE podcast SET needsCredentials = 1 WHERE id = :podcastId")
     abstract suspend fun markNeedsCredentials(podcastId: Long)
 
+    /** 10 Feed passwords: every podcast a "Share feed passwords" switch-on re-captures. */
+    @Query("SELECT syncId FROM podcast WHERE syncId IS NOT NULL AND credentialId IS NOT NULL")
+    abstract suspend fun syncIdsWithCredentials(): List<String>
+
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 
     /**

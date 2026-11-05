@@ -152,6 +152,7 @@ object SyncBindings {
         secrets: SecretStore,
         coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
         effects: SyncApplyEffects,
+        flags: SyncFlags,
         clock: Clock,
     ): FirstLinkMerger =
         FirstLinkMerger(
@@ -163,6 +164,7 @@ object SyncBindings {
             storagePaths = storagePaths,
             settings = settings,
             secrets = secrets,
+            sharePasswords = { flags.sharePasswords },
             coordinator = coordinator,
             effects = effects,
             clock = clock,
