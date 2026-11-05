@@ -488,9 +488,10 @@ private fun DesktopApplicationMenu(
  * the data folder (08 Banners and the startup gate). [viewModelFactory] is the graph's
  * `metroViewModel()` seam: every VM-backed entry resolves through it here, exactly where the
  * window, the UI test and smoke mode compose the same tree (01 Feature entry installers).
- * [banners] is the bound `DesktopNotifier` (11's in-app banner fallback until MD2's OS
- * notifier lands): its stream feeds the root snackbar and its taps come back through
- * `userMessageAction`, where the notification's route is applied.
+ * [banners] is the in-app banner fallback of the bound `DesktopNotifier` (11
+ * Notifications: MD2's OS notifier posts here when the OS channel cannot deliver): its
+ * stream feeds the root snackbar and its taps come back through `userMessageAction`,
+ * where the notification's route is applied.
  */
 @Composable
 internal fun NeutrodyneWindowContent(

@@ -12,6 +12,9 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
+import ch.lkmc.neutrodyne.core.navigation.IntentRouter
+import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.navigation.RouteInput
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
@@ -222,6 +225,20 @@ internal object DesktopShell {
         // The OS surfaces' hooks (11 Linux MPRIS): Raise shows the window like a hand-off;
         // Quit is bound inside `application` below, where the clean exit path exists.
         graph.shellActions.raise = activator::bringToFront
+        // 11 Notifications' click column: an OS-delivered click shows the window and, when
+        // the notification carries one, applies its route through the shared router — the
+        // same path the banner fallback's "Open" action takes; navigation stays on the AWT
+        // thread (`applyRoute` dispatches).
+        graph.appScope.launch {
+            graph.osNotifier.clicks.collect { notification ->
+                activator.bringToFront()
+                notification.route?.let { uri ->
+                    val route =
+                        IntentRouter.route(RouteInput(RouteInput.Action.VIEW, uri = uri, internal = true))
+                    if (route != Route.None) menuActions.applyRoute(route)
+                }
+            }
+        }
         val serveJob =
             handshakeScope.launch {
                 handshake.serve { request -> onHandoff(request, activator, openHandler) }
@@ -243,6 +260,8 @@ internal object DesktopShell {
                     // flushes its last position.
                     runCatching { graph.osSurfaces.close() }
                         .onFailure { Log.w(TAG, it) { "OS surfaces close failed" } }
+                    runCatching { graph.osNotifier.close() }
+                        .onFailure { Log.w(TAG, it) { "notification channel close failed" } }
                     runCatching { runBlocking { graph.desktopPlaybackController.shutdown() } }
                         .onFailure { Log.w(TAG, it) { "playback shutdown failed" } }
                     stopServices(

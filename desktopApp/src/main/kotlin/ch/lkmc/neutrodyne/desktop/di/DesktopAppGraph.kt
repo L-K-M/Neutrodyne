@@ -34,6 +34,8 @@ import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
+import ch.lkmc.neutrodyne.desktop.system.OsDesktopNotifier
+import ch.lkmc.neutrodyne.desktop.window.WindowIcons
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
@@ -49,6 +51,7 @@ import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
+import dev.zacsweers.metro.SingleIn
 import dev.zacsweers.metro.createGraphFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -155,11 +158,19 @@ interface DesktopAppGraph {
     val backupRepository: BackupRepository
 
     /**
-     * The bound [DesktopNotifier] — 11's documented in-app banner fallback while
-     * `OsDesktopNotifier` is MD2. The window feeds its [DesktopBannerNotifier.userMessages]
-     * into `RootSlots.userMessages` and attaches the route dispatch.
+     * The bound [DesktopNotifier] — MD2's `OsDesktopNotifier` (`:desktop:system`) over the
+     * in-app banner fallback ([DesktopBannerNotifier]): every post reaches the OS first and
+     * the banners whenever the OS channel cannot deliver (11 Notifications). The window
+     * feeds [DesktopBannerNotifier.userMessages] into `RootSlots.userMessages` and attaches
+     * the route dispatch; OS clicks arrive through [osNotifier].
      */
     val bannerNotifier: DesktopBannerNotifier
+
+    /** The OS notification half of the bound [DesktopNotifier] (clicks, diagnostics). */
+    val osNotifier: OsDesktopNotifier
+
+    /** The bound notification port: the OS notifier over the banner fallback. */
+    val desktopNotifier: DesktopNotifier
 
     /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through
@@ -186,12 +197,24 @@ interface DesktopAppGraph {
     val DesktopCrashReporter.asCrashContext: CrashContext
 
     /**
-     * The `DesktopNotifier` binding: the in-app banner fallback until MD2's
-     * `OsDesktopNotifier` (`:desktop:system`) replaces it — 11 Notifications' fallback
-     * column. No OS-centre delivery exists before then.
+     * The `DesktopNotifier` binding: MD2's `OsDesktopNotifier` over the in-app banner
+     * fallback — 11 Notifications' fallback column. A post the OS channel cannot deliver
+     * shows the banner instead, so the owners' notifiers stay source-agnostic.
      */
     @Binds
-    val DesktopBannerNotifier.asDesktopNotifier: DesktopNotifier
+    val OsDesktopNotifier.asDesktopNotifier: DesktopNotifier
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun osDesktopNotifier(
+        buildInfo: BuildInfo,
+        banner: DesktopBannerNotifier,
+    ): OsDesktopNotifier =
+        OsDesktopNotifier.create(
+            os = buildInfo.desktop?.os,
+            fallback = banner,
+            trayIcon = { WindowIcons.trayImage() },
+        )
 
     /**
      * The one database accessor (02 Error handling and recovery): blocks a background caller until
