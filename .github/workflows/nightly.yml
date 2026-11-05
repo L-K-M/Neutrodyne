@@ -945,10 +945,11 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
-      - name: Enable KVM and install emulator
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
+      - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
       - name: Exercise all Macrobenchmark journeys
         run: >-
           ./gradlew :benchmark:bench34BenchmarkReleaseAndroidTest
