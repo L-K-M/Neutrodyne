@@ -4,6 +4,7 @@
 import base64
 import io
 import json
+import os
 import re
 import threading
 from enum import Enum
@@ -81,10 +82,11 @@ class ReplayRH(RequestHandler):
     misses = 0
 
     @classmethod
-    def configure(cls, directory, mode=Mode.STRICT):
+    def configure(cls, directory, mode=None):
         cls.misses = 0
         cls._directory = Path(directory)
-        cls._mode = Mode(mode)
+        # ND_REPLAY_MODE selects the canary's contract gate; tests keep strict as the default.
+        cls._mode = Mode(mode or os.environ.get('ND_REPLAY_MODE', Mode.STRICT))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

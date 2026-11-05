@@ -99,13 +99,20 @@ dependencies {
     androidTestImplementation(libs.truth)
 }
 
-// Host-only strict replay uses the same verified asset packaged above.
+// Host-only replay uses the same verified asset packaged above. -Preplay=contract switches
+// the scenario cases to endpoint/InnerTube-client matching — the engine canary's gate.
 tasks.register<Exec>("shimTest") {
     dependsOn("verifyBundledYtDlp")
     group = "verification"
     description = "Run Python shim tests against hash-verified yt-dlp with strict offline replay"
     workingDir(rootProject.projectDir)
-    commandLine("python3", "-B", "youtube/engine/python/tests/run.py")
+    commandLine(
+        "python3",
+        "-B",
+        "youtube/engine/python/tests/run.py",
+        "--replay",
+        providers.gradleProperty("replay").getOrElse("strict"),
+    )
     // Always run: the selected host interpreter and upstream API are part of this proof.
 }
 
