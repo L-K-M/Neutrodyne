@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CancellationException
+import kotlin.math.abs
 
 /** User seeks can reset; setup/pickup seeks must never overwrite durable progress. */
 enum class SeekOrigin { USER, CORE }
@@ -49,6 +50,8 @@ class PositionSaver(
         var replayCleared: Boolean = false,
         var resetPending: Boolean = false,
         var lastSavedElapsed: Long,
+        /** The last position written or applied for this item; the paused-item pickup compares it. */
+        var lastKnownMs: Long? = null,
     )
 
     private var current: Current? = null
@@ -65,8 +68,28 @@ class PositionSaver(
             Current(episodeId, currentSinceMs, source, replay, allowed, lastSavedElapsed = clock.elapsedRealtime())
     }
 
-    fun startPositionApplied() {
+    /** The adapter applies its start seek (positionMs) before or without this when it is unknown. */
+    fun startPositionApplied(appliedPositionMs: Long? = null) {
         current?.ready = true
+        appliedPositionMs?.let { ms -> current?.lastKnownMs = ms.coerceAtLeast(0) }
+    }
+
+    /**
+     * 06 Sync interplay rule 4: the stored position to take up at the next resume of the paused
+     * current item — only when it diverges from the last position written or applied by more than
+     * [PICKUP_BOUND_MS] (a reset to 0 included). Null when nothing is loaded, nothing was written
+     * or applied yet, or the row agrees.
+     */
+    fun pickupPositionMs(storedPositionMs: Long?): Long? {
+        val item = current ?: return null
+        val known = item.lastKnownMs ?: return null
+        val stored = storedPositionMs ?: 0L
+        return if (abs(stored - known) > PICKUP_BOUND_MS) stored else null
+    }
+
+    /** A pickup seek the core requested: it writes nothing, but becomes the known position. */
+    fun pickupApplied(pickedUpMs: Long) {
+        current?.lastKnownMs = pickedUpMs.coerceAtLeast(0)
     }
 
     /** Replay is cleared at first actual playback, with retries if that transaction fails. */
@@ -163,7 +186,13 @@ class PositionSaver(
                     departure.pinStartedAt,
                     capture.allowed,
                 )
-            if (saved) PositionSaveResult.Saved else PositionSaveResult.Skipped
+            if (saved) {
+                current?.takeIf { it.episodeId == departure.episodeId }?.lastKnownMs =
+                    departure.positionMs.coerceAtLeast(0)
+                PositionSaveResult.Saved
+            } else {
+                PositionSaveResult.Skipped
+            }
         }
     }
 
@@ -183,6 +212,7 @@ class PositionSaver(
             store.reset(item.episodeId, clock.now())
             item.resetPending = false
             item.lastSavedElapsed = clock.elapsedRealtime()
+            item.lastKnownMs = 0L
             PositionSaveResult.Saved
         }
     }
@@ -215,5 +245,8 @@ class PositionSaver(
     private companion object {
         const val SAVE_INTERVAL_MS = 5_000L
         const val RESET_BOUND_MS = 1_000L
+
+        /** 06 Positions guard 6: a divergence beyond this (reset to 0 included) is picked up. */
+        const val PICKUP_BOUND_MS = 1_000L
     }
 }

@@ -255,7 +255,8 @@ class SyncSchedulerTest {
             deps.scheduler.start()
             runCurrent()
 
-            deps.playback.setPlaying(true)
+            // A playing player has an item loaded (06's `ActivePlayback` is null otherwise).
+            deps.playback.load(episodeId = 1L, playing = true)
             runCurrent()
             deps.awaitQuiet()
             assertTrue(deps.rounds.isEmpty())

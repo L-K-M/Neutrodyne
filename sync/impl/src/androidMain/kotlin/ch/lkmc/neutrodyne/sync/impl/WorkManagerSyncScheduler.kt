@@ -56,7 +56,7 @@ class WorkManagerSyncScheduler
         /** `ProcessLifecycleOwner` at least `STARTED`; `SyncForegroundObserver` flips it. */
         internal val uiVisible = MutableStateFlow(false)
 
-        override fun interactive(): Boolean = uiVisible.value || playback.active.value.isPlaying
+        override fun interactive(): Boolean = uiVisible.value || playback.active.value?.isPlaying == true
 
         // The reason is informational here: `sync-push` always maps to a push round, whichever
         // trigger deferred to it.
