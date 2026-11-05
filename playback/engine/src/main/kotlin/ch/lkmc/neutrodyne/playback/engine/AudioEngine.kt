@@ -101,6 +101,14 @@ sealed interface EngineState {
 sealed interface EngineEvent {
     data class ItemTransition(
         val fromEpisodeId: Long?,
+        /**
+         * The outgoing item's audible position at the boundary, in milliseconds.
+         * The engine has already handed the ring to [toEpisodeId] when this event
+         * is emitted, so the clock no longer reports the outgoing item; the
+         * controller captures the departure from this value, mirroring Media3's
+         * `oldPosition.positionMs` at `onPositionDiscontinuity`.
+         */
+        val fromPositionMs: Long,
         val toEpisodeId: Long,
         val reason: TransitionReason,
     ) : EngineEvent

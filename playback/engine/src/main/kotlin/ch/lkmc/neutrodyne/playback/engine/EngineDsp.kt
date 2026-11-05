@@ -10,6 +10,12 @@ internal class EngineDsp(
     private val channels: Int,
     private val deviceRate: Int,
     private val episodeId: Long,
+    /**
+     * The ring frame index this item's first output frame lands at. A gapless
+     * chain keeps one clock across items, so markers stay in the ring's global
+     * frame coordinates instead of restarting at zero for every item.
+     */
+    private val outFrameBase: Long,
     private val clock: TimelineClock,
     private val write: (ShortArray) -> Unit,
     initialSpeed: Float,
@@ -102,7 +108,7 @@ internal class EngineDsp(
         previousSourceEnd = sourceFrame + frames
         clock.push(
             TimelineClock.Marker(
-                outputCursor.toLong(),
+                outFrameBase + outputCursor.toLong(),
                 episodeId.toString(),
                 (firstPtsUs ?: 0L) + sourceFrame * MICROS_PER_SECOND / sampleRate,
                 speed,

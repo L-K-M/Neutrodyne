@@ -106,6 +106,12 @@ class NdOutput private constructor(
         return { COUNTER.getAcquire(storage, 0L) as Long }
     }
 
+    /** The underrun reader captures the same storage as [clockReader]. */
+    fun underrunReader(): () -> Long {
+        val storage = counters
+        return { COUNTER.getAcquire(storage, Long.SIZE_BYTES.toLong()) as Long }
+    }
+
     @Synchronized
     internal fun nativeFramesPlayed(): Long {
         check(!closed)

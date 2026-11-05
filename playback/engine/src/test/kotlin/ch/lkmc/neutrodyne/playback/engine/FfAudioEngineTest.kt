@@ -133,7 +133,11 @@ class FfAudioEngineTest {
             assertEquals(600L, engine.positionMs())
             engine.play()
             await("playback after tail edit") { engine.positionMs() >= 650 }
-            synchronized(resolver) { assertEquals(listOf(item to 0), resolver.calls) }
+            // The MD1b prepare-ahead resolves the next item, but a tail edit must
+            // never resolve or restart the item the user hears.
+            synchronized(resolver) {
+                assertEquals(listOf(item to 0), resolver.calls.filter { it.first.episodeId == 1L })
+            }
         }
     }
 
@@ -246,6 +250,128 @@ class FfAudioEngineTest {
             closer.join(6_000)
         }
         assertFalse(closer.isAlive)
+    }
+
+    /**
+     * MD1 AC4 with the null back-end: the next window item is prepared while the
+     * current one still plays, the handover keeps the device running with no gap
+     * longer than 50 ms, the transition event carries the audible boundary, and
+     * the last item still ends the engine.
+     */
+    @Test
+    fun automaticTransitionPreparesTheNextItemAndKeepsTheRingContinuous() {
+        val second = EngineItem(2, "ep:2:pin", true)
+        val resolver = resolver().apply { sources[2L to 0] = ResolvedSource.File(media()) }
+        engine(resolver).use { engine ->
+            val transitions = mutableListOf<EngineEvent.ItemTransition>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.ItemTransition>().collect { transitions += it }
+            }
+            try {
+                engine.setWindow(listOf(item, second), 0, null)
+                engine.play()
+                awaitReady(engine)
+                // The next item is prepared before the current one ends.
+                await("next item prepared") {
+                    synchronized(resolver) { resolver.calls.any { it.first.episodeId == 2L } }
+                }
+                assertTrue(engine.positionMs() < 2_000)
+                val framesBefore = requireNotNull(engine.outputFramesPlayed).invoke()
+                val underrunBefore = requireNotNull(engine.outputUnderrunFrames).invoke()
+                await("automatic transition") { transitions.isNotEmpty() }
+                val event = transitions.single()
+                assertEquals(1L, event.fromEpisodeId)
+                assertEquals(2L, event.toEpisodeId)
+                assertEquals(TransitionReason.AUTO, event.reason)
+                assertTrue(
+                    abs(event.fromPositionMs - 2_000) <= 50,
+                    "outgoing position ${event.fromPositionMs}",
+                )
+                // The device never stopped: it kept consuming frames across the
+                // boundary and the ring never emptied for longer than 50 ms.
+                val framesAfter = requireNotNull(engine.outputFramesPlayed).invoke()
+                assertTrue(framesAfter > framesBefore, "the device stopped at the transition")
+                val gapMs = (requireNotNull(engine.outputUnderrunFrames).invoke() - underrunBefore) * 1_000 / RATE
+                assertTrue(gapMs <= 50, "transition gap $gapMs ms")
+                // The clock follows the arrival from its first audible frame.
+                await("arrival position") { engine.positionMs() < 1_000 }
+                await("end of the second item") { engine.state.value == EngineState.Ended }
+                assertTrue(abs(engine.positionMs() - 2_000) <= 50)
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
+    /** The next item's preparation starts about 10 s before the end, not at the start. */
+    @Test
+    fun theNextItemIsPreparedAboutTenSecondsBeforeTheEnd() {
+        val first = EngineItem(1, "ep:1:pin", true)
+        val second = EngineItem(2, "ep:2:pin", true)
+        val file = writeTestWave(ByteArray(15 * RATE * 4))
+        try {
+            val resolver =
+                FakeDesktopSourceResolver().apply {
+                    sources[1L to 0] = ResolvedSource.File(file)
+                    sources[2L to 0] = ResolvedSource.File(media())
+                }
+            engine(resolver).use { engine ->
+                engine.setSpeed(3f)
+                engine.setWindow(listOf(first, second), 0, null)
+                engine.play()
+                awaitReady(engine)
+                await("next item prepared") {
+                    synchronized(resolver) { resolver.calls.any { it.first.episodeId == 2L } }
+                }
+                val remainingMs = 15_000 - engine.positionMs()
+                assertTrue(
+                    remainingMs in 8_000..12_000,
+                    "prepared with ${remainingMs}ms remaining at ${engine.positionMs()}ms",
+                )
+                await("end of the first item") { engine.state.value == EngineState.Ended }
+            }
+        } finally {
+            Files.delete(file)
+        }
+    }
+
+    @Test
+    fun aTailEditDuringPreparationDropsTheStalePrepare() {
+        val second = EngineItem(2, "ep:2:pin", true)
+        val third = EngineItem(3, "ep:3:pin", true)
+        val resolver =
+            resolver().apply {
+                sources[2L to 0] = ResolvedSource.File(media())
+                sources[3L to 0] = ResolvedSource.File(media())
+            }
+        engine(resolver).use { engine ->
+            val transitions = mutableListOf<EngineEvent.ItemTransition>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.ItemTransition>().collect { transitions += it }
+            }
+            try {
+                engine.setWindow(listOf(item, second), 0, null)
+                engine.play()
+                awaitReady(engine)
+                await("next item prepared") {
+                    synchronized(resolver) { resolver.calls.any { it.first.episodeId == 2L } }
+                }
+                // The queued item is replaced while its preparation is in flight.
+                engine.updateWindow(
+                    EngineWindowDiff(
+                        removed = setOf(2),
+                        inserted = listOf(PlacedItem(1, third)),
+                    ),
+                )
+                await("transition to the replacement") { transitions.isNotEmpty() }
+                assertEquals(3L, transitions.single().toEpisodeId)
+                await("end of the replacement") { engine.state.value == EngineState.Ended }
+            } finally {
+                scope.cancel()
+            }
+        }
     }
 
     @Test
