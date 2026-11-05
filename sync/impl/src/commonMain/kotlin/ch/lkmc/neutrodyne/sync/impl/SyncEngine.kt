@@ -20,6 +20,8 @@ import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** The host of a server URL, for the token origin (`sync:<host>`). */
 fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
@@ -45,7 +47,15 @@ class SyncEngine(
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
 
-    suspend fun round(reason: SyncRoundReason): SyncReport {
+    /**
+     * Rounds serialize: an in-process round, a `SyncWorker` round and the controller's "Sync now"
+     * may race; interleaved pushes would confuse the outbox ACK arithmetic.
+     */
+    private val roundMutex = Mutex()
+
+    suspend fun round(reason: SyncRoundReason): SyncReport = roundMutex.withLock { roundLocked(reason) }
+
+    private suspend fun roundLocked(reason: SyncRoundReason): SyncReport {
         val started = clock.now()
         val serverUrl = address.serverUrl()
         val token = serverUrl?.let { tokens.load(hostOf(it)) }
@@ -70,7 +80,14 @@ class SyncEngine(
             if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
             val state = db.syncStateDao().get()
             val response =
-                client.sync(state?.cursor, changes)
+                try {
+                    client.sync(state?.cursor, changes)
+                } catch (failure: SyncTransportException) {
+                    // 10 Errors: a rejected token revokes the link on every caller, not just
+                    // the controller's "Sync now", so worker and scheduler rounds stop too.
+                    if (failure.status == STATUS_REVOKED) markRevoked()
+                    throw failure
+                }
             pushed += changes.size
             db.withWriteTransaction { handleResults(changes, response.results) }
             applied += response.records.size
@@ -149,4 +166,13 @@ class SyncEngine(
     }
 
     private suspend fun localPodcastCount(): Int = db.podcastDao().allForExport().size
+
+    private suspend fun markRevoked() {
+        val state = db.syncStateDao().get() ?: return
+        db.syncStateDao().upsert(state.copy(lastError = SYNC_ERROR_REVOKED))
+    }
+
+    private companion object {
+        const val STATUS_REVOKED = 401
+    }
 }

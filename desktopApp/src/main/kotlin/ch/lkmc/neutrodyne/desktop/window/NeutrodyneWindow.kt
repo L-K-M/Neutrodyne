@@ -74,6 +74,8 @@ import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.Frame
 import java.awt.SystemTray
+import java.awt.event.WindowEvent
+import java.awt.event.WindowFocusListener
 import java.nio.file.Path
 
 /**
@@ -102,6 +104,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     viewModelFactory: MetroViewModelFactory,
     playbackController: PlaybackController,
     playbackState: PlaybackStateSource,
+    syncFocusPoke: () -> Unit,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
     updateChecker: AppUpdateChecker? = null,
@@ -129,6 +132,18 @@ internal fun ApplicationScope.NeutrodyneWindow(
         onKeyEvent = { event -> windowShortcut(event) { requestClose(onQuitRequest) { hidden = it } } },
     ) {
         WindowEffects(activator = activator, background = background)
+        // 10 Scheduling on the desktop: a refocus after > 60 s away pokes the `sync` lane; the
+        // callback itself is cheap — the trigger owns the cooldown and the lane poke.
+        DisposableEffect(syncFocusPoke) {
+            val listener =
+                object : WindowFocusListener {
+                    override fun windowGainedFocus(event: WindowEvent?) = syncFocusPoke()
+
+                    override fun windowLostFocus(event: WindowEvent?) = Unit
+                }
+            window.addWindowFocusListener(listener)
+            onDispose { window.removeWindowFocusListener(listener) }
+        }
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {

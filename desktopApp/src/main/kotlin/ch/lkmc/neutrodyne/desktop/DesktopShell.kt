@@ -276,6 +276,7 @@ internal object DesktopShell {
                 viewModelFactory = graph.metroViewModelFactory,
                 playbackController = graph.playbackController,
                 playbackState = graph.playbackStateSource,
+                syncFocusPoke = graph.syncFocusPoke::poke,
                 updateChecker = graph.appUpdateChecker,
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,
