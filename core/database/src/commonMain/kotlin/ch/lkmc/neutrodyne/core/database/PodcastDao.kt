@@ -277,6 +277,13 @@ abstract class PodcastDao(
     @Query("UPDATE podcast SET needsCredentials = 0 WHERE id = :podcastId")
     abstract suspend fun clearNeedsCredentials(podcastId: Long)
 
+    /**
+     * The remote projection of the synced flag (10 Feed passwords): this feed requires a password
+     * this device has no credential for. Always written under `applying = 1` on the sync path.
+     */
+    @Query("UPDATE podcast SET needsCredentials = 1 WHERE id = :podcastId")
+    abstract suspend fun markNeedsCredentials(podcastId: Long)
+
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 
     /**

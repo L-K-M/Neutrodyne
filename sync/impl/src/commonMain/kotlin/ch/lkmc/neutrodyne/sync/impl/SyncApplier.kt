@@ -54,6 +54,8 @@ data class SyncApplyResult(
     val parked: Int,
     val held: Int,
     val invalid: Int,
+    /** Podcasts that need a password no received `auth` covers (10 Feed passwords). */
+    val passwordNeeded: List<Long> = emptyList(),
 )
 
 /**
@@ -83,11 +85,17 @@ class SyncApplier(
         var parked = 0
         var held = 0
         var invalid = 0
+        val passwordNeeded = LinkedHashSet<Long>()
+        // 10 Durable apply effects: stage every candidate secret before the page transaction; the
+        // transaction then references only protected keys, and losing candidates leave again.
+        val stage = AuthStage(secrets, db.syncStateDao().get()?.accountId.orEmpty())
+        val marked = stage.admit(records)
+        val referenced = HashSet<String>()
         db.withWriteTransaction {
             db.syncStateDao().withApplying {
-                val ordered = records.sortedBy { it.coll }
+                val ordered = marked.sortedBy { it.coll }
                 for (dto in ordered) {
-                    val result = applyRecord(dto, roundId)
+                    val result = applyRecord(dto, roundId, stage, referenced, passwordNeeded)
                     when (result) {
                         is RecordOutcome.Applied -> applied++
                         is RecordOutcome.Stale -> stale++
@@ -98,12 +106,16 @@ class SyncApplier(
                 }
             }
         }
-        return SyncApplyResult(applied, stale, parked, held, invalid)
+        stage.removeUnreferenced(referenced)
+        return SyncApplyResult(applied, stale, parked, held, invalid, passwordNeeded.toList())
     }
 
     private suspend fun applyRecord(
         dto: RecordDto,
         roundId: Long,
+        stage: AuthStage,
+        referenced: MutableSet<String>,
+        passwordNeeded: MutableCollection<Long>,
     ): RecordOutcome {
         val coll =
             runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: return RecordOutcome.Invalid
@@ -116,11 +128,15 @@ class SyncApplier(
         val pending = pendingState(coll, resolved.rid)
         val merge = SyncRecordMerger.merge(stored?.state, pending, incoming)
         if (merge.advanced.isEmpty() && merge.lost.isEmpty() && merge.record == stored?.state) {
+            // An equal-clock redelivery: its staged candidate IS the stored reference, so the
+            // cleanup pass must not treat it as a losing candidate.
+            val staged = stage.stagedKey(resolved.rid, incoming.fields["auth"]?.c?.toString())
+            if (staged != null && stored?.authReference?.storeKey == staged) referenced += staged
             return RecordOutcome.Stale
         }
         val outcome =
             when (coll) {
-                SyncCollection.PODCAST -> applyPodcast(resolved, merge, roundId)
+                SyncCollection.PODCAST -> applyPodcast(resolved, merge, roundId, passwordNeeded)
                 SyncCollection.GROUP -> applyGroup(resolved, merge, roundId)
                 SyncCollection.MEMBER -> applyMember(resolved, merge)
                 SyncCollection.EPISODE -> applyEpisode(resolved, merge)
@@ -137,14 +153,16 @@ class SyncApplier(
                 } else {
                     null
                 }
+            val protected = protectAuth(resolved.rid, merge, stored, stage, referenced)
             clockStore.put(
                 coll.wire,
                 resolved.rid,
                 RawSyncRecord(
-                    state = merge.record,
+                    state = protected.state,
                     by = dto.by ?: stored?.by,
                     pendingSetting = pendingSetting ?: stored?.pendingSetting,
-                    pendingAuth = stored?.pendingAuth,
+                    authReference = protected.authReference ?: stored?.authReference,
+                    pendingAuth = protected.pendingAuth,
                 ),
             )
             deleteLostPending(coll.wire, resolved.rid, merge.advanced)
@@ -152,10 +170,83 @@ class SyncApplier(
         return outcome
     }
 
+    /**
+     * 10 Durable apply effects, passwords: no plaintext `auth` enters raw state. A staged
+     * candidate that won keeps its protected reference and journals `pendingAuth`; a local value
+     * that won is replaced by a marker naming the feed origin its secret already lives at. An
+     * equal-clock redelivery keeps an unfinished effect (`advanced` is empty then, so the stored
+     * marker survives untouched).
+     */
+    private suspend fun protectAuth(
+        rid: String,
+        merge: RecordMerge,
+        stored: RawSyncRecord?,
+        stage: AuthStage,
+        referenced: MutableSet<String>,
+    ): ProtectedAuth {
+        val auth = merge.record.fields["auth"] ?: return ProtectedAuth(merge.record, stored?.pendingAuth, stored?.authReference)
+        val clock = auth.c?.toString().orEmpty()
+        val markerKey = authMarkerKey(auth.v)
+        if (markerKey != null && markerKey.startsWith(PENDING_ORIGIN_PREFIX)) {
+            // A staged candidate of this page (or an equal-clock redelivery of one). Without a
+            // derivable origin the credential could never install; the candidate is dropped.
+            val origin =
+                credentialOriginFor(rid, merge.record)
+                    ?: return ProtectedAuth(merge.record, stored?.pendingAuth, stored?.authReference)
+            referenced += markerKey
+            val reference = AuthReference(markerKey, origin, clock)
+            val pending =
+                if ("auth" in merge.advanced) {
+                    PendingAuth(markerKey, origin, clock)
+                } else {
+                    stored?.pendingAuth
+                }
+            return ProtectedAuth(merge.record, pending, reference)
+        }
+        if (markerKey != null) {
+            // A feed-origin marker: the winning value is a credential this store already holds.
+            return ProtectedAuth(merge.record, stored?.pendingAuth?.takeIf { it.reference == markerKey }, AuthReference(markerKey, markerKey, clock))
+        }
+        // A local pending value won; its secret lives at the feed origin. Mark it, never store it.
+        val origin = localCredentialOrigin(rid, merge.record)
+            ?: return ProtectedAuth(merge.record, stored?.pendingAuth, stored?.authReference)
+        val marked = merge.record.copy(fields = merge.record.fields + ("auth" to auth.copy(v = authMarker(origin))))
+        return ProtectedAuth(marked, null, AuthReference(origin, origin, clock))
+    }
+
+    /** Where a received credential installs: the record's origin, else this podcast's own. */
+    private suspend fun credentialOriginFor(
+        rid: String,
+        record: RecordState,
+    ): String? {
+        record.stringField("credentialOrigin")?.let { return it }
+        return localCredentialOrigin(rid, record)
+    }
+
+    private suspend fun localCredentialOrigin(
+        rid: String,
+        record: RecordState,
+    ): String? {
+        val podcast = db.podcastDao().bySyncId(rid)
+        podcast
+            ?.credentialId
+            ?.let { id -> db.credentialDao().byIds(listOf(id)).firstOrNull()?.origin }
+            ?.let { return it }
+        val feedUrl = podcast?.feedUrl ?: record.stringField("feedUrl")
+        return feedUrl?.let { UrlNormalizer.origin(it) }
+    }
+
+    private data class ProtectedAuth(
+        val state: RecordState,
+        val pendingAuth: PendingAuth?,
+        val authReference: AuthReference?,
+    )
+
     private suspend fun applyPodcast(
         id: RecordId,
         merge: RecordMerge,
         roundId: Long,
+        passwordNeeded: MutableCollection<Long>,
     ): RecordOutcome {
         val rid = (id as RecordId.Podcast).id.value
         val existing = db.podcastDao().bySyncId(rid)
@@ -221,17 +312,44 @@ class SyncApplier(
                 }
             }
             applyOverrides(idInserted, isGroup = false, merge.record)
+            if (needsPasswordWithoutAuth(merge.record, credentialId = null)) passwordNeeded += idInserted
             return RecordOutcome.Applied
         }
-        applyPodcastFields(existing, merge.record)
+        applyPodcastFields(existing, merge.record, passwordNeeded)
         return RecordOutcome.Applied
     }
+
+    /**
+     * 10 Feed passwords: a podcast the record says needs a password, with no winning `auth` and no
+     * local credential for it, keeps `needsCredentials = 1` and joins the pull's
+     * `FeedPasswordNeeded` notice. The wire flag means "this feed requires a password", never this
+     * device's error state, so a held credential answers it.
+     */
+    private fun needsPasswordWithoutAuth(
+        record: RecordState,
+        credentialId: Long?,
+    ): Boolean =
+        credentialId == null &&
+            record.fields["auth"] == null &&
+            (record.booleanField("needsCredentials") == true || record.stringField("credentialOrigin") != null)
 
     private suspend fun applyPodcastFields(
         existing: PodcastEntity,
         record: RecordState,
+        passwordNeeded: MutableCollection<Long>,
     ) {
         val now = clock.now()
+        record.booleanField("needsCredentials")?.let { needs ->
+            when {
+                // A local credential already answers the flag; never re-flag this device.
+                needs && existing.credentialId == null -> db.podcastDao().markNeedsCredentials(existing.id)
+
+                !needs -> db.podcastDao().clearNeedsCredentials(existing.id)
+
+                else -> {}
+            }
+        }
+        if (needsPasswordWithoutAuth(record, existing.credentialId)) passwordNeeded += existing.id
         record.stringField("feedUrl")?.let { feedUrl ->
             val feedKey = UrlNormalizer.forIdentity(feedUrl)
             if (feedKey != null && feedKey != existing.feedKey) {
