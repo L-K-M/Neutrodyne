@@ -5,11 +5,15 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.ContextType
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.testing.FakeAudioEngine
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -30,7 +34,9 @@ import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackRuntime
 import ch.lkmc.neutrodyne.playback.engine.AudioEngine
+import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineState
+import ch.lkmc.neutrodyne.playback.engine.Gapless
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
@@ -346,6 +352,99 @@ class DesktopPlaybackControllerTest {
                 } finally {
                     restored.shutdown()
                 }
+            }
+        }
+
+    @Test
+    fun embeddedChaptersReachTheSharedRepositoryAndNavigationSeeks() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                val chapters =
+                    listOf(
+                        EpisodeChapter(0, 1_000, "Intro", null, null, ChapterSource.ID3, false),
+                        EpisodeChapter(1_000, 2_000, "Middle", null, null, ChapterSource.ID3, false),
+                    )
+                fixture.engine.onWindow = {
+                    fixture.engine.events.tryEmit(
+                        EngineEvent.TracksKnown(1, 120_000, chapters, Gapless(0, 0, 0)),
+                    )
+                }
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.graph
+                        .databaseOpener
+                        .requireDatabase()
+                        .chapterDao()
+                        .observe(1)
+                        .filter { it.size == 2 }
+                        .first()
+                }
+                assertEquals(
+                    0,
+                    fixture.controller.currentChapter.value
+                        ?.index,
+                )
+                fixture.controller.nextChapter()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it?.position?.positionMs == 1_000L }
+                        .first()
+                }
+                assertEquals(1_000L, fixture.engine.position)
+                assertEquals(
+                    1,
+                    fixture.controller.currentChapter.value
+                        ?.index,
+                )
+            }
+        }
+
+    @Test
+    fun endOfEpisodeSleepMarksTheItemPlayedAndKeepsTheSession() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.controller.setSleepTimer(SleepTimerMode.EndOfEpisode)
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.sleepTimer
+                        .filter { it == SleepTimerState.EndOfEpisode(1) }
+                        .first()
+                }
+                fixture.engine.end()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.sleepTimer
+                        .filter { it == SleepTimerState.Off }
+                        .first()
+                }
+                // The played chain resets the position row, so the played mark is
+                // read from the episode state rather than PositionStore.observe.
+                val playedAt =
+                    fixture.graph
+                        .databaseOpener
+                        .requireDatabase()
+                        .episodeStateDao()
+                        .byEpisode(1)
+                        ?.playedAt
+                assertNotNull(playedAt)
+                assertEquals(1f, fixture.engine.fade)
+                assertEquals(
+                    1L,
+                    fixture.graph
+                        .queueRepository()
+                        .observeSession()
+                        .first()
+                        ?.currentEpisodeId,
+                )
+                assertFalse(
+                    fixture.controller.nowPlaying.value!!
+                        .isPlaying,
+                )
             }
         }
 

@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.model.AddResult
+import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
@@ -28,6 +29,7 @@ import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.api.StreamKind
+import ch.lkmc.neutrodyne.playback.core.ChapterIndex
 import ch.lkmc.neutrodyne.playback.core.CurrentAction
 import ch.lkmc.neutrodyne.playback.core.PlaybackExit
 import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
@@ -36,6 +38,7 @@ import ch.lkmc.neutrodyne.playback.core.PositionSaveResult
 import ch.lkmc.neutrodyne.playback.core.PreviousAction
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.SeekOrigin
+import ch.lkmc.neutrodyne.playback.core.SleepTimerCore
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.StartRequest
@@ -66,6 +69,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.ceil
 
 /**
  * In-process desktop adapter. A mutex spans suspending repository calls, since a single dispatcher
@@ -107,6 +111,20 @@ class DesktopPlaybackController(
     private var skipBackMs = DEFAULT_SKIP_BACK_MS
     private var skipForwardMs = DEFAULT_SKIP_FORWARD_MS
     private val history = PlaybackHistory()
+    private val sleepTimerCore = SleepTimerCore()
+    private var sleepSampledAt = 0L
+    private var chapterIndex = ChapterIndex(emptyList())
+    private var chapterFollowing: Job? = null
+    private var chapterBoundary: Job? = null
+    private val writtenChapterSources = mutableSetOf<ChapterSource>()
+
+    /**
+     * TracksKnown of a prepared successor can reach the controller before the
+     * engine's ItemTransition event, while [engineCurrentId] is still the outgoing
+     * item. The event is kept until that episode becomes current, so its chapters
+     * and measured duration are applied exactly when the item loads.
+     */
+    private val pendingTracksKnown = mutableMapOf<Long, EngineEvent.TracksKnown>()
     private val current = MutableStateFlow<NowPlaying?>(null)
     private val ticks = MutableSharedFlow<PositionSnapshot>(replay = 1)
     private val effective = MutableStateFlow<EffectivePlayback?>(null)
@@ -117,9 +135,10 @@ class DesktopPlaybackController(
     override val pendingMeteredConsent = MutableStateFlow<PlayResult.NeedsMeteredConsent?>(null).asStateFlow()
     override val events = notifications.asSharedFlow()
 
-    // Completion of these features, including end-of-item arbitration and chapter enrichment, is MD1b.
-    override val sleepTimer = MutableStateFlow<SleepTimerState>(SleepTimerState.Off).asStateFlow()
-    override val currentChapter = MutableStateFlow<CurrentChapter?>(null).asStateFlow()
+    private val mutableSleepTimer = MutableStateFlow<SleepTimerState>(SleepTimerState.Off)
+    private val mutableCurrentChapter = MutableStateFlow<CurrentChapter?>(null)
+    override val sleepTimer = mutableSleepTimer.asStateFlow()
+    override val currentChapter = mutableCurrentChapter.asStateFlow()
 
     suspend fun initialize() {
         serial { ensureRuntime() }
@@ -130,6 +149,7 @@ class DesktopPlaybackController(
         runtime?.let { return it }
         val value = withContext(ioDispatcher) { runtimeFactory() }
         runtime = value
+        sleepSampledAt = clock.elapsedRealtime()
         projector = DesktopQueueProjector(value.engine, value.resolver)
         scope.launch {
             combine(
@@ -160,6 +180,9 @@ class DesktopPlaybackController(
                     if (replacement != null && oldId != queue.current?.episodeId) flushPause()
                     if (replacement != null) prepareSettings(plan.entries)
                     projection.apply(queue, plan.entries, plan.operations, engineCurrentId)
+                    pendingTracksKnown.keys.retainAll { id ->
+                        projection.entries.any { it.item.episodeId == id }
+                    }
                     if (replacement != null || plan.operations.any { it == WindowOp.Clear }) {
                         loaded(replacement?.startPositionMs ?: 0)
                     }
@@ -179,6 +202,15 @@ class DesktopPlaybackController(
                     skipBackMs = preferences.skipBackMs
                     skipForwardMs = preferences.skipForwardMs
                     withContext(ioDispatcher) { value.cache.setMaxBytes(preferences.streamCacheMb * BYTES_PER_MB) }
+                }
+            }
+        }
+        // The shared core's 500-ms step keeps the 20 fade steps over 10 s.
+        scope.launch {
+            while (true) {
+                delay(SleepTimerCore.STEP_MS)
+                guarded {
+                    applySleep(sleepTimerCore.tick(sleepElapsed()))
                 }
             }
         }
@@ -206,6 +238,7 @@ class DesktopPlaybackController(
         val row = queue.current?.episodeId?.let(media::get)
         if (row == null) {
             engineCurrentId = null
+            mutableCurrentChapter.value = null
             current.value = null
             return
         }
@@ -332,6 +365,9 @@ class DesktopPlaybackController(
         // Repository/settings reads suspend. A restore may have replaced the accepted session.
         if (!sessionMatches(queue)) return false
         ticket?.let(::requireIntent)
+        // The engine emits TracksKnown during setWindow; the current id must already be
+        // visible to the event collector, which can run before loaded().
+        engineCurrentId = queue.current?.episodeId
         requireNotNull(projector).apply(
             queue,
             entries,
@@ -374,6 +410,9 @@ class DesktopPlaybackController(
         durationMs = row?.let { it.measuredDurationMs ?: it.durationMs }
         since = clock.now()
         if (row == null) {
+            pendingTracksKnown.clear()
+            followChapters(null)
+            applySleep(sleepTimerCore.currentChanged(null))
             value.settings.followCurrent(null, null)
             effective.value = null
             current.value = null
@@ -395,6 +434,9 @@ class DesktopPlaybackController(
         value.saver.load(row.episodeId, since, source, replay = row.playedAt != null)
         value.saver.startPositionApplied()
         followSettings(row, group)
+        followChapters(row.episodeId)
+        pendingTracksKnown.remove(row.episodeId)?.let { applyTracksKnown(it) }
+        applySleep(sleepTimerCore.currentChanged(row.episodeId))
         publish(startMs)
     }
 
@@ -432,12 +474,17 @@ class DesktopPlaybackController(
 
     override fun pause() {
         intent.incrementAndGet()
-        command {
-            wantPlaying = false
-            runtime?.engine?.pause()
-            flushPause()
-            publish()
-        }
+        command { userPause() }
+    }
+
+    /** An explicit pause restores normal volume; the timer keeps its remaining time. */
+    private suspend fun userPause() {
+        wantPlaying = false
+        runtime?.engine?.pause()
+        sampleSleep()
+        applySleep(sleepTimerCore.paused())
+        flushPause()
+        publish()
     }
 
     override fun togglePlayPause() {
@@ -445,10 +492,7 @@ class DesktopPlaybackController(
         command {
             requireIntent(ticket)
             if (wantPlaying) {
-                wantPlaying = false
-                runtime?.engine?.pause()
-                flushPause()
-                publish()
+                userPause()
             } else {
                 reportStart(startLocked(StartRequest.Resume, ticket))
             }
@@ -562,7 +606,11 @@ class DesktopPlaybackController(
             }
 
             EngineState.Ended -> {
-                advance(PlaybackExit.END)
+                if (sleepTimerCore.state is SleepTimerState.EndOfEpisode) {
+                    endOfEpisode()
+                } else {
+                    advance(PlaybackExit.END)
+                }
                 return
             }
 
@@ -571,6 +619,13 @@ class DesktopPlaybackController(
             }
         }
         val advancing = state is EngineState.Ready && state.playing
+        // Buffering stops the countdown but holds the fade factor; an explicit pause
+        // restores the volume through userPause.
+        applySleep(
+            sleepTimerCore.advancing(
+                if (advancing) SleepTimerCore.Advancement.PLAYING else SleepTimerCore.Advancement.STOPPED,
+            ),
+        )
         if (!advancing && (current.value?.isPlaying == true || state is EngineState.Error)) flushPause()
         publish()
     }
@@ -580,10 +635,9 @@ class DesktopPlaybackController(
         when (event) {
             is EngineEvent.TracksKnown -> {
                 if (event.episodeId == engineCurrentId) {
-                    event.durationMs?.takeIf { it > 0 }?.let {
-                        durationMs = it
-                        requireNotNull(runtime).positions.setMeasuredDuration(event.episodeId, it)
-                    }
+                    applyTracksKnown(event)
+                } else if (projector?.entries?.any { it.item.episodeId == event.episodeId } == true) {
+                    pendingTracksKnown[event.episodeId] = event
                 }
             }
 
@@ -625,6 +679,9 @@ class DesktopPlaybackController(
         value.planner.appliedOwnGeneration(generation)
         engineCurrentId = toId
         history.record(outgoing.item)
+        followChapters(toId)
+        pendingTracksKnown.remove(toId)?.let { applyTracksKnown(it) }
+        applySleep(sleepTimerCore.currentChanged(toId))
         val group = context?.takeIf { it.type == ContextType.GROUP }?.id
         val settings = requireNotNull(value.settings.cached(row.podcastId, group))
         effective.value = settings
@@ -747,10 +804,162 @@ class DesktopPlaybackController(
                 context,
             )
         ticks.emit(snapshot)
+        evaluateChapter()
     }
 
     private suspend fun flushPause() {
         if (prepared) checkSave(requireNotNull(runtime).saver.onPause(position(), durationMs))
+    }
+
+    private fun sleepElapsed(): Long {
+        val now = clock.elapsedRealtime()
+        val elapsed = (now - sleepSampledAt).coerceAtLeast(0)
+        sleepSampledAt = now
+        return elapsed
+    }
+
+    private suspend fun sampleSleep() {
+        applySleep(sleepTimerCore.tick(sleepElapsed()))
+    }
+
+    /**
+     * Applies the shared core's commands. The desktop has no EndOfItemPauseArbiter:
+     * the end-of-episode pause is driven by the core state at [EngineState.Ended],
+     * so [SleepTimerCore.Effect.ArmEndOfItem] only records what that handler reads.
+     */
+    private suspend fun applySleep(effects: List<SleepTimerCore.Effect>) {
+        val value = runtime ?: return
+        effects.forEach { effect ->
+            when (effect) {
+                is SleepTimerCore.Effect.Fade -> {
+                    value.engine.setFade(effect.factor)
+                }
+
+                is SleepTimerCore.Effect.ArmEndOfItem -> {
+                    Unit
+                }
+
+                SleepTimerCore.Effect.Pause -> {
+                    wantPlaying = false
+                    value.engine.pause()
+                    flushPause()
+                    publish()
+                }
+
+                SleepTimerCore.Effect.Fired -> {
+                    notifications.emit(PlaybackEvent.SleepTimerFired)
+                }
+            }
+        }
+        mutableSleepTimer.value = sleepTimerCore.state
+    }
+
+    /**
+     * The end-of-episode timer completes the item in place: the shared boundary write
+     * marks it played, the session stays on it and the timer clears (06 Sleep timer).
+     */
+    private suspend fun endOfEpisode() {
+        val value = requireNotNull(runtime)
+        val id = engineCurrentId ?: return
+        val projection = projector ?: return
+        val capture = value.saver.capture(position(), durationMs, PlaybackExit.END)
+        if (capture != null && capture.departure.writePosition && capture.departure.markPlayed) {
+            value.sessions.markBoundaryPlayed(id, SessionRevision(id, projection.generation), clock.now())
+        }
+        applySleep(sleepTimerCore.endOfItem())
+        publish()
+    }
+
+    private suspend fun applyTracksKnown(event: EngineEvent.TracksKnown) {
+        if (event.episodeId != engineCurrentId) return
+        event.durationMs?.takeIf { it > 0 }?.let {
+            durationMs = it
+            requireNotNull(runtime).positions.setMeasuredDuration(event.episodeId, it)
+        }
+        persistEmbeddedChapters(event)
+    }
+
+    private suspend fun persistEmbeddedChapters(event: EngineEvent.TracksKnown) {
+        val value = runtime ?: return
+        event.chapters
+            .groupBy { it.source }
+            .forEach { (source, rows) ->
+                if (rows.isEmpty() || source in writtenChapterSources) return@forEach
+                try {
+                    value.chapterRepository.replace(event.episodeId, source, rows)
+                    writtenChapterSources += source
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    Log.w(TAG, failure) { "Could not persist embedded chapters" }
+                }
+            }
+    }
+
+    /**
+     * Observes the winning rows of the current episode and asks for Podcasting 2.0 JSON
+     * enrichment, as Android's Chapters does. The observation already publishes the
+     * winning source, so container rows and JSON rows need no second merge.
+     */
+    private suspend fun followChapters(episodeId: Long?) {
+        chapterFollowing?.cancelAndJoin()
+        chapterFollowing = null
+        chapterBoundary?.cancel()
+        chapterBoundary = null
+        chapterIndex = ChapterIndex(emptyList())
+        writtenChapterSources.clear()
+        mutableCurrentChapter.value = null
+        val value = runtime ?: return
+        if (episodeId == null) return
+        chapterFollowing =
+            scope.launch {
+                value.chapterRepository.observe(episodeId).collect { rows ->
+                    guarded {
+                        if (episodeId != engineCurrentId) return@guarded
+                        chapterIndex = ChapterIndex(rows)
+                        evaluateChapter()
+                    }
+                }
+            }
+        // Best-effort enrichment; a failure leaves stored and lower sources in place.
+        scope.launch {
+            try {
+                value.chapterRepository.ensureLoaded(episodeId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.w(TAG, failure) { "Could not load chapters" }
+            }
+        }
+    }
+
+    /**
+     * Publishes the containing chapter and schedules the next boundary, as Android's
+     * Chapters does; a gap or an explicit end clears the state without waiting for the
+     * next start.
+     */
+    private fun evaluateChapter() {
+        chapterBoundary?.cancel()
+        chapterBoundary = null
+        val id = engineCurrentId
+        val index = id?.let { chapterIndex.current(position()) }
+        mutableCurrentChapter.value =
+            id?.let { episode ->
+                index?.let { CurrentChapter(episode, it, chapterIndex.chapters.size, chapterIndex.chapters[it]) }
+            }
+        if (current.value?.isPlaying != true) return
+        val next = chapterIndex.nextBoundary(position()) ?: return
+        val speed =
+            effective.value
+                ?.speed
+                ?.value
+                ?.takeIf { it > 0f } ?: return
+        val waitMs = ceil((next - position()).coerceAtLeast(0).toDouble() / speed).toLong().coerceAtLeast(1)
+        chapterBoundary =
+            scope.launch {
+                delay(waitMs)
+                guarded { evaluateChapter() }
+            }
     }
 
     private fun checkSave(result: PositionSaveResult) {
@@ -810,6 +1019,8 @@ class DesktopPlaybackController(
                 val value = runtime ?: return@serial
                 value.engine.pause()
                 wantPlaying = false
+                sampleSleep()
+                applySleep(sleepTimerCore.set(SleepTimerMode.Off, null))
                 try {
                     flushPause()
                 } finally {
@@ -833,15 +1044,39 @@ class DesktopPlaybackController(
             Unit
         }
 
-    override fun setSleepTimer(mode: SleepTimerMode) = Unit
+    override fun setSleepTimer(mode: SleepTimerMode) {
+        if (mode is SleepTimerMode.Minutes && !SleepTimerMode.isValidMinutes(mode.minutes)) return
+        command {
+            sampleSleep()
+            applySleep(sleepTimerCore.set(mode, engineCurrentId))
+        }
+    }
 
-    override fun extendSleepTimer(minutes: Int) = Unit
+    override fun extendSleepTimer(minutes: Int) {
+        if (!SleepTimerMode.isValidMinutes(minutes)) return
+        command {
+            sampleSleep()
+            applySleep(sleepTimerCore.extend(minutes))
+        }
+    }
 
-    override fun nextChapter() = Unit
+    override fun nextChapter() = command { chapterSeek(ChapterDirection.NEXT) }
 
-    override fun previousChapter() = Unit
+    override fun previousChapter() = command { chapterSeek(ChapterDirection.PREVIOUS) }
 
     override fun grantMeteredStreaming() = Unit
+
+    private suspend fun chapterSeek(direction: ChapterDirection) {
+        if (!prepared) return
+        val target =
+            when (direction) {
+                ChapterDirection.NEXT -> chapterIndex.next(position())
+                ChapterDirection.PREVIOUS -> chapterIndex.previous(position())
+            } ?: return
+        seek(target)
+    }
+
+    private enum class ChapterDirection { NEXT, PREVIOUS }
 
     private fun command(block: suspend () -> Unit) {
         scope.launch { guarded(block) }
