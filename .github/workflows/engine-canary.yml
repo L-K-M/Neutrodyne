@@ -1,0 +1,334 @@
+# SPDX-License-Identifier: Unlicense
+#
+# engine-canary.yml — the scheduled approval pipeline for YouTube engine
+# updates (09 engine-canary.yml, 04 Engine canary). detect resolves the
+# candidate, gate runs the full verification leg against it, approve writes
+# and signs the manifest and heartbeat, deploy publishes them as assets of
+# the rolling `engine-approvals` prerelease.
+#
+# Implementation note 2026-11-04: the design deploys to GitHub Pages; this
+# slice ships GitHub Release assets instead (`engine-approvals` tag,
+# ytdlp-approved.json(+sig), ytdlp-heartbeat.json(+sig)) — same trust chain,
+# one fewer moving part. The desktop (stdio) host joins the gate with MD3.
+# A run whose signing secret is absent ends as a dry run: everything up to
+# the signature still runs, nothing is published, and the run stays green so
+# forks and not-yet-configured environments see the pipeline work.
+
+name: engine-canary
+
+on:
+  schedule:
+    - cron: '23 */6 * * *' # every 6 h (09; time budget upstream→approved ≤ 6 h)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Approve this yt-dlp stable tag instead of the latest'
+        required: false
+        type: string
+      revoke:
+        description: 'Version to add to revoked[] (with tag = last good version)'
+        required: false
+        type: string
+      bootstrap:
+        description: 'First run: no current manifest, sequence starts at 1'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: engine-canary
+  cancel-in-progress: false # two runs never race on `sequence`
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      candidate: ${{ steps.candidate.outputs.tag }}
+      changed: ${{ steps.decide.outputs.changed }}
+      sequence: ${{ steps.decide.outputs.sequence }}
+      floor: ${{ steps.floor.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve the candidate tag
+        id: candidate
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -e
+          if [ -n "$TAG_INPUT" ]; then
+              tag="$TAG_INPUT"
+          else
+              tag=$(python3 scripts/engine/latest-ytdlp-tag.py)
+          fi
+          case "$tag" in
+              20[0-9][0-9].[0-9][0-9].[0-9][0-9]) ;;
+              *) echo "candidate '$tag' is not a stable yyyy.mm.dd tag" >&2; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Bundled floor
+        id: floor
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('youtube/ytdlp/engine/bundled.json'))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Fetch and verify the current manifest
+        id: current
+        run: |
+          set -e
+          url=$(grep '^neutrodyne.engineManifestUrl=' gradle.properties | cut -d= -f2-)
+          mkdir -p current
+          stamp=$(date +%s)
+          code=$(curl -sSLo current/ytdlp-approved.json -w '%{http_code}' "$url?cb=$stamp" || true)
+          if [ "$code" = 404 ]; then
+              echo 'present=false' >> "$GITHUB_OUTPUT"
+              echo 'no approved manifest yet'
+              exit 0
+          fi
+          [ "$code" = 200 ] || { echo "manifest fetch returned $code" >&2; exit 1; }
+          curl -fsSLo current/ytdlp-approved.json.sig "$url.sig?cb=$stamp"
+          python3 - <<'EOF'
+          import json, sys
+          sys.path.insert(0, 'scripts/engine')
+          import edsig
+          doc = open('current/ytdlp-approved.json', 'rb').read()
+          sig = open('current/ytdlp-approved.json.sig').read()
+          if not edsig.verify_detached(doc, sig, 'youtube/ytdlp/keys'):
+              sys.exit('current manifest signature does not verify; refusing to trust its state')
+          m = json.loads(doc)
+          with open('current/state.json', 'w') as out:
+              json.dump({'sequence': m['sequence'], 'version': m['ytdlp']['version'],
+                         'revoked': m['revoked']}, out)
+          print(f"current sequence={m['sequence']} version={m['ytdlp']['version']}")
+          EOF
+          echo 'present=true' >> "$GITHUB_OUTPUT"
+      - name: Decide whether anything changed
+        id: decide
+        env:
+          REVOKE: ${{ inputs.revoke }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          PRESENT: ${{ steps.current.outputs.present }}
+          CANDIDATE_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          set -e
+          python3 - "$GITHUB_OUTPUT" <<'EOF'
+          import json, os, sys
+          out = sys.argv[1]
+          present = os.environ['PRESENT'] == 'true'
+          bootstrap = os.environ['BOOTSTRAP'] == 'true'
+          candidate = os.environ['CANDIDATE_TAG']
+          revoke = os.environ['REVOKE'].strip()
+          sequence = 0
+          changed = True
+          if present:
+              state = json.load(open('current/state.json'))
+              sequence = state['sequence']
+              changed = candidate != state['version'] or bool(revoke)
+          elif not bootstrap:
+              sys.exit('no approved manifest: dispatch with bootstrap=true for the first run')
+          with open(out, 'a') as fh:
+              fh.write(f"changed={'true' if changed else 'false'}\nsequence={sequence}\n")
+          print(f"changed={changed} sequence={sequence}")
+          EOF
+
+  gate:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh files the engine-canary issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+      - name: Stage and gate the candidate
+        id: candidate
+        run: scripts/engine/canary.sh --tag '${{ needs.detect.outputs.candidate }}' --out "$GITHUB_OUTPUT"
+      # The staged metadata, not the checkout's, is what approve may sign:
+      # approve works on a clean checkout where bundled.json is the old floor.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: engine-candidate
+          path: youtube/ytdlp/engine/bundled.json
+      - name: Strict replay report (non-blocking)
+        id: strict
+        continue-on-error: true
+        run: ./gradlew :youtube:ytdlp:shimTest
+      - name: Record the strict-mode drift
+        if: steps.strict.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue list --label engine-canary --state open --limit 5 --json number,title > /tmp/issues.json
+          python3 - <<'EOF'
+          import json, os, subprocess
+          issues = json.load(open('/tmp/issues.json'))
+          marker = 'strict replay drift'
+          run = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          body = (f"Contract mode approved the candidate but strict replay mismatched — "
+                  f"recordings need a refresh ({run}).\n\n<!-- engine-canary:strict-drift -->")
+          existing = next((i['number'] for i in issues if 'strict replay' in i['title']), None)
+          if existing:
+              subprocess.run(['gh', 'issue', 'comment', str(existing), '--body', body], check=True)
+          else:
+              subprocess.run(['gh', 'issue', 'create', '--title', 'engine-canary: strict replay drift — recordings need re-recording',
+                              '--label', 'engine-canary', '--body', body], check=True)
+          EOF
+      - name: Compare the pinned upstream key fingerprint
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          curl -fsSL -o /tmp/upstream-public.key 'https://github.com/yt-dlp/yt-dlp/raw/master/public.key' || exit 0
+          GNUPGHOME=$(mktemp -d); export GNUPGHOME; chmod 700 "$GNUPGHOME"
+          gpg --batch --quiet --import /tmp/upstream-public.key 2>/dev/null || exit 0
+          found=$(gpg --batch --with-colons --list-keys | awk -F: '/^fpr:/ {print $10}' | sort -u)
+          case "$found" in
+              *AC0CBBE6848D6A873464AF4E57CF65933B5A7581*) echo 'upstream release key unchanged' ;;
+              *)
+                  if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
+                      gh issue create --title 'engine-canary: upstream yt-dlp release key changed' \
+                          --label engine-canary \
+                          --body "the pinned fingerprint no longer appears in upstream's public.key; review before the next bump." \
+                          || true
+                  else
+                      echo 'upstream release key fingerprint changed (issue filing is main-only)'
+                  fi ;;
+          esac
+      - name: Open the gate-failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh engine-canary --label engine-canary
+      - name: Close the gate-failure issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh engine-canary --label engine-canary --close
+    outputs:
+      version: ${{ steps.candidate.outputs.version }}
+      tag: ${{ steps.candidate.outputs.tag }}
+
+  approve:
+    needs: [detect, gate]
+    # Runs for a green gate and for no-op runs (gate skipped) so the signed
+    # heartbeat still republishes; a red or cancelled gate never reaches the key.
+    if: always() && needs.detect.result == 'success' && (needs.gate.result == 'success' || needs.gate.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: engine-approval
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.detect.outputs.changed == 'true'
+        with:
+          name: engine-candidate
+          path: candidate
+      - name: Fetch the current manifest
+        run: |
+          set -e
+          url=$(grep '^neutrodyne.engineManifestUrl=' gradle.properties | cut -d= -f2-)
+          mkdir -p approved
+          stamp=$(date +%s)
+          code=$(curl -sSLo approved/ytdlp-approved.json -w '%{http_code}' "$url?cb=$stamp" || true)
+          if [ "$code" = 200 ]; then
+              curl -fsSLo approved/ytdlp-approved.json.sig "$url.sig?cb=$stamp"
+          else
+              rm -f approved/ytdlp-approved.json
+              [ "${{ inputs.bootstrap }}" = 'true' ] || \
+                  { echo "manifest fetch returned $code outside bootstrap" >&2; exit 1; }
+          fi
+      - name: Write the new manifest
+        if: needs.detect.outputs.changed == 'true'
+        env:
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          REVOKE: ${{ inputs.revoke }}
+        run: |
+          set -e
+          args="--out approved/ytdlp-approved.json"
+          if [ -f approved/ytdlp-approved.json ]; then
+              args="$args --current approved/ytdlp-approved.json --current-sig approved/ytdlp-approved.json.sig"
+          else
+              args="$args --bootstrap"
+          fi
+          if [ "${{ needs.gate.outputs.tag }}" ]; then
+              args="$args --bundled candidate/bundled.json --floor '${{ needs.detect.outputs.floor }}'"
+          else
+              args="$args --keep-candidate"
+          fi
+          [ "$REVOKE" ] && args="$args --revoke '$REVOKE'"
+          python3 scripts/engine/make-engine-manifest.py $args
+      - name: Write the heartbeat
+        run: |
+          sequence=$(python3 -c "import json;print(json.load(open('approved/ytdlp-approved.json'))['sequence'])")
+          python3 scripts/engine/make-engine-manifest.py --heartbeat --sequence "$sequence" \
+              --out approved/ytdlp-heartbeat.json
+      - name: Sign (or dry-run without the secret)
+        id: sign
+        env:
+          NEUTRODYNE_ENGINE_MANIFEST_KEY: ${{ secrets.NEUTRODYNE_ENGINE_MANIFEST_KEY }}
+        run: |
+          set -e
+          signed=true
+          for doc in ytdlp-approved.json ytdlp-heartbeat.json; do
+              rc=0
+              python3 scripts/engine/sign-engine-manifest.py "approved/$doc" || rc=$?
+              if [ "$rc" = 77 ]; then signed=false; elif [ "$rc" != 0 ]; then exit "$rc"; fi
+          done
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          echo "signed=$signed"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.sign.outputs.signed == 'true'
+        with:
+          name: engine-approvals
+          path: approved/
+
+  deploy:
+    needs: approve
+    if: needs.approve.outputs.signed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # gh release create/upload
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: engine-approvals
+          path: approved
+      - name: Publish the rolling approval release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          if ! gh release view engine-approvals >/dev/null 2>&1; then
+              gh release create engine-approvals --prerelease \
+                  --title 'Engine approvals' \
+                  --notes 'Rolling release: the canary-approved yt-dlp manifest and heartbeat. Apps read ytdlp-approved.json(.sig) and ytdlp-heartbeat.json(.sig) from this release.'
+          fi
+          gh release upload engine-approvals \
+              approved/ytdlp-approved.json approved/ytdlp-approved.json.sig \
+              approved/ytdlp-heartbeat.json approved/ytdlp-heartbeat.json.sig \
+              --clobber
+      - name: Record approval latency
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          published=$(gh release view engine-approvals --json assets \
+              --jq '.assets[] | select(.name=="ytdlp-approved.json") | .updatedAt')
+          echo "approved manifest served at $published" >> "$GITHUB_STEP_SUMMARY"
