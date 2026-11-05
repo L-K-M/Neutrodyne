@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
@@ -22,8 +23,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.printToLog
 import androidx.lifecycle.SavedStateHandle
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.espresso.Espresso
@@ -205,9 +208,9 @@ class ExternalYouTubeModeTest {
                 // The subscribe write goes through the same interpreter-cold stack as the
                 // preview above; it too gets the recovery window (a durable write has no
                 // retry affordance — the remedy is patience, not another click).
-                waitUntil(timeoutMillis = PREVIEW_RECOVERY_TIMEOUT_MS) {
-                    runBlocking { db.podcastDao().allForExport().isNotEmpty() }
-                }
+                awaitJourney(
+                    PREVIEW_RECOVERY_TIMEOUT_MS,
+                ) { runBlocking { db.podcastDao().allForExport().isNotEmpty() } }
                 runBlocking {
                     runJourneyWorker(
                         application,
@@ -418,11 +421,26 @@ class ExternalYouTubeModeTest {
 
     private companion object {
         const val PREVIEW_RECOVERY_TIMEOUT_MS = 90_000L
-
         // Locale.ENGLISH is forced above, so the EN sheet copy (yt_network_error, action_retry)
         // is exact — including the typographic apostrophe.
         const val NETWORK_FAILURE_TEXT = "Couldn’t reach YouTube. Check your connection and try again."
         const val RETRY_LABEL = "Retry"
+    }
+
+    /**
+     * A timed-out wait must say which step the journey was in: the per-test logcat upload carries
+     * the whole semantics tree, so a CI-only stall is diagnosable from the artifact.
+     */
+    private fun awaitJourney(
+        timeoutMillis: Long,
+        condition: () -> Boolean,
+    ) {
+        try {
+            compose.waitUntil(timeoutMillis = timeoutMillis, condition = condition)
+        } catch (failure: ComposeTimeoutException) {
+            compose.onRoot(useUnmergedTree = true).printToLog("E8Journey")
+            throw failure
+        }
     }
 }
 
