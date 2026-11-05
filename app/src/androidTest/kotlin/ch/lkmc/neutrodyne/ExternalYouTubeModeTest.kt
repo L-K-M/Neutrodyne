@@ -192,7 +192,12 @@ class ExternalYouTubeModeTest {
                 val checkbox = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
                 onNode(hasText("Journey group") and checkbox).performClick()
                 onNodeWithText("Subscribe").performClick()
-                waitUntil(20_000) { runBlocking { db.podcastDao().allForExport().isNotEmpty() } }
+                // The subscribe write goes through the same interpreter-cold stack as the
+                // preview above; it too gets the recovery window (a durable write has no
+                // retry affordance — the remedy is patience, not another click).
+                waitUntil(timeoutMillis = PREVIEW_RECOVERY_TIMEOUT_MS) {
+                    runBlocking { db.podcastDao().allForExport().isNotEmpty() }
+                }
                 runBlocking {
                     runJourneyWorker(
                         application,
