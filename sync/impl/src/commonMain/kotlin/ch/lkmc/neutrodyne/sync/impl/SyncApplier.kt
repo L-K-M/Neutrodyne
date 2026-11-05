@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress
 import ch.lkmc.neutrodyne.sync.protocol.EpisodeStateRules
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -147,7 +148,7 @@ class SyncApplier(
                 SyncCollection.PODCAST -> applyPodcast(resolved, merge, roundId, passwordNeeded)
                 SyncCollection.GROUP -> applyGroup(resolved, merge, roundId)
                 SyncCollection.MEMBER -> applyMember(resolved, merge)
-                SyncCollection.EPISODE -> applyEpisode(resolved, merge)
+                SyncCollection.EPISODE -> applyEpisode(resolved, merge, dto.by)
                 SyncCollection.UPNEXT -> applyUpNext(resolved, merge)
                 SyncCollection.SESSION -> applySession(resolved, merge)
                 SyncCollection.SETTING -> applySetting(resolved, merge)
@@ -543,6 +544,7 @@ class SyncApplier(
     private suspend fun applyEpisode(
         id: RecordId,
         merge: RecordMerge,
+        by: String?,
     ): RecordOutcome {
         val episodeId = id as RecordId.Episode
         val podcast =
@@ -568,14 +570,34 @@ class SyncApplier(
                     .byIdentityKey(
                         podcast.id,
                         episodeId.key.value,
-                    )?.let { applyEpisodeState(it.id, merge.record) }
+                    )?.let {
+                        reportRemotePlayedIfLoaded(it.id, merge, by)
+                        applyEpisodeState(it.id, merge.record)
+                    }
             } else {
+                reportRemotePlayedIfLoaded(idInserted, merge, by)
                 applyEpisodeState(idInserted, merge.record)
             }
             return RecordOutcome.Applied
         }
+        reportRemotePlayedIfLoaded(matched, merge, by)
         applyEpisodeState(matched, merge.record)
         return RecordOutcome.Applied
+    }
+
+    /**
+     * 10 Episode-state rules rule 2: only a winning `played = true` that makes the merged episode
+     * effectively played freezes the loaded player, and only before that state is projected — an
+     * older mark hidden by a newer listening position derives to in-progress and calls nothing.
+     */
+    private suspend fun reportRemotePlayedIfLoaded(
+        episodeId: Long,
+        merge: RecordMerge,
+        by: String?,
+    ) {
+        if (EpisodeStateRules.derive(merge.record.fields).state != EpisodeProgress.PLAYED) return
+        if (playback.active.value?.episodeId != episodeId) return
+        playback.onRemoteMarkedPlayed(episodeId, by ?: "")
     }
 
     private suspend fun applyEpisodeState(
