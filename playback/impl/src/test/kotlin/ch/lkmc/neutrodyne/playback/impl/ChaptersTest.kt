@@ -91,6 +91,42 @@ class ChaptersTest {
             }
         }
 
+    @Test fun transitionDoesNotLetOutgoingTracksBlockTheIncomingItem() =
+        runTest {
+            val exo = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+            val player = TestPlayer(exo) { testScheduler.currentTime }
+            val repo = FakeChapterRepository()
+            val chapters = Chapters(player, repo, backgroundScope) {}
+            try {
+                chapters.attach()
+                runCurrent()
+                player.id = 1
+                val outgoing = tracks(chapter(0), chapter(1000))
+                player.availableTracks = outgoing
+                chapters.onTracksChanged(outgoing)
+                runCurrent()
+                assertEquals(listOf(1L), repo.writes.map { it.episodeId })
+
+                // The callback carries the incoming item while the player still reports the
+                // outgoing one; the outgoing tracks must not occupy the incoming write guard.
+                val incoming = MediaItem.Builder().setMediaId("episode:2").build()
+                chapters.onMediaItemTransition(incoming, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+                runCurrent()
+
+                player.id = 2
+                val incomingTracks = tracks(chapter(0), chapter(2000))
+                player.availableTracks = incomingTracks
+                chapters.onTracksChanged(incomingTracks)
+                runCurrent()
+
+                assertEquals(listOf(1L, 2L), repo.writes.map { it.episodeId })
+                assertEquals(2_000L, repo.writes.last { it.episodeId == 2L }.chapters.last().startMs)
+            } finally {
+                chapters.detach()
+                exo.release()
+            }
+        }
+
     @Test fun seekSpeedPauseAndExplicitEndBoundaries() =
         runTest {
             val exo = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()

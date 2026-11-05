@@ -38,12 +38,13 @@ internal class Chapters(
     private var boundary: Job? = null
     private var epoch = 0L
     private var index = ChapterIndex(emptyList())
-    private val written = mutableSetOf<ChapterSource>()
-    private val writing = mutableSetOf<ChapterSource>()
+    private var episodeId: Long? = null
+    private val written = mutableMapOf<Long, MutableSet<ChapterSource>>()
+    private val writing = mutableMapOf<Long, MutableSet<ChapterSource>>()
 
     fun attach() {
         player.addListener(this)
-        currentChanged()
+        currentChanged(player.currentMediaItem)
     }
 
     fun detach() {
@@ -57,17 +58,24 @@ internal class Chapters(
     override fun onMediaItemTransition(
         mediaItem: MediaItem?,
         reason: Int,
-    ) = currentChanged()
+    ) = currentChanged(mediaItem)
 
-    private fun currentChanged() {
+    /**
+     * The transition callback carries the new item, but the player's current item can still
+     * report the previous one. Read the id from [mediaItem] and skip the track extraction
+     * while the player disagrees: those tracks belong to the outgoing item and would occupy
+     * the write guard the incoming item's tracks need.
+     */
+    private fun currentChanged(mediaItem: MediaItem? = player.currentMediaItem) {
         occurrence?.cancel()
         boundary?.cancel()
         val captured = ++epoch
         index = ChapterIndex(emptyList())
-        written.clear()
-        writing.clear()
         publish(null)
-        val id = player.episodeIdOrNull() ?: return
+        val id = mediaItem?.episodeIdOrNull() ?: return
+        episodeId = id
+        written.remove(id)
+        writing.remove(id)
         val currentScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
         occurrence = currentScope
         // A failed enrichment observer must not terminate audio playback.
@@ -81,29 +89,31 @@ internal class Chapters(
             }
         }
         currentScope.launch { bestEffort { repository.ensureLoaded(id) } }
-        extract(player.currentTracks)
+        if (player.episodeIdOrNull() == id) extract(player.currentTracks)
     }
 
     override fun onTracksChanged(tracks: Tracks) = extract(tracks)
 
     private fun extract(tracks: Tracks) {
         if (tracks != player.currentTracks) return
-        val id = player.episodeIdOrNull() ?: return
+        val id = episodeId ?: return
         val captured = epoch
         val currentScope = occurrence ?: return
         for ((source, rows) in fromTracks(tracks)) {
-            if (source in written || !writing.add(source)) continue
+            val writtenForId = written.getOrPut(id) { mutableSetOf() }
+            val writingForId = writing.getOrPut(id) { mutableSetOf() }
+            if (source in writtenForId || !writingForId.add(source)) continue
             currentScope.launch {
                 try {
-                    if (captured != epoch || player.episodeIdOrNull() != id) return@launch
+                    if (captured != epoch || episodeId != id) return@launch
                     repository.replace(id, source, rows)
-                    if (captured == epoch) written.add(source)
+                    if (captured == epoch) writtenForId.add(source)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     Log.w(TAG, "Could not persist embedded chapters", error)
                 } finally {
-                    if (captured == epoch) writing.remove(source)
+                    if (captured == epoch) writingForId.remove(source)
                 }
             }
         }
@@ -133,7 +143,7 @@ internal class Chapters(
 
     private fun evaluate() {
         boundary?.cancel()
-        val id = player.episodeIdOrNull()
+        val id = episodeId
         val position = player.currentPosition
         publish(
             id?.let { episode ->
@@ -161,6 +171,9 @@ internal class Chapters(
             Log.w(TAG, "Could not load chapters", error)
         }
     }
+
+    private fun MediaItem?.episodeIdOrNull(): Long? =
+        this?.mediaId?.removePrefix("episode:")?.toLongOrNull()
 
     companion object {
         private const val TAG = "Chapters"
