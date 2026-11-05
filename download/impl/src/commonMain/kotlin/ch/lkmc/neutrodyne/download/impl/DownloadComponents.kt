@@ -30,7 +30,10 @@ import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -53,6 +56,9 @@ internal class DownloadHost(
     val activity: Flow<Long> = flowOf(0L),
     val hasActiveTransfers: () -> Boolean = { false },
     val noticeSources: suspend () -> NoticeSources = { NoticeSources() },
+    val busy: Flow<Boolean> = flowOf(false),
+    val charging: StateFlow<Boolean> = MutableStateFlow(true),
+    val beforeRunnerReset: suspend (Set<String>) -> Unit = {},
 )
 
 /** Lazily resolved after DB open by the platform hosts, never by the index's constructor. */
@@ -73,7 +79,7 @@ internal class DownloadComponents(
     private val platform: PlatformInfo,
     media: PlaybackMediaLookup,
     artwork: ArtworkStore,
-    host: DownloadHost,
+    private val host: DownloadHost,
     @param:ApplicationScope scope: CoroutineScope,
     chapters: Provider<ChapterRepository>,
     playback: PlaybackBeforeUnsubscribe = PlaybackBeforeUnsubscribe.None,
@@ -84,8 +90,21 @@ internal class DownloadComponents(
     private val uris = PlatformLocalUris()
     val deletes = DeferredDeletes(device, fileSystem, roots, db.downloadDao()::allRows)
     private val verification = DownloadFiles(fileSystem, roots, PlatformSriHasher(roots), uris, deletes)
-    val reconciler = DownloadReconciler(db, fileSystem, roots, uris, index, deletes, claimMutex, host.liveTokens, clock)
+    val reconciler =
+        DownloadReconciler(
+            db,
+            fileSystem,
+            roots,
+            uris,
+            index,
+            deletes,
+            claimMutex,
+            host.liveTokens,
+            clock,
+            host.beforeRunnerReset,
+        )
     val quota = DownloadQuota(settings)
+    val mover = DownloadMoverImpl(db, fileSystem, roots, device, index, deletes, claimMutex, clock, quota)
     private val storage =
         DownloadStorage(
             db,
@@ -107,10 +126,20 @@ internal class DownloadComponents(
     private fun conditions() =
         network.status.value.let {
             val desktop = platform.kind == PlatformKind.DESKTOP
-            Conditions(it.isConnected, desktop || !it.isMetered, true, false, desktop || it.isValidated)
+            Conditions(
+                it.isConnected,
+                desktop || !it.isMetered,
+                desktop || host.charging.value,
+                false,
+                desktop || it.isValidated,
+            )
         }
 
-    private val conditions = network.status.map { conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
+    private val conditions =
+        combine(
+            network.status,
+            host.charging,
+        ) { _, _ -> conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
 
     // Large episode merges must not start an unbounded set of inspectors and JSON fetches.
     private val chapterReaders = Semaphore(MAX_CHAPTER_READERS)
@@ -160,6 +189,22 @@ internal class DownloadComponents(
             },
             cleanup,
         )
+    val planner =
+        AutoDownloadPlannerImpl(
+            db,
+            resolver,
+            quota,
+            device,
+            clock,
+            roots,
+            scheduler,
+            claimMutex,
+            engine::stopTransfer,
+            storage,
+            media,
+            platform.kind,
+            io,
+        )
     val controller =
         DownloadControllerImpl(
             db,
@@ -176,6 +221,7 @@ internal class DownloadComponents(
             host.activity,
             host.hasActiveTransfers,
             host.noticeSources,
+            host.busy,
         )
     val lifecycle: DownloadLifecycle =
         DownloadLifecycleImpl(db, controller, storage, index, playback, claimMutex, io, completedMedia)

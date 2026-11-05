@@ -167,6 +167,19 @@ source is the `python-build-standalone-<tag>-src.tar.gz` asset attached to the r
   file carries a "Modified by Neutrodyne" line under its copyright header, and the published POM,
   which the Licences screens show, names the artifact "Room-Runtime (modified by Neutrodyne)".
 
+## Copied or ported code
+
+- `playback/engine/src/main/kotlin/ch/lkmc/neutrodyne/playback/engine/Sonic.kt`:
+  Media3 1.11.1 androidx.media3.common.audio.Sonic, Apache-2.0; copyright
+  2017 The Android Open Source Project and 2010 Bill Cox, Sonic Library.
+- `playback/engine/src/main/kotlin/ch/lkmc/neutrodyne/playback/engine/SilenceSkipper.kt`:
+  Media3 1.11.1 SilenceSkippingAudioProcessor, Apache-2.0; copyright
+  2018 The Android Open Source Project.
+
+Both files are modified Kotlin ports for the desktop. Their source headers
+and desktop AboutLibraries entries retain the original licence and credits.
+The Media3 source archives contain no separate NOTICE file.
+
 ## Data
 
 - OkHttp's Public Suffix List (MPL-2.0, unmodified, in every build incl. the emergency one) — see
