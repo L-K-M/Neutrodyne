@@ -295,7 +295,16 @@ class PlaybackServiceTest {
                 // Await the precondition through the same NetworkMonitor the metered gate reads:
                 // the API 26 image's synchronous activeNetwork/capabilities read can stay stale
                 // long after the default-network callback delivered the metered cellular caps.
-                await {
+                // PhoneSwitcher brings the emulator's cellular up only for a live request, and on
+                // a stalled API 26 stack the request arrives while the radio never connects; cycle
+                // data the way a user would after a grace window — cycling earlier could abort a
+                // connect that was already under way.
+                var dataCycleAt = SystemClock.elapsedRealtime() + DATA_CYCLE_GRACE_MS
+                await(2 * WAIT_MS) {
+                    if (networkId == null && SystemClock.elapsedRealtime() >= dataCycleAt) {
+                        dataCycleAt = SystemClock.elapsedRealtime() + DATA_CYCLE_MS
+                        shell("svc data disable; svc data enable")
+                    }
                     graph.networkMonitor.status.value
                         .let { it.isConnected && it.isMetered }
                 }
@@ -761,10 +770,14 @@ class PlaybackServiceTest {
             .any { it.contains("ServiceRecord{") && it.contains(component) }
     }
 
-    private suspend fun await(condition: suspend () -> Boolean) =
-        withTimeout(WAIT_MS) {
-            while (!condition()) delay(100)
-        }
+    private suspend fun await(condition: suspend () -> Boolean) = await(WAIT_MS, condition)
+
+    private suspend fun await(
+        timeoutMs: Long,
+        condition: suspend () -> Boolean,
+    ) = withTimeout(timeoutMs) {
+        while (!condition()) delay(100)
+    }
 
     private suspend fun awaitNotification(id: Int): Notification {
         var notification: Notification? = null
@@ -969,6 +982,8 @@ class PlaybackServiceTest {
         const val SETTLE_MS = 500L
         const val TIMER_EXPIRY_MS = 75_000L
         const val WAIT_MS = 30_000L
+        const val DATA_CYCLE_GRACE_MS = 10_000L
+        const val DATA_CYCLE_MS = 10_000L
         const val THIRTY_MINUTES_MS = 30 * 60 * 1_000L
         val EMBEDDED_CHAPTER_FIXTURES =
             listOf(
