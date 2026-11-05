@@ -104,4 +104,15 @@ internal class WindowActivator {
             current.toFront()
         }
     }
+
+    /**
+     * 11 No tray available: the hide fallback when `SystemTray.isSupported()` is false — the
+     * app stays reachable from the taskbar (and the Dock on macOS).
+     */
+    fun iconify() {
+        val current = window ?: return
+        SwingUtilities.invokeLater {
+            if (current is Frame) current.extendedState = current.extendedState or Frame.ICONIFIED
+        }
+    }
 }

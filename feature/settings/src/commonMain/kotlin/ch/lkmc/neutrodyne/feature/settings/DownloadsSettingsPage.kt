@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -15,6 +16,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
@@ -42,7 +44,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.download_cap
 import ch.lkmc.neutrodyne.core.ui.resources.download_change_folder
 import ch.lkmc.neutrodyne.core.ui.resources.download_cleanup
 import ch.lkmc.neutrodyne.core.ui.resources.download_default_folder
-import ch.lkmc.neutrodyne.core.ui.resources.download_desktop_settings
 import ch.lkmc.neutrodyne.core.ui.resources.download_folder
 import ch.lkmc.neutrodyne.core.ui.resources.download_leave
 import ch.lkmc.neutrodyne.core.ui.resources.download_move
@@ -55,17 +56,22 @@ import ch.lkmc.neutrodyne.core.ui.resources.download_usage
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootKind
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_section_downloads
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
+import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
+/**
+ * Settings › Downloads (07 and 08 Downloads settings). On the desktop the page's "Downloads
+ * folder" row only links to [SettingsPage.DESKTOP], where [DesktopDownloadFolderSection] renders
+ * the folder itself; Android's storage-root selection stays here and shares 07's move dialog.
+ */
 @Composable
 internal fun DownloadsSettingsPage(
     platform: PlatformKind,
-    page: SettingsPage = SettingsPage.DOWNLOADS,
     viewModel: DownloadsSettingsViewModel = metroViewModel(),
 ) {
-    val desktopFolder = page == SettingsPage.DESKTOP
     val state by viewModel.state.collectAsStateWithLifecycle()
     val storage by viewModel.storage.collectAsStateWithLifecycle()
     val roots by viewModel.roots.collectAsStateWithLifecycle()
@@ -74,51 +80,43 @@ internal fun DownloadsSettingsPage(
     val error by viewModel.error.collectAsStateWithLifecycle()
     val working by viewModel.working.collectAsStateWithLifecycle()
     var capDialog by rememberSaveable { mutableStateOf(false) }
-    val actions = LocalPlatformActions.current
-    val scope = rememberCoroutineScope()
     val navigator = LocalAppNavigator.current
-    val folderTitle = stringResource(Res.string.download_change_folder)
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
-            title =
-                stringResource(
-                    if (desktopFolder) Res.string.download_desktop_settings else Res.string.downloads_settings,
-                ),
+            title = stringResource(Res.string.downloads_settings),
             navigation = {
                 SettingsBackButton()
             },
         )
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            if (!desktopFolder) {
-                ManualDownloadSettings(platform, viewModel::selectRoot)
-                DownloadSettingsRows(
-                    ScopedSettingsView(
-                        state.values,
-                        state.values,
-                        SettingField.entries.associateWith {
-                            SettingSource.AppDefault
-                        },
-                    ),
-                    DownloadSettingsScope.APP,
-                    platform,
-                    viewModel::edit,
-                )
-                SettingsRow(
-                    NdIcons.Download,
-                    stringResource(Res.string.download_cap),
-                    if (state.capMb ==
-                        0
-                    ) {
-                        stringResource(Res.string.download_unlimited)
-                    } else {
-                        downloadSizeText(state.capMb.toLong() * MIB).asString()
+            ManualDownloadSettings(platform, viewModel::selectRoot)
+            DownloadSettingsRows(
+                ScopedSettingsView(
+                    state.values,
+                    state.values,
+                    SettingField.entries.associateWith {
+                        SettingSource.AppDefault
                     },
-                    {
-                        capDialog =
-                            true
-                    },
-                )
-            }
+                ),
+                DownloadSettingsScope.APP,
+                platform,
+                viewModel::edit,
+            )
+            SettingsRow(
+                NdIcons.Download,
+                stringResource(Res.string.download_cap),
+                if (state.capMb ==
+                    0
+                ) {
+                    stringResource(Res.string.download_unlimited)
+                } else {
+                    downloadSizeText(state.capMb.toLong() * MIB).asString()
+                },
+                {
+                    capDialog =
+                        true
+                },
+            )
             storage?.let { usage ->
                 Text(
                     stringResource(
@@ -129,72 +127,25 @@ internal fun DownloadsSettingsPage(
                             ?: stringResource(Res.string.download_unknown_space),
                     ),
                 )
-                if (!desktopFolder) {
-                    SettingsRow(
-                        NdIcons.Close,
-                        stringResource(Res.string.download_cleanup),
-                        downloadSizeText(usage.orphanBytes).asString(),
-                        viewModel::confirmOrphans,
-                        enabled =
-                            usage.orphanBytes > 0 && !working,
-                    )
-                }
+                SettingsRow(
+                    NdIcons.Close,
+                    stringResource(Res.string.download_cleanup),
+                    downloadSizeText(usage.orphanBytes).asString(),
+                    viewModel::confirmOrphans,
+                    enabled =
+                        usage.orphanBytes > 0 && !working,
+                )
                 if (platform == PlatformKind.DESKTOP) {
-                    if (!desktopFolder) {
-                        SettingsRow(
-                            NdIcons.Download,
-                            stringResource(Res.string.download_folder),
-                            roots
-                                .firstOrNull {
-                                    it.rootId ==
-                                        usage.rootId
-                                }?.path,
-                            { navigator.pushDetail(SettingsKey(SettingsPage.DESKTOP)) },
-                        )
-                    } else {
-                        val current = roots.firstOrNull { it.rootId == usage.rootId }
-                        SettingsRow(
-                            NdIcons.Download,
-                            folderTitle,
-                            current?.path,
-                            {
-                                scope.launch {
-                                    suspendRunCatching { actions.files.pickFolder(folderTitle) }
-                                        .onSuccess { it?.let(viewModel::chooseFolder) }
-                                        .onFailure {
-                                            viewModel.error.value =
-                                                UiText.Res(Res.string.download_operation_failed)
-                                        }
-                                }
-                            },
-                            enabled = !working,
-                        )
-                        if (current?.kind == RootKind.DESKTOP_FOLDER) {
-                            SettingsRow(
-                                NdIcons.Download,
-                                stringResource(Res.string.download_default_folder),
-                                null,
-                                viewModel::useDefaultFolder,
-                                enabled = !working,
-                            )
-                        }
-                        current?.path?.let { path ->
-                            actions.reveal?.let { reveal ->
-                                SettingsRow(
-                                    NdIcons.Download,
-                                    stringResource(Res.string.download_show_folder),
-                                    null,
-                                    {
-                                        if (!reveal.reveal(path)) {
-                                            viewModel.error.value =
-                                                UiText
-                                                    .Res(Res.string.download_operation_failed)
-                                        }
-                                    },
-                                )
-                            }
-                        }
-                    }
+                    SettingsRow(
+                        NdIcons.Download,
+                        stringResource(Res.string.download_folder),
+                        roots
+                            .firstOrNull {
+                                it.rootId ==
+                                    usage.rootId
+                            }?.path,
+                        { navigator.pushDetail(SettingsKey(SettingsPage.DESKTOP)) },
+                    )
                 }
             }
             error?.let {
@@ -227,9 +178,116 @@ internal fun DownloadsSettingsPage(
             onDismissRequest = { capDialog = false },
         )
     }
-    folder?.let { decision ->
+    FolderMoveDialog(folder, error, working, viewModel::changeFolder, viewModel::dismissFolder)
+    orphans?.let {
+        OrphanFilesDialog(
+            it,
+            working,
+            viewModel::deleteOrphans,
+            viewModel::dismissOrphans,
+            error = error,
+        )
+    }
+}
+
+/**
+ * The downloads-folder section of Settings › Desktop (11 Change folder; 08's Desktop page owns the
+ * layout): the usage line of the current root, "Change folder…", "Use default folder" and "Show in
+ * folder", the inline error line and 07's move confirmation dialog. [DesktopPage] renders it
+ * through a slot so the page itself composes without a download graph; the view model binds
+ * through `metroViewModel()` like the Downloads page's, scoped to the Desktop entry's store.
+ */
+@Composable
+internal fun DesktopDownloadFolderSection(viewModel: DownloadsSettingsViewModel = metroViewModel()) {
+    val storage by viewModel.storage.collectAsStateWithLifecycle()
+    val roots by viewModel.roots.collectAsStateWithLifecycle()
+    val folder by viewModel.folderDecision.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    val working by viewModel.working.collectAsStateWithLifecycle()
+    val actions = LocalPlatformActions.current
+    val scope = rememberCoroutineScope()
+    val folderTitle = stringResource(Res.string.download_change_folder)
+    Column {
+        Text(
+            stringResource(SettingsRes.string.desktop_section_downloads),
+            Modifier.padding(SECTION_HEADING_PADDING),
+            style = MaterialTheme.typography.titleSmall,
+        )
+        storage?.let { usage ->
+            Text(
+                stringResource(
+                    Res.string.download_usage,
+                    downloadSizeText(usage.usedBytes).asString(),
+                    downloadSizeText(usage.partialBytes).asString(),
+                    usage.freeBytes?.let { downloadSizeText(it).asString() }
+                        ?: stringResource(Res.string.download_unknown_space),
+                ),
+            )
+            val current = roots.firstOrNull { it.rootId == usage.rootId }
+            SettingsRow(
+                NdIcons.Download,
+                folderTitle,
+                current?.path,
+                {
+                    scope.launch {
+                        suspendRunCatching { actions.files.pickFolder(folderTitle) }
+                            .onSuccess { it?.let(viewModel::chooseFolder) }
+                            .onFailure {
+                                viewModel.error.value =
+                                    UiText.Res(Res.string.download_operation_failed)
+                            }
+                    }
+                },
+                enabled = !working,
+            )
+            if (current?.kind == RootKind.DESKTOP_FOLDER) {
+                SettingsRow(
+                    NdIcons.Download,
+                    stringResource(Res.string.download_default_folder),
+                    null,
+                    viewModel::useDefaultFolder,
+                    enabled = !working,
+                )
+            }
+            current?.path?.let { path ->
+                actions.reveal?.let { reveal ->
+                    SettingsRow(
+                        NdIcons.Download,
+                        stringResource(Res.string.download_show_folder),
+                        null,
+                        {
+                            if (!reveal.reveal(path)) {
+                                viewModel.error.value =
+                                    UiText
+                                        .Res(Res.string.download_operation_failed)
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        error?.let {
+            Text(
+                it.asString(),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+    FolderMoveDialog(folder, error, working, viewModel::changeFolder, viewModel::dismissFolder)
+}
+
+/** 07's "Move {n} downloads ({size}) to {folder}?" confirmation, shared by both entry points. */
+@Composable
+private fun FolderMoveDialog(
+    decision: FolderDecision?,
+    error: UiText?,
+    working: Boolean,
+    onConfirm: (RootChangeMode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    decision?.let { decision ->
         NdDialog(
-            onDismissRequest = viewModel::dismissFolder,
+            onDismissRequest = onDismiss,
             title = stringResource(Res.string.download_folder),
             confirm =
                 if (working) {
@@ -237,9 +295,7 @@ internal fun DownloadsSettingsPage(
                 } else {
                     NdDialogAction(
                         stringResource(Res.string.download_move),
-                        onClick = {
-                            viewModel.changeFolder(RootChangeMode.MOVE_EXISTING)
-                        },
+                        onClick = { onConfirm(RootChangeMode.MOVE_EXISTING) },
                     )
                 },
             dismiss =
@@ -248,9 +304,7 @@ internal fun DownloadsSettingsPage(
                 } else {
                     NdDialogAction(
                         stringResource(Res.string.download_leave),
-                        onClick = {
-                            viewModel.changeFolder(RootChangeMode.NEW_DOWNLOADS_ONLY)
-                        },
+                        onClick = { onConfirm(RootChangeMode.NEW_DOWNLOADS_ONLY) },
                     )
                 },
         ) {
@@ -265,15 +319,8 @@ internal fun DownloadsSettingsPage(
             error?.let { Text(it.asString(), color = MaterialTheme.colorScheme.error) }
         }
     }
-    orphans?.let {
-        OrphanFilesDialog(
-            it,
-            working,
-            viewModel::deleteOrphans,
-            viewModel::dismissOrphans,
-            error = error,
-        )
-    }
 }
 
 private const val MIB = 1_048_576L
+
+private val SECTION_HEADING_PADDING = 16.dp

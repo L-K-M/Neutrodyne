@@ -3,9 +3,14 @@
 <resources>
     <!-- The window (11 Window and tray behaviour). -->
     <string name="window_title">Neutrodyne</string>
-    <string name="tray_tooltip">Neutrodyne</string>
+    <string name="window_title_playing">%1$s — Neutrodyne</string>
     <string name="tray_show">Show Neutrodyne</string>
+    <string name="tray_play">Play</string>
+    <string name="tray_pause">Pause</string>
+    <string name="tray_next">Next</string>
     <string name="tray_quit">Quit</string>
+    <string name="no_tray_hint_title">No tray icon on this desktop</string>
+    <string name="no_tray_hint_body">Closing the window minimises Neutrodyne to the taskbar instead of hiding it to a tray icon.</string>
     <string name="menu_file">File</string>
     <string name="menu_import">Import OPML or backup…</string>
     <string name="drop_to_import">Drop to import</string>

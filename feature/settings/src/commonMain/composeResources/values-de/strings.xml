@@ -85,4 +85,21 @@
     <string name="appearance_artwork_tint_summary">Player und Kopfbereiche mit Coverfarben tönen</string>
     <string name="appearance_pure_black">Reines Schwarz</string>
     <string name="appearance_pure_black_summary">Schwarze Oberflächen im dunklen Design verwenden</string>
+
+    <string name="settings_desktop">Desktop</string>
+    <string name="desktop_section_window">Fenster</string>
+    <string name="desktop_section_downloads">Downloads</string>
+    <string name="desktop_close_title">Beim Schließen des Fensters</string>
+    <string name="desktop_close_quit">Beenden, wenn nichts wiedergegeben oder heruntergeladen wird</string>
+    <string name="desktop_close_quit_summary">Neutrodyne läuft im Tray weiter, solange es wiedergibt oder herunterlädt, und beendet sich dann</string>
+    <string name="desktop_close_quit_summary_mac">Neutrodyne läuft in der Menüleiste weiter, solange es wiedergibt oder herunterlädt, und beendet sich dann</string>
+    <string name="desktop_close_keep">Im Tray weiterlaufen</string>
+    <string name="desktop_close_keep_mac">In der Menüleiste weiterlaufen</string>
+    <string name="desktop_close_keep_summary">Neutrodyne aktualisiert und synchronisiert weiter, solange es läuft. Über das Tray-Symbol beenden.</string>
+    <string name="desktop_close_keep_summary_mac">Neutrodyne aktualisiert und synchronisiert weiter, solange es läuft. Über das Menüleistensymbol beenden.</string>
+    <string name="desktop_login">Beim Anmelden starten</string>
+    <string name="desktop_login_summary">Startet Neutrodyne im Hintergrund, wenn du dich anmeldest</string>
+    <string name="desktop_login_disabled_os">Im Task-Manager deaktiviert</string>
+    <string name="desktop_login_approval">Neutrodyne in Systemeinstellungen › Allgemein › Anmeldeobjekte erlauben</string>
+    <string name="desktop_login_open_settings">Systemeinstellungen öffnen</string>
 </resources>

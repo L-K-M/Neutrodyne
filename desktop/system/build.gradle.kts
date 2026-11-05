@@ -15,6 +15,9 @@ dependencies {
     // session and the private test bus.
     implementation(libs.dbus.java.core)
     implementation(libs.dbus.java.transport.native.unixsocket)
+    // HKCU Run value and StartupApproved read through Advapi32Util (11 Start at login).
+    implementation(libs.jna)
+    implementation(libs.jna.platform)
 
     testImplementation(project(":core:testing"))
 }
