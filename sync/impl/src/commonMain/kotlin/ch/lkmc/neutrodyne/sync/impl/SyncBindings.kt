@@ -95,6 +95,7 @@ object SyncBindings {
         tokens: SyncTokenStore,
         effects: SyncApplyEffects,
         notices: SyncNoticeBus,
+        playback: PlaybackSyncPort,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -107,6 +108,7 @@ object SyncBindings {
             tokens = tokens,
             effects = effects,
             notices = notices,
+            playback = playback,
         )
 
     /**
@@ -133,6 +135,7 @@ object SyncBindings {
             clock = clock,
             scope = scope,
             hooks = hooks,
+            releaseDeferred = { engine.releaseDeferred() },
         )
 
     /**

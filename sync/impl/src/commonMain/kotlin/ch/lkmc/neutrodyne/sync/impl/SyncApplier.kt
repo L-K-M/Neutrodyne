@@ -155,9 +155,7 @@ class SyncApplier(
         if (outcome is RecordOutcome.Applied || outcome is RecordOutcome.Held) {
             val pendingSetting =
                 if (coll == SyncCollection.SETTING) {
-                    val value = merge.record.fields["v"]?.v
-                    val text = (value as? JsonPrimitive)?.content ?: value?.toString()
-                    text?.let { PendingSetting(it, merge.record.maxClock?.toString() ?: "") }
+                    settingPendingMarker(stored, merge.record)
                 } else {
                     null
                 }
@@ -215,7 +213,14 @@ class SyncApplier(
                 return RecordOutcome.Applied
             }
             return if (merge.advanced.contains("subscribed")) {
-                MassChangeGuard.stagePodcast(db, roundId, rid, merge.record.fieldClock("subscribed"))
+                // 10 Mass-change guard rule 4: a removal of the podcast loaded in a playing
+                // player never interrupts playback — it defers into its own held row until the
+                // player stops or the item changes.
+                if (isPlayingPodcast(rid)) {
+                    MassChangeGuard.stageDeferred(db, roundId, rid, merge.record.fieldClock("subscribed"))
+                } else {
+                    MassChangeGuard.stagePodcast(db, roundId, rid, merge.record.fieldClock("subscribed"))
+                }
                 RecordOutcome.Held
             } else {
                 RecordOutcome.Stale
@@ -292,6 +297,18 @@ class SyncApplier(
         credentialId == null &&
             record.fields["auth"] == null &&
             (record.booleanField("needsCredentials") == true || record.stringField("credentialOrigin") != null)
+
+    /**
+     * 10 Mass-change guard rule 4: the podcast of the loaded, playing item. A paused player is
+     * not deferred — only a playing one is interrupted by nothing (R7.5).
+     */
+    private suspend fun isPlayingPodcast(podcastRid: String): Boolean {
+        val active = playback.active.value
+        if (!active.isPlaying) return false
+        val episodeId = active.episodeId ?: return false
+        val episode = db.episodeDao().byId(episodeId) ?: return false
+        return db.podcastDao().byId(episode.podcastId)?.syncId == podcastRid
+    }
 
     private suspend fun applyPodcastFields(
         existing: PodcastEntity,
@@ -676,7 +693,8 @@ class SyncApplier(
             merge.record.fields["v"]
                 ?.v
                 ?.toString() ?: return RecordOutcome.Stale
-        val pending = storedPending(settingKey.name) ?: PendingSetting(value, merge.record.maxClock?.toString() ?: "")
+        val incomingClock = merge.record.maxClock?.toString() ?: ""
+        val pending = storedPending(settingKey.name, incomingClock) ?: PendingSetting(value, incomingClock)
         db.syncClockDao().upsert(
             ch.lkmc.neutrodyne.core.database.SyncClockEntity(
                 SyncCollection.SETTING.wire,
@@ -693,7 +711,40 @@ class SyncApplier(
         return RecordOutcome.Applied
     }
 
-    private suspend fun storedPending(key: String): PendingSetting? = null
+    /**
+     * 10 Durable apply effects: the marker this record's page journals. An undrained stored
+     * marker at least as new as the record keeps its identity — a replay cannot reset the
+     * effect's completion comparison (clock equality); anything older is re-created from the
+     * merged winner.
+     */
+    private fun settingPendingMarker(
+        stored: RawSyncRecord?,
+        record: RecordState,
+    ): PendingSetting? {
+        val value = record.fields["v"]?.v
+        val text = (value as? JsonPrimitive)?.content ?: value?.toString() ?: return stored?.pendingSetting
+        val fresh = PendingSetting(text, record.maxClock?.toString() ?: "")
+        val storedPending = stored?.pendingSetting ?: return fresh
+        val storedClock = runCatching { Hlc.parse(storedPending.clock) }.getOrNull() ?: return fresh
+        val freshClock = runCatching { Hlc.parse(fresh.clock) }.getOrNull() ?: return storedPending
+        return if (storedClock >= freshClock) storedPending else fresh
+    }
+
+    /**
+     * The stored pending marker of [key] when it names work at least as new as [incomingClock]
+     * — the receive-side half of [settingPendingMarker]'s rule.
+     */
+    private suspend fun storedPending(
+        key: String,
+        incomingClock: String?,
+    ): PendingSetting? {
+        val raw = clockStore.get(SyncCollection.SETTING.wire, key) ?: return null
+        val pending = raw.pendingSetting ?: return null
+        val storedClock = runCatching { Hlc.parse(pending.clock) }.getOrNull() ?: return null
+        val incoming =
+            incomingClock?.let { runCatching { Hlc.parse(it) }.getOrNull() } ?: return pending
+        return if (storedClock >= incoming) pending else null
+    }
 
     private suspend fun deleteLostPending(
         coll: String,

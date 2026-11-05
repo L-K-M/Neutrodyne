@@ -2,8 +2,10 @@
 
 package ch.lkmc.neutrodyne.sync.impl
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
+import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -39,7 +41,9 @@ data class HeldBatch(
  * 10 Mass-change guard: a pull that would unsubscribe more than 10 podcasts, or more than 20 % of
  * the locally subscribed podcasts and at least 3, or delete more than 3 groups is held. The
  * applier stages removals in a provisional `sync_held` row of the round; [evaluate] applies or
- * holds the batch.
+ * holds the batch. A removal of the podcast loaded in a playing player is never applied while it
+ * plays (R7.5): it is staged as "deferred while playing" and [releaseDeferred] applies it when
+ * the player stops or the item changes, re-checking that its clock still wins.
  */
 object MassChangeGuard {
     /** Stages one podcast removal in the round's provisional row. */
@@ -76,6 +80,30 @@ object MassChangeGuard {
         }
     }
 
+    /**
+     * Stages a removal of the playing podcast outside the round's batch (10 rule 4): its own
+     * DEFERRED row, reused when a later round re-delivers the same removal.
+     */
+    suspend fun stageDeferred(
+        db: NeutrodyneDatabase,
+        roundId: Long,
+        podcastRid: String,
+        clock: String?,
+    ) {
+        val removal = HeldRemoval(podcastRid, clock ?: "")
+        val existing = db.syncHeldDao().all().firstOrNull { row -> holdsRid(row, podcastRid, HeldState.DEFERRED) }
+        if (existing != null) return
+        db
+            .syncHeldDao()
+            .insert(
+                SyncHeldEntity(
+                    batch = encode(HeldBatch(podcasts = listOf(removal)), HeldState.DEFERRED),
+                    summary = "{}",
+                    heldAt = roundId,
+                ),
+            )
+    }
+
     /** The thresholds' verdict for a batch, given the local subscribed-podcast denominator. */
     fun isMassChange(
         podcastCount: Int,
@@ -89,36 +117,102 @@ object MassChangeGuard {
     }
 
     /**
-     * Evaluates the round's provisional batch. Below the thresholds the batch is applied by the
-     * caller and the row deleted; above, a HELD row is written (the prompt) and the provisional
-     * row deleted. Returns the held batch, or `null` when nothing was held.
+     * Evaluates the round's provisional batch. Below the thresholds the staged removals are
+     * applied (re-checking that their clocks still win) and the row deleted; above, a HELD row
+     * is written (the prompt) and the provisional row deleted. Returns the held batch, or `null`
+     * when nothing was held. DEFERRED rows never join the count: they wait for playback.
      */
     suspend fun evaluate(
         db: NeutrodyneDatabase,
         roundId: Long,
         localPodcasts: Int,
+        now: Long,
     ): HeldBatch? {
-        val provisional = db.syncHeldDao().forRound(roundId).firstOrNull() ?: return null
+        val provisional =
+            db.syncHeldDao().forRound(roundId).firstOrNull { stateOf(it.batch) != HeldState.DEFERRED } ?: return null
         val batch = decode(provisional.batch)
         if (batch.podcasts.isEmpty() && batch.groups.isEmpty()) {
             db.syncHeldDao().delete(provisional.id)
             return null
         }
-        return if (isMassChange(batch.podcasts.size, batch.groups.size, localPodcasts)) {
-            db
-                .syncHeldDao()
-                .insert(
-                    SyncHeldEntity(
-                        batch = encode(batch, HeldState.HELD),
-                        summary = summary(db, batch),
-                        heldAt = roundId,
-                    ),
+        if (!isMassChange(batch.podcasts.size, batch.groups.size, localPodcasts)) {
+            applyBatch(db, stillWinning(db, batch), now)
+            db.syncHeldDao().delete(provisional.id)
+            return null
+        }
+        db
+            .syncHeldDao()
+            .insert(
+                SyncHeldEntity(
+                    batch = encode(batch, HeldState.HELD),
+                    summary = summary(db, batch),
+                    heldAt = roundId,
+                ),
+            )
+        db.syncHeldDao().delete(provisional.id)
+        return batch
+    }
+
+    /**
+     * Applies the deferred rows whose podcast is no longer the playing one (10 rule 4):
+     * each removal whose clock still wins runs through the shared apply; one that a newer
+     * value overturned is dropped. A still-playing podcast's row stays deferred.
+     */
+    suspend fun releaseDeferred(
+        db: NeutrodyneDatabase,
+        playingPodcastRid: String?,
+        now: Long,
+    ) {
+        for (row in db.syncHeldDao().all()) {
+            if (stateOf(row.batch) != HeldState.DEFERRED) continue
+            val batch = decode(row.batch)
+            val due =
+                HeldBatch(
+                    podcasts =
+                        batch.podcasts.filter {
+                            it.rid != playingPodcastRid && removalStillWins(db, "podcast", "subscribed", it)
+                        },
+                    groups = emptyList(),
                 )
-            db.syncHeldDao().delete(provisional.id)
-            batch
-        } else {
-            db.syncHeldDao().delete(provisional.id)
-            null
+            db.syncHeldDao().delete(row.id)
+            if (due.podcasts.isEmpty()) continue
+            applyBatch(db, due, now)
+        }
+    }
+
+    /** A removal applies only while its record clock still wins against `sync_clock`. */
+    private suspend fun stillWinning(
+        db: NeutrodyneDatabase,
+        batch: HeldBatch,
+    ): HeldBatch =
+        HeldBatch(
+            podcasts = batch.podcasts.filter { removalStillWins(db, "podcast", "subscribed", it) },
+            groups = batch.groups.filter { removalStillWins(db, "group", "deleted", it) },
+        )
+
+    private suspend fun removalStillWins(
+        db: NeutrodyneDatabase,
+        coll: String,
+        field: String,
+        removal: HeldRemoval,
+    ): Boolean {
+        val raw =
+            db.syncClockDao().get(coll, removal.rid)?.let {
+                runCatching { SyncJson.decodeFromString<RawSyncRecord>(it.clocks) }.getOrNull()
+            } ?: return true
+        val stored = raw.state.fields[field]?.c ?: return true
+        val staged = runCatching { Hlc.parse(removal.clock) }.getOrNull() ?: return true
+        return stored <= staged
+    }
+
+    /** The removal application the below-threshold branch and deferred releases share. */
+    private suspend fun applyBatch(
+        db: NeutrodyneDatabase,
+        batch: HeldBatch,
+        now: Long,
+    ) {
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying { apply(db, batch, now) }
         }
     }
 
@@ -158,12 +252,27 @@ object MassChangeGuard {
         roundId: Long,
         transform: (HeldBatch) -> HeldBatch,
     ) {
-        val existing = db.syncHeldDao().forRound(roundId).firstOrNull()
+        val existing =
+            db.syncHeldDao().forRound(roundId).firstOrNull { stateOf(it.batch) != HeldState.DEFERRED }
         val batch = transform(existing?.let { decode(it.batch) } ?: HeldBatch())
         val entity =
             existing?.copy(batch = encode(batch, HeldState.STAGED))
                 ?: SyncHeldEntity(batch = encode(batch, HeldState.STAGED), summary = "{}", heldAt = roundId)
         db.syncHeldDao().upsert(entity)
+    }
+
+    /** Whether a row in [state] already carries a removal of [rid]. */
+    private fun holdsRid(
+        row: SyncHeldEntity,
+        rid: String,
+        state: HeldState,
+    ): Boolean = stateOf(row.batch) == state && decode(row.batch).let { it.podcasts.any { r -> r.rid == rid } }
+
+    /** The batch state a row's JSON carries; legacy rows without the field read as STAGED. */
+    private fun stateOf(json: String): HeldState {
+        val obj = SyncJson.parseToJsonElement(json).jsonObject
+        val name = (obj["state"] as? JsonPrimitive)?.contentOrNull ?: return HeldState.STAGED
+        return HeldState.entries.firstOrNull { it.name == name } ?: HeldState.STAGED
     }
 
     private suspend fun summary(

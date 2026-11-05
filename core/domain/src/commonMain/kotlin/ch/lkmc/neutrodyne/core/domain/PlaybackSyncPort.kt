@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.StateFlow
 /** What the sync engine needs to know about the local player (10 Scheduling on Android). */
 data class PlaybackSyncActive(
     val isPlaying: Boolean,
+    /** The loaded current item's episode, when one is loaded (10's `ActivePlayback`). */
+    val episodeId: Long? = null,
 )
 
 /** A player boundary that triggers a round (10 Scheduling on Android). */
