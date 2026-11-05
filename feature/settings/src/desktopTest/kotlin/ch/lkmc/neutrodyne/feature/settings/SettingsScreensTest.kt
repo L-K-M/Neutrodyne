@@ -34,12 +34,16 @@ import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.domain.DesktopIntegration
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.core.model.LoginItemState
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
+import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -49,6 +53,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.FakeDesktopIntegration
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -158,8 +163,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot()
             openSettings()
-            onAllNodesWithText("About").onFirst().performClick()
-
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Neutrodyne").assertExists()
             onNodeWithText("Version 1.2.3 · macOS arm64 · DMG").assertIsDisplayed()
             onNodeWithText("Debug build").assertExists()
@@ -171,7 +175,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(buildInfo = FakeBuildInfo.copy(platform = BuildInfo.Platform.ANDROID, desktop = null))
             openSettings()
-            onAllNodesWithText("About").onFirst().performClick()
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Install & updates").performScrollTo().performClick()
             onNodeWithText("Android Auto", substring = false).performScrollTo().performClick()
             onNodeWithText("Unknown sources", substring = true).assertExists()
@@ -231,7 +235,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(platformActions = NoHandlerActions)
             openSettings()
-            onAllNodesWithText("About").onFirst().performClick()
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Source code and releases").performScrollTo().performClick()
             waitForIdle()
 
@@ -353,6 +357,101 @@ class SettingsScreensTest {
             assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.PURE_BLACK) })
         }
 
+    @Test
+    fun desktopRowShowsOnDesktopAndOpensThePage() =
+        runComposeUiTest {
+            setSettingsRoot(desktopIntegration = FakeDesktopIntegration())
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("When the window is closed").assertIsDisplayed()
+            // The home row's summary carries the same text; the page's radio row is the second.
+            onAllNodesWithText("Quit unless playing or downloading").onLast().assertIsDisplayed()
+            // The harness runs on macOS, so the keep-running label uses its menu-bar wording.
+            onNodeWithText("Keep running in the menu bar").assertIsDisplayed()
+            onNodeWithText("Start at login").assertIsDisplayed()
+        }
+
+    @Test
+    fun desktopRowIsHiddenOnAndroid() =
+        runComposeUiTest {
+            setSettingsRoot(platformInfo = FakePlatformInfo.ANDROID)
+            openSettings()
+            onNodeWithText("Desktop").assertDoesNotExist()
+        }
+
+    @Test
+    fun closeBehaviourRadioWritesTheSetting() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            setSettingsRoot(settingsRepository = settings)
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Keep running in the menu bar").performClick()
+            waitForIdle()
+            assertEquals(
+                CloseBehaviour.KEEP_RUNNING,
+                runBlocking { settings.get(DesktopSettingKeys.CLOSE_BEHAVIOUR) },
+            )
+            onNodeWithText("Quit unless playing or downloading").performClick()
+            waitForIdle()
+            assertEquals(
+                CloseBehaviour.QUIT_WHEN_IDLE,
+                runBlocking { settings.get(DesktopSettingKeys.CLOSE_BEHAVIOUR) },
+            )
+        }
+
+    @Test
+    fun startAtLoginCallsTheRegistrarAndShowsItsState() =
+        runComposeUiTest {
+            val integration = FakeDesktopIntegration(LoginItemState.NOT_REGISTERED)
+            setSettingsRoot(desktopIntegration = integration)
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Start at login").performClick()
+            waitForIdle()
+            assertEquals(true, integration.lastEnabled)
+            assertEquals(LoginItemState.REGISTERED, integration.loginItem.value)
+        }
+
+    @Test
+    fun startAtLoginIsHiddenWhenUnsupported() =
+        runComposeUiTest {
+            setSettingsRoot(desktopIntegration = FakeDesktopIntegration(LoginItemState.UNSUPPORTED))
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Start at login").assertDoesNotExist()
+        }
+
+    @Test
+    fun startAtLoginApprovalShowsMacGuidance() =
+        runComposeUiTest {
+            setSettingsRoot(
+                desktopIntegration = FakeDesktopIntegration(LoginItemState.REQUIRES_APPROVAL),
+            )
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText(
+                "Allow Neutrodyne in System Settings › General › Login Items",
+            ).assertIsDisplayed()
+            onNodeWithText("Open System Settings").assertIsDisplayed()
+        }
+
+    @Test
+    fun startAtLoginDisabledByOsStillShowsEnabled() =
+        runComposeUiTest {
+            setSettingsRoot(desktopIntegration = FakeDesktopIntegration(LoginItemState.DISABLED_BY_OS))
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Start at login").assertIsOn()
+            onNodeWithText("Disabled in Task Manager").assertIsDisplayed()
+        }
+
     private fun ComposeUiTest.openSettings() {
         onAllNodesWithContentDescription("Settings").onFirst().performClick()
         onNodeWithText("About").assertExists()
@@ -364,6 +463,7 @@ class SettingsScreensTest {
         settingsRepository: FakeSettingsRepository = FakeSettingsRepository(),
         platformInfo: PlatformInfo = FakePlatformInfo.DESKTOP,
         platformActions: PlatformActions = TestPlatformActions,
+        desktopIntegration: DesktopIntegration? = null,
     ) {
         setContent {
             CompositionLocalProvider(LocalPlatformActions provides platformActions) {
@@ -393,6 +493,7 @@ class SettingsScreensTest {
                                     ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
                                         .Android("arm64-v8a", 34),
                                 ),
+                                desktopIntegration,
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )

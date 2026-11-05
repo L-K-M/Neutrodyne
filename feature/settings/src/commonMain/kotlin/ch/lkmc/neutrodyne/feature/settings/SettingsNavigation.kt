@@ -7,6 +7,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.domain.DesktopIntegration
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
@@ -30,9 +31,10 @@ import dev.zacsweers.metro.Provides
  *
  * The shells' graph must bind a `BuildInfo` for the About page, a `SettingsRepository` and a
  * `PlatformInfo` for Appearance, and may bind a [LicencesSource] (nullable: when unbound the
- * Licences screen shows its empty state). `SettingsHomeKey` is a list pane whose desktop detail
- * placeholder is the Appearance page (08 Settings screens); `SettingsKey` and `LicencesKey` are
- * detail panes (08 Screen inventory).
+ * Licences screen shows its empty state) and a [DesktopIntegration] (nullable: `DesktopAppGraph`
+ * alone binds it, so the Start-at-login row reads the OS where it exists). `SettingsHomeKey` is
+ * a list pane whose desktop detail placeholder is the Appearance page (08 Settings screens);
+ * `SettingsKey` and `LicencesKey` are detail panes (08 Screen inventory).
  */
 @ContributesTo(AppScope::class)
 @BindingContainer
@@ -47,6 +49,7 @@ public object SettingsNavigation {
         checker: AppUpdateChecker,
         notices: UpdateNotices,
         runtime: UpdateRuntimeInputs,
+        desktopIntegration: DesktopIntegration?,
     ): EntryProviderInstaller =
         {
             // 08: the wallpaper-colour row exists only where Android 12+ can serve it.
@@ -70,7 +73,12 @@ public object SettingsNavigation {
                         },
                     ),
             ) {
-                SettingsHomeRoute(settingsRepository, checker)
+                SettingsHomeRoute(
+                    settingsRepository,
+                    checker,
+                    platformInfo.kind,
+                    buildInfo.desktop?.os,
+                )
             }
             entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
                 SettingsRoute(
@@ -80,6 +88,7 @@ public object SettingsNavigation {
                     dynamicColorSupport,
                     platformInfo.kind,
                     runtime.target,
+                    desktopIntegration,
                 )
             }
             entry<InstallHelpKey>(metadata = NdSceneMetadata.paneDetail()) { key ->

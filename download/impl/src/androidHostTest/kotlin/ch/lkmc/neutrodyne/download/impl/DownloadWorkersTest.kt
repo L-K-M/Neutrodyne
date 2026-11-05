@@ -53,11 +53,55 @@ class DownloadWorkersTest {
     @Config(sdk = [34])
     fun coldStopAndWakeDoNotInitializeDatabase() {
         val pending = lazy<DownloadComponents> { error("Database is not open") }
-        val host = AndroidDownloadBindings.runtime(pending, lazy { error("Scheduler is not needed") })
+        val host =
+            AndroidDownloadBindings.runtime(
+                pending,
+                lazy {
+                    error("Scheduler is not needed")
+                },
+                lazy { error("Maintenance is not needed") },
+            )
         host.stop(RunnerToken("uidt:cold"), StopIntent.Pause)
         host.wake(DownloadLane.MANUAL)
         assertFalse(pending.isInitialized())
     }
+
+    @Test fun visibleAutoNeverPromotesOrProvidesForegroundInfoOnAnyApi() =
+        runTest {
+            visibility.update(true)
+            val worker = worker(DownloadLane.AUTO)
+            worker.promote = { error("AUTO foreground promotion") }
+            assertFailsWith<IllegalStateException> { worker.getForegroundInfo() }
+            assertEquals(ListenableWorker.Result.success(), worker.doWork())
+            val request = requests.single()
+            assertEquals(setOf(DownloadLane.AUTO), request.lanes)
+            assertEquals(
+                fixture.clock.elapsedRealtime() + DownloadLaneWorker.SOFT_DEADLINE_MS,
+                request.softDeadlineElapsed,
+            )
+            request.reporter.active(setOf(1))
+            request.reporter.bytes(20, 100)
+            assertTrue(fixture.scheduler.liveTokens().isEmpty())
+        }
+
+    @Test fun autoDoesNotYieldClaimsToManualUidtAndStopUnregistersOnlyAuto() =
+        runTest {
+            fixture.registry.uidtStarted(RunnerToken("uidt:manual"))
+            drain = { request ->
+                assertTrue(request.claimsAllowed())
+                throw CancellationException("quota")
+            }
+            assertFailsWith<CancellationException> { worker(DownloadLane.AUTO).doWork() }
+            assertIs<StopIntent.RunnerStopped>(stops.single())
+            assertEquals(setOf("uidt:manual"), fixture.scheduler.liveTokens())
+        }
+
+    @Test fun malformedLaneFailsBeforeRegisteringOrResolvingRuntime() =
+        runTest {
+            assertEquals(ListenableWorker.Result.failure(), worker(input = "invalid").doWork())
+            assertTrue(fixture.scheduler.liveTokens().isEmpty())
+            assertTrue(requests.isEmpty())
+        }
 
     @Test fun backgroundHasEightMinuteDeadline() =
         runTest {
@@ -175,9 +219,12 @@ class DownloadWorkersTest {
             assertTrue(fixture.enqueued.isEmpty())
         }
 
-    private fun worker(): DownloadLaneWorker =
+    private fun worker(
+        lane: DownloadLane = DownloadLane.MANUAL,
+        input: String = lane.name,
+    ): DownloadLaneWorker =
         TestListenableWorkerBuilder<DownloadLaneWorker>(context)
-            .setInputData(androidx.work.workDataOf(AndroidDownloadWork.KEY_LANE to AndroidDownloadWork.MANUAL))
+            .setInputData(androidx.work.workDataOf(AndroidDownloadWork.KEY_LANE to input))
             .setWorkerFactory(
                 object : WorkerFactory() {
                     override fun createWorker(

@@ -13,10 +13,15 @@ import ch.lkmc.neutrodyne.desktop.resources.drop_to_add
 import ch.lkmc.neutrodyne.desktop.resources.drop_to_import
 import ch.lkmc.neutrodyne.desktop.resources.menu_file
 import ch.lkmc.neutrodyne.desktop.resources.menu_import
+import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_body
+import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_title
+import ch.lkmc.neutrodyne.desktop.resources.tray_next
+import ch.lkmc.neutrodyne.desktop.resources.tray_pause
+import ch.lkmc.neutrodyne.desktop.resources.tray_play
 import ch.lkmc.neutrodyne.desktop.resources.tray_quit
 import ch.lkmc.neutrodyne.desktop.resources.tray_show
-import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
+import ch.lkmc.neutrodyne.desktop.resources.window_title_playing
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import org.jetbrains.compose.resources.getString
@@ -39,9 +44,17 @@ class DesktopImportMenuTest {
                 assertThat(getString(Res.string.drop_to_add)).isEqualTo("Drop to add podcast")
                 assertThat(getString(Res.string.desktop_cannot_open_file)).isEqualTo("Neutrodyne can't open this file")
                 assertThat(getString(Res.string.window_title)).isEqualTo("Neutrodyne")
-                assertThat(getString(Res.string.tray_tooltip)).isEqualTo("Neutrodyne")
+                assertThat(getString(Res.string.window_title_playing, "Episode")).isEqualTo("Episode — Neutrodyne")
                 assertThat(getString(Res.string.tray_show)).isEqualTo("Show Neutrodyne")
+                assertThat(getString(Res.string.tray_play)).isEqualTo("Play")
+                assertThat(getString(Res.string.tray_pause)).isEqualTo("Pause")
+                assertThat(getString(Res.string.tray_next)).isEqualTo("Next")
                 assertThat(getString(Res.string.tray_quit)).isEqualTo("Quit")
+                assertThat(getString(Res.string.no_tray_hint_title)).isEqualTo("No tray icon on this desktop")
+                assertThat(getString(Res.string.no_tray_hint_body))
+                    .isEqualTo(
+                        "Closing the window minimises Neutrodyne to the taskbar instead of hiding it to a tray icon.",
+                    )
             }
         }
 
@@ -56,9 +69,15 @@ class DesktopImportMenuTest {
                     getString(Res.string.desktop_cannot_open_file),
                 ).isEqualTo("Neutrodyne kann diese Datei nicht öffnen")
                 assertThat(getString(Res.string.window_title)).isEqualTo("Neutrodyne")
-                assertThat(getString(Res.string.tray_tooltip)).isEqualTo("Neutrodyne")
+                assertThat(getString(Res.string.window_title_playing, "Episode")).isEqualTo("Episode — Neutrodyne")
                 assertThat(getString(Res.string.tray_show)).isEqualTo("Neutrodyne anzeigen")
+                assertThat(getString(Res.string.tray_play)).isEqualTo("Wiedergabe")
+                assertThat(getString(Res.string.tray_pause)).isEqualTo("Pause")
+                assertThat(getString(Res.string.tray_next)).isEqualTo("Nächste Episode")
                 assertThat(getString(Res.string.tray_quit)).isEqualTo("Beenden")
+                assertThat(getString(Res.string.no_tray_hint_title)).isEqualTo("Kein Tray-Symbol auf diesem System")
+                assertThat(getString(Res.string.no_tray_hint_body))
+                    .isEqualTo("Beim Schließen wird Neutrodyne stattdessen in der Taskleiste minimiert.")
             }
         }
 

@@ -122,7 +122,7 @@ class NeutrodyneWindowContentTest {
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
             onNodeWithText("Appearance").assertExists()
 
-            onAllNodesWithText("About").onFirst().performClick()
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Neutrodyne").assertExists()
             onNodeWithText("Debug build").assertExists()
         }
