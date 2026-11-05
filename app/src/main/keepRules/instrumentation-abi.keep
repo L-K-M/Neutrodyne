@@ -1916,6 +1916,14 @@
   public java.lang.Object addLast(java.util.List, kotlin.coroutines.Continuation);
   public java.lang.Object addNext(java.util.List, kotlin.coroutines.Continuation);
 }
+-keep interface ch.lkmc.neutrodyne.core.domain.RefreshController {
+  public void refreshNow(ch.lkmc.neutrodyne.core.domain.RefreshScope);
+}
+-keep class ch.lkmc.neutrodyne.core.domain.RefreshScope$All {
+  ch.lkmc.neutrodyne.core.domain.RefreshScope$All INSTANCE;
+}
+-keep interface ch.lkmc.neutrodyne.core.domain.RefreshScope {
+}
 -keep class ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests$MetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -2261,6 +2269,7 @@
   public ch.lkmc.neutrodyne.playback.api.PlaybackStateSource getPlaybackStateSource();
   public dev.zacsweers.metro.Provider getPositionStore();
   public dev.zacsweers.metro.Provider getQueueRepository();
+  public ch.lkmc.neutrodyne.core.domain.RefreshController getRefreshController();
   public ch.lkmc.neutrodyne.core.domain.SearchRepository getSearchRepository();
   public ch.lkmc.neutrodyne.core.domain.SecretStore getSecretStore();
   public ch.lkmc.neutrodyne.core.domain.SettingsRepository getSettingsRepository();
