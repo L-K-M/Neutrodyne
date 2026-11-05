@@ -30,6 +30,13 @@ abstract class CredentialDao(
     abstract suspend fun byOrigin(origin: String): List<CredentialEntity>
 
     /**
+     * Every distinct stored origin — 10's protected-snapshot enumeration
+     * (`SecretStore.originsWithPrefix`). Never returns secret material.
+     */
+    @Query("SELECT DISTINCT origin FROM credential")
+    abstract suspend fun origins(): List<String>
+
+    /**
      * 03 `SecretStore.remove` — e.g. the `sync:<host>` token on unlink (10). Feed credentials go
      * through the unsubscribe cascade's last-reference delete instead.
      */

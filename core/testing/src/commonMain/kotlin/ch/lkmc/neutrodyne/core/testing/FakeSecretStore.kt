@@ -74,6 +74,8 @@ class FakeSecretStore(
         }
     }
 
+    override suspend fun originsWithPrefix(prefix: String): List<String> = rows.value.keys.filter { it.startsWith(prefix) }
+
     override suspend fun forPodcast(podcastId: Long): BasicCredentials? {
         val id = podcastCredentialIds.value[podcastId] ?: return null
         val stored =
