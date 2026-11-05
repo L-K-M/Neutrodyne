@@ -131,6 +131,13 @@ class DesktopPlaybackController(
     private var outputDeviceLost = false
 
     /**
+     * The terminal [EngineState.Ended] was already handled. The 1-s tick
+     * reconciles a coalesced Ended, but a second pass must not end the session
+     * after an end-of-episode sleep already completed the item.
+     */
+    private var engineEndedHandled = false
+
+    /**
      * An issue the engine's own state no longer carries: a missing local file is
      * re-resolved at once, so the error state is replaced by Buffering before the
      * UI can show it. Held until playback resumes (06 Error recovery).
@@ -457,6 +464,8 @@ class DesktopPlaybackController(
 
     private suspend fun loaded(startMs: Long) {
         val value = requireNotNull(runtime)
+        // A new item is current, so a later terminal Ended is a new event.
+        engineEndedHandled = false
         val row = projector?.entries?.firstOrNull()?.media
         following?.cancelAndJoin()
         following = null
@@ -666,6 +675,8 @@ class DesktopPlaybackController(
             }
 
             EngineState.Ended -> {
+                if (engineEndedHandled) return
+                engineEndedHandled = true
                 if (sleepTimerCore.state is SleepTimerState.EndOfEpisode) {
                     endOfEpisode()
                 } else {
