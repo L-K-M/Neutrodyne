@@ -463,6 +463,40 @@ class FfAudioEngineTest {
     }
 
     @Test
+    fun aRepeatedContentChangeMapsToTheContentChangedError() {
+        val failing =
+            object : ByteSource {
+                override val length: Long? get() = 100
+
+                override fun read(
+                    position: Long,
+                    dst: MemorySegment,
+                    maxBytes: Int,
+                ): Int = throw ContentChangedException("the representation changed")
+
+                override fun abort() = Unit
+
+                override fun close() = Unit
+            }
+        val resolver =
+            FakeDesktopSourceResolver().apply {
+                sources[1L to 0] = ResolvedSource.File(media())
+                sources[1L to 1] = ResolvedSource.File(media())
+            }
+        engine(resolver, open = { failing }).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("content changed error") { engine.state.value is EngineState.Error }
+            assertEquals(
+                EngineError.ContentChanged,
+                (engine.state.value as EngineState.Error).error,
+            )
+            // The first failure re-resolves once; the second maps to the error.
+            synchronized(resolver) { assertEquals(listOf(item to 0, item to 1), resolver.calls) }
+        }
+    }
+
+    @Test
     fun anOutputWriteFailurePublishesDeviceLostAndDiscardsTheOutput() {
         val failing = FakeOutput(FailOn.WRITE, NdOutputException.E_DEVICE)
         engine(output = { failing }).use { engine ->
