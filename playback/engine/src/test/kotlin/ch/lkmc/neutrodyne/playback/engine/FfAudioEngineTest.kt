@@ -557,10 +557,7 @@ class FfAudioEngineTest {
         engine(output = { FakeOutput().also { outputs += it } }).use { engine ->
             engine.setWindow(listOf(item), 0, null)
             engine.play()
-            await("ready", timeoutMs = 30_000L) {
-                assertHealthy(engine)
-                engine.state.value is EngineState.Ready
-            }
+            awaitReadyWithDump(engine)
             engine.onDeviceRemoved()
             await("output error", timeoutMs = 30_000L) { engine.state.value is EngineState.Error }
             assertEquals(1, outputs.size)
@@ -568,6 +565,23 @@ class FfAudioEngineTest {
             engine.setWindow(listOf(item), 0, null)
             await("the next play opens a fresh output") { outputs.size == 2 }
         }
+    }
+
+    /** Waits for Ready, dumping the engine threads when the CI runner starves them. */
+    private fun awaitReadyWithDump(engine: FfAudioEngine) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+        while (System.nanoTime() < deadline) {
+            if (engine.state.value is EngineState.Ready) return
+            assertHealthy(engine)
+            Thread.sleep(2)
+        }
+        Thread.getAllStackTraces().forEach { (thread, stack) ->
+            if (thread.name.startsWith("nd-")) {
+                println("DEBUG thread ${thread.name} state=${thread.state}")
+                stack.forEach { println("DEBUG   at $it") }
+            }
+        }
+        throw AssertionError("timed out waiting for ready: ${engine.state.value}")
     }
 
     /** The engine's output seam, driven by the fault tests. */
