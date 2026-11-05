@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.database.SyncStateDao
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
@@ -29,6 +30,9 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.MergeSummary
+import ch.lkmc.neutrodyne.core.model.MergeValueOrigin
+import ch.lkmc.neutrodyne.core.model.MergedField
+import ch.lkmc.neutrodyne.core.model.MergedRecord
 import ch.lkmc.neutrodyne.core.model.NetworkPolicy
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
@@ -42,6 +46,7 @@ import ch.lkmc.neutrodyne.feeds.backup.OverridesV1
 import ch.lkmc.neutrodyne.feeds.backup.PodcastV1
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import dev.zacsweers.metro.Inject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.uuid.Uuid
 
 /**
@@ -50,8 +55,14 @@ import kotlin.uuid.Uuid
  * deleted, matched podcasts' state/position rows and the Up next/session context cleared
  * per [RestoreCategory]), the credential step and transaction A (groups, podcasts, aliases,
  * scope settings, memberships). Episode lines, `queue.json` and `settings.json` are the
- * later phases; the `LINK_*` policies are MS2's first-link reuse of this routine and are
- * refused until then.
+ * later phases.
+ *
+ * The `LINK_*` policies are the First-link column of the rules table (MS2): the same ladders
+ * with ID adoption (a matched podcast takes the record's `syncId`, a `nameKey`-matched group
+ * the record's `uuid`), new groups and members keeping the record's order keys, and every
+ * transaction inside [SyncStateDao.withApplying] so nothing is captured implicitly. Link
+ * policies stage no credentials and report their per-field winners through [onApplied]
+ * (05 First-link metadata) instead of writing settings or secrets.
  *
  * The credential step holds `CredentialCommitCoordinator` from the `SecretStore.put`s until
  * transaction A commits, so 02's maintenance sweep cannot delete a just-stored credential in
@@ -75,24 +86,34 @@ internal class RestoreMerger(
     private val podcastDao get() = db.podcastDao()
     private val groupDao get() = db.groupDao()
     private val scopeDao get() = db.scopeSettingsDao()
+    private val outbox get() = db.syncOutboxDao()
 
     /**
-     * Writes [staged]'s library rows under [policy]'s Merge and Replace rules; [progress]
-     * reports `(done, total)` once per staged podcast and canonical group. `LINK_*` policies
-     * are not supported in M3. Returns the [LibraryMergeResult] the episode phase must
-     * attach through — its `p`/group-`uuid` maps are the settled identities: the matches
-     * ran before any write, so live re-derivation cannot reproduce them once a later
-     * staged row commits.
+     * Writes [staged]'s library rows under [policy]'s column of the rules table; [progress]
+     * reports `(done, total)` once per staged podcast and canonical group. Returns the
+     * [LibraryMergeResult] the episode phase must attach through — its `p`/group-`uuid` maps
+     * are the settled identities: the matches ran before any write, so live re-derivation
+     * cannot reproduce them once a later staged row committed.
+     *
+     * [captureWithBackupTimes] serves a Merge restore on a linked device (05 Restore while
+     * linked): every transaction runs inside `withApplying` and each value the restore
+     * changed is recorded with `captureAt` at the backup's own timestamps, presence fields
+     * with a fresh literal tick. [onApplied] (link policies) receives per-field winners
+     * inside transaction A.
      */
     suspend fun mergeLibrary(
         staged: StagedLibrary,
         policy: MergePolicy,
         categories: Set<RestoreCategory>,
+        captureWithBackupTimes: Boolean = false,
         progress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        onApplied: (suspend (MergedRecord) -> Unit)? = null,
     ): LibraryMergeResult {
-        require(policy == MergePolicy.RESTORE_MERGE || policy == MergePolicy.RESTORE_REPLACE) {
-            "mergeLibrary supports RESTORE_MERGE and RESTORE_REPLACE; $policy lands with MS2"
-        }
+        val link = policy == MergePolicy.LINK_MERGE || policy == MergePolicy.LINK_REPLACE
+        // Linked writes (link policies, linked restore) suppress the capture triggers; the
+        // explicit captures below still land — captureAt/captureLiteral answer to `enabled`
+        // alone, never `applying`.
+        val suppressCapture = link || captureWithBackupTimes
         val library = staged.library()
         val now = clock.now()
 
@@ -107,15 +128,21 @@ internal class RestoreMerger(
         // is validated and the rewrite fallback chosen here, so a malformed `orderKey`/`ok`
         // can neither persist nor abort the restore after the unsubscribes have run.
         val orderKeyPlan =
-            if (policy == MergePolicy.RESTORE_REPLACE) {
+            if (policy == MergePolicy.RESTORE_REPLACE || policy == MergePolicy.LINK_REPLACE) {
                 planReplaceOrderKeys(stagedGroups)
             } else {
                 ReplaceOrderKeys(emptyMap(), emptyMap())
             }
 
         val deletedGroupUuids =
-            if (policy == MergePolicy.RESTORE_REPLACE) {
-                replacePreStep(podcastMatches.values.filterNotNull().toSet(), matchedGroupIds, categories, now)
+            if (policy == MergePolicy.RESTORE_REPLACE || policy == MergePolicy.LINK_REPLACE) {
+                replacePreStep(
+                    podcastMatches.values.filterNotNull().toSet(),
+                    matchedGroupIds,
+                    categories,
+                    now,
+                    suppressCapture,
+                )
             } else {
                 emptyList()
             }
@@ -133,75 +160,114 @@ internal class RestoreMerger(
         val total = stagedPodcasts.size + stagedGroups.count { it.foldedInto == null }
 
         coordinator.withCredentialCommit {
-            restoreCredentials(library.credentials, policy, credentialIds)
+            if (!link) restoreCredentials(library.credentials, policy, credentialIds)
             db.withWriteTransaction {
-                // Replace frees the nameKeys of every surviving local group first, so a pair
-                // of groups swapping names cannot hit the unique index mid-rewrite, then
-                // clears the join table — surviving memberships are rebuilt exactly (05).
-                if (policy == MergePolicy.RESTORE_REPLACE) {
-                    val parked =
-                        stagedGroups.flatMap { group ->
-                            listOfNotNull(group.localId) + group.absorbedLocalIds
-                        }
-                    backupDao.parkGroupNameKeys(parked)
-                    backupDao.clearGroupMembers()
-                }
-
-                // Merge appends new groups after the local ones in backup order (05).
-                var lastGroupKey: String? = groupDao.lastGroupOrderKey()
-                for (group in stagedGroups) {
-                    if (group.foldedInto != null) continue
-                    val localId =
-                        group.localId
-                            ?: run {
-                                val orderKey =
-                                    if (policy == MergePolicy.RESTORE_REPLACE) {
-                                        orderKeyPlan.groups.getValue(group)
-                                    } else {
-                                        orderKeys.after(lastGroupKey).also { lastGroupKey = it }
-                                    }
-                                groupsAdded++
-                                insertGroup(group, orderKey, staged.createdAtMs, now, policy)
+                val block: suspend () -> Unit = {
+                    // Replace frees the nameKeys of every surviving local group first, so a
+                    // pair of groups swapping names cannot hit the unique index mid-rewrite,
+                    // then clears the join table — surviving memberships are rebuilt exactly.
+                    if (policy == MergePolicy.RESTORE_REPLACE || policy == MergePolicy.LINK_REPLACE) {
+                        val parked =
+                            stagedGroups.flatMap { group ->
+                                listOfNotNull(group.localId) + group.absorbedLocalIds
                             }
-                    group.resolvedId = localId
-                    if (group.localId != null) {
-                        groupsMatched++
-                        if (policy == MergePolicy.RESTORE_REPLACE) {
-                            replaceGroup(
-                                group,
-                                localId,
-                                orderKeyPlan.groups.getValue(group),
-                                now,
-                                uuidChanges,
-                            )
+                        backupDao.parkGroupNameKeys(parked)
+                        backupDao.clearGroupMembers()
+                    }
+
+                    // Merge appends new groups after the local ones in backup order (05).
+                    var lastGroupKey: String? = groupDao.lastGroupOrderKey()
+                    for (group in stagedGroups) {
+                        if (group.foldedInto != null) continue
+                        val localId =
+                            group.localId
+                                ?: run {
+                                    val orderKey =
+                                        if (policy == MergePolicy.RESTORE_REPLACE ||
+                                            policy == MergePolicy.LINK_REPLACE
+                                        ) {
+                                            orderKeyPlan.groups.getValue(group)
+                                        } else if (link) {
+                                            // The First-link column: a new group keeps the
+                                            // record's key when it is valid.
+                                            recordOrderKey(group.primary.orderKey, lastGroupKey)
+                                        } else {
+                                            orderKeys.after(lastGroupKey)
+                                        }
+                                    lastGroupKey = orderKey
+                                    groupsAdded++
+                                    val inserted = insertGroup(group, orderKey, staged.createdAtMs, now, policy)
+                                    if (captureWithBackupTimes) captureNewGroup(inserted)
+                                    inserted
+                                }
+                        group.resolvedId = localId
+                        if (group.localId != null) {
+                            groupsMatched++
+                            when (policy) {
+                                MergePolicy.RESTORE_REPLACE, MergePolicy.LINK_REPLACE -> {
+                                    replaceGroup(
+                                        group,
+                                        localId,
+                                        orderKeyPlan.groups.getValue(group),
+                                        now,
+                                        uuidChanges,
+                                    )
+                                }
+
+                                MergePolicy.LINK_MERGE -> {
+                                    adoptGroupUuid(group, localId, uuidChanges)
+                                }
+
+                                else -> {}
+                            }
                         }
+                        writeGroupSettings(localId, group.primary.settings, policy)
+                        onApplied?.invoke(groupRecord(group, localId, staged.createdAtMs, policy))
+                        progress(++done, total)
                     }
-                    writeGroupSettings(localId, group.primary.settings, policy)
-                    progress(++done, total)
-                }
 
-                for (podcast in stagedPodcasts) {
-                    var localId = podcastMatches[podcast]
-                    // The staged list was deduped by key; a same-key row appearing since the
-                    // match pass (or a second staged copy) still resolves to the live row.
-                    if (localId == null) localId = podcastDao.byFeedKey(podcast.key)?.id
-                    if (localId == null) {
-                        localId = insertPodcast(podcast, now, credentialIds)
-                        podcastsAdded++
-                        insertedPodcastIds += localId
-                    } else {
-                        podcastsMatched++
-                        applyMatchedPodcast(localId, podcast, policy)
+                    for (podcast in stagedPodcasts) {
+                        var localId = podcastMatches[podcast]
+                        // The staged list was deduped by key; a same-key row appearing since the
+                        // match pass (or a second staged copy) still resolves to the live row.
+                        if (localId == null) localId = podcastDao.byFeedKey(podcast.key)?.id
+                        val matched = localId != null
+                        if (localId == null) {
+                            localId = insertPodcast(podcast, now, credentialIds)
+                            podcastsAdded++
+                            insertedPodcastIds += localId
+                            if (captureWithBackupTimes) captureNewPodcast(localId, podcast)
+                        } else {
+                            podcastsMatched++
+                            applyMatchedPodcast(localId, podcast, policy)
+                            if (link) adoptPodcastSyncId(localId, podcast)
+                        }
+                        podcastIdByKey[podcast.key] = localId
+                        for (alias in podcast.aliases) podcastIdByKey.putIfAbsent(alias, localId)
+                        recordAmbiguousGuids(localId, podcast)
+                        restoreAliases(localId, podcast.aliases, staged.createdAtMs, policy)
+                        writePodcastSettings(localId, podcast.settings, policy)
+                        onApplied?.invoke(podcastRecord(localId, podcast, policy, matched))
+                        progress(++done, total)
                     }
-                    podcastIdByKey[podcast.key] = localId
-                    for (alias in podcast.aliases) podcastIdByKey.putIfAbsent(alias, localId)
-                    recordAmbiguousGuids(localId, podcast)
-                    restoreAliases(localId, podcast.aliases, staged.createdAtMs)
-                    writePodcastSettings(localId, podcast.settings, policy)
-                    progress(++done, total)
-                }
 
-                writeMembers(stagedGroups, policy, staged.createdAtMs, podcastIdByKey, now, orderKeyPlan.members)
+                    writeMembers(
+                        stagedGroups,
+                        policy,
+                        staged.createdAtMs,
+                        podcastIdByKey,
+                        now,
+                        orderKeyPlan.members,
+                        captureWithBackupTimes,
+                    )
+                }
+                // Linked execution suppresses the triggers (05): link policies and a linked
+                // Merge restore run transaction A inside `withApplying`.
+                if (suppressCapture) {
+                    db.syncStateDao().withApplying { block() }
+                } else {
+                    block()
+                }
             }
         }
 
@@ -277,40 +343,57 @@ internal class RestoreMerger(
      * use case (cascade, credential sweep and reschedule, D24); local groups no staged group
      * matched are deleted without undo. HISTORY clears the matched podcasts' state and
      * position rows — one transaction per podcast — so the backup's rows can land verbatim;
-     * UP_NEXT clears `queue_entry` and the session context.
+     * UP_NEXT clears `queue_entry` and the session context. Linked execution wraps every
+     * transaction in `withApplying`.
      */
     private suspend fun replacePreStep(
         matchedPodcastIds: Set<Long>,
         matchedGroupIds: Set<Long>,
         categories: Set<RestoreCategory>,
         now: Long,
+        suppressCapture: Boolean,
     ): List<String> {
         val localOnly = podcastDao.allForExport().map { it.id }.filter { it !in matchedPodcastIds }
-        if (localOnly.isNotEmpty()) unsubscribe(localOnly)
+        if (localOnly.isNotEmpty()) {
+            if (suppressCapture) {
+                db.withWriteTransaction { db.syncStateDao().withApplying { unsubscribe(localOnly) } }
+            } else {
+                unsubscribe(localOnly)
+            }
+        }
 
         val deletedUuids = mutableListOf<String>()
         db.withWriteTransaction {
-            for (group in groupDao.groupsInOrder()) {
-                if (group.id in matchedGroupIds) continue
-                groupDao.clearGroupContext(group.id, now)
-                groupDao.deleteGroup(group.id)
-                deletedUuids += group.uuid
+            val block: suspend () -> Unit = {
+                for (group in groupDao.groupsInOrder()) {
+                    if (group.id in matchedGroupIds) continue
+                    groupDao.clearGroupContext(group.id, now)
+                    groupDao.deleteGroup(group.id)
+                    deletedUuids += group.uuid
+                }
             }
+            if (suppressCapture) db.syncStateDao().withApplying { block() } else block()
         }
 
         if (RestoreCategory.HISTORY in categories) {
             for (podcastId in matchedPodcastIds) {
                 db.withWriteTransaction {
-                    backupDao.deleteStateOfPodcast(podcastId)
-                    backupDao.deletePositionsOfPodcast(podcastId)
+                    val block: suspend () -> Unit = {
+                        backupDao.deleteStateOfPodcast(podcastId)
+                        backupDao.deletePositionsOfPodcast(podcastId)
+                    }
+                    if (suppressCapture) db.syncStateDao().withApplying { block() } else block()
                 }
             }
         }
 
         if (RestoreCategory.UP_NEXT in categories) {
             db.withWriteTransaction {
-                db.queueDao().clear()
-                db.playSessionDao().clearContext(now)
+                val block: suspend () -> Unit = {
+                    db.queueDao().clear()
+                    db.playSessionDao().clearContext(now)
+                }
+                if (suppressCapture) db.syncStateDao().withApplying { block() } else block()
             }
         }
         return deletedUuids
@@ -470,9 +553,13 @@ internal class RestoreMerger(
         warnSmartGroup(primary)
         return groupDao.insert(
             PodcastGroupEntity(
-                // 05 IDs: a restore adopts a backup uuid only in Replace — under Merge a
-                // locally-created group keeps a fresh one.
-                uuid = if (policy == MergePolicy.RESTORE_REPLACE) primary.uuid else Uuid.random().toString(),
+                // 05 IDs: a restore adopts a backup uuid only in Replace; a link policy
+                // adopts the record's uuid always — the record addresses the group by it.
+                uuid =
+                    when (policy) {
+                        MergePolicy.RESTORE_REPLACE, MergePolicy.LINK_MERGE, MergePolicy.LINK_REPLACE -> primary.uuid
+                        else -> Uuid.random().toString()
+                    },
                 name = group.name,
                 nameKey = group.nameKey,
                 orderKey = orderKey,
@@ -580,20 +667,24 @@ internal class RestoreMerger(
             ?.id
     }
 
-    /** 05's user-column row for a matched podcast: Merge keeps local, Replace takes the backup's. */
+    /**
+     * 05's user-column row for a matched podcast: Merge keeps local, Replace takes the
+     * backup's; the link policies follow their columns (LINK_MERGE as Merge — the field
+     * clocks decide after the upload — LINK_REPLACE as Replace).
+     */
     private suspend fun applyMatchedPodcast(
         localId: Long,
         podcast: PodcastV1,
         policy: MergePolicy,
     ) {
         when (policy) {
-            MergePolicy.RESTORE_MERGE -> {
+            MergePolicy.RESTORE_MERGE, MergePolicy.LINK_MERGE -> {
                 if (podcast.customTitle != null && podcastDao.byId(localId)?.customTitle == null) {
                     podcastDao.setCustomTitle(localId, podcast.customTitle)
                 }
             }
 
-            MergePolicy.RESTORE_REPLACE -> {
+            MergePolicy.RESTORE_REPLACE, MergePolicy.LINK_REPLACE -> {
                 backupDao.replacePodcastUserFields(
                     podcastId = localId,
                     customTitle = podcast.customTitle,
@@ -602,9 +693,6 @@ internal class RestoreMerger(
                     youtubeVariants = podcast.youtubeVariants ?: DEFAULT_YOUTUBE_VARIANTS,
                 )
             }
-
-            // LINK_* never reaches a write — mergeLibrary refuses those policies.
-            else -> {}
         }
     }
 
@@ -620,18 +708,29 @@ internal class RestoreMerger(
         writes.recordAmbiguousGuids(localId, guids)
     }
 
-    /** 05: aliases `INSERT OR IGNORE` with reason `RESTORE`, never equal to any `feedKey`. */
+    /**
+     * 05: aliases `INSERT OR IGNORE`, never equal to any `feedKey`. A restore files them
+     * under `RESTORE`; a link policy under `SYNC` — the record's `feedKeys` are the server's
+     * alias evidence (10 Merge step 2).
+     */
     private suspend fun restoreAliases(
         localId: Long,
         aliases: List<String>,
         addedAt: Long,
+        policy: MergePolicy,
     ) {
+        val reason =
+            if (policy == MergePolicy.LINK_MERGE || policy == MergePolicy.LINK_REPLACE) {
+                AliasReason.SYNC
+            } else {
+                AliasReason.RESTORE
+            }
         val rows =
             aliases.distinct().mapNotNull { url ->
                 if (podcastDao.byFeedKey(url) != null || podcastDao.aliasOwner(url) != null) {
                     return@mapNotNull null
                 }
-                PodcastUrlAliasEntity(url, localId, AliasReason.RESTORE, addedAt)
+                PodcastUrlAliasEntity(url, localId, reason, addedAt)
             }
         if (rows.isNotEmpty()) podcastDao.insertAliases(rows)
     }
@@ -663,8 +762,8 @@ internal class RestoreMerger(
 
     /**
      * Merge: a local non-null column wins, else the backup's; Replace: the backup row replaces
-     * the local row (an absent/empty staged row deletes it). LINK_* never reaches a write —
-     * mergeLibrary refuses those policies.
+     * the local row (an absent/empty staged row deletes it). The link policies follow their
+     * columns of the rules table.
      */
     private suspend fun writeScopeSettings(
         local: ScopeOverrides?,
@@ -674,18 +773,16 @@ internal class RestoreMerger(
         delete: suspend () -> Unit,
     ) {
         when (policy) {
-            MergePolicy.RESTORE_MERGE -> {
+            MergePolicy.RESTORE_MERGE, MergePolicy.LINK_MERGE -> {
                 if (staged == null) return
                 val merged = mergeOverrides(local, staged.toScopeOverrides())
                 if (merged != local && merged != ScopeOverrides()) upsert(merged)
             }
 
-            MergePolicy.RESTORE_REPLACE -> {
+            MergePolicy.RESTORE_REPLACE, MergePolicy.LINK_REPLACE -> {
                 val overrides = staged?.toScopeOverrides() ?: ScopeOverrides()
                 if (overrides == ScopeOverrides()) delete() else upsert(overrides)
             }
-
-            else -> {}
         }
     }
 
@@ -693,7 +790,9 @@ internal class RestoreMerger(
      * Memberships (05): Merge unions with `OrderKey.after(last)` keys in backup order (the
      * table's orderKey row assigns staged keys to Replace writes only); Replace replays the
      * member list with [replaceMemberKeys]'s verbatim-or-rewrite keys against the join table
-     * the pre-transaction cleared.
+     * the pre-transaction cleared. The First-link column lets a new member keep the record's
+     * own key when it is valid. A linked Merge restore captures each new membership's
+     * presence with a fresh literal tick (05 Restore while linked).
      */
     private suspend fun writeMembers(
         groups: List<StagedGroup>,
@@ -702,16 +801,23 @@ internal class RestoreMerger(
         podcastIdByKey: Map<String, Long>,
         now: Long,
         replaceMemberKeys: Map<StagedGroup, List<String>>,
+        captureWithBackupTimes: Boolean = false,
     ) {
+        val link = policy == MergePolicy.LINK_MERGE || policy == MergePolicy.LINK_REPLACE
         val touched = HashSet<Long>()
         for (group in groups) {
             if (group.foldedInto != null) continue
             val groupId = group.resolvedId ?: continue
-            if (policy == MergePolicy.RESTORE_MERGE) {
+            if (policy == MergePolicy.RESTORE_MERGE || policy == MergePolicy.LINK_MERGE) {
                 var lastKey = groupDao.lastMemberOrderKey(groupId)
                 for (member in group.members.values) {
                     val podcastId = memberPodcastId(member.podcastKey, podcastIdByKey) ?: continue
-                    val key = orderKeys.after(lastKey)
+                    val key =
+                        if (link) {
+                            recordOrderKey(member.orderKey, lastKey)
+                        } else {
+                            orderKeys.after(lastKey)
+                        }
                     val inserted =
                         groupDao.insertMember(
                             PodcastGroupMemberEntity(
@@ -726,6 +832,9 @@ internal class RestoreMerger(
                     if (inserted != -1L) {
                         lastKey = key
                         touched += groupId
+                        if (captureWithBackupTimes) {
+                            captureNewMember(groupId, podcastId, member.podcastKey)
+                        }
                     }
                 }
             } else {
@@ -744,6 +853,151 @@ internal class RestoreMerger(
             }
         }
         if (touched.isNotEmpty()) groupDao.touchUpdatedAt(touched, now)
+    }
+
+    /**
+     * The record's own order key when the generator's grammar accepts it, else the next key
+     * after [lastKey] (05 First-link column: "new items keep the record's key").
+     */
+    private fun recordOrderKey(
+        wanted: String?,
+        lastKey: String?,
+    ): String {
+        if (wanted != null && runCatching { orderKeys.after(wanted) }.isSuccess) return wanted
+        return orderKeys.after(lastKey)
+    }
+
+    /**
+     * First-link ID adoption (10 Redirects on clients): a local group matched by `nameKey`
+     * takes the record's `uuid`, so later records address it directly; the channel
+     * carry-over is recorded for after the commit. Matched by `uuid` the row already has it.
+     */
+    private suspend fun adoptGroupUuid(
+        group: StagedGroup,
+        localId: Long,
+        uuidChanges: MutableList<UuidChange>,
+    ) {
+        if (!group.matchedByNameKey) return
+        val local = groupDao.groupById(localId) ?: return
+        if (local.uuid == group.primary.uuid) return
+        if (backupDao.matchGroupByUuid(group.primary.uuid) != null) return
+        backupDao.updateGroup(local.copy(uuid = group.primary.uuid))
+        uuidChanges += UuidChange(local.uuid, group.primary.uuid)
+    }
+
+    /** First-link ID adoption: a local podcast matched by key or alias takes the record's `syncId`. */
+    private suspend fun adoptPodcastSyncId(
+        localId: Long,
+        podcast: PodcastV1,
+    ) {
+        val syncId = podcast.syncId ?: return
+        val local = podcastDao.byId(localId) ?: return
+        if (local.syncId == syncId) return
+        podcastDao.adoptSyncId(localId, syncId)
+    }
+
+    /** 05 Restore while linked: an inserted podcast's captures — presence fresh, the rest at `subscribedAt`. */
+    private suspend fun captureNewPodcast(
+        localId: Long,
+        podcast: PodcastV1,
+    ) {
+        val row = podcastDao.byId(localId) ?: return
+        outbox.captureLiteral(COLL_PODCAST, row.syncId, "subscribed", "true")
+        val at = podcast.subscribedAt
+        outbox.captureAt(COLL_PODCAST, row.syncId, "feedUrl", at, JsonPrimitive(podcast.feedUrl).toString())
+        outbox.captureAt(COLL_PODCAST, row.syncId, "title", at, JsonPrimitive(podcast.title).toString())
+        outbox.captureAt(COLL_PODCAST, row.syncId, "subscribedAt", at, JsonPrimitive(at).toString())
+    }
+
+    /** 05 Restore while linked: a new group's captures — presence fresh, the name at its `createdAt`. */
+    private suspend fun captureNewGroup(localId: Long) {
+        val row = groupDao.groupById(localId) ?: return
+        outbox.captureLiteral(COLL_GROUP, row.uuid, "deleted", "false")
+        val at = row.createdAt
+        outbox.captureAt(COLL_GROUP, row.uuid, "name", at, JsonPrimitive(row.name).toString())
+    }
+
+    /** 05 Restore while linked: a new membership's presence capture with a fresh tick. */
+    private suspend fun captureNewMember(
+        groupId: Long,
+        podcastId: Long,
+        podcastKey: String,
+    ) {
+        val groupUuid = groupDao.groupById(groupId)?.uuid ?: return
+        val syncId = podcastDao.byId(podcastId)?.syncId ?: podcastDao.byFeedKey(podcastKey)?.syncId ?: return
+        outbox.captureLiteral(COLL_MEMBER, groupUuid + syncId, "in", "true")
+    }
+
+    /** [onApplied] for one staged group: the identity fields with their winners (05). */
+    private suspend fun groupRecord(
+        group: StagedGroup,
+        localId: Long,
+        stagedAtMs: Long,
+        policy: MergePolicy,
+    ): MergedRecord {
+        val primary = group.primary
+        return if (group.localId != null && policy == MergePolicy.LINK_MERGE) {
+            val local = groupDao.groupById(localId)
+            MergedRecord(
+                collection = COLL_GROUP,
+                recordId = local?.uuid ?: primary.uuid,
+                fields =
+                    mapOf(
+                        "name" to
+                            MergedField(
+                                JsonPrimitive(local?.name ?: group.name),
+                                local?.updatedAt ?: stagedAtMs,
+                                MergeValueOrigin.LOCAL,
+                            ),
+                        "deleted" to
+                            MergedField(JsonPrimitive(false), local?.updatedAt ?: stagedAtMs, MergeValueOrigin.LOCAL),
+                    ),
+            )
+        } else {
+            MergedRecord(
+                collection = COLL_GROUP,
+                recordId = primary.uuid,
+                fields =
+                    mapOf(
+                        "name" to
+                            MergedField(
+                                JsonPrimitive(group.name),
+                                primary.createdAt ?: stagedAtMs,
+                                MergeValueOrigin.STAGED,
+                            ),
+                        "deleted" to
+                            MergedField(JsonPrimitive(false), primary.createdAt ?: stagedAtMs, MergeValueOrigin.STAGED),
+                    ),
+            )
+        }
+    }
+
+    /** [onApplied] for one staged podcast: the identity fields with their winners (05). */
+    private suspend fun podcastRecord(
+        localId: Long,
+        podcast: PodcastV1,
+        policy: MergePolicy,
+        matched: Boolean,
+    ): MergedRecord {
+        val row = podcastDao.byId(localId)
+        val rid = row?.syncId ?: podcast.syncId.orEmpty()
+        val localWinner = matched && policy == MergePolicy.LINK_MERGE && row != null
+        val fields =
+            if (localWinner) {
+                mapOf(
+                    "subscribed" to MergedField(JsonPrimitive(true), row.subscribedAt, MergeValueOrigin.LOCAL),
+                    "feedUrl" to MergedField(JsonPrimitive(row.feedUrl), row.subscribedAt, MergeValueOrigin.LOCAL),
+                    "title" to MergedField(JsonPrimitive(row.title), row.subscribedAt, MergeValueOrigin.LOCAL),
+                )
+            } else {
+                mapOf(
+                    "subscribed" to MergedField(JsonPrimitive(true), podcast.subscribedAt, MergeValueOrigin.STAGED),
+                    "feedUrl" to
+                        MergedField(JsonPrimitive(podcast.feedUrl), podcast.subscribedAt, MergeValueOrigin.STAGED),
+                    "title" to MergedField(JsonPrimitive(podcast.title), podcast.subscribedAt, MergeValueOrigin.STAGED),
+                )
+            }
+        return MergedRecord(collection = COLL_PODCAST, recordId = rid, fields = fields)
     }
 
     /** A member's `podcastKey` → the restored row's id, else a live feed-key lookup. */
@@ -784,6 +1038,11 @@ internal class RestoreMerger(
         const val TAG = "RestoreMerger"
         const val DEFAULT_GROUP_NAME = "Group"
         const val DEFAULT_YOUTUBE_VARIANTS = 1
+
+        /** Sync collection wire names (10) for the explicit captures of a linked restore. */
+        const val COLL_PODCAST = "podcast"
+        const val COLL_GROUP = "group"
+        const val COLL_MEMBER = "member"
     }
 }
 

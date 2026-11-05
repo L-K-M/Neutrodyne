@@ -62,6 +62,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -216,7 +217,7 @@ class BackupRepositoryImplTest {
             stager = stager,
             merger = merger,
             episodes = episodeMerger,
-            settingsMerge = RestoreSettingsMerge(settings),
+            settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort()),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,
