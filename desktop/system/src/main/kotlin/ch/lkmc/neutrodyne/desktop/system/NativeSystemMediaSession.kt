@@ -21,7 +21,13 @@ import java.awt.Toolkit
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Windows/macOS spike transport. It owns its poller; the production graph stays unavailable. */
+/**
+ * The Windows/macOS [SystemMediaSession] over `ndmedia`: one process-wide native session
+ * whose events this poller drains (the shim never enters the JVM). Commands surface on
+ * [commands]; suspend, resume and route notices on [systemEvents] feed `OsPowerMonitor` and
+ * later the route monitor; [failure] reports the last poll or publish failure without
+ * stopping playback (11 OS-integration failure modes).
+ */
 class NativeSystemMediaSession private constructor(
     private val native: NativeMediaSession,
 ) : SystemMediaSession {
@@ -48,17 +54,10 @@ class NativeSystemMediaSession private constructor(
                     delay(POLL_MS)
                     continue
                 }
-                val command =
-                    when (event.kind) {
-                        NativeSessionEventKind.PLAY -> RemoteCommand.Play
-                        NativeSessionEventKind.PAUSE -> RemoteCommand.Pause
-                        NativeSessionEventKind.TOGGLE -> RemoteCommand.Toggle
-                        NativeSessionEventKind.NEXT -> RemoteCommand.Next
-                        NativeSessionEventKind.PREVIOUS -> RemoteCommand.Previous
-                        NativeSessionEventKind.SEEK -> RemoteCommand.SeekTo(event.value)
-                        else -> null
-                    }
-                if (command != null) commandChannel.send(command) else eventChannel.send(event)
+                when (val routing = routeNativeEvent(event.kind)) {
+                    is NativeEventRouting.Command -> commandChannel.send(routing.command)
+                    NativeEventRouting.SystemEvent -> eventChannel.send(event)
+                }
             }
         }
     }
@@ -131,3 +130,35 @@ class MacNowPlayingSession private constructor(
         }
     }
 }
+
+/** How one polled native session event leaves the session: a command or a system event. */
+internal sealed interface NativeEventRouting {
+    data class Command(val command: RemoteCommand) : NativeEventRouting
+
+    data object SystemEvent : NativeEventRouting
+}
+
+/**
+ * Classifies a native session event kind for the poll loop. Exhaustive on purpose: a kind
+ * added to the native enum without a decision here is a compile error in this module, not a
+ * silently dropped event (the MD0 review's "unknown event" finding). The *raw* code-to-kind
+ * parse — where an unknown native code really appears — is `NativeMediaSession.poll` in
+ * `:playback:native`, out of this milestone's reach; 11's dated note records the residual.
+ */
+internal fun routeNativeEvent(
+    kind: NativeSessionEventKind,
+    seekValueMs: Long = 0,
+): NativeEventRouting =
+    when (kind) {
+        NativeSessionEventKind.PLAY -> NativeEventRouting.Command(RemoteCommand.Play)
+        NativeSessionEventKind.PAUSE -> NativeEventRouting.Command(RemoteCommand.Pause)
+        NativeSessionEventKind.TOGGLE -> NativeEventRouting.Command(RemoteCommand.Toggle)
+        NativeSessionEventKind.NEXT -> NativeEventRouting.Command(RemoteCommand.Next)
+        NativeSessionEventKind.PREVIOUS -> NativeEventRouting.Command(RemoteCommand.Previous)
+        NativeSessionEventKind.SEEK -> NativeEventRouting.Command(RemoteCommand.SeekTo(seekValueMs))
+        NativeSessionEventKind.SUSPEND,
+        NativeSessionEventKind.RESUME,
+        NativeSessionEventKind.REMOVED,
+        NativeSessionEventKind.DEFAULT_CHANGED,
+        -> NativeEventRouting.SystemEvent
+    }

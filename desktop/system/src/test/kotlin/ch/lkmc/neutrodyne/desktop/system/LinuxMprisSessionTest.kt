@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -9,24 +10,26 @@ import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
+import org.freedesktop.dbus.exceptions.DBusException
 import org.freedesktop.dbus.interfaces.DBusInterface
+import org.freedesktop.dbus.interfaces.DBusSigHandler
 import org.freedesktop.dbus.interfaces.Properties
+import org.freedesktop.dbus.messages.DBusSignal
 import org.freedesktop.dbus.types.Variant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
-import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * MD0 AC4 on Linux: `dbus-run-session` hands the test JVM a private session
- * bus through `DBUS_SESSION_BUS_ADDRESS`, and the exported MPRIS object proves
- * it answers `org.freedesktop.DBus.Properties` queries and delivers media-key
- * method calls as [RemoteCommand]s — the same proof desktop environments get,
- * without needing a desktop. The test skips when no session bus address is
- * set: CI wraps the Gradle invocation in `dbus-run-session` on Linux, where
- * MPRIS is the media-key contract. Starting the daemon here would trip the
- * process-spawn rule (01 banned APIs), so the runner owns it.
+ * MD2 AC1 on Linux: `dbus-run-session` hands the test JVM a private session bus through
+ * `DBUS_SESSION_BUS_ADDRESS`, and the exported MPRIS object proves it answers
+ * `org.freedesktop.DBus.Properties` queries, signals `PropertiesChanged` for what a publish
+ * changed, clamps the published rate to the advertised window, and delivers media-key method
+ * calls as [RemoteCommand]s — the same proof desktop environments get, without needing a
+ * desktop. The test skips when no session bus address is set: CI wraps the Gradle invocation
+ * in `dbus-run-session` on Linux, where MPRIS is the media-key contract. Starting the daemon
+ * here would trip the process-spawn rule (01 banned APIs), so the runner owns it.
  */
 class LinuxMprisSessionTest {
     @Test(timeout = TEST_TIMEOUT_MS)
@@ -36,8 +39,9 @@ class LinuxMprisSessionTest {
             "no session bus: run under dbus-run-session (CI wraps the Linux Gradle steps)",
             address?.startsWith("unix:") == true,
         )
+        val shell = RecordingShell()
 
-        LinuxMprisSession.open(address).use { session ->
+        LinuxMprisSession.open(address, shell).use { session ->
             val received = ConcurrentLinkedQueue<RemoteCommand>()
             Thread({
                 runBlocking { session.commands.collect { received += it } }
@@ -66,6 +70,14 @@ class LinuxMprisSessionTest {
                     testNowPlaying().position.positionMs * US_PER_MS,
                     props.Get<Any?>(MprisNames.PLAYER, "Position"),
                 )
+                assertEquals(
+                    true,
+                    props.Get<Any?>(MprisNames.PLAYER, "CanRaise"),
+                )
+                assertEquals(
+                    true,
+                    props.Get<Any?>(MprisNames.PLAYER, "CanQuit"),
+                )
 
                 @Suppress("UNCHECKED_CAST")
                 val metadata =
@@ -78,6 +90,7 @@ class LinuxMprisSessionTest {
                 player.Seek(SEEK_US)
                 player.Next()
                 client.root().Raise()
+                client.root().Quit()
                 props.Set(
                     MprisNames.PLAYER,
                     "Rate",
@@ -88,6 +101,8 @@ class LinuxMprisSessionTest {
                 await("SeekTo") { received.any { it is RemoteCommand.SeekTo } }
                 await("Next") { received.contains(RemoteCommand.Next) }
                 await("SetRate") { received.contains(RemoteCommand.SetRate(SET_RATE.toFloat())) }
+                await("Raise") { shell.raises > 0 }
+                await("Quit") { shell.quits > 0 }
 
                 val seek = received.filterIsInstance<RemoteCommand.SeekTo>().last()
                 assertEquals(testNowPlaying().position.positionMs + SEEK_US / US_PER_MS, seek.positionMs)
@@ -96,6 +111,71 @@ class LinuxMprisSessionTest {
                     props.Get<Any?>(MprisNames.PLAYER, "Rate") as Double,
                     RATE_EPSILON,
                 )
+            }
+        }
+    }
+
+    @Test(timeout = TEST_TIMEOUT_MS)
+    fun aPublishClampsTheRateOntoTheAdvertisedWindow() {
+        val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")
+        assumeTrue("private session bus required", address?.startsWith("unix:") == true)
+
+        LinuxMprisSession.open(address).use { session ->
+            session.publish(
+                testNowPlaying().copy(position = testNowPlaying().position.copy(speed = ABOVE_MAX_RATE)),
+                SKIP_MS,
+                SKIP_MS,
+                SPEED_PRESETS,
+            )
+
+            DBusConnectionBuilder.forAddress(address).build().use { client ->
+                val props = client.properties()
+                assertEquals(
+                    MAX_RATE,
+                    props.Get<Any?>(MprisNames.PLAYER, "Rate") as Double,
+                    RATE_EPSILON,
+                )
+                assertEquals(
+                    MIN_RATE,
+                    props.Get<Any?>(MprisNames.PLAYER, "MinimumRate") as Double,
+                    RATE_EPSILON,
+                )
+                assertEquals(
+                    MAX_RATE,
+                    props.Get<Any?>(MprisNames.PLAYER, "MaximumRate") as Double,
+                    RATE_EPSILON,
+                )
+            }
+        }
+    }
+
+    @Test(timeout = TEST_TIMEOUT_MS)
+    fun aChangedPublishSignalsPropertiesChangedForWhatChanged() {
+        val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")
+        assumeTrue("private session bus required", address?.startsWith("unix:") == true)
+
+        LinuxMprisSession.open(address).use { session ->
+            session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
+            DBusConnectionBuilder.forAddress(address).build().use { client ->
+                val received = ConcurrentLinkedQueue<Properties.PropertiesChanged>()
+                client.addSigHandler(
+                    Properties.PropertiesChanged::class.java,
+                    DBusSigHandler { received += it },
+                )
+
+                // The AddMatch rule must reach the bus before the first signal is due.
+                Thread.sleep(MATCH_RULE_SETTLE_MS)
+                val paused = testNowPlaying().copy(isPlaying = false)
+                session.publish(paused, SKIP_MS, SKIP_MS, SPEED_PRESETS)
+                session.publish(paused, SKIP_MS, SKIP_MS, SPEED_PRESETS)
+
+                await("PropertiesChanged") { received.isNotEmpty() }
+                // The unchanged second publish adds no further signal.
+                val afterUnchanged = received.size
+                Thread.sleep(UNCHANGED_WAIT_MS)
+                assertEquals(afterUnchanged, received.size)
+                val changed = received.single().propertiesChanged
+                assertEquals("Paused", changed.getValue("PlaybackStatus").value)
             }
         }
     }
@@ -120,6 +200,26 @@ class LinuxMprisSessionTest {
         }
     }
 
+    @Test
+    fun openUriAnswersNotSupported() {
+        assumeTrue("private session bus required", System.getenv("DBUS_SESSION_BUS_ADDRESS") != null)
+        LinuxMprisSession.open().use { session ->
+            session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
+            DBusConnectionBuilder
+                .forAddress(System.getenv("DBUS_SESSION_BUS_ADDRESS"))
+                .build()
+                .use { client ->
+                    val failure =
+                        runCatching { client.player().OpenUri("https://example.test/x.mp3") }.exceptionOrNull()
+                    assertTrue(
+                        "expected org.freedesktop.DBus.Error.NotSupported, got $failure",
+                        failure is DBusException &&
+                            failure.message?.contains("NotSupported") == true,
+                    )
+                }
+        }
+    }
+
     private fun DBusConnection.properties(): Properties =
         getRemoteObject(MprisNames.BUS, MprisNames.PATH, Properties::class.java)
 
@@ -138,14 +238,35 @@ class LinuxMprisSessionTest {
         assertTrue("$what never arrived on the commands flow", until())
     }
 
+    private class RecordingShell : MprisShellActions {
+        var raises = 0
+            private set
+
+        var quits = 0
+            private set
+
+        override fun raise() {
+            raises++
+        }
+
+        override fun quit() {
+            quits++
+        }
+    }
+
     private companion object {
         const val US_PER_MS = 1_000L
         const val SKIP_MS = 30_000L
         const val SEEK_US = 15_000_000L
         const val SET_RATE = 2.0
+        const val MIN_RATE = 0.5
+        const val MAX_RATE = 3.0
+        const val ABOVE_MAX_RATE = 4.0f
         const val RATE_EPSILON = 0.001
         const val AWAIT_MS = 5_000L
         const val AWAIT_POLL_MS = 10L
+        const val MATCH_RULE_SETTLE_MS = 250L
+        const val UNCHANGED_WAIT_MS = 250L
         const val TEST_TIMEOUT_MS = 60_000L
         val SPEED_PRESETS = listOf(0.5f, 1f, 2f, 3f)
     }
@@ -161,10 +282,14 @@ internal interface MprisPlayerClient : DBusInterface {
     fun Seek(offset: Long)
 
     fun Next()
+
+    fun OpenUri(uri: String)
 }
 
 @Suppress("ktlint:standard:function-naming", "FunctionName")
 @DBusInterfaceName(MprisNames.ROOT)
 internal interface MprisRootClient : DBusInterface {
     fun Raise()
+
+    fun Quit()
 }
