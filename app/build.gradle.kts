@@ -72,6 +72,14 @@ android {
     sourceSets["test"].kotlin.srcDir("src/deviceSelectionTest/kotlin")
 }
 
+// KMP libraries have one resource variant. Keep all unit-test variants available,
+// but reject publication tasks when the test-only pseudo resource tree is selected.
+if (providers.gradleProperty("neutrodyne.pseudoLocales").orNull == "true") {
+    tasks
+        .matching { it.name in setOf("assembleRelease", "bundleRelease", "packageRelease", "signReleaseBundle") }
+        .configureEach { doFirst { error("Pseudo-locale resources are for verification builds only") } }
+}
+
 tasks.withType<Test>().configureEach {
     // The selection test invokes this negative control through the pinned runner itself.
     exclude("ch/lkmc/neutrodyne/DeviceTestSelectionTest\$FailureFixture.class")

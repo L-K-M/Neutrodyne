@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -28,11 +29,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,6 +78,11 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.HingeOrientation
+import ch.lkmc.neutrodyne.core.model.HingeState
+import ch.lkmc.neutrodyne.core.model.WindowHinge
+import ch.lkmc.neutrodyne.core.model.WindowPosture
+import ch.lkmc.neutrodyne.core.model.WindowRectDp
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -102,6 +110,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
@@ -301,10 +310,32 @@ private fun ReadyRoot(
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
             navChromeDp = navChromeDp,
-            // M4 uses the sheet at every width; MD1/M10 activate the side panel.
-            hasNowPlaying = false,
+            hasNowPlaying = state.hasNowPlaying,
             panelHidden = state.playerPanelHidden,
         )
+    val posture =
+        remember(windowInfo.windowPosture, density) {
+            WindowPosture(
+                windowInfo.windowPosture.hingeList
+                    .map { hinge ->
+                        val bounds = hinge.bounds
+                        WindowHinge(
+                            WindowRectDp(
+                                bounds.left / density.density,
+                                bounds.top / density.density,
+                                bounds.right / density.density,
+                                bounds.bottom / density.density,
+                            ),
+                            if (hinge.isVertical) HingeOrientation.VERTICAL else HingeOrientation.HORIZONTAL,
+                            if (hinge.isFlat) HingeState.FLAT else HingeState.HALF_OPENED,
+                            hinge.isSeparating,
+                        )
+                    }.toImmutableList(),
+            )
+        }
+    // Moving the same composition preserves its collectors, tabs and sheet state on resize.
+    val currentPlayer by rememberUpdatedState(slots.player)
+    val player = remember { movableContentOf<PlayerSlotState> { currentPlayer(it) } }
     // The pane directive keeps the library's spacing/hinge values; only the partition count is ours.
     val directive =
         remember(windowInfo, layout.partitions) {
@@ -439,7 +470,19 @@ private fun ReadyRoot(
                                 )
                             }
                             if (layout.playerPanel) {
-                                slots.player(PlayerSlotState(layout, navigateFromPlayer))
+                                Box(Modifier.width(if (windowWidthDp >= 1200) 412.dp else 360.dp)) {
+                                    player(
+                                        PlayerSlotState(
+                                            layout,
+                                            navigateFromPlayer,
+                                            windowWidthDp = windowWidthDp,
+                                            posture = posture,
+                                            expandRequest = expandRequest,
+                                            collapseRequest = collapseRequest + playerNavigationRequests,
+                                            onExpandedSettled = { expandedSettled = it },
+                                        ),
+                                    )
+                                }
                             }
                         }
                     }
@@ -448,9 +491,11 @@ private fun ReadyRoot(
 
             if (!layout.playerPanel) {
                 Box(Modifier.fillMaxSize()) {
-                    slots.player(
+                    player(
                         PlayerSlotState(
                             layout = layout,
+                            windowWidthDp = windowWidthDp,
+                            posture = posture,
                             navigate = navigateFromPlayer,
                             contentBottomPx = contentBottomPx,
                             expandRequest = expandRequest,

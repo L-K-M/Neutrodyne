@@ -20,8 +20,9 @@
     <string name="library_empty_body">Abonnements, die du hinzufügst, erscheinen hier als Kacheln.</string>
     <string name="up_next_empty_title">„Als Nächstes“ ist leer</string>
     <string name="up_next_empty_body">Füge Folgen mit „Als Nächstes abspielen“ oder „Ans Ende stellen“ hinzu.</string>
-    <string name="downloads_empty_title">Keine Downloads</string>
-    <string name="downloads_empty_body">Heruntergeladene Folgen werden hier aufgelistet.</string>
+    <string name="downloads_auto_settings">Auto-Download-Einstellungen</string>
+    <string name="downloads_empty_title">Heruntergeladene Folgen spielen offline ab</string>
+    <string name="downloads_empty_body">Speichere Folgen hier über die Aktion „Herunterladen“.</string>
     <string name="discover_empty_title">Finde etwas Neues</string>
     <string name="discover_empty_body">Suche in den Podcast-Verzeichnissen und Charts oder füge einen Feed per URL hinzu.</string>
 
@@ -643,6 +644,8 @@
     <string name="chapter_number">Kapitel %1$d</string>
     <string name="chapter_seek">Zu %1$s springen</string>
     <string name="settings_update_available">Einstellungen, Update verfügbar</string>
+    <string name="feeds_empty_group">Noch keine Podcasts in '%1$s'</string>
+    <string name="feeds_add_podcasts">Podcasts hinzufügen</string>
     <string name="setting_not_supported">Für YouTube-Kanäle nicht verfügbar</string>
 
     <!-- Owner radio home design, 2026-11-04. -->

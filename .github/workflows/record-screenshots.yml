@@ -65,7 +65,7 @@ jobs:
         run: |
           case "$TIER" in pr|full) ;; *) echo 'Invalid screenshot tier' >&2; exit 1 ;; esac
           ./gradlew recordRoborazziAndroidHostTest recordRoborazziDesktop \
-            -Proborazzi.test.record=true -PscreenshotTier="$TIER"
+            -Proborazzi.test.record=true -PscreenshotTier="$TIER" -Pneutrodyne.pseudoLocales=true
       # The manifest pins the checked-out source (git HEAD of the requested
       # branch), not the workflow ref's github.sha — a dispatch on main that
       # records branch B must bind the artifact to B's commit.
