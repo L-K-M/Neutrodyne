@@ -6,11 +6,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -30,6 +32,7 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val platform = LocalPlatformActions.current
+    val platformKind = LocalPlatformKind.current
     val scope = rememberCoroutineScope()
     val settings = {
         navigator.pushDetail(SettingsKey(SettingsPage.DOWNLOADS))
@@ -79,14 +82,39 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
         onReload = viewModel::reload,
         onNotice = { notice ->
             when (notice) {
-                DownloadNotice.DATA_SAVER -> platform.settings?.open(SystemSettingsTarget.BACKGROUND_DATA)
-                DownloadNotice.BACKGROUND_RESTRICTED -> platform.settings?.open(SystemSettingsTarget.APP_DETAILS)
-                DownloadNotice.NOTIFICATIONS_OFF -> viewModel.downloads.askNotifications()
-                DownloadNotice.STORAGE_LOW -> manageStorage()
-                DownloadNotice.ORPHAN_FILES -> viewModel.askDeleteOrphans()
-                DownloadNotice.ROOT_UNAVAILABLE -> navigator.pushDetail(SettingsKey(SettingsPage.DESKTOP))
-                DownloadNotice.CAP_REACHED -> settings()
-                DownloadNotice.MOVE_IN_PROGRESS, DownloadNotice.YOUTUBE_PAUSED -> Unit
+                DownloadNotice.DATA_SAVER -> {
+                    platform.settings?.open(SystemSettingsTarget.BACKGROUND_DATA)
+                }
+
+                DownloadNotice.BACKGROUND_RESTRICTED -> {
+                    platform.settings?.open(SystemSettingsTarget.APP_DETAILS)
+                }
+
+                DownloadNotice.NOTIFICATIONS_OFF -> {
+                    viewModel.downloads.askNotifications()
+                }
+
+                DownloadNotice.STORAGE_LOW -> {
+                    manageStorage()
+                }
+
+                DownloadNotice.ORPHAN_FILES -> {
+                    viewModel.askDeleteOrphans()
+                }
+
+                DownloadNotice.ROOT_UNAVAILABLE -> {
+                    navigator.pushDetail(
+                        SettingsKey(rootUnavailableTarget(platformKind)),
+                    )
+                }
+
+                DownloadNotice.CAP_REACHED -> {
+                    settings()
+                }
+
+                DownloadNotice.MOVE_IN_PROGRESS, DownloadNotice.YOUTUBE_PAUSED -> {
+                    Unit
+                }
             }
         },
     )
@@ -117,3 +145,13 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
         }
     })
 }
+
+/**
+ * The settings page an unavailable-root notice opens: the page holding the storage choice —
+ * Android's SD-card root on Settings › Downloads, the desktop folder on Settings › Desktop (11).
+ */
+internal fun rootUnavailableTarget(platform: PlatformKind): SettingsPage =
+    when (platform) {
+        PlatformKind.ANDROID -> SettingsPage.DOWNLOADS
+        PlatformKind.DESKTOP -> SettingsPage.DESKTOP
+    }
