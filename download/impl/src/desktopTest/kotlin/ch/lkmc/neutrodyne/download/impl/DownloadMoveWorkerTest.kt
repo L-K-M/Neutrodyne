@@ -185,6 +185,32 @@ class DownloadMoveWorkerTest {
             assertEquals(MoveResult.COMPLETE, f.run())
         }
 
+    @Test fun failedCommitOfAnAdoptedCopyKeepsTheOnlyFileForTheNextRun() =
+        engineTest {
+            val engine = this
+            val f = MoveRig(engine)
+            val id = f.completed().single()
+            assertEquals(MoveResult.COMPLETE, f.run())
+            val moved = engine.row(id)
+            val path = checkNotNull(moved.relativePath)
+            assertNull(engine.files.stat("old", f.oldPath(id)))
+            // A process death after publishing the copy but before the row commit: only the target exists.
+            engine.dao.updateUnclaimed(
+                moved.copy(rootId = "old", relativePath = f.oldPath(id), finalUri = null),
+                DownloadState.COMPLETED,
+            )
+            f.base.store.set(DownloadSettingKeys.MOVE_TARGET, "new")
+            f.failPublishResolve = true
+            assertEquals(MoveResult.PENDING, f.run())
+            assertFalse(f.failPublishResolve, "the target must become unavailable inside publish")
+            assertEquals("old", engine.row(id).rootId)
+            assertNotNull(engine.files.stat("new", path))
+            assertEquals(MoveResult.COMPLETE, f.run())
+            assertEquals("new", engine.row(id).rootId)
+            assertEquals(path, engine.row(id).relativePath)
+            f.assertBytes(id, mediaBytes(4096))
+        }
+
     @Test fun rowRemovedDuringCopyDoesNotResurrectOrLeaveFinalCopy() =
         engineTest {
             val engine = this
@@ -261,8 +287,23 @@ internal class MoveRig(
     var beforePublish: suspend () -> Unit = {}
     var afterAppend: suspend () -> Unit = {}
     var shortenOutput = false
+
+    /**
+     * Reports "new" unavailable once, at the first resolve after publish creates the target's
+     * directories; publish then fails between placing the file and committing the row.
+     */
+    var failPublishResolve = false
+    private var publishing = false
     val roots =
         object : StorageRoots by engine.roots {
+            override suspend fun resolve(rootId: String): ResolvedRoot? {
+                if (rootId == "new" && failPublishResolve && publishing) {
+                    failPublishResolve = false
+                    return null
+                }
+                return engine.roots.resolve(rootId)
+            }
+
             override suspend fun list() =
                 (engine.roots.available + "old" + "new").map {
                     StorageRootInfo(it, RootKind.DESKTOP_FOLDER, null, null, it in engine.roots.available)
@@ -270,6 +311,14 @@ internal class MoveRig(
         }
     val files =
         object : DownloadFileSystem by engine.files {
+            override suspend fun createDirectories(
+                rootId: String,
+                path: String,
+            ) {
+                publishing = rootId == "new"
+                engine.files.createDirectories(rootId, path)
+            }
+
             override suspend fun sameStore(
                 sourceRoot: String,
                 targetRoot: String,
@@ -330,7 +379,10 @@ internal class MoveRig(
 
     suspend fun target() = base.store.get(DownloadSettingKeys.MOVE_TARGET)
 
-    suspend fun run(deadline: Long? = null) = mover.run("new", deadline)
+    suspend fun run(deadline: Long? = null): MoveResult {
+        publishing = false
+        return mover.run("new", deadline)
+    }
 
     suspend fun write(
         root: String,

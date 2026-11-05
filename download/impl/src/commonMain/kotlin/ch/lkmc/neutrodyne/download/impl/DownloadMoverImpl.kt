@@ -270,7 +270,9 @@ internal class DownloadMoverImpl(
                     return@withContext Outcome.PENDING
                 }
                 files.createDirectories(target, path.substringBeforeLast('/'))
-                var renamed = artifact == Artifact.ADOPTED
+                // Only a file this call placed is undone. An adopted file is the only copy left
+                // (its source is gone), so a failed commit keeps it for the next run to adopt.
+                var renamed = false
                 try {
                     if (artifact == Artifact.NEW) {
                         if (method == Method.RENAME) {
@@ -304,7 +306,7 @@ internal class DownloadMoverImpl(
                             }
                         }
                     if (!committed) {
-                        rollback(row, target, path, method)
+                        if (renamed) rollback(row, target, path, method)
                         return@withContext retryOutcome(dao.byEpisode(row.episodeId), row, target)
                     }
                     index.put(row.episodeId, uri)
