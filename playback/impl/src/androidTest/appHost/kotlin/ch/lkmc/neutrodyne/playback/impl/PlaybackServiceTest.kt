@@ -16,7 +16,6 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
@@ -38,6 +37,7 @@ import ch.lkmc.neutrodyne.NeutrodyneApplication
 import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.ChapterEntity
+import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
@@ -101,7 +101,6 @@ class PlaybackServiceTest {
     private var ids = emptyList<Long>()
     private var cover: File? = null
     private var phase = "setup"
-    private var mobileDataRequest: ConnectivityManager.NetworkCallback? = null
     private val observation = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     @Before fun startHost() =
@@ -281,19 +280,12 @@ class PlaybackServiceTest {
                     // The emulator image boots with mobile data off; without it there is
                     // no metered network to take over after Wi-Fi is disabled. The
                     // PhoneSwitcher only brings the data connection up for a requested
-                    // network, so request one after the Wi-Fi radio is down.
+                    // network, so ask the app's own refresh lane for one after the Wi-Fi
+                    // radio is down (its CONNECTED constraint runs on cellular).
                     val enabled = shell("svc data enable")
                     check(enabled.exitCode == 0) { "Could not enable mobile data: ${enabled.text}" }
                     setWifiEnabled(false)
-                    val manager = app.getSystemService(ConnectivityManager::class.java)
-                    val request =
-                        NetworkRequest
-                            .Builder()
-                            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                            .build()
-                    val callback = object : ConnectivityManager.NetworkCallback() {}
-                    manager.requestNetwork(request, callback)
-                    mobileDataRequest = callback
+                    graph.refreshController.refreshNow(RefreshScope.All)
                     null
                 }
             if (networkId != null) {
@@ -346,12 +338,6 @@ class PlaybackServiceTest {
                 if (networkId != null) {
                     device.executeShellCommand("cmd netpolicy set metered-network $networkId undefined")
                 } else {
-                    mobileDataRequest?.let { callback ->
-                        app
-                            .getSystemService(ConnectivityManager::class.java)
-                            .unregisterNetworkCallback(callback)
-                    }
-                    mobileDataRequest = null
                     setWifiEnabled(true)
                 }
                 graph.settingsRepository.set(
