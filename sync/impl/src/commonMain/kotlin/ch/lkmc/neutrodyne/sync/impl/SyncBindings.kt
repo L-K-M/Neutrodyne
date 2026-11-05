@@ -135,7 +135,10 @@ object SyncBindings {
             hooks = hooks,
         )
 
-    /** The first-link merge; the controller drives it from the link state machine. */
+    /**
+     * The first-link merge; the controller drives it from the link state machine. The
+     * `LibraryMerger` port is `:core:data`'s `RestoreMerger` binding (05's one routine).
+     */
     @Provides
     @SingleIn(AppScope::class)
     fun firstLinkMerger(
@@ -143,7 +146,21 @@ object SyncBindings {
         client: SyncClient,
         applier: SyncApplier,
         engine: SyncEngine,
+        libraryMerger: ch.lkmc.neutrodyne.core.domain.LibraryMerger,
+        storagePaths: ch.lkmc.neutrodyne.core.common.StoragePaths,
+        settings: SettingsSyncPort,
         clock: Clock,
         activity: SyncActivityState,
-    ): FirstLinkMerger = FirstLinkMerger(db, client, applier, engine, clock, activity)
+    ): FirstLinkMerger =
+        FirstLinkMerger(
+            db = db,
+            client = client,
+            applier = applier,
+            engine = engine,
+            libraryMerger = libraryMerger,
+            storagePaths = storagePaths,
+            settings = settings,
+            clock = clock,
+            activity = activity,
+        )
 }
