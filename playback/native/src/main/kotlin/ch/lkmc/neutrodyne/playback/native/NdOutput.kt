@@ -20,6 +20,8 @@ class NdOutput private constructor(
     private val library: NdmediaLibrary,
     private val handle: MemorySegment,
     private val counters: MemorySegment,
+    /** Bytes per interleaved frame at the configured channel count. */
+    private val frameBytes: Long,
 ) : AutoCloseable {
     private val write =
         library.downcall("nd_out_write", NdmediaAbi.WRITE)
@@ -66,7 +68,7 @@ class NdOutput private constructor(
         frames: Int,
     ): Int {
         check(!closed) { "output is closed" }
-        require(frames >= 0 && pcm.isNative && pcm.byteSize() >= frames.toLong() * BYTES_PER_FRAME)
+        require(frames >= 0 && pcm.isNative && pcm.byteSize() >= frames.toLong() * frameBytes)
         return check("write", write.invokeExact(handle, pcm, frames) as Int)
     }
 
@@ -133,13 +135,15 @@ class NdOutput private constructor(
         what: String,
         code: Int,
     ): Int {
-        if (code < 0) throw NdOutputException("nd_out_$what failed with $code")
+        if (code < 0) throw NdOutputException("nd_out_$what failed with $code", code)
         return code
     }
 
     companion object {
         private const val DESCRIBE_CAP = 2_048
-        private const val BYTES_PER_FRAME = 8L
+
+        /** Mirrors ndmedia's `ND_DEFAULT_CHANNELS`: 0 in the config means stereo. */
+        private const val DEFAULT_CHANNELS = 2
         private val COUNTER = ValueLayout.JAVA_LONG.varHandle()
 
         // Pin storage while native callbacks can write it. After close, clock
@@ -174,7 +178,7 @@ class NdOutput private constructor(
             val rc = probe.invokeExact(config, slot) as Int
             if (rc < 0) {
                 library.close()
-                throw NdOutputException("nd_out_open failed with $rc")
+                throw NdOutputException("nd_out_open failed with $rc", rc)
             }
             val handle = slot.get(NdmediaAbi.ADDRESS, 0)
             LIVE_COUNTERS[handle.address()] = counters
@@ -185,8 +189,9 @@ class NdOutput private constructor(
                         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
                     )
                 val attached = attach.invokeExact(handle, counters) as Int
-                if (attached < 0) throw NdOutputException("nd_out_attach_clock failed with $attached")
-                return NdOutput(library, handle, counters)
+                if (attached < 0) throw NdOutputException("nd_out_attach_clock failed with $attached", attached)
+                val effectiveChannels = if (channels > 0) channels else DEFAULT_CHANNELS
+                return NdOutput(library, handle, counters, effectiveChannels * Float.SIZE_BYTES.toLong())
             } catch (failure: Throwable) {
                 library.downcall("nd_out_close", NdmediaAbi.CLOSE).invokeExact(handle)
                 LIVE_COUNTERS.remove(handle.address(), counters)
@@ -199,4 +204,15 @@ class NdOutput private constructor(
 
 class NdOutputException(
     message: String,
-) : Exception(message)
+    /** ndmedia's negative `ND_E_*` code; [E_DEVICE] means the device itself failed. */
+    val code: Int,
+) : Exception(message) {
+    companion object {
+        const val E_ARG = -1
+        const val E_STATE = -2
+        const val E_BACKEND = -3
+
+        /** The device stopped or could not be opened; the engine discards its output. */
+        const val E_DEVICE = -4
+    }
+}

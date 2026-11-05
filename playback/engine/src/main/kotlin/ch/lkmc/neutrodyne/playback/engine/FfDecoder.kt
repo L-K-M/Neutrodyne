@@ -60,13 +60,20 @@ class FfDecoder
          */
         private var remainingPriming = UNDECIDED
 
-        /** Total decoded samples this decoder has produced, after trimming. */
+        /**
+         * Total decoded samples this decoder has produced, after trimming.
+         * Cumulative for the whole pipeline, not per seek: the corpus reference
+         * counts are the decoder's lifetime totals.
+         */
         var decodedSamples: Long = 0
             private set
 
-        /** Total samples the decoders emitted, before any trimming. */
+        /** Total samples the decoders emitted, before any trimming; also cumulative. */
         var rawDecodedSamples: Long = 0
             private set
+
+        /** Consecutive packets the decoder refused; a seek resets the streak. */
+        private var consecutivePacketErrors = 0
 
         /** The source sample rate the decoded PCM arrives at. */
         val sampleRate: Int = demuxer.audioTrack.sampleRate
@@ -114,6 +121,13 @@ class FfDecoder
             }
         }
 
+        /**
+         * Hands one packet to the decoder. True means the packet was accepted or
+         * dropped as corrupt; false means backpressure (drain and retry the same
+         * packet). A run of [MAX_CONSECUTIVE_PACKET_ERRORS] refused packets throws
+         * [IllegalArgumentException], which the engine maps to
+         * [EngineError.UnsupportedFormat] (11 Engine errors and recovery).
+         */
         override fun send(packet: AudioPacket): Boolean {
             if (remainingPriming == UNDECIDED) remainingPriming = packet.primingSamples
             val target = requireNotNull(sendSlot.dereference()) { "the send packet was released" }
@@ -126,7 +140,16 @@ class FfDecoder
             check(referenced >= 0) { "packet reference failed: ${library.errorString(referenced)}" }
             val result = library.sendPacket(context, target)
             if (result == layout.intConstant("AVERROR_EAGAIN")) return false
-            check(result >= 0) { "packet decoding failed: ${library.errorString(result)}" }
+            if (result >= 0) {
+                consecutivePacketErrors = 0
+                return true
+            }
+            if (++consecutivePacketErrors >= MAX_CONSECUTIVE_PACKET_ERRORS) {
+                throw IllegalArgumentException(
+                    "the decoder refused $consecutivePacketErrors consecutive packets: " +
+                        library.errorString(result),
+                )
+            }
             return true
         }
 
@@ -157,10 +180,16 @@ class FfDecoder
             }
         }
 
-        /** Drops every buffered frame, as a seek requires (11 Demux and decode step 3). */
+        /**
+         * Drops every buffered frame, as a seek requires (11 Demux and decode step 3).
+         * The sample counters stay cumulative (they measure the decoder's lifetime
+         * output, which the corpus reference counts read); only the corrupt-packet
+         * streak resets with the new position.
+         */
         fun flushBuffers() {
             library.flushCodecBuffers(context)
             remainingPriming = UNDECIDED
+            consecutivePacketErrors = 0
         }
 
         /**
@@ -196,7 +225,7 @@ class FfDecoder
             val rate = frame.readInt(layout, "AVFrame", "sample_rate")
             val mask =
                 frame.readChannelMask(layout, "AVFrame")
-                    ?: defaultMaskFor(frame.readChannelCount(layout, "AVFrame"))
+                    ?: defaultChannelMask(frame.readChannelCount(layout, "AVFrame"))
             if (format != inputFormat || mask != inputMask || rate != inputRate) {
                 reconfigure(format, mask, rate)
             }
@@ -271,7 +300,8 @@ class FfDecoder
                 if (pts == NO_TIMESTAMP) {
                     null
                 } else {
-                    pts * timeBaseNum * MICROS_PER_SECOND / timeBaseDen + leading * MICROS_PER_SECOND / sampleRate
+                    FfmpegTime.ticksToScaled(pts, timeBaseNum, timeBaseDen, FfmpegTime.MICROS_PER_SECOND) +
+                        leading * FfmpegTime.MICROS_PER_SECOND / sampleRate
                 }
             return AudioFrame(pcm, STEREO_CHANNELS, sampleRate, ptsUs)
         }
@@ -293,22 +323,49 @@ class FfDecoder
             /** The output buffer, in samples per channel: one large frame plus headroom. */
             const val OUTPUT_BUFFER_SAMPLES = 1 shl 16
 
-            const val MICROS_PER_SECOND = 1_000_000L
-
             const val NO_TIMESTAMP = Long.MIN_VALUE
 
             /** The priming is not known until the first packet arrives. */
             const val UNDECIDED = -1
-
-            /**
-             * The mask swresample assumes for a channel count when a frame reports
-             * no native layout: FFmpeg's own default order, `AV_CH_FRONT_CENTER`
-             * for one channel and `AV_CH_FRONT_LEFT | AV_CH_FRONT_RIGHT` otherwise.
-             */
-            fun defaultMaskFor(channels: Int): Long =
-                when (channels) {
-                    1 -> 0x4L
-                    else -> 0x3L
-                }
         }
+    }
+
+/** 11 Engine errors and recovery: 50 consecutive refusals end the item. */
+internal const val MAX_CONSECUTIVE_PACKET_ERRORS = 50
+
+/**
+ * The mask swresample assumes for a channel count when a frame reports no
+ * native layout: FFmpeg 9's `av_channel_layout_default`, which takes the first
+ * entry of its channel-layout table for the count (mono, stereo, 3.0, 4.0,
+ * 5.0, 5.1, 6.1, 7.1). The values are the `AV_CH_LAYOUT_*` masks of the
+ * channel_layout.h the FFmpeg build ships; a count outside 1..8 falls back to
+ * stereo, as the previous code did.
+ */
+internal fun defaultChannelMask(channels: Int): Long =
+    when (channels) {
+        1 -> 0x4L
+
+        // AV_CH_LAYOUT_MONO
+        2 -> 0x3L
+
+        // AV_CH_LAYOUT_STEREO
+        3 -> 0x7L
+
+        // AV_CH_LAYOUT_SURROUND (3.0)
+        4 -> 0x107L
+
+        // AV_CH_LAYOUT_4POINT0
+        5 -> 0x37L
+
+        // AV_CH_LAYOUT_5POINT0_BACK (5.0)
+        6 -> 0x3FL
+
+        // AV_CH_LAYOUT_5POINT1_BACK (5.1)
+        7 -> 0x70FL
+
+        // AV_CH_LAYOUT_6POINT1 (6.1)
+        8 -> 0x63FL
+
+        // AV_CH_LAYOUT_7POINT1 (7.1)
+        else -> 0x3L
     }
