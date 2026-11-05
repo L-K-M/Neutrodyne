@@ -35,6 +35,9 @@ import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
+import ch.lkmc.neutrodyne.download.api.DownloadController
+import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
+import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
@@ -77,6 +80,9 @@ interface DesktopAppGraph {
     val playbackStateSource: PlaybackStateSource
     val playbackMaintenance: PlaybackMaintenance
     val localMediaIndex: LocalMediaIndex
+    val localMediaChanges: LocalMediaChanges
+    val downloadController: Provider<DownloadController>
+    val downloadProgress: Provider<DownloadProgressSource>
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
 

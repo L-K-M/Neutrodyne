@@ -4,7 +4,9 @@ package ch.lkmc.neutrodyne.core.designsystem.components
 
 import androidx.compose.ui.unit.Density
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.PRE_CONFIRMATION_HEADER
 import coil3.PlatformContext
+import coil3.network.httpHeaders
 import coil3.request.crossfadeMillis
 import coil3.size.Size
 import kotlinx.coroutines.test.runTest
@@ -54,5 +56,21 @@ class CoversRequestTest {
         val reduced = Covers.request(context, ref, CoverTier.THUMB, density, crossfade = false)
         assertEquals(200, animated.crossfadeMillis)
         assertEquals(0, reduced.crossfadeMillis)
+    }
+
+    /** Unconfirmed art carries the pre-confirmation mark; subscribed art stays unmarked. */
+    @Test
+    fun `only unconfirmed requests carry the peer-guard marker`() {
+        val marked =
+            Covers.request(
+                context,
+                ref,
+                CoverTier.THUMB,
+                density,
+                network = CoverNetworkPolicy.UNCONFIRMED,
+            )
+        val plain = Covers.request(context, ref, CoverTier.THUMB, density)
+        assertEquals("1", marked.httpHeaders[PRE_CONFIRMATION_HEADER])
+        assertNull(plain.httpHeaders[PRE_CONFIRMATION_HEADER])
     }
 }

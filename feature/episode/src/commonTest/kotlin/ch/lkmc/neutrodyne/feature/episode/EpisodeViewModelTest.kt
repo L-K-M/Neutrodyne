@@ -35,6 +35,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -56,6 +57,13 @@ class EpisodeViewModelTest : MainDispatcherTest() {
     private val playbackController = FakePlaybackController()
     private val playbackStates = FakePlaybackStateSource()
 
+    private val downloads =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController()
+    private val liveSource =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeEpisodeLiveStateSource()
+
     private fun viewModel(episodeId: Long = 5) =
         EpisodeViewModel(
             episodeId,
@@ -67,11 +75,30 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             playbackStates,
             testPlatformInfo,
             network,
+            downloadController = downloads,
+            liveStateSource = liveSource,
         )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun progressWindowTracksVisibilityAndClearsDuringTheSharingGrace() =
+        runTest {
+            val model = viewModel()
+            val subscription = backgroundScope.launch { model.uiState.collect {} }
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+
+            model.onVisible()
+            runCurrent()
+            assertEquals(setOf(5L), liveSource.lastVisibleIds.value)
+
+            subscription.cancel()
+            model.onHidden()
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+        }
 
     @Test
     fun initialStateBeforeSubscription() =
@@ -535,5 +562,17 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertNull(viewModel.pendingCredentials.value)
             assertEquals(listOf("setCredentials(7, user)"), podcasts.calls)
+        }
+
+    @Test fun downloadToggleReachesTheManualRequestHandler() =
+        runTest {
+            val vm = viewModel()
+            vm.onAction(EpisodeAction.DownloadToggle(5))
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadController.Action.REQUEST,
+                downloads.calls.single().action,
+            )
+            assertEquals(listOf(5L), downloads.calls.single().ids)
         }
 }

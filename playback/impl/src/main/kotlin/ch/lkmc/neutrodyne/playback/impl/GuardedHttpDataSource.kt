@@ -89,7 +89,15 @@ internal class GuardedHttpDataSource internal constructor(
             clients: NetworkClients,
             private val resolver: EpisodeResolver,
         ) : DataSource.Factory {
-            private val upstream = OkHttpDataSource.Factory(clients[HttpClientKind.MEDIA])
+            // Media3 cancels a load when its thread is interrupted and never closes the
+            // response body; the cleaning factory closes it on cancel (debug StrictMode).
+            private val media =
+                clients[HttpClientKind.MEDIA]
+                    .newBuilder()
+                    .addInterceptor(CancellationCleaningCallFactory.installInterceptor())
+                    .build()
+            private val upstream =
+                OkHttpDataSource.Factory(CancellationCleaningCallFactory.wrap(media))
 
             override fun createDataSource(): GuardedHttpDataSource =
                 GuardedHttpDataSource(upstream.createDataSource(), resolver)

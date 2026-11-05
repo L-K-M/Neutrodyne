@@ -131,9 +131,16 @@ source is the `python-build-standalone-<tag>-src.tar.gz` asset attached to the r
 
 ## Native components
 
-None yet. MD0 records the FFmpeg build (LGPL-2.1, dynamically linked, notices + corresponding
-source attached to each release) and miniaudio in `playback/native/native-components.lock`, and the
-C++/WinRT headers under `playback/native/src/`.
+- **FFmpeg 9.0.2**: LGPL-2.1-or-later, built from the verified upstream
+  archive as four separate, replaceable shared libraries. MD0 publishes only
+  spike evidence, paired with `ffmpeg-9.0.2-neutrodyne-src.tar.xz` and its
+  LGPL text; no native library is added to the production app. AAC and HE-AAC
+  may be covered by patents in your jurisdiction. The build enables no GPL,
+  version3 or nonfree components and no network protocol.
+- **miniaudio 0.11.22**: MIT-0 elected from its dual licence. Copyright 2025
+  David Reid. Its unchanged header is checksum-verified at build time and
+  compiled into the spike's `ndmedia`, never into FFmpeg. The desktop
+  AboutLibraries root carries the upstream licence text.
 
 ## Bundled runtimes
 
@@ -159,12 +166,6 @@ C++/WinRT headers under `playback/native/src/`.
   hand-off, index inspection; [`third_party/room3`](third_party/room3/README.md)). Each patched
   file carries a "Modified by Neutrodyne" line under its copyright header, and the published POM,
   which the Licences screens show, names the artifact "Room-Runtime (modified by Neutrodyne)".
-
-## Copied or ported code
-
-None yet. Files copied or ported under the contribution rule (permissive or Unlicense sources only)
-are listed here as `- \`path/in/repo\`: origin and licence`; `checkSpdxHeaders` requires each listed
-file to keep its original SPDX line or credit header.
 
 ## Data
 

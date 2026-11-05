@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="downloads_in_progress">In progress · %1$d</string>
+    <string name="downloads_failed">Failed · %1$d</string>
+    <string name="downloads_completed">Completed · %1$d · %2$s</string>
+    <string name="downloads_pause_all">Pause all</string>
+    <string name="downloads_resume_all">Resume all</string>
+    <string name="downloads_retry_all">Retry all</string>
+    <string name="downloads_play_all">Play all</string>
+    <string name="downloads_select_all">Select all completed</string>
+    <string name="downloads_select_played">Select played</string>
+    <string name="downloads_selected">%1$d selected</string>
+    <plurals name="downloads_delete_confirm">
+        <item quantity="one">Delete %1$d download (%2$s)?</item>
+        <item quantity="other">Delete %1$d downloads (%2$s)?</item>
+    </plurals>
+    <string name="downloads_delete_body">The downloaded files will be removed. You can download them again.</string>
+    <string name="downloads_delete_orphans">Delete untracked files (%1$s)?</string>
+    <string name="downloads_delete_orphans_body">These files no longer belong to an episode in your library.</string>
+    <string name="downloads_storage">%1$s used · %2$s free</string>
+    <string name="downloads_partial">%1$s partial · %2$s untracked</string>
+    <string name="downloads_unknown">Unknown size</string>
+    <string name="downloads_about">about %1$s</string>
+    <string name="downloads_bytes">%1$s of %2$s</string>
+    <string name="downloads_speed">%1$s · %2$s/s</string>
+    <string name="downloads_now">Download now</string>
+    <string name="downloads_mobile">Use mobile data</string>
+    <string name="downloads_wifi">Wait for Wi-Fi</string>
+    <string name="downloads_retry_now">Retry now</string>
+    <string name="downloads_manage">Manage storage</string>
+    <string name="downloads_folder">Show folder</string>
+    <string name="downloads_share">Share file</string>
+    <string name="downloads_settings">Download settings</string>
+    <string name="downloads_root">Storage location</string>
+    <string name="downloads_root_new">Use this location for new downloads. Existing files stay where they are.</string>
+    <string name="downloads_root_external">Device storage</string>
+    <string name="downloads_root_internal">Internal storage</string>
+    <string name="downloads_root_removable">SD card</string>
+    <string name="downloads_root_desktop">Default downloads folder</string>
+    <string name="downloads_root_unavailable">Storage location is unavailable</string>
+    <string name="downloads_manual_metered">Mobile data for manual downloads</string>
+    <string name="downloads_metered_ask">Ask each time</string>
+    <string name="downloads_metered_always">Always use mobile data</string>
+    <string name="downloads_metered_never">Wait for Wi-Fi</string>
+    <string name="downloads_metered_title">Download on mobile data?</string>
+    <plurals name="downloads_metered_body">
+        <item quantity="one">Download %1$d episode (about %2$s) on mobile data?</item>
+        <item quantity="other">Download %1$d episodes (about %2$s) on mobile data?</item>
+    </plurals>
+    <plurals name="downloads_metered_unknown">
+        <item quantity="one">%1$d episode has an unknown size.</item>
+        <item quantity="other">%1$d episodes have an unknown size.</item>
+    </plurals>
+    <string name="downloads_notification_title">See download progress</string>
+    <string name="downloads_notification_body">Allow notifications to see download progress outside the app. Downloads still work without them.</string>
+    <string name="downloads_allow">Allow</string>
+    <string name="downloads_not_now">Not now</string>
+    <string name="downloads_data_saver">Data Saver is on. Downloads over mobile data may pause while Neutrodyne is in the background.</string>
+    <string name="downloads_background">Background activity is restricted for Neutrodyne. Downloads may pause while the app is in the background.</string>
+    <string name="downloads_storage_low">Not enough storage. %1$d downloads are waiting.</string>
+    <string name="downloads_root_missing">The SD card is not available.</string>
+    <string name="downloads_folder_missing">The download folder isn't available.</string>
+    <string name="downloads_orphans">%1$s of files Neutrodyne no longer tracks.</string>
+    <plurals name="downloads_failed_badge">
+        <item quantity="one">%1$d failed download</item>
+        <item quantity="other">%1$d failed downloads</item>
+    </plurals>
+    <string name="dl_interrupted">Interrupted, resumes automatically</string>
+    <string name="downloads_loading">Loading downloads</string>
+    <string name="downloads_empty_manual">Downloaded episodes play offline</string>
+    <string name="downloads_dismiss">Dismiss</string>
+    <string name="downloads_open_episode">Go to episode</string>
+    <string name="downloads_select">Select</string>
+    <string name="downloads_cancel_selection">Clear selection</string>
+    <string name="downloads_working">Working…</string>
+    <string name="downloads_file_unavailable">The downloaded file is unavailable</string>
+    <string name="downloads_server_error">Server error (%1$d)</string>
+    <string name="downloads_reject_gone">This episode is no longer available</string>
+    <string name="downloads_reject_no_file">This episode has no file to download</string>
+    <string name="downloads_reject_stream">This episode can only be streamed</string>
+    <plurals name="downloads_skipped">
+        <item quantity="one">%1$d episode skipped: %2$s</item>
+        <item quantity="other">%1$d episodes skipped: %2$s</item>
+    </plurals>
+    <string name="downloads_too_large">This file is too large for the selected storage</string>
+    <string name="downloads_options">Download actions</string>
+</resources>

@@ -30,6 +30,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.ChartGenre
+import ch.lkmc.neutrodyne.core.model.ProviderInfo
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
@@ -52,7 +53,7 @@ import org.jetbrains.compose.resources.stringResource
 internal fun DirectoryRoute(key: DirectoryKey) {
     val viewModel = assistedMetroViewModel<DirectoryViewModel, DirectoryViewModel.Factory> { create(key) }
     val state by viewModel.state.collectAsStateWithLifecycle()
-    DirectoryScreen(key, state, viewModel::retry, LocalAppNavigator.current)
+    DirectoryScreen(key, state, viewModel::retry, LocalAppNavigator.current, viewModel::onProvidersVisible)
 }
 
 @Composable
@@ -61,6 +62,7 @@ internal fun DirectoryScreen(
     state: DirectoryState,
     retry: () -> Unit,
     navigator: AppNavigator,
+    onProvidersVisible: (List<ProviderInfo>) -> Unit = {},
 ) {
     val list = rememberLazyListState()
     val bars = LocalScrollbars.current
@@ -71,6 +73,7 @@ internal fun DirectoryScreen(
             navigation = { NdIconButton({ navigator.pop() }, NdIcons.ArrowBack, stringResource(Res.string.back)) },
             actions = { SettingsGearButton() },
         )
+        ProviderDisclosure(state.providers, Modifier.padding(horizontal = 16.dp), onProvidersVisible)
         LazyColumn(state = list, modifier = Modifier.fillMaxSize().ndScrollbar(list, bars, ndScrollbarColor(bars))) {
             item {
                 when {

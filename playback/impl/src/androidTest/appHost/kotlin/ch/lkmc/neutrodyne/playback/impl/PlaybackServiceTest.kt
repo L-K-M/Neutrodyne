@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.NeutrodyneApplication
 import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.ChapterEntity
+import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
@@ -276,7 +277,15 @@ class PlaybackServiceTest {
                         .firstOrNull { it.isNotBlank() }
                         ?: error("No Wi-Fi network available to mark metered")
                 } else {
+                    // The emulator image boots with mobile data off; without it there is
+                    // no metered network to take over after Wi-Fi is disabled. The
+                    // PhoneSwitcher only brings the data connection up for a requested
+                    // network, so ask the app's own refresh lane for one after the Wi-Fi
+                    // radio is down (its CONNECTED constraint runs on cellular).
+                    val enabled = shell("svc data enable")
+                    check(enabled.exitCode == 0) { "Could not enable mobile data: ${enabled.text}" }
                     setWifiEnabled(false)
+                    graph.refreshController.refreshNow(RefreshScope.All)
                     null
                 }
             if (networkId != null) {
@@ -533,7 +542,7 @@ class PlaybackServiceTest {
             }
             await { !serviceDump().contains(FOREGROUND_SERVICE_MARKER) }
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
-            await { !serviceDump().contains("ServiceRecord{") }
+            await { !serviceRecordPresent() }
             phase("recreation/foreground")
             foregroundHost()
             val restored = withContext(Dispatchers.Main) { connect() }
@@ -578,7 +587,7 @@ class PlaybackServiceTest {
             // Let Media3's post-pause foreground grace finish before the cold-start probe.
             await { !serviceDump().contains(FOREGROUND_SERVICE_MARKER) }
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
-            await { !serviceDump().contains("ServiceRecord{") }
+            await { !serviceRecordPresent() }
             // System media-session dispatch exercises the manifest's standard MediaButtonReceiver.
             device.executeShellCommand("cmd media_session dispatch play")
             awaitAudio()
@@ -679,7 +688,14 @@ class PlaybackServiceTest {
         )
         val podcast =
             db.podcastDao().insertPodcast(
-                podcastEntity(title = "Playback fixture", artworkKey = key) {
+                podcastEntity(
+                    // The periodic feed refresh must stay on the fixture server: the default
+                    // example.com URL would open a real HTTPS connection, which is both
+                    // nondeterministic and an OkHttp HTTP/2 shutdown leak on API 26.
+                    title = "Playback fixture",
+                    feedUrl = server.url("/feed.xml").toString(),
+                    artworkKey = key,
+                ) {
                     copy(artworkUrl = coverUrl)
                 },
             )
@@ -736,6 +752,18 @@ class PlaybackServiceTest {
         device.executeShellCommand(
             "dumpsys activity services ${app.packageName}/$SERVICE_CLASS",
         )
+
+    /**
+     * dumpsys prints a "Last ANR service" record for the whole system, so the raw dump
+     * always contains a ServiceRecord on an emulator whose SystemUI has ANR'd. Match the
+     * record for this app's component instead.
+     */
+    private fun serviceRecordPresent(): Boolean {
+        val component = "${app.packageName}/$SERVICE_CLASS"
+        return serviceDump()
+            .lineSequence()
+            .any { it.contains("ServiceRecord{") && it.contains(component) }
+    }
 
     private suspend fun await(condition: suspend () -> Boolean) =
         withTimeout(WAIT_MS) {

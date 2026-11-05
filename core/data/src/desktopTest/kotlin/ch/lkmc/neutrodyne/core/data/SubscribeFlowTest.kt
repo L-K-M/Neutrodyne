@@ -50,9 +50,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
+import okhttp3.Dns
 import okio.Buffer
 import org.junit.Rule
 import java.io.File
+import java.net.InetAddress
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -90,7 +92,17 @@ class SubscribeFlowTest {
             kotlin.io.path
                 .createTempDirectory("nd-subscribe-test")
                 .toFile()
-        resolverBundle = newResolver(root, db, clock)
+        resolverBundle =
+            newResolver(
+                root,
+                db,
+                clock,
+                // `preview()` is a discovered fetch (03 note 2026-11-02): the `cdn.test`
+                // spelling rides the stub DNS to this server while the peer seam leaves the
+                // guard's coverage to AddLocalDestinationTest.
+                networkClients =
+                    newNetworkClients(baseDns = testDns, isLocalPeer = NO_LOCAL_PEER),
+            )
         subscribeBundle =
             newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, scheduler, settings, clock)
     }
@@ -102,6 +114,24 @@ class SubscribeFlowTest {
     }
 
     private fun feedUrl(path: String = "/feed.xml") = server.url(path).toString()
+
+    /** The `preview()` host: public spelling, resolving to this server through [testDns]. */
+    private fun publicFeedUrl(path: String) =
+        server
+            .url(path)
+            .newBuilder()
+            .host("cdn.test")
+            .build()
+            .toString()
+
+    private val testDns =
+        Dns { host ->
+            if (host == "cdn.test" || host.endsWith(".cdn.test")) {
+                listOf(InetAddress.getByName("127.0.0.1"))
+            } else {
+                Dns.SYSTEM.lookup(host)
+            }
+        }
 
     private suspend fun resolvePreview(
         path: String = "/feed.xml",
@@ -521,19 +551,19 @@ class SubscribeFlowTest {
             server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e2")))))
             val previewC =
                 assertIs<Outcome.Success<ch.lkmc.neutrodyne.core.model.FeedPreview>>(
-                    resolverBundle.resolver.preview(feedUrl("/cdn.xml")),
+                    resolverBundle.resolver.preview(publicFeedUrl("/cdn.xml")),
                 ).value
 
-            assertEquals(feedUrl("/cdn.xml"), previewC.feedUrl)
-            assertEquals(feedUrl("/cdn.xml"), previewC.previewId)
+            assertEquals(publicFeedUrl("/cdn.xml"), previewC.feedUrl)
+            assertEquals(publicFeedUrl("/cdn.xml"), previewC.previewId)
             assertEquals(3, server.requestCount)
 
             val id =
                 assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(previewC.previewId, emptySet()))
                     .value
             val row = assertNotNull(db.podcastDao().byId(id))
-            assertEquals(feedUrl("/cdn.xml"), row.feedUrl)
-            assertEquals(UrlNormalizer.forIdentity(feedUrl("/cdn.xml")), row.feedKey)
+            assertEquals(publicFeedUrl("/cdn.xml"), row.feedUrl)
+            assertEquals(UrlNormalizer.forIdentity(publicFeedUrl("/cdn.xml")), row.feedKey)
         }
 
     @Test

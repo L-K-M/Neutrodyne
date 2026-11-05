@@ -113,9 +113,13 @@ class SettingsScreensTest {
             waitForIdle()
             onAllNodes(hasClickAction(), useUnmergedTree = true)
                 .fetchSemanticsNodes()
-                // Scrolled-out rows have empty clipped bounds and cannot be tapped.
-                .filter { !it.boundsInRoot.isEmpty }
-                .forEach { node ->
+                // Scrolled-out rows have empty clipped bounds and cannot be tapped; a row clipped
+                // to a sliver at the scroll edge is not a visible target either.
+                .filter {
+                    !it.boundsInRoot.isEmpty &&
+                        it.boundsInRoot.width + 0.5f >= it.layoutInfo.width &&
+                        it.boundsInRoot.height + 0.5f >= it.layoutInfo.height
+                }.forEach { node ->
                     val bounds = node.boundsInRoot
                     val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
                     assertTrue(
@@ -157,7 +161,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot()
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
             waitForIdle()
             onNodeWithText("kotlinx-coroutines-core").assertExists()
             onNodeWithText("Libraries · 1 library").assertExists()
@@ -173,7 +177,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(licencesSource = null)
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
 
             onNodeWithText("No licence information in this build.").assertIsDisplayed()
         }
@@ -191,7 +195,7 @@ class SettingsScreensTest {
                     ),
             )
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
             waitForIdle()
 
             onNodeWithText("Bundled components", substring = true).assertExists()

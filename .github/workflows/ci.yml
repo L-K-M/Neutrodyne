@@ -76,13 +76,22 @@ jobs:
       # invoked, not just wired). `checkBrandAssets` joined 2026-10-06: it was
       # delivered early with M0a.1, so a hand-edited generated asset must fail
       # here, not only on a local `check`. Still TODO as their milestones land:
-      # checkTranslations, :playback:native:checkNativeLicences (MD0),
-      # clang-format over playback/native/src/native/ (MD0), detekt SARIF
-      # upload with continue-on-error (non-blocking until a stable detekt
-      # supports this toolchain).
+      # checkTranslations, clang-format over playback/native/src/native/ (MD0,
+      # with the first native sources), detekt SARIF upload with
+      # continue-on-error (non-blocking until a stable detekt supports this
+      # toolchain). `:playback:native:checkNativeLicences` is not a static gate:
+      # it reads the four built libraries, so it runs per target in
+      # `desktop-matrix` below, where each target's own toolchain exists.
+      - name: Native source formatting
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-format-18
+          clang-format-18 --dry-run --Werror playback/native/ffmpeg/ffoffsets.c
       - name: KGP assertion (PLAN M0 AC3)
         # The root project's buildEnvironment: plugins load through the included build, so :app's lists none (01 S1)
         run: ./gradlew -q buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'
+      - name: Native policy regression tests
+        run: ./gradlew -p build-logic :convention:test --tests NativeLicencePolicyTest
       - name: Static checks (M0a)
         run: >-
           ./gradlew spotlessCheck :app:lintRelease assertModuleGraph
@@ -112,8 +121,12 @@ jobs:
           fi
       # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
       # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
+      # native-ffmpeg-build.test.sh covers playback/native/ffmpeg/build.sh's
+      # guards, the licence envelope of the lock and the shell-function order
+      # the four-runner build would otherwise discover (MD0, 11 FFmpeg build).
       - name: CI script fixture tests
         run: |
+          scripts/ci/tests/native-ffmpeg-build.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
@@ -127,7 +140,25 @@ jobs:
           python3 scripts/ci/tests/preserve-emulator-crashes.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
+          python3 scripts/ci/tests/assert-download-tests.test.py
+          python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/update-json.test.py
+          python3 scripts/ci/tests/native-msys-reexec.test.py
+      - name: Preserve a formatting repair patch
+        if: failure()
+        run: |
+          format_status=0
+          ./gradlew spotlessApply || format_status=$?
+          mkdir -p build/md0-evidence
+          git diff --binary > build/md0-evidence/format.patch
+          exit "$format_status"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: static-md0-evidence
+          path: |
+            build/md0-evidence/
+            build-logic/convention/build/test-results/
 
   unit:
     runs-on: ubuntu-24.04
@@ -151,11 +182,8 @@ jobs:
         with:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-4.17-sdk36
-      # TODO: add `:youtube:ytdlp:shimTest` and
-      # `:youtube:ytdlp-desktop:shimTestStdio` (MD3) as their milestones land —
-      # 09's full line: ./gradlew allTests test mutationTest
-      # :youtube:ytdlp:shimTest :youtube:ytdlp-desktop:shimTestStdio
-      # -Proborazzi.test.verify=true --continue
+      # :desktop:system's MPRIS test needs a private session bus; the runner
+      # owns the daemon because test code may not spawn processes (rule 17).
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
         run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
       - name: Room schema drift
@@ -315,6 +343,159 @@ jobs:
   # TODO (M0b): `desktop-smoke` (xvfb-run smoke start of the Linux x64 image +
   # check-desktop-image.sh + check-runtime-sources.sh --image) — `needs: assemble`
   # per 09; it lands with the desktop packaging.
+
+  # MD0's four-target desktop matrix (11 Platform matrix, D88). jpackage cannot
+  # cross-package and neither can a shared library, so each target's unit tests
+  # and its own FFmpeg build and licence check run on the host that serves it:
+  # a green `unit` on linux-x64 says nothing about macOS arm64. Dispatch-only:
+  # a pull_request or main-push run has no runner for the other three targets,
+  # and nightly.yml carries the same job on its schedule. Every `run:` step sets
+  # `shell: bash`, and the SDK step exports one SDK location (asserted by
+  # scripts/ci/tests/install-android-sdk.test.sh).
+  desktop-matrix:
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runs-on: windows-2025
+            # The MSVC FFmpeg compile is the slowest leg; the shared 90-minute
+            # ceiling once cut it off mid-build, so the leg gets its own.
+            timeout-minutes: 150
+          - target: macos-arm64
+            runs-on: macos-15
+          - target: linux-x64
+            runs-on: ubuntu-24.04
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: ${{ matrix.timeout-minutes || 90 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      # The KMP android targets configure AGP in every module, so every host
+      # needs an SDK even for a desktop-only build.
+      - name: Android SDK
+        shell: bash
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          # One SDK location for AGP: the runner image's inherited
+          # ANDROID_SDK_ROOT must not disagree with ANDROID_HOME, and on Windows
+          # Gradle needs the C:\ form, not the MSYS one.
+          sdk_dir="$HOME/android-sdk"
+          command -v cygpath >/dev/null 2>&1 && sdk_dir="$(cygpath -w "$sdk_dir")"
+          echo "ANDROID_HOME=$sdk_dir" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_dir" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      # binutils serves jlink's strip-debug; xvfb and dbus-x11 wrap the desktop
+      # UI tests; libegl1 is skiko-linux-arm64's only unresolvable NEEDED entry.
+      - name: Host tools (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          pkgs="binutils xvfb dbus-x11 dbus-daemon"
+          [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          sudo apt-get install -y -qq $pkgs
+      # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell
+      # with GNU make, NASM and gpg. `buildFfmpeg` names MSYS2's bash explicitly
+      # (Git Bash ships none of the three), and coreutils provides the `timeout`
+      # that bounds every download and gpg call inside build.sh.
+      - name: MSYS2 tools for the Windows FFmpeg build
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz coreutils"
+      # The modules MD0 builds on this target. The repository-wide suite stays on
+      # linux-x64 in `unit`, which is where its reference platform is: the
+      # committed Roborazzi goldens live in screenshots/{android,desktop} with no
+      # per-OS split, so a second desktop OS compares against another font stack,
+      # and the file-permission suites of M3/M5 assert POSIX semantics. Neither
+      # is evidence about the desktop engine, so neither is a desktop-matrix gate.
+      # buildFfmpeg, checkNativeLicences and assembleFfmpegSource for the target
+      # this host serves: the licence gate reads the built libraries, so it can
+      # only run where the build ran (11 FFmpeg build, MD0 AC2).
+      - name: Build the target's FFmpeg and check its licences
+        shell: bash
+        run: |
+          ./gradlew :playback:native:buildFfmpeg \
+            :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+      # The modules MD0 builds on this target, and the corpus suite that loads the
+      # FFmpeg build the previous step produced (11 Testing, MD0 AC1).
+      # On Linux the MPRIS test connects to the private session bus
+      # dbus-run-session provides; the runner owns the daemon because test
+      # code may not spawn processes (01 banned-API rule 17).
+      - name: Desktop engine tests on this host
+        shell: bash
+        run: |
+          tests="./gradlew :playback:engine:test \
+            :playback:native:test --continue"
+          [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
+          $tests
+      # The measured evidence MD0 records per target: stripped sizes, the licence
+      # string, the protocol inventory, the enabled components and the build's
+      # own configure line and toolchain. It exists even when the tests failed,
+      # which is when the evidence matters most, so it is collected either way.
+      - name: Inspect native binary boundaries
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = Windows ]; then
+            vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+            [ -x "$vswhere" ] || vswhere="/c/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+            vcroot="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+            vcroot="$(cygpath -u "$vcroot")"
+            version="$(cat "$vcroot/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" | tr -d '\r\n')"
+            export PATH="$vcroot/VC/Tools/MSVC/$version/bin/Hostx64/x64:$PATH"
+          fi
+          python scripts/ci/check-native-binary.py --target "${{ matrix.target }}"
+      - name: Collect the licence evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p native-evidence
+          for f in ffmpeg-build.txt ffmpeg-sizes.txt ffmpeg-license.txt \
+                   ffmpeg-protocols.txt ffmpeg-components.txt ffmpeg-config.h; do
+            source="playback/native/build/ffmpeg/${{ matrix.target }}/$f"
+            [ ! -f "$source" ] || cp "$source" native-evidence/
+          done
+          cp playback/native/build/ffmpeg-source/*.tar.xz native-evidence/ 2>/dev/null || true
+          # A native crash writes its report into the engine module's directory;
+          # it is the only stack a segfault leaves, so it rides along too.
+          cp playback/engine/hs_err_pid*.log native-evidence/ 2>/dev/null || true
+          printf '%s\n' "${{ github.sha }}" > native-evidence/commit.txt
+          ls -l native-evidence
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: desktop-native-${{ matrix.target }}
+          path: |
+            native-evidence/
+            playback/native/build/ffmpeg/${{ matrix.target }}/lib/
+            playback/native/build/ffmpeg/${{ matrix.target }}/bin/
+            playback/native/build/ndmedia/${{ matrix.target }}/*ndmedia*
+            desktopApp/config/licenses/MIT-0-miniaudio.json
+            desktopApp/config/licenses/LGPL-2.1-or-later.json
+            playback/native/build/ffmpeg/${{ matrix.target }}/ffmpeg-layout.json
+            playback/native/build/ffmpeg-cache/build-${{ matrix.target }}/*.log
+            playback/native/build/ndmedia/${{ matrix.target }}/ndmedia-build.txt
+            playback/engine/build/test-results/
+            playback/engine/build/reports/tests/
+            playback/native/build/test-results/
+            desktop/system/build/test-results/
+          retention-days: 14
 
   server:
     needs: assemble

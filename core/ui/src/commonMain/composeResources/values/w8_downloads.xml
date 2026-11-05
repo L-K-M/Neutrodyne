@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="restore_redownload">Re-download %1$d episodes</string>
+    <string name="restore_download_metered">Download using mobile data?</string>
+    <string name="restore_download_allow">Use mobile data</string>
+    <string name="restore_download_wifi">Wait for Wi-Fi</string>
+    <string name="restore_download_cancel">Cancel</string>
+    <string name="restore_download_failed">Some episodes could not be queued. Try again.</string>
+</resources>

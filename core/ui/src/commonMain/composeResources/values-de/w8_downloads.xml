@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="restore_redownload">%1$d Episoden erneut herunterladen</string>
+    <string name="restore_download_metered">Über mobile Daten herunterladen?</string>
+    <string name="restore_download_allow">Mobile Daten verwenden</string>
+    <string name="restore_download_wifi">Auf WLAN warten</string>
+    <string name="restore_download_cancel">Abbrechen</string>
+    <string name="restore_download_failed">Einige Episoden konnten nicht eingereiht werden. Versuch es erneut.</string>
+</resources>

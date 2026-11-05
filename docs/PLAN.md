@@ -299,7 +299,7 @@ ADR-style register. "Conflict" marks a decision that resolves contradictory rese
 | D14 | Source of truth (scope revision 2026-10-05) | Room is the single source of truth on every client; the UI observes flows; deferrable work runs behind common scheduler interfaces — WorkManager and JobScheduler on Android, the in-process `DesktopJobRunner` on the desktop ([D85](#3-key-decisions)); a sync server holds a replica of user state and is never a client's source of truth ([D93](#3-key-decisions)) | Offline by construction on every platform | In-memory caches as truth; the server as the source of truth | [01](design/01-foundation.md#architecture-patterns) |
 | D15 | Feed data vs user state | `episode` holds feed-derived columns only; they are written only by the refresh pipeline (03 ingestion, 04 enrichment), with three exceptions: restore inserts stubs, retention deletes rows, and 04's `YouTubeAvailabilityRecorder` writes `availability` at resolve time. Low-churn user state in `episode_state`; high-churn position in `episode_position` | Conflict: the downloads research put `downloadDismissedAt`/`isFavorite`/`playedAt` on `episode`; the playback research kept position with played state. Refreshes must never clobber user state, and list queries must not join 5-s writes | User columns on `episode`; one state table | [02](design/02-data-model.md#tables) |
 | D16 | List invalidation hygiene | Paged list queries join only low-churn tables (`episode`, `podcast`, `podcast_group_member`, `episode_state`, `download`, `artwork`); positions, live download bytes and now-playing reach rows through `EpisodeLiveStateSource` keyed by visible IDs; `podcast` fetch-state writes during a refresh are batched by `FetchStateBatcher` (≤ 15 invalidations per 300-feed refresh), with a 1:1 `podcast_fetch_state` table as the fallback if that or R2.9 fails | Conflict: the stack research's group-feed SQL joined position and download progress; Room re-runs `COUNT(*)` + page on every write to any observed table (the groups and OPML research, the UI research) | Join everything; custom throttled `PagingSource` | [02](design/02-data-model.md#invalidation-hygiene), [08](design/08-ui-ux.md#live-row-state) |
-| D17 | Download progress persistence | `download` row is low-churn: `downloadedBytes` persisted only on state transitions; the `.part` file length is the authoritative resume offset; live bytes via in-memory `DownloadProgressSource` (≤ 4 Hz) | Conflict: the downloads research persisted bytes every ~2 s into a table that list queries join | Separate `download_progress` table | [07](design/07-downloads.md#progress-and-notifications) |
+| D17 | Download progress persistence | `download` row is low-churn: `downloadedBytes` persisted only on state transitions and rare token-owned changed-representation proof checkpoints before replacement bytes, never periodically; the `.part` file length is the authoritative resume offset; live bytes via in-memory `DownloadProgressSource` (≤ 4 Hz) | Conflict: the downloads research persisted bytes every ~2 s into a table that list queries join | Separate `download_progress` table | [07](design/07-downloads.md#progress-and-notifications) |
 | D18 | Episode identity | Key ladder guid → normalised enclosure URL → hash(title + day) → hash(link), with fallback matching for GUID rewrites; key algorithm carries a version (`kv` per backup line; a numeric key prefix for versions after 1) because backups depend on it; the database is never bulk re-keyed — an older-version key is rewritten in place when its item reappears; scope revision 2026-10-05: sync keys episode records by `podcastSyncId` + `identityKey` with match hints, and in-place re-keys propagate as `rekey` operations ([D91](#3-key-decisions)) | Prevents duplicates on host migrations; backups match by key | Row IDs in backups; guid only | [03](design/03-feeds-and-discovery.md#ingestion-and-diff), [02](design/02-data-model.md#identity-keys) |
 | D19 | Feed ordering | `sortDate = min(pubDate ?: firstSeenAt, firstSeenAt + 24h)`, tiebreak `feedOrder` (rows of one parse are inserted in descending `feedOrder`, so `id` encodes it), list order `(sortDate, id)` | Future-dated and undated items cannot pin to the top of group feeds | Raw pubDate | [03](design/03-feeds-and-discovery.md#ingestion-and-diff) |
 | D20 | Per-scope settings | Typed tables `podcast_settings` and `podcast_group_settings` (nullable = inherit), globals in DataStore; **no per-episode overrides in v1**; scope revision 2026-10-05: override fields are classified synced (playback) or device-local (auto-download, notifications, refresh) ([D93](#3-key-decisions)) | Conflict: the playback research proposed one scope-keyed `PlaybackOverrides` table (no FKs, orphans) | Scope-keyed table | [05](design/05-groups-opml-backup.md#effective-settings-resolution), [02](design/02-data-model.md#tables) |
@@ -1287,6 +1287,18 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
 
 #### M6: Downloads
 
+
+
+**Implementation note (2026-10-19, M6a).** Adopted resolutions 2, 3, 5 and 7:
+AC14's audible offline half requires MD1; transfer mechanics are independent and
+cannot close all M6a acceptance. AC1/AC14's HTML failure applies to validated
+Android networks and desktop; AC12's NETWORK wait applies only to unvalidated
+Android networks (test with injected conditions). AC7's real bmgr transport proof
+is M6a, overriding 09's delivery table; static backup XML assertions alone do not
+close it. M6a stop callbacks and stale-runner recovery do not close M6b AC11's
+historical Task Manager inference. No device or desktop-audio proof is claimed by
+the W1 contract freeze.
+
 - **Goal:** reliable manual and automatic downloads that play offline transparently.
 - **Increments** ([7.1](#71-milestone-overview)): **M6a** (manual downloads, storage, reconciliation, offline playback, Downloads screen) and **M6b** (automatic downloads, cleanup and quota, Task Manager rule, moves between roots, "Download all", out-of-process system tests). Untagged deliverables and criteria are M6a.
 - **Deliverables:**
@@ -1308,15 +1320,16 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
   9. Two concurrent drains never claim the same row; slots hold at 3 / 2 per host / 1 YouTube; a completed download writes its `download` row exactly 3 times after the insert (`DownloadEngineTest`, [07 Claiming and slots](design/07-downloads.md#claiming-and-slots)).
   10. On API 34+ a manual request while visible schedules the UIDT job and while invisible enqueues `download-lane-MANUAL`; while every `MANUAL` row is in backoff no job runs, and the wake work never fires without a runnable row (`DownloadSchedulerTest`, [07 Runners and scheduling](design/07-downloads.md#runners-and-scheduling)).
   11. (M6b) Task Manager "Stop" on the UIDT job leaves the `MANUAL` rows `PAUSED`, while swiping the app from Recents does not pause them (`DownloadReconcilerTest` and the M6 device checklist, [07 Lifecycle and reconciliation](design/07-downloads.md#lifecycle-and-reconciliation)).
-  12. A captive-portal HTML page ends as a `NETWORK` wait without a stored file; a full disk keeps the `.part` and waits with `STORAGE`; an unmounted root marks rows `MISSING` until it returns (`RssTransferSourceTest`, `DownloadEngineTest`, `DownloadReconcilerTest`).
+  12. On an unvalidated Android network, a captive-portal HTML page ends as a `NETWORK` wait without a stored file (validated Android and desktop HTML fail as `NOT_MEDIA`, AC1/14); a full disk keeps the `.part` and waits with `STORAGE`; an unmounted root marks rows `MISSING` until it returns (`RssTransferSourceTest`, `DownloadEngineTest`, `DownloadReconcilerTest`).
   13. (M6b) Moving downloads to the other storage root copies, verifies and renames every file, defers deleting the playing file, and continues after a stop (`DownloadMoveWorkerTest`).
   14. On the desktop JVM a manual download cut at 50 % resumes from the `.part` length after the app is quit and restarted (fixture with a strong ETag; without a reliable validator it restarts from 0, AC1), a completed file plays offline with its artwork (from MD1), and a `text/html` 200 ends `FAILED(NOT_MEDIA)` exactly as on Android (`DesktopDownloadLaneTest`, the shared transfer-core suite).
   15. (M6b) Desktop auto-download for a group with keep 3 queues the same rows as AC4's scenario (the shared planner test on the desktop JVM), and "Change folder…" copies, verifies and renames every file, defers the playing one and continues after an interruption (`DesktopMoveTest`).
-- **Dependencies:** M3 (backup rules), M4 (resolver, artwork store); PO-12 default. M6b depends on M6a.
+- **Dependencies:** M3 (backup rules), M4 (resolver, artwork store); MD1 for AC14 offline audio; PO-12 default. M6b depends on M6a.
 - **Design refs:** [07](design/07-downloads.md), [07 Desktop runners](design/07-downloads.md#desktop-runners), [06 Media items and URI resolution](design/06-playback.md#media-items-and-uri-resolution), [05 Effective settings resolution](design/05-groups-opml-backup.md#effective-settings-resolution), [08 Live row state](design/08-ui-ux.md#live-row-state), [08 Downloads](design/08-ui-ux.md#downloads), [09 Out-of-process system tests](design/09-quality-and-release.md#out-of-process-system-tests), [11 Desktop downloads and storage](design/11-desktop.md#desktop-downloads-and-storage).
 - **Advances:** M6a: R4.2, R4.3, R4.6, R1.8, R2.5 (downloaded), R5.3, R8.7, R8.8, N1, N2, N6; M6b: R4.4, R4.5, R2.6 (download all), R2.7 (auto-download), R8.8, N1, N2.
 
 #### M7: Discovery
+
 
 - **Goal:** find and add podcasts without knowing a feed URL.
 - **Deliverables:**
@@ -1328,10 +1341,10 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
   - The Discover screen, directory results and the add sheet run on the desktop as well; desktop URL and file handlers arrive in MD2.
 - **Acceptance criteria:**
   1. Searching "news" returns merged, de-duplicated Apple + fyyd results; a failing provider still yields partial results; hits without a feed URL are dropped.
-  2. Unit test: no more than 20 Apple requests per minute; search fires after 600 ms debounce with ≥ 3 characters or on IME search.
+  2. Unit test: no more than 20 Apple dispatches in any rolling 60 seconds across search/lookup/charts, immediate RateLimited and no queue; search fires after 600 ms debounce with ≥ 3 characters or on IME search.
   3. Autodiscovery fixtures: `<link rel=alternate>` page, page with only an Apple Podcasts link, WordPress `/feed/podcast`, page with several candidates → chooser.
   4. Sharing a podcasts.apple.com URL from a browser opens the add sheet with a preview and a subscribe button.
-  5. Without a key Podcast Index is hidden; with a user key its results appear; the key is stored encrypted.
+  5. Without a key Podcast Index is hidden; with a user key its results appear; storage uses Android Keystore encryption, Windows DPAPI, or macOS/Linux protected files (0600 per PO-44).
   6. Discover shows which providers receive queries.
   7. `neutrodyne://subscribe?url=…` and `feed:`/`pcast:`/`podcast:`/`itpc:` links open the add sheet with a preview (E1 deep-link case, [03 Deep links and share targets](design/03-feeds-and-discovery.md#deep-links-and-share-targets)).
   8. Recorded Apple search, Apple chart, fyyd and Podcast Index responses parse into ranked results; hits without a feed URL are dropped and unknown fields ignored ([03 Search and discovery](design/03-feeds-and-discovery.md#search-and-discovery)).
@@ -1382,6 +1395,28 @@ provider's switch stays off; the in-app "What Neutrodyne connects to" list is `P
 - **Advances:** R3.1 (links), R3.2, R3.3, R3.4, R3.7, R1.6, R5.8, N3 (inventory `youtube-subscriptions`), N9 (YouTube import formats).
 
 #### M9: YouTube playback and downloads via the embedded yt-dlp engine
+
+Implementation note (2026-10-19, M9a): D72's verified bundled store,
+D76's build-time signature/hash gate and the shared Python shim are integrated
+locally. The official 2026.08.19 pin is unchanged. Portable implementation and
+deterministic testing may precede the reference-device spike; host selection
+and production activation still require owner approval, **spike pending**.
+W6's portable lifecycle and synchronous extraction reservations now use the
+frozen host/settings/cache ports; Android adapters, consumer wiring and device
+proof remain pending. M8 feed health stays independent.
+Both shells remain external with `NOT_YET_AVAILABLE`. Status/preparation hooks
+and worker creators stay unbound; ordinary startup never compiles or imports
+Python. No runtime updater, JS provider or engine-backed playback is activated.
+Host CPython 3.11.2 is a disclosed test fallback, not CPython 3.14 acceptance;
+replay fixtures are synthetic and successful residential captures remain open.
+W5 now supplies portable client admission, strict DTO/audio/error mapping, the
+pure selector and memory-only resolver single flight/cache. Its network-identity
+adapter is unbound. Portable W5/W6 health/cache boundaries are tested together
+against real shared implementations. W4 host enforcement, W9 facts/ingest, W11
+bindings and reference-device evidence remain separate gates; these local
+tests do not accept the milestone.
+See [04 Host and packaging](design/04-youtube.md#host-and-packaging) and
+[09 Recorded responses](design/09-quality-and-release.md#recorded-responses).
 
 - **Goal:** on the 64-bit APKs, YouTube episodes play and download as audio exactly like podcasts, through yt-dlp embedded in CPython in the `:ytx` process (layer B, [D72](#3-key-decisions)–[D75](#3-key-decisions)) (M9a); YouTube fixes then reach users as verified engine updates within hours, without an app update ([D76](#3-key-decisions)) (M9b).
 - **Increments** ([7.1](#71-milestone-overview)): **M9a** = every deliverable and criterion below not tagged M9b; **M9b** = the tagged ones. M9a starts with a one-week spike whose results decide the go/fallback before the rest of M9a is built.
