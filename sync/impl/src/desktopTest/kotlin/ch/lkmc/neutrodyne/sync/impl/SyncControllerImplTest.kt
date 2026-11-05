@@ -820,6 +820,34 @@ private class Harness(
             tokens = tokens,
         )
     val merger = FirstLinkMerger(db, client, applier, engine, clock)
+
+    /** Records the scheduler's platform callbacks: link arm and work cancellation. */
+    val schedulerCalls = mutableListOf<String>()
+    val scheduler =
+        SyncScheduler(
+            db = db,
+            round = { reason -> engine.round(reason) },
+            playback = NoPlaybackSync,
+            network =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeNetworkMonitor(),
+            clock = clock,
+            scope = controllerScope,
+            hooks =
+                object : SyncScheduleHooks {
+                    override fun interactive(): Boolean = false
+
+                    override fun schedulePush(reason: ch.lkmc.neutrodyne.sync.api.SyncRoundReason) = Unit
+
+                    override suspend fun onLinked() {
+                        schedulerCalls += "linked"
+                    }
+
+                    override suspend fun onUnlinked() {
+                        schedulerCalls += "unlinked"
+                    }
+                },
+        )
     val build =
         BuildInfo(
             versionName = "1.0.0",
@@ -849,6 +877,7 @@ private class Harness(
             merger = merger,
             gate = gate,
             errors = classifier,
+            scheduler = scheduler,
             io = kotlinx.coroutines.Dispatchers.Default,
             scope = controllerScope,
         )
