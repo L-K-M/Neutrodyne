@@ -37,7 +37,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.settings
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
-import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestRule
@@ -107,9 +107,13 @@ class SmokeTest {
         }
     }
 
-    @After
+    @Before
     fun resetNightMode() {
+        // Reset before the journey, not after it: resetting after the test would
+        // trigger a configuration-change relaunch while the Compose rule is tearing
+        // the activity down, outside the relaxed policy's lifetime.
         compose.runOnUiThread { AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM) }
+        compose.waitForIdle()
     }
 
     @Test
