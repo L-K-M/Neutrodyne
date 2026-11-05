@@ -142,7 +142,8 @@ class RadioHomeDeviceTest {
                 val frame =
                     InstrumentationRegistry
                         .getInstrumentation()
-                        .context.assets.open("media/cbr_128k_2s.mp3")
+                        .context.assets
+                        .open("media/cbr_128k_2s.mp3")
                         .use { it.readBytes() }
                 val body = Buffer().apply { repeat(STREAM_REPEATS) { write(frame) } }.readByteArray()
                 server.dispatcher =
@@ -268,7 +269,10 @@ class RadioHomeDeviceTest {
                 )
         }
         compose.onNodeWithTag("radio_play").performClick()
-        compose.waitUntil(30_000) { graph.playbackStateSource.nowPlaying.value?.isPlaying == true }
+        compose.waitUntil(30_000) {
+            graph.playbackStateSource.nowPlaying.value
+                ?.isPlaying == true
+        }
         compose.waitForIdle()
         if (capture == "playing") {
             // nowPlaying.position is a snapshot; the advancing position rides positionTicks.
@@ -286,7 +290,10 @@ class RadioHomeDeviceTest {
             )
         }
         compose.runOnUiThread { graph.playbackController.pause() }
-        compose.waitUntil(10_000) { graph.playbackStateSource.nowPlaying.value?.isPlaying == false }
+        compose.waitUntil(10_000) {
+            graph.playbackStateSource.nowPlaying.value
+                ?.isPlaying == false
+        }
         compose.onNodeWithTag("radio_new_playlist").performClick()
         compose.onNodeWithTag("radio_name").assertIsFocused()
         compose.onNodeWithTag("radio_create").assertIsDisplayed()
