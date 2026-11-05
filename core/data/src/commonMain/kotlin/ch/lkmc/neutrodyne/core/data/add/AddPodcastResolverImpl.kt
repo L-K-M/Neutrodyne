@@ -102,6 +102,9 @@ internal class AddPodcastResolverImpl(
 
     override suspend fun resolve(input: String): AddResolution = withContext(io) { resolveInner(input, null) }
 
+    override suspend fun resolveUnconfirmed(input: String): AddResolution =
+        withContext(io) { resolveInner(input, null, topPurpose = FeedRequestPurpose.ADD_DISCOVERED) }
+
     override suspend fun lookupOnce(input: String): AddResolution =
         withContext(io) { resolveInner(input, null, DirectoryAccess.ONE_TIME_LOOKUP) }
 
@@ -124,7 +127,16 @@ internal class AddPodcastResolverImpl(
             ) {
                 return@withContext Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
             }
-            when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
+            when (
+                val r =
+                    fetchAndParse(
+                        feedUrl,
+                        feedUrl,
+                        null,
+                        schemeGuessed = false,
+                        purpose = FeedRequestPurpose.ADD_DISCOVERED,
+                    )
+            ) {
                 is PreviewOutcome.Done -> Outcome.Success(buildPreview(cacheEntry(r.entry)))
                 is PreviewOutcome.Failed -> Outcome.Failure(r.error)
                 else -> Outcome.Failure(AddPodcastError.NotAFeed)
@@ -139,6 +151,7 @@ internal class AddPodcastResolverImpl(
         input: String,
         credentials: BasicCredentials?,
         access: DirectoryAccess = DirectoryAccess.ENABLED_ONLY,
+        topPurpose: FeedRequestPurpose? = null,
     ): AddResolution {
         if (input.take(MAX_INPUT_CHARS).split(Regex("\\s+")).any {
                 HostChecks.isYouTube(it)
@@ -154,7 +167,15 @@ internal class AddPodcastResolverImpl(
             }
         val creds = credentials ?: normalized.credentials?.let { BasicCredentials(it.username, it.password) }
         val result =
-            resolveUrl(normalized.url, normalized.url, creds, normalized.schemeGuessed, access, DiscoveryMode.FULL)
+            resolveUrl(
+                normalized.url,
+                normalized.url,
+                creds,
+                normalized.schemeGuessed,
+                access,
+                DiscoveryMode.FULL,
+                topPurpose,
+            )
         return when (result) {
             is PreviewOutcome.Done -> {
                 AddResolution.Feed(buildPreview(cacheEntry(result.entry)))
@@ -194,6 +215,7 @@ internal class AddPodcastResolverImpl(
         schemeGuessed: Boolean,
         access: DirectoryAccess,
         mode: DiscoveryMode,
+        topPurpose: FeedRequestPurpose? = null,
     ): PreviewOutcome {
         if (HostChecks.isYouTube(url)) return PreviewOutcome.Failed(AddPodcastError.YouTubeNotYetSupported)
         return when (val action = HostRecognizer.recognize(url)) {
@@ -225,7 +247,7 @@ internal class AddPodcastResolverImpl(
                         if (result.error ==
                             ProviderStatus.Disabled
                         ) {
-                            fetchAndParse(url, inputUrl, credentials, schemeGuessed, mode)
+                            fetchAndParse(url, inputUrl, credentials, schemeGuessed, mode, topPurpose)
                         } else {
                             directoryFailure(result.error)
                         }
@@ -238,7 +260,7 @@ internal class AddPodcastResolverImpl(
             }
 
             else -> {
-                fetchAndParse(url, inputUrl, credentials, schemeGuessed, mode)
+                fetchAndParse(url, inputUrl, credentials, schemeGuessed, mode, topPurpose)
             }
         }
     }
@@ -434,7 +456,8 @@ internal class AddPodcastResolverImpl(
                                     UrlNormalizer.origin(url)
                             },
                             false,
-                            purpose = requestPurpose,
+                            // Consent for /feed never covers an inferred /feed/podcast URL.
+                            purpose = FeedRequestPurpose.ADD_DISCOVERED,
                         )
                     } else {
                         parsed

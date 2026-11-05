@@ -1,0 +1,242 @@
+{
+  "generatedBy": "scripts/fixtures/corpus_reference.py",
+  "corpus": "MD0 desktop audio engine spike (PLAN MD0 AC1)",
+  "licence": "Unlicense",
+  "provenance": "First-party synthetic sine waves from scripts/fixtures/make-engine-corpus.sh; HE-AAC from the same generated WAV; no original recordings. Encoder build versions were not retained by the initial generator run.",
+  "files": [
+    {
+      "container": "mp3",
+      "codec": "mp3",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 89856,
+      "decodedSamples": 89856,
+      "trimRule": null,
+      "chapters": [],
+      "file": "cbr_128k_2s.mp3",
+      "bytes": 32600,
+      "sha256": "e6a00b3e0b65ccf9c03c96eb8fd70bcbfb88b5c2965ce7b857bbda85fa952d82"
+    },
+    {
+      "container": "flac",
+      "codec": "flac",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 88200,
+      "decodedSamples": 88200,
+      "trimRule": null,
+      "file": "flac_2s.flac",
+      "bytes": 39285,
+      "sha256": "2a1484d574d8ba978da1422a2014d94efec13977edcf6c097ccbff903c761379"
+    },
+    {
+      "container": "mp4",
+      "codec": "aac",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 133120,
+      "decodedSamples": 134144,
+      "trimRule": "aac-fmp4-priming-1024",
+      "chapters": [],
+      "file": "fmp4_itag140_3s.mp4",
+      "bytes": 47807,
+      "sha256": "8f9f8b92190330ec260799855bd59420405cd4a8e11639ad3334390289e1f873"
+    },
+    {
+      "container": "adts",
+      "codec": "aac-he",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 94208,
+      "decodedSamples": 94208,
+      "trimRule": null,
+      "chapters": [],
+      "file": "heaac_v1_2s.aac",
+      "bytes": 17090,
+      "sha256": "42be9dbccd32c3d32fe111c20b13dcd1cc6332caf360a1b8ca2cd471db0f55ff"
+    },
+    {
+      "container": "adts",
+      "codec": "aac-hev2",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 96256,
+      "decodedSamples": 96256,
+      "trimRule": null,
+      "chapters": [],
+      "file": "heaac_v2_2s.aac",
+      "bytes": 8731,
+      "sha256": "f56d3f52b8d0af7412131b5d846fe03fb57edf12acc5c9d2c688f2529042695d"
+    },
+    {
+      "container": "mp3",
+      "codec": "mp3",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 133632,
+      "decodedSamples": 133632,
+      "trimRule": null,
+      "chapters": [
+        {
+          "startMs": 0,
+          "endMs": 1000,
+          "title": "Intro"
+        },
+        {
+          "startMs": 1000,
+          "endMs": 2000,
+          "title": "Middle"
+        },
+        {
+          "startMs": 2000,
+          "endMs": 3000,
+          "title": "Outro"
+        }
+      ],
+      "file": "id3chap_3s.mp3",
+      "bytes": 48698,
+      "sha256": "c22b96b7b6db799537d910e4a5ace6eb0ba37b5c960a433c31eb7813ef7b5e8f"
+    },
+    {
+      "container": "mp4",
+      "codec": "aac",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 132300,
+      "decodedSamples": 132300,
+      "trimRule": "elst-media-time",
+      "chapters": [
+        {
+          "startMs": 0,
+          "endMs": 1000,
+          "title": "First"
+        },
+        {
+          "startMs": 1000,
+          "endMs": 2000,
+          "title": "Second"
+        },
+        {
+          "startMs": 2000,
+          "endMs": 3000,
+          "title": "Third"
+        }
+      ],
+      "file": "m4a_chapters_3s.m4a",
+      "bytes": 46510,
+      "sha256": "29cfdcf44fab76988e0cf8cd379b5147c98f220f105acaba2e42cef008e8b917"
+    },
+    {
+      "container": "mp4",
+      "codec": "aac",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 88200,
+      "decodedSamples": 88200,
+      "trimRule": "elst-media-time",
+      "chapters": [],
+      "file": "m4a_lc_2s.m4a",
+      "bytes": 31024,
+      "sha256": "cb9bcd69dd90575cfba707006ea08de20728d75d77a71f19207f89c2e2bb65c8"
+    },
+    {
+      "container": "mp3",
+      "codec": "mp3",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 133632,
+      "decodedSamples": 133632,
+      "trimRule": null,
+      "chapters": [],
+      "file": "mp3_silence_gaps_3s.mp3",
+      "bytes": 48483,
+      "sha256": "22e0a5e92627b7a53b7749fc52c9b23c24c52be06d5da0448b90163d66c5ad0d"
+    },
+    {
+      "container": "ogg",
+      "codec": "opus",
+      "sampleRate": 48000,
+      "channels": 2,
+      "expectedSamples": 96000,
+      "decodedSamples": 96000,
+      "trimRule": "opus-pre-skip",
+      "file": "ogg_opus_2s.opus",
+      "bytes": 30539,
+      "sha256": "a1043721540074bf440d129449194108800a8ea7e74aaf8da717506cd2698129"
+    },
+    {
+      "container": "ogg",
+      "codec": "vorbis",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 88200,
+      "decodedSamples": 88200,
+      "trimRule": null,
+      "file": "ogg_vorbis_2s.ogg",
+      "bytes": 9598,
+      "sha256": "728b3d735d379e265d243e1a959e2e6fb6476cba375f9e5ebb331285dfab00b0"
+    },
+    {
+      "container": "ogg",
+      "codec": "vorbis",
+      "sampleRate": 22050,
+      "channels": 1,
+      "expectedSamples": 44100,
+      "decodedSamples": 44100,
+      "trimRule": null,
+      "file": "ogg_vorbis_mono_22050_2s.ogg",
+      "bytes": 5917,
+      "sha256": "6fdad496827ce5a7a733f8e79898988e309a8a3e2b34dfdcfa19ad522f3cc7cd"
+    },
+    {
+      "container": "mp3",
+      "codec": "mp3",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 89856,
+      "decodedSamples": 89856,
+      "trimRule": null,
+      "chapters": [],
+      "file": "vbr_no_toc_2s.mp3",
+      "bytes": 8738,
+      "sha256": "008f3c7fd3e528b5a1918ede6f010ce63506cc789ad6573396ef0e25ba9059f2"
+    },
+    {
+      "container": "mp3",
+      "codec": "mp3",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 88200,
+      "decodedSamples": 88200,
+      "trimRule": "lame-tag-delay-and-padding",
+      "chapters": [],
+      "file": "vbr_xing_2s.mp3",
+      "bytes": 8946,
+      "sha256": "29e29dfc0edeb62f09e64c78ede875060c4ecaea83997cfc38f3b72d49ae4895"
+    },
+    {
+      "container": "wav",
+      "codec": "pcm_s16le",
+      "sampleRate": 44100,
+      "channels": 2,
+      "expectedSamples": 88200,
+      "decodedSamples": 88200,
+      "trimRule": null,
+      "file": "wav_2s.wav",
+      "bytes": 352878,
+      "sha256": "4d190768917e19831eb63d3c99f00df90da94ad154b81ccc2ecf691809b3d69d"
+    },
+    {
+      "container": "webm",
+      "codec": "opus",
+      "sampleRate": 48000,
+      "channels": 2,
+      "expectedSamples": 96000,
+      "decodedSamples": 96000,
+      "trimRule": "matroska-codec-delay-and-discard-padding",
+      "file": "webm_opus_2s.webm",
+      "bytes": 31383,
+      "sha256": "d8c31cac7e54799271dd201cee60953187ef4bab786692eef590650e201779e5"
+    }
+  ]
+}

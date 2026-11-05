@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
+import ch.lkmc.neutrodyne.core.designsystem.components.CoverNetworkPolicy
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
@@ -185,6 +186,9 @@ internal fun PodcastPreviewScreen(
                         title = preview.title,
                         modifier = Modifier.size(160.dp),
                         tier = CoverTier.HERO,
+                        // Preview art is feed/directory-supplied, pre-confirmation (03 note
+                        // 2026-11-02).
+                        networkPolicy = CoverNetworkPolicy.UNCONFIRMED,
                     )
                     Text(preview.title, style = MaterialTheme.typography.headlineSmall)
                     preview.author?.let { Text(it) }

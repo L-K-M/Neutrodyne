@@ -337,7 +337,12 @@ object FeedQueryBuilder {
         }
         where += VISIBLE
         where += "e.availability = 'AVAILABLE'"
-        where += "s.playedAt IS NULL"
+        // Browsing Downloads lists every completed download, played or not (06 Browse tree), so
+        // only an explicit Unplayed filter narrows it; every other context is unplayed by rule.
+        val browsesDownloads = selection == ContextSelection.BROWSE && spec.type == ContextType.DOWNLOADS
+        if (!browsesDownloads || spec.filterFlags and FilterFlagBits.UNPLAYED != 0) {
+            where += "s.playedAt IS NULL"
+        }
         if (selection == ContextSelection.TAIL) {
             where += "NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)"
         }

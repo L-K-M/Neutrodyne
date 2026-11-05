@@ -19,8 +19,10 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdScrollbarStyle
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -38,11 +40,20 @@ import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
+import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSearchRepository
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.persistentSetOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -50,7 +61,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 class DiscoveryScreenTest {
     private val navigator = RecordingAppNavigator()
     private lateinit var locale: Locale
@@ -64,6 +75,67 @@ class DiscoveryScreenTest {
     @AfterTest fun cleanup() {
         Locale.setDefault(locale)
     }
+
+    @Test
+    fun changedRecipientsWaitForTheUpdatedDisclosureFrame() =
+        runComposeUiTest {
+            val dispatcher = StandardTestDispatcher()
+            Dispatchers.setMain(dispatcher)
+            val repository = FakeSearchRepository()
+            repository.providers.value =
+                listOf(ProviderInfo(ProviderId.APPLE, true), ProviderInfo(ProviderId.FYYD, false)).toImmutableList()
+            val vm = DiscoverViewModel(repository, FakeGroupRepository())
+            try {
+                dispatcher.scheduler.advanceUntilIdle()
+                setContent {
+                    CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                        NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                            DiscoverRoute(vm)
+                        }
+                    }
+                }
+                waitForIdle()
+                onNodeWithText("Searches are sent to Apple").assertIsDisplayed()
+                onNode(hasSetTextAction()).performTextInput("news")
+                runOnIdle { dispatcher.scheduler.advanceUntilIdle() }
+                assertEquals(listOf("news"), repository.queries)
+                mainClock.autoAdvance = false
+                runOnIdle {
+                    repository.providers.value =
+                        repository.providers.value
+                            .map { it.copy(enabled = true) }
+                            .toImmutableList()
+                    dispatcher.scheduler.advanceUntilIdle()
+                }
+                // Provider collection and search work drain while Compose cannot draw new recipients.
+                assertEquals(listOf("news"), repository.queries)
+                mainClock.advanceTimeByFrame()
+                waitForIdle()
+                mainClock.advanceTimeByFrame()
+                waitForIdle()
+                onNodeWithText("Searches are sent to Apple, fyyd").assertIsDisplayed()
+                runOnIdle { dispatcher.scheduler.advanceUntilIdle() }
+                assertEquals(listOf("news", "news"), repository.queries)
+            } finally {
+                vm.viewModelScope.cancel()
+                Dispatchers.resetMain()
+                mainClock.autoAdvance = true
+            }
+        }
+
+    @Test
+    fun unknownProvidersDoNotClaimDirectoriesAreDisabled() =
+        runComposeUiTest {
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DiscoverScreen(DiscoverState(), {}, {}, navigator)
+                    }
+                }
+            }
+            onNodeWithText("Enable a directory in Discover settings").assertDoesNotExist()
+            onNodeWithText("Searches are sent to", substring = true).assertDoesNotExist()
+        }
 
     @Test
     fun enterAndImeOpenFullDirectoryEvenForShortQuery() =

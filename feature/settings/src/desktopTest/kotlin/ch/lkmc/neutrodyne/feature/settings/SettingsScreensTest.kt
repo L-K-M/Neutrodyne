@@ -185,7 +185,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot()
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
             waitForIdle()
             onNodeWithText("kotlinx-coroutines-core").assertExists()
             onNodeWithText("Libraries · 1 library").assertExists()
@@ -201,7 +201,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(licencesSource = null)
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
 
             onNodeWithText("No licence information in this build.").assertIsDisplayed()
         }
@@ -219,7 +219,7 @@ class SettingsScreensTest {
                     ),
             )
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
             waitForIdle()
 
             onNodeWithText("Bundled components", substring = true).assertExists()

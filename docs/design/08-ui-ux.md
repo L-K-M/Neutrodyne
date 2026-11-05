@@ -750,6 +750,18 @@ In progress is enabled; Downloaded remains gated until M6.
 
 ### Downloads
 
+**Implementation note (2026-10-19, M6a).** The manual Downloads screen exposes
+new-download storage selection, manual mobile-data policy and the current wait
+reasons. The empty state links to "Download settings". Automatic admission,
+cleanup/caps, root moves, Download all and desktop folder registration remain
+M6b controls and are hidden. Existing completed files retain their recorded
+roots when you select a location for new downloads. Desktop Share file is
+hidden. The background-restriction notice refers to downloads generally while
+automatic downloads are unavailable. Queued episode buttons open the current
+wait reason's actions and Cancel; completed buttons open a delete confirmation.
+Progress is an overlay for visible IDs and never invalidates paging membership.
+
+
 `DownloadsKey`, `:feature:downloads`, M6 (empty state from M0). Data: 07's `DownloadController.observeAll(): Flow<DownloadsOverview>` (in progress, completed and failed `DownloadEntry` lists, `StorageUsage`, `notices`) with live bytes from `DownloadProgressSource` for the visible in-progress rows ([07 Engine architecture](07-downloads.md#engine-architecture), [07 Notices](07-downloads.md#notices)); texts are [`DownloadStatusText`](#download-status-text).
 
 ```
@@ -855,7 +867,7 @@ A list of `DirectoryHit` cards: 64 dp cover, title, author, "120 episodes · upd
 
 The empty field's helper text is "Paste a podcast feed, website, Apple Podcasts or YouTube link, or a YouTube @handle" (with and without the engine; before M8 without "or a YouTube @handle"); a bare `@handle` resolves through 03's YouTube pre-check and never reaches `NotAUrl`; every "Add a YouTube channel" and "Add by URL" entry point opens this same sheet with `AddPodcastKey(null)`. The sheet's state (input, preview id, chosen groups) is `rememberSaveable`; after process death the preview is re-resolved from the saved input (previews are memory-only, D24). On the desktop the sheet also opens from Ctrl/Cmd+N, File › Add podcast…, a link handed over by the OS or a second launch, and a URL dropped on the window (11); the field takes focus at once, Enter runs Subscribe when it is enabled, and the (paste) button reads the clipboard's text.
 
-**Implementation note (2026-11-02, M7).** A prefilled input that names a local-network destination (`AddPodcastResolver.isLocalDestination`) opens with the text visible but does not auto-resolve — the field's initial effect calls `autoResolve`, which skips local inputs; the user's tap resolves it like a typed URL. Chooser rows show the localized source label of `FeedCandidateSource`, never the enum identifier.
+**Implementation note (2026-11-02, M7).** A prefilled local-network input opens with its text visible and waits for a tap. Other prefills resolve through the unconfirmed path; a transport-level local refusal also returns to the wait-for-tap state. Preview and directory covers use the unconfirmed image policy; subscribed-library artwork retains its existing behavior. Add's search action stays disabled while providers load. Add and Discover show a loading disclosure until recipients are known; Directory keeps that disclosure above results and waits for its composition before its first dispatch or a configuration-triggered retry. Chooser rows show localized `FeedCandidateSource` labels.
 
 ### Import
 
@@ -1588,6 +1600,12 @@ All in `:core:ui`, returning `UiText` (01) so ViewModels stay resource-free; eac
 `EpisodeRowSummary.describe(row, live)`: "{title}. {podcast}. {date}. {duration}[, {n} minutes left][. Played][. New][. Downloaded | Downloading, {p} percent | {wait text} | Download failed][. Video][. Opens in YouTube][. Unavailable: {reason}][. Now playing]".
 
 #### Download status text
+
+**Implementation note (2026-10-19, M6a).** Desktop `SYSTEM` waits use
+"Interrupted, resumes automatically", following 07's quit/crash recovery
+semantics. The earlier statement below that `SYSTEM` never occurs on desktop
+does not apply to M6a recovery rows.
+
 
 07 owns the meaning of each state ([07 Wait reasons](07-downloads.md#wait-reasons), [07 Errors](07-downloads.md#errors)); this is the final wording, including 07's refinements (marked ‡). Context needed beyond the enum value: `lastError` (for `STORAGE` and `MISSING`), `nextAttemptAt` (both in `RowLive` and `DownloadStatus`), the row's `sourceType`, `YouTubeHealth.state` (YouTube gate) and `YouTubeCapabilities.externalReason` (YouTube rows in external mode). All texts, the YouTube ones included, are ordinary string resources, identical in every APK and desktop build ([Capability differences in UI](#capability-differences-in-ui)); on the desktop `STORAGE` with `lastError = STORAGE_UNAVAILABLE` reads ‡ "Waiting for the download folder", and `UNMETERED_NETWORK`, `CHARGING`, `SYSTEM` and `NEEDS_FOREGROUND` do not occur ([07 Desktop runners](07-downloads.md#desktop-runners)).
 
@@ -2749,6 +2767,14 @@ Shown at the top of Feeds and Manage groups when `PodcastRepository.observeCateg
 `StartupGate` (visuals in `:core:ui`, hosted by both shells; state from each shell's start-up code, 01 [Application start-up](01-foundation.md#application-start-up), [11 Start-up sequence](11-desktop.md#start-up-sequence)): on Android the system splash covers the first 400 ms; the desktop window opens directly. If the database is still `Pending`, a full-window surface shows the in-app brand mark on navy, "Updating your library…" and an indeterminate `NdLoading`. `Failed` keeps the gate: for 02's `DatabaseOpenException.Reason.DISK_FULL`, "Not enough storage to open your library" with "Manage storage" (`ACTION_MANAGE_STORAGE`, Android; the desktop shows the data folder through `RevealInFolder`) and "Try again"; otherwise "Neutrodyne couldn't open its library" with "Send report" (09's `reportNonFatal`; "Copy diagnostics" when ACRA is unavailable) and "Try again". "Try again" calls `StartupViewModel.retry()`, which calls `DatabaseOpener.awaitOpen()` again (02: a failed result is not cached); it does not restart the activity (Android) or the window, because the retained `StartupViewModel` would keep the failed state. Nothing is deleted. The gate uses only `:core:designsystem` and string resources (no repository, 01).
 
 ### Permission prompts
+
+**Implementation note (2026-10-19, M6a).** Download consent and notification
+permission use the shared contextual dialog handler. After a notification
+denial, the contextual prompt shows "Notifications are blocked" and an explicit
+"Open settings" action. It never opens system settings automatically or retries
+the system dialog after a denial. This prompt replaces the inline blocked row
+for the M6a download entry points.
+
 
 **Android.** `POST_NOTIFICATIONS` (API 33+) is never requested at launch ([01 P22](01-foundation.md#platform-compliance)). `PlatformActions.notifications` (`NotificationPermissionRequester`, [Modules](#modules)) wraps `rememberLauncherForActivityResult(RequestPermission())` and is invoked only:
 

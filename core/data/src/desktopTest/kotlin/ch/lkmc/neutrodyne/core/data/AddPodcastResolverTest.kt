@@ -15,8 +15,10 @@ import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
+import okhttp3.Dns
 import org.junit.Rule
 import java.io.File
+import java.net.InetAddress
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
@@ -50,7 +52,17 @@ class AddPodcastResolverTest {
             kotlin.io.path
                 .createTempDirectory("nd-add-test")
                 .toFile()
-        bundle = newResolver(root, db, clock)
+        bundle =
+            newResolver(
+                root,
+                db,
+                clock,
+                // A directory-hit preview is a discovered fetch (03 note 2026-11-02): the
+                // `page.test` spelling rides the stub DNS to this server while the peer seam
+                // leaves the guard's coverage to AddLocalDestinationTest.
+                networkClients =
+                    newNetworkClients(baseDns = testDns, isLocalPeer = NO_LOCAL_PEER),
+            )
     }
 
     @AfterTest
@@ -60,6 +72,24 @@ class AddPodcastResolverTest {
     }
 
     private fun feedUrl(path: String = "/feed.xml") = server.url(path).toString()
+
+    /** The `preview()` host: public spelling, resolving to this server through [testDns]. */
+    private fun publicFeedUrl(path: String = "/feed.xml") =
+        server
+            .url(path)
+            .newBuilder()
+            .host("page.test")
+            .build()
+            .toString()
+
+    private val testDns =
+        Dns { host ->
+            if (host == "page.test" || host.endsWith(".page.test")) {
+                listOf(InetAddress.getByName("127.0.0.1"))
+            } else {
+                Dns.SYSTEM.lookup(host)
+            }
+        }
 
     // --- Input normalisation (03 steps 1–7) ---------------------------------------------------------
 
@@ -525,7 +555,7 @@ class AddPodcastResolverTest {
         runTest {
             server.enqueue(mockResponse(body = rssBody(title = "Fresh")))
 
-            val r = bundle.resolver.preview(feedUrl())
+            val r = bundle.resolver.preview(publicFeedUrl())
 
             val preview = assertIs<Outcome.Success<FeedPreview>>(r).value
             assertEquals("Fresh", preview.title)
