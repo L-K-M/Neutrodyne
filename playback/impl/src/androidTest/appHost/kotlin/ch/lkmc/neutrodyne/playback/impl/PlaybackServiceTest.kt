@@ -985,7 +985,11 @@ class PlaybackServiceTest {
         const val SEEK_TOLERANCE_MS = 4_000L
         const val SETTLE_MS = 500L
         const val TIMER_EXPIRY_MS = 75_000L
-        const val WAIT_MS = 30_000L
+
+        // The interpreter-mode API 26 CI lane can starve a service bind, a
+        // notification post or an audio start for tens of seconds on first-ever
+        // class loading; the shared wait budget doubles there only.
+        val WAIT_MS = if (Build.VERSION.SDK_INT < 29) 60_000L else 30_000L
         const val DATA_CYCLE_GRACE_MS = 10_000L
         const val DATA_CYCLE_MS = 10_000L
         const val THIRTY_MINUTES_MS = 30 * 60 * 1_000L
