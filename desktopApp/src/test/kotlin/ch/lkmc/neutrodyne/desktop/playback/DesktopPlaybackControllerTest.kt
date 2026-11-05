@@ -97,6 +97,102 @@ class DesktopPlaybackControllerTest {
         }
 
     @Test
+    fun automaticTransitionAdvancesTheSessionAndMarksTheOutgoingPlayed() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                val group = fixture.seed()
+                assertEquals(
+                    PlayResult.Started,
+                    fixture.controller.playFeed(
+                        FeedSource.Group(group),
+                        FeedFilters(unplayedOnly = true),
+                        FeedOrder.NEWEST_FIRST,
+                    ),
+                )
+                fixture.awaitEpisode(3)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.engine.position = 119_000
+                fixture.engine.transition(2)
+                fixture.awaitEpisode(2)
+                // The outgoing item is marked played; the mark-played chain resets
+                // its stored position.
+                val outgoing =
+                    fixture.graph
+                        .positionStore()
+                        .observe(3)
+                        .first()
+                assertNotNull(outgoing?.playedAt)
+                assertEquals(0L, outgoing?.positionMs)
+                assertEquals(
+                    2L,
+                    fixture.graph
+                        .queueRepository()
+                        .observeSession()
+                        .first()
+                        ?.currentEpisodeId,
+                )
+                // The engine's window dropped the outgoing item and kept the tail.
+                fixture.awaitWindow(listOf(2L, 1L))
+                // The arrival plays on without a restart and saves normally.
+                fixture.engine.position = 50_000
+                fixture.controller.pause()
+                fixture.awaitPaused()
+                assertEquals(50_000L, fixture.position(2))
+            }
+        }
+
+    @Test
+    fun automaticTransitionsDrainToTheLastItemAndEndTheSession() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                val group = fixture.seed()
+                assertEquals(
+                    PlayResult.Started,
+                    fixture.controller.playFeed(
+                        FeedSource.Group(group),
+                        FeedFilters(unplayedOnly = true),
+                        FeedOrder.NEWEST_FIRST,
+                    ),
+                )
+                val window = listOf(3L, 2L, 1L)
+                for (index in window.indices) {
+                    val id = window[index]
+                    fixture.awaitEpisode(id)
+                    fixture.engine.ready()
+                    fixture.awaitPlaying()
+                    fixture.engine.position = 119_000
+                    if (index < window.lastIndex) {
+                        fixture.engine.transition(window[index + 1])
+                    } else {
+                        fixture.engine.end()
+                    }
+                }
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it == null }
+                        .first()
+                }
+                for (id in window) {
+                    assertNotNull(
+                        fixture.graph
+                            .positionStore()
+                            .observe(id)
+                            .first()
+                            ?.playedAt,
+                    )
+                }
+                assertNull(
+                    fixture.graph
+                        .queueRepository()
+                        .observeSession()
+                        .first()
+                        ?.currentEpisodeId,
+                )
+            }
+        }
+
+    @Test
     fun coalescedEndsOfShortItemsStillDrainTheQueue() =
         runBlocking {
             PlaybackFixture().use { fixture ->
@@ -367,6 +463,14 @@ internal class PlaybackFixture : AutoCloseable {
     suspend fun awaitPlaying() {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             withTimeout(10_000) { controller.nowPlaying.filter { it?.isPlaying == true }.first() }
+        }
+    }
+
+    suspend fun awaitWindow(ids: List<Long>) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            withTimeout(10_000) {
+                while (engine.items.map { it.episodeId } != ids) kotlinx.coroutines.delay(5)
+            }
         }
     }
 

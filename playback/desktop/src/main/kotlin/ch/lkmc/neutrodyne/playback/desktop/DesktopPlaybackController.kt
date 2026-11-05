@@ -94,6 +94,13 @@ class DesktopPlaybackController(
     private var context: PlayContextInfo? = null
     private var since = 0L
     private var durationMs: Long? = null
+
+    /**
+     * The engine's loaded item. It advances on the engine's own automatic
+     * transition before the projected window catches up, so the projector and
+     * the planner diff against the engine's real current, not `entries.first()`.
+     */
+    private var engineCurrentId: Long? = null
     private var prepared = false
     private var wantPlaying = false
     private var closed = false
@@ -152,7 +159,7 @@ class DesktopPlaybackController(
                     }
                     if (replacement != null && oldId != queue.current?.episodeId) flushPause()
                     if (replacement != null) prepareSettings(plan.entries)
-                    projection.apply(queue, plan.entries, plan.operations)
+                    projection.apply(queue, plan.entries, plan.operations, engineCurrentId)
                     if (replacement != null || plan.operations.any { it == WindowOp.Clear }) {
                         loaded(replacement?.startPositionMs ?: 0)
                     }
@@ -198,9 +205,11 @@ class DesktopPlaybackController(
     ) {
         val row = queue.current?.episodeId?.let(media::get)
         if (row == null) {
+            engineCurrentId = null
             current.value = null
             return
         }
+        engineCurrentId = row.episodeId
         val saved = requireNotNull(runtime).positions.observe(row.episodeId).first()
         val snapshot =
             PositionSnapshot(
@@ -323,7 +332,12 @@ class DesktopPlaybackController(
         // Repository/settings reads suspend. A restore may have replaced the accepted session.
         if (!sessionMatches(queue)) return false
         ticket?.let(::requireIntent)
-        requireNotNull(projector).apply(queue, entries, listOf(WindowOp.SetAll(entries.map { it.item }, startMs)))
+        requireNotNull(projector).apply(
+            queue,
+            entries,
+            listOf(WindowOp.SetAll(entries.map { it.item }, startMs)),
+            queue.current?.episodeId,
+        )
         value.planner.appliedOwnGeneration(queue.generation)
         loaded(startMs)
         return sessionMatches(queue)
@@ -356,6 +370,7 @@ class DesktopPlaybackController(
         following = null
         value.saver.clear()
         prepared = row != null
+        engineCurrentId = row?.episodeId
         durationMs = row?.let { it.measuredDurationMs ?: it.durationMs }
         since = clock.now()
         if (row == null) {
@@ -379,6 +394,21 @@ class DesktopPlaybackController(
             }
         value.saver.load(row.episodeId, since, source, replay = row.playedAt != null)
         value.saver.startPositionApplied()
+        followSettings(row, group)
+        publish(startMs)
+    }
+
+    /**
+     * Follows the current item's effective settings, replacing the previous
+     * item's follow. An automatic transition changes the current item, so it
+     * must re-follow or a different podcast's settings would reach the engine.
+     */
+    private suspend fun followSettings(
+        row: ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo,
+        group: Long?,
+    ) {
+        val value = requireNotNull(runtime)
+        following?.cancelAndJoin()
         following =
             scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 value.settings.followCurrent(row.podcastId, group)
@@ -398,7 +428,6 @@ class DesktopPlaybackController(
             }.also { settingsObserver ->
                 following?.invokeOnCompletion { settingsObserver.cancel() }
             }
-        publish(startMs)
     }
 
     override fun pause() {
@@ -469,7 +498,8 @@ class DesktopPlaybackController(
         if (!prepared) return
         val value = requireNotNull(runtime)
         val projection = requireNotNull(projector)
-        val current = projection.entries.firstOrNull()?.item ?: return
+        val currentId = engineCurrentId ?: return
+        val current = projection.entries.firstOrNull { it.item.episodeId == currentId }?.item ?: return
         val revision = SessionRevision(current.episodeId, projection.generation)
         // Re-read the live tail before deciding, including edits not yet collected by the projector.
         val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
@@ -489,7 +519,7 @@ class DesktopPlaybackController(
         if (committed.generation != generation || committed.current?.episodeId != next?.episodeId) return
         if (next == null) {
             value.engine.pause()
-            projection.apply(committed, emptyList(), listOf(WindowOp.Clear))
+            projection.apply(committed, emptyList(), listOf(WindowOp.Clear), currentId)
             value.planner.appliedOwnGeneration(generation)
             wantPlaying = false
             loaded(0)
@@ -515,7 +545,7 @@ class DesktopPlaybackController(
     private suspend fun engineState(state: EngineState) {
         val value = runtime ?: return
         if (!prepared || state != value.engine.state.value) return
-        val id = current.value?.episodeId
+        val id = engineCurrentId
         when (state) {
             is EngineState.Ready -> {
                 if (state.episodeId != id) return
@@ -547,12 +577,88 @@ class DesktopPlaybackController(
 
     private suspend fun engineEvent(event: EngineEvent) {
         if (!prepared) return
-        if (event is EngineEvent.TracksKnown && event.episodeId == current.value?.episodeId) {
-            event.durationMs?.takeIf { it > 0 }?.let {
-                durationMs = it
-                requireNotNull(runtime).positions.setMeasuredDuration(event.episodeId, it)
+        when (event) {
+            is EngineEvent.TracksKnown -> {
+                if (event.episodeId == engineCurrentId) {
+                    event.durationMs?.takeIf { it > 0 }?.let {
+                        durationMs = it
+                        requireNotNull(runtime).positions.setMeasuredDuration(event.episodeId, it)
+                    }
+                }
+            }
+
+            is EngineEvent.ItemTransition -> {
+                engineItemTransition(event)
+                return
+            }
+
+            else -> {
+                Unit
             }
         }
+        publish()
+    }
+
+    /**
+     * The engine has already handed the ring to the next window item. Commit the
+     * shared departure/arrival through the core stores, then apply the arrival's
+     * start position and effective settings; the projected window follows the
+     * commit. The engine keeps the outgoing item in its window, so the planner
+     * diff removes it as a prefix and the arrival is never re-prepared.
+     */
+    private suspend fun engineItemTransition(event: EngineEvent.ItemTransition) {
+        val value = requireNotNull(runtime)
+        val projection = projector ?: return
+        val toId = event.toEpisodeId
+        val fromId = event.fromEpisodeId ?: return
+        if (engineCurrentId == toId) {
+            publish()
+            return
+        }
+        val outgoing = projection.entries.firstOrNull { it.item.episodeId == fromId } ?: return
+        val arrival = projection.entries.firstOrNull { it.item.episodeId == toId } ?: return
+        val row = arrival.media ?: return
+        val revision = SessionRevision(fromId, projection.generation)
+        val departure = value.saver.capture(event.fromPositionMs, durationMs, PlaybackExit.AUTO)?.departure ?: return
+        val generation =
+            value.sessions.onTransition(departure, toId, arrival.item.origin, revision, clock.now()) ?: return
+        value.planner.appliedOwnGeneration(generation)
+        engineCurrentId = toId
+        history.record(outgoing.item)
+        val group = context?.takeIf { it.type == ContextType.GROUP }?.id
+        val settings = requireNotNull(value.settings.cached(row.podcastId, group))
+        effective.value = settings
+        value.engine.setSpeed(settings.speed.value)
+        value.engine.setSkipSilence(settings.skipSilence.value)
+        durationMs = row.measuredDurationMs ?: row.durationMs
+        since = clock.now()
+        val source = if (arrival.localUri != null) PositionSource.DOWNLOAD else PositionSource.STREAM
+        value.saver.load(toId, since, source, replay = row.playedAt != null)
+        value.saver.startPositionApplied()
+        checkSave(value.saver.onPlaying())
+        followSettings(row, group)
+        val saved = value.positions.observe(toId).first()
+        val startMs =
+            StartPositionRule().startPositionMs(
+                saved?.positionMs,
+                saved?.updatedAt,
+                durationMs,
+                row.playedAt != null || saved?.playedAt != null,
+                clock.now(),
+            )
+        if (startMs > 0) {
+            value.engine.seekTo(startMs)
+            checkSave(value.saver.onSeek(startMs, durationMs, SeekOrigin.CORE))
+        }
+        publish(startMs)
+        // The committed queue emission re-projects the tail; apply it now so the
+        // engine's window and the planner agree even when the emission coalesced.
+        val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+        if (queue.generation != generation || queue.current?.episodeId != toId) return
+        val ids = (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
+        val media = value.media.observe(ids).first()
+        val plan = value.planner.plan(queue, media, playerWindow()) ?: return
+        projection.apply(queue, plan.entries, plan.operations, toId)
         publish()
     }
 
@@ -564,19 +670,28 @@ class DesktopPlaybackController(
                 ?: 0
         }
 
-    private fun playerWindow(): PlayerWindow =
-        PlayerWindow(
-            if (prepared) projector?.entries.orEmpty() else emptyList(),
+    private fun playerWindow(): PlayerWindow {
+        val entries = if (prepared) projector?.entries.orEmpty() else emptyList()
+        val index = engineCurrentId?.let { id -> entries.indexOfFirst { it.item.episodeId == id } } ?: -1
+        return PlayerWindow(
+            entries,
+            currentIndex = if (entries.isEmpty()) 0 else index.coerceIn(0, entries.size - 1),
             currentSinceMs = since,
             positionMs = position(),
             isPlaying = current.value?.isPlaying == true,
             playWhenReady = wantPlaying,
         )
+    }
 
     private suspend fun publish(positionMs: Long = position()) {
         if (!prepared) return
         val value = requireNotNull(runtime)
-        val row = projector?.entries?.firstOrNull()?.media ?: return
+        val projection = projector ?: return
+        val row =
+            engineCurrentId
+                ?.let { id -> projection.entries.firstOrNull { it.item.episodeId == id }?.media }
+                ?: projection.entries.firstOrNull()?.media
+                ?: return
         val state = value.engine.state.value
         val phase =
             when (state) {
@@ -619,9 +734,9 @@ class DesktopPlaybackController(
                 playing,
                 wantPlaying,
                 snapshot,
-                requireNotNull(projector).entries.size > 1,
+                projection.entries.size > 1,
                 value.resolver.streamKind(row.episodeId)
-                    ?: if (projector?.entries?.firstOrNull()?.localUri !=
+                    ?: if (projection.entries.firstOrNull { it.item.episodeId == row.episodeId }?.localUri !=
                         null
                     ) {
                         StreamKind.LOCAL
@@ -677,7 +792,7 @@ class DesktopPlaybackController(
             requireIntent(ticket)
             value.engine.pause()
             val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
-            requireNotNull(projector).apply(queue, emptyList(), listOf(WindowOp.Clear))
+            requireNotNull(projector).apply(queue, emptyList(), listOf(WindowOp.Clear), engineCurrentId)
             value.planner.appliedOwnGeneration(queue.generation)
             wantPlaying = false
             loaded(0)

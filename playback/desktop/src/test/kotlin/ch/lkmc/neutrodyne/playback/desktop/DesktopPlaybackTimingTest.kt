@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.desktop
 
+import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
+import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import ch.lkmc.neutrodyne.core.testing.FakeAudioEngine
 import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
@@ -218,6 +221,70 @@ class DesktopPlaybackTimingTest {
         }
 
     @Test
+    fun automaticTransitionCapturesTheBoundaryThroughTheSharedRules() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 119_000
+                fixture.engine.transition(2)
+                runCurrent()
+                // The engine's own transition commits the outgoing departure with
+                // the shared PositionSaver/PlayedRule decision at the boundary.
+                val call =
+                    fixture.sessions.calls.last {
+                        it.operation == FakePlaySessionStore.Operation.TRANSITION
+                    }
+                assertEquals(119_000L, call.departure?.positionMs)
+                assertEquals(true, call.departure?.markPlayed)
+                assertEquals(2L, call.arrivalId)
+                assertEquals(QueueOrigin.CONTEXT, call.origin)
+                // The controller follows the engine's current; the committed queue
+                // emission then re-projects the window without re-preparing item 2.
+                fixture.sessions.queue =
+                    VirtualQueue(2, QueueItem(2, QueueOrigin.CURRENT), emptyList(), emptyList())
+                fixture.queue.queue.value = fixture.sessions.queue
+                runCurrent()
+                assertEquals(
+                    2L,
+                    fixture.controller.nowPlaying.value
+                        ?.episodeId,
+                )
+                assertEquals(listOf(2L), fixture.engine.items.map { it.episodeId })
+                assertEquals(listOf("window"), fixture.engine.commands.filter { it == "window" })
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun automaticTransitionReFollowsTheArrivalPodcastSettings() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                fixture.effectiveResolver.playbackValues.value =
+                    mapOf(
+                        2L to null to
+                            EffectivePlayback(
+                                Effective(2f, SettingSource.PodcastOverride),
+                                Effective(false, SettingSource.AppDefault),
+                            ),
+                    )
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                assertEquals(1f, fixture.engine.speed)
+                fixture.engine.transition(2)
+                runCurrent()
+                assertEquals(2f, fixture.engine.speed)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
     fun foreignSessionClearRemovesPlayingItemFromStateAndEngine() =
         runTest {
             val fixture = TimingFixture(this)
@@ -252,6 +319,7 @@ private class TimingFixture(
     private val rule = PlayedRule()
     private val startPosition = StartPositionRule()
     private val settings = FakeSettingsRepository()
+    val effectiveResolver = FakeEffectiveSettingsResolver()
     private val runtime =
         DesktopPlaybackRuntime(
             PlayStarter(
@@ -269,7 +337,7 @@ private class TimingFixture(
             ),
             QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), startPosition, rule),
             PositionSaver(positions, clock, rule),
-            EffectivePlaybackSettings(FakeEffectiveSettingsResolver(), FakeScopeSettingsRepository(), settings),
+            EffectivePlaybackSettings(effectiveResolver, FakeScopeSettingsRepository(), settings),
             sessions,
             queue,
             media,
@@ -309,8 +377,31 @@ private class TimingFixture(
                         null,
                         null,
                     ),
+                2L to
+                    PlaybackMediaInfo(
+                        2,
+                        row.podcastId + 1,
+                        "Second",
+                        row.podcastTitle,
+                        row.artwork,
+                        row.sourceType,
+                        row.availability,
+                        false,
+                        "https://media.example/2.mp3",
+                        null,
+                        null,
+                        120_000,
+                        null,
+                        null,
+                    ),
             )
-        queue.queue.value = VirtualQueue(1, QueueItem(1, QueueOrigin.CURRENT), emptyList(), emptyList())
+        queue.queue.value =
+            VirtualQueue(
+                1,
+                QueueItem(1, QueueOrigin.CURRENT),
+                emptyList(),
+                listOf(QueueItem(2, QueueOrigin.CONTEXT)),
+            )
         sessions.queue = queue.queue.value
     }
 
