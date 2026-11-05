@@ -303,10 +303,9 @@ class SyncApplier(
      * not deferred — only a playing one is interrupted by nothing (R7.5).
      */
     private suspend fun isPlayingPodcast(podcastRid: String): Boolean {
-        val active = playback.active.value
+        val active = playback.active.value ?: return false
         if (!active.isPlaying) return false
-        val episodeId = active.episodeId ?: return false
-        val episode = db.episodeDao().byId(episodeId) ?: return false
+        val episode = db.episodeDao().byId(active.episodeId) ?: return false
         return db.podcastDao().byId(episode.podcastId)?.syncId == podcastRid
     }
 
