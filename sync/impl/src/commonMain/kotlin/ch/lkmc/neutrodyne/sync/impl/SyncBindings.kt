@@ -31,6 +31,16 @@ object SyncBindings {
     @SingleIn(AppScope::class)
     fun syncTokenStore(secrets: SecretStore): SyncTokenStore = SyncTokenStore(secrets)
 
+    /** 10 Durable apply effects: the engine's rounds and the first-link merge share one drain. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncApplyEffects(
+        db: NeutrodyneDatabase,
+        settings: SettingsSyncPort,
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+    ): SyncApplyEffects = SyncApplyEffects(db, settings, secrets, coordinator)
+
     @Provides
     @SingleIn(AppScope::class)
     fun linkFlow(): LinkFlowImpl = LinkFlowImpl()
@@ -83,6 +93,8 @@ object SyncBindings {
         flags: SyncFlags,
         address: SyncServerAddress,
         tokens: SyncTokenStore,
+        effects: SyncApplyEffects,
+        notices: SyncNoticeBus,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -93,6 +105,8 @@ object SyncBindings {
             sharePasswords = { flags.sharePasswords },
             address = address,
             tokens = tokens,
+            effects = effects,
+            notices = notices,
         )
 
     /**
@@ -135,6 +149,9 @@ object SyncBindings {
         libraryMerger: ch.lkmc.neutrodyne.core.domain.LibraryMerger,
         storagePaths: ch.lkmc.neutrodyne.core.common.StoragePaths,
         settings: SettingsSyncPort,
+        secrets: SecretStore,
+        coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+        effects: SyncApplyEffects,
         clock: Clock,
     ): FirstLinkMerger =
         FirstLinkMerger(
@@ -145,6 +162,9 @@ object SyncBindings {
             libraryMerger = libraryMerger,
             storagePaths = storagePaths,
             settings = settings,
+            secrets = secrets,
+            coordinator = coordinator,
+            effects = effects,
             clock = clock,
         )
 }

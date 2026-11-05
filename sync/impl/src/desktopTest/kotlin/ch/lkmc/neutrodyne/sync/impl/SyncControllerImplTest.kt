@@ -50,6 +50,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -66,6 +68,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncControllerImplTest {
     private val now = 1_800_000_000_000L
+    private val remoteNode = NodeId("0000000000000002")
     private val host = "sync.example"
     private val serverUrl = "https://$host"
 
@@ -718,6 +721,80 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun unlinkRemovesTheAccountsProtectedSnapshots() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.secrets.put(
+                    pendingAuthOrigin(ACCOUNT_ID, PODCAST_SYNC_ID, "ffffffffffffffff-0000000000000001"),
+                    "anna",
+                    "hunter2".toCharArray(),
+                )
+                assertTrue(h.controller.unlink() is Outcome.Success)
+
+                assertEquals(emptyList(), h.secrets.originsWithPrefix(PENDING_ORIGIN_PREFIX))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aRoundDrainsAPulledCredentialIntoTheStore() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.addLocalPodcast()
+                val clock = Hlc.of(now, 5, remoteNode).toString()
+                h.client.syncHandler = { _, changes ->
+                    defaultSyncResponse(changes).copy(
+                        records =
+                            listOf(
+                                RecordDto(
+                                    coll = "podcast",
+                                    id = JsonPrimitive(PODCAST_SYNC_ID),
+                                    seq = 1,
+                                    by = DEVICE_ID,
+                                    fields =
+                                        mapOf(
+                                            "needsCredentials" to FieldValue(JsonPrimitive(true), clock),
+                                            "credentialOrigin" to
+                                                FieldValue(JsonPrimitive("https://example.com/feed"), clock),
+                                            "auth" to
+                                                FieldValue(
+                                                    buildJsonObject {
+                                                        put("u", "anna")
+                                                        put("p", "hunter2")
+                                                    },
+                                                    clock,
+                                                ),
+                                        ),
+                                ),
+                            ),
+                        cursor = "c:00000001:2",
+                    )
+                }
+
+                h.engine.round(ch.lkmc.neutrodyne.sync.api.SyncRoundReason.SYNC_NOW)
+
+                // The page's drain installed the credential; no outbox row, no notice.
+                val podcast = h.db.podcastDao().bySyncId(PODCAST_SYNC_ID)
+                assertNotNull(podcast?.credentialId)
+                assertEquals(
+                    "hunter2",
+                    h.secrets
+                        .get("https://example.com/feed")
+                        ?.secret
+                        ?.concatToString(),
+                )
+                assertEquals(0, h.db.syncOutboxDao().count())
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun syncPlaybackSettingsWritesTheSettingAndTheCache() =
         runTest {
             val h = harness(this)
@@ -789,7 +866,22 @@ private class Harness(
 
     val db = TestDb.inMemory()
     val clock = TestClock(now)
-    val secrets = FakeSecretStore()
+    val secrets =
+        FakeSecretStore(
+            rowWriter = { origin, username ->
+                db
+                    .credentialDao()
+                    .putByOrigin(
+                        ch.lkmc.neutrodyne.core.database.CredentialEntity(
+                            origin = origin,
+                            username = username,
+                            secretCipher = null,
+                            iv = null,
+                            createdAt = 1,
+                        ),
+                    )
+            },
+        )
     val settings = FakeSettingsSyncPort()
     val address = FakeSyncServerAddress(serverUrl = null)
     val flags = SyncFlags()
@@ -819,6 +911,16 @@ private class Harness(
                 },
             sharePasswords = { flags.sharePasswords },
         )
+    val effects =
+        SyncApplyEffects(
+            db = db,
+            settings = settings,
+            secrets = secrets,
+            coordinator =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeCredentialCommitCoordinator(),
+        )
+    val noticeBus = SyncNoticeBus()
     val engine =
         SyncEngine(
             db = db,
@@ -829,6 +931,8 @@ private class Harness(
             sharePasswords = { flags.sharePasswords },
             address = address,
             tokens = tokens,
+            effects = effects,
+            notices = noticeBus,
         )
     val libraryMerger =
         ch.lkmc.neutrodyne.core.testing
@@ -842,6 +946,11 @@ private class Harness(
             libraryMerger = libraryMerger,
             storagePaths = testStoragePaths(),
             settings = FakeSettingsSyncPort(),
+            secrets = secrets,
+            coordinator =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeCredentialCommitCoordinator(),
+            effects = effects,
             clock = clock,
         )
 
@@ -909,6 +1018,7 @@ private class Harness(
             engine = engine,
             linkFlow = linkFlow,
             tokenStore = tokens,
+            secrets = secrets,
             clock = clock,
             address = address,
             flags = flags,
@@ -917,6 +1027,7 @@ private class Harness(
             gate = gate,
             errors = classifier,
             scheduler = scheduler,
+            noticeBus = noticeBus,
             io = kotlinx.coroutines.Dispatchers.Default,
             scope = controllerScope,
         )

@@ -113,6 +113,9 @@ class FirstLinkMerger(
     private val libraryMerger: LibraryMerger,
     storagePaths: StoragePaths,
     private val settings: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort,
+    private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
+    private val coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
+    private val effects: SyncApplyEffects,
     private val clock: Clock,
 ) {
     private val fileSystem: FileSystem = FileSystem.SYSTEM
@@ -254,7 +257,7 @@ class FirstLinkMerger(
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         captureLocalWinners()
         journalPendingSettings(pull.records)
-        SyncApplyEffects(db, settings).drainSettings()
+        effects.drain()
         pushOutbox(onProgress)
         completeLink()
         discardStaging()
@@ -279,16 +282,27 @@ class FirstLinkMerger(
             return FirstLinkResult.Failed("mergeStaged failed: $outcome")
         }
         // The server's records are the adopted state: seed verbatim, nothing captured, so
-        // later local changes order after them (10 Use the server's library).
+        // later local changes order after them (10 Use the server's library). A received
+        // `auth` keeps only its protected marker and journals its install effect.
         for (dto in pull.records) {
             val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: continue
             val rid = runCatching { RecordId.fromWire(coll, dto.id) }.getOrNull()?.rid ?: continue
             val incoming = runCatching { ProtocolValidation.record(dto) }.getOrNull() ?: continue
-            clockStore.put(coll.wire, rid, RawSyncRecord(incoming))
+            val protection = protectAuthRecord(db, rid, incoming, incoming.fields.keys, null)
+            clockStore.put(
+                coll.wire,
+                rid,
+                RawSyncRecord(
+                    state = protection.state,
+                    by = dto.by,
+                    authReference = protection.authReference,
+                    pendingAuth = protection.pendingAuth,
+                ),
+            )
         }
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         journalPendingSettings(pull.records)
-        SyncApplyEffects(db, settings).drainSettings()
+        effects.drain()
         completeLink()
         discardStaging()
         return FirstLinkResult.Completed(pull.records.size)
@@ -336,6 +350,17 @@ class FirstLinkMerger(
         fileSystem.createDirectories(cacheDir)
         fileSystem.deleteRecursively(stagingDirPath(deviceId), mustExist = false)
         fileSystem.delete(file, mustExist = false)
+        // 10 Durable apply effects: every pulled password is staged in the protected store and
+        // the file carries only its marker, so the cache dir never holds a plaintext credential.
+        val stage =
+            AuthStage(
+                secrets,
+                db
+                    .syncStateDao()
+                    .get()
+                    ?.accountId
+                    .orEmpty(),
+            )
         val records = ArrayList<RecordDto>()
         var cursor: String? = null
         var maxClock = 0L
@@ -344,7 +369,7 @@ class FirstLinkMerger(
             while (pages < MAX_PAGES) {
                 pages++
                 val page = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
-                for (dto in page.records) {
+                for (dto in stage.admit(page.records)) {
                     maxClock = maxOf(maxClock, maxClockOf(dto))
                     records += dto
                     sink.writeUtf8(SyncJson.encodeToString(StagingLine(record = dto))).writeByte('\n'.code)
@@ -725,7 +750,8 @@ class FirstLinkMerger(
     /**
      * Merges every received record into `sync_clock` through the shared field merge: the
      * local seed stands in for the stored state, so server-won fields keep their received
-     * clocks and local-won fields keep the frozen local stamps (10 Merge step 4).
+     * clocks and local-won fields keep the frozen local stamps (10 Merge step 4). A received
+     * `auth` keeps only its protected marker; the install effect journals like any pull's.
      */
     private suspend fun mergeReceivedClocks(records: List<RecordDto>) {
         db.withWriteTransaction {
@@ -734,14 +760,17 @@ class FirstLinkMerger(
                     val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: continue
                     val rid = runCatching { RecordId.fromWire(coll, dto.id) }.getOrNull()?.rid ?: continue
                     val incoming = runCatching { ProtocolValidation.record(dto) }.getOrNull() ?: continue
-                    val stored = clockStore.get(coll.wire, rid)?.state
-                    val merged = SyncRecordMerger.merge(stored, null, incoming)
+                    val storedRaw = clockStore.get(coll.wire, rid)
+                    val merged = SyncRecordMerger.merge(storedRaw?.state, null, incoming)
+                    val protection = protectAuthRecord(db, rid, merged.record, merged.advanced, storedRaw)
                     clockStore.put(
                         coll.wire,
                         rid,
                         RawSyncRecord(
-                            state = merged.record,
-                            by = dto.by ?: clockStore.get(coll.wire, rid)?.by,
+                            state = protection.state,
+                            by = dto.by ?: storedRaw?.by,
+                            authReference = protection.authReference ?: storedRaw?.authReference,
+                            pendingAuth = protection.pendingAuth,
                         ),
                     )
                 }
