@@ -1009,6 +1009,22 @@ R7.4's background sync is "requested every 60 min" (amended 2026-10-05, [PO-47](
 
 On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the outbox is not empty ([11 Desktop shell](11-desktop.md#desktop-shell)); whatever is left stays in the outbox for the next start. Nothing runs while the app is quit. Only the instance holding the single-instance lock syncs (risk T26). When the window is hidden, a held batch of the [Mass-change guard](#mass-change-guard) also posts a desktop notification (`NotificationKind.SYNC_HELD`, [11 OS integration](11-desktop.md#os-integration)); on Android it posts one notification on the channel 08 assigns.
 
+**Implementation note (2026-11-04, MS2, scheduling).** The shared
+`SyncScheduler` (`commonMain`) owns the outbox debounce, the playback
+boundary and while-playing ticks, the group-deletion undo-window poke and
+the network-regain re-check; each platform contributes a
+`SyncScheduleHooks` that decides where the deferred push goes
+(`sync-push` work on Android, a reasoned `JobLanePoker.poke("sync")` on
+the desktop). Two readings differ from the tables above: "Sync now" runs
+an in-process round through `SyncController` — the `sync-now` work name
+serves the foreground trigger — because the controller needs the round's
+result for the status card, and a desktop `pos`/`session` flush is
+condition-checked (`hasPlaybackRows`), so a paused device pushes pending
+playback rows at the next lane tick rather than stranding them when a
+boundary poke was lost. A 401 inside `SyncEngine.round` records the
+revocation for every caller; the worker then fails the work and cancels
+every sync work name.
+
 ### Live updates
 
 `SyncEventsClient` keeps one SSE connection through Ktor's client SSE support (in `ktor-client-core`, with reconnection, [Ktor client SSE](https://ktor.io/docs/client-server-sent-events.html)) over the `SYNC` OkHttp client:
