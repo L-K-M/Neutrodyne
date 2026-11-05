@@ -75,6 +75,9 @@ private const val UNLINK_PUSH_BUDGET_MS = 5_000L
 private const val DELETE_CONFIRMATION = "DELETE"
 private const val RESET_MODE_PURGE = "purge"
 
+/** 10 Errors: `lastError` marker the scheduler and status map treat as a revoked link. */
+internal const val SYNC_ERROR_REVOKED = "Revoked"
+
 /**
  * The [SyncController] application service (10 Client sync engine, 08 Sync screens). The status is
  * derived from `sync_state` and the secret store; the engine runs the rounds; the link flow is the
@@ -96,6 +99,7 @@ class SyncControllerImpl(
     private val merger: FirstLinkMerger,
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
+    private val scheduler: SyncScheduler,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
 ) : SyncController {
@@ -156,7 +160,7 @@ class SyncControllerImpl(
                     SyncStatus.NotConfigured
                 }
 
-                state.lastError == REVOKED_ERROR -> {
+                state.lastError == SYNC_ERROR_REVOKED -> {
                     SyncStatus.Revoked(url)
                 }
 
@@ -381,6 +385,8 @@ class SyncControllerImpl(
         address.serverUrl()?.let { url -> runCatching { client.logout() } }
         db.syncStateDao().unlink()
         address.serverUrl()?.let { tokenStore.clear(hostOf(it)) }
+        // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
+        scheduler.onUnlinked()
         lastRoundProblem.value = null
         refreshStatus()
         return Outcome.Success(Unit)
@@ -393,6 +399,7 @@ class SyncControllerImpl(
             client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
             db.syncStateDao().unlink()
             tokenStore.clear(hostOf(url))
+            scheduler.onUnlinked()
             lastRoundProblem.value = null
             refreshStatus()
             Outcome.Success(Unit)
@@ -650,6 +657,7 @@ class SyncControllerImpl(
             db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(enabled = true, linkedAt = clock.now())) }
         }
         linkFlow.linked(accountName.orEmpty(), deviceName())
+        scheduler.onLinked()
         refreshStatus()
     }
 
@@ -663,6 +671,7 @@ class SyncControllerImpl(
             ) {
                 is FirstLinkResult.Completed -> {
                     linkFlow.linked(accountName.orEmpty(), deviceName())
+                    scheduler.onLinked()
                     refreshStatus()
                 }
 
@@ -770,13 +779,15 @@ class SyncControllerImpl(
     }
 
     private suspend fun markRevoked() {
-        db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastError = REVOKED_ERROR)) }
+        db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastError = SYNC_ERROR_REVOKED)) }
+        // 10 Scheduling: a revoked token cancels every sync work name, as an unlink does.
+        scheduler.onUnlinked()
         refreshStatus()
     }
 
     private suspend fun clearTransientError() {
         val state = db.syncStateDao().get() ?: return
-        if (state.lastError != null && state.lastError != REVOKED_ERROR) {
+        if (state.lastError != null && state.lastError != SYNC_ERROR_REVOKED) {
             db.syncStateDao().upsert(state.copy(lastError = null))
         }
     }
@@ -856,10 +867,6 @@ class SyncControllerImpl(
                     groupNames = summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
                 )
             }
-    }
-
-    private companion object {
-        const val REVOKED_ERROR = "Revoked"
     }
 }
 

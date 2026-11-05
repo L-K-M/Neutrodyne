@@ -139,6 +139,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     playbackState: PlaybackStateSource,
     busySignal: AppBusySignal,
     clock: Clock,
+    syncFocusPoke: () -> Unit,
     onQuitRequest: () -> Unit,
     onWindowFocusGain: () -> Unit = {},
     portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
@@ -303,7 +304,16 @@ internal fun ApplicationScope.NeutrodyneWindow(
             window.background = java.awt.Color(argb, true)
             onDispose { }
         }
-        WindowEffects(activator = activator, background = background, onFocusGain = onWindowFocusGain)
+        // 10 Scheduling on the desktop: a refocus after > 60 s away pokes the `sync` lane; the
+        // callback itself is cheap — the trigger owns the cooldown and the lane poke.
+        WindowEffects(
+            activator = activator,
+            background = background,
+            onFocusGain = {
+                onWindowFocusGain()
+                syncFocusPoke()
+            },
+        )
         // The menu's actions are attached here, where the window's own services and state are
         // in scope; the navigation and player-slot actions arrive from the content below.
         val closeRequest = {

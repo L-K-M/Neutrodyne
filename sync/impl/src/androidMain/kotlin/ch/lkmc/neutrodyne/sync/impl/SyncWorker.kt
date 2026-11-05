@@ -21,6 +21,7 @@ class SyncWorker
         @Assisted context: Context,
         @Assisted params: WorkerParameters,
         private val engine: SyncEngine,
+        private val scheduler: SyncScheduler,
     ) : CoroutineWorker(context, params) {
         /** The `MetroWorkerFactory` entry point; the app's generated graph code calls it. */
         @AssistedFactory
@@ -43,6 +44,15 @@ class SyncWorker
                 Result.success()
             } catch (cancellation: CancellationException) {
                 throw cancellation
+            } catch (failure: SyncTransportException) {
+                // 10 Errors: a rejected token revokes the link — the engine already recorded it;
+                // cancel the sync work names and fail instead of retrying dead credentials.
+                if (failure.status == STATUS_REVOKED) {
+                    scheduler.onUnlinked()
+                    Result.failure()
+                } else {
+                    Result.retry()
+                }
             } catch (failure: Exception) {
                 Result.retry()
             }
@@ -53,5 +63,6 @@ class SyncWorker
             const val WORK_PUSH = "sync-push"
             const val WORK_PERIODIC = "sync-periodic"
             const val KEY_WORK = "work"
+            private const val STATUS_REVOKED = 401
         }
     }
