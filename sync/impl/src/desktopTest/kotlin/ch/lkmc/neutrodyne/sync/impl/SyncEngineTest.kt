@@ -300,6 +300,16 @@ class SyncEngineTest {
                         override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
                     },
                 tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
+                effects =
+                    SyncApplyEffects(
+                        db = db,
+                        settings = FakeSettingsSyncPort(),
+                        secrets = secrets,
+                        coordinator =
+                            ch.lkmc.neutrodyne.core.testing
+                                .FakeCredentialCommitCoordinator(),
+                    ),
+                notices = SyncNoticeBus(),
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)

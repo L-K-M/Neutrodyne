@@ -92,6 +92,7 @@ class SyncControllerImpl(
     private val engine: SyncEngine,
     private val linkFlow: LinkFlowImpl,
     private val tokenStore: SyncTokenStore,
+    private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
     private val clock: Clock,
     private val address: SyncServerAddress,
     private val flags: SyncFlags,
@@ -100,6 +101,7 @@ class SyncControllerImpl(
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
+    private val noticeBus: SyncNoticeBus,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
 ) : SyncController {
@@ -148,6 +150,9 @@ class SyncControllerImpl(
 
     init {
         scope.launch { refreshStatus() }
+        // The engine's rounds post one-shot notices through the shared bus; relay them into the
+        // controller's flow so the shells collect one channel.
+        scope.launch { noticeBus.shared.collect { _notices.emit(it) } }
     }
 
     suspend fun refreshStatus() {
@@ -383,6 +388,7 @@ class SyncControllerImpl(
             lastRoundProblem.value = classify(failure)
         }
         address.serverUrl()?.let { url -> runCatching { client.logout() } }
+        removeProtectedSnapshots()
         db.syncStateDao().unlink()
         address.serverUrl()?.let { tokenStore.clear(hostOf(it)) }
         // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
@@ -397,6 +403,7 @@ class SyncControllerImpl(
         val (url, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
         return try {
             client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
+            removeProtectedSnapshots()
             db.syncStateDao().unlink()
             tokenStore.clear(hostOf(url))
             scheduler.onUnlinked()
@@ -769,6 +776,18 @@ class SyncControllerImpl(
         val state = db.syncStateDao().get()
         val token = tokenStore.load(hostOf(url))
         return if (state?.enabled == true && state.linkedAt != null && token != null) url to token else null
+    }
+
+    /**
+     * 10 Durable apply effects: unlink cancels the drain and removes the account's protected
+     * snapshots before the bookkeeping that references them is cleared.
+     */
+    private suspend fun removeProtectedSnapshots() {
+        val account = db.syncStateDao().get()?.accountId ?: return
+        if (account.isBlank()) return
+        for (origin in secrets.originsWithPrefix("$PENDING_ORIGIN_PREFIX$account:")) {
+            secrets.remove(origin)
+        }
     }
 
     /** Maps a transport failure and remembers a revocation. */

@@ -2,13 +2,17 @@
 
 package ch.lkmc.neutrodyne.sync.impl
 
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
@@ -107,3 +111,79 @@ internal class AuthStage(
         }
     }
 }
+
+/** What raw state keeps for one record's `auth` field after [protectAuthRecord]. */
+internal data class AuthProtection(
+    val state: RecordState,
+    val pendingAuth: PendingAuth?,
+    val authReference: AuthReference?,
+)
+
+/**
+ * 10 Durable apply effects, passwords: converts one merged record into its protected raw form.
+ * A staged candidate that won keeps its protected reference and journals `pendingAuth`; a local
+ * value that won is replaced by a marker naming the feed origin its secret already lives at. An
+ * equal-clock redelivery (`advanced` empty) keeps an unfinished stored effect untouched.
+ */
+internal suspend fun protectAuthRecord(
+    db: NeutrodyneDatabase,
+    rid: String,
+    merged: RecordState,
+    advanced: Set<String>,
+    stored: RawSyncRecord?,
+): AuthProtection {
+    val auth =
+        merged.fields["auth"]
+            ?: return AuthProtection(merged, stored?.pendingAuth, stored?.authReference)
+    val clock = auth.c?.toString().orEmpty()
+    val markerKey = authMarkerKey(auth.v)
+    if (markerKey != null && markerKey.startsWith(PENDING_ORIGIN_PREFIX)) {
+        // Without a derivable origin the credential could never install; drop the reference so
+        // the candidate counts as losing.
+        val origin =
+            credentialOriginFor(db, rid, merged)
+                ?: return AuthProtection(merged, stored?.pendingAuth, stored?.authReference)
+        val reference = AuthReference(markerKey, origin, clock)
+        val pending =
+            if ("auth" in advanced) PendingAuth(markerKey, origin, clock) else stored?.pendingAuth
+        return AuthProtection(merged, pending, reference)
+    }
+    if (markerKey != null) {
+        // A feed-origin marker: the winning value is a credential this store already holds.
+        return AuthProtection(
+            merged,
+            stored?.pendingAuth?.takeIf { it.reference == markerKey },
+            AuthReference(markerKey, markerKey, clock),
+        )
+    }
+    // A local pending value won; its secret lives at the feed origin. Mark it, never store it.
+    val origin =
+        credentialOriginFor(db, rid, merged)
+            ?: return AuthProtection(merged, stored?.pendingAuth, stored?.authReference)
+    val marked = merged.copy(fields = merged.fields + ("auth" to auth.copy(v = authMarker(origin))))
+    return AuthProtection(marked, null, AuthReference(origin, origin, clock))
+}
+
+/** Where a credential belongs: the record's origin, else this podcast's own. */
+private suspend fun credentialOriginFor(
+    db: NeutrodyneDatabase,
+    rid: String,
+    record: RecordState,
+): String? {
+    record.stringValue("credentialOrigin")?.let { return it }
+    val podcast = db.podcastDao().bySyncId(rid)
+    podcast
+        ?.credentialId
+        ?.let { id ->
+            db
+                .credentialDao()
+                .byIds(listOf(id))
+                .firstOrNull()
+                ?.origin
+        }?.let { return it }
+    val feedUrl = podcast?.feedUrl ?: record.stringValue("feedUrl")
+    return feedUrl?.let { UrlNormalizer.origin(it) }
+}
+
+private fun RecordState.stringValue(name: String): String? =
+    (fields[name]?.v as? JsonPrimitive)?.takeIf { it.isString }?.content
