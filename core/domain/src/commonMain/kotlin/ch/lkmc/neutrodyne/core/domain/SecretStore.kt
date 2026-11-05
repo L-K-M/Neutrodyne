@@ -39,6 +39,12 @@ interface SecretStore : CredentialLookup {
 
     suspend fun remove(origin: String)
 
+    /**
+     * Every stored origin starting with [prefix] — 10's protected `sync:pending:` snapshots, for
+     * the orphan sweep and unlink cleanup. Never returns the decrypted material.
+     */
+    suspend fun originsWithPrefix(prefix: String): List<String>
+
     /** The feed credential of [podcastId] — 05's opted-in exports, 10's opted-in `auth`. */
     suspend fun forPodcast(podcastId: Long): BasicCredentials?
 
