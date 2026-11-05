@@ -76,14 +76,15 @@ class PositionSaver(
 
     /**
      * 06 Sync interplay rule 4: the stored position to take up at the next resume of the paused
-     * current item — only when it diverges from the last position written or applied by more than
-     * [PICKUP_BOUND_MS] (a reset to 0 included). Null when nothing is loaded, nothing was written
-     * or applied yet, or the row agrees.
+     * current item — only when a row exists (a written reset to 0 counts) and it diverges from the
+     * last position written or applied by more than [PICKUP_BOUND_MS]. Null when nothing is
+     * loaded, nothing was written or applied yet, no row exists, or the row agrees. An absent row
+     * is "nothing was written", never a reset to pick up.
      */
     fun pickupPositionMs(storedPositionMs: Long?): Long? {
         val item = current ?: return null
         val known = item.lastKnownMs ?: return null
-        val stored = storedPositionMs ?: 0L
+        val stored = storedPositionMs ?: return null
         return if (abs(stored - known) > PICKUP_BOUND_MS) stored else null
     }
 
