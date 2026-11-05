@@ -82,7 +82,8 @@ class AndroidStartupRecoveryTest {
             }
             pumpUntil { initializers.isCompleted }
             assertIs<DatabaseOpenState.Opened>(graph.databaseOpener.openState.value)
-            // Refresh, playback and manual downloads each install one process observer.
+            // Refresh, the lazy player connection, the sync foreground trigger and manual
+            // downloads each install one process observer.
             assertEquals(1 to PROCESS_OBSERVERS, periodicWork().size to (lifecycle.observerCount - observersBefore))
             val work = periodicWork().single()
 
@@ -138,7 +139,7 @@ class AndroidStartupRecoveryTest {
          * 28 s under CPU contention, where a 10 s bound on the Robolectric start-up failed.
          */
         const val STARTUP_BOUND_SECONDS = 60L
-        const val PROCESS_OBSERVERS = 3
+        const val PROCESS_OBSERVERS = 4
 
         /**
          * Bands that must never run while the database is still closed — the M1b credential load
@@ -155,6 +156,9 @@ class AndroidStartupRecoveryTest {
                 "DownloadIndexInitializer",
                 "PeriodicRefreshInitializer",
                 "RefreshForegroundObserverInitializer",
+                // 10 Scheduling on Android sits at 240: it reconciles `sync-periodic`, starts
+                // `SyncScheduler` and registers its observer only behind an opened database.
+                "SyncSchedulingInitializer",
             )
     }
 }
