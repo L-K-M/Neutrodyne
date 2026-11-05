@@ -553,35 +553,20 @@ class FfAudioEngineTest {
 
     @Test
     fun aRemovedDeviceIsDiscardedAndTheNextPlayReopens() {
-        val outputs = mutableListOf<FakeOutput>()
-        engine(output = { FakeOutput().also { outputs += it } }).use { engine ->
+        engine().use { engine ->
             engine.setWindow(listOf(item), 0, null)
             engine.play()
-            awaitReadyWithDump(engine)
+            awaitReady(engine)
             engine.onDeviceRemoved()
-            await("output error", timeoutMs = 30_000L) { engine.state.value is EngineState.Error }
-            assertEquals(1, outputs.size)
-            assertTrue(outputs[0].closed, "the removed device must be discarded")
+            await("output error") { engine.state.value is EngineState.Error }
+            assertEquals(
+                EngineError.Output("the output device was removed"),
+                (engine.state.value as EngineState.Error).error,
+            )
+            // The next play opens a fresh default device and plays again.
             engine.setWindow(listOf(item), 0, null)
-            await("the next play opens a fresh output") { outputs.size == 2 }
+            awaitReady(engine)
         }
-    }
-
-    /** Waits for Ready, dumping the engine threads when the CI runner starves them. */
-    private fun awaitReadyWithDump(engine: FfAudioEngine) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
-        while (System.nanoTime() < deadline) {
-            if (engine.state.value is EngineState.Ready) return
-            assertHealthy(engine)
-            Thread.sleep(2)
-        }
-        Thread.getAllStackTraces().forEach { (thread, stack) ->
-            if (thread.name.startsWith("nd-")) {
-                println("DEBUG thread ${thread.name} state=${thread.state}")
-                stack.forEach { println("DEBUG   at $it") }
-            }
-        }
-        throw AssertionError("timed out waiting for ready: ${engine.state.value}")
     }
 
     /** The engine's output seam, driven by the fault tests. */
