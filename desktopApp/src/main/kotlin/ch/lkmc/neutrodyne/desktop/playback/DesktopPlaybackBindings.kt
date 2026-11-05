@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
@@ -70,6 +71,7 @@ object DesktopPlaybackBindings {
         media: PlaybackMediaLookup,
         positions: PositionStore,
         capabilities: YouTubeCapabilitiesSource,
+        chapterRepository: ChapterRepository,
         resolver: DesktopEpisodeSourceResolver,
         cache: SpanCache,
         engine: AudioEngine,
@@ -84,6 +86,7 @@ object DesktopPlaybackBindings {
             media,
             positions,
             capabilities,
+            chapterRepository,
             resolver,
             cache,
             engine,
