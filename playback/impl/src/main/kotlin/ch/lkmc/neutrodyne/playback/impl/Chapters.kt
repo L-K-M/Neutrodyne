@@ -172,8 +172,7 @@ internal class Chapters(
         }
     }
 
-    private fun MediaItem?.episodeIdOrNull(): Long? =
-        this?.mediaId?.removePrefix("episode:")?.toLongOrNull()
+    private fun MediaItem?.episodeIdOrNull(): Long? = this?.mediaId?.removePrefix("episode:")?.toLongOrNull()
 
     companion object {
         private const val TAG = "Chapters"

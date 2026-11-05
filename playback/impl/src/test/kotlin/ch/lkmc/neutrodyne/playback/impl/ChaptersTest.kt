@@ -120,7 +120,14 @@ class ChaptersTest {
                 runCurrent()
 
                 assertEquals(listOf(1L, 2L), repo.writes.map { it.episodeId })
-                assertEquals(2_000L, repo.writes.last { it.episodeId == 2L }.chapters.last().startMs)
+                assertEquals(
+                    2_000L,
+                    repo.writes
+                        .last { it.episodeId == 2L }
+                        .chapters
+                        .last()
+                        .startMs,
+                )
             } finally {
                 chapters.detach()
                 exo.release()
