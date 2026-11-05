@@ -644,4 +644,33 @@
     <string name="chapter_seek">Zu %1$s springen</string>
     <string name="settings_update_available">Einstellungen, Update verfügbar</string>
     <string name="setting_not_supported">Für YouTube-Kanäle nicht verfügbar</string>
+
+    <!-- Owner radio home design, 2026-11-04. -->
+    <string name="radio_menu">Menü</string>
+    <string name="radio_your_playlist">Deine Playlist</string>
+    <string name="radio_new_playlist">Neue Playlist</string>
+    <string name="radio_episodes">Folgen</string>
+    <string name="radio_swipe">Zum Verwerfen nach links wischen</string>
+    <string name="radio_removed">Aus dieser Playlist entfernt.</string>
+    <string name="radio_ready">BEREIT ZUM ABSPIELEN</string>
+    <string name="radio_playing">WIEDERGABE LÄUFT</string>
+    <string name="radio_paused">PAUSIERT</string>
+    <string name="radio_cleared">PLAYLIST GELEERT</string>
+    <string name="radio_play">Abspielen</string>
+    <string name="radio_pause">Pause</string>
+    <string name="radio_elapsed">Verstrichen</string>
+    <string name="radio_playlists">Deine Playlists</string>
+    <string name="radio_create">Playlist erstellen</string>
+    <string name="radio_name">Name der Playlist</string>
+    <string name="radio_podcasts">Podcasts auswählen</string>
+    <string name="radio_choose_note">Wähle mindestens einen Podcast, um seine Folgen hinzuzufügen.</string>
+    <string name="radio_placeholder">z. B. Abendprogramm</string>
+    <string name="radio_all_clear">Alles erledigt.</string>
+    <string name="radio_no_episodes">Keine Folgen mehr in dieser Playlist.</string>
+    <string name="radio_nothing">Nichts vorgemerkt</string>
+    <string name="radio_choose_other">Wähle zum Hören eine andere Playlist.</string>
+    <string name="radio_release">Loslassen</string>
+    <string name="radio_discard">zum Verwerfen</string>
+    <string name="radio_elapsed_full">Verstrichen: %1$d Stunden, %2$d Minuten, %3$d Sekunden</string>
+    <string name="radio_meta">%1$d Podcasts · %2$d Folgen</string>
 </resources>

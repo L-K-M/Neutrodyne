@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:font-barlow",
+  "name": "Barlow font",
+  "website": "https://github.com/google/fonts/tree/main/ofl/barlow",
+  "developers": [],
+  "licenses": [
+    "OFL-1.1-barlow"
+  ],
+  "tag": "bundled",
+  "artifactVersion": "1.408",
+  "description": "Bundled Google Fonts Barlow, weights 400/500/600/700. Source: https://github.com/google/fonts/tree/main/ofl/barlow"
+}

@@ -69,6 +69,17 @@ class DiscoveryEvidenceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.verify(self.root, ["api26"])
 
+    def test_a_dropped_initialization_error_fails_every_device_lane(self):
+        for device in ("api26", "api36"):
+            self.report(f"{device}DebugAndroidTest", gate.DEVICE)
+        hidden = self.root / "api26DebugAndroidTest" / "logcat-ch.lkmc.neutrodyne.SubscribeJourneyTest-initializationError.txt"
+        hidden.write_text("")
+        with self.assertRaises(ValueError) as caught:
+            gate.verify(self.root, ["api26", "api36"])
+        self.assertIn("SubscribeJourneyTest-initializationError", str(caught.exception))
+        hidden.unlink()
+        gate.verify(self.root, ["api26", "api36"])
+
 
 if __name__ == "__main__":
     unittest.main()

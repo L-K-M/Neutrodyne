@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -63,6 +64,7 @@ interface AndroidAppGraph : DownloadComponentsInjector {
 
     val playbackController: PlaybackController
     val playbackStateSource: PlaybackStateSource
+    val refreshController: RefreshController
     val playbackMaintenance: PlaybackMaintenance
     val localMediaIndex: LocalMediaIndex
     val youtubeCapabilities: YouTubeCapabilitiesSource

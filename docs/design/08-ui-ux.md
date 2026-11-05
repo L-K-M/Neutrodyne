@@ -147,6 +147,106 @@ dialog; `granted` is refreshed when the activity resumes from settings.
 
 ---
 
+## Radio home
+
+**Owner decisions and implementation contract, 2026-11-04 (PO-51–PO-54).**
+This section supersedes the earlier bottom navigation, Feeds home, home-player
+and home-theme descriptions below. The design source is the owner's read-only
+`/Users/lkm/nd-wt/design/neutrodyne/`: `START-HERE.txt`,
+`implementation-brief.txt`, `mockup-source.html` and four preset renders.
+
+The entire home is a physical radio in shared Compose code. Its cabinet has
+wooden side walls, thickness, plinth and feet. The natural 1100:423 valve deck
+spans the cabinet width. The speaker, textured metal programme faceplate,
+paper episode slips and guides, routed progress recess, single recessed Nixie
+glass slot and concave ivory Play/Pause key form one assembly. No nameplate,
+visible discard button or extra decorative controls are added. Exactly one
+small physical Menu key, constructed like New playlist, opens existing
+Library, Up next, Downloads, Discover and Settings destinations over home.
+The existing navigation keys, deep links, Add podcast, Import, notification
+routes and desktop menu items remain. Back returns through their existing
+stacks to radio home. The existing mini/full player remains on other screens;
+home hides the mini player because the radio is the player.
+
+Playlists are groups with existing membership, sync and import/export. Your
+playlists lists real groups. New playlist uses the existing name validator:
+trimmed, normalized, nonempty, at most 40 Unicode code points, unique by name
+key, and at least one subscribed podcast. Its programme shows unplayed
+episodes newest first. Discard calls the existing mark-played use case;
+one Undo marks the episode unplayed so chronology restores its place. The
+message is visible only for its affected playlist. Undo does not restore an
+old selection or playback state. After clearing a list, Undo restores the
+entry without forcing playback or selection, resolving the prototype edge
+case conservatively. No schema or settings classification changes are needed.
+
+Selecting another episode preserves play/pause; selecting the same episode
+is inert. Switching playlists selects the first episode and pauses. Removing
+the selection picks the next at that index, or the previous at the end, and
+continues playing when possible; removing another item leaves playback alone.
+An empty list stops playback and shows All clear. / No episodes left in this
+playlist. States are READY TO PLAY, NOW PLAYING, PAUSED and PLAYLIST CLEARED.
+No selection darkens the counter. Below 100 minutes it displays MM:SS; from
+100 minutes it displays hours, H, colon and minutes, up to 9H:59. Accessible
+elapsed time always includes the full hours, minutes and seconds.
+
+**Production deviations from the prototype (2026-11-04).** Data comes from
+subscriptions, groups and episodes, never fixture content. Selecting an
+episode shows its saved resume position where the specification retains one,
+rather than zero. Play uses PlaybackController with group context and existing
+queue and auto-advance semantics, rather than stopping at the prototype end.
+Needle seeks use the existing seek path. Saved positions and played state
+retain their existing persistence and synchronization behavior.
+
+A left swipe commits only on release at
+`min(80, max(48, rowWidth * 0.28))` dp; threshold feedback is Release / to
+discard. Vertical scrolling and resize cancel it; a drag suppresses click.
+Focused episodes support Delete on desktop and hardware keyboards. Chooser
+and create inserts restore focus, dismiss on Escape/Back, block underlying
+interaction and keep the create header/action fixed while fields scroll.
+All supplied English labels follow brief section 5 exactly; German resources
+are supplied. Menu (Menü) is the single owner-added label.
+
+**Implementation notes (2026-11-04).** The shared radio primitives and resources
+live in `:core:ui`; the production adapter lives in `:feature:feeds`. A queued
+episode outside the group's membership still drives the radio transport and
+counter while the programme remains the group's unplayed feed. Paused resume
+uses the existing context so Up next is retained. An explicit discard that
+clears the playlist stops playback; a natural queue transition keeps the
+existing playback rules. The mini sheet stays mounted for consent and external
+expand requests but its collapsed content is unplaced on radio home. The
+serialized `FeedsKey` remains the home identity for saved-stack compatibility.
+The existing All-feed notification route opens the existing Feeds screen as
+`FeedBrowserKey` over home, with its mini player and Back behavior preserved;
+group notification routes select their playlist on the radio.
+
+A paused browse selection never starts audio just to show or seek it. A needle
+seek on an unloaded selection is retained locally and sent through
+`PlaybackController.seekTo` after its first accepted group start; loaded
+playback seeks immediately. Counts come from the repository while paging is
+incomplete; a total duration is shown only when all durations are known and
+the feed is fully loaded, avoiding a partial sum presented as the total.
+Dosis is a static 300-weight instance of the Google Fonts variable source;
+all three families retain their complete upstream OFL texts in both notices
+roots. The canonical asset ownership and excluded reference photos remain as
+specified above.
+
+Responsive dimensions are dp after system insets: stacked below 600; two
+columns from 600, programme left and speaker/player right; tighter insets
+below 370; compact header/player below 800 high; deck stowed below 660.
+The deck also stows if its natural height leaves fewer than about two rows,
+computed from available space independently of episode count and without
+feedback from the hidden result. Extremely short narrow surfaces scroll
+outside; font scaling must not clip or hide controls. Materials ignore theme
+and dynamic colour; other screens retain Appearance. Bundle Barlow
+400/500/600/700, Courier Prime 400/700 and Dosis 300 with their own OFL texts
+in Android and desktop notices. Owner assets need no third-party notices;
+reference photographs and their branding must never be shipped.
+
+Verification requires state/unit tests, swipe/Undo/Delete/focus UI tests,
+Android and desktop goldens for 390×844, 320×568, 700×360, 700×900, large
+text and playing, plus local emulator visual comparison with offline seeded
+data. These are requirements, not claims of completed checks.
+
 ## Information architecture
 
 Serves R2.4, R5.1, R4.6, R8.1, R8.9. Delivered in M0 (M0a: Android shell; M0b: the same five destinations in the desktop window) and per screen milestone. Honours [D54](../PLAN.md#3-key-decisions), [D83](../PLAN.md#3-key-decisions), [D85](../PLAN.md#3-key-decisions). Both apps have the same destinations, screens and keys; the desktop adds the window menus of 11 ([11 Menus](11-desktop.md#menus)), whose items open the same keys.
