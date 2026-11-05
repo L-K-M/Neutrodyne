@@ -1493,6 +1493,37 @@ Interactions: downloads wait (`BACKOFF` until the gate reopens); auto-download p
 
 ## Engine updates
 
+Implementation note (2026-11-05, M9b first slice `m9b-trust`). The Android
+half of this section is implemented; `engine-canary.yml`, manifest
+publishing, the desktop runner and the Settings UI rows remain open. Notes
+on the shipped shape:
+
+- `EngineStore.hostLibDir()` is `hostPrepared()`: it returns the prepared
+  `lib/` directory plus its compile marker (`PreparedEngine`), which
+  `BinderYtxTransport` passes to `YtxService` with the app and engine
+  versions. During a self-test trial it returns the staged candidate.
+- The trial state (`beginTrial`/`commitTrial`/`abortTrial`) is in-memory:
+  `active.json` is rewritten only when the trial commits or aborts, so a
+  process death mid-trial keeps the previous record and the staged
+  `versions/<v>` tree, which the next run may resume from.
+- `YouTubeEngine.checkForUpdate()` runs `EngineUpdater` in-process through
+  `EngineUpdateHooks.runUpdate` and awaits the outcome directly; it does
+  not enqueue `engine-update-now`. The one-time work is only the breaker
+  trigger (`hooks.requestImmediateCheck()` on the closed → open
+  transition), and the shared 3 h throttle lives inside `EngineUpdater`,
+  not in the scheduler.
+- `YouTubeHealth` gained an `outcomes` flow of `ExtractionOutcome` so
+  `EngineRollbackMonitor` (in `:youtube:engine`, started by `YtDlpEngine`)
+  watches extraction results and `HostStatus` transitions instead of
+  polling counters.
+- The worker classes are `EngineUpdateWorker`, `EngineUpdateInitializer`
+  (order 200) and `WorkManagerEngineUpdateScheduler` in
+  `youtube/ytdlp/.../EngineUpdate.kt`; `TinkEd25519Verifier` and
+  `JdkEd25519Verifier` implement the `Ed25519Verifier` port.
+- This slice ships no update UI, so the acceptance coverage lives in
+  `EngineUpdaterTest` and `BundledEngineStoreTest` (recorded fixtures and
+  a local test server), not an `EngineUpdateWorkerTest` on device.
+
 Serves R3.9, R8.6, N11, N12; mitigates risks M1r, M7r, P3, P14. Delivered in M9b on Android (`EngineStore` and the bundled-version handling in M9a) and MD3 on the desktop. Honours [D76](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions), [PO-32](../PLAN.md#48-further-product-owner-decisions) (resolved 2026-10-05: Neutrodyne-approved, automatic). yt-dlp, with the yt-dlp-ejs it bundles, is replaced at runtime by a newer official release without an app release, on both hosts with the same keys, manifest, checks, policies, rollback and reset: everything below is shared code in `:youtube:engine` ([Shared engine module](#shared-engine-module)); only the runner, the store paths, the compile step and the Ed25519 implementation differ per host. Every app update is a manual install: the update check only announces a release and links to it on GitHub ([PO-31](../PLAN.md#48-further-product-owner-decisions), [D78](../PLAN.md#3-key-decisions)); from Google's 2027 verification rollout every APK update of the unregistered app also needs the advanced flow on certified devices ([PO-5](../PLAN.md#po-5-google-developer-verification)), and every desktop update means re-running the installer and, on macOS, "Open Anyway" again ([D80](../PLAN.md#3-key-decisions)). An engine update is data the app downloads, not an install, so it also reaches users who have not installed the latest release or whose updates are blocked, and it never triggers Gatekeeper, SmartScreen or Smart App Control, because no native code is ever downloaded.
 
 ### Trust chain
