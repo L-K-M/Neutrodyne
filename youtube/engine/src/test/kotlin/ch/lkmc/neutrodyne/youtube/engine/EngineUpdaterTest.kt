@@ -21,7 +21,6 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
-import okhttp3.OkHttpClient
 import okio.Buffer
 import okio.Path.Companion.toPath
 import org.junit.Rule
@@ -144,7 +143,7 @@ class EngineUpdaterTest {
         EngineUpdater(
             store = store,
             settings = settings,
-            http = OkHttpEngineHttp(OkHttpClient(), OkHttpClient(), allowPlainHttp = true),
+            http = fixtures.engineHttp(),
             keys = fixtures.keys,
             verifier = JdkEd25519Verifier,
             scheduler = scheduler,

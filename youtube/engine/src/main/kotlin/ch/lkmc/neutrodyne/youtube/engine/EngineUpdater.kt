@@ -411,7 +411,9 @@ class EngineRollbackMonitor(
                 if (count >= DISTINCT_FAILURES) rollbackNow(EngineRejectReason.ROLLED_BACK)
             }
 
-            else -> Unit
+            else -> {
+                Unit
+            }
         }
     }
 

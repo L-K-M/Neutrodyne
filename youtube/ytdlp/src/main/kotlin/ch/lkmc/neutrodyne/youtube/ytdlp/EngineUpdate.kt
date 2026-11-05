@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.youtube.ytdlp
 
+import android.app.Application
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -38,8 +39,12 @@ import java.util.concurrent.TimeUnit
  * the 2026-11-05 implementation note in 04-youtube.md).
  */
 class WorkManagerEngineUpdateScheduler(
-    private val workManager: WorkManager,
+    private val app: Application,
 ) : EngineUpdateScheduler {
+    // WorkManager.getInstance at construction would crash Robolectric graph tests;
+    // like WorkManagerArtworkScheduler, resolve it when a schedule call actually runs.
+    private val workManager: WorkManager get() = WorkManager.getInstance(app)
+
     override fun scheduleDaily(enabled: Boolean) {
         if (!enabled) {
             workManager.cancelUniqueWork(DAILY_WORK)
