@@ -125,12 +125,15 @@ interface PreparedBackup {
  * The policies `RestoreMerger` merges a staged library with (05 RestoreMerger): each value
  * is one column of the Merge and Replace rules table — the restore columns and the
  * First-link column (MS2), which 10's `FirstLinkMerger` reaches through `LibraryMerger`.
+ * `LINK_HISTORY` is 10's "Use this device's library everywhere" step 2: ID adoption and the
+ * timestamp episode-history merge only, no other server record applied.
  */
 enum class MergePolicy {
     RESTORE_MERGE,
     RESTORE_REPLACE,
     LINK_MERGE,
     LINK_REPLACE,
+    LINK_HISTORY,
 }
 
 /** Counts only — 10's durable effects travel through the `onApplied` callback. */

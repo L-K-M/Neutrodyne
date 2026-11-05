@@ -1361,6 +1361,59 @@ class RestoreEpisodeMergerTest {
             assertNull(db.episodeStateDao().byEpisode(e)!!.playedAt)
         }
 
+    /**
+     * 10 "Use this device's library everywhere" step 2 (LINK_HISTORY): the episode history
+     * of podcasts this device has merges by the timestamp policy — a newer remote "unplayed"
+     * clears an older local mark — while a podcast this device lacks contributes nothing:
+     * its line is skipped (the prune removes the record), never stubbed or parked, and the
+     * staged Up next list and session are not applied at all.
+     */
+    @Test
+    fun linkHistoryMergesStateSkipsUnknownPodcastsAndAppliesNoQueue() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e = seedEpisode(p, "g:e")
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = e, playedAt = june, updatedAt = june),
+            )
+            db.queueDao().insert(queueEntryEntity(seedEpisode(p, "g:local"), orderKey = "a1"))
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed"), podcastV1("https://b/feed")),
+                    episodeLines =
+                        listOf(
+                            line("https://a/feed", "g:e", pl = null, ts = october, fc = mapOf("played" to october)),
+                            // The unknown podcast's in-progress line would stub under
+                            // LINK_MERGE; LINK_HISTORY has no podcast to stub into.
+                            line("https://b/feed", "g:away", u = "https://b/e.mp3", pos = 100, posAt = october),
+                        ),
+                    queue =
+                        QueueV1(
+                            upNext = listOf(UpNextRefV1("https://a/feed", "g:e")),
+                            session = SessionV1(current = EpisodeRefV1("https://a/feed", "g:e")),
+                        ),
+                )
+
+            val unmatched = ArrayList<Pair<String, String>>()
+            val summary =
+                restore(
+                    staged,
+                    MergePolicy.LINK_HISTORY,
+                    ALL,
+                    onUnmatched = { sync, key -> unmatched += sync to key },
+                )
+
+            assertNull(db.episodeStateDao().byEpisode(e)!!.playedAt, "the newer remote unplayed wins")
+            assertTrue(unmatched.isEmpty(), "unknown-podcast lines are skipped, not parked: $unmatched")
+            assertEquals(1, summary.skippedLines)
+            assertEquals(0, summary.stubs)
+            // Up next keeps the local list; the session row is untouched.
+            assertEquals(1, db.queueDao().entries().size)
+            assertNull(db.playSessionDao().get()?.currentEpisodeId)
+            assertTrue(db.syncOutboxDao().rows().isEmpty(), "rows=${db.syncOutboxDao().rows()}")
+        }
+
     // --- Helpers -------------------------------------------------------------------------------------
 
     /** The caller contract: transaction A first, then the episode/queue/session phases. */
