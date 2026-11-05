@@ -244,7 +244,11 @@ class PositionSaverTest {
             assertNull(saver.pickupPositionMs(600_000))
             assertNull(saver.pickupPositionMs(600_500), "a divergence of at most one second is ignored")
             assertEquals(601_001L, saver.pickupPositionMs(601_001))
-            assertEquals(0L, saver.pickupPositionMs(0), "a reset to 0 is taken up too")
+            assertEquals(0L, saver.pickupPositionMs(0), "a written reset to 0 is taken up too")
+            assertNull(
+                saver.pickupPositionMs(null),
+                "an absent row is nothing written, never a reset to pick up",
+            )
             saver.pickupApplied(601_001)
             assertNull(saver.pickupPositionMs(601_001), "the picked-up position is the new reference")
         }
