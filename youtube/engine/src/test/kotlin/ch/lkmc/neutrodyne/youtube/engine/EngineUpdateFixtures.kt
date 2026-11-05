@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.youtube.engine
 
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
+import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
+import ch.lkmc.neutrodyne.core.common.PlatformInfo
+import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.common.UserAgentProvider
+import ch.lkmc.neutrodyne.core.network.okhttp.AuthInterceptor
+import ch.lkmc.neutrodyne.core.network.okhttp.CoreClients
+import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
+import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
+import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
+import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
 import java.io.ByteArrayOutputStream
 import java.math.BigInteger
 import java.security.KeyPair
@@ -29,6 +40,32 @@ class EngineUpdateFixtures {
 
     val keys: EngineKeys by lazy {
         EngineKeys.parse(manifestKeysText(), upstreamArmor(), upstreamKey.fingerprint)
+    }
+
+    /**
+     * Loopback-capable `EngineHttp` built the way the app graph builds it — through the network
+     * island. `checkBannedApis` rule 8 forbids constructing `OkHttpClient` in this module, and the
+     * LAN guard passes loopback hosts, so the fixture server works unmodified.
+     */
+    fun engineHttp(): EngineHttp {
+        val platform =
+            object : PlatformInfo {
+                override val kind = PlatformKind.ANDROID
+                override val userAgentPlatform = "Android 36; engine-update test"
+                override val androidSdkInt = 36
+                override val regionCode = "DE"
+            }
+        val clients =
+            NetworkClients(
+                CoreClients(
+                    UserAgentInterceptor(UserAgentProvider(platform, "0.0.0-test", REPO_URL)),
+                    LocalNetworkGuard(LocalNetworkAccess(), platform),
+                    DnsFamilyHints(),
+                    emptySet(),
+                ),
+                AuthInterceptor { CredentialLookup.None },
+            )
+        return OkHttpEngineHttp(clients.api, clients.download, allowPlainHttp = true)
     }
 
     fun manifestKeysText(): String {
@@ -210,6 +247,7 @@ class EngineUpdateFixtures {
         ByteArray(text.length / 2) { (text.substring(it * 2, it * 2 + 2).toInt(16) and 255).toByte() }
 
     companion object {
+        private const val REPO_URL = "https://synthetic.test/repository"
         const val BUNDLED_VERSION = "2026.08.19"
         const val NEW_VERSION = "2026.11.05"
         const val OTHER_VERSION = "2026.09.30"

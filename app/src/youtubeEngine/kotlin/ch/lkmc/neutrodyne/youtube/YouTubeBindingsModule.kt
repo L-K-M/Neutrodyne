@@ -183,8 +183,7 @@ object YouTubeBindingsModule {
 
     @Provides
     @SingleIn(AppScope::class)
-    fun updateScheduler(app: Application): EngineUpdateScheduler =
-        WorkManagerEngineUpdateScheduler(WorkManager.getInstance(app))
+    fun updateScheduler(app: Application): EngineUpdateScheduler = WorkManagerEngineUpdateScheduler(app)
 
     @Provides
     @SingleIn(AppScope::class)

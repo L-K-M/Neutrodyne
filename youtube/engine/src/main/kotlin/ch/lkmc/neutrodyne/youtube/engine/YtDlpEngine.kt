@@ -274,7 +274,8 @@ class YtDlpEngine(
         mutableStatus.value =
             EngineStatus(
                 availability = availability,
-                version = active.current.takeIf { it.isNotEmpty() && !absent },
+                // Before loadStatus() runs, `active` is empty: still report the bundled version.
+                version = active.current.ifEmpty { identity.engineVersion }.takeIf { it.isNotEmpty() && !absent },
                 source = active.source,
                 bundledVersion = active.bundled.takeIf { it.isNotEmpty() && !absent },
                 updatePolicy = update.updatePolicy,

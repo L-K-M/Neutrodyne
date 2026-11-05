@@ -522,6 +522,8 @@ class AndroidAppGraphTest {
                 "EngineStatusInitializer" to 150..150,
                 "YouTubeNetworkInitializer" to 150..150,
                 "EnginePreparationObserver" to 210..210,
+                // M9b: schedules the daily engine-update work with the other work schedulers.
+                "EngineUpdateInitializer" to 200..299,
                 "YouTubeBreakerNotifier" to 200..200,
                 "EngineFilesCleanup" to 300..300,
             )

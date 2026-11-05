@@ -13,5 +13,8 @@ dependencies {
     implementation(libs.okio)
     implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp)
+    // Test-only: fixture clients go through the network island; checkBannedApis forbids
+    // constructing OkHttp here directly.
+    testImplementation(project(":core:network:okhttp"))
     testImplementation(libs.okhttp.mockwebserver3)
 }
