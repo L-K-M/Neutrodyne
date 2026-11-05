@@ -2,9 +2,14 @@
 <!-- SPDX-License-Identifier: Unlicense -->
 <resources>
     <string name="window_title">Neutrodyne</string>
-    <string name="tray_tooltip">Neutrodyne</string>
+    <string name="window_title_playing">%1$s — Neutrodyne</string>
     <string name="tray_show">Neutrodyne anzeigen</string>
+    <string name="tray_play">Wiedergabe</string>
+    <string name="tray_pause">Pause</string>
+    <string name="tray_next">Nächste Episode</string>
     <string name="tray_quit">Beenden</string>
+    <string name="no_tray_hint_title">Kein Tray-Symbol auf diesem System</string>
+    <string name="no_tray_hint_body">Beim Schließen wird Neutrodyne stattdessen in der Taskleiste minimiert.</string>
     <string name="menu_file">Datei</string>
     <string name="menu_import">OPML oder Sicherung importieren…</string>
     <string name="drop_to_import">Zum Importieren ablegen</string>
