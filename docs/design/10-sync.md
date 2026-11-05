@@ -1200,6 +1200,36 @@ timestamp-LWW comparison (a local June `playedAt` loses to a server
 October "unplayed"); the staging-file resume of step 1 is not implemented
 yet and a crash mid-merge restarts the pull.
 
+**Implementation note (2026-11-05, MS2, first link through 05's port).**
+The shortcut above is gone: Merge and "Use the server's library" run
+`LibraryMerger.mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) over a staging
+directory the pull mapped under the archive's entry names, and the
+staging file (`sync-link-<deviceId>.jsonl` in the cache directory, one
+record per line plus an end marker carrying the cursor) is reused by a
+re-run that finds it complete — the staging-file resume of step 1; a
+completed link deletes it. Deviations the current code forces:
+
+- The staging directory carries a one-line `link-meta.json` with the pull
+  time — 05's "no manifest" bars a *validation* manifest, not metadata.
+- Step 4/5 seeding does not consume `onApplied`: `FirstLinkMerger` seeds
+  the local rows at their own timestamps first, folds every received
+  record in through the shared `SyncRecordMerger`, and captures exactly
+  the fields whose clock carries this node (the local winners and every
+  field the server lacks) at their own timestamps — the same set 05's
+  frozen-input rule produces. `onApplied` still reports podcast, group,
+  episode and setting winners; the settings journaling
+  (`pendingSetting`) runs after `mergeStaged` returns rather than inside
+  each chunk transaction, which keeps the same crash-recovery property
+  (the marker lives in `sync_clock`; `SyncApplyEffects.drainSettings`
+  applies it at the latest start).
+- The local seed now covers groups, members and Up next too, so an empty
+  account's upload includes them (the 2026-11-04 shortcut uploaded only
+  podcasts and episodes).
+- A linked Merge restore's session write is not captured (the `session`
+  record is MS3's); "Use this device's library everywhere" step 2 (ID
+  adoption and episode-history merge through `LibraryMerger`) remains
+  unimplemented, as recorded in the link-flow note below.
+
 Step 5's `captureAt` receives the frozen value as well as its pre-merge timestamp for played/position/session fields. Field winners come from 05's `onApplied(MergedRecord)` callback; `MergeSummary` carries counts only. Settings the server lacked use literal `v` captures. It never reads a post-merge projection at push time; an interrupted first link resumes from the saved raw inputs without turning an applied server value into a new local action.
 
 AntennaPod's first sync uploads every played episode stamped with the current time ([SyncService at 9c7ffa1](https://github.com/AntennaPod/AntennaPod/blob/9c7ffa16736c020045571d274aef4cdcf0878100/net/sync/service/src/main/java/de/danoeh/antennapod/net/sync/service/SyncService.java#L228-L248)), which flips later "unplayed" marks on other devices; stamping with row timestamps avoids that (risk SR2).
@@ -1234,8 +1264,23 @@ account never uploads silently. Deviations forced by the current code:
   timeout there is wall-clock, independent of test virtual time).
 - The bootstrap capture writes run with capture already enabled and the
   pulled cursor adopted, so the upload of a Merge or an empty account keeps
-  the rows' own timestamps; a played literal travels as one wire pair with a
-  single clock, as 05's archive requires.
+  the rows' own timestamps; a played literal travels as one wire pair with
+  a single clock, as 05's archive requires.
+
+**Update (2026-11-05, MS2 restore slice).** The first two deviations are
+resolved: Merge and "Use the server's library" now run 05's
+`mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) as the note above records,
+and the staging-file resume exists. The remaining bullets stand, and
+"Use this device's library everywhere" step 2 (ID adoption and the
+episode-history merge) is still open. Restore-while-linked (05's rules)
+is implemented: a linked Merge runs `applying = 1` with `captureAt` at
+the backup's timestamps (presence fields take a fresh literal tick), a
+THIS_DEVICE Replace unlinks first through the `LinkedRestoreCoordinator`
+port (`:core:domain`, bound by `:sync:impl` to the controller's unlink),
+and an ALL_DEVICES Replace keeps the claim-time `linkedAt` clear and
+runs the upload/push/prune steps in the restore's finish before the
+session commits — a failure there leaves the durable request, and a
+re-run replays the idempotent restore and this step.
 
 ### Use the server's library on this device
 

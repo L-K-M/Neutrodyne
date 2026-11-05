@@ -10,8 +10,9 @@ import ch.lkmc.neutrodyne.core.model.MergedRecord
 /**
  * The port through which 10's `FirstLinkMerger` reaches `:core:data`'s `RestoreMerger`
  * (05 RestoreMerger): `:sync:impl` may not depend on `:core:data`, so the contract lives
- * here. M3 implements the `RESTORE_*` policies; `LINK_*` stay representable and land in
- * MS2 ([MergePolicy]'s documentation).
+ * here. `LibraryMergerImpl` (`:core:data`) binds it over a first-link staging directory
+ * and serves the `LINK_*` policies (MS2); the `RESTORE_*` policies run through the
+ * restore pipeline directly.
  */
 interface LibraryMerger {
     /**
