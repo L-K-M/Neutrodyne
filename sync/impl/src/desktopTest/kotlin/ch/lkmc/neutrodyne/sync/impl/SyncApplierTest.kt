@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
 import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
@@ -240,6 +241,177 @@ class SyncApplierTest {
             }
         }
 
+
+    @Test
+    fun aReceivedAuthIsStagedProtectedAndJournaledAsPendingAuth() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                link(db)
+                seedSilently(db, podcastSyncId)
+                val applier = applier(db, secrets)
+                val authClock = clock(10).toString()
+                applier.applyPage(
+                    listOf(
+                        podcastRecord(
+                            podcastSyncId,
+                            "needsCredentials" to bool(true),
+                            "credentialOrigin" to text("https://example.com"),
+                            "auth" to auth("anna", "hunter2"),
+                        ),
+                    ),
+                    roundId = now,
+                )
+
+                // The secret lives only in the protected staging entry.
+                val stagedKey = pendingAuthOrigin("acc-1", podcastSyncId, authClock)
+                assertEquals("hunter2", secrets.get(stagedKey)?.secret?.concatToString())
+
+                // Raw state carries the marker and the reference; no plaintext anywhere in Room.
+                val raw = rawRecord(db, podcastSyncId)
+                assertNotNull(raw)
+                assertEquals(stagedKey, authMarkerKey(raw.state.fields.getValue("auth").v))
+                assertEquals(stagedKey, raw.pendingAuth?.reference)
+                assertEquals("https://example.com", raw.pendingAuth?.credentialOrigin)
+                assertEquals(stagedKey, raw.authReference?.storeKey)
+                assertFalse(db.syncClockDao().get("podcast", podcastSyncId)!!.clocks.contains("hunter2"))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anEqualClockRedeliveryKeepsThePendingEffectWithoutConflict() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                link(db)
+                seedSilently(db, podcastSyncId)
+                val applier = applier(db, secrets)
+                val page =
+                    listOf(
+                        podcastRecord(
+                            podcastSyncId,
+                            "needsCredentials" to bool(true),
+                            "auth" to auth("anna", "hunter2"),
+                        ),
+                    )
+                applier.applyPage(page, roundId = now)
+                val second = applier.applyPage(page, roundId = now + 1)
+
+                assertEquals(1, second.stale)
+                val raw = rawRecord(db, podcastSyncId)
+                assertNotNull(raw)
+                assertNotNull(raw.pendingAuth, "an equal-clock redelivery must not suppress unfinished work")
+                assertEquals("hunter2", secrets.get(raw.pendingAuth!!.reference)?.secret?.concatToString())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aPodcastNeedingAPasswordWithoutAuthIsFlaggedAndReported() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedSilently(db, podcastSyncId)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(podcastRecord(podcastSyncId, "needsCredentials" to bool(true))),
+                        roundId = now,
+                    )
+
+                assertEquals(listOf(podcastId), result.passwordNeeded)
+                assertEquals(true, db.podcastDao().byId(podcastId)?.needsCredentials)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aReceivedAuthSuppressesThePasswordNeededNotice() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedSilently(db, podcastSyncId)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            podcastRecord(
+                                podcastSyncId,
+                                "needsCredentials" to bool(true),
+                                "auth" to auth("anna", "hunter2"),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+
+                assertEquals(emptyList<Long>(), result.passwordNeeded)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aLosingAuthCandidateIsRemovedAndALocalWinnerIsMarkedWithTheFeedOrigin() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                link(db)
+                val podcastId = seedSilently(db, podcastSyncId)
+                val credentialId =
+                    db
+                        .credentialDao()
+                        .putByOrigin(
+                            ch.lkmc.neutrodyne.core.database.CredentialEntity(
+                                origin = "https://example.com",
+                                username = "local",
+                                secretCipher = null,
+                                iv = null,
+                                createdAt = 1,
+                            ),
+                        )
+                val fakeRowId = secrets.put("https://example.com", "local", "local-secret".toCharArray())!!
+                secrets.podcastCredentialIds.value = mapOf(podcastId to fakeRowId)
+                db.podcastDao().setCredentialId(podcastId, credentialId)
+                // A pending local auth row newer than the incoming remote value.
+                db
+                    .syncOutboxDao()
+                    .upsert(
+                        ch.lkmc.neutrodyne.core.database.SyncOutboxEntity(
+                            coll = "podcast",
+                            rid = podcastSyncId,
+                            field = "auth",
+                            hlc = (now + 100_000L) shl 16,
+                            nodeId = node.value,
+                        ),
+                    )
+                val applier = applier(db, secrets)
+                val remoteClock = clock(10).toString()
+                applier.applyPage(
+                    listOf(podcastRecord(podcastSyncId, "auth" to auth("anna", "remote-secret"))),
+                    roundId = now,
+                )
+
+                val raw = rawRecord(db, podcastSyncId)
+                assertNotNull(raw)
+                assertNull(raw.pendingAuth, "the local credential is already installed; nothing to drain")
+                assertEquals("https://example.com", authMarkerKey(raw.state.fields.getValue("auth").v))
+                assertEquals("https://example.com", raw.authReference?.storeKey)
+                assertNull(secrets.get(pendingAuthOrigin("acc-1", podcastSyncId, remoteClock)), "the losing candidate left the staging store")
+                assertFalse(db.syncClockDao().get("podcast", podcastSyncId)!!.clocks.contains("remote-secret"))
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun anAbsentPlayedAtKeepsTheLocalValue() =
         runTest {
@@ -353,12 +525,46 @@ class SyncApplierTest {
             }
         }
 
-    private fun applier(db: NeutrodyneDatabase): SyncApplier {
+    /** [seedPodcast] with the capture triggers silenced, so the seed stays out of the merge. */
+    private suspend fun seedSilently(
+        db: NeutrodyneDatabase,
+        syncId: String,
+    ): Long =
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying { seedPodcast(db, syncId) }
+        }
+
+    private fun auth(
+        username: String,
+        password: String,
+    ): FieldValue =
+        FieldValue(
+            JsonObject(
+                buildMap {
+                    put("u", JsonPrimitive(username))
+                    put("p", JsonPrimitive(password))
+                },
+            ),
+            clock(10).toString(),
+        )
+
+    private suspend fun rawRecord(
+        db: NeutrodyneDatabase,
+        rid: String,
+    ): RawSyncRecord? =
+        db.syncClockDao().get("podcast", rid)?.let {
+            runCatching { SyncJson.decodeFromString<RawSyncRecord>(it.clocks) }.getOrNull()
+        }
+
+    private fun applier(
+        db: NeutrodyneDatabase,
+        secrets: FakeSecretStore = FakeSecretStore(),
+    ): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
             db = db,
             clock = TestClock(now),
-            secrets = FakeSecretStore(),
+            secrets = secrets,
             settings = settings,
             playback = NoPlaybackSync,
             syncIngestHook = SyncIngestHook.None,
@@ -381,7 +587,7 @@ class SyncApplierTest {
         db.withWriteTransaction {
             db
                 .syncStateDao()
-                .upsert(SyncStateEntity(enabled = true, nodeId = node.value, hlc = 1L shl 16))
+                .upsert(SyncStateEntity(enabled = true, nodeId = node.value, hlc = 1L shl 16, accountId = "acc-1"))
         }
     }
 
