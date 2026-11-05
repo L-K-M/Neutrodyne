@@ -646,6 +646,7 @@
     <string name="settings_update_available">Einstellungen, Update verfügbar</string>
     <string name="feeds_empty_group">Noch keine Podcasts in '%1$s'</string>
     <string name="feeds_add_podcasts">Podcasts hinzufügen</string>
+    <string name="setting_not_supported">Für YouTube-Kanäle nicht verfügbar</string>
 
     <!-- Owner radio home design, 2026-11-04. -->
     <string name="radio_menu">Menü</string>

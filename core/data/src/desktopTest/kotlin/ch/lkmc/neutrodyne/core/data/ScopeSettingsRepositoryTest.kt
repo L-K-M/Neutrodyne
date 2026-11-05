@@ -51,6 +51,20 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ScopeSettingsRepositoryTest {
+    private val defaults =
+        SettingOverrides(
+            240,
+            false,
+            1f,
+            false,
+            autoDownload = false,
+            autoDownloadKeepLatest = 3,
+            autoDownloadNetwork = ch.lkmc.neutrodyne.core.model.NetworkPolicy.UNMETERED,
+            autoDownloadRequireCharging = false,
+            includeVideoInAutoDownload = false,
+            deleteAfterPlayed = ch.lkmc.neutrodyne.core.model.DeleteAfter.AFTER_24H,
+        )
+
     private val db = TestDb.inMemory()
     private val settings = FakeSettingsRepository()
     private val refresh = FakeRefreshController()
@@ -213,14 +227,14 @@ class ScopeSettingsRepositoryTest {
             repo.observeGroup(group).test {
                 val inherited = assertNotNull(awaitItem())
                 assertEquals(SettingOverrides(), inherited.own)
-                assertEquals(SettingOverrides(240, false, 1f, false), inherited.effective)
+                assertEquals(defaults, inherited.effective)
                 assertTrue(inherited.sources.values.all { it == SettingSource.AppDefault })
                 settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 480)
                 assertEquals(480, awaitItem()?.effective?.refreshIntervalMinutes)
                 repo.updateGroup(group) { SettingOverrides(0, true) }
                 val own = assertNotNull(awaitItem())
                 assertEquals(SettingOverrides(0, true), own.own)
-                assertEquals(SettingOverrides(null, true, 1f, false), own.effective)
+                assertEquals(defaults.copy(refreshIntervalMinutes = null, notifyNewEpisodes = true), own.effective)
                 assertEquals(
                     SettingSource.Group(identity.uuid, identity.name),
                     own.sources[SettingField.REFRESH_INTERVAL_MINUTES],
@@ -230,7 +244,7 @@ class ScopeSettingsRepositoryTest {
                     own.sources[SettingField.NOTIFY_NEW_EPISODES],
                 )
                 repo.updateGroup(group) { SettingOverrides() }
-                assertEquals(SettingOverrides(480, false, 1f, false), awaitItem()?.effective)
+                assertEquals(defaults.copy(refreshIntervalMinutes = 480), awaitItem()?.effective)
             }
         }
 
@@ -240,7 +254,7 @@ class ScopeSettingsRepositoryTest {
             val group = group()
             repo.updateGroup(group) { SettingOverrides(60, true) }
             repo.observePodcast(podcast).test {
-                assertEquals(SettingOverrides(240, false, 1f, false), awaitItem()?.effective)
+                assertEquals(defaults, awaitItem()?.effective)
                 settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, true)
                 assertEquals(true, awaitItem()?.effective?.notifyNewEpisodes)
                 db.groupDao().insertMember(memberEntity(group, podcast, "a"))

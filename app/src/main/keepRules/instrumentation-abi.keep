@@ -1317,8 +1317,6 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor {
 }
--keep interface ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus$MetroContributionToDevzacsweersmetroappScopeocf15 {
-}
 -keep class ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus$MetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus$MetroFactory create();
 }
@@ -1594,7 +1592,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImplContributions$ToAppScope$ProvidesEffectiveSettingsResolverImplMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImplContributions$ToAppScope$ProvidesEffectiveSettingsResolverImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public static ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImplContributions$ToAppScope$ProvidesEffectiveSettingsResolverImplMetroFactory create$default(ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImplContributions$ToAppScope$ProvidesEffectiveSettingsResolverImplMetroFactory$Companion, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, int, java.lang.Object);
 }
 -keep class ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImplContributions$ToAppScope$ProvidesEffectiveSettingsResolverImplMetroFactory {
   ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImplContributions$ToAppScope$ProvidesEffectiveSettingsResolverImplMetroFactory$Companion Companion;
@@ -2426,7 +2424,7 @@
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility {
 }
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory {
   ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory$Companion Companion;
