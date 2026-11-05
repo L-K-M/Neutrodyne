@@ -351,7 +351,12 @@ class DesktopPlaybackControllerTest {
                 try {
                     restored.initialize()
                     withTimeout(TIMEOUT_MS) { restored.nowPlaying.filter { it?.episodeId == 1L }.first() }
+                    // 11 Device loss, sleep and session restore: the saved item is
+                    // published paused at its position, and nothing is resolved,
+                    // fetched or decoded (no engine window) until Play.
                     assertEquals(PlayerPhase.NOT_LOADED, restored.nowPlaying.value?.phase)
+                    assertFalse(restored.nowPlaying.value!!.isPlaying)
+                    assertFalse(restored.nowPlaying.value!!.playWhenReady)
                     assertEquals(
                         38_000L,
                         restored.nowPlaying.value
