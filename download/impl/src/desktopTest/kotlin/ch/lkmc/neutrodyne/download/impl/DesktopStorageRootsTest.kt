@@ -100,7 +100,7 @@ class DesktopStorageRootsTest {
             assertFalse(Files.exists(selected))
             val result = assertIs<FolderRootResult.Ok>(f.roots.registerFolderRoot(reattached.toString()))
             assertEquals(id, result.root.rootId)
-            assertEquals(reattached.toString(), f.store.get(DesktopSettingKeys.DOWNLOADS_DIR))
+            assertEquals(reattached.toRealPath().toString(), f.store.get(DesktopSettingKeys.DOWNLOADS_DIR))
             assertEquals(id, f.roots.current())
             assertNotNull(f.roots.resolve(id))
             assertEquals(1, f.store.get(DownloadSettingKeys.DESKTOP_ROOTS).size)
