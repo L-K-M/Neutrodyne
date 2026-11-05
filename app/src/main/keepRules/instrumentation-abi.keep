@@ -1540,7 +1540,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.repo.EpisodeRepositoryImplContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.repo.FeedRepositoryImplContributions$ToAppScope$ProvidesFeedRepositoryImplMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.repo.FeedRepositoryImplContributions$ToAppScope$ProvidesFeedRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.repo.FeedRepositoryImplContributions$ToAppScope$ProvidesFeedRepositoryImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.repo.FeedRepositoryImplContributions$ToAppScope$ProvidesFeedRepositoryImplMetroFactory {
   ch.lkmc.neutrodyne.core.data.repo.FeedRepositoryImplContributions$ToAppScope$ProvidesFeedRepositoryImplMetroFactory$Companion Companion;
