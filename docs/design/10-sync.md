@@ -893,6 +893,45 @@ Room, DataStore and `SecretStore` cannot commit atomically. `SyncApplyEffects` t
 - Protected snapshots stay outside credential sweeps while raw state or pending work references them. Failed-page or losing candidates are removed; orphan staging entries are swept at startup after checking both raw and pending references. Unlink cancels the drain and removes the account's protected snapshots before clearing sync bookkeeping.
 - Removals retain their existing `sync_held` journal until the repository operation succeeds. Notification channels reconcile from the current groups on startup and after pulls; first fetches rediscover `PENDING_FIRST_FETCH` rows with `nextRefreshAt` due. These self-healing jobs need no payload journal. One-shot UI notices remain best effort.
 
+**Implementation note (2026-11-05, MS2, credentials).** The password
+rules above are implemented end to end (the switch of [Feed passwords
+and private feed URLs](#feed-passwords-and-private-feed-urls), staging,
+`pendingAuth` and the drain). Concrete shapes, refinements of this
+section rather than changes to it:
+
+- The protected reference stored in raw state — and in the replayed
+  literal of a full resync — is the marker object
+  `{"u":"","p":"","ref":"<storeKey>"}`: an `u`/`p`-empty AUTH value
+  that still passes protocol validation and merges canonically, so an
+  equal-clock redelivery compares equal instead of tripping the
+  write-identity conflict. A pending local value that wins is marked
+  with the feed origin it already lives at; push-time replay hydrates
+  a marker from its store entry only while sharing is on, and omits
+  the field when the snapshot is gone.
+- `SecretStore` gains `originsWithPrefix` for the orphan sweep and the
+  unlink cleanup; Android scans its rows' origins, the desktop unions
+  rows with its file-only entries.
+- A staging entry that no longer resolves after the store has loaded
+  (key loss, a lost secrets file) is unrecoverable: the effect is
+  abandoned and the feed flagged `needsCredentials` instead of
+  retrying forever. An effect whose podcast has not arrived stays
+  parked; the drain that follows the arriving page installs it.
+- Rounds drain at their start and after every applied page (the "at
+  each start" rule), and `FeedPasswordNeeded` posts once per round,
+  not once per page, through a notice bus the controller relays.
+- The first link stages every pulled candidate before its records
+  reach the cache-dir staging file, which therefore carries markers
+  only; a whole-library upload (first link or restore-everywhere)
+  captures one `auth` row per credentialed podcast while sharing is
+  on, exactly as a switch-on does.
+- Turning the switch off deletes the pending podcast `auth` outbox
+  rows: they can never be pushed while off, and a later switch-on
+  re-captures fresh ones.
+- The `podcast` `*` expansion carries `credentialOrigin` always and
+  `auth` while sharing is on (the Push table's "+ `credential`
+  … when `auth` is due"), so a whole-record push covers credentials
+  without a separate field row.
+
 ### Outbox and coalescing
 
 - One row per `(coll, rid, field)`: repeated changes coalesce, so 5-s position saves for one episode keep one row whatever the push cadence.
