@@ -8,12 +8,15 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.AllDevicesReachEffect
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
+import ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.model.BackupPreview
+import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
@@ -48,10 +51,26 @@ internal data class RestoreUiState(
     val confirmingReplace: Boolean = false,
     val requested: Boolean = false,
     val progress: RestoreProgress? = null,
+<<<<<<< HEAD
     val redownloadIds: List<Long> = emptyList(),
     val meteredDownload: Boolean = false,
     val downloadFailed: Boolean = false,
 )
+=======
+    /** The linked Replace's reach (05 Restore while linked); THIS_DEVICE is the default. */
+    val linkedReach: LinkedRestoreReach = LinkedRestoreReach.THIS_DEVICE,
+    /** The ALL_DEVICES confirmation: the server comparison is running. */
+    val checkingServerLibrary: Boolean = false,
+    /** The ALL_DEVICES effect counts once the server library was staged. */
+    val allDevicesEffect: AllDevicesReachEffect? = null,
+    /** The server library could not be staged (offline); the user may retry. */
+    val serverLibraryUnavailable: Boolean = false,
+) {
+    /** 05: only a linked Replace asks how far it reaches. */
+    val asksReach: Boolean
+        get() = preview?.linkedServerHost != null && mode == RestoreMode.REPLACE
+}
+>>>>>>> 787cf8d9a (Ask how far a linked Replace reaches in the restore preview)
 
 /** Backup-only controller; normal import confirmation is never part of this path. */
 internal class RestoreViewModel
@@ -61,6 +80,7 @@ internal class RestoreViewModel
         private val backups: BackupRepository,
         private val imports: ImportRepository,
         private val playback: PlaybackController,
+        private val linkedSync: LinkedRestoreCoordinator,
         @ApplicationScope private val appScope: CoroutineScope,
         private val downloads: RestoreDownloadRequests,
     ) : ViewModel() {
@@ -140,12 +160,57 @@ internal class RestoreViewModel
             state.update { it.copy(categories = if (selected) it.categories + category else it.categories - category) }
         }
 
+        fun selectReach(reach: LinkedRestoreReach) {
+            if (!editable()) return
+            state.update { it.copy(linkedReach = reach, serverLibraryUnavailable = false, allDevicesEffect = null) }
+        }
+
         suspend fun requestRestore() {
             if (!editable()) return
+            if (state.value.mode == RestoreMode.REPLACE && state.value.asksReach) {
+                when (state.value.linkedReach) {
+                    // The second confirmation compares the staged server library with the
+                    // backup's before anything is written (05 Restore while linked).
+                    LinkedRestoreReach.ALL_DEVICES -> checkServerLibrary()
+
+                    LinkedRestoreReach.THIS_DEVICE -> state.update { it.copy(confirmingReplace = true) }
+                }
+                return
+            }
             if (state.value.mode == RestoreMode.REPLACE) {
                 state.update { it.copy(confirmingReplace = true) }
                 return
             }
+            restore()
+        }
+
+        private suspend fun checkServerLibrary() {
+            val preview = state.value.preview ?: return
+            state.update { it.copy(checkingServerLibrary = true, serverLibraryUnavailable = false) }
+            val outcome =
+                suspendRunCatching {
+                    linkedSync.previewAllDevicesReach(preview.podcastKeys, preview.groupNames.toSet())
+                }.getOrElse { Outcome.Failure(BackupError.Io) }
+            state.update {
+                when (outcome) {
+                    is Outcome.Success -> {
+                        it.copy(checkingServerLibrary = false, allDevicesEffect = outcome.value)
+                    }
+
+                    is Outcome.Failure -> {
+                        it.copy(checkingServerLibrary = false, serverLibraryUnavailable = true)
+                    }
+                }
+            }
+        }
+
+        fun cancelAllDevices() {
+            state.update { it.copy(allDevicesEffect = null, serverLibraryUnavailable = false) }
+        }
+
+        suspend fun confirmAllDevices() {
+            if (state.value.allDevicesEffect == null || state.value.busy) return
+            state.update { it.copy(allDevicesEffect = null) }
             restore()
         }
 
@@ -190,7 +255,13 @@ internal class RestoreViewModel
                 state.value.error == null
 
         private suspend fun restore() {
-            val request = RestoreRequest(state.value.mode, state.value.categories.toSet())
+            val reach =
+                if (state.value.asksReach) {
+                    state.value.linkedReach
+                } else {
+                    LinkedRestoreReach.THIS_DEVICE
+                }
+            val request = RestoreRequest(state.value.mode, state.value.categories.toSet(), reach)
             state.update { it.copy(busy = true, error = null, progress = null) }
             if (!appScope.coroutineContext.isActive) {
                 state.update { it.copy(busy = false, error = BackupError.Io) }
