@@ -112,7 +112,10 @@ class FfAudioEngine internal constructor(
     }
 
     private val mutableState = MutableStateFlow<EngineState>(EngineState.Idle)
-    private val mutableEvents = MutableSharedFlow<EngineEvent>(extraBufferCapacity = EVENT_CAPACITY)
+
+    // Unbounded: a collector that lags (a slow transition write) must never fail the engine
+    // thread's emit. Events are small and rare, so the backlog stays bounded in practice.
+    private val mutableEvents = MutableSharedFlow<EngineEvent>(extraBufferCapacity = Int.MAX_VALUE)
     override val state = mutableState.asStateFlow()
     override val events = mutableEvents.asSharedFlow()
     private val control = Any()
@@ -542,7 +545,7 @@ class FfAudioEngine internal constructor(
     }
 
     private fun emit(event: EngineEvent) {
-        check(mutableEvents.tryEmit(event)) { "engine event consumer fell behind" }
+        check(mutableEvents.tryEmit(event)) { "unbounded engine event buffer refused an event" }
     }
 
     private fun checkOpen() = check(!closed.get()) { "engine is closed" }
@@ -588,7 +591,6 @@ class FfAudioEngine internal constructor(
         const val POLL_MS = 2L
         const val MIN_SPEED = 0.5f
         const val MAX_SPEED = 3f
-        const val EVENT_CAPACITY = 64
         const val MICROS_PER_MS = 1_000L
         const val CLOSE_WAIT_MS = 5_000L
         const val SOURCE_WAIT_MS = 30_000L
