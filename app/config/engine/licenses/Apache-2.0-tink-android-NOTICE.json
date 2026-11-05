@@ -1,0 +1,8 @@
+{
+  "_comment": "tink-android 1.23.0 ships no META-INF/NOTICE; this is the Tink repository NOTICE (Apache-2.0 4(d))",
+  "hash": "Apache-2.0-tink-android-NOTICE",
+  "spdxId": "Apache-2.0",
+  "name": "Tink NOTICE",
+  "url": "https://github.com/tink-crypto/tink-java/blob/main/NOTICE",
+  "content": "Tink\nCopyright 2017 Google LLC\n\nThis product contains software developed at\nGoogle LLC (https://www.google.com/).\n"
+}
