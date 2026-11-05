@@ -30,6 +30,7 @@ import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.printToLog
 import androidx.lifecycle.SavedStateHandle
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.CoroutineWorker
@@ -199,6 +200,11 @@ class ExternalYouTubeModeTest {
                     resolved
                 }
                 assertEquals(emptyList(), runBlocking { db.podcastDao().allForExport() })
+                // The sheet auto-focuses the field; on the API 26 CI emulator the open IME then
+                // leaves the dialog's recomposition half-applied (tree dumps show the membership
+                // chips and buttons gone while the channel card stays). A user closes the
+                // keyboard to reach Subscribe; the journey does the same before clicking.
+                Espresso.closeSoftKeyboard()
                 val checkbox = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
                 onNode(hasText("Journey group") and checkbox).performClick()
                 onNodeWithText("Subscribe").performClick()
