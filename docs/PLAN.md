@@ -1005,7 +1005,7 @@ v1.0 ships everything together (owner decision S0): the **M track** (shared code
 | M7 | Discovery: search providers, charts, autodiscovery, share/deep links | R2.2, R1/R2 onboarding, N3 | M |
 | M8 | YouTube subscriptions in all builds: channel resolution, Atom feeds, art, external episodes, YouTube imports | R3.1–R3.4, R3.7, R1.6, R5.8, N3, N9 | L |
 | M9a | YouTube engine and playback on Android: spike week, Chaquopy-hosted yt-dlp in `:ytx`, resolver, playback and download integration, enrichment, search, back catalogue, breaker | R3.1, R3.5, R3.6, R3.7, R3.8, N3, N5, N7, N8 | L |
-| M9b | YouTube-engine updates: trust chain, staging, self-test, rollback, engine canary and signed manifest, JS challenge provider if viable | R3.9, N3, N11, N12 | M |
+| M9b | YouTube-engine updates: trust chain, staging, self-test and rollback on Android (first slice), then the engine canary and signed manifest pipeline, JS challenge provider if viable | R3.9, N3, N11, N12 | M |
 | MS3 | Live updates and handoff: SSE, session adoption, pull before play, "Continue on this device" | R7.4, R7.5, R8.5 | M |
 | MD3 | Desktop YouTube engine: the stdio host on the `:youtube:engine` island (since M9a), python-build-standalone child process, engine updates on the desktop | R8.6, R3.5, R3.6, R3.8, R3.9, N5, N8 | L |
 | M10 | Covers, theming, adaptive layouts and accessibility to release quality (shared UI and Android) | R5.1–R5.8, N4, N5, N10 | L |
@@ -1427,6 +1427,18 @@ spike, residential response captures and manual playback/download checklist
 remain open. The host Mac lacks Python 3.14, so target-minor bytecode and device
 validation depend on CI. Implementation details and deviations are recorded in
 [04 YouTube engine](design/04-youtube.md#youtube-engine).
+
+Implementation note (2026-11-05, M9b first slice `m9b-trust`). The Android
+half of the engine-update path landed: the signed-manifest verifier and
+upstream OpenPGP/SHA-256 chain, `versions/` staging next to the active
+engine, the fresh-host self-test, atomic activation and rollback on a
+failed self-test or a crash loop, plus `youtube.engine_updates` and the
+WorkManager driver (`engine-update` daily, `engine-update-now` after a
+breaker opening). `engine-canary.yml`, manifest publishing and the JS
+challenge provider remain open, as do the desktop engine and the settings
+UI rows; this slice ships no update UI, so `EngineUpdateWorkerTest`-style
+coverage lives in `:youtube:engine` unit tests. Details and deviations:
+[04 Engine updates](design/04-youtube.md#engine-updates).
 
 - **Goal:** on the 64-bit APKs, YouTube episodes play and download as audio exactly like podcasts, through yt-dlp embedded in CPython in the `:ytx` process (layer B, [D72](#3-key-decisions)–[D75](#3-key-decisions)) (M9a); YouTube fixes then reach users as verified engine updates within hours, without an app update ([D76](#3-key-decisions)) (M9b).
 - **Increments** ([7.1](#71-milestone-overview)): **M9a** = every deliverable and criterion below not tagged M9b; **M9b** = the tagged ones. M9a starts with a one-week spike whose results decide the go/fallback before the rest of M9a is built.
