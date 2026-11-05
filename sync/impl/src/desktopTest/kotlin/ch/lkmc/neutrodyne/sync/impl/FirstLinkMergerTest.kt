@@ -349,16 +349,36 @@ class FirstLinkMergerTest {
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         client: SyncClient,
         library: FakeLibraryMerger,
-    ): FirstLinkMerger =
-        FirstLinkMerger(
+    ): FirstLinkMerger {
+        val secrets = FakeSecretStore()
+        return FirstLinkMerger(
             db = db,
             client = client,
-            applier = applier(db),
-            engine = engine(db, client),
+            applier = applier(db, secrets),
+            engine = engine(db, client, secrets),
             libraryMerger = library,
             storagePaths = paths,
             settings = FakeSettingsSyncPort(),
+            secrets = secrets,
+            coordinator =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeCredentialCommitCoordinator(),
+            effects = effects(db, secrets),
             clock = TestClock(now),
+        )
+    }
+
+    private fun effects(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
+    ): SyncApplyEffects =
+        SyncApplyEffects(
+            db = db,
+            settings = FakeSettingsSyncPort(),
+            secrets = secrets,
+            coordinator =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeCredentialCommitCoordinator(),
         )
 
     private suspend fun link(
@@ -396,9 +416,9 @@ class FirstLinkMergerTest {
     private fun engine(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         client: SyncClient,
-    ): SyncEngine {
-        val secrets = FakeSecretStore()
-        return SyncEngine(
+        secrets: ch.lkmc.neutrodyne.core.domain.SecretStore = FakeSecretStore(),
+    ): SyncEngine =
+        SyncEngine(
             db = db,
             client = client,
             applier = applier(db),
@@ -429,14 +449,18 @@ class FirstLinkMergerTest {
                 SyncTokenStore(secrets).apply {
                     kotlinx.coroutines.runBlocking { save("sync.example", "token") }
                 },
+            effects = effects(db, secrets),
+            notices = SyncNoticeBus(),
         )
-    }
 
-    private fun applier(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase): SyncApplier =
+    private fun applier(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        secrets: ch.lkmc.neutrodyne.core.domain.SecretStore = FakeSecretStore(),
+    ): SyncApplier =
         SyncApplier(
             db = db,
             clock = TestClock(now),
-            secrets = FakeSecretStore(),
+            secrets = secrets,
             settings = FakeSettingsSyncPort(),
             playback = NoPlaybackSync,
             syncIngestHook = SyncIngestHook.None,
