@@ -1751,6 +1751,18 @@ before the session commits. Deviations the current code forces:
   `captureAt` + `SettingsSyncPort.applyRemote` and skips
   `sync.server_url`/`sync.username` while linked, per step 7.
 
+**Implementation note (2026-11-05, MS2 final slice).** The mergers gained
+a fifth policy, `LINK_HISTORY`: 10's "Use this device's library
+everywhere" step 2. It runs the same ladders as `LINK_MERGE` but applies
+only the identity adoption (a matched podcast takes the record's
+`syncId`, a `nameKey`-matched group the record's `uuid`) and the episode
+phase's First-link timestamp rules — unmatched lines of podcasts this
+device has still hand to `onUnmatched`; every other server record
+(podcasts, groups, members, Up next, session, settings) is not applied,
+so server-only rows are neither inserted nor removed locally. This
+refines the `LINK_*` row of the rules table for 10's use; the restore
+policies are unchanged.
+
 **Implementation note (2026-10-18, B12b):** a replay still queues a matched podcast awaiting its first fetch, including one inserted by an interrupted attempt. Auto-snapshot retirement finishes before a terminal session marker; a failed rename or cancellation-marker write leaves durable work for retry. Settings restore requires the declared JSON primitive type rather than coercing strings into booleans or numbers.
 
 *Implementation note (2026-10-18, M3 B12c):* `BackupRepositoryImpl` (`:core:data`
