@@ -11,6 +11,12 @@
   <string name="sync_finish_link">Beende die Verknüpfung mit %1$s.</string>
   <string name="sync_revoked">Dieses Gerät wurde von %1$s getrennt.</string>
 
+  <string name="sync_share_passwords">Feed-Passwörter teilen</string>
+  <string name="sync_share_passwords_help">Ermöglicht deinen anderen Geräten, private Feeds mit Passwort zu aktualisieren. Passwörter, die bereits auf dem Server liegen, bleiben dort, bis du sie dort änderst oder deine Daten löschst.</string>
+  <string name="sync_share_passwords_confirm_title">Feed-Passwörter teilen?</string>
+  <string name="sync_share_passwords_confirm_body">Die Passwörter deiner privaten Feeds werden auf %1$s im Klartext gespeichert, damit deine anderen Geräte sie nutzen können. Jeder, der die Daten des Servers lesen kann, kann sie lesen.</string>
+  <string name="sync_share_passwords_share">Teilen</string>
+
   <string name="sync_setup_title">Gerät verknüpfen</string>
   <string name="sync_setup_address_hint">sync.example.org</string>
   <string name="sync_setup_checking">%1$s wird geprüft…</string>

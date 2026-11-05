@@ -11,6 +11,12 @@
   <string name="sync_finish_link">Finish linking to %1$s.</string>
   <string name="sync_revoked">This device was unlinked from %1$s.</string>
 
+  <string name="sync_share_passwords">Share feed passwords</string>
+  <string name="sync_share_passwords_help">Lets your other devices refresh private feeds that need a password. Passwords already on the server stay there until you change them there or delete your data.</string>
+  <string name="sync_share_passwords_confirm_title">Share feed passwords?</string>
+  <string name="sync_share_passwords_confirm_body">The passwords of your private feeds are stored on %1$s in readable form so your other devices can use them. Anyone who can read the server\'s data can read them.</string>
+  <string name="sync_share_passwords_share">Share</string>
+
   <string name="sync_setup_title">Link a device</string>
   <string name="sync_setup_address_hint">sync.example.org</string>
   <string name="sync_setup_checking">Checking %1$s…</string>
