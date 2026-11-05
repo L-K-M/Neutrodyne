@@ -533,7 +533,7 @@ class PlaybackServiceTest {
             }
             await { !serviceDump().contains(FOREGROUND_SERVICE_MARKER) }
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
-            await { !serviceDump().contains("ServiceRecord{") }
+            await { !serviceRecordPresent() }
             phase("recreation/foreground")
             foregroundHost()
             val restored = withContext(Dispatchers.Main) { connect() }
@@ -578,7 +578,7 @@ class PlaybackServiceTest {
             // Let Media3's post-pause foreground grace finish before the cold-start probe.
             await { !serviceDump().contains(FOREGROUND_SERVICE_MARKER) }
             app.stopService(Intent(app, NeutrodynePlaybackService::class.java))
-            await { !serviceDump().contains("ServiceRecord{") }
+            await { !serviceRecordPresent() }
             // System media-session dispatch exercises the manifest's standard MediaButtonReceiver.
             device.executeShellCommand("cmd media_session dispatch play")
             awaitAudio()
@@ -679,7 +679,14 @@ class PlaybackServiceTest {
         )
         val podcast =
             db.podcastDao().insertPodcast(
-                podcastEntity(title = "Playback fixture", artworkKey = key) {
+                podcastEntity(
+                    // The periodic feed refresh must stay on the fixture server: the default
+                    // example.com URL would open a real HTTPS connection, which is both
+                    // nondeterministic and an OkHttp HTTP/2 shutdown leak on API 26.
+                    title = "Playback fixture",
+                    feedUrl = server.url("/feed.xml").toString(),
+                    artworkKey = key,
+                ) {
                     copy(artworkUrl = coverUrl)
                 },
             )
@@ -736,6 +743,18 @@ class PlaybackServiceTest {
         device.executeShellCommand(
             "dumpsys activity services ${app.packageName}/$SERVICE_CLASS",
         )
+
+    /**
+     * dumpsys prints a "Last ANR service" record for the whole system, so the raw dump
+     * always contains a ServiceRecord on an emulator whose SystemUI has ANR'd. Match the
+     * record for this app's component instead.
+     */
+    private fun serviceRecordPresent(): Boolean {
+        val component = "${app.packageName}/$SERVICE_CLASS"
+        return serviceDump()
+            .lineSequence()
+            .any { it.contains("ServiceRecord{") && it.contains(component) }
+    }
 
     private suspend fun await(condition: suspend () -> Boolean) =
         withTimeout(WAIT_MS) {
