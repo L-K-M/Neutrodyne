@@ -17,6 +17,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -210,7 +211,7 @@ class ExternalYouTubeModeTest {
                         workDataOf("scope" to "all", "origin" to "SUBSCRIBE"),
                     )
                 }
-                waitUntil(30_000) {
+                awaitJourney(REFRESH_TIMEOUT_MS) {
                     runBlocking {
                         db
                             .podcastDao()
@@ -242,7 +243,7 @@ class ExternalYouTubeModeTest {
                         workDataOf("sessionId" to session),
                     )
                 }
-                waitUntil(30_000) {
+                awaitJourney(REFRESH_TIMEOUT_MS) {
                     runBlocking {
                         val channels = db.podcastDao().allForExport()
                         channels.size == 2 && channels.none { it.initialFetch }
@@ -413,6 +414,8 @@ class ExternalYouTubeModeTest {
     private companion object {
         const val PREVIEW_RECOVERY_TIMEOUT_MS = 90_000L
         const val SUBSCRIBE_TIMEOUT_MS = 20_000L
+        const val REFRESH_TIMEOUT_MS = 30_000L
+        const val OUTAGE_TIMEOUT_MS = 20_000L
 
         // Locale.ENGLISH is forced above, so the EN sheet copy (yt_network_error, action_retry)
         // is exact — including the typographic apostrophe.
@@ -422,7 +425,9 @@ class ExternalYouTubeModeTest {
 
     /**
      * A timed-out wait must say which step the journey was in: the per-test logcat upload carries
-     * the whole semantics tree, so a CI-only stall is diagnosable from the artifact.
+     * the whole semantics tree, so a CI-only stall is diagnosable from the artifact. MainActivity
+     * keeps its own composition under the journey's setContent, so the activity hosts two roots;
+     * each subtree is printed (SmokeTest's SettingsTouchTargets precedent).
      */
     private fun awaitJourney(
         timeoutMillis: Long,
@@ -431,7 +436,10 @@ class ExternalYouTubeModeTest {
         try {
             compose.waitUntil(timeoutMillis = timeoutMillis, condition = condition)
         } catch (failure: ComposeTimeoutException) {
-            compose.onRoot(useUnmergedTree = true).printToLog("E8Journey")
+            runCatching {
+                val roots = compose.onAllNodes(isRoot())
+                repeat(roots.fetchSemanticsNodes().size) { index -> roots[index].printToLog("E8Journey") }
+            }
             throw failure
         }
     }
