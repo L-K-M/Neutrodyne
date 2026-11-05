@@ -65,6 +65,9 @@ class YtxService : Service() {
                     running.incrementAndGet()
                     try {
                         if (deadlineAtMs > 0 && SystemClock.elapsedRealtime() >= deadlineAtMs) {
+                            // The ID is freed before every terminal answer: a woken caller
+                            // may legitimately reuse it while delivery is still in flight.
+                            calls.remove(id, engineId)
                             callback.onError(id, "TIMEOUT", null)
                             return@execute
                         }
@@ -101,12 +104,14 @@ class YtxService : Service() {
                                     engineId,
                                 )
                             }
+                        calls.remove(id, engineId)
                         if (!BinderPayloads.fits(result, YtxLimits.RESULT_BYTES)) {
                             callback.onError(id, "EXTRACTION", null)
                         } else {
                             callback.onResult(id, result)
                         }
                     } catch (failure: Exception) {
+                        calls.remove(id, engineId)
                         val code =
                             (failure as? YtxCallException)?.code
                                 ?: if (ready) "EXTRACTION" else "ENGINE_UNAVAILABLE"
