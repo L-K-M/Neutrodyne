@@ -17,6 +17,7 @@ kotlin {
             implementation(project(":download:api"))
             implementation(project(":youtube:api"))
         }
+        commonTest.dependencies { implementation(libs.materialColorUtilities) }
         desktopTest.dependencies {
             implementation(libs.cmp.ui.test)
             implementation(libs.kotlinx.coroutines.swing)

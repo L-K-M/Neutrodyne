@@ -100,6 +100,14 @@ class PlayerSheetTest {
         Locale.setDefault(previousLocale)
     }
 
+    @Test fun fullPlayerExposesTheCollapseGestureAsAnAction() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            setContent { fixture.Content() }
+            onNodeWithTag("full_player").performCustomAccessibilityActionWithLabel("Collapse player")
+            runOnIdle { assertFalse(fixture.state.settledExpanded) }
+        }
+
     @Test fun fullPlayerQueueSlotShowsAndEditsTheSharedList() =
         runComposeUiTest {
             val fixture = SheetFixture(PlayerSheetValue.Expanded)
