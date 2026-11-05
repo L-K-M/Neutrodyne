@@ -41,7 +41,10 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedMetadataReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealthState
 import ch.lkmc.neutrodyne.youtube.api.YtRef
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 /** Scriptable main-safe fakes. Suspending handlers allow failure, cancellation and coalescing tests. */
 class FakeYouTubeChannelResolver : YouTubeChannelResolver {
@@ -133,6 +136,8 @@ class FakeYouTubeHealth : YouTubeExtractionHealth {
     val reservations = mutableListOf<Long>()
     val completions = mutableListOf<Pair<ExtractionReservation, ExtractionOutcome>>()
     var reserve: (Long) -> ExtractionAdmission = { ExtractionAdmission.Admitted(ExtractionReservation(++nextId)) }
+    private val mutableOutcomes = MutableSharedFlow<ExtractionOutcome>(extraBufferCapacity = 16)
+    override val outcomes: SharedFlow<ExtractionOutcome> = mutableOutcomes.asSharedFlow()
 
     override fun reserveExtraction(nowMs: Long): ExtractionAdmission {
         reservations += nowMs
@@ -145,6 +150,7 @@ class FakeYouTubeHealth : YouTubeExtractionHealth {
     ) {
         check(admitted.remove(reservation)) { "Unknown or already completed extraction" }
         completions += reservation to outcome
+        mutableOutcomes.tryEmit(outcome)
     }
 
     override val state = MutableStateFlow(YouTubeHealthState())
@@ -161,6 +167,7 @@ class FakeYouTubeHealth : YouTubeExtractionHealth {
 
     override fun reportExtraction(outcome: ExtractionOutcome) {
         reports += outcome
+        mutableOutcomes.tryEmit(outcome)
     }
 
     override fun reportRateLimited(nowMs: Long) {
