@@ -32,11 +32,10 @@ object AndroidSyncBindings {
 }
 
 /**
- * The sync-scheduling start-up initializer (01 Application start-up, band 240 — after the
- * database open at 100 and the refresh schedulers at 200–220): reconciles `sync-periodic` with
- * the link state, starts `SyncScheduler`'s collectors, then registers the lifecycle observer.
- * The observer goes last so `ProcessLifecycleOwner`'s replayed `ON_START` sees an armed
- * scheduler; a late registration still replays the current state.
+ * The sync-scheduling start-up initializer (01 Application start-up, band 200 — with the other
+ * periodic-work arms): reconciles `sync-periodic` with the link state and starts
+ * `SyncScheduler`'s collectors. The lifecycle observer registers separately at 220 so
+ * `ProcessLifecycleOwner`'s replayed `ON_START` sees an armed scheduler.
  */
 @ContributesIntoSet(AppScope::class)
 class SyncSchedulingInitializer
@@ -45,13 +44,28 @@ class SyncSchedulingInitializer
         // Lazy (01 DI rule 7): every dependency reaches the database, which band 100 opens first.
         private val workScheduler: Provider<WorkManagerSyncScheduler>,
         private val scheduler: Provider<SyncScheduler>,
-        private val observer: Provider<SyncForegroundObserver>,
     ) : AppInitializer {
-        override val order: Int = 240
+        override val order: Int = 200
 
         override suspend fun run() {
             workScheduler().reschedulePeriodic()
             scheduler().start()
+        }
+    }
+
+/**
+ * Band 220 with `RefreshForegroundObserverInitializer`: adds the sync foreground observer on the
+ * main thread once the scheduler collectors exist.
+ */
+@ContributesIntoSet(AppScope::class)
+class SyncForegroundObserverInitializer
+    @Inject
+    constructor(
+        private val observer: Provider<SyncForegroundObserver>,
+    ) : AppInitializer {
+        override val order: Int = 220
+
+        override suspend fun run() {
             withContext(Dispatchers.Main) {
                 ProcessLifecycleOwner.get().lifecycle.addObserver(observer())
             }
