@@ -124,7 +124,11 @@ class ExternalYouTubeModeTest {
         compose.runOnUiThread { compose.activity.setContent(content = content) }
     }
 
-    @Test fun recordedSharedHandleAndImportedChannelsStayExternal() =
+    // JUnit4 invalidates the whole class when any test method is not void; the device runner
+    // then reports only an initializationError that the result XML drops (2026-11-04). The
+    // explicit Unit keeps that a compile-time property: `with` would otherwise infer the last
+    // expression's type, and assertExists() returns SemanticsNodeInteraction.
+    @Test fun recordedSharedHandleAndImportedChannelsStayExternal(): Unit =
         with(compose) {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
@@ -288,7 +292,7 @@ class ExternalYouTubeModeTest {
             }
         }
 
-    @Test fun browserFailureSuccessfulOpenUndoAndSettings() =
+    @Test fun browserFailureSuccessfulOpenUndoAndSettings(): Unit =
         with(compose) {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
