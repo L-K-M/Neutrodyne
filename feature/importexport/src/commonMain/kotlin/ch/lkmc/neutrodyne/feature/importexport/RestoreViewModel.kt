@@ -11,12 +11,15 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
+import ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
+import ch.lkmc.neutrodyne.download.api.RequestResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
@@ -45,6 +48,9 @@ internal data class RestoreUiState(
     val confirmingReplace: Boolean = false,
     val requested: Boolean = false,
     val progress: RestoreProgress? = null,
+    val redownloadIds: List<Long> = emptyList(),
+    val meteredDownload: Boolean = false,
+    val downloadFailed: Boolean = false,
 )
 
 /** Backup-only controller; normal import confirmation is never part of this path. */
@@ -56,6 +62,7 @@ internal class RestoreViewModel
         private val imports: ImportRepository,
         private val playback: PlaybackController,
         @ApplicationScope private val appScope: CoroutineScope,
+        private val downloads: RestoreDownloadRequests,
     ) : ViewModel() {
         private val state = MutableStateFlow(RestoreUiState())
         val uiState = state.asStateFlow()
@@ -78,6 +85,10 @@ internal class RestoreViewModel
                 }
             viewModelScope.launch {
                 imports.observeSession(sessionId).collect { session ->
+                    if (session?.state != ch.lkmc.neutrodyne.core.model.ImportState.PREVIEW) {
+                        val ids = downloads.eligible(session?.options?.redownloadIds.orEmpty())
+                        state.update { it.copy(redownloadIds = ids) }
+                    }
                     if (session?.options?.restoreRequestedAt == null) return@collect
                     state.update {
                         it.copy(
@@ -213,6 +224,41 @@ internal class RestoreViewModel
                     // Runs even if cancellation prevents dispatching the body (D1).
                     job.invokeOnCompletion { state.update { it.copy(busy = false) } }
                 }.await()
+        }
+
+        fun dismissMeteredDownload() {
+            state.update { it.copy(meteredDownload = false) }
+        }
+
+        suspend fun redownload(
+            allowMetered: Boolean? = null,
+            requester: NotificationPermissionRequester? = null,
+        ) {
+            if (state.value.busy || state.value.redownloadIds.isEmpty()) return
+            state.update { it.copy(busy = true, meteredDownload = false, downloadFailed = false) }
+            try {
+                when (val result = downloads.request(state.value.redownloadIds, allowMetered)) {
+                    is RequestResult.NeedsMeteredDecision -> {
+                        state.update { it.copy(meteredDownload = true) }
+                    }
+
+                    is RequestResult.Queued -> {
+                        state.update {
+                            it.copy(
+                                redownloadIds = it.redownloadIds.filter { id -> id in result.rejected },
+                                downloadFailed = result.rejected.isNotEmpty(),
+                            )
+                        }
+                        if (result.askNotificationPermission && requester?.granted == false) requester.request {}
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                state.update { it.copy(downloadFailed = true) }
+            } finally {
+                state.update { it.copy(busy = false) }
+            }
         }
 
         @AssistedFactory

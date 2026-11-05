@@ -2,11 +2,11 @@
 #
 # nightly.yml — 09's overnight jobs. M0a carries `instrumented-full` (debug
 # leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; M1a
-# adds `mutation-full`. The other jobs land with their milestones
-# (`system-tests` M6b, `no-engine-build` M9a, `desktop-matrix` M0b,
-# `sync-convergence` MS0, `server-image-smoke` MS1, `benchmark-dryrun` M10,
-# `screenshots-full` M10, `live-canary`, `youtube-canary` and
-# `engine-nightly-canary` M9a).
+# adds `mutation-full`; MD0 adds `desktop-matrix` (the four desktop targets'
+# unit tests, FFmpeg builds and licence checks). The other jobs land with their
+# milestones (`system-tests` M6b, `no-engine-build` M9a, `sync-convergence` MS0,
+# `server-image-smoke` MS1, `benchmark-dryrun` M10, `screenshots-full` M10,
+# `live-canary`, `youtube-canary` and `engine-nightly-canary` M9a).
 #
 # A failing job runs scripts/ci/report-nightly.sh, which opens or updates one
 # issue per job (label `nightly-failure`) and closes it after the next green
@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
+        description: "full | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
         default: full
 
 permissions:
@@ -49,7 +49,7 @@ jobs:
     permissions:
       contents: read
       issues: write # report-nightly.sh
-    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke' || inputs.scope == 'downloads'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -67,7 +67,7 @@ jobs:
         run: |
           # Apply access to the existing node; udev alone left it inaccessible.
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -93,6 +93,11 @@ jobs:
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
+          elif [ "${{ inputs.scope }}" = "downloads" ]; then
+            ./gradlew --info "${GMD_LIMITS[@]}" nightlyGroupDebugAndroidTest \
+              -Pneutrodyne.testScope=nightly \
+              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.DownloadJourneyTest \
+              -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
           else
             # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
             ./gradlew --info "${GMD_LIMITS[@]}" nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
@@ -100,14 +105,17 @@ jobs:
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe
           fi
-      - name: Require short playback and the API 34 screen-off case
-        if: inputs.scope != 'youtube-smoke'
+      - name: Require M5 playback and M6a download evidence
+        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads'
         run: python3 scripts/ci/assert-playback-tests.py nightly app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       # M7 evidence gate: the share/deep-link journeys and the shared replay cases
       # run on every nightly GMD (PLAN M7 AC4, AC7, AC8, AC10).
       - name: Require discovery cases on the nightly devices
-        if: inputs.scope != 'youtube-smoke'
+        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads'
         run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
+      - name: Require explicitly selected M6a journeys
+        if: inputs.scope == 'downloads'
+        run: python3 scripts/ci/assert-playback-tests.py downloads app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       # TODO (M6b): release leg — :benchmark's out-of-process release smoke
       # journeys and E10's companions against :app release on api36 (09).
       - name: Report failure
@@ -151,7 +159,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -341,7 +349,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -422,7 +430,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -500,7 +508,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -630,7 +638,7 @@ jobs:
       - name: Enable KVM
         run: |
           sudo chmod a+rw /dev/kvm
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -718,6 +726,168 @@ jobs:
           path: ${{ runner.temp }}/bgstart
           if-no-files-found: error
 
+  # MD0's four-target desktop matrix (11 Platform matrix, D88): the same legs as
+  # ci.yml's dispatch-only `desktop-matrix`, on the overnight schedule. Each
+  # target's unit tests, its own FFmpeg build and its own licence check run on
+  # the host that serves it, because a shared library cannot be cross-built and
+  # jpackage cannot cross-package. The measured licence evidence is uploaded per
+  # target and feeds MD0 AC2's ledger in 11.
+  desktop-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runs-on: windows-2025
+            # The MSVC FFmpeg compile is the slowest leg; the shared 90-minute
+            # ceiling once cut it off mid-build, so the leg gets its own.
+            timeout-minutes: 150
+          - target: macos-arm64
+            runs-on: macos-15
+          - target: linux-x64
+            runs-on: ubuntu-24.04
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: ${{ matrix.timeout-minutes || 90 }}
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'desktop'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Android SDK (the KMP android targets configure AGP in every module)
+        shell: bash
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          # One SDK location for AGP: the runner image's inherited
+          # ANDROID_SDK_ROOT must not disagree with ANDROID_HOME, and on Windows
+          # Gradle needs the C:\ form, not the MSYS one.
+          sdk_dir="$HOME/android-sdk"
+          command -v cygpath >/dev/null 2>&1 && sdk_dir="$(cygpath -w "$sdk_dir")"
+          echo "ANDROID_HOME=$sdk_dir" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_dir" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # binutils serves jlink's strip-debug; xvfb and dbus-x11 wrap the desktop
+      # UI tests; libegl1 is skiko-linux-arm64's only unresolvable NEEDED entry.
+      - name: Host tools (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          pkgs="binutils xvfb dbus-x11 dbus-daemon"
+          [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          sudo apt-get install -y -qq $pkgs
+      # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell
+      # with GNU make, NASM and gpg. `buildFfmpeg` names MSYS2's bash explicitly
+      # (Git Bash ships none of the three), and coreutils provides the `timeout`
+      # that bounds every download and gpg call inside build.sh.
+      - name: MSYS2 tools for the Windows FFmpeg build
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz coreutils"
+      # The modules MD0 builds on this target. The repository-wide suite stays on
+      # linux-x64 in ci.yml's `unit` job, which is where its reference platform
+      # is: the committed Roborazzi goldens live in screenshots/{android,desktop}
+      # with no per-OS split, so a second desktop OS compares against another
+      # font stack, and the file-permission suites of M3/M5 assert POSIX
+      # semantics. Neither is evidence about the desktop engine, so neither is a
+      # desktop-matrix gate.
+      - name: Build the target's FFmpeg and check its licences
+        shell: bash
+        run: |
+          ./gradlew :playback:native:buildFfmpeg :playback:native:buildNdmedia \
+            :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+      # On Linux the MPRIS test connects to the private session bus
+      # dbus-run-session provides; the runner owns the daemon because test
+      # code may not spawn processes (01 banned-API rule 17).
+      - name: Sanitize the native null-device boundary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: scripts/ci/check-ndmedia-sanitizers.sh
+      - name: Desktop engine tests on this host
+        shell: bash
+        run: |
+          tests="./gradlew :playback:engine:test :playback:engine:ffmpegTest \
+            :playback:native:test :desktop:system:test :desktop:system:systemSessionTest --continue"
+          [ "${{ runner.os }}" = Linux ] && tests="dbus-run-session -- $tests"
+          $tests
+      - name: Inspect native binary boundaries
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = Windows ]; then
+            vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+            [ -x "$vswhere" ] || vswhere="/c/Program Files/Microsoft Visual Studio/Installer/vswhere.exe"
+            vcroot="$("$vswhere" -latest -products '*' -property installationPath | tr -d '\r')"
+            vcroot="$(cygpath -u "$vcroot")"
+            version="$(cat "$vcroot/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt" | tr -d '\r\n')"
+            export PATH="$vcroot/VC/Tools/MSVC/$version/bin/Hostx64/x64:$PATH"
+          fi
+          python scripts/ci/check-native-binary.py --target "${{ matrix.target }}"
+      - name: Collect the licence evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p native-evidence
+          for f in ffmpeg-build.txt ffmpeg-sizes.txt ffmpeg-license.txt \
+                   ffmpeg-protocols.txt ffmpeg-components.txt ffmpeg-config.h; do
+            source="playback/native/build/ffmpeg/${{ matrix.target }}/$f"
+            [ ! -f "$source" ] || cp "$source" native-evidence/
+          done
+          cp playback/native/build/ffmpeg-source/*.tar.xz native-evidence/ 2>/dev/null || true
+          # A native crash writes its report into the engine module's directory;
+          # it is the only stack a segfault leaves, so it rides along too.
+          cp playback/engine/hs_err_pid*.log native-evidence/ 2>/dev/null || true
+          printf '%s\n' "${{ github.sha }}" > native-evidence/commit.txt
+          ls -l native-evidence
+      - name: Report failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh desktop-matrix-${{ matrix.target }}
+      - name: Report recovery
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh desktop-matrix-${{ matrix.target }} --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: desktop-native-${{ matrix.target }}
+          path: |
+            native-evidence/
+            playback/native/build/ffmpeg/${{ matrix.target }}/lib/
+            playback/native/build/ffmpeg/${{ matrix.target }}/bin/
+            playback/native/build/ndmedia/${{ matrix.target }}/*ndmedia*
+            desktopApp/config/licenses/MIT-0-miniaudio.json
+            desktopApp/config/licenses/LGPL-2.1-or-later.json
+            playback/native/build/ffmpeg/${{ matrix.target }}/ffmpeg-layout.json
+            playback/native/build/ffmpeg-cache/build-${{ matrix.target }}/*.log
+            playback/native/build/ndmedia/${{ matrix.target }}/ndmedia-build.txt
+            playback/engine/build/test-results/
+            playback/engine/build/reports/tests/
+            playback/native/build/test-results/
+            desktop/system/build/test-results/
+          retention-days: 14
+
   repro:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -795,7 +965,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-provider: basic
           cache-read-only: true
@@ -930,6 +1100,65 @@ jobs:
             **/build/reports/tests/
             **/build/test-results/
           if-no-files-found: error
+
+  bmgr-download-exclusion:
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'downloads'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 36]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Enable KVM
+        run: |
+          # Apply access to the existing node; udev alone left it inaccessible.
+          sudo chmod a+rw /dev/kvm
+      - name: Build release and seed APKs before boot
+        run: ./gradlew --max-workers=2 -PtestBuildType=release :app:assembleRelease :app:assembleReleaseAndroidTest
+      - name: Inspect backup transport with completed internal and external media
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install $(find app/build/outputs/apk/release -name '*x86_64*release.apk' -print -quit)
+            adb install -t app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+            scripts/ci/bmgr-download-exclusion.sh ch.lkmc.neutrodyne
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh bmgr-download-exclusion-api${{ matrix.api }}
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh bmgr-download-exclusion-api${{ matrix.api }} --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bmgr-download-exclusion-api${{ matrix.api }}
+          path: build/bmgr-evidence/
 
   server-convergence:
     runs-on: ubuntu-24.04

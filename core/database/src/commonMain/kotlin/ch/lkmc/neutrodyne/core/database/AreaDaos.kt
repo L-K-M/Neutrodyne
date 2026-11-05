@@ -58,19 +58,12 @@ abstract class GroupDao {
      * monogram fallback (implementation note 2026-10-16, M2: not in 02's reference SQL; the same
      * `COALESCE(customTitle, title)` as `observeLibraryTiles`).
      */
-    @Query(
-        "SELECT m.groupId, p.id AS podcastId, COALESCE(p.customTitle, p.title) AS title," +
-            " p.artworkKey, p.artworkUrl, COALESCE(a.version, 0) AS artworkVersion," +
-            " a.avgArgb AS artworkAvgArgb" +
-            " FROM podcast_group_member m JOIN podcast p ON p.id = m.podcastId" +
-            " LEFT JOIN artwork a ON a.key = p.artworkKey" +
-            " WHERE p.id IN (SELECT m2.podcastId FROM podcast_group_member m2" +
-            "  JOIN podcast p2 ON p2.id = m2.podcastId" +
-            "  WHERE m2.groupId = m.groupId" +
-            "  ORDER BY p2.latestEpisodeAt DESC, p2.id DESC LIMIT 4)" +
-            " ORDER BY m.groupId, p.latestEpisodeAt DESC, p.id DESC",
-    )
+    @Query(MOSAIC_MEMBERS_SQL)
     abstract fun observeMosaics(): Flow<List<GroupMosaicRow>>
+
+    /** Same projection/order, read inside the raster snapshot's transaction. */
+    @Query(MOSAIC_MEMBERS_SQL)
+    abstract suspend fun mosaicMembers(): List<GroupMosaicRow>
 
     @Query("SELECT * FROM podcast_group WHERE nameKey = :nameKey")
     abstract suspend fun groupByNameKey(nameKey: String): PodcastGroupEntity?
@@ -674,3 +667,15 @@ data class ArtworkSyncResult(
     val fetchedAt: Long?,
     val lastError: String?,
 )
+
+private const val MOSAIC_MEMBERS_SQL =
+    "SELECT m.groupId, p.id AS podcastId, COALESCE(p.customTitle, p.title) AS title," +
+        " p.artworkKey, p.artworkUrl, COALESCE(a.version, 0) AS artworkVersion," +
+        " a.avgArgb AS artworkAvgArgb" +
+        " FROM podcast_group_member m JOIN podcast p ON p.id = m.podcastId" +
+        " LEFT JOIN artwork a ON a.key = p.artworkKey" +
+        " WHERE p.id IN (SELECT m2.podcastId FROM podcast_group_member m2" +
+        "  JOIN podcast p2 ON p2.id = m2.podcastId" +
+        "  WHERE m2.groupId = m.groupId" +
+        "  ORDER BY p2.latestEpisodeAt DESC, p2.id DESC LIMIT 4)" +
+        " ORDER BY m.groupId, p.latestEpisodeAt DESC, p.id DESC"

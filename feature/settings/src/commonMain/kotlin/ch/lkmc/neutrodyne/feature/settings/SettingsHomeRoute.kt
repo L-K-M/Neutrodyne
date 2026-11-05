@@ -11,10 +11,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
+import ch.lkmc.neutrodyne.core.model.DesktopOs
+import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
+import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
@@ -26,8 +30,12 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_keep
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_keep_mac
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_quit
 import ch.lkmc.neutrodyne.feature.settings.resources.discover_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.discover_title
 import ch.lkmc.neutrodyne.feature.settings.resources.privacy_summary
@@ -38,6 +46,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_desktop
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback
@@ -51,12 +60,15 @@ import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 /**
  * The Settings home list (08 Settings screens; M0a shows Appearance and About, M1a adds Feeds).
  * It is the gear's target, pushed on the selected tab's stack, so it keeps a back arrow. The Feeds
- * row's summary is the live refresh interval ("Every 4 hours" in 08's wireframe).
+ * row's summary is the live refresh interval ("Every 4 hours" in 08's wireframe); the Desktop row
+ * — desktop only — summarizes the "When the window is closed" choice.
  */
 @Composable
 internal fun SettingsHomeRoute(
     settings: SettingsRepository,
     checker: AppUpdateChecker? = null,
+    platform: PlatformKind = PlatformKind.ANDROID,
+    desktopOs: DesktopOs? = null,
 ) {
     val navigator = LocalAppNavigator.current
     val updateState = checker?.state?.collectAsStateWithLifecycle()?.value
@@ -72,6 +84,9 @@ internal fun SettingsHomeRoute(
     val silenceFlow = remember(settings) { settings.observe(PlaybackSettingKeys.SKIP_SILENCE) }
     val speed by speedFlow.collectAsStateWithLifecycle(initialValue = PlaybackSettingKeys.SPEED.default)
     val silence by silenceFlow.collectAsStateWithLifecycle(initialValue = PlaybackSettingKeys.SKIP_SILENCE.default)
+    val closeBehaviourFlow = remember(settings) { settings.observe(DesktopSettingKeys.CLOSE_BEHAVIOUR) }
+    val closeBehaviour by
+        closeBehaviourFlow.collectAsStateWithLifecycle(initialValue = DesktopSettingKeys.CLOSE_BEHAVIOUR.default)
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
             title = stringResource(Res.string.settings),
@@ -104,6 +119,9 @@ internal fun SettingsHomeRoute(
                     ),
                 onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
             )
+            SettingsRow(NdIcons.Download, stringResource(Res.string.downloads_settings), null, {
+                navigator.push(SettingsKey(SettingsPage.DOWNLOADS))
+            })
             SettingsRow(
                 icon = NdIcons.History,
                 title = stringResource(SettingsRes.string.settings_backup),
@@ -118,6 +136,31 @@ internal fun SettingsHomeRoute(
                 onClick = { navigator.push(SettingsKey(SettingsPage.UPDATES)) },
                 badge = available != null,
             )
+            // 08's home wireframe places the Desktop row between Updates and Privacy, desktop only.
+            if (platform == PlatformKind.DESKTOP) {
+                SettingsRow(
+                    icon = NdIcons.Computer,
+                    title = stringResource(SettingsRes.string.settings_desktop),
+                    summary =
+                        stringResource(
+                            when {
+                                closeBehaviour == CloseBehaviour.KEEP_RUNNING &&
+                                    desktopOs == DesktopOs.MACOS -> {
+                                    SettingsRes.string.desktop_close_keep_mac
+                                }
+
+                                closeBehaviour == CloseBehaviour.KEEP_RUNNING -> {
+                                    SettingsRes.string.desktop_close_keep
+                                }
+
+                                else -> {
+                                    SettingsRes.string.desktop_close_quit
+                                }
+                            },
+                        ),
+                    onClick = { navigator.push(SettingsKey(SettingsPage.DESKTOP)) },
+                )
+            }
             SettingsRow(
                 NdIcons.Explore,
                 stringResource(SettingsRes.string.discover_title),

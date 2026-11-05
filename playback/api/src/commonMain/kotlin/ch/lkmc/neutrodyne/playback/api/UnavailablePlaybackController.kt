@@ -39,6 +39,8 @@ open class UnavailablePlaybackController :
         positionMs: Long,
     ): PlayResult = PlayResult.ServiceUnavailable
 
+    override suspend fun playDownloads(startEpisodeId: Long?): PlayResult = PlayResult.ServiceUnavailable
+
     override suspend fun playFeed(
         source: FeedSource,
         filters: FeedFilters,

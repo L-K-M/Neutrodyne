@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
+import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
 import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -134,6 +135,52 @@ class PlayStarterTest {
         contexts.specResult = contexts.specResult.copy(type = ContextType.GROUP, contextId = 7)
         contexts.startResult = 4
     }
+
+    @Test fun downloadsStartUsesContextAndLocalFilesOffline() =
+        runTest {
+            network.setStatus(FakeNetworkMonitor.OFFLINE)
+            sessions.queue = sessions.queue.copy(upNext = emptyList())
+            local.files[4L] = "file:///episode.mp3"
+            val result = committed(StartRequest.Downloads())
+            assertEquals(4L, result.queue.current?.episodeId)
+            assertEquals(
+                ContextType.DOWNLOADS,
+                sessions.calls
+                    .single()
+                    .start
+                    ?.context
+                    ?.type,
+            )
+        }
+
+    @Test fun downloadsStartOfPlayedEpisodeCommitsAtZero() =
+        runTest {
+            lookup.items.value += 9L to media(9).copy(playedAt = 100)
+            val result = committed(StartRequest.Downloads(9))
+            assertEquals(0L, result.startPositionMs)
+            val start = sessions.calls.single().start!!
+            assertEquals(ContextType.DOWNLOADS, start.context?.type)
+            assertEquals(StartMembership.CONTEXT, start.membership)
+        }
+
+    @Test fun videoWithSelectedAudioCanStartWithoutOriginalEnclosure() =
+        runTest {
+            lookup.items.value +=
+                2L to
+                media(
+                    2,
+                ).copy(
+                    isVideo = true,
+                    enclosureUrl = null,
+                    audioAlternate =
+                        AudioAlternate(
+                            "https://cdn.example/audio",
+                            "audio/mpeg",
+                            null,
+                        ),
+                )
+            assertIs<StartOutcome.Committed>(starter().start(StartRequest.Episode(2)))
+        }
 
     @Test fun externalListCarriesAtomicQueueHeadAndReplacesQueuedContextAfterGates() =
         runTest {

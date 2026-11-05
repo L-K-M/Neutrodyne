@@ -33,7 +33,7 @@
     <string name="player_not_now">Not now</string>
     <string name="player_settings">Playback settings</string>
     <string name="player_network_lost">Connection lost. Playback resumes when you are back online.</string>
-    <string name="player_file_missing">The downloaded file is missing. Streaming instead.</string>
+    <string name="player_file_missing">The downloaded file is missing. Connect to the internet to stream.</string>
     <string name="player_error">Playback failed. Try playing again.</string>
     <string name="player_rate_limited">YouTube is rate limited. Try again later.</string>
     <string name="player_youtube_unavailable">YouTube playback is temporarily unavailable.</string>
@@ -60,4 +60,5 @@
         <item quantity="one">%1$d second</item>
         <item quantity="other">%1$d seconds</item>
     </plurals>
+    <string name="player_hide_panel">Hide player panel</string>
 </resources>

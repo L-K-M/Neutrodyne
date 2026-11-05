@@ -14,8 +14,10 @@ kotlin {
             implementation(libs.cmp.material3.navigationSuite)
             implementation(libs.cmp.material3.adaptive)
             implementation(libs.graphics.shapes)
+            implementation(libs.materialColorUtilities)
             implementation(project.dependencies.platform(libs.coil.bom))
             implementation(libs.coil.compose)
+            implementation(libs.coil.network.core)
             implementation(libs.kotlinx.collections.immutable)
         }
         androidMain.dependencies {

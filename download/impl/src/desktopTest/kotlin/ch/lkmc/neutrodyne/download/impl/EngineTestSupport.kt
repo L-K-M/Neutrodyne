@@ -8,6 +8,7 @@ import androidx.sqlite.SQLiteStatement
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.model.SourceKind
+import ch.lkmc.neutrodyne.core.testing.FakeCleanupPlanner
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -44,6 +45,7 @@ internal class EngineRig(
     private val scope: TestScope,
     credentials: CredentialLookup = CredentialLookup.None,
     driver: SQLiteDriver = TestDb.bundledDriver(),
+    val faults: FaultFiles = FaultFiles(),
     sourceFactory: ((EngineRig) -> TransferSource)? = null,
 ) : AutoCloseable,
     CoroutineScope by scope {
@@ -55,7 +57,6 @@ internal class EngineRig(
     val dao = db.downloadDao()
     val conditions = MutableStateFlow(Conditions(true, true, true, true, true))
     val roots = TestRoots()
-    val faults = FaultFiles()
     val files = OkioDownloadFileSystem(roots, faults, dispatcher)
     val deletes = DeferredDeletes(JournalTestStore(), files, roots, dao::allRows)
     val verification = DownloadFiles(files, roots, PlatformSriHasher(roots, faults), PlatformLocalUris(), deletes)
@@ -69,6 +70,7 @@ internal class EngineRig(
     var onSchedule: suspend () -> Unit = {}
     var resets = 0
     var mayClaim = true
+    val cleanup = FakeCleanupPlanner()
     val scheduler =
         object : DownloadScheduler {
             override suspend fun ensureScheduled(lane: Lane) {
@@ -110,7 +112,7 @@ internal class EngineRig(
             override suspend fun changeRoot(
                 rootId: String,
                 mode: RootChangeMode,
-            ) = RootChangeResult.Unsupported
+            ) = RootChangeResult.Unavailable
 
             override suspend fun deleteOrphanFiles() = OrphanDeleteResult.Unavailable
 
@@ -154,6 +156,7 @@ internal class EngineRig(
             Mutex(),
             { resets++ },
             { completed += it.episodeId },
+            cleanup,
             { mayClaim },
             { 1.0 },
         )

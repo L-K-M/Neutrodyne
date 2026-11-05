@@ -7,6 +7,8 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -32,6 +34,10 @@ internal object UiRestore {
     private const val WAIT_LONG = 120_000L
     private const val WAIT_SHORT = 15_000L
     private const val WAIT_CLICK = 5_000L
+    private const val WAIT_SCROLL_STEP = 1_000L
+
+    private const val SCROLL_FRACTION = 0.8f
+    private const val MAX_SCROLL_STEPS = 8
 
     private val ANR_TITLE: Pattern = Pattern.compile(".*isn't responding.*")
     private val ANR_WAIT: Pattern = Pattern.compile("^Wait\$")
@@ -124,16 +130,29 @@ internal object UiRestore {
         if (!node.isChecked) node.click()
     }
 
-    private fun checkableRow(label: String): UiObject2 =
-        device.wait(
-            Until.findObject(By.pkg(BmgrArming.TARGET_PACKAGE).checkable(true).hasChild(By.text(label))),
-            WAIT_CLICK,
-        ) ?: throw IllegalStateException("checkable row '$label' never resolved")
+    private fun checkableRow(label: String): UiObject2 {
+        val selector = By.pkg(BmgrArming.TARGET_PACKAGE).checkable(true).hasChild(By.text(label))
+        return findWithScroll(selector) ?: throw IllegalStateException("checkable row '$label' never resolved")
+    }
+
+    /** Callers visit Merge, categories and Restore in display order, including below the fold. */
+    private fun findWithScroll(selector: BySelector): UiObject2? {
+        device.wait(Until.findObject(selector), WAIT_CLICK)?.let { return it }
+        repeat(MAX_SCROLL_STEPS) {
+            val scrollable =
+                device.findObject(By.pkg(BmgrArming.TARGET_PACKAGE).scrollable(true)) ?: return null
+            val canScrollFurther = scrollable.scroll(Direction.DOWN, SCROLL_FRACTION)
+            // A final swipe can reveal the target even when it reports the end of the list.
+            device.wait(Until.findObject(selector), WAIT_SCROLL_STEP)?.let { return it }
+            if (!canScrollFurther) return null
+        }
+        return null
+    }
 
     /** Click the Restore action and wait until the request is accepted (button gone). */
     fun requestRestore() {
         val button =
-            device.wait(Until.findObject(By.text(RESTORE_EXACT)), WAIT_CLICK)
+            findWithScroll(By.pkg(BmgrArming.TARGET_PACKAGE).text(RESTORE_EXACT))
                 ?: throw IllegalStateException("restore action never resolved")
         button.click()
         check(device.wait(Until.gone(By.text(RESTORE_EXACT)), WAIT_SHORT)) {

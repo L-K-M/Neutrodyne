@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,7 +17,7 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -74,7 +75,7 @@ import kotlin.test.assertTrue
 @ReleaseSmoke
 @RunWith(AndroidJUnit4::class)
 class SubscribeJourneyTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
     fun sharedAppleLinkResolvesWithoutWritingUntilConfirmation() = journey(Entry.APPLE)
@@ -117,7 +118,8 @@ class SubscribeJourneyTest {
                 server.start()
                 val url = server.url("/feed.xml").toString()
                 // 03 note 2026-11-02: a directory-named feed URL is a discovered destination and
-                // may never be loopback — Apple's hit names a fake public host the replay answers.
+                // may never be loopback; Apple's hit names a reserved public address the replay
+                // answers without DNS or a connection, including under the DNS preflight guard.
                 val feedUrl = if (entry == Entry.APPLE) APPLE_FEED_URL else url
                 val lookup =
                     instrumentation.context.assets
@@ -197,20 +199,22 @@ class SubscribeJourneyTest {
                             ),
                         )
                     }
-                compose.setContent {
-                    if (showing) {
-                        CompositionLocalProvider(
-                            LocalMetroViewModelFactory provides graph.metroViewModelFactory,
-                            LocalUiClock provides clock,
-                            LocalPlatformActions provides rememberAndroidPlatformActions(),
-                        ) {
-                            NeutrodyneRoot(
-                                state = RootUiState.READY,
-                                actions = RootActions({}, {}, {}, {}, { false }),
-                                slots = RootSlots(player = {}, userMessages = emptyFlow()),
-                                installers = graph.entryInstallers,
-                                routes = routing.routes,
-                            )
+                compose.runOnUiThread {
+                    compose.activity.setContent(parent = null) {
+                        if (showing) {
+                            CompositionLocalProvider(
+                                LocalMetroViewModelFactory provides graph.metroViewModelFactory,
+                                LocalUiClock provides clock,
+                                LocalPlatformActions provides rememberAndroidPlatformActions(),
+                            ) {
+                                NeutrodyneRoot(
+                                    state = RootUiState.READY,
+                                    actions = RootActions({}, {}, {}, {}, { false }),
+                                    slots = RootSlots(player = {}, userMessages = emptyFlow()),
+                                    installers = graph.entryInstallers,
+                                    routes = routing.routes,
+                                )
+                            }
                         }
                     }
                 }
@@ -306,7 +310,9 @@ class SubscribeJourneyTest {
         const val PREVIEW_TIMEOUT_MS = 20_000L
         const val SUBSCRIBE_TIMEOUT_MS = 20_000L
         const val SHOWN_TEXTS = 12
-        const val APPLE_FEED_HOST = "feeds.example"
+
+        // TEST-NET-1 (RFC 5737): replayed below the preflight, never sent to a real peer.
+        const val APPLE_FEED_HOST = "192.0.2.1"
         const val APPLE_FEED_URL = "https://$APPLE_FEED_HOST/feed.xml"
     }
 }

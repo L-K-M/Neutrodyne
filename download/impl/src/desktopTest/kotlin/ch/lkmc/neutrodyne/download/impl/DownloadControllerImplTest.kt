@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.download.impl
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.DownloadRootRegistration
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadRootRegistration
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -52,6 +54,35 @@ import ch.lkmc.neutrodyne.core.model.DownloadState as State
 import ch.lkmc.neutrodyne.core.model.WaitReason as Wait
 
 class DownloadControllerImplTest {
+    @Test fun overviewCarriesEpisodeAverageAndKeepsLaneOrdering() =
+        runTest {
+            fixture { f ->
+                val older = f.episode { copy(sortDate = 10, artworkKey = "u-older") }
+                val newer = f.episode { copy(sortDate = 20, artworkKey = "u-newer") }
+                f.insert(older, State.COMPLETED)
+                f.insert(newer, State.COMPLETED)
+                f.db.artworkDao().upsert(
+                    ch.lkmc.neutrodyne.core.database.ArtworkEntity(
+                        key = "u-newer",
+                        version = 8,
+                        avgArgb = 0xff345678.toInt(),
+                    ),
+                )
+                val result = f.controller.observeAll().first()
+                assertEquals(listOf(newer, older), result.completed.map { it.status.episodeId })
+                assertEquals(0xff345678.toInt(), result.completed.first().artworkAvgArgb)
+                assertEquals(
+                    8,
+                    result.completed
+                        .first()
+                        .artwork.version,
+                )
+                assertNull(result.completed.last().artworkAvgArgb)
+                assertTrue(result.inProgress.isEmpty())
+                assertTrue(result.failed.isEmpty())
+            }
+        }
+
     @Test fun requestStatesAndTombstones() =
         runTest {
             fixture { f ->
@@ -482,10 +513,37 @@ class DownloadControllerImplTest {
             .first()
             .notices
 
-    private suspend fun fixture(block: suspend (Fixture) -> Unit) {
+    @Test fun rootChangesUseOwnerOrFileImplementation() =
+        runTest {
+            val owner = FakeDownloadRootRegistration()
+            owner.changeResult = RootChangeResult.Applied
+            fixture(owner) { f ->
+                assertEquals(owner.registrationResult, f.controller.registerFolderRoot("/chosen"))
+                assertEquals(
+                    owner.changeResult,
+                    f.controller.changeRoot(
+                        "chosen",
+                        RootChangeMode.MOVE_EXISTING,
+                    ),
+                )
+            }
+            assertEquals(listOf("/chosen"), owner.registrations)
+            assertEquals(listOf("chosen" to RootChangeMode.MOVE_EXISTING), owner.changes)
+            fixture { f ->
+                assertEquals(
+                    RootChangeResult.Applied,
+                    f.controller.changeRoot("chosen", RootChangeMode.MOVE_EXISTING),
+                )
+            }
+        }
+
+    private suspend fun fixture(
+        registration: DownloadRootRegistration? = null,
+        block: suspend (Fixture) -> Unit,
+    ) {
         val db = TestDb.inMemory()
         try {
-            block(Fixture(db, db.podcastDao().insertPodcast(podcastEntity())))
+            block(Fixture(db, db.podcastDao().insertPodcast(podcastEntity()), registration))
         } finally {
             db.close()
         }
@@ -494,6 +552,7 @@ class DownloadControllerImplTest {
     private class Fixture(
         val db: NeutrodyneDatabase,
         val podcast: Long,
+        registration: DownloadRootRegistration? = null,
     ) {
         val dao = db.downloadDao()
         val clock = TestClock()
@@ -601,6 +660,7 @@ class DownloadControllerImplTest {
                 media,
                 { false },
                 noticeSources = { noticeSources },
+                rootRegistration = registration,
             )
 
         suspend fun episode(block: EpisodeEntity.() -> EpisodeEntity = { this }): Long =

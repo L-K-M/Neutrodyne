@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.PRE_CONFIRMATION_HEADER
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.feeds.identity.LocalDestination
@@ -63,18 +64,25 @@ internal class FeedFetcher(
                 return FetchOutcome.Network(ADD_YOUTUBE_REJECTED)
             }
             // A discovered URL must never fetch the LAN; a public add input must not redirect
-            // there either. Refresh keeps its existing behaviour. Known limit: a public
-            // hostname that resolves to a LAN address is only caught by the Android 37+
-            // LocalNetworkGuard's DNS check (03 note 2026-11-02).
+            // there either. Refresh keeps its existing behaviour. The spelling check is the
+            // fast path — the marked request below lets the transport refuse the hop when a
+            // public spelling resolves to (or redirects onto) a local peer (03 note
+            // 2026-11-02), so DNS answers are covered too.
             if (req.purpose != FeedRequestPurpose.REFRESH &&
                 LocalDestination.isLocal(url) &&
                 (req.purpose == FeedRequestPurpose.ADD_DISCOVERED || !typedLocal)
             ) {
                 return FetchOutcome.Network(ADD_LOCAL_REJECTED)
             }
+            // The pre-confirmation marker: every hop of a discovered request carries it, and
+            // every redirect hop of an add input — only the URL the user actually submitted
+            // goes unmarked, which is also the case a typed LAN feed needs.
+            val marked =
+                req.purpose != FeedRequestPurpose.REFRESH &&
+                    (req.purpose == FeedRequestPurpose.ADD_DISCOVERED || url != req.url)
             val result =
                 try {
-                    oneRequest(req, url, hops, permanentUrl)
+                    oneRequest(req, url, hops, permanentUrl, marked)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
@@ -107,6 +115,7 @@ internal class FeedFetcher(
         url: String,
         hops: List<RedirectHop>,
         permanentUrl: String?,
+        marked: Boolean,
     ): HopResult {
         var outcome: FetchOutcome = FetchOutcome.Network(NetError.Other("unassigned"))
         var location: String? = null
@@ -121,6 +130,7 @@ internal class FeedFetcher(
             client
                 .prepareGet(url) {
                     header(HttpHeaders.Accept, FEED_ACCEPT)
+                    if (marked) header(PRE_CONFIRMATION_HEADER, "1")
                     if (req.conditional) {
                         req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }
                         req.lastModified?.let { header(HttpHeaders.IfModifiedSince, it) }

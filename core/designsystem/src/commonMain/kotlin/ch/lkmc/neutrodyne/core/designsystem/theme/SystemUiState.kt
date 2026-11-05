@@ -53,3 +53,7 @@ public val LocalReducedMotion: androidx.compose.runtime.ProvidableCompositionLoc
 /** Whether artwork-derived schemes may tint the player (M10); off means the app scheme everywhere. */
 public val LocalArtworkTintEnabled: androidx.compose.runtime.ProvidableCompositionLocal<Boolean> =
     staticCompositionLocalOf { true }
+
+/** App surfaces remain available inside a nested artwork scope. */
+internal val LocalAppColorScheme = staticCompositionLocalOf<androidx.compose.material3.ColorScheme?> { null }
+internal val LocalPureBlack = staticCompositionLocalOf { false }

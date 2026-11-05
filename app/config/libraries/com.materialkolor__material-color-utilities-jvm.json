@@ -1,0 +1,8 @@
+{
+  "_comment": "MaterialKolor 5.0.1 (cc4d2cb931ba0a45995abe988717a2cea9ed478e): upstream MIT and MCU Apache-2.0 licences; no NOTICE in source tree",
+  "uniqueId": "com.materialkolor:material-color-utilities-jvm",
+  "licenses": [
+    "MIT-materialkolor",
+    "Apache-2.0-material-color-utilities"
+  ]
+}

@@ -9,10 +9,15 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
+import ch.lkmc.neutrodyne.core.designsystem.components.CoverNetworkPolicy
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ChartGenre
@@ -55,6 +60,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_technology
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_true_crime
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_genre_tv_film
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_partial
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_providers_loading
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.net_offline
@@ -74,9 +80,19 @@ internal fun AppNavigator.openHit(hit: DirectoryHit) =
  */
 @Composable
 internal fun ProviderDisclosure(
-    providers: List<ProviderInfo>,
+    providers: List<ProviderInfo>?,
     modifier: Modifier = Modifier,
+    onVisible: (List<ProviderInfo>) -> Unit = {},
 ) {
+    if (providers == null) {
+        Text(stringResource(Res.string.discovery_providers_loading), modifier)
+        return
+    }
+    val currentOnVisible by rememberUpdatedState(onVisible)
+    LaunchedEffect(providers.configuration()) {
+        withFrameNanos { }
+        currentOnVisible(providers)
+    }
     val recipients = providers.filter { it.effective }.joinToString(", ") { it.id.displayName() }
     Text(
         if (recipients.isEmpty()) {
@@ -126,6 +142,8 @@ internal fun DirectoryCover(
         monogram = rememberMonogram(hit.title),
         title = hit.title,
         modifier = modifier,
+        // Directory art is provider-supplied, pre-confirmation (03 note 2026-11-02).
+        networkPolicy = CoverNetworkPolicy.UNCONFIRMED,
     )
 }
 

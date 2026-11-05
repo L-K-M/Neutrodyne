@@ -1,0 +1,7 @@
+{
+  "_comment": "dbus-java 5.2.2 jar; ships inside :desktop:system for MPRIS/logind/portals (11 OS integration)",
+  "uniqueId": "com.github.hypfvieh:dbus-java-core",
+  "licenses": [
+    "MIT-dbus-java"
+  ]
+}
