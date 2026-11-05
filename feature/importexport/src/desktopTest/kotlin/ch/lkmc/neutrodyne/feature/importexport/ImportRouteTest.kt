@@ -79,6 +79,7 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakeLinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
@@ -686,6 +687,7 @@ class ImportRouteTest {
                                             backups,
                                             imports,
                                             playbackController,
+                                            FakeLinkedRestoreCoordinator(),
                                             appScope,
                                             ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
                                                 ch.lkmc.neutrodyne.core.testing

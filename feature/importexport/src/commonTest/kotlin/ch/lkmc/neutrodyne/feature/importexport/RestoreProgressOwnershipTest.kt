@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.testing.FakeBackupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakeLinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -34,6 +35,7 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                     backups,
                     imports,
                     FakePlaybackController(),
+                    FakeLinkedRestoreCoordinator(),
                     backgroundScope,
                     restoreDownloads(),
                 )
@@ -87,6 +89,7 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                     backups,
                     imports,
                     FakePlaybackController(),
+                    FakeLinkedRestoreCoordinator(),
                     backgroundScope,
                     restoreDownloads(),
                 )
@@ -115,6 +118,7 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                     backups,
                     imports,
                     FakePlaybackController(),
+                    FakeLinkedRestoreCoordinator(),
                     backgroundScope,
                     restoreDownloads(),
                 )
