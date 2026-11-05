@@ -196,7 +196,7 @@ class RestoreMergerTest {
     @Test
     fun linkHistoryAdoptsMatchedIdsAndAppliesNoLibraryRecord() =
         runTest {
-            link()
+            // The local rows seed before `link()` so their inserts stay out of the outbox.
             val local =
                 db.podcastDao().insertPodcast(
                     podcastEntity(feedKey = "https://a/feed") { copy(customTitle = "Local") },
@@ -204,6 +204,7 @@ class RestoreMergerTest {
             val localUuid = Uuid.random().toString()
             val localGroup =
                 db.groupDao().insert(groupEntity(name = "News", uuid = localUuid, orderKey = "0.5"))
+            link()
             val recordSyncId = "00000000-0000-4000-8000-0000000000cc"
             val recordUuid = "00000000-0000-4000-8000-0000000000dd"
             val staged =

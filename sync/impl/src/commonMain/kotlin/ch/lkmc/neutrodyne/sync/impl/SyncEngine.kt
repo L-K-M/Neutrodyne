@@ -202,8 +202,10 @@ class SyncEngine(
      * 10 Outbox and coalescing: the acknowledgement merges the exact sent fields into
      * `sync_clock` raw state by the normal field rules, never lowering a known field clock —
      * the cursor alone must not strand the accepted values (a resync replay compares against
-     * them). A sent `auth` keeps only its protected representation: the plaintext that left
-     * this device never enters Room.
+     * them). A sent `auth` is staged in the protected store and travels onward only as its
+     * marker — the same representation the receive path stores, so an equal-clock echo of the
+     * push compares equal instead of tripping the write-identity conflict, and the plaintext
+     * that left this device never enters Room.
      */
     private suspend fun mergeAckedSnapshot(
         collWire: String,
@@ -216,31 +218,57 @@ class SyncEngine(
         for ((name, value) in change.fields) {
             val clock = value.c ?: continue
             val parsed = runCatching { Hlc.parse(clock) }.getOrNull() ?: continue
-            if (value.v != null) {
-                fields[name] = FieldState(value.v, parsed, value.reset == true)
-            } else if (!value.add.isNullOrEmpty()) {
-                growSets[name] = value.add.toSet()
+            val sent = value.v
+            val added = value.add
+            when {
+                sent != null -> fields[name] = FieldState(sent, parsed, value.reset == true)
+                !added.isNullOrEmpty() -> growSets[name] = added.toSet()
             }
         }
-        if (fields.isEmpty() && growSets.isEmpty()) return
-        val incoming = RecordState(coll, fields, growSets, change.match)
-        val stored = clockStore.get(collWire, rid)
-        val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
-        val protection = protectAuthRecord(db, rid, merged.record, merged.advanced, stored)
-        clockStore.put(
-            collWire,
-            rid,
-            RawSyncRecord(
-                state = protection.state,
-                by = stored?.by,
-                authReference = protection.authReference ?: stored?.authReference,
-                pendingAuth = protection.pendingAuth ?: stored?.pendingAuth,
-                redirect = stored?.redirect,
-                alias = stored?.alias,
-                settingHash = stored?.settingHash,
-                pendingSetting = stored?.pendingSetting,
-            ),
-        )
+        if (fields.isNotEmpty() || growSets.isNotEmpty()) {
+            if (coll == SyncCollection.PODCAST) stageAckedAuth(rid, fields)
+            val incoming = RecordState(coll, fields, growSets, change.match)
+            val stored = clockStore.get(collWire, rid)
+            val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
+            val protection = protectAuthRecord(db, rid, merged.record, merged.advanced, stored)
+            clockStore.put(
+                collWire,
+                rid,
+                RawSyncRecord(
+                    state = protection.state,
+                    by = stored?.by,
+                    authReference = protection.authReference ?: stored?.authReference,
+                    pendingAuth = protection.pendingAuth ?: stored?.pendingAuth,
+                    redirect = stored?.redirect,
+                    alias = stored?.alias,
+                    settingHash = stored?.settingHash,
+                    pendingSetting = stored?.pendingSetting,
+                ),
+            )
+        }
+    }
+
+    /**
+     * The ack's protected auth staging: a sent plaintext pair is put under its deterministic
+     * `sync:pending:` key and the field value becomes the marker, mirroring the receive path's
+     * [AuthStage] so both paths store one representation.
+     */
+    private suspend fun stageAckedAuth(
+        rid: String,
+        fields: MutableMap<String, FieldState>,
+    ) {
+        val auth = fields["auth"] ?: return
+        val clock = auth.c ?: return
+        val candidate = authCandidate(auth.v) ?: return
+        val account =
+            db
+                .syncStateDao()
+                .get()
+                ?.accountId
+                .orEmpty()
+        val key = pendingAuthOrigin(account, rid, clock.toString())
+        secrets.put(key, candidate.username, candidate.password.toCharArray())
+        fields["auth"] = FieldState(authMarker(key), clock)
     }
 
     private suspend fun raiseHlc(records: List<RecordDto>) {

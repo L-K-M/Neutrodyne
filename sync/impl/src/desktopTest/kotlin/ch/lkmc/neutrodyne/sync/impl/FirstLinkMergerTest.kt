@@ -381,8 +381,11 @@ class FirstLinkMergerTest {
                                 ) { copy(guid = "one") },
                             ),
                         ).single()
-                db.episodeStateDao()
-                    .ensure(EpisodeStateEntity(episodeId, playedAt = october + 100_000L, updatedAt = october + 100_000L))
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        EpisodeStateEntity(episodeId, playedAt = october + 100_000L, updatedAt = october + 100_000L),
+                    )
                 val client = CountingClient(listOf(podcastRecord(), episodeRecord()))
                 val merger = mergerOf(db, client, library)
 

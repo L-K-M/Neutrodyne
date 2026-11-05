@@ -314,13 +314,18 @@ internal class RestoreMerger(
 
         // Transaction A's settled staged-`uuid` → survivor map: canonical, folded and
         // absorbed staged uuids all land on their root's resolved row (Merge's fresh
-        // inserts included — the staged uuid never exists locally there).
+        // inserts included — the staged uuid never exists locally there). LINK_HISTORY
+        // applies no staged group it did not match, so its rows legitimately stay
+        // unresolved and map to nothing.
         val groupIdByUuid = LinkedHashMap<String, Long>()
         for (group in stagedGroups) {
             val survivor =
-                checkNotNull(group.root().resolvedId) {
-                    "staged group '${group.primary.uuid}' left transaction A unresolved"
-                }
+                group.root().resolvedId
+                    ?: if (policy == MergePolicy.LINK_HISTORY) {
+                        continue
+                    } else {
+                        error("staged group '${group.primary.uuid}' left transaction A unresolved")
+                    }
             groupIdByUuid[group.primary.uuid] = survivor
             for (absorbed in group.absorbed) groupIdByUuid[absorbed.uuid] = survivor
         }
