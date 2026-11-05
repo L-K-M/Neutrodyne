@@ -839,6 +839,12 @@
 -keep class ch.lkmc.neutrodyne.core.data.DataBindings$FileSystemMetroFactory {
   public static ch.lkmc.neutrodyne.core.data.DataBindings$FileSystemMetroFactory create();
 }
+-keep class ch.lkmc.neutrodyne.core.data.DataBindings$IngestionEventsMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.DataBindings$IngestionEventsMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataBindings$IngestionEventsMetroFactory {
+  ch.lkmc.neutrodyne.core.data.DataBindings$IngestionEventsMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.core.data.DataBindings$PodcastIndexClientMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.DataBindings$PodcastIndexClientMetroFactory create(dev.zacsweers.metro.Provider);
 }
@@ -1893,6 +1899,8 @@
 }
 -keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings {
 }
+-keep class ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore {
+}
 -keep class ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory$MetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -2373,14 +2381,32 @@
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ChangesMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ChangesMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$CleanupPlannerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$CleanupPlannerMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$CleanupPlannerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$CleanupPlannerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$CleanupWorkerMetroFactory$Companion {
+  public kotlin.jvm.functions.Function2 cleanupWorker(ch.lkmc.neutrodyne.download.impl.CleanupWorker$Factory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$CleanupWorkerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$CleanupWorkerMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ControllerMetroFactory$Companion {
   public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ControllerMetroFactory create(dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ControllerMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ControllerMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ExitReasonsMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ExitReasonsMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ExitReasonsMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ExitReasonsMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$HostMetroFactory$Companion Companion;
@@ -2390,6 +2416,12 @@
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$IndexMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$IndexMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$JobsMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$JobsMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$JobsMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$JobsMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$LaneWorkerMetroFactory$Companion {
   public kotlin.jvm.functions.Function2 laneWorker(ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker$Factory);
@@ -2403,17 +2435,35 @@
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$LifecycleMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$LifecycleMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MaintenanceMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MaintenanceMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MaintenanceMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MaintenanceMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MissingMetroFactory$Companion {
   public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MissingMetroFactory create(dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MissingMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MissingMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MoveWorkerMetroFactory$Companion {
+  public kotlin.jvm.functions.Function2 moveWorker(kotlin.Lazy, ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore, ch.lkmc.neutrodyne.core.common.Clock);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MoveWorkerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$MoveWorkerMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory$Companion {
   public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$NotificationsMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$PlannerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$PlannerMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$PlannerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$PlannerMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ProgressMetroFactory$Companion {
   public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ProgressMetroFactory create(dev.zacsweers.metro.Provider);
@@ -2449,13 +2499,13 @@
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RootsMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$RuntimeMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory {
   ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$SchedulerMetroFactory$Companion Companion;
@@ -2474,8 +2524,32 @@
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings {
 }
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadTriggers$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.AndroidDownloadTriggers$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadTriggers$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.AndroidDownloadTriggers$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadTriggers {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.CleanupWorker$Factory$Impl$Companion {
+  public dev.zacsweers.metro.Provider create(ch.lkmc.neutrodyne.download.impl.CleanupWorker$MetroFactory);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.CleanupWorker$Factory$Impl {
+  ch.lkmc.neutrodyne.download.impl.CleanupWorker$Factory$Impl$Companion Companion;
+}
+-keep interface ch.lkmc.neutrodyne.download.impl.CleanupWorker$Factory {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.CleanupWorker$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.CleanupWorker$MetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.CleanupWorker$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.CleanupWorker$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.CleanupWorker {
+}
 -keep class ch.lkmc.neutrodyne.download.impl.DeferredDeletesInitializerContributions$ToAppScope$ProvideIntoSetDeferredDeletesInitializerMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetDeferredDeletesInitializer(kotlin.Lazy, kotlin.Lazy, kotlinx.coroutines.CoroutineScope);
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetDeferredDeletesInitializer(kotlin.Lazy, kotlin.Lazy, ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore, kotlin.Lazy, kotlinx.coroutines.CoroutineScope);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.DeferredDeletesInitializerContributions$ToAppScope$ProvideIntoSetDeferredDeletesInitializerMetroFactory {
   ch.lkmc.neutrodyne.download.impl.DeferredDeletesInitializerContributions$ToAppScope$ProvideIntoSetDeferredDeletesInitializerMetroFactory$Companion Companion;
@@ -2514,6 +2588,24 @@
 }
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadChannelsInitializerContributions {
 }
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadChargingMonitor$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.download.impl.DownloadChargingMonitor$MetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadChargingMonitor$MetroFactory {
+  ch.lkmc.neutrodyne.download.impl.DownloadChargingMonitor$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadChargingMonitor {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadCleanupInitializerContributions$ToAppScope$ProvideIntoSetDownloadCleanupInitializerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetDownloadCleanupInitializer(kotlin.Lazy);
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadCleanupInitializerContributions$ToAppScope$ProvideIntoSetDownloadCleanupInitializerMetroFactory {
+  ch.lkmc.neutrodyne.download.impl.DownloadCleanupInitializerContributions$ToAppScope$ProvideIntoSetDownloadCleanupInitializerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadCleanupInitializerContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadCleanupInitializerContributions {
+}
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory$Companion {
   public ch.lkmc.neutrodyne.download.impl.DownloadComponents$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -2548,8 +2640,10 @@
 }
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadLaneWorker {
 }
+-keep class ch.lkmc.neutrodyne.download.impl.DownloadMoveWorker {
+}
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadObserversInitializerContributions$ToAppScope$ProvideIntoSetDownloadObserversInitializerMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetDownloadObserversInitializer(android.app.Application, ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility, kotlin.Lazy, kotlin.Lazy, ch.lkmc.neutrodyne.core.common.NetworkMonitor, ch.lkmc.neutrodyne.core.database.DatabaseOpener, kotlin.Lazy, kotlin.Lazy, kotlin.jvm.functions.Function2, kotlinx.coroutines.CoroutineScope);
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetDownloadObserversInitializer(android.app.Application, ch.lkmc.neutrodyne.download.impl.DownloadAppVisibility, ch.lkmc.neutrodyne.download.impl.DownloadChargingMonitor, kotlin.Lazy, kotlin.Lazy, ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore, kotlin.Lazy, kotlin.Lazy, ch.lkmc.neutrodyne.core.common.NetworkMonitor, ch.lkmc.neutrodyne.core.database.DatabaseOpener, kotlin.Lazy, kotlin.Lazy, kotlin.jvm.functions.Function2, kotlinx.coroutines.CoroutineScope);
 }
 -keep class ch.lkmc.neutrodyne.download.impl.DownloadObserversInitializerContributions$ToAppScope$ProvideIntoSetDownloadObserversInitializerMetroFactory {
   ch.lkmc.neutrodyne.download.impl.DownloadObserversInitializerContributions$ToAppScope$ProvideIntoSetDownloadObserversInitializerMetroFactory$Companion Companion;

@@ -786,7 +786,7 @@ sealed interface ResolvedSource {
 }
 interface ByteSource : AutoCloseable {
     val length: Long?                                        // null = unknown (no Content-Range total yet)
-    fun read(position: Long, dst: MemorySegment, maxBytes: Int): Int   // blocking, engine or prepare thread; -1 at EOF
+    fun read(position: Long, dst: MemorySegment, maxBytes: Int): Int   // blocking, engine or prepare thread; 0 at EOF, -1 when aborted
     fun abort()                                              // any thread; makes a blocked read return
 }
 fun interface DemuxerFactory { fun open(source: ByteSource, hint: SourceHint): Demuxer }
@@ -854,6 +854,36 @@ Loop of `nd-engine`, per iteration (one block ≈ 1,024 output frames):
 | Content change | A 200 answer to a ranged `If-Range` request or a changed `Content-Range` total → `ContentChangedException` → the resource is dropped and the item re-resolved once at the same position |
 | Write failure | Disk full or permission error → the resource continues uncached (reads stream from the network through an 8-MiB in-memory window), as `FLAG_IGNORE_CACHE_ON_ERROR` does on Android |
 | Maintenance | `PlaybackMaintenance.streamingCacheBytes()` and `clearStreamingCache()` (all keys except the current pins) back Settings › Playback › Storage on the desktop |
+
+**MD1a.1 implementation note (2026-11-04).** `ByteSource` retains MD0's
+explicit return convention: 0 at EOF and -1 after abort; `AvioBridge` translates
+these to FFmpeg's EOF and EXIT codes. Source exceptions are retained across the
+catch-all upcall and rethrown after the downcall returns, so HTTP status and
+content-change failures can trigger the specified re-resolution. The shared
+JDK 25 engine fakes live in `core/testing/src/desktopEngineMain`; engine test
+source sets compile them directly. They do not add an engine dependency or
+FFM types to `:core:testing`'s Android/JDK 21 artifact. `SpanCache`'s byte limit
+is supplied by its caller; wiring the existing portable, never-synced
+`playback.stream_cache_mb` setting and storage maintenance UI belongs to the
+application/controller work. No new setting is introduced here.
+
+The production engine implements the current-item window and non-current
+window diffs. Automatic item transitions and next-item preparation remain
+MD1b work. A seek cancels the source and re-resolves/reopens a pipeline at the
+target, while retaining and clearing the output device. This also starts a
+fresh RSS pin. The idle `nd-prepare` executor samples the output counters every
+50 ms so a blocked AVIO call can still publish `Buffering` after a 300-ms
+underrun. Silence-skip events follow consumed-frame markers. MD0's diagnostic
+instrument remains separately available as `Md0AudioProbe`.
+
+For device-rate conversion MD1a.1 retains the MD0 path: Sonic performs both
+time stretch and source-to-device rate conversion, followed by gain and f32
+conversion. There is no second output swresample stage. The pinned Android
+Sonic references already cover 44.1-kHz input to 48-kHz output; the input
+format/channel conversion still uses FFmpeg swresample. This refines the
+placement of rate conversion in the diagram without changing D86's DSP order.
+Application position persistence (`PositionSaver`, M4/MD1a.2), player UI, native
+hardware/soak checks and MD1b's transition/device-loss acceptance remain open.
 
 ### FFmpeg build
 

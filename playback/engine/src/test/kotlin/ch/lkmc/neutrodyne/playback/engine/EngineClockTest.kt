@@ -30,7 +30,7 @@ class EngineClockTest {
         assumeTrue("corpus item missing: $file", file.toFile().isFile)
 
         for (speed in SPEEDS) {
-            FfAudioEngine(requireNotNull(ffmpeg), requireNotNull(ndmedia), "null", RATE).use { engine ->
+            Md0AudioProbe(requireNotNull(ffmpeg), requireNotNull(ndmedia), "null", RATE).use { engine ->
                 engine.play(file, speed, SKIP)
                 assertTrue(engine.awaitEnded(PLAY_TIMEOUT_MS), "item never ended at ${speed}x")
                 val position = engine.positionMs()
@@ -47,52 +47,52 @@ class EngineClockTest {
     fun liveClockMatchesConsumedPcmBeforeTheEndAssignment() {
         val ffmpeg = requireNotNull(ffmpegDir()) { "FFmpeg build required" }
         val ndmedia = requireNotNull(ndmediaDir()) { "ndmedia build required" }
-        for (speed in SPEEDS) {
-            FfAudioEngine(ffmpeg, ndmedia, "null", RATE).use { engine ->
-                engine.play(mediaDir().resolve("wav_2s.wav"), speed, true)
-                val deadline = System.nanoTime() + 5_000_000_000L
-                while (engine.outputDescription == null && System.nanoTime() < deadline) Thread.sleep(5)
-                val description = Json.parseToJsonElement(requireNotNull(engine.outputDescription)).jsonObject
-                val period = requireNotNull(description["period"]).jsonPrimitive.int
-                repeat(3) {
-                    Thread.sleep(100)
-                    engine.pause()
-                    assertTrue(!engine.isEnded, "a live clock sample must precede the end assignment")
-                    val reference = ((engine.framesPlayed - period).coerceAtLeast(0) * speed * 1000 / RATE).toLong()
-                    val error = abs(engine.positionMs() - reference)
-                    println(
-                        "MD0 clock: speed=$speed referenceMs=$reference actualMs=${engine.positionMs()} " +
-                            "errorMs=$error device=$description",
-                    )
-                    assertTrue(error <= MAX_ERROR_MS, "${speed}x: live error=$error ms, reference=$reference ms")
-                    engine.resume()
+        val pcm = ByteArray(RATE * Short.SIZE_BYTES * 2 * LIVE_FIXTURE_SECONDS)
+        val samples = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        while (samples.hasRemaining()) samples.put(LIVE_SAMPLE_AMPLITUDE)
+        val file = writeTestWave(pcm)
+        try {
+            for (speed in SPEEDS) {
+                Md0AudioProbe(ffmpeg, ndmedia, "null", RATE).use { engine ->
+                    engine.play(file, speed, true)
+                    val deadline = System.nanoTime() + LIVE_WAIT_NS
+                    while (engine.outputDescription == null && System.nanoTime() < deadline) Thread.sleep(5)
+                    val description = Json.parseToJsonElement(requireNotNull(engine.outputDescription)).jsonObject
+                    val period = requireNotNull(description["period"]).jsonPrimitive.int
+                    repeat(3) { measurement ->
+                        val targetFrames = (measurement + 1L) * RATE / LIVE_MEASUREMENTS_PER_SECOND
+                        val sampleDeadline = System.nanoTime() + LIVE_WAIT_NS
+                        while (engine.framesPlayed < targetFrames && !engine.isEnded &&
+                            System.nanoTime() < sampleDeadline
+                        ) {
+                            Thread.sleep(1)
+                        }
+                        engine.pause()
+                        assertTrue(engine.framesPlayed >= targetFrames, "the null device made no progress")
+                        assertTrue(!engine.isEnded, "a live clock sample must precede the end assignment")
+                        val reference = ((engine.framesPlayed - period).coerceAtLeast(0) * speed * 1000 / RATE).toLong()
+                        val error = abs(engine.positionMs() - reference)
+                        println(
+                            "MD0 clock: speed=$speed referenceMs=$reference actualMs=${engine.positionMs()} " +
+                                "errorMs=$error device=$description",
+                        )
+                        assertTrue(error <= MAX_ERROR_MS, "${speed}x: live error=$error ms, reference=$reference ms")
+                        engine.resume()
+                    }
                 }
             }
+        } finally {
+            Files.delete(file)
         }
     }
 
     @Test
     fun liveClockFollowsRetainedAudioAcrossARealSilenceGap() {
         val pcm = parityInput("speech")
-        val header = ByteBuffer.allocate(44 + pcm.size).order(ByteOrder.LITTLE_ENDIAN)
-        header.put("RIFF".toByteArray()).putInt(36 + pcm.size).put("WAVEfmt ".toByteArray())
-        header
-            .putInt(16)
-            .putShort(1)
-            .putShort(2)
-            .putInt(RATE)
-            .putInt(RATE * 4)
-        header
-            .putShort(4)
-            .putShort(16)
-            .put("data".toByteArray())
-            .putInt(pcm.size)
-            .put(pcm)
-        val file = Files.createTempFile("md0-clock-gap-", ".wav")
+        val file = writeTestWave(pcm)
         try {
-            Files.write(file, header.array())
             for (speed in SPEEDS) {
-                FfAudioEngine(requireNotNull(ffmpegDir()), requireNotNull(ndmediaDir()), "null", RATE).use { engine ->
+                Md0AudioProbe(requireNotNull(ffmpegDir()), requireNotNull(ndmediaDir()), "null", RATE).use { engine ->
                     engine.play(file, speed, true)
                     val deadline = System.nanoTime() + 10_000_000_000L
                     var measurements = 0
@@ -158,6 +158,12 @@ class EngineClockTest {
         const val MODULE_DIR = "neutrodyne.moduleDir"
         const val ROOT_DIR = "neutrodyne.rootDir"
         const val RATE = 44_100
+
+        // At 3x this outlasts the initial wait plus all three bounded samples.
+        const val LIVE_FIXTURE_SECONDS = 64
+        const val LIVE_SAMPLE_AMPLITUDE: Short = 8_192
+        const val LIVE_WAIT_NS = 5_000_000_000L
+        const val LIVE_MEASUREMENTS_PER_SECOND = 10
         const val GAP_OUTPUT_FRAME = 18_614L
         const val SKIPPED_FRAMES = 6_382L
         const val ITEM = "mp3_silence_gaps_3s.mp3"

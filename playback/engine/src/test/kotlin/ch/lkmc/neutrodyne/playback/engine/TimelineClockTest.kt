@@ -6,6 +6,23 @@ import kotlin.test.assertEquals
 
 class TimelineClockTest {
     @Test
+    fun seekAnchorSurvivesDeviceLatencyBeforeTheFirstCallback() {
+        val clock = TimelineClock(44_100, 441) { 0L }
+        clock.push(TimelineClock.Marker(0, "item", 900_000, 1f))
+        assertEquals(900L, clock.positionMs())
+        clock.pause()
+        assertEquals(900L, clock.positionMs())
+    }
+
+    @Test
+    fun theLatestMarkerWinsWhenSilenceWritesNoFrames() {
+        val clock = TimelineClock(1_000, 0) { 0L }
+        clock.push(TimelineClock.Marker(0, "item", 900_000, 1f))
+        clock.push(TimelineClock.Marker(0, "item", 1_400_000, 2f))
+        assertEquals(1_400L, clock.positionMs())
+    }
+
+    @Test
     fun pauseFreezesThePositionUntilAnotherMarker() {
         var played = 500L
         val clock = TimelineClock(1_000, 0) { played }

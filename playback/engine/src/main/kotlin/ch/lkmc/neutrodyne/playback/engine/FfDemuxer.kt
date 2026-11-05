@@ -100,7 +100,9 @@ class FfDemuxer
                 allocated.writeAddress(layout, "AVFormatContext", "pb", avio.context)
                 allocated.writeAddress(layout, "AVFormatContext", "interrupt_callback.callback", avio.interruptStub)
 
+                check(library.setProbeSize(allocated, PROBE_BYTES) >= 0) { "FFmpeg refused the probe limit" }
                 val opened = library.openInput(contextSlot, library.cString(SOURCE_NAME))
+                avio.throwIfFailed()
                 require(opened >= 0) { "the demuxer could not open the source: ${library.errorString(opened)}" }
                 formatContext = requireNotNull(contextSlot.dereference()) { "avformat_open_input released the context" }
                 containerName =
@@ -120,6 +122,7 @@ class FfDemuxer
                         // runs only when stream selection says the header alone
                         // was not enough.
                         val found = library.findStreamInfo(formatContext)
+                        avio.throwIfFailed()
                         require(found >= 0) {
                             "the demuxer could not read the stream info: ${library.errorString(found)}"
                         }
@@ -254,6 +257,7 @@ class FfDemuxer
                 library.unrefPacket(packet)
                 val result = library.readFrame(formatContext, packet)
                 if (result < 0) {
+                    avio.throwIfFailed()
                     if (result == layout.intConstant("AVERROR_EOF")) return null
                     require(result != layout.intConstant("AVERROR_EXIT")) { "the read was aborted" }
                     error("reading a packet failed: ${library.errorString(result)}")
@@ -338,6 +342,8 @@ class FfDemuxer
 
         private companion object {
             /** The name `avformat_open_input` is given; the source is the custom AVIO. */
+            const val PROBE_BYTES = 1024L * 1024
+
             const val SOURCE_NAME = "nd-source"
 
             /** FFmpeg's "no value" sentinel, as `int64_t`. */

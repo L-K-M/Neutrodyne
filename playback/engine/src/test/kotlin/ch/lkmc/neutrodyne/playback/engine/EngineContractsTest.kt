@@ -14,6 +14,15 @@ import java.lang.foreign.ValueLayout
 import java.nio.file.Files
 
 class EngineWindowDiffTest {
+    @Test
+    fun aDiffCannotIntroduceDuplicateEpisodeIds() {
+        val current = EngineItem(1, "ep:1:pin", true)
+        val tail = EngineItem(2, "ep:2:pin", true)
+        assertThrows(IllegalArgumentException::class.java) {
+            EngineWindowDiff(inserted = listOf(PlacedItem(2, tail))).applyTo(listOf(current, tail), current.episodeId)
+        }
+    }
+
     private val first = EngineItem(episodeId = 1L, cacheKey = "ep:1:fp", localHint = true)
     private val second = EngineItem(episodeId = 2L, cacheKey = "ep:2:fp", localHint = false)
     private val third = EngineItem(episodeId = 3L, cacheKey = "ep:3:fp", localHint = false)

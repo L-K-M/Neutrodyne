@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReferenceArray
 
@@ -27,15 +26,21 @@ internal class TimelineClock(
         val speed: Float,
     )
 
-    private val markers = AtomicReferenceArray<Marker?>(MARKER_COUNT)
-    private val writeIndex = AtomicInteger(0)
+    private data class Entry(
+        val sequence: Long,
+        val marker: Marker,
+    )
+
+    private val markers = AtomicReferenceArray<Entry?>(MARKER_COUNT)
+    private val writeIndex = AtomicLong(0)
     private val pausedPositionUs = AtomicLong(-1)
 
     // -1 while playing; the item's end position once the source is consumed.
     private val endPositionUs = AtomicLong(-1)
 
     fun push(marker: Marker) {
-        markers.set(writeIndex.getAndIncrement() % MARKER_COUNT, marker)
+        val sequence = writeIndex.getAndIncrement()
+        markers.set((sequence % MARKER_COUNT).toInt(), Entry(sequence, marker))
     }
 
     /** Position in ms: the latest marker at or before played-minus-latency. */
@@ -47,12 +52,27 @@ internal class TimelineClock(
         val end = endPositionUs.get()
         if (end >= 0) return end / 1000
         val played = framesPlayed() - latencyFrames
-        var best: Marker? = null
+        var best: Entry? = null
+        var earliest: Entry? = null
         for (i in 0 until MARKER_COUNT) {
-            val m = markers.get(i) ?: continue
-            if (m.outFrame <= played && (best == null || m.outFrame > best.outFrame)) best = m
+            val entry = markers.get(i) ?: continue
+            val frame = entry.marker.outFrame
+            val first = earliest
+            if (first == null || frame < first.marker.outFrame ||
+                (frame == first.marker.outFrame && entry.sequence > first.sequence)
+            ) {
+                earliest = entry
+            }
+            val preceding = best
+            if (frame <= played && (
+                    preceding == null || frame > preceding.marker.outFrame ||
+                        (frame == preceding.marker.outFrame && entry.sequence > preceding.sequence)
+                )
+            ) {
+                best = entry
+            }
         }
-        val anchor = best ?: return 0
+        val anchor = (best ?: earliest)?.marker ?: return 0
         val delta =
             (
                 (played - anchor.outFrame).coerceAtLeast(0) *

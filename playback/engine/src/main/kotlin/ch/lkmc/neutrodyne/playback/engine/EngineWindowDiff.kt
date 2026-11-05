@@ -63,6 +63,9 @@ data class EngineWindowDiff(
             }
             result.add(move.toIndex, result.removeAt(index))
         }
+        require(result.map { it.episodeId }.distinct().size == result.size) {
+            "the diff introduces duplicate episode IDs"
+        }
         return result
     }
 }
