@@ -174,6 +174,12 @@ sealed interface EngineError {
 
     data object NoMedia : EngineError
 
+    /**
+     * The representation changed under a ranged read (DAI length or validator).
+     * The engine has already re-resolved once, so this is the second failure.
+     */
+    data object ContentChanged : EngineError
+
     data object Network : EngineError
 
     data object LocalFileMissing : EngineError

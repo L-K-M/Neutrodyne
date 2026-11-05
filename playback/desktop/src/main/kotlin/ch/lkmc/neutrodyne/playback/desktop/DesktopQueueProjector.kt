@@ -23,6 +23,10 @@ internal class DesktopQueueProjector(
     var entries: List<WindowEntry> = emptyList()
         private set
 
+    /** The engine's current window items, in order (the projector owns them). */
+    val engineWindow: List<EngineItem>
+        get() = items
+
     private var items: List<EngineItem> = emptyList()
     var generation: Long = 0
         private set

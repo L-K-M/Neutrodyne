@@ -140,7 +140,8 @@ class DesktopNativePlaybackTest {
                     engine,
                 )
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            val controller = DesktopPlaybackController(scope, clock, { runtime })
+            val controller =
+                DesktopPlaybackController(scope, clock, { runtime }, FakeNetworkMonitor(FakeNetworkMonitor.ONLINE))
             try {
                 assertEquals(PlayResult.Started, controller.play())
                 withTimeout(10_000) {
@@ -269,7 +270,8 @@ class DesktopNativePlaybackTest {
                         engine,
                     )
                 val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-                val controller = DesktopPlaybackController(scope, clock, { runtime })
+                val controller =
+                    DesktopPlaybackController(scope, clock, { runtime }, FakeNetworkMonitor(FakeNetworkMonitor.ONLINE))
                 try {
                     assertEquals(PlayResult.Started, controller.play())
                     controller.pause()
