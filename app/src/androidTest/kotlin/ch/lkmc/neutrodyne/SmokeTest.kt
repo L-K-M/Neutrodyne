@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne
 
 import android.os.Build
 import android.os.Process
+import android.os.StrictMode
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.assert
@@ -36,6 +37,7 @@ import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,9 +53,31 @@ class SmokeTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
 
+    @Before
+    fun allowRelaunchOverlap() {
+        relaxActivityInstanceLimit(2)
+    }
+
     @After
     fun resetNightMode() {
+        relaxActivityInstanceLimit(1)
         compose.runOnUiThread { AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM) }
+    }
+
+    /**
+     * `ActivityScenario.recreate()` keeps the destroyed activity reachable until the
+     * relaunch completes; StrictMode's activity-leak heuristic counts it and the debug
+     * policy kills the process (a relaunch false positive on API 26). The public API has
+     * no per-class limit, so reflect the hidden setter, which API 28+ blocks; there the
+     * relaunch path does not reproduce the violation.
+     */
+    private fun relaxActivityInstanceLimit(limit: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) return
+        runCatching {
+            StrictMode::class.java
+                .getMethod("setClassInstanceLimit", Class::class.java, Int::class.javaPrimitiveType)
+                .invoke(null, MainActivity::class.java, limit)
+        }
     }
 
     @Test
