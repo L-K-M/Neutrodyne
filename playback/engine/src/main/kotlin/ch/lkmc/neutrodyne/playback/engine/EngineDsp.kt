@@ -108,7 +108,7 @@ internal class EngineDsp(
                 speed,
             ),
         )
-        outputCursor += frames * deviceRate / (sampleRate * speed.toDouble())
+        outputCursor += deviceFrames(frames, sampleRate, deviceRate, speed)
         sonic.queueInput(input)
         drainSonic()
     }
@@ -132,3 +132,11 @@ internal class EngineDsp(
         const val MICROS_PER_SECOND = 1_000_000L
     }
 }
+
+/** Device frames that [frames] source frames fill after resampling to [deviceRate] at [speed]. */
+internal fun deviceFrames(
+    frames: Int,
+    sampleRate: Int,
+    deviceRate: Int,
+    speed: Float,
+): Double = frames.toDouble() * deviceRate / (sampleRate * speed.toDouble())
