@@ -124,6 +124,7 @@ class LibraryScreenTest {
     private val refreshController = FakeRefreshController()
     private val settings = FakeSettingsRepository()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+    private val sync = ch.lkmc.neutrodyne.core.testing.FakeSyncController()
 
     /** Case-insensitive ordering so the sort assertions are locale-free and deterministic. */
     private val collator =
@@ -139,6 +140,7 @@ class LibraryScreenTest {
         previousLocale = Locale.getDefault()
         Locale.setDefault(Locale.ENGLISH)
         installFakeImageLoader()
+        LibraryViewModel.reconnectDismissedForRun = false
     }
 
     @AfterTest
@@ -152,6 +154,44 @@ class LibraryScreenTest {
             setLibrary(LibraryUiState(loaded = false))
             onNodeWithText("Library").assertIsDisplayed()
             onNodeWithText("Your library is empty").assertDoesNotExist()
+        }
+
+    /**
+     * 08 Banners priority 4: the sync "Reconnect" banner shows while the status is
+     * `Reconnect`, its action reaches the callback and "Not now" dismisses it.
+     */
+    @Test
+    fun reconnectBannerShowsActsAndDismisses() =
+        runComposeUiTest {
+            var reconnected = 0
+            var dismissed = 0
+            setLibrary(
+                LibraryUiState(
+                    loaded = true,
+                    reconnect =
+                        ReconnectBanner(serverUrl = "https://sync.example.org", host = "sync.example.org"),
+                ),
+                onReconnect = { reconnected++ },
+                onDismissReconnect = { dismissed++ },
+            )
+            onNodeWithText("Reconnect to sync.example.org to keep syncing").assertIsDisplayed()
+            onNodeWithText("Reconnect").performClick()
+            onNodeWithText("Not now").performClick()
+            assertEquals(1, reconnected)
+            assertEquals(1, dismissed)
+        }
+
+    /** The route maps the controller's `Reconnect` status onto the banner and hides it on "Not now". */
+    @Test
+    fun theRouteShowsTheReconnectBannerForAReconnectStatus() =
+        runComposeUiTest {
+            sync.status.value =
+                ch.lkmc.neutrodyne.sync.api.SyncStatus.Reconnect("https://sync.example.org", "alice")
+            setLibraryRoute(tiles = emptyList())
+            onNodeWithText("Reconnect to sync.example.org to keep syncing").assertIsDisplayed()
+            onNodeWithText("Not now").performClick()
+            waitForIdle()
+            onNodeWithText("Reconnect to sync.example.org to keep syncing").assertDoesNotExist()
         }
 
     /**
@@ -880,6 +920,7 @@ class LibraryScreenTest {
                 groups,
                 feeds,
                 TestClock(),
+                sync,
             )
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare compose

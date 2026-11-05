@@ -45,6 +45,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
+import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
@@ -93,6 +94,9 @@ import ch.lkmc.neutrodyne.feature.library.resources.add_podcasts
 import ch.lkmc.neutrodyne.feature.library.resources.empty_group
 import ch.lkmc.neutrodyne.feature.library.resources.manage_groups
 import ch.lkmc.neutrodyne.feature.library.resources.mark_many
+import ch.lkmc.neutrodyne.feature.library.resources.reconnect_action
+import ch.lkmc.neutrodyne.feature.library.resources.reconnect_banner
+import ch.lkmc.neutrodyne.feature.library.resources.reconnect_later
 import ch.lkmc.neutrodyne.feature.library.resources.select
 import ch.lkmc.neutrodyne.feature.library.resources.ungrouped
 import ch.lkmc.neutrodyne.feature.library.resources.unsubscribe_many
@@ -134,6 +138,8 @@ internal fun LibraryScreen(
     onDismissMarkAll: () -> Unit,
     onAddPodcast: () -> Unit,
     onSearchPodcasts: () -> Unit,
+    onReconnect: () -> Unit = {},
+    onDismissReconnect: () -> Unit = {},
     modifier: Modifier = Modifier,
     segment: LibrarySegment = state.segment,
     selectedIds: List<Long> = emptyList(),
@@ -206,6 +212,21 @@ internal fun LibraryScreen(
             )
         }
         OfflineBanner(state.offline)
+        state.reconnect?.let { reconnect ->
+            // 08 Banners priority 4 (Library only): "Reconnect to {host} to keep syncing".
+            NdBanner(
+                message = stringResource(LibraryRes.string.reconnect_banner, reconnect.host),
+                icon = NdIcons.CloudOff,
+                primary =
+                    NdDialogAction(label = stringResource(LibraryRes.string.reconnect_action)) {
+                        onReconnect()
+                    },
+                secondary =
+                    NdDialogAction(label = stringResource(LibraryRes.string.reconnect_later)) {
+                        onDismissReconnect()
+                    },
+            )
+        }
         LibrarySegments(segment, onSegment)
         if (segment == LibrarySegment.PODCASTS) LibraryGroupChips(state, onGroupFilter, onNewGroup)
         when {

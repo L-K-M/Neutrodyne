@@ -27,6 +27,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_continue
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_finish_link
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_finishing_restore
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_finishing_restore_body
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_intro
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_linked
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_now
@@ -102,6 +104,17 @@ fun SyncSettingsScreen(
 
                 is SyncStatus.LinkUnfinished -> {
                     Text(stringResource(Res.string.sync_finish_link, current.serverUrl))
+                }
+
+                is SyncStatus.FinishingRestore -> {
+                    Text(
+                        stringResource(Res.string.sync_finishing_restore),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(Res.string.sync_finishing_restore_body, hostOf(current.serverUrl)),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
 
                 is SyncStatus.Revoked -> {

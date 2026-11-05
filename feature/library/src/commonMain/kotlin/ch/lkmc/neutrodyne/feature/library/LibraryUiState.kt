@@ -17,6 +17,16 @@ import kotlinx.collections.immutable.persistentMapOf
 
 internal const val UNGROUPED_FILTER = "ungrouped"
 
+/**
+ * 08 Banners priority 4: the Auto Backup "Reconnect" banner. `serverUrl` feeds the setup
+ * screen; [host] is its readable form.
+ */
+@Immutable
+public data class ReconnectBanner(
+    val serverUrl: String,
+    val host: String,
+)
+
 /** Library tiles, ordered groups and the persisted single-select filter (08 Library). */
 @Immutable
 public data class LibraryUiState(
@@ -31,4 +41,6 @@ public data class LibraryUiState(
     val sort: LibrarySort = LibrarySort.TITLE,
     val offline: Boolean = false,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
+    /** The sync "Reconnect" banner (08); null while not reconnecting or dismissed. */
+    val reconnect: ReconnectBanner? = null,
 )

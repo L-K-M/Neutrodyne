@@ -31,4 +31,7 @@
         <item quantity="other">Mark all episodes in %1$d podcasts as played?</item>
     </plurals>
     <string name="group_actions">Group actions</string>
+    <string name="reconnect_banner">Reconnect to %1$s to keep syncing</string>
+    <string name="reconnect_action">Reconnect</string>
+    <string name="reconnect_later">Not now</string>
 </resources>
