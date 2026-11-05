@@ -156,7 +156,7 @@ class DesktopPlaybackControllerTest {
                 fixture.engine.position = 50_000
                 fixture.controller.pause()
                 fixture.awaitPaused()
-                assertEquals(50_000L, fixture.position(2))
+                assertEquals(50_000L, fixture.awaitPosition(2, 50_000L))
             }
         }
 
@@ -249,7 +249,7 @@ class DesktopPlaybackControllerTest {
                 fixture.engine.position = 41_000
                 fixture.controller.pause()
                 fixture.awaitPaused()
-                assertEquals(41_000L, fixture.position(1))
+                assertEquals(41_000L, fixture.awaitPosition(1, 41_000L))
                 fixture.controller.seekTo(0)
                 withTimeout(TIMEOUT_MS) {
                     fixture.graph
@@ -269,7 +269,7 @@ class DesktopPlaybackControllerTest {
                 fixture.engine.position = 0
                 fixture.controller.pause()
                 fixture.controller.shutdown()
-                assertEquals(17_000L, fixture.position(1))
+                assertEquals(17_000L, fixture.awaitPosition(1, 17_000L))
                 assertTrue(fixture.engine.closed)
                 assertTrue(fixture.engine.commands.indexOf("speed") < fixture.engine.commands.indexOf("window"))
             }
@@ -287,7 +287,7 @@ class DesktopPlaybackControllerTest {
                 fixture.engine.position = 42_000
                 fixture.controller.skipToNext()
                 fixture.awaitEpisode(2)
-                assertEquals(42_000L, fixture.position(1))
+                assertEquals(42_000L, fixture.awaitPosition(1, 42_000L))
                 fixture.controller.skipToPrevious()
                 fixture.awaitEpisode(1)
                 assertEquals(
@@ -554,7 +554,7 @@ class DesktopPlaybackControllerTest {
                         listOf(PlaybackEvent.Skipped(3, "Episode 3", UnplayableReason.Http(404))),
                         skipped,
                     )
-                    assertEquals(42_000L, fixture.position(3))
+                    assertEquals(42_000L, fixture.awaitPosition(3, 42_000L))
                     assertNull(
                         fixture.graph
                             .positionStore()
