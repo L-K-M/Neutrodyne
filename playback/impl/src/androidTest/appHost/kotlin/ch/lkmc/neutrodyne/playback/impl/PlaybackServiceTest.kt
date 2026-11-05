@@ -276,6 +276,9 @@ class PlaybackServiceTest {
                         .firstOrNull { it.isNotBlank() }
                         ?: error("No Wi-Fi network available to mark metered")
                 } else {
+                    // The emulator image boots with mobile data off; without it there is
+                    // no metered network to take over after Wi-Fi is disabled.
+                    device.executeShellCommand("svc data enable")
                     setWifiEnabled(false)
                     null
                 }
