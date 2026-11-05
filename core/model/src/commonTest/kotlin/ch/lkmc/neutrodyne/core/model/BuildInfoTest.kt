@@ -8,15 +8,16 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BuildInfoTest {
+    private val repoUrl = "https://github.com/L-K-M/Neutrodyne"
     private val info =
         BuildInfo(
             versionName = "0.1.0",
             versionCode = 10095,
             debug = true,
             platform = BuildInfo.Platform.DESKTOP,
-            repoUrl = "https://github.com/L-K-M/Neutrodyne",
-            updateManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/latest/download/update.json",
-            engineManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/download/engine-approvals/ytdlp-approved.json",
+            repoUrl = repoUrl,
+            updateManifestUrl = "$repoUrl/releases/latest/download/update.json",
+            engineManifestUrl = "$repoUrl/releases/download/engine-approvals/ytdlp-approved.json",
             youTubeEngineBundled = true,
             desktop =
                 BuildInfo.Desktop(
