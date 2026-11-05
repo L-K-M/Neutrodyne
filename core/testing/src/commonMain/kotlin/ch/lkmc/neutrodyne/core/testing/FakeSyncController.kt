@@ -165,6 +165,7 @@ class FakeSyncController(
 
     override suspend fun setShareFeedPasswords(enabled: Boolean) {
         passwordSharing += enabled
+        shareFeedPasswords.value = enabled
     }
 
     fun post(notice: SyncNotice) {
