@@ -156,8 +156,9 @@ class SyncEngineTest {
 
     /**
      * A pushed `auth` keeps only its protected representation when acknowledged: the raw state
-     * carries the feed-origin marker, never the plaintext that left the device (10 Durable
-     * apply effects).
+     * carries the `sync:pending:` marker — the same representation the receive path stores, so
+     * an equal-clock echo of the push compares equal — and never the plaintext that left the
+     * device (10 Durable apply effects).
      */
     @Test
     fun anAcknowledgedAuthKeepsOnlyItsProtectedMarker() =
@@ -184,12 +185,11 @@ class SyncEngineTest {
                         .decodeFromString<RawSyncRecord>(raw.clocks)
                         .state
                 val auth = state.fields["auth"]!!
-                assertEquals(
-                    "https://a.example",
-                    (auth.v as? kotlinx.serialization.json.JsonObject)?.get("ref")
-                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content },
-                    "the marker names the feed origin: ${auth.v}",
-                )
+                val ref =
+                    (auth.v as? kotlinx.serialization.json.JsonObject)
+                        ?.get("ref")
+                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                assertTrue(ref != null && ref.startsWith("sync:pending:"), "the marker names the store: ${auth.v}")
             } finally {
                 a.close()
             }

@@ -124,7 +124,9 @@ class LibraryScreenTest {
     private val refreshController = FakeRefreshController()
     private val settings = FakeSettingsRepository()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
-    private val sync = ch.lkmc.neutrodyne.core.testing.FakeSyncController()
+    private val sync =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeSyncController()
 
     /** Case-insensitive ordering so the sort assertions are locale-free and deterministic. */
     private val collator =
@@ -186,7 +188,8 @@ class LibraryScreenTest {
     fun theRouteShowsTheReconnectBannerForAReconnectStatus() =
         runComposeUiTest {
             sync.status.value =
-                ch.lkmc.neutrodyne.sync.api.SyncStatus.Reconnect("https://sync.example.org", "alice")
+                ch.lkmc.neutrodyne.sync.api.SyncStatus
+                    .Reconnect("https://sync.example.org", "alice")
             setLibraryRoute(tiles = emptyList())
             onNodeWithText("Reconnect to sync.example.org to keep syncing").assertIsDisplayed()
             onNodeWithText("Not now").performClick()
@@ -867,6 +870,8 @@ class LibraryScreenTest {
         onDismissMarkAll: () -> Unit = {},
         onAddPodcast: () -> Unit = {},
         onSearchPodcasts: () -> Unit = {},
+        onReconnect: () -> Unit = {},
+        onDismissReconnect: () -> Unit = {},
     ) {
         setContent {
             CompositionLocalProvider(
@@ -890,6 +895,8 @@ class LibraryScreenTest {
                         onDismissMarkAll = onDismissMarkAll,
                         onAddPodcast = onAddPodcast,
                         onSearchPodcasts = onSearchPodcasts,
+                        onReconnect = onReconnect,
+                        onDismissReconnect = onDismissReconnect,
                     )
                 }
             }

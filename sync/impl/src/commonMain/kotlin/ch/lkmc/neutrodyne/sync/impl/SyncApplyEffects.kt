@@ -71,13 +71,17 @@ class SyncApplyEffects(
         pending: PendingSetting,
     ): Boolean {
         val pendingClock =
-            runCatching { ch.lkmc.neutrodyne.sync.protocol.Hlc.parse(pending.clock) }.getOrNull() ?: return false
+            runCatching {
+                ch.lkmc.neutrodyne.sync.protocol.Hlc
+                    .parse(pending.clock)
+            }.getOrNull() ?: return false
         for (outboxRow in db.syncOutboxDao().rowsFor(SyncCollection.SETTING.wire, listOf(rid))) {
             if (outboxRow.field != "v") continue
             val rowClock =
                 ch.lkmc.neutrodyne.sync.protocol.Hlc(
                     outboxRow.hlc,
-                    ch.lkmc.neutrodyne.sync.protocol.NodeId(outboxRow.nodeId),
+                    ch.lkmc.neutrodyne.sync.protocol
+                        .NodeId(outboxRow.nodeId),
                 )
             if (rowClock > pendingClock) return true
         }
