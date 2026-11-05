@@ -1724,23 +1724,32 @@ rejected before any write — the session goes `CANCELLED`, progress reports
 `BackupError.Unsupported` — because linked execution (unlink first, `withApplying`
 capture, the ALL_DEVICES steps) lands with MS2. The linked branches below describe MS2.
 
-**Implementation note (2026-11-08, MS2, restore-policies precursor).** `RestoreRunner`
-no longer rejects a linked restore: a linked Merge runs with `applying = 1` and
-`captureWithBackupTimes` at the backup's own timestamps; a Replace THIS_DEVICE calls
-`LinkedRestoreCoordinator.unlinkForRestore()` before any write; a Replace ALL_DEVICES
-relies on the claim-time `linkedAt` clear in `BackupRepositoryImpl` and calls
-`completeAllDevicesRestore()` before the session commits, so a failure keeps the durable
-request. `RestoreMerger`/`RestoreEpisodeMerger` implement `LINK_MERGE`/`LINK_REPLACE`
-(state clocks, ID adoption, the stub rule), and `LibraryMergerImpl` binds the
-`LibraryMerger` port over a staging directory. This precursor is not the activated MS2
-feature: `:sync:impl`'s `LinkedRestoreCoordinator` implementation arrives with the next
-slice, so `LinkedRestoreCoordinatorBindings` (`:core:domain`) temporarily binds the
-fail-closed `NoLinkedRestoreCoordinator`. A Replace on a linked device therefore fails
-closed with `BackupError.Unsupported` through `RestoreRunResult.Retry` and leaves the
-durable request intact, while a linked Merge runs locally. 10's `FirstLinkMerger` still
-uses the engine field merge and does not call `mergeStaged`, so the new `LINK_*` policies
-and `LibraryMergerImpl` are implemented and tested but not reached by the client; the
-reach prompts remain 08's later slice, and the UI still sends the default THIS_DEVICE.
+**Implementation note (2026-11-05, MS2).** The limit is lifted: the `LINK_*`
+policies are implemented in `RestoreMerger`/`RestoreEpisodeMerger`
+(`LibraryMergerImpl` binds 05's `LibraryMerger` port over a staging
+directory), and a linked restore runs as this section specifies — a Merge
+with `applying = 1` and `captureAt` at the backup's timestamps (presence
+with a fresh literal tick), a THIS_DEVICE Replace that unlinks first
+through the `LinkedRestoreCoordinator` port, an ALL_DEVICES Replace whose
+claim clears `linkedAt` and whose finish runs the upload/prune steps
+before the session commits. Deviations the current code forces:
+
+- `RestoreMerger`'s entry points stay the split phases (`mergeLibrary`,
+  `mergeEpisodes`, the settings merge) with `captureWithBackupTimes`,
+  `onUnmatched` and `onApplied` parameters, rather than 05's single
+  `merge(...)` shape; `LibraryMergerImpl` is the one caller that runs all
+  three under a link policy, so no second merge implementation exists.
+- The settings journaling of a link merge (`pendingSetting`) happens
+  after `mergeStaged` returns rather than inside each chunk transaction
+  (the marker lives in `sync_clock`, preserving the crash-recovery
+  property); a linked Merge restore does not capture the `session` write
+  (the `session` record is MS3's).
+- The ALL_DEVICES second confirmation's server comparison runs in the
+  restore preview through the coordinator port (staging the server
+  library first); the counts name what the other devices will remove.
+- `RestoreRunner`'s settings phase routes synced keys through
+  `captureAt` + `SettingsSyncPort.applyRemote` and skips
+  `sync.server_url`/`sync.username` while linked, per step 7.
 
 **Implementation note (2026-10-18, B12b):** a replay still queues a matched podcast awaiting its first fetch, including one inserted by an interrupted attempt. Auto-snapshot retirement finishes before a terminal session marker; a failed rename or cancellation-marker write leaves durable work for retry. Settings restore requires the declared JSON primitive type rather than coercing strings into booleans or numbers.
 
