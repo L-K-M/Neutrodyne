@@ -861,6 +861,10 @@ class FfAudioEngine internal constructor(
                 EngineError.LocalFileMissing
             }
 
+            is ContentChangedException -> {
+                EngineError.ContentChanged
+            }
+
             is IOException -> {
                 EngineError.Network
             }

@@ -578,6 +578,7 @@ private class TimingFixture(
     private val startPosition = StartPositionRule()
     private val settings = FakeSettingsRepository()
     val effectiveResolver = FakeEffectiveSettingsResolver()
+    val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
     private val runtime =
         DesktopPlaybackRuntime(
             PlayStarter(
@@ -588,7 +589,7 @@ private class TimingFixture(
                 positions,
                 caps,
                 local,
-                FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+                network,
                 clock,
                 startPosition,
                 rule,
@@ -611,6 +612,7 @@ private class TimingFixture(
             test.backgroundScope,
             clock,
             { runtime },
+            network,
             StandardTestDispatcher(test.testScheduler),
             StandardTestDispatcher(test.testScheduler),
         )

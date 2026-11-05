@@ -28,12 +28,19 @@ import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.DesktopAppGraph
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.desktop.system.AudioRouteMonitor
+import ch.lkmc.neutrodyne.desktop.system.NoOpAudioRouteMonitor
+import ch.lkmc.neutrodyne.desktop.system.RouteEvent
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
+import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
+import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackRuntime
 import ch.lkmc.neutrodyne.playback.engine.AudioEngine
+import ch.lkmc.neutrodyne.playback.engine.EngineError
 import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineState
 import ch.lkmc.neutrodyne.playback.engine.Gapless
@@ -45,8 +52,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Test
@@ -503,12 +515,313 @@ class DesktopPlaybackControllerTest {
             }
         }
 
+    @Test
+    fun anHttpErrorSkipsTheItemWithASkippedEvent() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                val group = fixture.seed()
+                val skipped = mutableListOf<PlaybackEvent.Skipped>()
+                val collector =
+                    launch {
+                        fixture.controller.events.collect {
+                            if (it is PlaybackEvent.Skipped) {
+                                skipped +=
+                                    it
+                            }
+                        }
+                    }
+                try {
+                    assertEquals(
+                        PlayResult.Started,
+                        fixture.controller.playFeed(
+                            FeedSource.Group(group),
+                            FeedFilters(unplayedOnly = true),
+                            FeedOrder.NEWEST_FIRST,
+                        ),
+                    )
+                    fixture.awaitEpisode(3)
+                    fixture.engine.ready()
+                    fixture.awaitPlaying()
+                    fixture.engine.position = 42_000
+                    fixture.engine.state.value = EngineState.Error(3, EngineError.Http(404))
+                    fixture.awaitEpisode(2)
+                    assertEquals(
+                        listOf(PlaybackEvent.Skipped(3, "Episode 3", UnplayableReason.Http(404))),
+                        skipped,
+                    )
+                    assertEquals(42_000L, fixture.position(3))
+                    assertNull(
+                        fixture.graph
+                            .positionStore()
+                            .observe(3)
+                            .first()
+                            ?.playedAt,
+                    )
+                } finally {
+                    collector.cancel()
+                }
+            }
+        }
+
+    @Test
+    fun fiveConsecutiveSkipsThenPauseWithPlayerError() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                val group = fixture.seed()
+                fixture.seedEpisodes(7L..12L)
+                assertEquals(
+                    PlayResult.Started,
+                    fixture.controller.playFeed(
+                        FeedSource.Group(group),
+                        FeedFilters(unplayedOnly = true),
+                        FeedOrder.NEWEST_FIRST,
+                    ),
+                )
+                for (id in listOf(12L, 11L, 10L, 9L, 8L)) {
+                    fixture.awaitEpisode(id)
+                    fixture.engine.ready()
+                    fixture.awaitPlaying()
+                    fixture.engine.state.value = EngineState.Error(id, EngineError.Http(404))
+                }
+                fixture.awaitEpisode(7)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                // The sixth unplayable item pauses instead of spinning the queue.
+                fixture.engine.state.value = EngineState.Error(7, EngineError.Http(404))
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it?.issue == PlaybackIssue.PLAYER_ERROR }
+                        .first()
+                }
+                assertFalse(
+                    fixture.controller.nowPlaying.value!!
+                        .isPlaying,
+                )
+            }
+        }
+
+    @Test
+    fun aNetworkErrorKeepsTheItemAndRepreparesWhenOnline() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.awaitEpisode(1)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.engine.position = 30_000
+                fixture.engine.state.value = EngineState.Error(1, EngineError.Network)
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it?.issue == PlaybackIssue.NETWORK_LOST }
+                        .first()
+                }
+                assertFalse(
+                    fixture.controller.nowPlaying.value!!
+                        .isPlaying,
+                )
+                assertEquals(30_000L, fixture.awaitPosition(1, 30_000L))
+                val windows = fixture.engine.windows.size
+                // Let the controller's collector observe the loss before the
+                // recovery; a StateFlow conflates synchronous flips.
+                fixture.network.setStatus(FakeNetworkMonitor.OFFLINE)
+                delay(ROUTE_TURN_MS)
+                fixture.network.setStatus(FakeNetworkMonitor.ONLINE)
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it?.issue == null && it?.episodeId == 1L }
+                        .first()
+                }
+                assertTrue(fixture.engine.windows.size > windows, "the network recovery must re-prepare")
+            }
+        }
+
+    @Test
+    fun aMissingLocalFileReResolvesAtTheSamePosition() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.awaitEpisode(1)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.engine.position = 20_000
+                val windows = fixture.engine.windows.size
+                fixture.engine.state.value = EngineState.Error(1, EngineError.LocalFileMissing)
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it?.issue == PlaybackIssue.LOCAL_FILE_MISSING }
+                        .first()
+                }
+                assertTrue(fixture.engine.windows.size > windows, "the missing file must re-resolve")
+                // The issue is held until playback actually resumes.
+                fixture.engine.ready()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it?.issue == null }
+                        .first()
+                }
+                Unit
+            }
+        }
+
+    @Test
+    fun aContentChangedErrorSkipsWithTheRangeReason() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                val group = fixture.seed()
+                val skipped = mutableListOf<PlaybackEvent.Skipped>()
+                val collector =
+                    launch {
+                        fixture.controller.events.collect {
+                            if (it is PlaybackEvent.Skipped) {
+                                skipped +=
+                                    it
+                            }
+                        }
+                    }
+                try {
+                    assertEquals(
+                        PlayResult.Started,
+                        fixture.controller.playFeed(
+                            FeedSource.Group(group),
+                            FeedFilters(unplayedOnly = true),
+                            FeedOrder.NEWEST_FIRST,
+                        ),
+                    )
+                    fixture.awaitEpisode(3)
+                    fixture.engine.ready()
+                    fixture.awaitPlaying()
+                    fixture.engine.state.value = EngineState.Error(3, EngineError.ContentChanged)
+                    fixture.awaitEpisode(2)
+                    assertEquals(
+                        listOf(PlaybackEvent.Skipped(3, "Episode 3", UnplayableReason.Http(416))),
+                        skipped,
+                    )
+                } finally {
+                    collector.cancel()
+                }
+            }
+        }
+
+    @Test
+    fun aSuccessorPrepareFailureSkipsTheSuccessorAndTriesTheNext() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                val group = fixture.seed()
+                val skipped = mutableListOf<PlaybackEvent.Skipped>()
+                val collector =
+                    launch {
+                        fixture.controller.events.collect {
+                            if (it is PlaybackEvent.Skipped) {
+                                skipped +=
+                                    it
+                            }
+                        }
+                    }
+                try {
+                    assertEquals(
+                        PlayResult.Started,
+                        fixture.controller.playFeed(
+                            FeedSource.Group(group),
+                            FeedFilters(unplayedOnly = true),
+                            FeedOrder.NEWEST_FIRST,
+                        ),
+                    )
+                    fixture.awaitEpisode(3)
+                    fixture.engine.ready()
+                    fixture.awaitPlaying()
+                    fixture.engine.position = 119_000
+                    // The engine reports a failure preparing item 2 at the boundary.
+                    fixture.engine.state.value = EngineState.Error(2, EngineError.Http(404))
+                    fixture.awaitEpisode(1)
+                    assertEquals(
+                        listOf(PlaybackEvent.Skipped(2, "Episode 2", UnplayableReason.Http(404))),
+                        skipped,
+                    )
+                    // The outgoing item ended naturally, so it is committed and marked played.
+                    assertNotNull(
+                        fixture.graph
+                            .positionStore()
+                            .observe(3)
+                            .first()
+                            ?.playedAt,
+                    )
+                    Unit
+                } finally {
+                    collector.cancel()
+                }
+            }
+        }
+
+    @Test
+    fun anOutputErrorPausesSavesAndReopensAtTheNextPlay() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.awaitEpisode(1)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.engine.position = 41_000
+                fixture.engine.onDeviceRemoved()
+                fixture.awaitPaused()
+                assertEquals(41_000L, fixture.awaitPosition(1, 41_000L))
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.nowPlaying
+                        .filter { it?.episodeId == 1L && it.playWhenReady }
+                        .first()
+                }
+                assertEquals(41_000L, fixture.engine.position)
+            }
+        }
+
+    @Test
+    fun aRemovedRoutePausesAndSavesAndDefaultChangeKeepsPlaying() =
+        runBlocking {
+            val route = FakeAudioRouteMonitor()
+            PlaybackFixture(route).use { fixture ->
+                fixture.seed()
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.awaitEpisode(1)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.engine.position = 41_000
+                route.defaultChanged()
+                delay(ROUTE_TURN_MS)
+                assertTrue(
+                    fixture.controller.nowPlaying.value!!
+                        .isPlaying,
+                )
+                route.removed("device-1")
+                fixture.awaitPaused()
+                assertEquals(41_000L, fixture.awaitPosition(1, 41_000L))
+            }
+        }
+
+    private class FakeAudioRouteMonitor : AudioRouteMonitor {
+        private val mutable = MutableSharedFlow<RouteEvent>(extraBufferCapacity = 8)
+        override val events: Flow<RouteEvent> = mutable.asSharedFlow()
+
+        fun removed(deviceId: String) {
+            mutable.tryEmit(RouteEvent.DeviceRemoved(deviceId))
+        }
+
+        fun defaultChanged() {
+            mutable.tryEmit(RouteEvent.DefaultChanged)
+        }
+    }
+
     private companion object {
         const val TIMEOUT_MS = 10_000L
+        const val ROUTE_TURN_MS = 100L
     }
 }
 
-internal class PlaybackFixture : AutoCloseable {
+internal class PlaybackFixture(
+    private val routeMonitor: AudioRouteMonitor = NoOpAudioRouteMonitor,
+) : AutoCloseable {
     val clock = TestClock()
     val engine = FakeAudioEngine()
     val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
@@ -516,7 +829,7 @@ internal class PlaybackFixture : AutoCloseable {
     private val info = BuildInfoLoader.load()
     val graph =
         createDynamicGraphFactory<DesktopAppGraph.Factory>(
-            PlaybackTestBindings(engine, clock, network),
+            PlaybackTestBindings(engine, clock, network, routeMonitor),
         ).create(dirs, info, DesktopCrashReporter(dirs, info, clock, RecentLogBuffer()))
     val controller get() = graph.desktopPlaybackController
 
@@ -593,13 +906,51 @@ internal class PlaybackFixture : AutoCloseable {
             .first()
             ?.positionMs
 
-    fun newController(engine: FakeAudioEngine): DesktopPlaybackController {
+    /** Waits for the stored position to reach [expected] (Room's invalidation is async). */
+    suspend fun awaitPosition(
+        id: Long,
+        expected: Long,
+    ): Long? =
+        withTimeout(10_000L) {
+            graph
+                .positionStore()
+                .observe(id)
+                .filter { it?.positionMs == expected }
+                .first()
+                ?.positionMs
+        }
+
+    /** Inserts more unplayed episodes into the group's podcast, newest last. */
+    suspend fun seedEpisodes(ids: LongRange) {
+        val db = graph.databaseOpener.requireDatabase()
+        for (id in ids) {
+            db.episodeDao().insertStub(
+                episodeEntity(
+                    id = id,
+                    podcastId = 1,
+                    title = "Episode $id",
+                    sortDate = clock.now() + (id - 6) * 1_000,
+                ) {
+                    copy(
+                        enclosureUrl = "https://media.example/$id.mp3",
+                        enclosureType = "audio/mpeg",
+                        durationMs = 120_000,
+                    )
+                },
+            )
+        }
+    }
+
+    fun newController(
+        engine: FakeAudioEngine,
+        routeMonitor: AudioRouteMonitor = NoOpAudioRouteMonitor,
+    ): DesktopPlaybackController {
         runBlocking {
             graph.appScope.coroutineContext[Job]!!.cancelAndJoin()
         }
         graph.databaseOpener.requireDatabase().close()
         retiredOriginal = true
-        val bindings = PlaybackTestBindings(engine, clock, network)
+        val bindings = PlaybackTestBindings(engine, clock, network, routeMonitor)
         val other =
             createDynamicGraphFactory<DesktopAppGraph.Factory>(bindings)
                 .create(dirs, info, DesktopCrashReporter(dirs, info, clock, RecentLogBuffer()))
@@ -631,10 +982,13 @@ private class PlaybackTestBindings(
     private val engine: FakeAudioEngine,
     private val clock: Clock,
     private val network: NetworkMonitor,
+    private val routeMonitor: AudioRouteMonitor,
 ) {
     @Provides fun engine(): AudioEngine = engine
 
     @Provides fun clock(): Clock = clock
 
     @Provides fun network(): NetworkMonitor = network
+
+    @Provides fun routeMonitor(): AudioRouteMonitor = routeMonitor
 }
