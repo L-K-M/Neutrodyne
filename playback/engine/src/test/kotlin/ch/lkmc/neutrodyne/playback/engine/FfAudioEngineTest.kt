@@ -2,6 +2,8 @@
 package ch.lkmc.neutrodyne.playback.engine
 
 import ch.lkmc.neutrodyne.core.testing.FakeDesktopSourceResolver
+import ch.lkmc.neutrodyne.playback.native.AudioOutput
+import ch.lkmc.neutrodyne.playback.native.NdOutputException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -407,8 +409,17 @@ class FfAudioEngineTest {
     private fun engine(
         resolver: DesktopSourceResolver = resolver(),
         rate: Int = RATE,
+        output: (() -> AudioOutput)? = null,
         open: (ResolvedSource) -> ByteSource = { FileByteSource((it as ResolvedSource.File).path) },
-    ) = FfAudioEngine(nativeDirectory("ffmpeg"), nativeDirectory("ndmedia"), resolver, open, EngineBackend.NULL, rate)
+    ): FfAudioEngine {
+        val directory = nativeDirectory("ffmpeg")
+        val ndmedia = nativeDirectory("ndmedia")
+        return if (output == null) {
+            FfAudioEngine(directory, ndmedia, resolver, open, EngineBackend.NULL, rate)
+        } else {
+            FfAudioEngine(directory, ndmedia, resolver, open, EngineBackend.NULL, rate, output)
+        }
+    }
 
     private fun resolver(file: Path = media()) =
         FakeDesktopSourceResolver().apply { sources[1L to 0] = ResolvedSource.File(file) }
@@ -450,6 +461,128 @@ class FfAudioEngineTest {
             }
         return Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")), "playback/native/build/$kind/$target")
     }
+
+    @Test
+    fun anOutputWriteFailurePublishesDeviceLostAndDiscardsTheOutput() {
+        val failing = FakeOutput(FailOn.WRITE, NdOutputException.E_DEVICE)
+        engine(output = { failing }).use { engine ->
+            val lost = CompletableFuture<EngineEvent.DeviceLost>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.DeviceLost>().collect { lost.complete(it) }
+            }
+            try {
+                engine.setWindow(listOf(item), 0, null)
+                engine.play()
+                await("output error") { engine.state.value is EngineState.Error }
+                val error = engine.state.value as EngineState.Error
+                assertEquals(EngineError.Output("nd_out_write failed with -4"), error.error)
+                assertEquals(EngineEvent.DeviceLost, lost.get(5, TimeUnit.SECONDS))
+                assertTrue(failing.closed, "the failed output must be discarded")
+                // No stale output reference: a new window opens a fresh device.
+                engine.setWindow(listOf(item), 0, null)
+                await("the engine stays erroring on the discarded output") {
+                    engine.state.value is EngineState.Error
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun anOutputStartFailureBecomesAnErrorInsteadOfEscapingPlay() {
+        val failing = FakeOutput(FailOn.START, NdOutputException.E_DEVICE)
+        engine(output = { failing }).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("output error") { engine.state.value is EngineState.Error }
+            assertTrue(failing.closed)
+        }
+    }
+
+    @Test
+    fun anOutputOpenFailureBecomesAnError() {
+        engine(output = {
+            throw NdOutputException("nd_out_open failed with -4", NdOutputException.E_DEVICE)
+        }).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("output error") { engine.state.value is EngineState.Error }
+            assertEquals(
+                EngineError.Output("nd_out_open failed with -4"),
+                (engine.state.value as EngineState.Error).error,
+            )
+        }
+    }
+
+    @Test
+    fun aRemovedDeviceIsDiscardedAndTheNextPlayReopens() {
+        val outputs = mutableListOf<FakeOutput>()
+        engine(output = { FakeOutput().also { outputs += it } }).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("ready") { engine.state.value is EngineState.Ready }
+            engine.onDeviceRemoved()
+            await("output error") { engine.state.value is EngineState.Error }
+            assertEquals(1, outputs.size)
+            assertTrue(outputs[0].closed, "the removed device must be discarded")
+            engine.setWindow(listOf(item), 0, null)
+            await("the next play opens a fresh output") { outputs.size == 2 }
+        }
+    }
+
+    /** The engine's output seam, driven by the fault tests. */
+    private class FakeOutput(
+        private val failOn: FailOn? = null,
+        private val code: Int = NdOutputException.E_DEVICE,
+    ) : AudioOutput {
+        var writes = 0
+            private set
+        var starts = 0
+            private set
+        var closed = false
+            private set
+        private var played = 0L
+
+        override val framesPlayed: Long get() = played
+        override val underrunFrames: Long get() = 0
+
+        override fun freeFrames(): Int = 4_096
+
+        override fun write(
+            pcm: MemorySegment,
+            frames: Int,
+        ): Int {
+            writes++
+            if (failOn == FailOn.WRITE) throw NdOutputException("nd_out_write failed with $code", code)
+            played += frames
+            return frames
+        }
+
+        override fun start(): Int {
+            starts++
+            if (failOn == FailOn.START) throw NdOutputException("nd_out_start failed with $code", code)
+            return 0
+        }
+
+        override fun stop(): Int = 0
+
+        override fun clear(): Int = 0
+
+        override fun describe(): String =
+            """{"rate":44100,"channels":2,"backend":"fake","device":"fake","period":1024}"""
+
+        override fun clockReader(): () -> Long = { played }
+
+        override fun underrunReader(): () -> Long = { 0L }
+
+        override fun close() {
+            closed = true
+        }
+    }
+
+    private enum class FailOn { WRITE, START }
 
     private class BlockedSource(
         bytes: ByteArray,

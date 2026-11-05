@@ -61,6 +61,15 @@ interface AudioEngine : AutoCloseable {
     /** Current position in milliseconds; safe from any thread (TimelineClock). */
     fun positionMs(): Long
 
+    /**
+     * MD2's route monitor reports the output device in use disappeared (11 Device
+     * loss, sleep and session restore). The engine discards its output so the next
+     * play opens the default device; the controller pauses and saves. The default
+     * implementation does nothing, because the null and fake backends have no
+     * device to lose.
+     */
+    fun onDeviceRemoved() = Unit
+
     /** Stop the engine thread and release the pipeline; the object is then unusable. */
     override fun close()
 }
