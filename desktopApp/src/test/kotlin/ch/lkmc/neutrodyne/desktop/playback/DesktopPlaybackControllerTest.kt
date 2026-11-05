@@ -5,6 +5,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.testing.FakeAudioEngine
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -267,6 +269,36 @@ class DesktopPlaybackControllerTest {
                         .observeSession()
                         .first()
                         ?.currentEpisodeId,
+                )
+            }
+        }
+
+    @Test
+    fun playDownloadsStartsTheRequestedEpisodeInTheDownloadsContext() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                // The Downloads context only admits completed downloads (FeedDao's context query).
+                fixture.graph.databaseOpener
+                    .requireDatabase()
+                    .downloadDao()
+                    .insert(downloadEntity(3))
+                assertEquals(PlayResult.Started, fixture.controller.playDownloads(3))
+                fixture.awaitEpisode(3)
+                assertEquals(
+                    3L,
+                    fixture.engine.items
+                        .first()
+                        .episodeId,
+                )
+                assertEquals(
+                    ContextType.DOWNLOADS,
+                    fixture.graph
+                        .queueRepository()
+                        .observeSession()
+                        .first()
+                        ?.context
+                        ?.type,
                 )
             }
         }
