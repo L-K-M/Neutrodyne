@@ -49,9 +49,11 @@ import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.backup.BackupKind
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
@@ -351,7 +353,7 @@ class RestoreWorkerTest {
                     orderKeys = ProtocolOrderKeys,
                     clock = clock,
                 ),
-            settingsMerge = RestoreSettingsMerge(settings),
+            settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(app), FakeSettingsSyncPort()),
             payloads =
                 PayloadStore(
                     storagePaths = storagePaths,

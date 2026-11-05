@@ -191,9 +191,14 @@ internal class RestoreRunner(
                     RestoreMode.REPLACE -> MergePolicy.RESTORE_REPLACE
                 }
             val settled =
-                merger.mergeLibrary(staged, policy, request.categories) { done, total ->
-                    progressFlow.value = RestoreProgress.Running(sessionId, PHASE_LIBRARY, done, total)
-                }
+                merger.mergeLibrary(
+                    staged,
+                    policy,
+                    request.categories,
+                    progress = { done, total ->
+                        progressFlow.value = RestoreProgress.Running(sessionId, PHASE_LIBRARY, done, total)
+                    },
+                )
             val episodeResult =
                 episodes.mergeEpisodes(
                     staged,
@@ -201,9 +206,10 @@ internal class RestoreRunner(
                     policy,
                     request.categories,
                     episodeTotal = staged.episodeLines,
-                ) { done, total ->
-                    progressFlow.value = RestoreProgress.Running(sessionId, PHASE_EPISODES, done, total)
-                }
+                    progress = { done, total ->
+                        progressFlow.value = RestoreProgress.Running(sessionId, PHASE_EPISODES, done, total)
+                    },
+                )
 
             var settingsApplied = 0
             var settingsSkipped = 0

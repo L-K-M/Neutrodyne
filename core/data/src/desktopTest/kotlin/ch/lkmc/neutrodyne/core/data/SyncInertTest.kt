@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -187,7 +188,12 @@ class SyncInertTest {
                         orderKeys = ProtocolOrderKeys,
                         clock = clock,
                     ),
-                settingsMerge = RestoreSettingsMerge(FakeSettingsRepository()),
+                settingsMerge =
+                    RestoreSettingsMerge(
+                        FakeSettingsRepository(),
+                        TestDb.inMemory(),
+                        FakeSettingsSyncPort(),
+                    ),
                 payloads = payloadStore,
                 storagePaths = storagePaths,
                 fileSystem = FileSystem.SYSTEM,
