@@ -140,6 +140,10 @@ internal class DesktopSecretStore(
         }
     }
 
+    override suspend fun originsWithPrefix(prefix: String): List<String> =
+        // File-only `sync:` entries have no row, so the union covers everything the store keeps.
+        (dao.origins() + file.entries().keys).filter { it.startsWith(prefix) }.distinct()
+
     private inner class DesktopSeam : SecretStoreSeam {
         /** The interrupted-put sweep runs once per process, inside the core mutex. */
         private var orphansChecked = false
