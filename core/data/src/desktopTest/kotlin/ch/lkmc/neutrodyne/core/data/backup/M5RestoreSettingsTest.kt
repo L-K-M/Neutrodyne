@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.core.data.backup
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.backup.SettingValueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import kotlinx.coroutines.test.runTest
@@ -32,7 +34,7 @@ class M5RestoreSettingsTest {
                 )
             val result =
                 assertIs<Outcome.Success<SettingsMergeCounts>>(
-                    RestoreSettingsMerge(store).apply(SettingsV1(values)),
+                    RestoreSettingsMerge(store, TestDb.inMemory(), FakeSettingsSyncPort()).apply(SettingsV1(values)),
                 ).value
             assertEquals(3, result.applied)
             assertEquals(6, result.skipped)

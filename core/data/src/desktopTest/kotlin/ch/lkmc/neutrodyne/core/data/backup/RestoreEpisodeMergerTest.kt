@@ -19,6 +19,8 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.MergeSummary
+import ch.lkmc.neutrodyne.core.model.MergeValueOrigin
+import ch.lkmc.neutrodyne.core.model.MergedRecord
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
@@ -1071,9 +1073,9 @@ class RestoreEpisodeMergerTest {
 
             staged.failAfter = BackupDao.EPISODE_CHUNK // the 1,001st line never arrives
             assertFailsWith<IllegalStateException> {
-                restore(staged, MergePolicy.RESTORE_MERGE, ALL, total = lines.size) { d, t ->
+                restore(staged, MergePolicy.RESTORE_MERGE, ALL, total = lines.size, progress = { d, t ->
                     progress += d to t
-                }
+                })
             }
             // The first 1,000-line transaction committed; the interrupted second one did not.
             assertEquals(BackupDao.EPISODE_CHUNK.toLong(), countSql("SELECT COUNT(*) FROM episode"))
@@ -1116,6 +1118,249 @@ class RestoreEpisodeMergerTest {
             assertEquals(first, snapshot(p, "g:e", "g:new"))
         }
 
+    // --- LINK_* (MS2 First-link column) -------------------------------------------------------------
+
+    private val june = 1_780_000_000_000L
+    private val october = 1_790_000_000_000L
+
+    /** MS2 acceptance 3: an older local played mark loses to a newer remote "unplayed". */
+    @Test
+    fun linkMergeANewerRemoteUnplayedClearsAnOlderLocalPlayedMark() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e = seedEpisode(p, "g:e")
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = e, playedAt = june, playCount = 2, updatedAt = june),
+            )
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    // The record carries played = false at October; `pl` is null = unplayed.
+                    episodeLines =
+                        listOf(
+                            line(
+                                "https://a/feed",
+                                "g:e",
+                                pl = null,
+                                lp = null,
+                                ts = october,
+                                fc =
+                                    mapOf("played" to october),
+                            ),
+                        ),
+                )
+
+            restore(staged, MergePolicy.LINK_MERGE, ALL)
+
+            val s = assertNotNull(db.episodeStateDao().byEpisode(e))
+            assertNull(s.playedAt)
+            assertEquals(2, s.playCount)
+            assertEquals(october, s.updatedAt)
+        }
+
+    @Test
+    fun linkMergeKeepsTheLocalMarkWhenTheRecordIsOlder() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e = seedEpisode(p, "g:e")
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = e, playedAt = october, updatedAt = october),
+            )
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    episodeLines =
+                        listOf(line("https://a/feed", "g:e", pl = june, ts = june, fc = mapOf("played" to june))),
+                )
+
+            restore(staged, MergePolicy.LINK_MERGE, ALL)
+
+            assertEquals(october, db.episodeStateDao().byEpisode(e)!!.playedAt)
+        }
+
+    /** 05 Archive's staging rule: a record without `played`/`fav` never clears either mark. */
+    @Test
+    fun linkMergeLeavesStateAloneWhenTheRecordCarriesNoStateFields() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e = seedEpisode(p, "g:e")
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = e, playedAt = june, isFavorite = true, updatedAt = june),
+            )
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    // Only a position: ts = 0, no fc entries.
+                    episodeLines = listOf(line("https://a/feed", "g:e", pos = 5_000, posAt = october)),
+                )
+
+            restore(staged, MergePolicy.LINK_MERGE, ALL)
+
+            val s = assertNotNull(db.episodeStateDao().byEpisode(e))
+            assertEquals(june, s.playedAt)
+            assertTrue(s.isFavorite)
+            assertEquals(june, s.updatedAt)
+            val pos = assertNotNull(db.positionDao().byEpisode(e))
+            assertEquals(5_000L, pos.positionMs)
+            assertEquals(october, pos.updatedAt)
+        }
+
+    @Test
+    fun linkMergeFavouriteIsDecidedByItsOwnClock() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e = seedEpisode(p, "g:e")
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = e, isFavorite = false, updatedAt = october),
+            )
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    // An older remote favourite loses; a played field at June carries the line.
+                    episodeLines =
+                        listOf(
+                            line("https://a/feed", "g:e", fav = true, ts = june, fc = mapOf("fav" to june)),
+                        ),
+                )
+
+            restore(staged, MergePolicy.LINK_MERGE, ALL)
+
+            assertFalse(db.episodeStateDao().byEpisode(e)!!.isFavorite)
+        }
+
+    /**
+     * 05 First-link column: only queued, current, in-progress or favourite unmatched lines
+     * stub; every other one goes to `onUnmatched` for 10 to park.
+     */
+    @Test
+    fun linkMergeStubsOnlySpecialUnmatchedLinesAndParksTheRest() =
+        runTest {
+            val syncId = "00000000-0000-4000-8000-0000000000aa"
+            val p =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://a/feed", syncId = syncId),
+                )
+            val queue = QueueV1(upNext = listOf(UpNextRefV1("https://a/feed", "g:queued")))
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    episodeLines =
+                        listOf(
+                            // Plain unmatched line with evidence: parked, not stubbed.
+                            line(
+                                "https://a/feed",
+                                "g:plain",
+                                u = "https://a/e1.mp3",
+                                pl = october,
+                                ts = october,
+                                fc =
+                                    mapOf("played" to october),
+                            ),
+                            // In progress (pos > 0, not played): stubs.
+                            line("https://a/feed", "g:progress", u = "https://a/e2.mp3", pos = 100, posAt = october),
+                            // Favourite: stubs.
+                            line(
+                                "https://a/feed",
+                                "g:fav",
+                                u = "https://a/e3.mp3",
+                                fav = true,
+                                ts = october,
+                                fc =
+                                    mapOf("fav" to october),
+                            ),
+                            // Referenced by queue.json: stubs.
+                            line("https://a/feed", "g:queued", u = "https://a/e4.mp3"),
+                        ),
+                    queue = queue,
+                )
+
+            val unmatched = ArrayList<Pair<String, String>>()
+            val summary =
+                restore(
+                    staged,
+                    MergePolicy.LINK_MERGE,
+                    ALL,
+                    onUnmatched = { sync, key -> unmatched += sync to key },
+                )
+
+            assertEquals(3, summary.stubs)
+            assertEquals(1, summary.unmatched)
+            assertEquals(listOf(syncId to "g:plain"), unmatched)
+        }
+
+    /** The winners reach `onApplied` with the record's logical id and per-field origins. */
+    @Test
+    fun linkMergeReportsWinnersThroughOnApplied() =
+        runTest {
+            val syncId = "00000000-0000-4000-8000-0000000000bb"
+            val p =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://a/feed", syncId = syncId),
+                )
+            val e = seedEpisode(p, "g:e")
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = e, playedAt = june, updatedAt = june),
+            )
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    episodeLines =
+                        listOf(line("https://a/feed", "g:e", ts = october, fc = mapOf("played" to october))),
+                )
+
+            val applied = ArrayList<MergedRecord>()
+            restore(
+                staged,
+                MergePolicy.LINK_MERGE,
+                ALL,
+                onApplied = { applied += it },
+            )
+
+            val episode = applied.first { it.collection == "episode" && it.recordId == syncId + "g:e" }
+            val played = assertNotNull(episode.fields["played"])
+            assertEquals(october, played.originalAtMs)
+            assertEquals(MergeValueOrigin.STAGED, played.origin)
+            // The staged podcast's identity fields report through the same callback.
+            assertTrue(applied.any { it.collection == "podcast" && it.recordId == syncId })
+        }
+
+    @Test
+    fun linkReplaceTakesTheStagedStateVerbatim() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e = seedEpisode(p, "g:e")
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = e, playedAt = october, updatedAt = october),
+            )
+            val staged =
+                staged(
+                    staging = true,
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    // Older than the local mark, but Replace owns the row.
+                    episodeLines =
+                        listOf(
+                            line(
+                                "https://a/feed",
+                                "g:e",
+                                pl = null,
+                                ts = june,
+                                fc =
+                                    mapOf("played" to june),
+                            ),
+                        ),
+                )
+
+            restore(staged, MergePolicy.LINK_REPLACE, ALL)
+
+            assertNull(db.episodeStateDao().byEpisode(e)!!.playedAt)
+        }
+
     // --- Helpers -------------------------------------------------------------------------------------
 
     /** The caller contract: transaction A first, then the episode/queue/session phases. */
@@ -1127,9 +1372,21 @@ class RestoreEpisodeMergerTest {
         episodes: RestoreEpisodeMerger = this.episodes,
         total: Int = 0,
         progress: (Int, Int) -> Unit = { _, _ -> },
+        onUnmatched: (suspend (String, String) -> Unit)? = null,
+        onApplied: (suspend (MergedRecord) -> Unit)? = null,
     ): MergeSummary {
-        val settled = merger.mergeLibrary(staged, policy, categories)
-        return episodes.mergeEpisodes(staged, settled, policy, categories, total, progress).summary
+        val settled = merger.mergeLibrary(staged, policy, categories, onApplied = onApplied)
+        return episodes
+            .mergeEpisodes(
+                staged,
+                settled,
+                policy,
+                categories,
+                episodeTotal = total,
+                progress = progress,
+                onUnmatched = onUnmatched,
+                onApplied = onApplied,
+            ).summary
     }
 
     /** A restore bound to the real `OrderKey` port — the Replace `ok` cases. */
@@ -1253,6 +1510,7 @@ class RestoreEpisodeMergerTest {
         dis: Long? = null,
         md: Long? = null,
         ts: Long = 0,
+        fc: Map<String, Long>? = null,
     ) = EpisodeLineV1(
         p = p,
         k = k,
@@ -1276,6 +1534,7 @@ class RestoreEpisodeMergerTest {
         dis = dis,
         md = md,
         ts = ts,
+        fc = fc,
     )
 
     private fun podcastV1(
@@ -1312,7 +1571,9 @@ class RestoreEpisodeMergerTest {
         episodeLines: List<EpisodeLineV1> = emptyList(),
         rawLines: List<String> = emptyList(),
         queue: QueueV1? = null,
-    ): CodecStaged = CodecStaged(LibraryV1(podcasts = podcasts, groups = groups), episodeLines, rawLines, queue)
+        staging: Boolean = false,
+    ): CodecStaged =
+        CodecStaged(LibraryV1(podcasts = podcasts, groups = groups), episodeLines, rawLines, queue, staging = staging)
 
     private companion object {
         const val ARCHIVE_AT = 1_650_000_000_000L
@@ -1331,8 +1592,9 @@ private class CodecStaged(
     rawLines: List<String>,
     private val queue: QueueV1?,
     override val createdAtMs: Long = 1_650_000_000_000L,
+    staging: Boolean = false,
 ) : StagedLibrary {
-    private val codec = BackupCodec()
+    private val codec = BackupCodec(if (staging) BackupCodec.Mode.STAGING else BackupCodec.Mode.ARCHIVE)
     private val libraryText = codec.encodeLibrary(library)
     private val queueText = queue?.let(codec::encodeQueue)
     private val episodesText =

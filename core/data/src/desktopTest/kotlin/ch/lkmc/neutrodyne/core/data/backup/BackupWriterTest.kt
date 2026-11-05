@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.settings.UpdateSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
@@ -323,7 +324,9 @@ class BackupWriterTest {
             reader(target()).use { reader ->
                 val values = reader.settings().values
                 val restored = FakeSettingsRepository()
-                assertIs<Outcome.Success<*>>(RestoreSettingsMerge(restored).apply(reader.settings()))
+                assertIs<Outcome.Success<*>>(
+                    RestoreSettingsMerge(restored, TestDb.inMemory(), FakeSettingsSyncPort()).apply(reader.settings()),
+                )
                 assertEquals(expected, restored.observePortableSnapshot().first())
                 assertEquals(false, restored.get(AppearanceSettingKeys.ARTWORK_TINT))
                 assertEquals(true, restored.get(AppearanceSettingKeys.PURE_BLACK))
@@ -372,7 +375,9 @@ class BackupWriterTest {
                     exported.values.filter { it.key.startsWith("updates.") }.map { it.key },
                 )
                 val restored = FakeSettingsRepository()
-                assertIs<Outcome.Success<*>>(RestoreSettingsMerge(restored).apply(exported))
+                assertIs<Outcome.Success<*>>(
+                    RestoreSettingsMerge(restored, TestDb.inMemory(), FakeSettingsSyncPort()).apply(exported),
+                )
                 assertEquals(false, restored.get(UpdateSettingKeys.CHECK_ENABLED))
                 assertEquals(-1L, restored.get(UpdateSettingKeys.LAST_CHECK_AT))
                 assertEquals(false, restored.get(UpdateSettingKeys.FIRST_RUN_CHOICE_DONE))

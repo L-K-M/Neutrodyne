@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.core.data.backup
 
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.backup.SettingValueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import kotlinx.coroutines.test.runTest
@@ -25,7 +27,11 @@ class UpdateRestoreSettingsTest {
                 ) + Keys.ALL.drop(1).map { SettingValueV1(it.name, "Int64", JsonPrimitive(123L)) }
             val counts =
                 assertIs<Outcome.Success<SettingsMergeCounts>>(
-                    RestoreSettingsMerge(settings).apply(SettingsV1(entries)),
+                    RestoreSettingsMerge(
+                        settings,
+                        TestDb.inMemory(),
+                        FakeSettingsSyncPort(),
+                    ).apply(SettingsV1(entries)),
                 ).value
             assertEquals(1, counts.applied)
             assertEquals(7, counts.skipped)
