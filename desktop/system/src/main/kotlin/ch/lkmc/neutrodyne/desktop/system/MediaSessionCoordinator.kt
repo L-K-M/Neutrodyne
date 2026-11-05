@@ -57,35 +57,49 @@ class MediaSessionCoordinator(
 
     private suspend fun dispatch(command: RemoteCommand) {
         when (command) {
-            RemoteCommand.Play -> controller.play()
+            RemoteCommand.Play -> {
+                controller.play()
+            }
 
-            RemoteCommand.Pause -> controller.pause()
+            RemoteCommand.Pause -> {
+                controller.pause()
+            }
 
-            RemoteCommand.Toggle -> controller.togglePlayPause()
+            RemoteCommand.Toggle -> {
+                controller.togglePlayPause()
+            }
 
-            RemoteCommand.Next ->
+            RemoteCommand.Next -> {
                 if (hardwareButtons.value == HardwareButtons.EPISODE) {
                     controller.skipToNext()
                 } else {
                     controller.skipForward()
                 }
+            }
 
-            RemoteCommand.Previous ->
+            RemoteCommand.Previous -> {
                 if (hardwareButtons.value == HardwareButtons.EPISODE) {
                     controller.skipToPrevious()
                 } else {
                     controller.skipBack()
                 }
+            }
 
-            RemoteCommand.SkipForward -> controller.skipForward()
+            RemoteCommand.SkipForward -> {
+                controller.skipForward()
+            }
 
-            RemoteCommand.SkipBack -> controller.skipBack()
+            RemoteCommand.SkipBack -> {
+                controller.skipBack()
+            }
 
             is RemoteCommand.SeekTo -> {
                 if (seekAllowed()) controller.seekTo(command.positionMs)
             }
 
-            is RemoteCommand.SetRate -> applyExternalRate(command.rate)
+            is RemoteCommand.SetRate -> {
+                applyExternalRate(command.rate)
+            }
         }
     }
 
@@ -100,7 +114,9 @@ class MediaSessionCoordinator(
 
     private fun seekWindowNanos(): Long = (1_000_000_000L.toDouble() / SEEKS_PER_SECOND).roundToLong()
 
-    private val rateDropped = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val rateDropped =
+        java.util.concurrent.atomic
+            .AtomicBoolean(false)
 
     private suspend fun applyExternalRate(rate: Float) {
         if (!rate.isFinite()) return

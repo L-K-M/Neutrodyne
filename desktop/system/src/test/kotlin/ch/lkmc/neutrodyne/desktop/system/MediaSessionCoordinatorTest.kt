@@ -80,16 +80,17 @@ class MediaSessionCoordinatorTest {
             runCurrent()
 
             val actions = controller.calls.filterIsInstance<FakePlaybackController.Call.Transport>().map { it.action }
-            assertThat(actions).containsExactly(
-                FakePlaybackController.Action.PLAY,
-                FakePlaybackController.Action.PAUSE,
-                FakePlaybackController.Action.TOGGLE,
-                FakePlaybackController.Action.NEXT,
-                FakePlaybackController.Action.PREVIOUS,
-                FakePlaybackController.Action.FORWARD,
-                FakePlaybackController.Action.BACK,
-                FakePlaybackController.Action.SEEK,
-            ).inOrder()
+            assertThat(actions)
+                .containsExactly(
+                    FakePlaybackController.Action.PLAY,
+                    FakePlaybackController.Action.PAUSE,
+                    FakePlaybackController.Action.TOGGLE,
+                    FakePlaybackController.Action.NEXT,
+                    FakePlaybackController.Action.PREVIOUS,
+                    FakePlaybackController.Action.FORWARD,
+                    FakePlaybackController.Action.BACK,
+                    FakePlaybackController.Action.SEEK,
+                ).inOrder()
             assertThat(
                 controller.calls
                     .filterIsInstance<FakePlaybackController.Call.Transport>()
@@ -115,12 +116,13 @@ class MediaSessionCoordinatorTest {
             runCurrent()
 
             val actions = controller.calls.filterIsInstance<FakePlaybackController.Call.Transport>().map { it.action }
-            assertThat(actions).containsExactly(
-                FakePlaybackController.Action.FORWARD,
-                FakePlaybackController.Action.BACK,
-                FakePlaybackController.Action.NEXT,
-                FakePlaybackController.Action.PREVIOUS,
-            ).inOrder()
+            assertThat(actions)
+                .containsExactly(
+                    FakePlaybackController.Action.FORWARD,
+                    FakePlaybackController.Action.BACK,
+                    FakePlaybackController.Action.NEXT,
+                    FakePlaybackController.Action.PREVIOUS,
+                ).inOrder()
         }
 
     @Test

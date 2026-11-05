@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.desktop.system
 
 import com.google.common.truth.Truth.assertThat
-import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.freedesktop.dbus.DBusPath
@@ -12,6 +11,7 @@ import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * The Linux idle-sleep inhibition over a real session bus: a fake
@@ -85,7 +85,9 @@ class LinuxIdleSleepInhibitorBusTest {
         private val bus: DBusConnection,
     ) : PortalInhibit {
         val calls = ConcurrentLinkedQueue<InhibitCall>()
-        val closedHandles = java.util.concurrent.atomic.AtomicInteger(0)
+        val closedHandles =
+            java.util.concurrent.atomic
+                .AtomicInteger(0)
 
         private var nextHandle = 0
 

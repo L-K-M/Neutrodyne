@@ -44,7 +44,9 @@ object IdleSleepInhibitors {
 object PendingIdleSleepInhibitor : IdleSleepInhibitor {
     private const val TAG = "IdleSleep"
 
-    private val logged = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val logged =
+        java.util.concurrent.atomic
+            .AtomicBoolean(false)
 
     override fun acquire(reason: String) {
         if (logged.compareAndSet(false, true)) {

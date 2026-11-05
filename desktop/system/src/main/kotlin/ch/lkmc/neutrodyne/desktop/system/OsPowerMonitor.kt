@@ -77,11 +77,12 @@ class OsPowerMonitor private constructor(
             nativeSession: () -> SystemMediaSession?,
         ): OsPowerMonitor =
             when (os) {
-                DesktopOs.LINUX ->
+                DesktopOs.LINUX -> {
                     runCatching { LinuxSuspendMonitor.open() }.fold(
                         onSuccess = { monitor -> fromEvents(scope, monitor.events, monitor) },
                         onFailure = { noNotices(scope, "logind system bus unavailable: ${it.message}") },
                     )
+                }
 
                 DesktopOs.WINDOWS, DesktopOs.MACOS, null -> {
                     val session =

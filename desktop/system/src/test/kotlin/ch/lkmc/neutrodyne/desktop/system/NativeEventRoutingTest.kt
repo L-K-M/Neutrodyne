@@ -31,11 +31,11 @@ class NativeEventRoutingTest {
     @Test
     fun systemEventKindsStaySystemEvents() {
         for (kind in listOf(
-                 NativeSessionEventKind.SUSPEND,
-                 NativeSessionEventKind.RESUME,
-                 NativeSessionEventKind.REMOVED,
-                 NativeSessionEventKind.DEFAULT_CHANGED,
-             )) {
+            NativeSessionEventKind.SUSPEND,
+            NativeSessionEventKind.RESUME,
+            NativeSessionEventKind.REMOVED,
+            NativeSessionEventKind.DEFAULT_CHANGED,
+        )) {
             assertEquals(NativeEventRouting.SystemEvent, routeNativeEvent(kind), "$kind")
         }
     }

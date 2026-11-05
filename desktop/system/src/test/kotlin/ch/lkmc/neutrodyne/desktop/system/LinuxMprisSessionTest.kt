@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.testing.testNowPlaying
-import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -20,6 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * MD2 AC1 on Linux: `dbus-run-session` hands the test JVM a private session bus through

@@ -112,6 +112,20 @@ interface DesktopAppGraph {
 
     val crashReporter: CrashReporter
 
+    /**
+     * MD2's OS integration: the per-OS media session (or the documented unavailable one),
+     * the `PowerMonitor` port's `OsPowerMonitor`, the idle-sleep inhibitor, and the surface
+     * wiring the shell starts at band 250 and closes on shutdown.
+     */
+    val systemMediaSession: ch.lkmc.neutrodyne.desktop.system.SystemMediaSession
+
+    val idleSleepInhibitor: ch.lkmc.neutrodyne.desktop.system.IdleSleepInhibitor
+
+    val osSurfaces: ch.lkmc.neutrodyne.desktop.os.DesktopOsSurfaces
+
+    /** The OS surfaces' late-bound window hooks (MPRIS `Raise`/`Quit`). */
+    val shellActions: ch.lkmc.neutrodyne.desktop.di.DesktopShellActions
+
     /** The window maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
 

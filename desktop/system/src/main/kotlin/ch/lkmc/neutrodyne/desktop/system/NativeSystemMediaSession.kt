@@ -133,7 +133,9 @@ class MacNowPlayingSession private constructor(
 
 /** How one polled native session event leaves the session: a command or a system event. */
 internal sealed interface NativeEventRouting {
-    data class Command(val command: RemoteCommand) : NativeEventRouting
+    data class Command(
+        val command: RemoteCommand,
+    ) : NativeEventRouting
 
     data object SystemEvent : NativeEventRouting
 }
@@ -151,11 +153,17 @@ internal fun routeNativeEvent(
 ): NativeEventRouting =
     when (kind) {
         NativeSessionEventKind.PLAY -> NativeEventRouting.Command(RemoteCommand.Play)
+
         NativeSessionEventKind.PAUSE -> NativeEventRouting.Command(RemoteCommand.Pause)
+
         NativeSessionEventKind.TOGGLE -> NativeEventRouting.Command(RemoteCommand.Toggle)
+
         NativeSessionEventKind.NEXT -> NativeEventRouting.Command(RemoteCommand.Next)
+
         NativeSessionEventKind.PREVIOUS -> NativeEventRouting.Command(RemoteCommand.Previous)
+
         NativeSessionEventKind.SEEK -> NativeEventRouting.Command(RemoteCommand.SeekTo(seekValueMs))
+
         NativeSessionEventKind.SUSPEND,
         NativeSessionEventKind.RESUME,
         NativeSessionEventKind.REMOVED,

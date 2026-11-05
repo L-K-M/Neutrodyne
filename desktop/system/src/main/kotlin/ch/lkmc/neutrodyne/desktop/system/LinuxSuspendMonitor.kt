@@ -3,7 +3,6 @@ package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.common.PowerEvent
 import ch.lkmc.neutrodyne.core.common.PowerMonitor
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,6 +13,7 @@ import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBusInterface
 import org.freedesktop.dbus.interfaces.DBusSigHandler
 import org.freedesktop.dbus.messages.DBusSignal
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The Linux suspend/resume source of `OsPowerMonitor` (11 Power): logind's
