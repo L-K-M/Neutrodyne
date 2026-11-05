@@ -7,16 +7,19 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
+import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
@@ -45,9 +48,11 @@ class SyncEngine(
     private val tokens: SyncTokenStore,
     private val effects: SyncApplyEffects,
     private val notices: SyncNoticeBus,
+    private val playback: PlaybackSyncPort = NoPlaybackSync,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
+    private val clockStore = SyncClockStore(db)
 
     /**
      * Rounds serialize: an in-process round, a `SyncWorker` round and the controller's "Sync now"
@@ -67,6 +72,9 @@ class SyncEngine(
         // 10 Durable apply effects: recover journaled settings and credentials at each start,
         // before pushing or reconciling — a committed cursor must never strand their effects.
         effects.drain()
+        // A deferred removal whose playback ended releases here too, so a restart or any round
+        // applies it even when no boundary event was observed (10 Mass-change guard rule 4).
+        releaseDeferred()
         var pushed = 0
         var applied = 0
         var stale = 0
@@ -122,13 +130,11 @@ class SyncEngine(
             )
         }
 
-        val batch = MassChangeGuard.evaluate(db, roundId, localPodcastCount())
+        val batch = MassChangeGuard.evaluate(db, roundId, localPodcastCount(), clock.now())
         if (batch != null) {
             held += batch.podcasts.size + batch.groups.size
-        } else {
-            // Below the thresholds the guard deleted its provisional row; the removals were staged
-            // in `sync_held` only when held, so nothing else to apply here.
         }
+        // A null batch means the guard applied a below-threshold batch itself or had nothing.
         db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastSyncAt = clock.now())) }
         return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
     }
@@ -143,6 +149,25 @@ class SyncEngine(
         passwordNeeded += page.passwordNeeded
         effects.drain()
         return records.size
+    }
+
+    /**
+     * 10 Mass-change guard rule 4: apply the deferred removals whose podcast is no longer the
+     * loaded, playing item — a boundary event or any round reaches this.
+     */
+    suspend fun releaseDeferred() {
+        val active = playback.active.value
+        val playingRid =
+            if (active.isPlaying) {
+                active.episodeId?.let { episodeId ->
+                    db.episodeDao().byId(episodeId)?.let { episode ->
+                        db.podcastDao().byId(episode.podcastId)?.syncId
+                    }
+                }
+            } else {
+                null
+            }
+        MassChangeGuard.releaseDeferred(db, playingRid, clock.now())
     }
 
     private suspend fun handleResults(
@@ -169,7 +194,53 @@ class SyncEngine(
                 .mapNotNull { runCatching { Hlc.parse(it) }.getOrNull() }
                 .minOrNull()
                 ?.let { db.syncOutboxDao().deleteAcked(coll, rid, "*", it.packed, it.nodeId.value) }
+            mergeAckedSnapshot(coll, rid, change)
         }
+    }
+
+    /**
+     * 10 Outbox and coalescing: the acknowledgement merges the exact sent fields into
+     * `sync_clock` raw state by the normal field rules, never lowering a known field clock —
+     * the cursor alone must not strand the accepted values (a resync replay compares against
+     * them). A sent `auth` keeps only its protected representation: the plaintext that left
+     * this device never enters Room.
+     */
+    private suspend fun mergeAckedSnapshot(
+        collWire: String,
+        rid: String,
+        change: ChangeDto,
+    ) {
+        val coll = runCatching { SyncCollection.fromWire(collWire) }.getOrNull() ?: return
+        val fields = HashMap<String, FieldState>()
+        val growSets = HashMap<String, Set<String>>()
+        for ((name, value) in change.fields) {
+            val clock = value.c ?: continue
+            val parsed = runCatching { Hlc.parse(clock) }.getOrNull() ?: continue
+            if (value.v != null) {
+                fields[name] = FieldState(value.v, parsed, value.reset == true)
+            } else if (!value.add.isNullOrEmpty()) {
+                growSets[name] = value.add.toSet()
+            }
+        }
+        if (fields.isEmpty() && growSets.isEmpty()) return
+        val incoming = RecordState(coll, fields, growSets, change.match)
+        val stored = clockStore.get(collWire, rid)
+        val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
+        val protection = protectAuthRecord(db, rid, merged.record, merged.advanced, stored)
+        clockStore.put(
+            collWire,
+            rid,
+            RawSyncRecord(
+                state = protection.state,
+                by = stored?.by,
+                authReference = protection.authReference ?: stored?.authReference,
+                pendingAuth = protection.pendingAuth ?: stored?.pendingAuth,
+                redirect = stored?.redirect,
+                alias = stored?.alias,
+                settingHash = stored?.settingHash,
+                pendingSetting = stored?.pendingSetting,
+            ),
+        )
     }
 
     private suspend fun raiseHlc(records: List<RecordDto>) {

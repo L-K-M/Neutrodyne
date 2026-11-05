@@ -44,16 +44,44 @@ class SyncApplyEffects(
         )
     }
 
-    /** Applies every pending setting whose marker survived; leaves the rest for a later drain. */
+    /**
+     * Applies every pending setting whose marker survived. A newer local intent (a `v` outbox
+     * row stamped after the marker's clock) supersedes the remote effect: its DataStore value
+     * is never clobbered and the marker clears without applying — the intent's push and the
+     * server's answer converge on the newer value (10 Durable apply effects).
+     */
     suspend fun drainSettings() {
         for (row in db.syncClockDao().all()) {
             if (row.coll != SyncCollection.SETTING.wire) continue
             val raw = decode(row.clocks) ?: continue
             val pending = raw.pendingSetting ?: continue
             val key = AllSettingKeys.list.firstOrNull { it.name == row.rid } ?: continue
+            if (newerLocalIntentWins(row.rid, pending)) {
+                db.syncClockDao().upsert(row.copy(clocks = encode(raw.copy(pendingSetting = null))))
+                continue
+            }
             if (!settings.applyRemote(key, pending.value)) continue
             db.syncClockDao().upsert(row.copy(clocks = encode(raw.copy(pendingSetting = null))))
         }
+    }
+
+    /** A pending `v` outbox row newer than the marker's clock is the winning local intent. */
+    private suspend fun newerLocalIntentWins(
+        rid: String,
+        pending: PendingSetting,
+    ): Boolean {
+        val pendingClock =
+            runCatching { ch.lkmc.neutrodyne.sync.protocol.Hlc.parse(pending.clock) }.getOrNull() ?: return false
+        for (outboxRow in db.syncOutboxDao().rowsFor(SyncCollection.SETTING.wire, listOf(rid))) {
+            if (outboxRow.field != "v") continue
+            val rowClock =
+                ch.lkmc.neutrodyne.sync.protocol.Hlc(
+                    outboxRow.hlc,
+                    ch.lkmc.neutrodyne.sync.protocol.NodeId(outboxRow.nodeId),
+                )
+            if (rowClock > pendingClock) return true
+        }
+        return false
     }
 
     /**

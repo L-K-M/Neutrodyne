@@ -279,6 +279,31 @@ class SyncSchedulerTest {
 
     // --- the undo-window maturity poke ---------------------------------------------------------
 
+    /**
+     * 10 Mass-change guard rule 4: a playback boundary that ends playback or changes the item
+     * releases the deferred removals; a pause (the item stays current and loaded) does not.
+     */
+    @Test
+    fun `a stop or transition releases deferred removals but a pause does not`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            val releases = mutableListOf<Unit>()
+            deps.releaseDeferred = { releases += Unit }
+            deps.scheduler.start()
+            runCurrent()
+
+            deps.playback.emit(PlaybackSyncEvent.Paused)
+            deps.awaitQuiet()
+            assertTrue(releases.isEmpty(), "a pause keeps the deferral")
+
+            deps.playback.emit(PlaybackSyncEvent.Stopped)
+            deps.await { releases.size == 1 }
+
+            deps.playback.emit(PlaybackSyncEvent.Transition(7L))
+            deps.await { releases.size == 2 }
+        }
+
     @Test
     fun `a held group deletion re-fires the outbox path when it comes of age`() =
         runTest {
@@ -319,6 +344,7 @@ class SyncSchedulerTest {
     ) {
         var interactive: Boolean = true
         var roundFails: Boolean = false
+        var releaseDeferred: suspend () -> Unit = {}
 
         private val clock = scope.clock
 
@@ -345,6 +371,7 @@ class SyncSchedulerTest {
 
                         override suspend fun onUnlinked() = Unit
                     },
+                releaseDeferred = { this@Deps.releaseDeferred() },
             )
 
         fun clockNow(): Long = clock.now()
