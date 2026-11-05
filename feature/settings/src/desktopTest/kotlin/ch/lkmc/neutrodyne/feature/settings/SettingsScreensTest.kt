@@ -31,6 +31,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -54,6 +55,7 @@ import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.testing.FakeDesktopIntegration
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -71,12 +73,15 @@ import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
+import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
+import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.stringResource
 import java.util.Locale
+import kotlin.reflect.KClass
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -370,6 +375,12 @@ class SettingsScreensTest {
             // The harness runs on macOS, so the keep-running label uses its menu-bar wording.
             onNodeWithText("Keep running in the menu bar").assertIsDisplayed()
             onNodeWithText("Start at login").assertIsDisplayed()
+            // The unified page carries the downloads folder as its second section (11 Change
+            // folder); the fake controller's storage emission lands a frame after the page opens.
+            waitUntil("the downloads folder section loads", TIMEOUT_MS) {
+                onAllNodesWithText("Change folder…").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Change folder…").performScrollTo().assertIsDisplayed()
         }
 
     @Test
@@ -466,7 +477,12 @@ class SettingsScreensTest {
         desktopIntegration: DesktopIntegration? = null,
     ) {
         setContent {
-            CompositionLocalProvider(LocalPlatformActions provides platformActions) {
+            CompositionLocalProvider(
+                LocalPlatformActions provides platformActions,
+                // The Desktop page's downloads section resolves its view model like the shells'
+                // wiring does (NeutrodyneWindow provides the real factory); here it maps to fakes.
+                LocalMetroViewModelFactory provides FakeDownloadsViewModelFactory,
+            ) {
                 NeutrodyneRoot(
                     state = RootUiState.READY,
                     actions =
@@ -501,6 +517,21 @@ class SettingsScreensTest {
         }
     }
 }
+
+/**
+ * Serves the Settings pages' view models from `:core:testing` fakes, the way the shells' graph
+ * factory serves them from the real graph. Only the Desktop page's downloads section needs one
+ * in these journeys.
+ */
+private val FakeDownloadsViewModelFactory =
+    object : MetroViewModelFactory() {
+        override val viewModelProviders: Map<KClass<out ViewModel>, () -> ViewModel> =
+            mapOf(
+                DownloadsSettingsViewModel::class to {
+                    DownloadsSettingsViewModel(FakeSettingsRepository(), FakeDownloadController())
+                },
+            )
+    }
 
 private val FakeBuildInfo =
     BuildInfo(
@@ -642,6 +673,9 @@ private fun TopBarStub(tab: TopLevelKey) {
     val title = if (tab == FeedsKey) stringResource(Res.string.nav_feeds) else tab.toString()
     NdTopAppBar(title = title, actions = { SettingsGearButton() })
 }
+
+/** A section fed by a fresh view model needs a few frames before its rows assert. */
+private const val TIMEOUT_MS = 5_000L
 
 /** A scroll viewport clips drawing, while the clickable's measured layout stays unchanged. */
 private fun assertMinimumClickableLayout(node: SemanticsNode) {

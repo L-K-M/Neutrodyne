@@ -95,6 +95,7 @@
 
     <string name="settings_desktop">Desktop</string>
     <string name="desktop_section_window">Window</string>
+    <string name="desktop_section_downloads">Downloads</string>
     <string name="desktop_close_title">When the window is closed</string>
     <string name="desktop_close_quit">Quit unless playing or downloading</string>
     <string name="desktop_close_quit_summary">Neutrodyne keeps running in the tray while it plays or downloads, then quits</string>
