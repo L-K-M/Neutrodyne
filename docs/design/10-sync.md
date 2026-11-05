@@ -776,10 +776,13 @@ dropping them, and a removal of the playing podcast stages its own
 DEFERRED row that `SyncEngine` releases on a `Stopped`/`Transition`
 boundary, at the start of every round, and never for the podcast still
 playing. `PlaybackSyncActive` gained the loaded item's `episodeId` so the
-applier and the release can name the playing podcast; until 06's
-`PlaybackSyncBridge` binds a real `PlaybackSyncPort` (the graph still
-binds `NoPlaybackSync`), the deferral is dormant in production — removals
-apply directly, exactly as before this note.
+applier and the release can name the playing podcast (the same slice
+renamed it `ActivePlayback` with `sinceMs` and made `active` null while
+nothing is loaded, per 06). Since 2026-11-05 the Android graph binds 06's
+`PlaybackSyncBridge`, so the deferral is live on Android; the desktop
+graph keeps `NoPlaybackSync` until `DesktopPlaybackController` lands with
+MD1a.2 (06's implementation note), where the deferral stays dormant and
+removals apply directly.
 
 ### Now playing and handoff
 
