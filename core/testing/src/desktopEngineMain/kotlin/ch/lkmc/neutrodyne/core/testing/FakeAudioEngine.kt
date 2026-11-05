@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.playback.engine.AudioEngine
+import ch.lkmc.neutrodyne.playback.engine.EngineError
 import ch.lkmc.neutrodyne.playback.engine.EngineEvent
 import ch.lkmc.neutrodyne.playback.engine.EngineItem
 import ch.lkmc.neutrodyne.playback.engine.EngineState
@@ -111,6 +112,18 @@ class FakeAudioEngine : AudioEngine {
     }
 
     override fun positionMs(): Long = position
+
+    /**
+     * Mirrors the production engine's route-event reaction: discard the output
+     * and report the device loss, so the controller pauses and saves.
+     */
+    override fun onDeviceRemoved() {
+        commands += "deviceRemoved"
+        if (items.isEmpty()) return
+        events.tryEmit(EngineEvent.DeviceLost)
+        state.value =
+            EngineState.Error(items[currentIndex].episodeId, EngineError.Output("the output device was removed"))
+    }
 
     override fun close() {
         commands += "close"

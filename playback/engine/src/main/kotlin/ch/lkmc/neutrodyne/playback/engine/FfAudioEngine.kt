@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.engine
 
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
+import ch.lkmc.neutrodyne.playback.native.AudioOutput
 import ch.lkmc.neutrodyne.playback.native.NdOutput
 import ch.lkmc.neutrodyne.playback.native.NdOutputException
 import kotlinx.coroutines.Job
@@ -51,6 +52,9 @@ class FfAudioEngine internal constructor(
     private val openSource: (ResolvedSource) -> ByteSource,
     private val backend: EngineBackend = EngineBackend.SYSTEM,
     private val deviceRate: Int = DEFAULT_RATE,
+    private val outputFactory: () -> AudioOutput = {
+        NdOutput.open(ndmediaDirectory, backend.nativeName, deviceRate, CHANNELS, RING_MS)
+    },
 ) : AudioEngine {
     constructor(
         ffmpegDirectory: Path,
@@ -142,8 +146,15 @@ class FfAudioEngine internal constructor(
      */
     private var transitionAtFrame: Long? = null
     private var transitionEvent: EngineEvent.ItemTransition? = null
-    private var output: NdOutput? = null
-    private var ownedOutput: NdOutput? = null
+    private var output: AudioOutput? = null
+    private var ownedOutput: AudioOutput? = null
+
+    /**
+     * The output failure being reported, or null. Set once: the failed device is
+     * discarded so the next play opens a fresh one, and the generation bump stops
+     * the running chain without re-resolving it.
+     */
+    @Volatile private var outputFailure: NdOutputException? = null
     private var outputReady = false
     private var queuedFrames = 0L
     private var emptySinceNs: Long? = null
@@ -254,6 +265,20 @@ class FfAudioEngine internal constructor(
 
     override fun positionMs(): Long = clock?.positionMs() ?: anchorMs.get()
 
+    /**
+     * MD2's route monitor reports the output device in use disappeared (11 Device
+     * loss). The engine discards its output so the next play re-opens the default
+     * device; the controller pauses and saves.
+     */
+    override fun onDeviceRemoved() {
+        synchronized(control) {
+            if (closed.get()) return
+            if (output != null && outputFailure == null) {
+                failOutput(NdOutputException("the output device was removed", NdOutputException.E_DEVICE))
+            }
+        }
+    }
+
     override fun close() {
         synchronized(control) {
             if (!closed.compareAndSet(false, true)) return
@@ -289,6 +314,7 @@ class FfAudioEngine internal constructor(
         transitionAtFrame = null
         transitionEvent = null
         output?.stop()
+        outputFailure = null
         // A reader that sees the detached clock must already see this anchor.
         anchorMs.set(positionMs)
         clock = null
@@ -302,12 +328,17 @@ class FfAudioEngine internal constructor(
 
     private fun applyDesiredState() {
         val out = output ?: return
-        if (wantPlaying && outputReady) {
-            clock?.resume()
-            out.start()
-        } else {
-            out.stop()
-            clock?.pause()
+        try {
+            if (wantPlaying && outputReady) {
+                clock?.resume()
+                out.start()
+            } else {
+                out.stop()
+                clock?.pause()
+            }
+        } catch (failure: NdOutputException) {
+            failOutput(failure)
+            return
         }
         val ready = mutableState.value as? EngineState.Ready ?: return
         mutableState.value = ready.copy(playing = wantPlaying)
@@ -336,6 +367,8 @@ class FfAudioEngine internal constructor(
                     val problem = (failure as? java.util.concurrent.ExecutionException)?.cause ?: failure
                     synchronized(control) {
                         if (!isCurrent(request)) return@synchronized
+                        // An output failure has already published its event and error.
+                        if (outputFailure != null) return@synchronized
                         if (request.attempt == 0 && shouldResolveAgain(problem)) {
                             val position = positionMs()
                             anchorMs.set(position)
@@ -376,7 +409,13 @@ class FfAudioEngine internal constructor(
         first: Prepared,
     ) {
         val generation = request.generation
-        val out = ownedOutput ?: openOutput()
+        val out =
+            try {
+                ownedOutput ?: openOutput()
+            } catch (failure: NdOutputException) {
+                failOutput(failure)
+                return
+            }
         // A new chain (a start or a seek) drops the previous item's queued audio;
         // a handover inside the chain never clears the ring.
         out.stop()
@@ -534,7 +573,8 @@ class FfAudioEngine internal constructor(
             synchronized(control) {
                 output = null
                 outputReady = false
-                out.stop()
+                // A failed output was already discarded by failOutput.
+                if (outputFailure == null) out.stop()
                 if (source === prepared.source) source = null
             }
             prepared.close()
@@ -544,7 +584,7 @@ class FfAudioEngine internal constructor(
     /** Drains the ring and publishes [EngineState.Ended] at the last item's end. */
     private fun finishChain(
         generation: Long,
-        out: NdOutput,
+        out: AudioOutput,
         timeline: TimelineClock,
         readFrames: () -> Long,
         writtenFrames: Long,
@@ -686,13 +726,44 @@ class FfAudioEngine internal constructor(
             }
         }
 
-    private fun openOutput(): NdOutput =
-        NdOutput.open(ndmediaDirectory, backend.nativeName, deviceRate, CHANNELS, RING_MS).also { ownedOutput = it }
+    private fun openOutput(): AudioOutput = outputFactory().also { ownedOutput = it }
+
+    /**
+     * The documented output-device reaction (11 Engine errors and recovery): the
+     * failed device is closed and discarded so the next play opens the default
+     * device again, the last position is kept for the controller's save, a
+     * device-level failure publishes [EngineEvent.DeviceLost], and the state
+     * becomes [EngineState.Error] with [EngineError.Output]. Nothing escapes the
+     * engine thread and no stale output reference survives.
+     */
+    private fun failOutput(failure: NdOutputException) {
+        synchronized(control) {
+            if (outputFailure != null) return
+            outputFailure = failure
+            // The clock dies with the device; keep the last audible position so
+            // the controller's save never falls back to the chain's anchor.
+            val lastPosition = clock?.positionMs() ?: anchorMs.get()
+            anchorMs.set(lastPosition)
+            output = null
+            outputReady = false
+            clock = null
+            ownedOutput?.close()
+            ownedOutput = null
+            if (failure.code == NdOutputException.E_DEVICE) {
+                emit(EngineEvent.DeviceLost)
+            }
+            current?.let {
+                mutableState.value =
+                    EngineState.Error(it.episodeId, EngineError.Output(failure.message ?: "output failed"))
+            }
+            generation.incrementAndGet()
+        }
+    }
 
     private fun write(
         item: EngineItem,
         generation: Long,
-        out: NdOutput,
+        out: AudioOutput,
         readFrames: () -> Long,
         pcm: ShortArray,
     ): Long {
@@ -705,7 +776,13 @@ class FfAudioEngine internal constructor(
             var written = 0
             while (written < frames && isGenerationCurrent(generation)) {
                 val remaining = segment.asSlice(written.toLong() * CHANNELS * Float.SIZE_BYTES)
-                val accepted = out.write(remaining, frames - written)
+                val accepted =
+                    try {
+                        out.write(remaining, frames - written)
+                    } catch (failure: NdOutputException) {
+                        failOutput(failure)
+                        return written.toLong()
+                    }
                 written += accepted
                 synchronized(control) {
                     if (isGenerationCurrent(generation) && accepted > 0) {
@@ -757,7 +834,7 @@ class FfAudioEngine internal constructor(
             }
         }
 
-    private fun publishSilenceJumps(out: NdOutput) {
+    private fun publishSilenceJumps(out: AudioOutput) {
         val heardFrame = out.framesPlayed - sessionBaseFrames - sessionPeriodFrames
         while (silenceJumps.firstOrNull()?.let { it.outFrame <= heardFrame } == true) {
             emit(silenceJumps.removeFirst().event)

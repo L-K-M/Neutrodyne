@@ -22,7 +22,7 @@ class NdOutput private constructor(
     private val counters: MemorySegment,
     /** Bytes per interleaved frame at the configured channel count. */
     private val frameBytes: Long,
-) : AutoCloseable {
+) : AudioOutput {
     private val write =
         library.downcall("nd_out_write", NdmediaAbi.WRITE)
     private val freeFrames =
@@ -43,16 +43,16 @@ class NdOutput private constructor(
     private var closed = false
 
     /** Media frames consumed by the device callback; underrun silence excluded. */
-    val framesPlayed: Long
+    override val framesPlayed: Long
         get() = COUNTER.getAcquire(counters, 0L) as Long
 
     /** Frames the device asked for while the ring was empty. */
-    val underrunFrames: Long
+    override val underrunFrames: Long
         get() = COUNTER.getAcquire(counters, Long.SIZE_BYTES.toLong()) as Long
 
     /** Frames of ring space the engine may still write. */
     @Synchronized
-    fun freeFrames(): Int {
+    override fun freeFrames(): Int {
         check(!closed) { "output is closed" }
         return check("free_frames", freeFrames.invokeExact(handle) as Int)
     }
@@ -63,7 +63,7 @@ class NdOutput private constructor(
      * recovers; never blocks.
      */
     @Synchronized
-    fun write(
+    override fun write(
         pcm: MemorySegment,
         frames: Int,
     ): Int {
@@ -73,27 +73,27 @@ class NdOutput private constructor(
     }
 
     @Synchronized
-    fun start(): Int {
+    override fun start(): Int {
         check(!closed) { "output is closed" }
         return check("start", start.invokeExact(handle) as Int)
     }
 
     @Synchronized
-    fun stop(): Int {
+    override fun stop(): Int {
         check(!closed) { "output is closed" }
         return check("stop", stop.invokeExact(handle) as Int)
     }
 
     /** Drops queued audio after a seek; returns the frames dropped. */
     @Synchronized
-    fun clear(): Int {
+    override fun clear(): Int {
         check(!closed) { "output is closed" }
         return check("clear", clear.invokeExact(handle) as Int)
     }
 
     /** `nd_out_describe`'s JSON: rate, channels, backend, device name, period. */
     @Synchronized
-    fun describe(): String {
+    override fun describe(): String {
         check(!closed) { "output is closed" }
         Arena.ofConfined().use { arena ->
             val buffer = arena.allocate(DESCRIBE_CAP.toLong())
@@ -103,13 +103,13 @@ class NdOutput private constructor(
     }
 
     /** The clock reader captures storage, never a device that close could free. */
-    fun clockReader(): () -> Long {
+    override fun clockReader(): () -> Long {
         val storage = counters
         return { COUNTER.getAcquire(storage, 0L) as Long }
     }
 
     /** The underrun reader captures the same storage as [clockReader]. */
-    fun underrunReader(): () -> Long {
+    override fun underrunReader(): () -> Long {
         val storage = counters
         return { COUNTER.getAcquire(storage, Long.SIZE_BYTES.toLong()) as Long }
     }
