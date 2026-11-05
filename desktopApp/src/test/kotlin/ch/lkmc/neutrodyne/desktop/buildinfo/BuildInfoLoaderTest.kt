@@ -54,7 +54,7 @@ class BuildInfoLoaderTest {
             versionName=1.2.3
             versionCode=200
             repoUrl=https://github.com/L-K-M/Neutrodyne
-            engineManifestUrl=https://l-k-m.github.io/Neutrodyne/engine/ytdlp-approved.json
+            engineManifestUrl=https://github.com/L-K-M/Neutrodyne/releases/download/engine-approvals/ytdlp-approved.json
             youtubeEngine=true
             installKind=msi
             os=windows
