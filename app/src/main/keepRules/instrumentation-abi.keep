@@ -784,6 +784,7 @@
   public kotlinx.coroutines.flow.StateFlow getSleepTimer();
 }
 -keep class ch.lkmc.neutrodyne.playback.api.PositionSnapshot {
+  public long getPositionMs();
   public long positionAt(long);
 }
 -keep enum ch.lkmc.neutrodyne.playback.api.StreamKind {
