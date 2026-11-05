@@ -149,10 +149,17 @@ internal fun SettingsHomeRoute(
                         stringResource(
                             when {
                                 closeBehaviour == CloseBehaviour.KEEP_RUNNING &&
-                                    desktopOs == DesktopOs.MACOS -> SettingsRes.string.desktop_close_keep_mac
-                                closeBehaviour == CloseBehaviour.KEEP_RUNNING ->
+                                    desktopOs == DesktopOs.MACOS -> {
+                                    SettingsRes.string.desktop_close_keep_mac
+                                }
+
+                                closeBehaviour == CloseBehaviour.KEEP_RUNNING -> {
                                     SettingsRes.string.desktop_close_keep
-                                else -> SettingsRes.string.desktop_close_quit
+                                }
+
+                                else -> {
+                                    SettingsRes.string.desktop_close_quit
+                                }
                             },
                         ),
                     onClick = { navigator.push(SettingsKey(SettingsPage.DESKTOP)) },

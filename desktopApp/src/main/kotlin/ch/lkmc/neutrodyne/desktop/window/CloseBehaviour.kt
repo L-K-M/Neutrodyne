@@ -31,14 +31,17 @@ internal fun closeRequestOutcome(
     trayAvailable: Boolean,
 ): CloseOutcome =
     when (behaviour) {
-        CloseBehaviour.KEEP_RUNNING ->
+        CloseBehaviour.KEEP_RUNNING -> {
             if (trayAvailable) CloseOutcome.HIDE_TO_TRAY else CloseOutcome.ICONIFY
-        CloseBehaviour.QUIT_WHEN_IDLE ->
+        }
+
+        CloseBehaviour.QUIT_WHEN_IDLE -> {
             when {
                 !busy -> CloseOutcome.QUIT
                 trayAvailable -> CloseOutcome.HIDE_TO_TRAY
                 else -> CloseOutcome.ICONIFY
             }
+        }
     }
 
 /**

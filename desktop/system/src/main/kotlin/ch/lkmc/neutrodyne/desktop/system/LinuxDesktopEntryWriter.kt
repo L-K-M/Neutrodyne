@@ -40,8 +40,13 @@ object LinuxDesktopEntryWriter {
                             append(c)
                         }
 
-                        '%' -> append("%%")
-                        else -> append(c)
+                        '%' -> {
+                            append("%%")
+                        }
+
+                        else -> {
+                            append(c)
+                        }
                     }
                 }
                 append('"')
@@ -80,9 +85,10 @@ object LinuxDesktopEntryWriter {
         }
 
     /** The spec's string escape over a whole field value; only `\` is rewritten. */
-    private fun stringEscape(value: String): String = buildString(value.length) {
-        for (c in value) {
-            if (c == '\\') append("\\\\") else append(c)
+    private fun stringEscape(value: String): String =
+        buildString(value.length) {
+            for (c in value) {
+                if (c == '\\') append("\\\\") else append(c)
+            }
         }
-    }
 }

@@ -10,11 +10,11 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.StartAtLoginError
 import ch.lkmc.neutrodyne.core.model.LoginItemState
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
+import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Inject
-import dev.zacsweers.metro.SingleIn
-import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
+import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 

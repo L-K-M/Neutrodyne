@@ -178,7 +178,9 @@ private fun loginSummary(state: LoginItemState) =
     when (state) {
         // The entry exists but the OS switched it off — say so where the user can act on it.
         LoginItemState.DISABLED_BY_OS -> Res.string.desktop_login_disabled_os
+
         LoginItemState.REQUIRES_APPROVAL -> Res.string.desktop_login_approval
+
         else -> Res.string.desktop_login_summary
     }
 

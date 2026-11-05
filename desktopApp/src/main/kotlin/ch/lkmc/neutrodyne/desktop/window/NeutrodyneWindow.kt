@@ -149,13 +149,14 @@ internal fun ApplicationScope.NeutrodyneWindow(
     ).collectAsState(initial = CloseBehaviour.QUIT_WHEN_IDLE)
 
     // 11's hidden-idle quit: any state change restarts the continuous 10 idle minutes.
+    val quitRequest by rememberUpdatedState(onQuitRequest)
     LaunchedEffect(clock) {
         hiddenIdleQuit(
             clock,
             hidden = snapshotFlow { hidden },
             behaviour = snapshotFlow { closeBehaviour },
             busy = busySignal.busy,
-            onQuit = onQuitRequest,
+            onQuit = { quitRequest() },
         )
     }
 
@@ -362,7 +363,7 @@ private fun maybeShowNoTrayHint(
                 title = getString(Res.string.no_tray_hint_title),
                 body = getString(Res.string.no_tray_hint_body),
                 route = null,
-            )
+            ),
         )
     }
 }

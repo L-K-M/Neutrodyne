@@ -52,7 +52,9 @@ class DesktopImportMenuTest {
                 assertThat(getString(Res.string.tray_quit)).isEqualTo("Quit")
                 assertThat(getString(Res.string.no_tray_hint_title)).isEqualTo("No tray icon on this desktop")
                 assertThat(getString(Res.string.no_tray_hint_body))
-                    .isEqualTo("Closing the window minimises Neutrodyne to the taskbar instead of hiding it to a tray icon.")
+                    .isEqualTo(
+                        "Closing the window minimises Neutrodyne to the taskbar instead of hiding it to a tray icon.",
+                    )
             }
         }
 

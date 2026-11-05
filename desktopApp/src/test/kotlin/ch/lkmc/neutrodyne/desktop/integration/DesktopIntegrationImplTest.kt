@@ -23,56 +23,64 @@ class DesktopIntegrationImplTest {
 
     @Test
     fun `the flow starts at the registrar's state`() {
-        val unsupported = DesktopIntegrationImpl(
-            FakeLoginItemRegistrar(LoginItemState.UNSUPPORTED),
-            settings,
-        )
+        val unsupported =
+            DesktopIntegrationImpl(
+                FakeLoginItemRegistrar(LoginItemState.UNSUPPORTED),
+                settings,
+            )
         assertThat(integration.loginItem.value).isEqualTo(LoginItemState.NOT_REGISTERED)
         assertThat(unsupported.loginItem.value).isEqualTo(LoginItemState.UNSUPPORTED)
     }
 
     @Test
-    fun `enabling registers the OS entry and records intent`() = runTest {
-        val outcome = integration.setStartAtLogin(true)
+    fun `enabling registers the OS entry and records intent`() =
+        runTest {
+            val outcome = integration.setStartAtLogin(true)
 
-        assertThat(outcome).isEqualTo(Outcome.Success(Unit))
-        assertThat(registrar.registerCalls).isEqualTo(1)
-        assertThat(integration.loginItem.value).isEqualTo(LoginItemState.REGISTERED)
-        assertThat(settings.get(DesktopSettingKeys.START_AT_LOGIN)).isTrue()
-    }
-
-    @Test
-    fun `disabling removes the OS entry`() = runTest {
-        integration.setStartAtLogin(true)
-        val outcome = integration.setStartAtLogin(false)
-
-        assertThat(outcome).isEqualTo(Outcome.Success(Unit))
-        assertThat(registrar.unregisterCalls).isEqualTo(1)
-        assertThat(integration.loginItem.value).isEqualTo(LoginItemState.NOT_REGISTERED)
-        assertThat(settings.get(DesktopSettingKeys.START_AT_LOGIN)).isFalse()
-    }
+            assertThat(outcome).isEqualTo(Outcome.Success(Unit))
+            assertThat(registrar.registerCalls).isEqualTo(1)
+            assertThat(integration.loginItem.value).isEqualTo(LoginItemState.REGISTERED)
+            assertThat(settings.get(DesktopSettingKeys.START_AT_LOGIN)).isTrue()
+        }
 
     @Test
-    fun `a refused write reports the failure and leaves the true state`() = runTest {
-        registrar.registerError = ch.lkmc.neutrodyne.core.common.LoginItemException("registry write denied")
+    fun `disabling removes the OS entry`() =
+        runTest {
+            integration.setStartAtLogin(true)
+            val outcome = integration.setStartAtLogin(false)
 
-        val outcome = integration.setStartAtLogin(true)
-
-        assertThat(outcome).isInstanceOf(Outcome.Failure::class.java)
-        assertThat((outcome as Outcome.Failure).error).isInstanceOf(StartAtLoginError.Failed::class.java)
-        assertThat(integration.loginItem.value).isEqualTo(LoginItemState.NOT_REGISTERED)
-    }
+            assertThat(outcome).isEqualTo(Outcome.Success(Unit))
+            assertThat(registrar.unregisterCalls).isEqualTo(1)
+            assertThat(integration.loginItem.value).isEqualTo(LoginItemState.NOT_REGISTERED)
+            assertThat(settings.get(DesktopSettingKeys.START_AT_LOGIN)).isFalse()
+        }
 
     @Test
-    fun `an unsupported registrar never reaches register`() = runTest {
-        val unsupported = DesktopIntegrationImpl(
-            FakeLoginItemRegistrar(LoginItemState.UNSUPPORTED),
-            settings,
-        )
-        val outcome = unsupported.setStartAtLogin(true)
+    fun `a refused write reports the failure and leaves the true state`() =
+        runTest {
+            registrar.registerError =
+                ch.lkmc.neutrodyne.core.common
+                    .LoginItemException("registry write denied")
 
-        assertThat(outcome)
-            .isEqualTo(Outcome.Failure(StartAtLoginError.Unsupported))
-        assertThat(unsupported.loginItem.value).isEqualTo(LoginItemState.UNSUPPORTED)
-    }
+            val outcome = integration.setStartAtLogin(true)
+
+            assertThat(outcome).isInstanceOf(Outcome.Failure::class.java)
+            assertThat((outcome as Outcome.Failure).error).isInstanceOf(StartAtLoginError.Failed::class.java)
+            assertThat(integration.loginItem.value).isEqualTo(LoginItemState.NOT_REGISTERED)
+        }
+
+    @Test
+    fun `an unsupported registrar never reaches register`() =
+        runTest {
+            val unsupported =
+                DesktopIntegrationImpl(
+                    FakeLoginItemRegistrar(LoginItemState.UNSUPPORTED),
+                    settings,
+                )
+            val outcome = unsupported.setStartAtLogin(true)
+
+            assertThat(outcome)
+                .isEqualTo(Outcome.Failure(StartAtLoginError.Unsupported))
+            assertThat(unsupported.loginItem.value).isEqualTo(LoginItemState.UNSUPPORTED)
+        }
 }

@@ -3,10 +3,8 @@ package ch.lkmc.neutrodyne.desktop.window
 
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 
-/**
- * 11's tray-menu and tooltip rules as pure functions; the Compose `Tray` call site stays a
- * thin render of them so every label and string is unit-tested without AWT.
- */
+// 11's tray-menu and tooltip rules as pure functions; the Compose `Tray` call site stays a
+// thin render of them so every label and string is unit-tested without AWT.
 
 /** The "Neutrodyne — {episode title}" tooltip, hard-truncated to 60 characters (11 Tray icon). */
 internal fun trayTooltip(nowPlaying: NowPlaying?): String {

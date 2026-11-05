@@ -25,69 +25,74 @@ class HiddenIdleQuitTest {
     private var quits = 0
 
     @Test
-    fun `ten continuous idle minutes quit the hidden window`() = runTest {
-        val clock = TestClock.from(testScheduler)
-        val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
+    fun `ten continuous idle minutes quit the hidden window`() =
+        runTest {
+            val clock = TestClock.from(testScheduler)
+            val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
 
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS - 1)
-        assertThat(quits).isEqualTo(0)
-        advanceTimeBy(2)
-        assertThat(quits).isEqualTo(1)
-        job.cancel()
-    }
-
-    @Test
-    fun `a busy edge restarts the ten minutes`() = runTest {
-        val clock = TestClock.from(testScheduler)
-        val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
-
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS / 2)
-        busy.value = true
-        runCurrent() // let the collector see the edge — same-instant writes conflate
-        busy.value = false
-        runCurrent()
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS - 1)
-        assertThat(quits).isEqualTo(0)
-        advanceTimeBy(2)
-        assertThat(quits).isEqualTo(1)
-        job.cancel()
-    }
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS - 1)
+            assertThat(quits).isEqualTo(0)
+            advanceTimeBy(2)
+            assertThat(quits).isEqualTo(1)
+            job.cancel()
+        }
 
     @Test
-    fun `an unhide cancels the countdown`() = runTest {
-        val clock = TestClock.from(testScheduler)
-        val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
+    fun `a busy edge restarts the ten minutes`() =
+        runTest {
+            val clock = TestClock.from(testScheduler)
+            val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
 
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS / 2)
-        hidden.value = false
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS * 2)
-        assertThat(quits).isEqualTo(0)
-        job.cancel()
-    }
-
-    @Test
-    fun `keep-running never arms the countdown`() = runTest {
-        val clock = TestClock.from(testScheduler)
-        behaviour.value = CloseBehaviour.KEEP_RUNNING
-        val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
-
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS * 3)
-        assertThat(quits).isEqualTo(0)
-        job.cancel()
-    }
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS / 2)
+            busy.value = true
+            runCurrent() // let the collector see the edge — same-instant writes conflate
+            busy.value = false
+            runCurrent()
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS - 1)
+            assertThat(quits).isEqualTo(0)
+            advanceTimeBy(2)
+            assertThat(quits).isEqualTo(1)
+            job.cancel()
+        }
 
     @Test
-    fun `hidden while busy starts the clock at the idle edge`() = runTest {
-        val clock = TestClock.from(testScheduler)
-        busy.value = true
-        val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
+    fun `an unhide cancels the countdown`() =
+        runTest {
+            val clock = TestClock.from(testScheduler)
+            val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
 
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS * 2)
-        assertThat(quits).isEqualTo(0)
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS / 2)
+            hidden.value = false
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS * 2)
+            assertThat(quits).isEqualTo(0)
+            job.cancel()
+        }
 
-        busy.value = false
-        advanceTimeBy(HIDDEN_IDLE_QUIT_MS + 1)
-        assertThat(quits).isEqualTo(1)
-        job.cancel()
-    }
+    @Test
+    fun `keep-running never arms the countdown`() =
+        runTest {
+            val clock = TestClock.from(testScheduler)
+            behaviour.value = CloseBehaviour.KEEP_RUNNING
+            val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
+
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS * 3)
+            assertThat(quits).isEqualTo(0)
+            job.cancel()
+        }
+
+    @Test
+    fun `hidden while busy starts the clock at the idle edge`() =
+        runTest {
+            val clock = TestClock.from(testScheduler)
+            busy.value = true
+            val job = launch { hiddenIdleQuit(clock, hidden, behaviour, busy) { quits++ } }
+
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS * 2)
+            assertThat(quits).isEqualTo(0)
+
+            busy.value = false
+            advanceTimeBy(HIDDEN_IDLE_QUIT_MS + 1)
+            assertThat(quits).isEqualTo(1)
+            job.cancel()
+        }
 }

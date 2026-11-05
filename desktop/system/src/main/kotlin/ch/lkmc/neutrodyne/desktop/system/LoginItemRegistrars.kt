@@ -25,15 +25,21 @@ object LoginItemRegistrars {
         registry: WindowsRegistry = JnaWindowsRegistry,
     ): LoginItemRegistrar =
         when (os) {
-            DesktopOs.WINDOWS -> WindowsRunKeyRegistrar(registry, launcher)
-            DesktopOs.LINUX ->
+            DesktopOs.WINDOWS -> {
+                WindowsRunKeyRegistrar(registry, launcher)
+            }
+
+            DesktopOs.LINUX -> {
                 if (configHome == null) {
                     UnsupportedLoginItemRegistrar
                 } else {
                     XdgAutostartRegistrar(configHome.resolve(AUTOSTART_DIR), launcher)
                 }
+            }
 
-            DesktopOs.MACOS, null -> UnsupportedLoginItemRegistrar
+            DesktopOs.MACOS, null -> {
+                UnsupportedLoginItemRegistrar
+            }
         }
 }
 
@@ -41,9 +47,7 @@ object LoginItemRegistrars {
 object UnsupportedLoginItemRegistrar : LoginItemRegistrar {
     override fun status(): LoginItemState = LoginItemState.UNSUPPORTED
 
-    override fun register() {
-        throw LoginItemException("start at login is not supported on this platform")
-    }
+    override fun register(): Unit = throw LoginItemException("start at login is not supported on this platform")
 
     override fun unregister() = Unit
 }
