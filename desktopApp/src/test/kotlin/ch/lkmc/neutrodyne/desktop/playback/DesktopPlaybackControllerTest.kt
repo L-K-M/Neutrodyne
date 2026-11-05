@@ -382,6 +382,11 @@ class DesktopPlaybackControllerTest {
                         .filter { it.size == 2 }
                         .first()
                 }
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.currentChapter
+                        .filter { it != null }
+                        .first()
+                }
                 assertEquals(
                     0,
                     fixture.controller.currentChapter.value
@@ -393,12 +398,12 @@ class DesktopPlaybackControllerTest {
                         .filter { it?.position?.positionMs == 1_000L }
                         .first()
                 }
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.currentChapter
+                        .filter { it?.index == 1 }
+                        .first()
+                }
                 assertEquals(1_000L, fixture.engine.position)
-                assertEquals(
-                    1,
-                    fixture.controller.currentChapter.value
-                        ?.index,
-                )
             }
         }
 
