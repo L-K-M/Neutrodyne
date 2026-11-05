@@ -104,6 +104,15 @@ paths = ["assets/chaquopy/cacert.pem"]
 requires = ["neutrodyne:certifi-cacert"]
 reason = "certifi's CA bundle, unmodified MPL-2.0 data"
 
+[[claim]]
+paths = ["assets/composeResources/*/font/*.ttf"]
+requires = [
+    "neutrodyne:font-barlow",
+    "neutrodyne:font-courierprime",
+    "neutrodyne:font-dosis",
+]
+reason = "Owner-provided radio fonts bundled as compose resources (OFL-1.1)"
+
 # JetBrains Compose Multiplatform root modules publish no Android artifact of their own: their
 # Android variant is available-at the androidx.* artifact, which the definitions list and scan
 # checks separately. Gradle may keep only the parsed metadata of such a root module, so scan
