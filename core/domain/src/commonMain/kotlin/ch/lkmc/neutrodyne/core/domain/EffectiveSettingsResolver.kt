@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.domain
 
 import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.EffectiveAutoDownload
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import kotlinx.coroutines.flow.Flow
 
@@ -29,4 +30,10 @@ interface EffectiveSettingsResolver {
     fun observeNotifications(podcastIds: Collection<Long>): Flow<Map<Long, Effective<Boolean>>>
 
     fun observeRefreshIntervals(): Flow<Map<Long, Effective<Int?>>>
+
+    /** Only existing requested podcasts. Missing capability uses source NotSupported. */
+    suspend fun autoDownload(podcastIds: Collection<Long>): Map<Long, EffectiveAutoDownload>
+
+    /** Full map, distinct by effective policy. Consumers debounce planning by 2 s (07). */
+    fun observeAutoDownload(): Flow<Map<Long, EffectiveAutoDownload>>
 }

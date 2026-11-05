@@ -21,12 +21,14 @@ import ch.lkmc.neutrodyne.core.network.okhttp.JvmNetErrors
 import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
+import ch.lkmc.neutrodyne.core.network.okhttp.isLocalPeerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.collections.immutable.persistentListOf
 import mockwebserver3.MockResponse
 import okhttp3.Dns
 import okio.FileSystem
 import java.io.File
+import java.net.InetSocketAddress
 
 internal fun fakePlatform(
     kind: PlatformKind = PlatformKind.DESKTOP,
@@ -62,6 +64,9 @@ internal fun newNetworkClients(
     credentials: CredentialLookup = CredentialLookup.None,
     platform: PlatformInfo = fakePlatform(),
     baseDns: Dns = Dns.SYSTEM,
+    isLocalPeer: (InetSocketAddress) -> Boolean = { peer ->
+        peer.address == null || isLocalPeerAddress(peer.address)
+    },
 ): NetworkClients =
     NetworkClients(
         CoreClients(
@@ -70,9 +75,17 @@ internal fun newNetworkClients(
             hints = DnsFamilyHints(),
             debugInterceptors = emptySet(),
             baseDns = baseDns,
+            isLocalPeer = isLocalPeer,
         ),
         AuthInterceptor { credentials },
     )
+
+/**
+ * Tests that exercise discovery/probe/preview fetches against a loopback MockWebServer opt out
+ * of the M7 peer guard — the refusal coverage lives in `AddLocalDestinationTest`, whose seam
+ * keeps only the recorder's address local (03 note 2026-11-02).
+ */
+internal val NO_LOCAL_PEER: (InetSocketAddress) -> Boolean = { false }
 
 /** The desktop classifier with a synthetic "connected" flag (Offline never wins in tests). */
 internal val testClassifier =

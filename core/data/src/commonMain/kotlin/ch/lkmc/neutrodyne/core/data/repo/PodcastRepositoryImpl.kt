@@ -20,9 +20,11 @@ import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.PodcastArtworkRow
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -75,6 +77,7 @@ internal class PodcastRepositoryImpl(
     // eagerly would resolve the whole client family for a path only `setCredentials` uses.
     private val fetcher: Provider<FeedFetcher>,
     private val tempFiles: FeedTempFiles,
+    private val downloads: Provider<DownloadLifecycle>,
 ) : PodcastRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -113,7 +116,7 @@ internal class PodcastRepositoryImpl(
 
     override fun observePodcast(podcastId: Long): Flow<PodcastDetail?> =
         combine(
-            db.podcastDao().observeById(podcastId),
+            db.podcastDao().observeWithArtwork(podcastId),
             db.podcastDao().observeEpisodeCount(podcastId),
         ) { entity, count ->
             entity?.let { detailOf(it, count) }
@@ -162,8 +165,12 @@ internal class PodcastRepositoryImpl(
         return withContext(NonCancellable) {
             // One transaction for the whole list: a crash mid-loop must not leave a half-unsubscribed
             // library with stale periodic scheduling (03 Unsubscribe).
+            downloads().beforeEpisodeRemoval(db.downloadDao().downloadedEpisodeIds(podcastIds))
             coordinator.withCredentialCommit {
                 db.withWriteTransaction {
+                    check(db.downloadDao().downloadedEpisodeIds(podcastIds).isEmpty()) {
+                        "Downloads changed during unsubscribe cleanup; retry unsubscribe"
+                    }
                     for (id in podcastIds) {
                         if (dao.byId(id) == null) continue
                         dao.deleteCascade(id, clock.now())
@@ -373,11 +380,12 @@ internal class PodcastRepositoryImpl(
                 .map { (key, ids) -> CategoryCount(names.getValue(key), ids.sorted()) }
         }
 
-    private suspend fun detailOf(
-        p: PodcastEntity,
+    private fun detailOf(
+        row: PodcastArtworkRow,
         episodeCount: Int,
-    ): PodcastDetail =
-        PodcastDetail(
+    ): PodcastDetail {
+        val p = row.podcast
+        return PodcastDetail(
             id = p.id,
             displayTitle = p.customTitle ?: p.title,
             author = p.author,
@@ -385,9 +393,8 @@ internal class PodcastRepositoryImpl(
                 p.descriptionHtml?.let {
                     sanitizer.toDocument(it, isHtml = true, baseUri = p.feedUrl).toModel()
                 },
-            // The version lives on the artwork row, not the podcast row — the tile projection
-            // joins it, the detail flow reads it here. 0 when the row is absent.
-            artwork = ArtworkRef(p.artworkKey, p.artworkUrl, db.artworkDao().byKey(p.artworkKey)?.version ?: 0),
+            artwork = ArtworkRef(p.artworkKey, p.artworkUrl, row.artworkVersion),
+            artworkAvgArgb = row.artworkAvgArgb,
             bannerUrl = p.bannerUrl,
             sourceType = p.sourceType,
             link = p.link,
@@ -402,6 +409,7 @@ internal class PodcastRepositoryImpl(
             includeInAll = p.includeInAll,
             hasOlderPages = p.pagingNextUrl != null,
         )
+    }
 
     /** 03 Per-feed states: `gone = 0 AND failureCount ≥ 10 AND COALESCE(lastSuccessAt, subscribedAt) < now − 7 d`. */
     private fun healthOf(

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:font-dosis",
+  "name": "Dosis font",
+  "website": "https://github.com/google/fonts/tree/main/ofl/dosis",
+  "developers": [],
+  "licenses": [
+    "OFL-1.1-dosis"
+  ],
+  "tag": "bundled",
+  "artifactVersion": "3.002",
+  "description": "Bundled Google Fonts Dosis, weights 300 (static instance of the variable source). Source: https://github.com/google/fonts/tree/main/ofl/dosis"
+}

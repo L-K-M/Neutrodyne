@@ -40,4 +40,7 @@ enum class NotificationKind {
 
     /** 05 §8's "import finished" report (Android channel `import_backup`). */
     IMPORT_BACKUP,
+
+    /** The shell's own hints — for now the one-time "no tray" explanation (11 Window and tray). */
+    APP_SHELL,
 }

@@ -8,6 +8,7 @@ internal fun Project.configureLicensee() {
     pluginManager.apply("app.cash.licensee")
     val jna = libs.version("jna")
     val jsoup = libs.version("jsoup")
+    val dbusJava = libs.version("dbusJava")
     extensions.configure<LicenseeExtension> {
         for (spdx in ALLOWED_SPDX) allow(spdx)
         allowDependency("net.java.dev.jna", "jna", jna) { because("dual-licensed; used under Apache-2.0 (D3)") }
@@ -20,6 +21,15 @@ internal fun Project.configureLicensee() {
         allowDependency("org.jsoup", "jsoup", jsoup) {
             because("MIT; POM declares the licence as the URL https://jsoup.org/license only")
         }
+        for (artifact in listOf(
+            "material-color-utilities",
+            "material-color-utilities-android",
+            "material-color-utilities-jvm",
+        )) {
+            allowDependency("com.materialkolor", artifact, "5.0.1") {
+                because("MIT declared in the 5.0.1 POM; Licensee does not recognize the upstream licence URL")
+            }
+        }
         // slf4j lands on different resolved versions per classpath (transitively capped to 2.0.19 on
         // some), so the pinned allowDependency misses; the URL itself is unambiguous MIT (01, 2026-10-06).
         allowUrl("https://opensource.org/license/mit") {
@@ -30,6 +40,14 @@ internal fun Project.configureLicensee() {
             // Its POM carries only the CVS-hosted licence URL + a CC public-domain URL.
             because("BSD-style licence, URL-declared only; pinned transitive version")
         }
+        // :desktop:system's MPRIS prototype; the POM declares "MIT License"
+        // as a name Licensee does not map to the SPDX id.
+        allowDependency("com.github.hypfvieh", "dbus-java-core", dbusJava) { because("MIT") }
+        allowDependency(
+            "com.github.hypfvieh",
+            "dbus-java-transport-native-unixsocket",
+            dbusJava,
+        ) { because("MIT") }
         // No GPL, AGPL, LGPL or MPL artifact is otherwise allowed, not even scoped (D3).
     }
 

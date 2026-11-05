@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.ChangeOrigin
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -83,7 +84,16 @@ class PodcastRepositoryTest {
         scheduler = scheduler,
         sanitizer = JsoupShowNotesSanitizer(),
         clock = clock,
-        merger = PodcastMerger(db, coordinator, clock),
+        merger =
+            PodcastMerger(
+                db,
+                coordinator,
+                clock,
+                downloads =
+                    Provider {
+                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                    },
+            ),
         resolver = unusedPreviewResolver,
         secrets = secrets,
         coordinator = coordinator,
@@ -94,6 +104,7 @@ class PodcastRepositoryTest {
                     storagePathsFor(File("build/tmp/m1b-repo").resolve(UUID.randomUUID().toString())),
                     FileSystem.SYSTEM,
                 ),
+        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
     )
 
     @Test
@@ -195,6 +206,30 @@ class PodcastRepositoryTest {
             val detail = assertNotNull(repo().observePodcast(id).first())
 
             assertEquals(7, detail.artwork.version)
+        }
+
+    @Test
+    fun detailObservesArtworkPublicationWithoutPodcastWrites() =
+        runTest {
+            val id = seedPodcast(db, "https://a.example.com/f")
+            val key = db.podcastDao().byId(id)!!.artworkKey
+            repo().observePodcast(id).test {
+                assertEquals(0, assertNotNull(awaitItem()).artwork.version)
+                db.artworkDao().upsert(ArtworkEntity(key = key, version = 7, avgArgb = 0xff123456.toInt()))
+                val published = assertNotNull(awaitItem())
+                assertEquals(7, published.artwork.version)
+                assertEquals(0xff123456.toInt(), published.artworkAvgArgb)
+                // Local-only backfill changes colours without changing byte identity.
+                db.artworkDao().upsert(ArtworkEntity(key = key, version = 7, avgArgb = 0))
+                val backfilled = assertNotNull(awaitItem())
+                assertEquals(7, backfilled.artwork.version)
+                assertEquals(0, backfilled.artworkAvgArgb)
+                db.artworkDao().delete(key)
+                val missing = assertNotNull(awaitItem())
+                assertEquals(0, missing.artwork.version)
+                assertNull(missing.artworkAvgArgb)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
 
     @Test
@@ -439,12 +474,22 @@ class PodcastRepositoryTest {
                         scheduler = scheduler,
                         sanitizer = JsoupShowNotesSanitizer(),
                         clock = clock,
-                        merger = PodcastMerger(db, coordinator, clock),
+                        merger =
+                            PodcastMerger(
+                                db,
+                                coordinator,
+                                clock,
+                                downloads =
+                                    Provider {
+                                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                                    },
+                            ),
                         resolver = unusedPreviewResolver,
                         secrets = store,
                         coordinator = coordinator,
                         fetcher = Provider { bundle.fetcher },
                         tempFiles = bundle.tempFiles,
+                        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
                     )
 
                 val first =

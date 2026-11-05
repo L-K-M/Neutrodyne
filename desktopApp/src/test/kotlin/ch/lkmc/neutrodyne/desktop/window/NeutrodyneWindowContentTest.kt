@@ -122,7 +122,7 @@ class NeutrodyneWindowContentTest {
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
             onNodeWithText("Appearance").assertExists()
 
-            onAllNodesWithText("About").onFirst().performClick()
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Neutrodyne").assertExists()
             onNodeWithText("Debug build").assertExists()
         }
@@ -241,7 +241,7 @@ class NeutrodyneWindowContentTest {
             setWindowContent()
 
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
 
             // The desktop source loads the generated aboutlibraries.json off the classpath. The
             // list is lazy and the OpenJDK entry sits in "Bundled components" at its end, so the

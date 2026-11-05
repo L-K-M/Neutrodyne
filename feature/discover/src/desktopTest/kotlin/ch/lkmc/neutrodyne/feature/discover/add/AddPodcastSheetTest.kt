@@ -185,7 +185,7 @@ class AddPodcastSheetTest {
             waitForIdle()
 
             onNodeWithText("A Show").assertIsDisplayed()
-            assertEquals(listOf("https://example.com/feed"), resolver.inputs)
+            assertEquals(listOf("https://example.com/feed"), resolver.unconfirmedInputs)
         }
 
     @Test
@@ -499,11 +499,33 @@ class AddPodcastSheetTest {
             resolver.nextResolution = AddResolution.Feed(testFeedPreview())
             setSheet(initialInput = "http://192.168.1.1/feed")
             waitForIdle()
-            assertEquals(emptyList(), resolver.inputs)
+            assertEquals(emptyList(), resolver.inputs + resolver.unconfirmedInputs)
 
             onNodeWithText("Subscribe").performClick()
             waitForIdle()
             assertEquals(listOf("http://192.168.1.1/feed"), resolver.inputs)
+        }
+
+    /**
+     * The same wait-for-tap rule applies to spellings the transport normalizes to loopback:
+     * percent-encoded octets and IDNA full-width digits (03 note 2026-11-02).
+     */
+    @Test
+    fun encodedLocalPrefillDoesNotAutoResolve() =
+        runComposeUiTest {
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview())
+            setSheet(initialInput = "http://%31%32%37.0.0.1/feed")
+            waitForIdle()
+            assertEquals(emptyList(), resolver.inputs + resolver.unconfirmedInputs)
+        }
+
+    @Test
+    fun fullwidthLocalPrefillDoesNotAutoResolve() =
+        runComposeUiTest {
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview())
+            setSheet(initialInput = "http://１２７.０.０.１/feed")
+            waitForIdle()
+            assertEquals(emptyList(), resolver.inputs + resolver.unconfirmedInputs)
         }
 
     /**
@@ -531,6 +553,25 @@ class AddPodcastSheetTest {
             )
             onNodeWithText("Searches are sent to Apple, Podcast Index").assertIsDisplayed()
             onNodeWithText("Search for ‘medical history’").assertIsDisplayed()
+        }
+
+    /**
+     * The same action stays disabled while the provider configuration is still loading (M7
+     * disclosure race): a tap must never outrun the recipient disclosure.
+     */
+    @Test
+    fun searchActionStaysDisabledUntilProvidersLoad() =
+        runComposeUiTest {
+            setSheet(
+                stateOverride =
+                    AddPodcastUiState(
+                        step = AddSheetStep.Input(searchQuery = "medical history"),
+                        providers = null,
+                    ),
+            )
+            onNodeWithText("Search for ‘medical history’").assertIsNotEnabled()
+            onNodeWithText("Searches are sent to", substring = true).assertDoesNotExist()
+            onNodeWithText("Enable a directory in Discover settings").assertDoesNotExist()
         }
 
     /** The chooser shows the localized source label, never the enum identifier (M7). */

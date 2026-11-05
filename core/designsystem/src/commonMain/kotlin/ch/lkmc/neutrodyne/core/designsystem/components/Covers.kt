@@ -5,7 +5,10 @@ package ch.lkmc.neutrodyne.core.designsystem.components
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.PRE_CONFIRMATION_HEADER
 import coil3.PlatformContext
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 
@@ -14,6 +17,14 @@ public enum class CoverTier { THUMB, HERO }
 
 /** The aspect a cover request is decoded for. */
 public enum class CoverAspect { SQUARE, WIDE_16_9 }
+
+/**
+ * The caller's confirmation status for the artwork URL (03 note 2026-11-02): a URL the user
+ * never submitted — add/directory/podcast previews — is fetched marked, so the transport's
+ * peer guard can refuse a local peer including after redirects. A subscribed podcast's
+ * artwork keeps the unmarked fetch.
+ */
+public enum class CoverNetworkPolicy { SUBSCRIBED, UNCONFIRMED }
 
 /**
  * 08 "Request tiers and memory keys": builds the [ImageRequest] for an [ArtworkRef] with the
@@ -40,6 +51,7 @@ public object Covers {
         density: Density,
         aspect: CoverAspect = CoverAspect.SQUARE,
         crossfade: Boolean = true,
+        network: CoverNetworkPolicy = CoverNetworkPolicy.SUBSCRIBED,
     ): ImageRequest =
         ImageRequest
             .Builder(context)
@@ -49,6 +61,15 @@ public object Covers {
                     tier == CoverTier.HERO -> size(HERO_PX)
                     aspect == CoverAspect.WIDE_16_9 -> size(WIDE_PX, WIDE_PX_HEIGHT)
                     else -> size(thumbPx(density))
+                }
+            }.apply {
+                if (network == CoverNetworkPolicy.UNCONFIRMED) {
+                    httpHeaders(
+                        NetworkHeaders
+                            .Builder()
+                            .add(PRE_CONFIRMATION_HEADER, "1")
+                            .build(),
+                    )
                 }
             }.memoryCacheKey("art:${ref.key}:v${ref.version}:${tierKey(tier)}")
             .apply {

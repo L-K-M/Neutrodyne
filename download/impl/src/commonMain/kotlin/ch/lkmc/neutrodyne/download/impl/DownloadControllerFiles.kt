@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.download.impl
 
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
+import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
 import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
@@ -22,6 +23,8 @@ internal interface DownloadControllerFiles {
     suspend fun reportFileMissing(episodeId: Long)
 
     fun observeStorage(): Flow<StorageUsage>
+
+    fun observeNotices(): Flow<Set<DownloadNotice>> = kotlinx.coroutines.flow.flowOf(emptySet())
 
     suspend fun changeRoot(
         rootId: String,

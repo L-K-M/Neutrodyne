@@ -7,16 +7,17 @@ package ch.lkmc.neutrodyne.feeds.identity
  * the automatic fetches into LAN requests. Pure string classification — no JVM or Android APIs,
  * no DNS — so it behaves identically on every target.
  *
- * Known limit: a public hostname that *resolves* to a LAN address is not visible to this
- * predicate; only the Android 37+ `LocalNetworkGuard`'s DNS check covers that case.
+ * DNS answers are checked separately by the marked-request transport guard on both platforms;
+ * this predicate only supplies the early prefill/fetch decision.
  */
 public object LocalDestination {
-    private val schemeWithAuthority = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""")
     private val hexDigits = "0123456789abcdefABCDEF".toSet()
 
     private const val IPV4_PARTS = 4
     private const val IPV4_MAPPED_PREFIX_GROUPS = 5
     private const val IPV4_MAPPED_MARKER = 0xFFFF
+    private const val MULTICAST_V4_FIRST_OCTET = 224
+    private const val MULTICAST_V6_PREFIX = 0xFF00
     private const val BYTE_MASK = 0xFF
     private const val ULA_MASK = 0xFE00
     private const val ULA_PREFIX = 0xFC00
@@ -24,17 +25,28 @@ public object LocalDestination {
     private const val LINK_LOCAL_PREFIX = 0xFE80
 
     /**
-     * True when [url] is an absolute `scheme://…` URL whose host names a local destination:
+     * True when [url] is an absolute URL whose host names a local destination:
      * `localhost`, `*.localhost` and `*.local`; the IPv4 literals of 0/8, 10/8, 100.64/10, 127/8,
      * 169.254/16, 172.16/12 and 192.168/16; the IPv6 literals `::`, `::1`, fc00::/7 and fe80::/10
-     * including their `::ffff:` IPv4-mapped forms; and any numeric host that is not a plain
-     * four-part decimal address (`2130706433`, `0x7f.0.0.1`, `127.1`), because resolvers read
-     * such spellings as IP addresses whose value cannot be verified here. Public hostnames and
-     * public dotted quads are not local, and neither is input without `scheme://`.
+     * including local IPv4-compatible (`::/96`) and IPv4-mapped (`::ffff:`) forms; multicast,
+     * reserved IPv4 and limited broadcast; and ambiguous numeric hosts that cannot be
+     * normalized safely. Valid decimal shorthands are classified after normalization.
+     * Public hostnames and
+     * public dotted quads are not local. HTTP authorities use the same lenient splitter as
+     * normalization, including `http:/host`, `http:\\host` and `http:host`.
      */
     public fun isLocal(url: String): Boolean {
-        val host = authorityHost(url) ?: return false
-        val lowered = host.removeSuffix(".").lowercase()
+        val parsed = splitLenient(url)
+        if (parsed.scheme == null) return false
+        val raw = parsed.host ?: return false
+        // Classify the host the transport will actually dial: percent-decoded, IDNA-mapped,
+        // numeric spellings canonicalised (03 note 2026-11-02). `http://%31%32%37.0.0.1/` and
+        // `http://１２７.０.０.１/` both come back as `127.0.0.1`.
+        UrlNormalizer.transportHost(url)?.let { return isLocalHost(it) }
+        // The normaliser only refuses spellings the transport rejects or whose numeric grammar
+        // is ambiguous (0x… parts, >4 groups, bad ports); those still get the conservative
+        // authority-host pass so an unreadable numeric spelling stays local.
+        val lowered = raw.removeSuffix(".").lowercase()
         if (lowered == "localhost" || lowered.endsWith(".localhost") || lowered.endsWith(".local")) {
             return true
         }
@@ -54,24 +66,25 @@ public object LocalDestination {
     }
 
     /**
-     * The URL's authority host: userinfo stripped at the last `@`, the port at `:`, and the
-     * authority itself at the first `/`, `?`, `#` or `\` (the fetch stack reads `\` as a path
-     * separator). IPv6 literals keep their brackets; `null` when there is no `scheme://`.
+     * The local-destination classification of a host already run through the transport's own
+     * normalisation: lowercased, decoded, IDNA-mapped, numeric forms canonicalised to a dotted
+     * quad; IPv6 literals keep their brackets.
      */
-    private fun authorityHost(url: String): String? {
-        val match = schemeWithAuthority.find(url) ?: return null
-        val authority =
-            url
-                .substring(match.range.last + 1)
-                .substringBefore('/')
-                .substringBefore('?')
-                .substringBefore('#')
-                .substringBefore('\\')
-                .substringAfterLast('@')
-        return when {
-            authority.startsWith("[") -> authority.substringBefore(']') + "]"
-            else -> authority.substringBefore(':').takeIf { it.isNotEmpty() }
+    private fun isLocalHost(host: String): Boolean {
+        if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true
+        if (host.startsWith("[")) {
+            val literal = host.substring(1, host.lastIndex).substringBefore('%')
+            val groups = UrlNormalizer.parseIpv6Groups(literal) ?: return false
+            return isLocalIpv6(groups)
         }
+        val parts = host.split('.')
+        if (parts.size == IPV4_PARTS && parts.all { it.isNotEmpty() && it.all { c -> c in '0'..'9' } }) {
+            // Normalization currently bounds every octet, but this classifier must remain
+            // total if that contract changes. Unreadable numeric hosts stay conservative.
+            val octets = parts.map { it.toIntOrNull()?.takeIf { octet -> octet in 0..BYTE_MASK } ?: return true }
+            return isLocalIpv4(octets)
+        }
+        return false
     }
 
     /** A numeric host: every dot-part is decimal digits or `0x`+hex, never a DNS name (WHATWG). */
@@ -93,6 +106,9 @@ public object LocalDestination {
         when {
             // 0/8, 10/8, 127/8
             octets[0] == 0 || octets[0] == 10 || octets[0] == 127 -> true
+
+            // Multicast 224/4 and reserved 240/4, including limited broadcast.
+            octets[0] >= MULTICAST_V4_FIRST_OCTET -> true
 
             // CGNAT 100.64/10
             octets[0] == 100 && octets[1] in 64..127 -> true
@@ -131,8 +147,14 @@ public object LocalDestination {
                 true
             }
 
-            // ::ffff:a.b.c.d — the IPv4-mapped spelling gets the IPv4 ranges.
-            groups.take(IPV4_MAPPED_PREFIX_GROUPS).all { it == 0 } && groups[5] == IPV4_MAPPED_MARKER -> {
+            // ff00::/8 multicast
+            groups[0] and MULTICAST_V6_PREFIX == MULTICAST_V6_PREFIX -> {
+                true
+            }
+
+            // Both ::a.b.c.d (compatible) and ::ffff:a.b.c.d (mapped) use the IPv4 ranges.
+            groups.take(IPV4_MAPPED_PREFIX_GROUPS).all { it == 0 } &&
+                (groups[5] == 0 || groups[5] == IPV4_MAPPED_MARKER) -> {
                 isLocalIpv4(
                     listOf(
                         groups[6] shr 8,

@@ -7,7 +7,6 @@ import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,9 +28,9 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
+import ch.lkmc.neutrodyne.core.designsystem.rememberAndroidSystemUiState
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
-import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
@@ -54,10 +53,10 @@ import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
@@ -94,9 +93,20 @@ class MainActivity : AppCompatActivity() {
         setContent {
             val opener = graph.databaseOpener
             val openState by opener.openState.collectAsStateWithLifecycle()
+
+            val failedDownloads =
+                androidx.compose.runtime.remember(graph) {
+                    kotlinx.coroutines.flow.flow {
+                        opener.awaitOpen()
+                        graph.downloadController().observeFailedCount().collect { emit(it) }
+                    }
+                }
             val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
 
-            val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
+            val systemUi = rememberAndroidSystemUiState()
+            val panelHidden by graph.settingsRepository
+                .observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
+                .collectAsStateWithLifecycle(initialValue = false)
             val platformActions = rememberAndroidPlatformActions()
             val updates =
                 rememberUpdateRootPresentation(
@@ -127,10 +137,12 @@ class MainActivity : AppCompatActivity() {
                 LocalMetroViewModelFactory provides graph.metroViewModelFactory,
             ) {
                 NeutrodyneRoot(
+                    failedDownloads = failedDownloads,
                     state =
                         ROOT_STATE_BASE.copy(
                             startup = openState.toGateState(),
                             hasNowPlaying = nowPlaying != null,
+                            playerPanelHidden = panelHidden,
                             settingsBadge = updates.badge,
                             notice = updates.notice,
                         ),
@@ -209,10 +221,8 @@ class MainActivity : AppCompatActivity() {
             gateExpired = true
         }
         lifecycleScope.launch {
-            combine(
-                settings.observe(AppearanceSettingKeys.THEME),
-                settings.observe(AppearanceSettingKeys.DYNAMIC_COLOR),
-            ) { theme, dynamicColor -> AppearancePrefs(theme = theme, dynamicColor = dynamicColor) }
+            settings
+                .observeAppearance()
                 .flowWithLifecycle(lifecycle)
                 .collect { appearance.value = it }
         }

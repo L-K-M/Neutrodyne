@@ -140,7 +140,7 @@ class GroupSettingsScreenTest {
                 )
             setPage { GroupSettingsScreen(state, {}, {}, {}) }
             onNodeWithText("Manual only").assertIsDisplayed()
-            onAllNodesWithText("App default").assertCountEquals(2)
+            onAllNodesWithText("App default").assertCountEquals(6)
             onNodeWithText("Notifications are blocked").assertDoesNotExist()
             onNodeWithText("Open settings").assertDoesNotExist()
         }
@@ -175,7 +175,17 @@ class GroupSettingsScreenTest {
     @Test fun deletedGroupPopsTheSettingsRoute() =
         runComposeUiTest {
             scopes.seedGroup(group.id, group.uuid, group.name)
-            val vm = GroupSettingsViewModel(group.id, groups, scopes, FakeSettingsRepository())
+            val vm =
+                GroupSettingsViewModel(
+                    group.id,
+                    groups,
+                    scopes,
+                    FakeSettingsRepository(),
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakePodcastRepository(),
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeCapabilitiesSource(),
+                )
             store.put("settings", vm)
             setPage { GroupSettingsRoute(GroupSettingsKey(group.id), vm) }
             onNodeWithText("Group settings · News").assertIsDisplayed()
@@ -229,6 +239,7 @@ class GroupSettingsScreenTest {
                                 SettingField.NOTIFY_NEW_EPISODES -> own.notifyNewEpisodes != null
                                 SettingField.PLAYBACK_SPEED -> own.playbackSpeed != null
                                 SettingField.SKIP_SILENCE -> own.skipSilence != null
+                                else -> false
                             }
                         if (hasOwn) SettingSource.Group(group.uuid, group.name) else SettingSource.AppDefault
                     },

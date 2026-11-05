@@ -430,6 +430,8 @@ stateDiagram-v2
 
 `<launcher>` is the path of the running jpackage launcher, read from the system property `jpackage.app-path`, which the jpackage 25 launcher always passes to the JVM ([`JvmLauncher.cpp`](https://raw.githubusercontent.com/openjdk/jdk25u/master/src/jdk.jpackage/share/native/applauncher/JvmLauncher.cpp)); without it (`InstallKind.DEV`) registration is skipped. On macOS the registered item is the bundle, so a translocated first start ([First install and every update](#first-install-and-every-update)) must not register: `MacLoginItemRegistrar` refuses while the bundle runs from a path containing `/AppTranslocation/` and Settings says "Move Neutrodyne to Applications first" (the same check adds a hint to the first-run card).
 
+**Implementation notes (2026-11-05, MD2 — close, tray and start at login).** `MacLoginItemRegistrar` is pending in a later MD2 slice — this slice writes no native code, so the factory binds an `UnsupportedLoginItemRegistrar` on macOS and Settings › Desktop hides the row there; `SMAppService.mainApp` through the Objective-C shim and the translocation refusal above still apply when it lands. The `REQUIRES_APPROVAL` rendering is already built and tested (the System Settings guidance with the `x-apple.systempreferences:` opener), so the deferred registrar only has to report its status. The Windows registrar implements the `StartupApproved` byte rule as the table documents, but that value stays Unverified until it is exercised on a real Windows install (MD2 AC5). A registrar reports `UNSUPPORTED` when `jpackage.app-path` is absent — dev runs — which is this paragraph's "registration is skipped" surfaced as a state, so the row is hidden rather than half-present. The tray follows the row above as Compose `Tray` on AWT `SystemTray`; its glue lives in `:desktopApp` (`NeutrodyneWindow`) over the pure, tested `TrayMenu` model and tooltip functions, so the `TrayController` of the module table is not a separate class in this slice. The one-time no-tray hint is a banner after an iconified busy close, persisted by `desktop.tray_hint_shown`.
+
 ### Shell failure modes
 
 | Failure | Behaviour |
@@ -666,7 +668,7 @@ Notification clicks after the app has quit start the app (Windows and macOS) or 
 
 ### ndmedia interface
 
-`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. All functions return immediately; only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
+`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. PCM writes and the audio callback never wait; device and session lifecycle calls may wait and run away from the audio and UI threads. In the production sketch only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
 
 ```c
 /* ndmedia.h (sketch) — UTF-8 strings, int return codes (0 = ok, < 0 = ND_E_*), opaque handles */
@@ -784,7 +786,7 @@ sealed interface ResolvedSource {
 }
 interface ByteSource : AutoCloseable {
     val length: Long?                                        // null = unknown (no Content-Range total yet)
-    fun read(position: Long, dst: MemorySegment, maxBytes: Int): Int   // blocking, engine or prepare thread; -1 at EOF
+    fun read(position: Long, dst: MemorySegment, maxBytes: Int): Int   // blocking, engine or prepare thread; 0 at EOF, -1 when aborted
     fun abort()                                              // any thread; makes a blocked read return
 }
 fun interface DemuxerFactory { fun open(source: ByteSource, hint: SourceHint): Demuxer }
@@ -810,6 +812,47 @@ fun interface DecoderFactory { fun create(track: AudioTrackInfo): Decoder }
 | Sync ports (MS2, MS3) | `DesktopPlaybackController` implements 10's `PlaybackSyncPort` (`active`, `PAUSED` / `STOPPED` / `TRANSITIONED` events, `onRemoteMarkedPlayed` freezing position writes without skipping or stopping) and calls `PrePlaySync.beforeStart()` before UI-started plays. A playing controller ignores remote sessions; an idle one shows "Continue on this device" when `SessionAdopter` writes a newer session; resuming goes through `play()` ([06 Shared playback core](06-playback.md#shared-playback-core), [10 Conflict resolution](10-sync.md#conflict-resolution)) |
 
 `EngineState` maps to `:playback:api`'s `PlayerPhase`: `Idle` → `NOT_LOADED`, `Buffering` → `BUFFERING`, `Ready` → `READY`, `Ended` → `ENDED`, `Error` → `ERROR` with `PlaybackIssue` per [Engine errors and recovery](#engine-errors-and-recovery). `StreamKind` is `LOCAL`, `STREAM` or `YOUTUBE` from the `ResolvedSource`.
+
+**MD1a.2 implementation note (2026-11-04).** The desktop now contributes
+`DesktopPlaybackController` to the existing shared player and Up next routes.
+It creates its database-backed runtime after the open gate, restores saved
+metadata without preparing output, and serializes commands, queue projection
+and engine observations across suspending writes. Arrival tickets prevent a
+newer pause, dismiss or start from dispatching an older suspended start. The
+shared `PlayStarter` can return `ServiceUnavailable` for a stale session or persistence failure;
+this reports a rejected start even though no remote playback service exists.
+Selection and persistence use `PlayStarter`, `QueueWindowPlanner`, `PositionSaver`, `PlaybackHistory`
+and `EffectivePlaybackSettings`; there is no second desktop queue algorithm.
+Effective speed and skip silence are set before `setWindow`, since preparation
+may prime decoded buffers before the device plays. The non-replaying engine
+event collector subscribes before preparation so early measured-duration
+metadata cannot be dropped. Saves run every five seconds
+while advancing and on pause, buffering stall, user seek, departure and shutdown.
+Measured duration goes through `PositionStore`; source/cache settings and maintenance
+use the existing device-local streaming cache preference.
+
+The current engine has no prepared-next transition. At `Ended` the controller
+commits the outgoing departure and promotes the next shared-core queue item,
+then opens it normally. This supplies MD1a.2's queue progression without claiming
+MD1b's gap or device-restart bounds. `DesktopEpisodeSourceResolver` retains the
+projected enclosure and length, prefers a completed local file at first open,
+and falls back to that enclosure if the file was already missing. Reconnects
+retain the chosen source kind even when a download completes meanwhile. M6 still
+owns the completed-file index binding; the shell currently supplies its empty index. YouTube resolution
+is available behind the existing capability gate, which remains external until
+MD3. New RSS connections retain MD1a.1's fresh-cache-resource rule.
+
+The existing shared sheet chooses its desktop side panel or mini-player layout;
+this work adds no home or navigation UI and remains compatible with the radio
+home lane. `:desktopApp:run` builds and locates this host's native libraries.
+Release-image native bundling, the release source bundle, gapless preparation,
+chapter enrichment/navigation, sleep-timer controls, retry/device-loss handling
+and OS sessions remain in MD1b/MD2. Until MD1b, the controller exposes the default
+Off/null sleep/chapter state. Sync ports remain MS2/MS3 work. Controller tests
+use real Room repositories with explicit fake-engine milestones; timing tests
+use virtual time, Compose tests use the existing desktop setup, and the native
+controller boundary runs with `EngineBackend.NULL` in the desktop CI matrix.
+No audible, physical-device or soak acceptance is claimed here.
 
 ### Engine thread and commands
 
@@ -853,6 +896,36 @@ Loop of `nd-engine`, per iteration (one block ≈ 1,024 output frames):
 | Write failure | Disk full or permission error → the resource continues uncached (reads stream from the network through an 8-MiB in-memory window), as `FLAG_IGNORE_CACHE_ON_ERROR` does on Android |
 | Maintenance | `PlaybackMaintenance.streamingCacheBytes()` and `clearStreamingCache()` (all keys except the current pins) back Settings › Playback › Storage on the desktop |
 
+**MD1a.1 implementation note (2026-11-04).** `ByteSource` retains MD0's
+explicit return convention: 0 at EOF and -1 after abort; `AvioBridge` translates
+these to FFmpeg's EOF and EXIT codes. Source exceptions are retained across the
+catch-all upcall and rethrown after the downcall returns, so HTTP status and
+content-change failures can trigger the specified re-resolution. The shared
+JDK 25 engine fakes live in `core/testing/src/desktopEngineMain`; engine test
+source sets compile them directly. They do not add an engine dependency or
+FFM types to `:core:testing`'s Android/JDK 21 artifact. `SpanCache`'s byte limit
+is supplied by its caller; wiring the existing portable, never-synced
+`playback.stream_cache_mb` setting and storage maintenance UI belongs to the
+application/controller work. No new setting is introduced here.
+
+The production engine implements the current-item window and non-current
+window diffs. Automatic item transitions and next-item preparation remain
+MD1b work. A seek cancels the source and re-resolves/reopens a pipeline at the
+target, while retaining and clearing the output device. This also starts a
+fresh RSS pin. The idle `nd-prepare` executor samples the output counters every
+50 ms so a blocked AVIO call can still publish `Buffering` after a 300-ms
+underrun. Silence-skip events follow consumed-frame markers. MD0's diagnostic
+instrument remains separately available as `Md0AudioProbe`.
+
+For device-rate conversion MD1a.1 retains the MD0 path: Sonic performs both
+time stretch and source-to-device rate conversion, followed by gain and f32
+conversion. There is no second output swresample stage. The pinned Android
+Sonic references already cover 44.1-kHz input to 48-kHz output; the input
+format/channel conversion still uses FFmpeg swresample. This refines the
+placement of rate conversion in the diagram without changing D86's DSP order.
+Application position persistence (`PositionSaver`, M4/MD1a.2), player UI, native
+hardware/soak checks and MD1b's transition/device-loss acceptance remain open.
+
 ### FFmpeg build
 
 One script, `playback/native/ffmpeg/build.sh <target>`, run by the `buildFfmpeg` task on each target's runner, builds FFmpeg 9.0.x (pinned with its SHA-256 and upstream signature in `native-components.lock`) as four shared libraries. The configure line is the one measured in the research build (2.83 MB stripped on Linux x64, "License: LGPL version 2.1 or later"), with assembly enabled on targets where the assembler is available:
@@ -869,7 +942,7 @@ One script, `playback/native/ffmpeg/build.sh <target>`, run by the `buildFfmpeg`
 
 | Target | `$TARGET_FLAGS` and toolchain | Library names (FFmpeg 9.0 majors as measured: avcodec 63, avformat 63, avutil 61, swresample 7) |
 |---|---|---|
-| `windows-x64` | MSYS2 shell with MSVC (`--toolchain=msvc --target-os=win64 --arch=x86_64`), NASM | `avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll` |
+| `windows-x64` | MSYS2 shell with MSVC (`--toolchain=msvc --target-os=win64 --arch=x86_64 --extra-cflags=-MD`), NASM | `avcodec-63.dll`, `avformat-63.dll`, `avutil-61.dll`, `swresample-7.dll` |
 | `macos-arm64` | Apple clang, `--arch=arm64 --extra-cflags=-mmacosx-version-min=13.0 --extra-ldflags=-mmacosx-version-min=13.0`, install names `@rpath/…` with `@loader_path` | `libavcodec.63.dylib`, … |
 | `linux-x64`, `linux-arm64` | gcc in `manylinux_2_28` containers (glibc 2.28 baseline, below our 2.31 floor), `-Wl,-rpath,'$ORIGIN'`, NASM on x64 | `libavcodec.so.63`, … |
 
@@ -888,8 +961,8 @@ Open (on `nd-prepare`, or `nd-engine` for the first item):
 
 1. Resolve the item (`attempt` 0) and open its `ByteSource`.
 2. `AvioBridge`: `avio_alloc_context` with a 64-KiB buffer and the read and seek upcalls (`SEEK_SET`, `SEEK_CUR`, `SEEK_END`, `AVSEEK_SIZE` → `length` or −1); `AVFMT_FLAG_CUSTOM_IO`; interrupt callback bound to the pipeline's abort flag.
-3. `avformat_open_input` with `probesize` 1 MiB; `avformat_find_stream_info` only when the best audio stream lacks its sample rate or channel layout.
-4. `av_find_best_stream(AUDIO)`; every other stream gets `discard = AVDISCARD_ALL` (video plays as audio; attached pictures are ignored).
+3. `avformat_open_input` with `probesize` 1 MiB.
+4. `av_find_best_stream(AUDIO)`; when it cannot pick a stream, `avformat_find_stream_info` runs and selection is retried (FFmpeg 9 refuses an audio stream whose rate or channel layout is still unset, and demuxers such as mp3 and adts leave both to their parser — MD0 finding, 2026-11-02); every other stream gets `discard = AVDISCARD_ALL` (video plays as audio; attached pictures are ignored).
 5. Open the decoder from `codecpar`; create the input resampler (decoder format → interleaved s16 stereo at the source rate; mono duplicated, more channels downmixed with swresample's default matrix).
 6. Emit `TracksKnown`: duration (stream, else container), chapters, gapless data (`initial_padding`, `trailing_padding`, skip-samples side data present).
 
@@ -974,7 +1047,7 @@ Spike S18 = milestone MD0 ([PLAN MD0](../PLAN.md#md0-desktop-audio-engine-spike)
 | Question | Does our engine core — minimal LGPL FFmpeg through FFM, miniaudio output, the timeline clock, the DSP ports — play every podcast format with an accurate clock on all four targets, and do the hardest OS integrations work? |
 | Procedure | `build.sh` on the four runners with the `avcodec_license()` check; the FFM bindings and `ffoffsets.c`; a custom AVIO over a JVM `ByteSource`; an `ndmedia` prototype (device, ring, `framesPlayed`); the engine thread with the `SilenceSkipper` and `Sonic` ports; the corpus (CBR and VBR MP3, MP3 with ID3 `CHAP`, M4A, M4A with chapters, fragmented M4A like itag 140, WebM Opus like itag 251, Ogg Opus, Ogg Vorbis, FLAC, WAV, HE-AAC v1 and v2); prototypes of SMTC with the hidden window and AppUserModelID, Now Playing and remote commands from the ad-hoc-signed app, MPRIS over dbus-java, device removal per OS, suspend notices including a Windows Modern Standby laptop |
 | Pass criteria | PLAN MD0 AC1–AC4: corpus demux and decode with reference sample counts, chapters and ±50-ms seeks on all targets; LGPL-2.1+ separate libraries ≤ 4 MB with no network protocol; clock within 50 ms at 0.5×–3× with skip silence and a 30-min underrun-free run per OS; media keys through all three sessions with the main window hidden, headphone removal pauses on Windows and macOS, suspend notice before audio stops |
-| Results | Pending (MD0). Recorded here per item: sizes per target, sample counts, seek errors, clock error, CPU at 3× on the slowest reference laptop, OS-integration outcomes, Modern Standby behaviour, macOS media-key routing, Linux device-removal behaviour |
+| Results | See [MD0 spike findings](#md0-spike-findings-2026-11-02). Required evidence per item: sizes per target, sample counts, seek errors, clock error, CPU at 3× on the slowest reference laptop, OS-integration outcomes, Modern Standby behaviour, macOS media-key routing, Linux device-removal behaviour |
 | Fallback | `MpvAudioEngine` behind the same `AudioEngine` seam: an LGPL libmpv build (`-Dgpl=false`) with an LGPL FFmpeg, our `ByteSource` through `mpv_stream_cb_add_ro`, speed through `scaletempo2`, positions from `time-pos`, the queue window mapped to mpv's playlist with `prefetch-playlist`. Costs recorded in [D86](../PLAN.md#3-key-decisions): different time-stretch quality and skip-silence feel than Android (skip silence would need our own detection, never the GPL script), about seven native libraries per target (libplacebo, libass, FreeType, HarfBuzz, FriBidi, libavfilter, libswscale are hard dependencies of mpv 0.41, [mpv meson.build](https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/meson.build)) and their source bundles. The decision is written into this section and D86 (MD0 AC5) |
 
 ---
@@ -1002,11 +1075,15 @@ Choosing a folder (`FilePicker` of `:core:ui`, 08):
 
 Validation before the folder is accepted: it exists or can be created; a probe file `.neutrodyne-probe` can be created, written and deleted; it is not inside the installation directory, `<cache>` or `<state>`; free space is shown in the confirmation. A folder that fails shows the reason and keeps the previous setting.
 
+**Implementation note (2026-11-05, M6b review).** Re-pointing a registered folder to its new mount path writes the folder registry first and `desktop.downloads_dir` second; the settings store has no multi-key write. A crash between the two leaves `desktop.downloads_dir` naming a path the registry no longer holds. `DesktopStorageRoots.current()` then logs a warning and answers the default folder: new downloads go there until a folder is chosen again, and every registered root, including the re-pointed one, keeps resolving.
+
 ### Change folder
 
 "Change folder…" (Settings › Desktop, R8.8) asks "Move {n} downloads ({size}) to {folder}?" with **Move** (default) and **Leave them where they are**, and calls 07's `changeRoot(rootId, moveExisting)`. New downloads use the new folder at once; queued and paused rows follow it at their next prepare.
 
 `DesktopMoveLane` (lane `downloads-move`) runs 07's move algorithm ([07 Moving between roots](07-downloads.md#moving-between-roots)) with one desktop optimisation: when source and target are on the same file store (`Files.getFileStore` equal), each completed file is moved with `Files.move(…, ATOMIC_MOVE)` — a rename — instead of copy, verify and delete; across stores 07's copy (256-KiB buffer, `force`, length check), rename, commit and journal deletion apply. The playing episode's file is deferred until it is no longer current. Progress shows in Settings and on the Downloads screen (`MOVE_IN_PROGRESS`); a quit or crash leaves the remaining rows on the old root, and the lane continues at the next start (R8.8 "continues after an interruption"). Emptied `[p…]` folders on the old root are removed; the old root itself is never deleted.
+
+**Implementation note (2026-11-05, M6b part 4 merge with MD2).** Settings › Desktop is one page: MD2's Window section (close behaviour, start at login) and a "Downloads" section holding the folder rows above it in the same scroll column. The section is the `DesktopDownloadFolderSection` composable, rendered through a `DesktopPage` slot so the page composes without a download graph; Settings › Downloads no longer hosts the folder — its desktop "Downloads folder" row pushes `SettingsKey(DESKTOP)`. The delivered section presentation differs from 08's wireframe sketch in row form only: the usage line first, then "Change folder…" (the current path as its summary), "Use default folder" (only while a folder was chosen) and "Show in Explorer / Finder / Files" as rows, rather than the sketched labelled path block with inline buttons; the dialog, wording and behaviour are unchanged.
 
 ### Names and path lengths on the desktop
 
@@ -1872,6 +1949,210 @@ Names fixed by PLAN and the change brief (`desktop.*` keys, `-Dneutrodyne.smoke`
 12. **`jdk.localedata` size (S13).** Its installed size; Compose 1.12.1's jlink step cannot restrict it to the shipped locales (no `--include-locales`), so it ships whole unless PB27 is missed, in which case the convention plugin runs its own jlink step.
 13. **Re-signed runtime on macOS (PO).** jpackage must replace Adoptium's signatures on the runtime's Mach-O files with the bundle's ad-hoc signature to seal the app; the code is unchanged. Default: treat it as unmodified for [D3](../PLAN.md#3-key-decisions)'s runtime exception and say so in `RUNTIME-SOURCES.md` ([Runtime exception obligations and checks](#runtime-exception-obligations-and-checks)).
 14. **Linux package dependencies (S13).** The `Depends`/`Requires` lists of [Linux DEB, RPM and tar.gz](#linux-deb-rpm-and-targz) are a first draft; S13's installs on Debian 11, Ubuntu 20.04–24.04, Fedora and openSUSE fix them. If a distribution inside the floor cannot satisfy them, the tar.gz is the documented route there.
+
+---
+
+## MD0 spike findings (2026-11-02)
+
+Implementation note (2026-11-01, continuation verified 2026-11-02): the
+initial prototype's end-position assertion did not establish a live clock
+accuracy result. Live reference comparisons now pass on all four targets;
+AC3 remains open for its real-device soak.
+Regression run `41528771248` exposes ring saturation, clock pause and clock
+reset defects before their repairs. Custom AVIO owns its current buffer and
+context even with `AVFMT_FLAG_CUSTOM_IO`; cleanup follows
+[FFmpeg's AVIO example](https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/avio_read_callback.c).
+The OS prototype uses the Windows SDK's COM/WinRT ABI declarations directly
+in our C++ shim, with no C++/WinRT implementation copied or embedded. A
+hidden top-level HWND receives power broadcasts; SMTC delegates enqueue
+commands and timeline seeks. Core Audio endpoint notifications identify the
+active default endpoint; jack detection still needs hardware proof. The
+Objective-C prototype registers Now Playing, remote commands, NSWorkspace
+sleep/wake and Core Audio listeners on Cocoa's main queue. Their native
+queues are polled by `NativeSystemMediaSession`, so no native OS callback
+enters the JVM. `LinuxSuspendMonitor` subscribes to logind's
+`PrepareForSleep` on the system bus; its private-bus test proves signal
+transport, with real suspend ordering still open. Their API registration suite is separate from physical key,
+ad-hoc signing, device-removal and suspend proofs. Neither session is wired
+into the production graph.
+
+Inspection of the Linux arm64 artifact from `41530910232` found GCC's
+out-of-line atomic helpers inside `ndmedia`. Their runtime exception does
+not widen D3. The new binary gate rejects them. The verified remedy is
+`-mno-outline-atomics` on arm64, followed by rebuilt binary and import/symbol
+inspection in run `41560278989`. If compiler runtime code remains, use a permissively licensed
+compiler runtime; do not waive the licence envelope or declare AC2 closed.
+
+Expanded runtime audit note (2026-11-01): run `41553908272` found GCC's
+`crtstuff.c` startup functions in all five Linux libraries and outlined
+atomics inside `avutil`, beyond the previously inspected `ndmedia` helpers.
+[GCC's source](https://raw.githubusercontent.com/gcc-mirror/gcc/master/libgcc/crtstuff.c)
+places the startup code under its GPL runtime exception, which D3 does not
+extend outside OpenJDK. The verified repair uses `-nostartfiles` only for
+shared links (`--extra-ldsoflags` for FFmpeg), plus `-mno-outline-atomics` for
+both arm64 builds. The audit reads FFmpeg's unstripped link outputs because
+installed stripping removes local helper names. Rebuild, decode and import
+checks passed on both Linux targets in run `41560278989`; an unresolved
+copied runtime remains a blocker. The
+fallback is an audited permissive compiler runtime, not an exception waiver.
+
+Clock mapping note (2026-11-01): the live known-gap test failed by 145 ms in
+that same run. Cumulative decode-ahead skip counts attached future jumps to
+audio already queued. Retained PCM now carries its source-frame span,
+including the silence processor's retained fade-in tail, and the engine
+publishes the span at the corresponding Sonic boundary. The source-span
+suite checks input chunking and partial drains; the Android waveform suite
+still matches all 54 configurations. The null-device gap test samples before and after the jump
+at all four required speeds, separately from EOF and the no-gap WAV test.
+The 50 ms requirement is unchanged. The repaired matrix passed, with a
+maximum measured gap-clock error of 1 ms on each target.
+
+The native callback accepts only actual allocated atomics for which
+`atomic_is_lock_free` succeeds, including both shared-clock slots. This
+checks the compiler's per-object ABI rather than assuming MSVC's macro
+classification. Linux and macOS also have standalone ASan/UBSan null-device
+stress instruments for partial writes, ring wraps, clear and teardown;
+three iterations per host passed without sanitizer reports in run
+`41560278989`. These intentionally drain the ring and record 240 underrun
+frames per iteration, so they are memory-safety evidence, not an underrun-free
+playback measurement. Their executables are temporary diagnostics outside
+shipping native output. Windows sanitizer coverage remains open.
+
+The owner-only `:desktopApp:md0Probe` and `md0ProbeImage` tasks use test
+classes, never the production image. They are instruments, not tester
+releases. `Md0SafetyTest` injects suspend, resume, removal and default-change
+events through the real `PositionSaver` and a fake store; it cannot prove
+that an OS delivered an event in time or that a production database saved.
+
+Owner procedure, still open on each real OS:
+
+1. Check out the evidence commit, with JDK 25 and the target's native build
+   tools. Choose an audio file long enough to play for 30 minutes at the
+   selected speed with silence skipping. Use wired output first; record OS,
+   hardware, backend, output rate/period, load, commit and file hash.
+2. Run `./gradlew :desktopApp:md0Probe -Pmd0.file=/absolute/audio-file
+   -Pmd0.backend=default -Pmd0.speed=3 -Pmd0.skip=true -Pmd0.seconds=1800
+   -Pmd0.report=/absolute/new-report.jsonl` as one command. The report path
+   must not already exist. Count a hardware run only when the reported device backend is not `null`;
+   `-Pmd0.backend=null` is diagnostic and supplies no audible/device proof.
+   If hardware cannot be opened, use explicit null and leave the device
+   measurements open.
+   An early EOF fails the soak. Inspect the frame and CPU samples and count
+   post-start underruns; retain the complete report, including failures.
+3. Use fresh launches for steps 3–6; interrupted runs do not count toward the
+   30-minute soak. With the prototype playing and no main player window, press keyboard and
+   headset play/pause, next/previous and seek controls. Verify the corresponding
+   `command` records. Play/pause controls actual output; next/previous/seek
+   records prove transport only in this single-item instrument. Full queue
+   and seek-controller behavior remains MD1. On Windows inspect the SMTC
+   flyout identity and metadata; on Linux exercise GNOME and KDE MPRIS.
+4. For the macOS signed-app case run
+   `./gradlew --no-configuration-cache :desktopApp:md0ProbeImage` and use the
+   printed `image/Md0Probe.app` path. Run `codesign --force --deep --sign -
+   /absolute/Md0Probe.app`, then `codesign --verify --deep --strict
+   /absolute/Md0Probe.app`. Launch its `Contents/MacOS/Md0Probe` executable
+   with the six arguments `audio-file default 3 true 1800 new-report.jsonl`.
+   Confirm Now Playing metadata and physical media-key routing with the
+   app's window hidden. API registration from an unsigned test JVM does not
+   close this check. The image references the same checkout's native build;
+   it is an owner-local instrument and is never uploaded or distributed.
+5. While playing, unplug the active jack and USB device, then repeat with
+   Bluetooth disconnection. Look for `REMOVED`, output pause and a
+   `fake-store-position` record. Change only the default device separately:
+   that must continue playing. Record Linux's actual sink-removal behavior;
+   automatic rerouting there is an accepted limitation. Windows monitors
+   the multimedia default endpoint; a different actual miniaudio endpoint
+   and built-in jack notification coverage still need hardware comparison.
+6. Suspend with the lid and menu while playing, then wake. Compare system
+   event-arrival/report timestamps with recorded audio stop, check pause and the
+   recorded position, and verify that wake never starts output. Report timestamps
+   mark JVM receipt, not the original native callback. Include a
+   Windows Modern Standby laptop and its power mode. A late/missing event
+   stays a failure/open result, with the five-second periodic save as the
+   documented loss bound; the fake-store probe does not prove disk durability.
+7. Keep the CPU trace at 3x and every underrun, routing and sleep observation.
+   No physical measurement, signed-app result or 30-minute soak is claimed
+   by the CI suites. If an OS session cannot be created, capture the exact
+   error; the in-app controls are the documented degraded mode, and AC4
+   remains open. libmpv does not resolve an OS-session or suspend failure.
+
+Diagnostic wording note (2026-11-01): `fake-store-position` reports the store's
+current value after a system event. It also appears after resume/default
+changes, which intentionally do not save; it asserts no new write. Existing
+`Md0SafetyTest` cases verify that policy. A log-label assertion would only
+mirror wording, and an actual OS-event log reproduction remains part of the
+owner checks above.
+
+Clock lifetime note (2026-11-01): the callback publishes two counters into
+aligned caller-owned storage. `NdOutput` pins it while the device can write;
+clock readers retain the automatic arena after device close. Reads never
+call a freed device and remain lock-free. Device operations serialize with
+close, and temporary description buffers are released per call. An old
+freed-handle read is not a safe deterministic regression; the new null-device
+test compares native/shared counts and reads the retained counter after close.
+
+Native source bundles now include the actual per-target build record, lock,
+verification key and build scripts, with missing or corrupt inputs rejected.
+
+Native boundary note (2026-11-01): the spike uses explicit host-compiler
+commands in `ndmedia/build.sh`, rather than adding CMake. Device names are
+escaped before JSON serialization; pure C boundary tests run with each host
+compiler and their executables stay outside the native output directory.
+A pre-fix automated OS-name injection was impractical without adding a
+platform-device test hook. The owner reproduction is to name an output device
+with a quote, backslash and non-ASCII text, then verify that `md0Probe` reports
+valid JSON and preserves the name. Real device-stop errors now propagate as
+`ND_E_DEVICE`; forced hardware-stop failure remains an owner measurement.
+
+The spike runs on `impl/md0-current`. The production graph still binds
+`DesktopUnavailablePlayback`; MD0 creates no tester build. Dispatch and
+nightly workflows select Windows x64, macOS arm64 and both Linux targets.
+
+Implementation evidence note (2026-11-01, measured 2026-11-03):
+[run 41560278989](https://github.com/L-K-M/Neutrodyne/actions/runs/41560278989)
+at `1a7a782c1a599646dd9801b65b4bfba20b96da49` passed documentation, static,
+unit, instrumented, assemble, server and all four desktop jobs. Each
+`desktop-native-<target>` artifact retains the generated ABI layout, test XML,
+configuration, protocol/component inventory, binary hashes/imports and exact
+source bundle for 14 days. The matrix ran the real miniaudio null backend.
+
+| Target | Four stripped FFmpeg libraries, bytes | Gap-clock maximum error, ms | Live samples at 0.5× / 1× / 2× / 3× |
+|---|---:|---:|---|
+| Windows x64 | 3,583,488 | 1 | 818 / 356 / 194 / 174 |
+| macOS arm64 | 2,334,368 | 1 | 284 / 118 / 60 / 38 |
+| Linux x64 | 3,107,508 | 1 | 1,593 / 803 / 403 / 272 |
+| Linux arm64 | 3,320,420 | 1 | 1,609 / 811 / 407 / 274 |
+
+Windows diagnosis note (2026-11-01): run `41556548008` passed SMTC API tests
+but failed the import audit because the shim's C++ standard-library helpers
+introduced `MSVCP140.dll`. The shim now uses Win32 threads, events, SRW locks,
+Interlocked counters and bounded UTF-16 buffers with the SDK's COM/WinRT ABI.
+Run `41560278989` passed registration/publication/teardown and the import
+audit without MSVCP. This supplies no physical-key or Modern Standby proof.
+
+| Criterion | Evidence and present result | Decision or fallback |
+|---|---|---|
+| AC1 corpus, chapters and seeks | Go on all four targets. `FfmpegCorpusTest` decodes all 16 independently referenced synthetic fixtures with exact sample counts, chapters, repeated seek-to-zero priming and timestamped start/middle/near-end/unaligned seeks within 50 ms. The logged quarter-duration seeks measured 0 ms error on every fixture/target. `MediaCorpusTest` checks hashes and reference metadata. | Retain custom AVIO/FFM. A future codec/container regression requires a corrected minimal FFmpeg build or an LGPL libmpv evaluation; do not omit a fixture. |
+| AC2 licence, size and replaceability | Go for the spike. Each target reports “LGPL version 2.1 or later”, four separate upstream-named libraries, zero network protocols and less than 4,000,000 bytes. `checkNativeLicences`, source-bundle negative tests and the five-library binary audit passed. The Linux audit also examines unstripped outputs for copied GCC runtime code. | Retain the dynamically loaded minimal FFmpeg build. The production image/release scan and source attachment remain MD1b obligations because MD0 ships no app image. Reject forbidden code or an oversized build; never widen D3 to pass the gate. |
+| AC3 clock and playback | Null-backend go; hardware portion open. `EngineClockTest` samples live PCM before EOF and across an actual skipped gap at 0.5×, 1×, 2× and 3×; maximum gap error is 1 ms on every target. `TimelineClockTest`, `SilenceSpanTest` and `EngineCommandsTest` cover pause/reset/underruns, spans and blocked-source controls. No physical 30-minute soak or reference-laptop CPU measurement ran. | Continue with the custom engine instrument. Keep production unavailable until MD1 and retain the hardware hold. If real playback misses the budget, repair device/DSP accounting or evaluate an LGPL libmpv build behind the seam. |
+| AC4 media sessions and safety | API/transport go; hardware portion open. Windows SMTC and macOS Now Playing API registration/publication/teardown passed. Private-bus MPRIS and logind tests passed on Linux. Injected removal/suspend/default-change tests use the actual saver with a fake store. Physical keys, hidden-window routing, signed macOS routing, active headphone removal and suspend/Modern Standby timing remain owner checks above. | In-app controls and periodic saves are documented degraded behavior, not AC4 acceptance. Keep AC4 open until those checks run. libmpv does not resolve OS-session or power delivery failures. |
+| AC5 engine decision | Conditional go for the custom FFmpeg/FFM/miniaudio core, backed by the four-target results above. The single-local-item instrument is not the production controller and does not execute full queue transitions or remote seeks. | Continue toward MD1 with the hardware hold explicit; MD0 has no unconditional acceptance while AC3/AC4 hardware evidence is open. If a core blocker recurs, evaluate an LGPL libmpv build with its own size, source and licence proof. That fallback was not built or measured here. |
+
+Implementation note (2026-11-01): Android's pinned Media3 1.11.1 processors
+produce independent PCM reference hashes in `Md0DspReferenceTest`; the
+producer artifact was captured from CI. The desktop suite now matches all
+45 Sonic and nine silence-skipping configurations across input chunk sizes
+on all four targets. Silence skipping first exposed two byte/frame-unit
+defects, observed failing in run `41541772367` before repair. The original
+statement that parity was deferred to MD1 was wrong.
+
+The MPRIS prototype validates track identity for absolute seeks. `Raise`,
+`Quit` and `OpenUri` remain transport stubs, and `Stop` maps to Pause. Full
+production controller behavior belongs to MD1/MD2; private-bus results do not
+prove GNOME/KDE physical-key routing. A missing real audio device selects the
+actual miniaudio null backend explicitly, with all device-dependent results
+left open. No audible, manual, signed-release or physical-device proof is
+claimed here.
 
 ---
 

@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.EffectiveAutoDownload
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import kotlinx.coroutines.flow.Flow
@@ -42,4 +43,11 @@ class FakeEffectiveSettingsResolver : EffectiveSettingsResolver {
     }
 
     override fun observeRefreshIntervals(): Flow<Map<Long, Effective<Int?>>> = refreshValues
+
+    val autoDownloadValues = MutableStateFlow<Map<Long, EffectiveAutoDownload>>(emptyMap())
+
+    override suspend fun autoDownload(podcastIds: Collection<Long>): Map<Long, EffectiveAutoDownload> =
+        autoDownloadValues.value.filterKeys { it in podcastIds }
+
+    override fun observeAutoDownload(): Flow<Map<Long, EffectiveAutoDownload>> = autoDownloadValues
 }

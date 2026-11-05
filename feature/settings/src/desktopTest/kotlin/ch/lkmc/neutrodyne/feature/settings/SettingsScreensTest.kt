@@ -2,13 +2,24 @@
 
 package ch.lkmc.neutrodyne.feature.settings
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -18,15 +29,22 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.domain.DesktopIntegration
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.core.model.LoginItemState
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
+import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -36,6 +54,8 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.FakeDesktopIntegration
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -49,19 +69,25 @@ import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
+import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
+import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
+import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.stringResource
 import java.util.Locale
+import kotlin.reflect.KClass
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * The M0a Settings screens driven through `NeutrodyneRoot` on the desktop JVM (01 S9 method): the
@@ -96,13 +122,53 @@ class SettingsScreensTest {
             onNodeWithText("Licences").assertExists()
         }
 
+    /** Visible clickables keep a 48dp layout after reaching the bottom of a compact Settings list. */
+    @Test
+    fun settingsHomeVisibleTargetsKeep48DpAfterScroll() =
+        runDesktopComposeUiTest(width = 320, height = 640) {
+            setSettingsRoot()
+            openSettings()
+            onNodeWithText("Licences").performScrollTo().assertIsDisplayed()
+            waitForIdle()
+            val target = onNodeWithText("Licences")
+            val visible = target.fetchSemanticsNode().boundsInRoot
+            val minimum = with(target.fetchSemanticsNode().layoutInfo.density) { 48.dp.toPx() }
+            assertTrue(visible.width >= minimum && visible.height >= minimum, "Licences is clipped: $visible")
+            onAllNodes(hasClickAction(), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .filter { !it.boundsInRoot.isEmpty }
+                .forEach(::assertMinimumClickableLayout)
+            target.performClick()
+        }
+
+    @Test
+    fun viewportClippingDoesNotMakeAProperLayoutUndersized() =
+        runDesktopComposeUiTest(width = 80, height = 80) {
+            setContent {
+                Box(Modifier.size(80.dp, 32.dp).verticalScroll(rememberScrollState())) {
+                    Box(Modifier.size(64.dp).clickable(role = Role.Button) {})
+                }
+            }
+            val node = onNode(hasClickAction()).fetchSemanticsNode()
+            val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
+            assertTrue(node.boundsInRoot.height < minimum, "The fixture must reproduce viewport clipping")
+            assertMinimumClickableLayout(node)
+        }
+
+    @Test
+    fun anActuallyUndersizedClickableStillFailsTheLayoutGate() =
+        runDesktopComposeUiTest(width = 80, height = 80) {
+            setContent { Box(Modifier.size(40.dp).clickable(role = Role.Button) {}) }
+            val node = onNode(hasClickAction()).fetchSemanticsNode()
+            assertFailsWith<AssertionError> { assertMinimumClickableLayout(node) }
+        }
+
     @Test
     fun aboutShowsVersionIdentityAndLicence() =
         runComposeUiTest {
             setSettingsRoot()
             openSettings()
-            onAllNodesWithText("About").onFirst().performClick()
-
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Neutrodyne").assertExists()
             onNodeWithText("Version 1.2.3 · macOS arm64 · DMG").assertIsDisplayed()
             onNodeWithText("Debug build").assertExists()
@@ -114,7 +180,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(buildInfo = FakeBuildInfo.copy(platform = BuildInfo.Platform.ANDROID, desktop = null))
             openSettings()
-            onAllNodesWithText("About").onFirst().performClick()
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Install & updates").performScrollTo().performClick()
             onNodeWithText("Android Auto", substring = false).performScrollTo().performClick()
             onNodeWithText("Unknown sources", substring = true).assertExists()
@@ -128,7 +194,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot()
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
             waitForIdle()
             onNodeWithText("kotlinx-coroutines-core").assertExists()
             onNodeWithText("Libraries · 1 library").assertExists()
@@ -144,7 +210,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(licencesSource = null)
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
 
             onNodeWithText("No licence information in this build.").assertIsDisplayed()
         }
@@ -162,7 +228,7 @@ class SettingsScreensTest {
                     ),
             )
             openSettings()
-            onAllNodesWithText("Licences").onFirst().performClick()
+            onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
             waitForIdle()
 
             onNodeWithText("Bundled components", substring = true).assertExists()
@@ -174,7 +240,7 @@ class SettingsScreensTest {
         runComposeUiTest {
             setSettingsRoot(platformActions = NoHandlerActions)
             openSettings()
-            onAllNodesWithText("About").onFirst().performClick()
+            onAllNodesWithText("About").onFirst().performScrollTo().performClick()
             onNodeWithText("Source code and releases").performScrollTo().performClick()
             waitForIdle()
 
@@ -279,6 +345,124 @@ class SettingsScreensTest {
             assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.DYNAMIC_COLOR) })
         }
 
+    @Test fun artworkAndBlackSwitchesPersistAndReportFailedWrites() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            setSettingsRoot(settingsRepository = settings)
+            openSettings()
+            onAllNodesWithText("Appearance").onFirst().performClick()
+            onNodeWithText("Use artwork colours").performClick()
+            onNodeWithText("Pure black").performClick()
+            waitForIdle()
+            assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.ARTWORK_TINT) })
+            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.PURE_BLACK) })
+            settings.failNextSet = SettingsError.WriteFailed
+            onNodeWithText("Pure black").performClick()
+            onNodeWithText("Couldn’t save the setting").assertIsDisplayed()
+            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.PURE_BLACK) })
+        }
+
+    @Test
+    fun desktopRowShowsOnDesktopAndOpensThePage() =
+        runComposeUiTest {
+            setSettingsRoot(desktopIntegration = FakeDesktopIntegration())
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("When the window is closed").assertIsDisplayed()
+            // The home row's summary carries the same text; the page's radio row is the second.
+            onAllNodesWithText("Quit unless playing or downloading").onLast().assertIsDisplayed()
+            // The harness runs on macOS, so the keep-running label uses its menu-bar wording.
+            onNodeWithText("Keep running in the menu bar").assertIsDisplayed()
+            onNodeWithText("Start at login").assertIsDisplayed()
+            // The unified page carries the downloads folder as its second section (11 Change
+            // folder); the fake controller's storage emission lands a frame after the page opens.
+            waitUntil("the downloads folder section loads", TIMEOUT_MS) {
+                onAllNodesWithText("Change folder…").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Change folder…").performScrollTo().assertIsDisplayed()
+        }
+
+    @Test
+    fun desktopRowIsHiddenOnAndroid() =
+        runComposeUiTest {
+            setSettingsRoot(platformInfo = FakePlatformInfo.ANDROID)
+            openSettings()
+            onNodeWithText("Desktop").assertDoesNotExist()
+        }
+
+    @Test
+    fun closeBehaviourRadioWritesTheSetting() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            setSettingsRoot(settingsRepository = settings)
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Keep running in the menu bar").performClick()
+            waitForIdle()
+            assertEquals(
+                CloseBehaviour.KEEP_RUNNING,
+                runBlocking { settings.get(DesktopSettingKeys.CLOSE_BEHAVIOUR) },
+            )
+            onNodeWithText("Quit unless playing or downloading").performClick()
+            waitForIdle()
+            assertEquals(
+                CloseBehaviour.QUIT_WHEN_IDLE,
+                runBlocking { settings.get(DesktopSettingKeys.CLOSE_BEHAVIOUR) },
+            )
+        }
+
+    @Test
+    fun startAtLoginCallsTheRegistrarAndShowsItsState() =
+        runComposeUiTest {
+            val integration = FakeDesktopIntegration(LoginItemState.NOT_REGISTERED)
+            setSettingsRoot(desktopIntegration = integration)
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Start at login").performClick()
+            waitForIdle()
+            assertEquals(true, integration.lastEnabled)
+            assertEquals(LoginItemState.REGISTERED, integration.loginItem.value)
+        }
+
+    @Test
+    fun startAtLoginIsHiddenWhenUnsupported() =
+        runComposeUiTest {
+            setSettingsRoot(desktopIntegration = FakeDesktopIntegration(LoginItemState.UNSUPPORTED))
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Start at login").assertDoesNotExist()
+        }
+
+    @Test
+    fun startAtLoginApprovalShowsMacGuidance() =
+        runComposeUiTest {
+            setSettingsRoot(
+                desktopIntegration = FakeDesktopIntegration(LoginItemState.REQUIRES_APPROVAL),
+            )
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText(
+                "Allow Neutrodyne in System Settings › General › Login Items",
+            ).assertIsDisplayed()
+            onNodeWithText("Open System Settings").assertIsDisplayed()
+        }
+
+    @Test
+    fun startAtLoginDisabledByOsStillShowsEnabled() =
+        runComposeUiTest {
+            setSettingsRoot(desktopIntegration = FakeDesktopIntegration(LoginItemState.DISABLED_BY_OS))
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Start at login").assertIsOn()
+            onNodeWithText("Disabled in Task Manager").assertIsDisplayed()
+        }
+
     private fun ComposeUiTest.openSettings() {
         onAllNodesWithContentDescription("Settings").onFirst().performClick()
         onNodeWithText("About").assertExists()
@@ -290,9 +474,15 @@ class SettingsScreensTest {
         settingsRepository: FakeSettingsRepository = FakeSettingsRepository(),
         platformInfo: PlatformInfo = FakePlatformInfo.DESKTOP,
         platformActions: PlatformActions = TestPlatformActions,
+        desktopIntegration: DesktopIntegration? = null,
     ) {
         setContent {
-            CompositionLocalProvider(LocalPlatformActions provides platformActions) {
+            CompositionLocalProvider(
+                LocalPlatformActions provides platformActions,
+                // The Desktop page's downloads section resolves its view model like the shells'
+                // wiring does (NeutrodyneWindow provides the real factory); here it maps to fakes.
+                LocalMetroViewModelFactory provides FakeDownloadsViewModelFactory,
+            ) {
                 NeutrodyneRoot(
                     state = RootUiState.READY,
                     actions =
@@ -319,6 +509,7 @@ class SettingsScreensTest {
                                     ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
                                         .Android("arm64-v8a", 34),
                                 ),
+                                desktopIntegration,
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )
@@ -326,6 +517,21 @@ class SettingsScreensTest {
         }
     }
 }
+
+/**
+ * Serves the Settings pages' view models from `:core:testing` fakes, the way the shells' graph
+ * factory serves them from the real graph. Only the Desktop page's downloads section needs one
+ * in these journeys.
+ */
+private val FakeDownloadsViewModelFactory =
+    object : MetroViewModelFactory() {
+        override val viewModelProviders: Map<KClass<out ViewModel>, () -> ViewModel> =
+            mapOf(
+                DownloadsSettingsViewModel::class to {
+                    DownloadsSettingsViewModel(FakeSettingsRepository(), FakeDownloadController())
+                },
+            )
+    }
 
 private val FakeBuildInfo =
     BuildInfo(
@@ -465,5 +671,18 @@ private val StubInstallers: Set<EntryProviderInstaller> =
 @Composable
 private fun TopBarStub(tab: TopLevelKey) {
     val title = if (tab == FeedsKey) stringResource(Res.string.nav_feeds) else tab.toString()
-    NdTopAppBar(title = title)
+    NdTopAppBar(title = title, actions = { SettingsGearButton() })
+}
+
+/** A section fed by a fresh view model needs a few frames before its rows assert. */
+private const val TIMEOUT_MS = 5_000L
+
+/** A scroll viewport clips drawing, while the clickable's measured layout stays unchanged. */
+private fun assertMinimumClickableLayout(node: SemanticsNode) {
+    val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
+    assertTrue(
+        node.size.width >= minimum && node.size.height >= minimum,
+        "layout=${node.size} visible=${node.boundsInRoot} " +
+            "role=${node.config.getOrNull(SemanticsProperties.Role)} minimum=${minimum}px",
+    )
 }

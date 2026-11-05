@@ -31,7 +31,7 @@ import kotlin.math.min
 /**
  * Paints a [MonogramSpec] live (08): background and centred initials (`FontWeight.Medium`, size
  * 38 % of the shorter side, at least 12 sp equivalent) in the LIGHT/DARK tone pair. At
- * [MIN_TITLE_SIDE] dp or larger the [title] draws in two `labelMedium` lines below the initials
+ * [MIN_TITLE_SIDE] dp or larger the [title] draws in up to two `labelMedium` lines below the initials
  * (CoverTile), so tiles are never ambiguous when titles are hidden. In-app monograms are painted
  * this way — never loaded from the raster files.
  */
@@ -56,7 +56,10 @@ public class MonogramPainter(
         val initialsLayout = measureInitials(fg, side)
         val titleLayout =
             if (title != null && side >= MIN_TITLE_SIDE.toPx()) {
-                measureTitle(fg)
+                val twoLines = measureTitle(fg)
+                val available = size.height - initialsLayout.size.height - TITLE_EDGE_PADDING.toPx()
+                // Keep the initials size; large fonts use one ellipsized label line when two would overlap.
+                if (twoLines.size.height <= available) twoLines else measureTitle(fg, maxLines = 1)
             } else {
                 null
             }
@@ -104,13 +107,16 @@ public class MonogramPainter(
         )
     }
 
-    private fun DrawScope.measureTitle(fgArgb: Int): TextLayoutResult =
+    private fun DrawScope.measureTitle(
+        fgArgb: Int,
+        maxLines: Int = 2,
+    ): TextLayoutResult =
         textMeasurer.measure(
             text = title.orEmpty(),
             style = titleStyle.copy(color = Color(fgArgb)),
             overflow = TextOverflow.Ellipsis,
             softWrap = true,
-            maxLines = 2,
+            maxLines = maxLines,
             constraints =
                 Constraints(
                     maxWidth =

@@ -8,6 +8,7 @@ public data class PaneLayout(
     val partitions: Int,
     val playerPanel: Boolean,
     val contentWidthDp: Int,
+    val playerPanelWidthDp: Int = 0,
 )
 
 /** The current [PaneLayout], provided by `NeutrodyneRoot`. Changes only on resize or panel change. */

@@ -5,12 +5,17 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -26,17 +31,28 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.rememberWindowState
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.DesktopNotification
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.NotificationKind
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
+import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
+import ch.lkmc.neutrodyne.core.designsystem.theme.BrandColors
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
+import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
@@ -54,34 +70,49 @@ import ch.lkmc.neutrodyne.core.ui.root.dispatchPlaybackKey
 import ch.lkmc.neutrodyne.desktop.DesktopOpenHandler
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.resources.Res
+import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_body
+import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_title
+import ch.lkmc.neutrodyne.desktop.resources.tray_next
+import ch.lkmc.neutrodyne.desktop.resources.tray_pause
+import ch.lkmc.neutrodyne.desktop.resources.tray_play
 import ch.lkmc.neutrodyne.desktop.resources.tray_quit
 import ch.lkmc.neutrodyne.desktop.resources.tray_show
-import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
+import ch.lkmc.neutrodyne.desktop.resources.window_title_playing
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.Frame
 import java.awt.SystemTray
+import java.awt.desktop.AppReopenedListener
 import java.nio.file.Path
 
 /**
  * The desktop's one window (11 Start-up sequence step 6, Window and tray behaviour): titled
- * "Neutrodyne" with the brand icon, 1200 × 800 dp clamped to 90 % of the primary screen and
- * centred, minimum 600 × 480 dp (PO-19). At M0b nothing can be busy, so every close request
- * (the close button, Ctrl/Cmd+W, the macOS Quit item) quits through the clean-shutdown path
- * the shell runs after `application { }` returns; window bounds persistence is MD4.
+ * "Neutrodyne" — "{episode title} — Neutrodyne" while playing — with the brand icon,
+ * 1200 × 800 dp clamped to 90 % of the primary screen and centred, minimum 600 × 480 dp
+ * (PO-19). A close request (the close button, Ctrl/Cmd+W, the macOS Quit item) runs
+ * [closeRequestOutcome] over `desktop.close_behaviour` and [busySignal]: idle under
+ * `QUIT_WHEN_IDLE` quits through the clean-shutdown path the shell runs after
+ * `application { }` returns; busy hides to the tray (iconifies without one, with the
+ * one-time hint of [maybeShowNoTrayHint]); `KEEP_RUNNING` always hides. A hidden window
+ * still under `QUIT_WHEN_IDLE` quits after 10 continuous idle minutes ([hiddenIdleQuit]);
+ * window bounds persistence is MD4.
  *
  * [onQuitRequest] ends the application scope (`exitApplication`); [background] starts the
  * window iconified (11's state diagram, the `--background` launch of start-at-login). The
@@ -102,8 +133,11 @@ internal fun ApplicationScope.NeutrodyneWindow(
     viewModelFactory: MetroViewModelFactory,
     playbackController: PlaybackController,
     playbackState: PlaybackStateSource,
+    busySignal: AppBusySignal,
+    clock: Clock,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
@@ -112,6 +146,54 @@ internal fun ApplicationScope.NeutrodyneWindow(
     val icon = remember { WindowIcons.windowIconPainter() }
     var hidden by remember { mutableStateOf(false) }
     val openState by databaseOpener.openState.collectAsState()
+    val nowPlaying by playbackState.nowPlaying.collectAsState()
+    val busy by busySignal.busy.collectAsState(initial = false)
+    val closeBehaviour by (
+        settings?.observe(DesktopSettingKeys.CLOSE_BEHAVIOUR)
+            ?: kotlinx.coroutines.flow.flowOf(CloseBehaviour.QUIT_WHEN_IDLE)
+    ).collectAsState(initial = CloseBehaviour.QUIT_WHEN_IDLE)
+
+    // 11's hidden-idle quit: any state change restarts the continuous 10 idle minutes.
+    val quitRequest by rememberUpdatedState(onQuitRequest)
+    LaunchedEffect(clock) {
+        hiddenIdleQuit(
+            clock,
+            hidden = snapshotFlow { hidden },
+            behaviour = snapshotFlow { closeBehaviour },
+            busy = busySignal.busy,
+            onQuit = { quitRequest() },
+        )
+    }
+
+    // macOS conventions row: a Dock click while hidden reopens the window (11's
+    // AppReopenedListener); bringToFront already unhides and de-iconifies.
+    DisposableEffect(activator) {
+        val desktop =
+            if (AppDirs.DesktopOs.current() == AppDirs.DesktopOs.MACOS) {
+                runCatching { Desktop.getDesktop() }.getOrNull()
+            } else {
+                null
+            }
+        val listener = AppReopenedListener { activator.bringToFront() }
+        desktop?.addAppEventListener(listener)
+        onDispose { desktop?.removeAppEventListener(listener) }
+    }
+
+    val appearance by produceState<AppearancePrefs?>(null, settings) {
+        launch {
+            delay(APPEARANCE_GATE_MS)
+            if (value == null) value = AppearancePrefs()
+        }
+        if (settings == null) value = AppearancePrefs() else settings.observeAppearance().collect { value = it }
+    }
+    val osDark = isSystemInDarkTheme()
+    val prefs = appearance ?: AppearancePrefs()
+    val dark =
+        when (prefs.theme) {
+            ThemeMode.SYSTEM -> osDark
+            ThemeMode.DARK -> true
+            ThemeMode.LIGHT -> false
+        }
 
     // The Compose-side `hidden` owns visibility; a hand-off reveal clears it first, so the
     // activator's direct `isVisible` never fights the next recomposition.
@@ -121,18 +203,54 @@ internal fun ApplicationScope.NeutrodyneWindow(
     }
 
     Window(
-        onCloseRequest = { requestClose(onQuitRequest) { hidden = it } },
+        onCloseRequest = {
+            requestClose(
+                behaviour = closeBehaviour,
+                busy = busy,
+                onQuit = onQuitRequest,
+                onHide = { hidden = true },
+                onIconify = {
+                    activator.iconify()
+                    maybeShowNoTrayHint(appScope, settings, banners)
+                },
+            )
+        },
         state = state,
-        visible = !hidden,
-        title = stringResource(Res.string.window_title),
+        visible = !hidden && appearance != null,
+        title = windowTitle(nowPlaying?.takeIf { it.isPlaying }?.title),
         icon = icon,
-        onKeyEvent = { event -> windowShortcut(event) { requestClose(onQuitRequest) { hidden = it } } },
+        onKeyEvent = { event ->
+            windowShortcut(event) {
+                requestClose(
+                    behaviour = closeBehaviour,
+                    busy = busy,
+                    onQuit = onQuitRequest,
+                    onHide = { hidden = true },
+                    onIconify = {
+                        activator.iconify()
+                        maybeShowNoTrayHint(appScope, settings, banners)
+                    },
+                )
+            }
+        },
     ) {
+        // Set the AWT background during apply, before Window's visibility side effect.
+        DisposableEffect(window, dark, prefs.pureBlack) {
+            val argb =
+                if (dark && prefs.pureBlack) {
+                    0xFF000000.toInt()
+                } else {
+                    BrandColors.scheme(dark, 0.0).background.toArgb()
+                }
+            window.background = java.awt.Color(argb, true)
+            onDispose { }
+        }
         WindowEffects(activator = activator, background = background)
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
+                prefs = prefs,
                 installers = installers,
                 menuActions = menuActions,
                 banners = banners,
@@ -143,6 +261,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 playbackController = playbackController,
                 playbackState = playbackState,
                 openHandler = openHandler,
+                failedDownloads = failedDownloads,
                 updateChecker = updateChecker,
                 updateNotices = updateNotices,
                 settings = settings,
@@ -156,12 +275,29 @@ internal fun ApplicationScope.NeutrodyneWindow(
         if (trayIcon != null) {
             Tray(
                 icon = trayIcon,
-                tooltip = stringResource(Res.string.tray_tooltip),
+                tooltip = trayTooltip(nowPlaying),
+                // 11 Tray icon's Windows row: the icon's default action shows the window.
+                onAction = { activator.bringToFront() },
             ) {
                 Item(stringResource(Res.string.tray_show)) {
                     hidden = false
                     activator.bringToFront()
                 }
+                Item(
+                    stringResource(
+                        when (trayPlayPause(nowPlaying)) {
+                            TrayPlayPause.PAUSE -> Res.string.tray_pause
+                            TrayPlayPause.PLAY -> Res.string.tray_play
+                        },
+                    ),
+                    enabled = trayPlayPauseEnabled(nowPlaying),
+                ) {
+                    playbackController.togglePlayPause()
+                }
+                Item(stringResource(Res.string.tray_next), enabled = trayNextEnabled(nowPlaying)) {
+                    playbackController.skipToNext()
+                }
+                Separator()
                 Item(stringResource(Res.string.tray_quit)) { onQuitRequest() }
             }
         }
@@ -183,22 +319,63 @@ internal fun rememberNeutrodyneWindowState(): WindowState {
     )
 }
 
+/** The window title rule (11's rules table): "{episode title} — Neutrodyne" while playing. */
+@Composable
+private fun windowTitle(episodeTitle: String?): String =
+    if (episodeTitle == null) {
+        stringResource(Res.string.window_title)
+    } else {
+        stringResource(Res.string.window_title_playing, episodeTitle)
+    }
+
 /**
- * 11's close rule at M0b: nothing is busy (playback arrives MD1, transfers M6) and the
- * behaviour setting with it, so the outcome is always `QUIT`; the hide branch stays for the
- * rule's shape.
+ * 11's close rule, MD2-wired: [behaviour] is `desktop.close_behaviour` and [busy] the
+ * `AppBusySignal` — a busy close hides (or iconifies through [onIconify] without a tray),
+ * an idle close under `QUIT_WHEN_IDLE` quits.
  */
 private fun requestClose(
-    onQuitRequest: () -> Unit,
-    setHidden: (Boolean) -> Unit,
+    behaviour: CloseBehaviour,
+    busy: Boolean,
+    onQuit: () -> Unit,
+    onHide: () -> Unit,
+    onIconify: () -> Unit,
 ) {
-    when (closeRequestOutcome(CloseBehaviour.QUIT_WHEN_IDLE, busy = false)) {
-        CloseOutcome.QUIT -> onQuitRequest()
-        CloseOutcome.HIDE_TO_TRAY -> setHidden(true)
+    when (closeRequestOutcome(behaviour, busy, SystemTray.isSupported())) {
+        CloseOutcome.QUIT -> onQuit()
+        CloseOutcome.HIDE_TO_TRAY -> onHide()
+        CloseOutcome.ICONIFY -> onIconify()
     }
 }
 
-/** Ctrl/Cmd+W and Ctrl/Cmd+Q (11 Keyboard shortcuts): both are close requests at M0b. */
+/**
+ * 11 No tray available's one-time hint: after an iconified busy close, a banner explains why
+ * the window went to the taskbar instead of a tray — persisted through
+ * `desktop.tray_hint_shown` so it shows exactly once.
+ */
+private fun maybeShowNoTrayHint(
+    appScope: CoroutineScope,
+    settings: SettingsRepository?,
+    banners: DesktopBannerNotifier,
+) {
+    appScope.launch {
+        val repo = settings ?: return@launch
+        if (repo.get(DesktopSettingKeys.TRAY_HINT_SHOWN)) return@launch
+        repo.set(DesktopSettingKeys.TRAY_HINT_SHOWN, true)
+        banners.post(
+            DesktopNotification(
+                id = NOTIFICATION_ID_NO_TRAY,
+                kind = NotificationKind.APP_SHELL,
+                title = getString(Res.string.no_tray_hint_title),
+                body = getString(Res.string.no_tray_hint_body),
+                route = null,
+            ),
+        )
+    }
+}
+
+private const val NOTIFICATION_ID_NO_TRAY = "shell-no-tray-hint"
+
+/** Ctrl/Cmd+W and Ctrl/Cmd+Q (11 Keyboard shortcuts): both are close requests. */
 private fun windowShortcut(
     event: KeyEvent,
     onCloseRequest: () -> Unit,
@@ -299,18 +476,37 @@ internal fun NeutrodyneWindowContent(
     viewModelFactory: MetroViewModelFactory,
     playbackController: PlaybackController,
     playbackState: PlaybackStateSource,
+    prefs: AppearancePrefs = AppearancePrefs(),
     banners: DesktopBannerNotifier? = null,
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
     openHandler: DesktopOpenHandler? = null,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
 ) {
+    val panelScope = rememberCoroutineScope()
+    val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
+        panelScope.launch {
+            suspendRunCatching {
+                settings?.set(
+                    AppearanceSettingKeys.PLAYER_PANEL_HIDDEN,
+                    visibility == PlayerPanelVisibility.HIDDEN,
+                )
+            }.onSuccess { result ->
+                if (result is Outcome.Failure) Log.w("DesktopPlayer") { "Player panel preference write failed" }
+            }.onFailure { Log.w("DesktopPlayer", it) { "Player panel preference write failed" } }
+        }
+    }
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
     val nowPlaying by playbackState.nowPlaying.collectAsState()
+    val panelHidden by (
+        settings?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
+            ?: flowOf(false)
+    ).collectAsState(initial = false)
     val updates =
         if (updateChecker != null && updateNotices != null && settings != null) {
             rememberUpdateRootPresentation(updateChecker, updateNotices, settings)
@@ -322,7 +518,15 @@ internal fun NeutrodyneWindowContent(
     // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
     // remembered (they were all-no-op until the banner stream landed).
     val actions =
-        remember(platformActions, dataDir, onRetryStartup, banners, playbackController, playbackState) {
+        remember(
+            platformActions,
+            dataDir,
+            onRetryStartup,
+            banners,
+            playbackController,
+            playbackState,
+            settings,
+        ) {
             RootActions(
                 retryStartup = onRetryStartup,
                 dismissNotice = { currentUpdates?.dismiss?.invoke(it) },
@@ -337,6 +541,8 @@ internal fun NeutrodyneWindowContent(
                 // A banner's "Open" reports here — the notifier maps it back to the
                 // notification's route (11 Notifications' in-app fallback).
                 userMessageAction = { id -> banners?.messageAction(id) },
+                hidePlayerPanel = { setPanelVisibility(PlayerPanelVisibility.HIDDEN) },
+                revealPlayerPanel = { setPanelVisibility(PlayerPanelVisibility.SHOWN) },
             )
         }
     val slots =
@@ -363,10 +569,12 @@ internal fun NeutrodyneWindowContent(
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
+            failedDownloads = failedDownloads,
             state =
                 RootUiState.READY.copy(
                     startup = startup,
                     hasNowPlaying = nowPlaying != null,
+                    playerPanelHidden = panelHidden,
                     settingsBadge = updates?.badge ?: false,
                     notice = updates?.notice,
                 ),
@@ -374,7 +582,12 @@ internal fun NeutrodyneWindowContent(
             slots = slots,
             installers = installers,
             systemUi = systemUi,
+            prefs = prefs,
             platform = BuildInfo.Platform.DESKTOP,
         )
     }
 }
+
+private const val APPEARANCE_GATE_MS = 1_000L
+
+private enum class PlayerPanelVisibility { SHOWN, HIDDEN }

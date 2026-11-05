@@ -488,6 +488,7 @@ internal class JournalTestStore : SettingStore {
     private val delegate = FakeSettingsRepository()
     private val mutex = Mutex()
     var fail = false
+    var beforeUpdate: suspend () -> Unit = {}
     override val file = SettingsFile.DEVICE
 
     override fun <T : Any> observe(key: SettingKey<T>) = delegate.observe(key)
@@ -506,6 +507,7 @@ internal class JournalTestStore : SettingStore {
         transform: (T) -> T,
     ) = mutex.withLock {
         if (fail) throw IOException("Injected journal failure")
+        beforeUpdate()
         set(key, transform(get(key)))
     }
 
@@ -547,6 +549,7 @@ internal class ReconcileRig(
             deletes,
             reconciler,
             engine.engine.claimMutex,
+            DownloadQuota(FakeSettingsRepository()),
             FakePlaybackMediaLookup(),
             TestArtwork(),
             { _, _ -> null },
@@ -577,7 +580,7 @@ internal class ReconcileRig(
     }
 }
 
-private class TestArtwork : ArtworkStore {
+internal class TestArtwork : ArtworkStore {
     override fun pinnedFile(key: String): Path? = null
 
     override fun pin(

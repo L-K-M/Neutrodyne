@@ -24,6 +24,7 @@ public class ArtworkSyncWorker
         @Assisted params: WorkerParameters,
         private val opener: DatabaseOpener,
         private val runner: Provider<ArtworkSyncRunner>,
+        private val mosaics: Provider<MosaicSync>,
         @param:Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     ) : CoroutineWorker(context, params) {
         @AssistedFactory
@@ -40,7 +41,7 @@ public class ArtworkSyncWorker
                     opener.awaitOpen()
                     // The runner owns the soft deadline and durable continuation. A second
                     // overlapping timer can enqueue twice when both expire on the same tick.
-                    runner().runOnce(DEADLINE)
+                    runner().runOnce(DEADLINE) { remaining -> mosaics().runOnce(remaining) }
                     Result.success()
                 }.getOrElse { Result.retry() }
             }
