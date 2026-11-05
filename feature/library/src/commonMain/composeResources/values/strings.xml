@@ -35,4 +35,7 @@
     <string name="grid_small">Small</string>
     <string name="grid_medium">Medium</string>
     <string name="grid_large">Large</string>
+    <string name="reconnect_banner">Reconnect to %1$s to keep syncing</string>
+    <string name="reconnect_action">Reconnect</string>
+    <string name="reconnect_later">Not now</string>
 </resources>

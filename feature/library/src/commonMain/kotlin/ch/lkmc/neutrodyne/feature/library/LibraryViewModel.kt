@@ -33,6 +33,8 @@ import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.sync.api.SyncController
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -41,6 +43,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -67,8 +70,21 @@ public class LibraryViewModel(
     private val groups: GroupRepository,
     feedRepository: FeedRepository,
     clock: Clock,
+    sync: SyncController,
 ) : ViewModel() {
     private val userMessages = UserMessages()
+
+    /** 08 Banners: "Not now" hides the Reconnect banner; the flag feeds the combine below. */
+    private val reconnectHidden = MutableStateFlow(reconnectDismissedForRun)
+
+    private val reconnect =
+        combine(sync.status, reconnectHidden) { status, hidden ->
+            if (hidden) {
+                null
+            } else {
+                (status as? SyncStatus.Reconnect)?.let { ReconnectBanner(it.serverUrl, hostOf(it.serverUrl)) }
+            }
+        }.distinctUntilChanged()
 
     private data class GroupFilter(
         val groups: List<Group>,
@@ -136,7 +152,15 @@ public class LibraryViewModel(
                 offline = !online,
                 messages = messages,
             )
+        }.combine(reconnect) { state, banner ->
+            state.copy(reconnect = banner)
         }.stateIn(viewModelScope, SHARING, LibraryUiState())
+
+    /** 08 Banners: "Not now" hides the Reconnect banner for the rest of this process run. */
+    public fun dismissReconnect() {
+        reconnectHidden.value = true
+        reconnectDismissedForRun = true
+    }
 
     public fun setSegment(segment: LibrarySegment) {
         writeSetting { settings.set(AppearanceSettingKeys.LIBRARY_SEGMENT, segment) }
@@ -261,8 +285,19 @@ public class LibraryViewModel(
             }
         }
 
-    private companion object {
-        const val TAG = "LibraryViewModel"
-        val SHARING = SharingStarted.WhileSubscribed(5_000)
+    companion object {
+        private const val TAG = "LibraryViewModel"
+        private val SHARING = SharingStarted.WhileSubscribed(5_000)
+
+        /**
+         * 08 Banners' process-run scope: a companion flag outlives this entry's ViewModel, so
+         * "Not now" keeps hiding the Reconnect banner until the process ends. Internal for
+         * tests, which reset it between cases.
+         */
+        @Volatile
+        internal var reconnectDismissedForRun = false
     }
 }
+
+/** The readable host of a server URL, for the banner's wording (08). */
+private fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
