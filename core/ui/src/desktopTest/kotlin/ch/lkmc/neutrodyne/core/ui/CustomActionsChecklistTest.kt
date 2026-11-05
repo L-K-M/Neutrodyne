@@ -99,7 +99,9 @@ class CustomActionsChecklistTest {
                     val download =
                         when (state.live?.downloadState ?: state.row.downloadState) {
                             null -> "Download"
-                            DownloadState.QUEUED, DownloadState.RESOLVING -> "Cancel download"
+                            // M6a exposes promote and cancel for queued rows behind the options menu.
+                            DownloadState.QUEUED -> "Download actions"
+                            DownloadState.RESOLVING -> "Cancel download"
                             DownloadState.DOWNLOADING -> "Pause download"
                             DownloadState.PAUSED -> "Resume download"
                             DownloadState.FAILED, DownloadState.MISSING -> "Retry download"
