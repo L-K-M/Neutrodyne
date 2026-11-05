@@ -163,12 +163,19 @@ internal class RestoreEpisodeMerger(
                                         if (line.ts != NO_STATE_TS) {
                                             writes.mergeState(episodeId, line.stateValues())
                                         }
+                                        val localPos =
+                                            if (captureWithBackupTimes) {
+                                                db.positionDao().byEpisode(episodeId)
+                                            } else {
+                                                null
+                                            }
                                         writes.mergePosition(episodeId, line.positionValues(staged.createdAtMs))
                                         if (captureWithBackupTimes) {
                                             captureRestoredState(
                                                 syncIdOf(podcastId, syncIdByPodcastId),
                                                 episodeId,
                                                 line,
+                                                localPos,
                                             )
                                         }
                                     }
@@ -410,12 +417,15 @@ internal class RestoreEpisodeMerger(
      * 05 Restore while linked: the state fields a Merge restore wrote, captured at the
      * backup's own timestamps — the played pair as one literal with `ts`, favourite,
      * `playCount` and `lastPlayedAt` as their values — plus the winning position at
-     * `posAt` with the snapshot it wrote (never a later read).
+     * `posAt` with the snapshot it wrote (never a later read). When the merge's post rules
+     * reset a surviving local position (`playedAt` newer than `posAt`), the reset literal
+     * `{"ms":0,"reset":true}` is captured instead, so other devices learn the reset.
      */
     private suspend fun captureRestoredState(
         podcastSyncId: String?,
         episodeId: Long,
         line: EpisodeLineV1,
+        localPos: ch.lkmc.neutrodyne.core.database.EpisodePositionEntity?,
     ) {
         if (podcastSyncId == null) return
         val rid = podcastSyncId + canonicalKey(line.k, line.kv)
@@ -433,6 +443,14 @@ internal class RestoreEpisodeMerger(
         if (stagedPos != null && stagedPos > 0) {
             val literal = """{"ms":$stagedPos,"dur":${line.dur ?: 0},"src":"${values.positionSource.name}"}"""
             outbox.captureAt(COLL_EPISODE, rid, "pos", line.posAt ?: 0L, literal)
+            return
+        }
+        // The zero/absent position still resets an older local one under the post rules.
+        val playedAt = line.pl
+        if (stagedPos == null && playedAt != null && localPos != null && localPos.positionMs > 0 &&
+            (line.posAt ?: 0L) < playedAt
+        ) {
+            outbox.captureAt(COLL_EPISODE, rid, "pos", line.posAt ?: 0L, """{"ms":0,"reset":true}""")
         }
     }
 

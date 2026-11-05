@@ -11,9 +11,8 @@ import ch.lkmc.neutrodyne.core.model.MergedRecord
 
 /**
  * Records [LibraryMerger] calls and feeds the configured fixtures to the callbacks before
- * returning [result]. Used by restore-runner tests now and by `FirstLinkMerger` tests in
- * MS2 — the `LINK_*` policies are representable but have no production implementation
- * until then (05 RestoreMerger).
+ * returning [result] — the fixture behind `FirstLinkMerger`'s orchestration tests (the
+ * `LINK_*` rules themselves are `:core:data`'s, pinned by its merger tests).
  */
 class FakeLibraryMerger : LibraryMerger {
     data class Call(

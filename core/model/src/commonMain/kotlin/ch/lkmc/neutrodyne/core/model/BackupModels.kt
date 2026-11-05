@@ -122,18 +122,14 @@ interface PreparedBackup {
 }
 
 /**
- * The policies `RestoreMerger` merges a staged library with (05 RestoreMerger):
- * `RESTORE_*` are the Merge and Replace columns of the rules table and are implemented in
- * M3; `LINK_*` is the First-link column, representable here but unsupported until MS2.
+ * The policies `RestoreMerger` merges a staged library with (05 RestoreMerger): each value
+ * is one column of the Merge and Replace rules table — the restore columns and the
+ * First-link column (MS2), which 10's `FirstLinkMerger` reaches through `LibraryMerger`.
  */
 enum class MergePolicy {
     RESTORE_MERGE,
     RESTORE_REPLACE,
-
-    /** MS2 (10's FirstLinkMerger); not implemented in M3. */
     LINK_MERGE,
-
-    /** MS2 ("Use the server's library on this device"); not implemented in M3. */
     LINK_REPLACE,
 }
 
