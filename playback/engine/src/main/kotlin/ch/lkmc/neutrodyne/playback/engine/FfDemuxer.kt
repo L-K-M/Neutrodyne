@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -44,7 +46,7 @@ class FfDemuxer
 
         override val durationMs: Long?
 
-        override val chapters: List<EngineChapter>
+        override val chapters: List<EpisodeChapter>
 
         /** The track's trimming information, published once with the track (11 Demux and decode step 6). */
         override val gapless: Gapless
@@ -225,7 +227,18 @@ class FfDemuxer
             return streamDuration * num * MILLIS_PER_SECOND / den
         }
 
-        private fun chaptersOf(): List<EngineChapter> {
+        /**
+         * Chapters carry 06's source: ID3 `CHAP` frames of an MP3 and Nero/QuickTime
+         * chapters of an MP4 family container. Other containers' chapter metadata has no
+         * source in the priority table, so it is not published (Android drops it too).
+         */
+        private fun chaptersOf(): List<EpisodeChapter> {
+            val source =
+                when {
+                    containerName.contains(MP4_MARKER) -> ChapterSource.MP4
+                    containerName.contains(MP3_MARKER) -> ChapterSource.ID3
+                    else -> return emptyList()
+                }
             val count = formatContext.readInt(layout, "AVFormatContext", "nb_chapters")
             if (count <= 0) return emptyList()
             val array = formatContext.readAddress(layout, "AVFormatContext", "chapters")
@@ -241,10 +254,14 @@ class FfDemuxer
                         ?.let { entry ->
                             library.readCString(entry.readAddress(layout, "AVDictionaryEntry", "value"))
                         }
-                EngineChapter(
+                EpisodeChapter(
                     startMs = start * num * MILLIS_PER_SECOND / den,
                     endMs = end * num * MILLIS_PER_SECOND / den,
                     title = title?.takeIf { it.isNotBlank() },
+                    imageUrl = null,
+                    linkUrl = null,
+                    source = source,
+                    hidden = false,
                 )
             }
         }
@@ -366,6 +383,9 @@ class FfDemuxer
 
             /** The mov demuxer's own name, as it reports itself to the engine. */
             const val MP4_MARKER = "mp4"
+
+            /** The mp3 demuxer's own name, which carries ID3 `CHAP` frames. */
+            const val MP3_MARKER = "mp3"
 
             /**
              * AAC priming in samples: the standard encoder delay of an AAC stream
