@@ -240,16 +240,18 @@ internal fun DesktopPage(
                         )
                     },
                     trailingContent = {
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    if (desktopIntegration?.addToApplicationsMenu() != true) {
-                                        snackbarHost.showSnackbar(saveFailed)
+                        if (linkHandlers != true) {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        if (desktopIntegration?.addToApplicationsMenu() != true) {
+                                            snackbarHost.showSnackbar(saveFailed)
+                                        }
                                     }
-                                }
-                            },
-                        ) {
-                            Text(stringResource(Res.string.desktop_links_setup))
+                                },
+                            ) {
+                                Text(stringResource(Res.string.desktop_links_setup))
+                            }
                         }
                     },
                 )
