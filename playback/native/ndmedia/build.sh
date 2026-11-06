@@ -146,7 +146,9 @@ case "$TARGET" in
             "$(cygpath -w "$SRC")" -Fondmedia.obj && \
             cl -nologo -O2 -EHsc -std:c++17 -LD -MD -I"$(cygpath -w "$ROOT")" \
             "$(cygpath -w "$ROOT/session_win.cpp")" ndmedia.obj \
-            -link -OUT:ndmedia.dll ole32.lib uuid.lib advapi32.lib user32.lib shell32.lib runtimeobject.lib) ||
+            -link -OUT:ndmedia.dll \
+            -IMPLIB:"$(cygpath -w "$BUILD_ROOT/ndmedia.lib")" \
+            ole32.lib uuid.lib advapi32.lib user32.lib shell32.lib runtimeobject.lib) ||
             die "cl failed"
         ;;
     *) die "unknown target $TARGET" ;;
