@@ -497,7 +497,7 @@ data class DesktopNotification(val id: String, val kind: NotificationKind, val t
 enum class NotificationKind { NEW_EPISODES, DOWNLOAD_FAILED, STORAGE_FULL, APP_UPDATE, ENGINE_ALERT, SYNC_HELD }
 interface LinuxDesktopPortal {                           // :desktop:system (dbus-java); null binding off Linux
     suspend fun showItems(file: String): Boolean         // org.freedesktop.FileManager1.ShowItems
-    suspend fun chooseDirectory(title: String, start: String?): String?   // portal FileChooser; null = no portal
+    suspend fun chooseDirectory(title: String, start: String?): DirectoryChoice   // portal FileChooser; note below
 }
 // Implementation note (2026-11-05, MD2's links slice): chooseDirectory returns a
 // DirectoryChoice (Chosen | Cancelled | Unavailable), not String?. A dismissal must end
