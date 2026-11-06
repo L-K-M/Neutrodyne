@@ -406,6 +406,66 @@ class FfAudioEngineTest {
         }
     }
 
+    /** Every source the engine opened, so a test can prove each one was closed again. */
+    private class OpenedSources {
+        private val sources = java.util.concurrent.CopyOnWriteArrayList<Tracked>()
+
+        fun open(resolved: ResolvedSource): ByteSource =
+            Tracked(FileByteSource((resolved as ResolvedSource.File).path)).also { sources += it }
+
+        fun count() = sources.size
+
+        fun openOnes() = sources.count { !it.closed }
+
+        /** Whether the [index]-th source opened (0-based, in open order) was closed. */
+        fun closed(index: Int) = sources.getOrNull(index)?.closed == true
+
+        private class Tracked(
+            private val delegate: ByteSource,
+        ) : ByteSource by delegate {
+            @Volatile var closed = false
+
+            override fun close() {
+                closed = true
+                delegate.close()
+            }
+        }
+    }
+
+    @Test
+    fun anOutputOpenFailureClosesThePreparedFirstItem() {
+        val opened = OpenedSources()
+        engine(
+            output = { throw NdOutputException("nd_out_open failed with -4", NdOutputException.E_DEVICE) },
+            open = opened::open,
+        ).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("output error") { engine.state.value is EngineState.Error }
+            await("every opened source closed") { opened.count() > 0 && opened.openOnes() == 0 }
+        }
+    }
+
+    @Test
+    fun aSeekDuringPrepareAheadClosesThePreparedSuccessor() {
+        val second = EngineItem(2, "ep:2:pin", true)
+        val resolver = resolver().apply { sources[2L to 0] = ResolvedSource.File(media()) }
+        val opened = OpenedSources()
+        engine(resolver, open = opened::open).use { engine ->
+            engine.setWindow(listOf(item, second), 0, null)
+            engine.play()
+            awaitReady(engine)
+            // The 2-s item prepares its successor at once; seek before the first item ends.
+            await("successor opened") { opened.count() >= 2 }
+            assertTrue(engine.positionMs() < 1_500, "the first item must still be playing")
+            engine.seekTo(0)
+            awaitReady(engine)
+            // The seek's chain reopens both items; the successor prepared before the seek
+            // (the second source opened) belongs to the stale chain and must be closed.
+            await("the stale successor closed") { opened.closed(1) }
+        }
+    }
+
     private fun engine(
         resolver: DesktopSourceResolver = resolver(),
         rate: Int = RATE,

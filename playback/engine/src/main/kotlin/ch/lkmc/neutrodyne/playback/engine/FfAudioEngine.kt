@@ -414,6 +414,8 @@ class FfAudioEngine internal constructor(
                 ownedOutput ?: openOutput()
             } catch (failure: NdOutputException) {
                 failOutput(failure)
+                // The chain never started, so its finally cannot release the first item.
+                first.close()
                 return
             }
         // A new chain (a start or a seek) drops the previous item's queued audio;
@@ -435,7 +437,10 @@ class FfAudioEngine internal constructor(
             ),
         )
         synchronized(control) {
-            if (!isGenerationCurrent(generation)) return
+            if (!isGenerationCurrent(generation)) {
+                first.close()
+                return
+            }
             clock = timeline
             output = out
             outputReady = false
@@ -578,6 +583,8 @@ class FfAudioEngine internal constructor(
                 if (source === prepared.source) source = null
             }
             prepared.close()
+            // A seek, stop or failure mid-item leaves the successor's preparation in flight.
+            dropPending(pending)
         }
     }
 
