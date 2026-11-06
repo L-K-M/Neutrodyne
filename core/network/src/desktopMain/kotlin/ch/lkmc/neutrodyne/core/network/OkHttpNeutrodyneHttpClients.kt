@@ -60,8 +60,11 @@ public class OkHttpNeutrodyneHttpClients
                     if (kind == HttpClientKind.DOWNLOAD) {
                         install(HttpRedirect) { allowHttpsDowngrade = true }
                     }
-                    // 10's long-lived sync stream.
-                    if (kind == HttpClientKind.SYNC) install(SSE)
+                    // 10's long-lived sync stream runs on the SYNC clients; SYNC_STREAM is the
+                    // no-read/call-timeout derivation the events endpoint uses.
+                    if (kind == HttpClientKind.SYNC || kind == HttpClientKind.SYNC_STREAM) {
+                        install(SSE)
+                    }
                     // Not for FEED: ContentNegotiation appends application/json to Accept, but 03's
                     // Request rules pin the feed Accept header verbatim (and feeds are never JSON).
                     if (kind != HttpClientKind.FEED) {
