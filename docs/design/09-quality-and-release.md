@@ -1870,6 +1870,17 @@ Serves N10. Delivered in M0a (Compose resources conventions, `checkTranslations`
 
 ### Pseudo-locales and RTL
 
+**Implementation note (2026-11-04, M10):** Compose libraries have a single
+Android resource variant. `generatePseudoLocales` therefore produces an
+isolated generated resource tree only with
+`-Pneutrodyne.pseudoLocales=true`. CI unit tests and both screenshot workflows
+use it; release APK packaging and desktop installers fail when it is selected.
+All unit-test variants stay enabled. Normal release builds use the original
+resources, and `check-apk.sh --published` rejects pseudo-locale Compose assets.
+The generator preserves formatting arguments, escapes and URLs and has JVM
+regression coverage. See [08 Screenshot matrix](08-ui-ux.md#screenshot-matrix)
+for the current captures.
+
 Pseudo-locales `en-XA` (accented, about 40 % longer) and `ar-XB` (right-to-left) exist only in tests and local `debug` builds:
 
 - **Android `res/`:** `isPseudoLocalesEnabled = true` on `:app`'s `debug` build type ([01 Debug build type](01-foundation.md#debug-build-type)); `release` generates none, and `check-apk.sh --published` asserts that the published APK carries neither ([Build-output checks](#build-output-checks)).
