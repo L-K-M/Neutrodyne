@@ -137,6 +137,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     clock: Clock,
     onQuitRequest: () -> Unit,
     onWindowFocused: () -> Unit = {},
+    portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
@@ -261,6 +262,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 viewModelFactory = viewModelFactory,
                 playbackController = playbackController,
                 playbackState = playbackState,
+                portal = portal,
                 openHandler = openHandler,
                 failedDownloads = failedDownloads,
                 updateChecker = updateChecker,
@@ -518,6 +520,7 @@ internal fun NeutrodyneWindowContent(
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
+    portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
@@ -538,7 +541,7 @@ internal fun NeutrodyneWindowContent(
         }
     }
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
-    val platformActions = rememberDesktopPlatformActions()
+    val platformActions = rememberDesktopPlatformActions(portal)
     val nowPlaying by playbackState.nowPlaying.collectAsState()
     val panelHidden by (
         settings?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)

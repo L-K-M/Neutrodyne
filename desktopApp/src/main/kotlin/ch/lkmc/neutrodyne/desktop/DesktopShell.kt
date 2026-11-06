@@ -315,6 +315,7 @@ internal object DesktopShell {
                         graph.databaseOpener.awaitOpen()
                         graph.downloadController().observeFailedCount().collect { emit(it) }
                     },
+                portal = graph.linuxDesktopPortal,
                 openHandler = openHandler,
                 menuActions = menuActions,
                 banners = graph.bannerNotifier,

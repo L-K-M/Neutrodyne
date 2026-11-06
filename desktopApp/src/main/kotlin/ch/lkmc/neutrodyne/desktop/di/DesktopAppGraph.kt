@@ -168,6 +168,9 @@ interface DesktopAppGraph {
     /** The OS notification half of the bound [DesktopNotifier] (clicks, diagnostics). */
     val osNotifier: OsDesktopNotifier
 
+    /** The D-Bus portal for the Linux chooser and "Show in Files"; `null` off Linux. */
+    val linuxDesktopPortal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal?
+
     /** The bound notification port: the OS notifier over the banner fallback. */
     val desktopNotifier: DesktopNotifier
 

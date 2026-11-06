@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.ui.platform
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import ch.lkmc.neutrodyne.core.common.DirectoryChoice
 import ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -39,7 +40,8 @@ public fun rememberDesktopPlatformActions(portal: LinuxDesktopPortal? = null): P
     return remember(portal, scope) { DesktopPlatformActions(portal, scope) }
 }
 
-private class DesktopPlatformActions(
+/** Internal for the folder-choice decision's test; otherwise the desktop's private glue. */
+internal class DesktopPlatformActions(
     private val portal: LinuxDesktopPortal?,
     private val scope: kotlinx.coroutines.CoroutineScope,
 ) : PlatformActions {
@@ -84,9 +86,14 @@ private class DesktopPlatformActions(
             }
 
             override suspend fun pickFolder(title: String): String? {
+                // 11's table: the portal first; `JFileChooser` only when no portal answered
+                // — a dismissed portal dialog must not open a second chooser.
                 portal?.let { p ->
-                    val chosen = p.chooseDirectory(title, null)
-                    if (chosen != null) return chosen
+                    when (val choice = p.chooseDirectory(title, null)) {
+                        is DirectoryChoice.Chosen -> return choice.path
+                        DirectoryChoice.Cancelled -> return null
+                        DirectoryChoice.Unavailable -> {}
+                    }
                 }
                 val pending = PendingDialog()
                 return awaitEdt(onCancel = { pending.dismiss() }) {

@@ -3,8 +3,10 @@ package ch.lkmc.neutrodyne.desktop.system
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal
 import ch.lkmc.neutrodyne.core.common.LoginItemRegistrar
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.DesktopOs
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
@@ -30,4 +32,17 @@ object DesktopSystemBindings {
             launcher = System.getProperty(LoginItemRegistrars.JPACKAGE_APP_PATH),
             configHome = dirs.config.parent,
         )
+
+    /**
+     * The D-Bus portal of 11's Runner contract: bound only on Linux — a nullable type is
+     * its own binding, so every other OS (and dev run of another OS) resolves `null` and
+     * the callers use their documented fallbacks.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun linuxDesktopPortal(buildInfo: BuildInfo): LinuxDesktopPortal? =
+        when (buildInfo.desktop?.os) {
+            DesktopOs.LINUX -> DbusDesktopPortal()
+            else -> null
+        }
 }
