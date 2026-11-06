@@ -21,6 +21,9 @@ class FakeSettingsSyncPort : SettingsSyncPort {
     var remoteResult: Boolean = true
     val applied = mutableListOf<Pair<SettingKey<*>, String>>()
 
+    /** What [syncedLiteralValues] returns; the default is empty. */
+    var syncedValues: Map<SettingKey<*>, String> = emptyMap()
+
     override suspend fun applyRemote(
         key: SettingKey<*>,
         json: String,
@@ -96,4 +99,6 @@ class FakeSettingsSyncPort : SettingsSyncPort {
         val json = encode(key, value) ?: return
         locals.tryEmit(LocalSyncedSetting(key, json, atMs))
     }
+
+    override suspend fun syncedLiteralValues(): Map<SettingKey<*>, String> = syncedValues
 }

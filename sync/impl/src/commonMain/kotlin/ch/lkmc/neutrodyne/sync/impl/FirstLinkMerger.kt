@@ -117,6 +117,7 @@ class FirstLinkMerger(
     private val settings: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort,
     private val secrets: ch.lkmc.neutrodyne.core.domain.SecretStore,
     private val sharePasswords: () -> Boolean,
+    private val syncPlaybackSettings: () -> Boolean = { true },
     private val coordinator: ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator,
     private val effects: SyncApplyEffects,
     private val clock: Clock,
@@ -175,6 +176,7 @@ class FirstLinkMerger(
             val pull = pullStaged(roundId, resume = false) { _, _, _ -> }
             adoptPulledState(pull.cursor, pull.maxClockPacked)
             captureLocalLibrary()
+            captureSyncedSettings()
             captureSharedPasswords()
             pushOutbox { _, _, _ -> }
             client.reset(DELETE_CONFIRMATION, RESET_MODE_LIBRARY, pull.cursor)
@@ -229,6 +231,23 @@ class FirstLinkMerger(
             }
         }
         return podcasts to groups
+    }
+
+    /**
+     * 10 "Use this device's library everywhere" step 1 for the link flow: stage the server
+     * snapshot and count its live podcasts and groups this device lacks — the second
+     * confirmation's effect on the other devices, computable only now. Nothing is applied or
+     * captured; the confirmed merge resumes the staging file.
+     */
+    suspend fun stageResetEffect(): Pair<Int, Int> {
+        val podcastKeys = db.podcastDao().allForExport().mapTo(mutableSetOf()) { it.feedKey }
+        val groupNames =
+            db
+                .groupDao()
+                .groupsInOrder()
+                .map { it.name }
+                .toSet()
+        return previewAllDevicesReach(podcastKeys, groupNames)
     }
 
     // --- Merge / Use the server ------------------------------------------------------------------
@@ -339,6 +358,7 @@ class FirstLinkMerger(
         mergeReceivedClocks(pull.records)
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         captureLocalLibrary()
+        captureSyncedSettings()
         // Episode state the local side won is re-sent at its own frozen timestamp; the
         // `captureAll` rows above are newer, so non-episode records never double-capture.
         captureLocalWinners()
@@ -965,6 +985,23 @@ class FirstLinkMerger(
                     db.syncOutboxDao().captureAll(SyncCollection.UPNEXT.wire, podcast.syncId + episode.identityKey)
                 }
                 db.syncOutboxDao().captureAll(SyncCollection.SESSION.wire, "current")
+            }
+        }
+    }
+
+    /**
+     * 10 "Use this device's library everywhere" step 3: each synced setting's literal `v` with a
+     * fresh clock — at or above the step's `t0`, the tick that follows `enabled = 1` and the
+     * cursor adoption — so this device's values win everywhere they land. The "Sync playback
+     * settings" switch gates them, exactly as it gates a local edit's recorder.
+     */
+    private suspend fun captureSyncedSettings() {
+        if (!syncPlaybackSettings()) return
+        val literals = settings.syncedLiteralValues()
+        if (literals.isEmpty()) return
+        db.withWriteTransaction {
+            for ((key, json) in literals) {
+                db.syncOutboxDao().captureLiteral(SyncCollection.SETTING.wire, key.name, "v", json)
             }
         }
     }
