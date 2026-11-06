@@ -2,50 +2,23 @@
 package ch.lkmc.neutrodyne.desktop.crash
 
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
-import ch.lkmc.neutrodyne.core.model.BuildInfo
-import ch.lkmc.neutrodyne.core.model.DesktopArch
-import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.core.testing.FakeCrashReporter
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
-import kotlinx.collections.immutable.persistentListOf
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import java.nio.file.Files
 import java.time.Instant
+import java.util.Locale
 
 class DesktopCrashDialogStateTest {
-    private fun buildInfo(
-        mailto: String = "neutrodyne@example.com",
-        installKind: InstallKind = InstallKind.MSI,
-    ): BuildInfo =
-        BuildInfo(
-            versionName = "1.0.0",
-            versionCode = 1,
-            debug = installKind == InstallKind.DEV,
-            platform = BuildInfo.Platform.DESKTOP,
-            repoUrl = "https://github.com/L-K-M/Neutrodyne",
-            updateManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/latest/download/neutrodyne-update.json",
-            engineManifestUrl = "https://example.com/engine.json",
-            youTubeEngineBundled = true,
-            apkAbi = null,
-            desktop =
-                BuildInfo.Desktop(
-                    os = DesktopOs.LINUX,
-                    arch = DesktopArch.X64,
-                    installKind = installKind,
-                    runtime = "Temurin 25",
-                ),
-            shippedLocales = persistentListOf("en", "de"),
-            acraMailto = mailto,
-            podcastIndexKey = "",
-            podcastIndexSecret = "",
-        )
-
     @Test
     fun `offers newest first and marks handled`() {
         val dirs = tempAppDirs("nd-crash-dialog").also { Files.createDirectories(it.state) }
@@ -65,7 +38,7 @@ class DesktopCrashDialogStateTest {
                 .from(Instant.ofEpochMilli(clock.now())),
         )
 
-        val state = DesktopCrashDialogState(dirs, buildInfo(), clock)
+        val state = DesktopCrashDialogState(dirs, crashDialogBuildInfo(), clock, FakeCrashReporter(true))
         val pending = state.pendingCrashes()
         assertThat(
             pending.map {
@@ -83,10 +56,22 @@ class DesktopCrashDialogStateTest {
         val dirs = tempAppDirs("nd-crash-dialog2").also { Files.createDirectories(it.state) }
         val clock = TestClock()
         Files.writeString(dirs.state.resolve("crash-20260101-010101.txt"), "x")
+
+        // The gate is the reporter's own `isAvailable` (D62/PO-10): a real
+        // DesktopCrashReporter derives it from the same BuildInfo the state scans with.
+        val devInfo = crashDialogBuildInfo(installKind = InstallKind.DEV)
+        val devReporter = DesktopCrashReporter(dirs, devInfo, clock, RecentLogBuffer())
+        assertThat(devReporter.isAvailable).isFalse()
+        assertThat(DesktopCrashDialogState(dirs, devInfo, clock, devReporter).pendingCrashes()).isEmpty()
+
+        val noMailboxInfo = crashDialogBuildInfo(mailto = "")
+        val noMailboxReporter = DesktopCrashReporter(dirs, noMailboxInfo, clock, RecentLogBuffer())
+        assertThat(noMailboxReporter.isAvailable).isFalse()
+        assertThat(DesktopCrashDialogState(dirs, noMailboxInfo, clock, noMailboxReporter).pendingCrashes()).isEmpty()
+
         assertThat(
-            DesktopCrashDialogState(dirs, buildInfo(installKind = InstallKind.DEV), clock).pendingCrashes(),
+            DesktopCrashDialogState(dirs, crashDialogBuildInfo(), clock, FakeCrashReporter(false)).pendingCrashes(),
         ).isEmpty()
-        assertThat(DesktopCrashDialogState(dirs, buildInfo(mailto = ""), clock).pendingCrashes()).isEmpty()
     }
 
     @Test
@@ -97,7 +82,7 @@ class DesktopCrashDialogStateTest {
         Files.writeString(f, "x".repeat(3000))
         var opened: String? = null
         val state =
-            DesktopCrashDialogState(dirs, buildInfo(), clock, openMailto = {
+            DesktopCrashDialogState(dirs, crashDialogBuildInfo(), clock, FakeCrashReporter(true), openMailto = {
                 opened = it
                 true
             })
@@ -113,17 +98,53 @@ class DesktopCrashDialogStateTest {
 
 @OptIn(ExperimentalTestApi::class)
 class DesktopCrashDialogUITest {
-    @Test
-    fun dialogRenders() {
-        runComposeUiTest {
-            setContent {
-                DesktopCrashDialog(
-                    onShowReport = {},
-                    onSendEmail = {},
-                    onDismiss = {},
-                )
-            }
-            waitForIdle()
-        }
+    private lateinit var previousLocale: Locale
+
+    @Before
+    fun setUp() {
+        // The shared test-task config sets the JVM to de_DE; these assertions name English labels.
+        previousLocale = Locale.getDefault()
+        Locale.setDefault(Locale.ENGLISH)
     }
+
+    @After
+    fun tearDown() {
+        Locale.setDefault(previousLocale)
+    }
+
+    @Test
+    fun `show report invokes its action`() =
+        runComposeUiTest {
+            var shown = 0
+            setContent {
+                DesktopCrashDialog(onShowReport = { shown++ }, onSendEmail = {}, onDismiss = {})
+            }
+            onNodeWithText("Show report").performClick()
+            waitForIdle()
+            assertThat(shown).isEqualTo(1)
+        }
+
+    @Test
+    fun `send by email invokes its action`() =
+        runComposeUiTest {
+            var sent = 0
+            setContent {
+                DesktopCrashDialog(onShowReport = {}, onSendEmail = { sent++ }, onDismiss = {})
+            }
+            onNodeWithText("Send by email").performClick()
+            waitForIdle()
+            assertThat(sent).isEqualTo(1)
+        }
+
+    @Test
+    fun `dont send invokes its action`() =
+        runComposeUiTest {
+            var dismissed = 0
+            setContent {
+                DesktopCrashDialog(onShowReport = {}, onSendEmail = {}, onDismiss = { dismissed++ })
+            }
+            onNodeWithText("Don't send").performClick()
+            waitForIdle()
+            assertThat(dismissed).isEqualTo(1)
+        }
 }
