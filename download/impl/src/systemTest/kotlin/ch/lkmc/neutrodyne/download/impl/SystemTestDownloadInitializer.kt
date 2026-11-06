@@ -60,13 +60,17 @@ internal class SystemTestDownloadInitializer(
         // Before the regular reconcile/scheduler initializers: retain the actual reset result
         // and park this fixture row until the test asks for resume. No stale token is live.
         if (marker.exists()) {
-            registry.register(guard)
-            components.value.reconciler.reconcile()
-            val row = checkNotNull(dao.byEpisode(marker.readText().toLong()))
-            File(app.filesDir, RESET).writeText(snapshot(row).toString())
-            // A finite wake time avoids overflow in Android scheduling while the test holds the row.
-            val parked = row.copy(nextAttemptAt = System.currentTimeMillis() + PARK_DELAY_MS)
-            check(dao.updateUnclaimed(parked, row.state) == 1)
+            val id = marker.readText().toLong()
+            val row = checkNotNull(dao.byEpisode(id))
+            if (parksFixtureRowOnStartup(row.state)) {
+                registry.register(guard)
+                components.value.reconciler.reconcile()
+                val reset = checkNotNull(dao.byEpisode(id))
+                File(app.filesDir, RESET).writeText(snapshot(reset).toString())
+                // A finite wake time avoids overflow in Android scheduling while the test holds the row.
+                val parked = reset.copy(nextAttemptAt = System.currentTimeMillis() + PARK_DELAY_MS)
+                check(dao.updateUnclaimed(parked, reset.state) == 1)
+            }
         }
         ContextCompat.registerReceiver(
             app,
@@ -230,15 +234,29 @@ internal class SystemTestDownloadInitializer(
     }
 
     private fun encode(json: JSONObject): String = Base64.encodeToString(json.toString().toByteArray(), Base64.NO_WRAP)
-
-    private companion object {
-        const val PARK_DELAY_MS = 24L * 60 * 60 * 1000
-        const val MANUAL_PRIORITY = 100
-        const val ACTION = "ch.lkmc.neutrodyne.SYSTEM_TEST"
-        const val MARKER = "system-test-episode"
-        const val RESET = "system-test-reset.json"
-        const val COMMAND_TIMEOUT_MS = 8_000L
-        const val RESULT_OK = 1
-        const val RESULT_ERROR = 2
-    }
 }
+
+/**
+ * Whether startup reconcile-and-park applies to a fixture row in [state]. The startup pass records the
+ * reset of an *interrupted* transfer; a row that already finished, lost its file or failed is the test's
+ * evidence and must stand untouched (a later process start would otherwise rewrite the recorded reset
+ * and stamp a retry deadline on a terminal outcome).
+ */
+internal fun parksFixtureRowOnStartup(state: DownloadState): Boolean =
+    state != DownloadState.COMPLETED && state != DownloadState.MISSING && state != DownloadState.FAILED
+
+private const val PARK_DELAY_MS = 24L * 60 * 60 * 1000
+
+private const val MANUAL_PRIORITY = 100
+
+private const val ACTION = "ch.lkmc.neutrodyne.SYSTEM_TEST"
+
+private const val MARKER = "system-test-episode"
+
+private const val RESET = "system-test-reset.json"
+
+private const val COMMAND_TIMEOUT_MS = 8_000L
+
+private const val RESULT_OK = 1
+
+private const val RESULT_ERROR = 2
