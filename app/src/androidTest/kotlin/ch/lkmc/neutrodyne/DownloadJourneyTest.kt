@@ -197,6 +197,9 @@ class DownloadJourneyTest {
                         it.notification.flags and Notification.FLAG_FOREGROUND_SERVICE != 0
                 }
             }
+            // The notification is posted before the transfer starts; the worker can
+            // still tear the FGS down before the dump. Await the active transfer.
+            await { db.downloadDao().byEpisode(id)?.state == DownloadState.DOWNLOADING }
             val dump = device.executeShellCommand("dumpsys activity services ${app.packageName}")
             assertTrue(dump.contains("androidx.work.impl.foreground.SystemForegroundService"))
             // The service's ActivityManager record exposes the effective FGS type, not just a manifest bit.
