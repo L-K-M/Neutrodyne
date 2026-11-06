@@ -28,8 +28,8 @@ import ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings
 import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
-import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
 import ch.lkmc.neutrodyne.playback.core.RemotePlayedGuard
+import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
 import ch.lkmc.neutrodyne.playback.desktop.DesktopEpisodeSourceResolver
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackRuntime

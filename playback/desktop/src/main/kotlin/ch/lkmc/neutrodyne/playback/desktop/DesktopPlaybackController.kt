@@ -1135,6 +1135,8 @@ class DesktopPlaybackController(
         val generation =
             value.sessions.onTransition(departure, toId, arrival.item.origin, revision, clock.now()) ?: return
         value.planner.appliedOwnGeneration(generation)
+        // The transition transaction committed with the departure saved (06's TRANSITIONED).
+        transitionBoundary(toId)
         engineCurrentId = toId
         history.record(outgoing.item)
         followChapters(toId)
@@ -1148,7 +1150,15 @@ class DesktopPlaybackController(
         durationMs = row.measuredDurationMs ?: row.durationMs
         since = clock.now()
         val source = if (arrival.localUri != null) PositionSource.DOWNLOAD else PositionSource.STREAM
-        value.saver.load(toId, since, source, replay = row.playedAt != null)
+        // 06 rule 3, as in [loaded]: only the arrival's freeze survives, and its saves re-read it.
+        remoteGuard.currentChanged(toId)
+        value.saver.load(
+            toId,
+            since,
+            source,
+            replay = row.playedAt != null,
+            allowed = { remoteGuard.allowsSaves(toId) },
+        )
         value.saver.startPositionApplied()
         checkSave(value.saver.onPlaying())
         followSettings(row, group)
