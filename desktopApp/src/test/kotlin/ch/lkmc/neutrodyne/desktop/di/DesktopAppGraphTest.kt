@@ -233,18 +233,27 @@ class DesktopAppGraphTest {
                         ch.lkmc.neutrodyne.core.testing.database
                             .podcastEntity(),
                     )
-                db.episodeDao().insertStub(
-                    ch.lkmc.neutrodyne.core.testing.database
-                        .episodeEntity(podcastId = podcast),
-                )
-                // MD1 still owns native audio. An RSS candidate must not be reported as external-only.
+                val rss =
+                    db.episodeDao().insertStub(
+                        ch.lkmc.neutrodyne.core.testing.database
+                            .episodeEntity(podcastId = podcast),
+                    )
+                // MD1 still owns native audio. An RSS candidate must not be reported as
+                // external-only: the live desktop starter refuses it as NoMedia (fixture
+                // has no enclosure) — anything but NothingToPlay(externalOnly=true).
                 assertThat(
                     graph.playbackController.playFeed(
                         FeedSource.All,
                         FeedFilters(),
                         FeedOrder.NEWEST_FIRST,
                     ),
-                ).isEqualTo(PlayResult.ServiceUnavailable)
+                ).isEqualTo(
+                    PlayResult.NotPlayable(
+                        rss,
+                        ch.lkmc.neutrodyne.playback.api.UnplayableReason
+                            .NoMedia,
+                    ),
+                )
             } finally {
                 db.close()
             }
