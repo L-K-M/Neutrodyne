@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.navigation.IntentRouter
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.RouteInput
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
+import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.ConsoleSink
@@ -333,6 +334,13 @@ internal object DesktopShell {
                 busySignal = busySignal,
                 clock = DesktopClock,
                 updateChecker = graph.appUpdateChecker,
+                crashOffer =
+                    DesktopCrashOffer(
+                        dirs = dirs,
+                        buildInfo = buildInfo,
+                        clock = DesktopClock,
+                        crashReporter = graph.crashReporter,
+                    ),
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,
                 refreshController = graph.refreshController,

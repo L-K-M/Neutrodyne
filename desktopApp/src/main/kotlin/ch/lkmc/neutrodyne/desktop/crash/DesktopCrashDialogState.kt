@@ -3,23 +3,26 @@ package ch.lkmc.neutrodyne.desktop.crash
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.model.BuildInfo
-import ch.lkmc.neutrodyne.core.model.InstallKind
 import java.awt.Desktop
 import java.io.File
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
+/**
+ * The next-start crash offer's scan (11 Crash files and the email dialog): unsent
+ * `crash-*.txt` files newest-first, bounded to 10 files within 30 days. The offer exists only
+ * while [crashReporter] reports available — `InstallKind.DEV` and an empty mailbox never ask
+ * (D62, PO-10), which is the reporter's own rule.
+ */
 class DesktopCrashDialogState(
     private val dirs: AppDirs,
     private val buildInfo: BuildInfo,
     private val clock: Clock,
+    private val crashReporter: CrashReporter,
     private val showInFolder: (Path) -> Boolean = ::defaultShowInFolder,
     private val openMailto: (String) -> Boolean = ::defaultOpenMailto,
 ) {
@@ -28,10 +31,7 @@ class DesktopCrashDialogState(
     private val maxMailtoBody = 1800
 
     fun pendingCrashes(): List<PendingCrash> {
-        val desktop = buildInfo.desktop
-        if (desktop?.installKind == InstallKind.DEV) return emptyList()
-        if (buildInfo.acraMailto.isBlank()) return emptyList()
-        if (!crashReporterAvailable()) return emptyList()
+        if (!crashReporter.isAvailable) return emptyList()
 
         val stateDir = dirs.state
         if (!Files.exists(stateDir)) return emptyList()
@@ -76,13 +76,6 @@ class DesktopCrashDialogState(
 
     fun dismiss(pending: PendingCrash): Boolean = markDismissed(pending.path)
 
-    private fun crashReporterAvailable(): Boolean {
-        // Delegate availability check to BuildInfo rules - same logic as DesktopCrashReporter
-        val desktop = buildInfo.desktop
-        if (desktop?.installKind == InstallKind.DEV) return false
-        return buildInfo.acraMailto.isNotBlank()
-    }
-
     private fun buildMailto(pending: PendingCrash): String {
         val to = buildInfo.acraMailto
         val subject = "Neutrodyne crash ${buildInfo.versionName}"
@@ -94,13 +87,9 @@ class DesktopCrashDialogState(
             } else {
                 content
             }
-        val encodedTo = URLEncoder.encode(to, StandardCharsets.UTF_8).replace("+", "%20")
-        val encodedSubject = URLEncoder.encode(subject, StandardCharsets.UTF_8).replace("+", "%20")
-        val encodedBody = URLEncoder.encode(body, StandardCharsets.UTF_8).replace("+", "%20")
-        return "mailto:$to?subject=${URLEncoder.encode(
-            subject,
-            StandardCharsets.UTF_8,
-        ).replace("+", "%20")}&body=${URLEncoder.encode(body, StandardCharsets.UTF_8).replace("+", "%20")}"
+
+        fun encode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20")
+        return "mailto:$to?subject=${encode(subject)}&body=${encode(body)}"
     }
 
     private fun readContent(path: Path): String =
