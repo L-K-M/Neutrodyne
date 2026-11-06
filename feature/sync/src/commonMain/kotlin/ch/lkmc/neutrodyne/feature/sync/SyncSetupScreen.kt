@@ -87,6 +87,9 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_method_password
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_not_encrypted
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_password_label
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_private_feeds
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_body
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_confirm
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_try_again
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_upload_body
@@ -222,6 +225,14 @@ internal fun SyncSetupScreen(
                     choice = choice,
                     onChoice = { choice = it },
                     onContinue = { controller.chooseFirstLink(choice) },
+                )
+            }
+
+            is LinkState.ConfirmReplaceEverywhere -> {
+                ConfirmReplaceEverywhereStep(
+                    state = state as LinkState.ConfirmReplaceEverywhere,
+                    onConfirm = { controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE) },
+                    onCancel = link::cancel,
                 )
             }
 
@@ -497,6 +508,34 @@ private fun ConfirmUploadStep(
         )
         Text(stringResource(Res.string.sync_setup_upload_body, host), style = MaterialTheme.typography.bodyMedium)
         Button(onClick = onConfirm) { Text(stringResource(Res.string.sync_setup_upload_confirm)) }
+        OutlinedButton(onClick = onCancel) { Text(stringResource(Res.string.sync_setup_cancel)) }
+    }
+}
+
+/**
+ * 10 First-link choices: the second confirmation of "Use this device's library everywhere",
+ * shown after its pull — the removals the other devices will see.
+ */
+@Composable
+private fun ConfirmReplaceEverywhereStep(
+    state: LinkState.ConfirmReplaceEverywhere,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            stringResource(Res.string.sync_setup_replace_title),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            stringResource(
+                Res.string.sync_setup_replace_body,
+                state.removedPodcasts,
+                state.removedGroups,
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Button(onClick = onConfirm) { Text(stringResource(Res.string.sync_setup_replace_confirm)) }
         OutlinedButton(onClick = onCancel) { Text(stringResource(Res.string.sync_setup_cancel)) }
     }
 }

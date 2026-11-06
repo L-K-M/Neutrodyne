@@ -510,6 +510,20 @@ class SyncControllerImplTest {
                 h.controller.startLink(serverUrl, LinkMethod.CODE)
                 await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
                 h.controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE)
+                // 10 First-link choices: the second confirmation follows the staging pull and
+                // names the removals the other devices will see — both server records are
+                // lacking locally. Nothing merged or pushed before "Replace everywhere".
+                await(h) { h.linkFlow.state.value is LinkState.ConfirmReplaceEverywhere }
+                val confirmation = h.linkFlow.state.value as LinkState.ConfirmReplaceEverywhere
+                assertEquals(1, confirmation.removedPodcasts)
+                assertEquals(1, confirmation.removedGroups)
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.linkedAt,
+                )
+                h.controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE)
                 await(h) { h.controller.status.value is SyncStatus.Linked }
                 // Uploaded this device's library ...
                 assertTrue(h.client.calls.any { it == "sync" })
@@ -534,6 +548,39 @@ class SyncControllerImplTest {
                         .get()
                         ?.linkedAt,
                 )
+            } finally {
+                h.close()
+            }
+        }
+
+    /** Cancelling the second confirmation aborts the link; nothing merged or pruned. */
+    @Test
+    fun cancellingTheReplaceEverywhereConfirmationAbortsTheLink() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.client.summary = AccountSummary("alice", LibraryCountsDto(1, 0, 0, 0, 0), 1, 0, 0)
+                h.client.changesHandler = { since ->
+                    if (since == null) {
+                        ChangesPage(listOf(otherPodcastRecord()), "c:00000001:1", false, "")
+                    } else {
+                        emptyPage()
+                    }
+                }
+                h.controller.startLink(serverUrl, LinkMethod.CODE)
+                await(h) { h.linkFlow.state.value is LinkState.ChooseFirstLink }
+                h.controller.chooseFirstLink(FirstLinkChoice.USE_DEVICE)
+                await(h) { h.linkFlow.state.value is LinkState.ConfirmReplaceEverywhere }
+                h.linkFlow.cancel()
+                assertEquals(LinkState.Address, h.linkFlow.state.value)
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.linkedAt,
+                )
+                assertTrue(h.client.calls.none { it == "reset" }, "calls=${h.client.calls}")
             } finally {
                 h.close()
             }

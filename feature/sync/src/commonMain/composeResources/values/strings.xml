@@ -49,6 +49,9 @@
   <string name="sync_setup_choice_server_body">Replaces this device\'s podcasts, groups, listening history and Up next with the server\'s.</string>
   <string name="sync_setup_choice_device">Use this device\'s library everywhere</string>
   <string name="sync_setup_choice_device_body">Replaces the library on the server and on your other devices with this device\'s.</string>
+  <string name="sync_setup_replace_title">Use this device\'s library everywhere?</string>
+  <string name="sync_setup_replace_body">Other devices will remove %1$d podcasts and %2$d groups when they next sync; devices ask first when this exceeds their limits.</string>
+  <string name="sync_setup_replace_confirm">Replace everywhere</string>
   <string name="sync_setup_merging_uploading">Uploading…</string>
   <string name="sync_setup_merging_downloading">Downloading…</string>
   <string name="sync_setup_merging">Combining your libraries… %1$d of %2$d</string>
