@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.domain.AutoDownloadPlanner
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.CleanupPlanner
 import ch.lkmc.neutrodyne.core.domain.DownloadMover
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
@@ -95,6 +96,9 @@ interface DesktopAppGraph {
     val downloadProgress: Provider<DownloadProgressSource>
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
+
+    /** Download-time container chapters (06 Chapters): the desktop `EmbeddedChapterReader`. */
+    val embeddedChapterReader: Provider<EmbeddedChapterReader?>
 
     /** Resolve database-backed playback ports only after the database open gate. */
     val queueRepository: Provider<QueueRepository>

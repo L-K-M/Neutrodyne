@@ -138,6 +138,13 @@ class DesktopPlaybackController(
     private var engineEndedHandled = false
 
     /**
+     * The item the end-of-episode timer completed in place. It stays loaded, so a user
+     * seek or Play on it starts a replay occurrence (06's M5 note, Android's
+     * `replayCompletedBoundary`); cleared once the item stops being current or is armed.
+     */
+    private var completedBoundary: Long? = null
+
+    /**
      * An issue the engine's own state no longer carries: a missing local file is
      * re-resolved at once, so the error state is replaced by Buffering before the
      * UI can show it. Held until playback resumes (06 Error recovery).
@@ -197,7 +204,9 @@ class DesktopPlaybackController(
             }.collect { (queue, info, media) ->
                 guarded {
                     val projection = requireNotNull(projector)
-                    val plan = value.planner.plan(queue, media, playerWindow()) ?: return@guarded
+                    val plan =
+                        value.planner.plan(queue, media, playerWindow(), frozen = ::frozenForPlanner)
+                            ?: return@guarded
                     context = info
                     val oldId = current.value?.episodeId
                     if (plan.playback == WindowPlayback.LOAD_PAUSED) {
@@ -379,13 +388,17 @@ class DesktopPlaybackController(
                 requireIntent(ticket)
                 outcome.seekPositionMs?.let { seek(it) }
                 requireIntent(ticket)
-                val failedId = engineCurrentId
-                if (failedId != null && value.engine.state.value is EngineState.Error) {
+                val currentId = engineCurrentId
+                if (currentId != null && value.engine.state.value is EngineState.Error) {
                     // A recovered failure (device loss, network, a rejected file)
                     // re-opens the current item at its saved position. This is the
                     // user's explicit retry, so it does not spend the automatic
                     // re-prepare budget.
-                    reprepare(failedId)
+                    reprepare(currentId)
+                } else if (currentId != null && completedBoundary == currentId) {
+                    // The end-of-episode timer completed this item in place; a Play
+                    // replays it from the start (06's M5 note).
+                    replayFromStart(currentId)
                 } else {
                     wantPlaying = true
                     value.engine.play()
@@ -466,6 +479,7 @@ class DesktopPlaybackController(
         val value = requireNotNull(runtime)
         // A new item is current, so a later terminal Ended is a new event.
         engineEndedHandled = false
+        completedBoundary = null
         val row = projector?.entries?.firstOrNull()?.media
         following?.cancelAndJoin()
         following = null
@@ -573,10 +587,56 @@ class DesktopPlaybackController(
     private suspend fun seek(requestedMs: Long) {
         if (!prepared) return
         val value = requireNotNull(runtime)
+        if (completedBoundary != null && completedBoundary == engineCurrentId) armReplay()
         val target = requestedMs.coerceAtLeast(0).let { durationMs?.let(it::coerceAtMost) ?: it }
         value.engine.seekTo(target)
         checkSave(value.saver.onSeek(target, durationMs, SeekOrigin.USER))
         publish(target)
+    }
+
+    /**
+     * The completed boundary item stays current: the planner must not apply its
+     * "current marked played" advance/end rule to it (Android passes the same freeze through
+     * `QueueProjector`). A replay trigger clears the marker, so the rule resumes.
+     */
+    private fun frozenForPlanner(episodeId: Long): Boolean = completedBoundary == episodeId
+
+    /**
+     * Arms a replay of the completed boundary item. A fresh `since` lets its saves through the
+     * played-after-start guard again, and `replay = true` clears the played mark at the first
+     * actual playback (06's M5 note, Android's `replayCompletedBoundary`).
+     */
+    private fun armReplay() {
+        val value = runtime ?: return
+        val id = engineCurrentId ?: return
+        val projection = projector ?: return
+        val source =
+            if (projection.entries.firstOrNull()?.localUri != null) {
+                PositionSource.DOWNLOAD
+            } else {
+                PositionSource.STREAM
+            }
+        since = clock.now()
+        value.saver.load(id, since, source, replay = true)
+        value.saver.startPositionApplied()
+        completedBoundary = null
+    }
+
+    /**
+     * A Play on the completed boundary item replays it from the start: the mark-played chain reset
+     * its position, so the engine re-prepares at 0 and the armed saver clears the played mark at the
+     * first actual playback.
+     */
+    private suspend fun replayFromStart(episodeId: Long) {
+        val value = requireNotNull(runtime)
+        val projection = projector ?: return
+        val index = projection.entries.indexOfFirst { it.item.episodeId == episodeId }
+        if (index < 0) return
+        armReplay()
+        value.engine.setWindow(projection.engineWindow, index, 0)
+        wantPlaying = true
+        value.engine.play()
+        publish()
     }
 
     override fun skipToNext() = command { advance(PlaybackExit.SEEK) }
@@ -990,7 +1050,9 @@ class DesktopPlaybackController(
         if (queue.generation != generation || queue.current?.episodeId != toId) return
         val ids = (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
         val media = value.media.observe(ids).first()
-        val plan = value.planner.plan(queue, media, playerWindow()) ?: return
+        val plan =
+            value.planner.plan(queue, media, playerWindow(), frozen = ::frozenForPlanner)
+                ?: return
         projection.apply(queue, plan.entries, plan.operations, toId)
         publish()
     }
@@ -1141,7 +1203,9 @@ class DesktopPlaybackController(
         val projection = projector ?: return
         val capture = value.saver.capture(position(), durationMs, PlaybackExit.END)
         if (capture != null && capture.departure.writePosition && capture.departure.markPlayed) {
-            value.sessions.markBoundaryPlayed(id, SessionRevision(id, projection.generation), clock.now())
+            if (value.sessions.markBoundaryPlayed(id, SessionRevision(id, projection.generation), clock.now())) {
+                completedBoundary = id
+            }
         }
         applySleep(sleepTimerCore.endOfItem())
         publish()
