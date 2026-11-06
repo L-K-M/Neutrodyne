@@ -132,6 +132,9 @@ class EditFeedUrlTest {
                 Provider {
                     FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
                 },
+            youTubeHealth =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeHealth(),
         )
 
     @AfterTest
@@ -290,6 +293,9 @@ class EditFeedUrlTest {
                 Provider {
                     FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
                 },
+            youTubeHealth =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeHealth(),
         )
     }
 
@@ -760,6 +766,9 @@ class EditFeedUrlTest {
                         Provider {
                             FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
                         },
+                    youTubeHealth =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeHealth(),
                 )
             server.enqueue(mockResponse(body = body()))
             assertEquals(Outcome.Success(Unit), repo.editFeedUrl(id, url()))

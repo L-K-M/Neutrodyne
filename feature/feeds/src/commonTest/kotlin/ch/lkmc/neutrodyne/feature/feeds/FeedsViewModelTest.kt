@@ -133,6 +133,15 @@ class FeedsViewModelTest : MainDispatcherTest() {
         platformInfo = testPlatformInfo,
         defaultDispatcher = dispatcher,
         downloadController = downloads,
+        externalOpenService =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeExternalOpen(),
+        capabilities =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeCapabilitiesSource(),
+        youTubeHealth =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeHealth(),
     ).also { store.put("feeds${vmNumber++}", it) }
 
     private fun viewModelTest(block: suspend TestScope.() -> Unit) =
