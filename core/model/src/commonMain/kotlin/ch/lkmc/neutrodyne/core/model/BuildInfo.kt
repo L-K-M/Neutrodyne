@@ -29,6 +29,8 @@ data class BuildInfo(
     val desktop: Desktop? = null,
     /** Localisation codes shipped in this build, e.g. `en`, `de` (11). */
     val shippedLocales: ImmutableList<String>,
+    /** Crash report mailbox from the committed property (PO-10). Empty when crash reporting is disabled. */
+    val acraMailto: String = "",
     /** Written into the binary only by release builds with written Podcast Index permission (PO-3). */
     val podcastIndexKey: String,
     val podcastIndexSecret: String,
@@ -47,5 +49,5 @@ data class BuildInfo(
         "BuildInfo(versionName=$versionName, versionCode=$versionCode, debug=$debug, " +
             "platform=$platform, repoUrl=$repoUrl, updateManifestUrl=$updateManifestUrl, " +
             "engineManifestUrl=$engineManifestUrl, youTubeEngineBundled=$youTubeEngineBundled, " +
-            "apkAbi=$apkAbi, desktop=$desktop, shippedLocales=$shippedLocales)"
+            "apkAbi=$apkAbi, desktop=$desktop, shippedLocales=$shippedLocales, acraMailto=[redacted])"
 }
