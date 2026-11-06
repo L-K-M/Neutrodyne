@@ -37,6 +37,11 @@ kotlin {
             implementation(libs.androidx.lifecycle.process)
             implementation(project(":core:testing"))
         }
+        findByName("desktopTest")?.dependencies {
+            // SyncEventsHttpTest: the real SYNC_STREAM stack against a scripted server.
+            implementation(libs.okhttp.mockwebserver3)
+            implementation(libs.okio)
+        }
         commonMain.dependencies {
             implementation(project(":sync:api"))
             implementation(project(":sync:protocol"))

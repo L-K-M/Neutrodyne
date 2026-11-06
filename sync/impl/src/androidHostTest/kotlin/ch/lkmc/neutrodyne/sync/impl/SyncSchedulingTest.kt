@@ -50,6 +50,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * 10 Scheduling on Android's WorkManager half: `sync-now`/`sync-push`/`sync-periodic` carry the
@@ -221,7 +222,9 @@ class SyncSchedulingTest {
 
     @Test
     fun `a rejected token revokes the link and cancels every sync work`() =
-        runTest {
+        // The worker, the revocation write and the cancel all ride real executors — on a loaded
+        // build machine the default 1-minute runTest timeout can elapse before they settle.
+        runTest(timeout = 3.minutes) {
             db = TestDb.inMemory(app)
             link()
             val client = ScriptedSyncClient(failWith = SyncTransportException(401, null, "nope"))

@@ -97,6 +97,24 @@ class DesktopSyncTriggersTest {
             assertEquals(emptyList(), deps.pokes)
         }
 
+    @Test
+    fun `a suspend closes the events gate and a resume reopens it`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            deps.triggers.start()
+            runCurrent()
+            assertEquals(true, deps.triggers.awake.value)
+
+            deps.powerEvents.emit(PowerEvent.Suspending)
+            runCurrent()
+            assertEquals(false, deps.triggers.awake.value)
+
+            deps.powerEvents.emit(PowerEvent.Resumed)
+            runCurrent()
+            assertEquals(true, deps.triggers.awake.value)
+        }
+
     // --- plumbing --------------------------------------------------------------------------------
 
     private class Deps(

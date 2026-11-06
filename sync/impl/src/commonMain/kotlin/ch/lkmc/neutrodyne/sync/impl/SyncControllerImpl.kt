@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
 import ch.lkmc.neutrodyne.sync.api.RemoteSessionOffer
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDevice
 import ch.lkmc.neutrodyne.sync.api.SyncNotice
@@ -51,6 +52,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -118,6 +120,7 @@ class SyncControllerImpl(
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
     private val scheduler: SyncScheduler,
+    private val events: SyncEventsClient,
     private val noticeBus: SyncNoticeBus,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
@@ -174,6 +177,15 @@ class SyncControllerImpl(
         // The engine's rounds post one-shot notices through the shared bus; relay them into the
         // controller's flow so the shells collect one channel.
         scope.launch { noticeBus.shared.collect { _notices.emit(it) } }
+        // 10 Live updates: the status card's activity line follows the round flag and the
+        // stream's connection state.
+        scope.launch {
+            combine(_syncing, events.connected) { _, _ -> }.collect {
+                (_status.value as? SyncStatus.Linked)?.let {
+                    _status.value = it.copy(activity = activity())
+                }
+            }
+        }
     }
 
     suspend fun refreshStatus() {
@@ -199,6 +211,7 @@ class SyncControllerImpl(
                         username = address.username(),
                         nodeId = state.nodeId.orEmpty(),
                         lastSyncAtMs = state.lastSyncAt,
+                        activity = activity(),
                         problem = lastRoundProblem.value,
                     )
                 }
@@ -228,6 +241,14 @@ class SyncControllerImpl(
         flags.syncPlaybackSettings = address.syncPlaybackSettings()
         syncSettingsRecorder(state)
     }
+
+    /** The status card's activity line: a round trumps the stream's connection (08 Sync screens). */
+    private fun activity(): SyncActivity =
+        when {
+            _syncing.value -> SyncActivity.SYNCING
+            events.connected.value -> SyncActivity.LIVE
+            else -> SyncActivity.IDLE
+        }
 
     /**
      * 10 Settings capture: installs the local synced-key recorder while the link is committed

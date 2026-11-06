@@ -1098,6 +1098,30 @@ every sync work name.
 - **Events:** `changed` with `by ≠` this device → a round within 500 ms (coalesced); `by` = this device → ignored.
 - If the server lacks `sse` or a proxy breaks streaming, polling covers it: rounds on foreground, pause and the timers above.
 
+**Implementation note (2026-11-06, MS3).** The stream is a named
+client kind, `HttpClientKind.SYNC_STREAM`, derived from `SYNC` with
+`readTimeout(0)`/`callTimeout(0)` rather than an ad-hoc derivation —
+same dispatcher, pool, DNS and LAN-gate island. Ktor's own session
+reconnection stays off (`maxReconnectionAttempts = 0`): the
+supervisor's `while` loop owns the documented cadence (server `retry`,
+`Retry-After` on `429`, exponential backoff to 5 min with ±20 %
+jitter, the `2 × hb + 15 s` watchdog), because the plugin's internal
+reconnect has no place for the gate, the `sse` capability check or the
+`401 → Revoked` funnel. Each (re)connect also pokes a round: the bus
+does not replay, so pushes missed while this device was disconnected
+surface only through a pull — the `changed`-event path is the same
+`SyncScheduler.onRemoteChanged` funnel (500 ms coalescing, reason
+`SSE`), which on a `401` rides `onUnlinked` instead of scheduling dead
+credentials. `SyncTransportException` gained `retryAfterSeconds` for
+the `429` wait. A linked row missing URL, token or device ID idles on
+the 5-min recheck cadence instead of reconnect-looping. The gate is a
+`combine` of platform `allowed`, live-link and `NetworkMonitor`; link
+changes reach it through `SyncScheduler`'s `linkStateChanged` funnel
+(`events.reevaluate()`), so unlink/revoke close the stream at once
+instead of waiting out a read. `SyncStatus.Linked` gained
+`activity: SyncActivity` (`IDLE`/`SYNCING`/`LIVE`; `SYNCING` wins over
+`LIVE`) for 08's presentation.
+
 ### Token storage
 
 `SyncTokenStore` keeps the device token in `SecretStore` (`:core:domain`) under the origin `sync:<host>`:

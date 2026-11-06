@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
@@ -134,6 +135,7 @@ object SyncBindings {
         clock: Clock,
         @ApplicationScope scope: CoroutineScope,
         hooks: SyncScheduleHooks,
+        events: Provider<SyncEventsClient>,
     ): SyncScheduler =
         SyncScheduler(
             db = db,
@@ -144,6 +146,40 @@ object SyncBindings {
             scope = scope,
             hooks = hooks,
             releaseDeferred = { engine.releaseDeferred() },
+            linkStateChanged = { events().reevaluate() },
+        )
+
+    /** The events stream's transport (10 Live updates) — the `SYNC_STREAM` client derivation. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncEventTransport(clients: NeutrodyneHttpClients): SyncEventTransport = KtorSyncEventTransport(clients)
+
+    /**
+     * 10 Live updates: the SSE supervisor. Its pokes ride the same scheduler paths a local
+     * change takes — a remote `changed` coalesces into a round, a `401` cancels sync work.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncEventsClient(
+        db: NeutrodyneDatabase,
+        transport: SyncEventTransport,
+        client: SyncClient,
+        address: SyncServerAddress,
+        tokens: SyncTokenStore,
+        network: NetworkMonitor,
+        @ApplicationScope scope: CoroutineScope,
+        scheduler: SyncScheduler,
+    ): SyncEventsClient =
+        SyncEventsClient(
+            db = db,
+            transport = transport,
+            discover = { url -> client.discover(url) },
+            address = address,
+            tokens = tokens,
+            network = network,
+            scope = scope,
+            onRemoteChanged = { scheduler.onRemoteChanged() },
+            onRevoked = { scheduler.onUnlinked() },
         )
 
     /**
