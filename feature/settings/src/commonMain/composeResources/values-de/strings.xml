@@ -112,4 +112,27 @@
     <string name="desktop_links_menu_summary">Fügt Neutrodyne mit Symbol zum Anwendungsmenü hinzu</string>
     <string name="desktop_links_menu_done">Im Anwendungsmenü</string>
     <string name="desktop_login_open_settings">Systemeinstellungen öffnen</string>
+
+    <string name="diagnostics_title">Diagnose</string>
+    <string name="diagnostics_refresh">Diagnose aktualisieren</string>
+    <string name="diagnostics_copy_report">Diagnosebericht kopieren</string>
+    <string name="diagnostics_copy_done">Diagnose kopiert</string>
+    <string name="diagnostics_export_db">Datenbankkopie exportieren</string>
+    <string name="diagnostics_export_done">Datenbankkopie exportiert</string>
+    <string name="diagnostics_export_failed">Datenbankexport fehlgeschlagen</string>
+    <string name="diagnostics_export_cancelled">Export abgebrochen</string>
+    <string name="diagnostics_verbose_log">Detailliertes Protokoll für 24 Stunden</string>
+    <string name="diagnostics_verbose_log_summary">Behält Debug-Zeilen im Diagnoseprotokoll für die nächsten 24 Stunden</string>
+    <string name="diagnostics_section_app">App</string>
+    <string name="diagnostics_section_refresh">Aktualisierung</string>
+    <string name="diagnostics_section_background">Hintergrund</string>
+    <string name="diagnostics_section_jobs">Aufträge</string>
+    <string name="diagnostics_section_downloads">Downloads</string>
+    <string name="diagnostics_section_youtube">YouTube</string>
+    <string name="diagnostics_section_sync">Synchronisation</string>
+    <string name="diagnostics_section_desktop">Desktop</string>
+    <string name="diagnostics_section_database">Datenbank</string>
+    <string name="diagnostics_section_notifications">Benachrichtigungen</string>
+    <string name="diagnostics_section_parse_warnings">Parser-Warnungen</string>
+    <string name="diagnostics_section_log">Protokoll</string>
 </resources>
