@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import ch.lkmc.neutrodyne.core.testing.FakeAudioEngine
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -205,6 +206,64 @@ class DesktopPlaybackSyncPortTest {
         }
 
     @Test
+    fun automaticTransitionEmitsTheTransitionAfterItsCommit() =
+        runTest {
+            val fixture = SyncPortFixture(this)
+            try {
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                fixture.engine.position = 119_000
+                fixture.engine.transition(2)
+                runCurrent()
+                assertEquals(
+                    2L,
+                    fixture.port.active.value
+                        ?.episodeId,
+                )
+                assertTrue(fixture.sessions.calls.any { it.operation == FakePlaySessionStore.Operation.TRANSITION })
+                // The start's own boundary, then the automatic transition's after its commit.
+                assertEquals(
+                    listOf<PlaybackSyncEvent>(PlaybackSyncEvent.Transition(1), PlaybackSyncEvent.Transition(2)),
+                    fixture.received,
+                )
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun automaticTransitionLiftsTheOutgoingFreezeAndGatesTheArrival() =
+        runTest {
+            val fixture = SyncPortFixture(this)
+            try {
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                fixture.port.onRemoteMarkedPlayed(1, "Pixel")
+                runCurrent()
+                fixture.engine.position = 119_000
+                fixture.engine.transition(2)
+                runCurrent()
+                // A freeze only governs the loaded item (06 rule 3).
+                assertFalse(fixture.guard.isFrozen(1))
+
+                // A remote mark-played of the arrival stops its writes like any loaded item's.
+                fixture.port.onRemoteMarkedPlayed(2, "Pixel")
+                runCurrent()
+                fixture.engine.position = 30_000
+                advanceTimeBy(15_000)
+                runCurrent()
+                assertTrue(
+                    fixture.store.saves().none { it.id == 2L },
+                    "a frozen arrival writes no position: ${fixture.store.saves()}",
+                )
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
     fun pausedPickupSeeksTheStoredPositionWithoutWriting() =
         runTest {
             val fixture = SyncPortFixture(this)
@@ -351,6 +410,7 @@ private class SyncPortFixture(
             media,
             store,
             caps,
+            FakeChapterRepository(),
             resolver,
             SpanCache(directory),
             engine,
@@ -361,6 +421,7 @@ private class SyncPortFixture(
             test.backgroundScope,
             clock,
             { runtime },
+            FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
             guard,
             StandardTestDispatcher(test.testScheduler),
             StandardTestDispatcher(test.testScheduler),
