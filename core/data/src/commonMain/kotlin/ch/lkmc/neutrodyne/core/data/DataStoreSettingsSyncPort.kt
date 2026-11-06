@@ -4,7 +4,7 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
-import ch.lkmc.neutrodyne.core.datastore.SettingStore
+import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.domain.LocalSyncedSetting
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
@@ -22,7 +22,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
-import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.Volatile
 
 /**
  * [SettingsSyncPort] over the portable [SettingStore] (10 Settings capture). The recorder is
@@ -34,10 +34,11 @@ import java.util.concurrent.atomic.AtomicReference
 @ContributesBinding(AppScope::class)
 @SingleIn(AppScope::class)
 internal class DataStoreSettingsSyncPort(
-    private val settingsStore: SettingStore,
+    private val settingsStore: SettingsStore,
     private val clock: Clock,
 ) : SettingsSyncPort {
-    private val recorderRef = AtomicReference<suspend (SettingKey<*>, String) -> Unit>(null)
+    @Volatile
+    private var recorderRef: suspend (SettingKey<*>, String) -> Unit = { _, _ -> }
     private val local = MutableSharedFlow<LocalSyncedSetting>(extraBufferCapacity = 16)
     override val localSyncedChanges: Flow<LocalSyncedSetting> = local
 
@@ -52,7 +53,7 @@ internal class DataStoreSettingsSyncPort(
     }
 
     override fun registerRecorder(recorder: suspend (key: SettingKey<*>, json: String) -> Unit) {
-        recorderRef.set(recorder)
+        recorderRef = recorder
     }
 
     override fun encode(
@@ -80,7 +81,7 @@ internal class DataStoreSettingsSyncPort(
     ) {
         if (!key.synced) return
         val json = encode(key, value) ?: return
-        recorderRef.get()?.invoke(key, json)
+        recorderRef.invoke(key, json)
     }
 
     override fun emitLocal(
@@ -139,6 +140,6 @@ internal class DataStoreSettingsSyncPort(
         key: SettingKey<*>,
         value: Any,
     ) {
-        (settingsStore as SettingStore).set(key as SettingKey<Any>, value)
+        settingsStore.set(key as SettingKey<Any>, value)
     }
 }

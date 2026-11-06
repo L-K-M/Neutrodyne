@@ -142,8 +142,8 @@ object MassChangeGuard {
     suspend fun keepMine(
         db: NeutrodyneDatabase,
         batch: HeldBatch,
+        clock: ch.lkmc.neutrodyne.core.common.Clock,
     ) {
-        val now = System.currentTimeMillis()
         for (removal in batch.podcasts) {
             val podcast = db.podcastDao().bySyncId(removal.rid) ?: continue
             db.syncOutboxDao().captureAll("podcast", podcast.syncId)

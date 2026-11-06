@@ -165,7 +165,7 @@ class SyncApplierTest {
 
                 db.withWriteTransaction {
                     db.syncStateDao().withApplying {
-                        MassChangeGuard.keepMine(db, held)
+                        MassChangeGuard.keepMine(db, held, TestClock(now))
                     }
                 }
                 val outbox = db.syncOutboxDao().rows()
