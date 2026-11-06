@@ -868,6 +868,10 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsRepositoryContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions {
+}
 -keep class ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImplContributions$ToAppScope$ProvideScopedInstanceAddPodcastResolverImplMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImplContributions$ToAppScope$ProvideScopedInstanceAddPodcastResolverImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
