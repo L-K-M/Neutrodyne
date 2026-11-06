@@ -29,7 +29,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -84,6 +92,7 @@ public fun CoverTile(
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     var focused by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
 
     val description =
         if (showTitle) {
@@ -99,8 +108,22 @@ public fun CoverTile(
             modifier
                 .hoverable(interactionSource)
                 .onFocusChanged { focused = it.isFocused }
+                .focusRequester(focusRequester)
                 .onSecondaryClick {
-                    if (selected == null && menuActions.isNotEmpty()) menuOpen = true
+                    if (selected == null && menuActions.isNotEmpty()) {
+                        focusRequester.requestFocus()
+                        menuOpen = true
+                    }
+                }.onPreviewKeyEvent { event ->
+                    // 08 Context menus: the Menu key and Shift+F10 open the same menu as the
+                    // secondary click, so the tile's actions stay reachable without a pointer.
+                    val menuKey = event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed)
+                    if (event.type == KeyEventType.KeyDown && menuKey && selected == null && menuActions.isNotEmpty()) {
+                        menuOpen = true
+                        true
+                    } else {
+                        false
+                    }
                 }.semantics(
                     mergeDescendants = true,
                 ) {
@@ -112,7 +135,15 @@ public fun CoverTile(
                                 true
                             }
                         }
-                }.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+                }.combinedClickable(
+                    // Click-to-focus keeps the keyboard context menu reachable after a pointer
+                    // activation (the episode and downloads rows do the same).
+                    onClick = {
+                        focusRequester.requestFocus()
+                        onClick()
+                    },
+                    onLongClick = onLongClick,
+                ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(

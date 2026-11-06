@@ -352,6 +352,27 @@ class LibraryScreenTest {
             )
         }
 
+    /** 08 Context menus: the Menu key and Shift+F10 open the tile's menu, not just the click. */
+    @Test
+    fun tileMenuOpensFromTheKeyboard() =
+        runComposeUiTest {
+            setLibrary(
+                LibraryUiState(
+                    tiles = listOf(testLibraryTile(5, displayTitle = "Tap Show")).toImmutableList(),
+                    loaded = true,
+                ),
+            )
+            onNodeWithContentDescription("Tap Show").performMouseInput { click(center) }
+            onNodeWithContentDescription("Tap Show").performKeyInput { pressKey(Key.Menu) }
+            onNodeWithText("Add to groups").assertIsDisplayed()
+            onNodeWithContentDescription("Tap Show").performKeyInput {
+                keyDown(Key.ShiftLeft)
+                pressKey(Key.F10)
+                keyUp(Key.ShiftLeft)
+            }
+            onNodeWithText("Mark all as played…").assertIsDisplayed()
+        }
+
     @Test
     fun sortMenuDispatchesChosenMode() =
         runComposeUiTest {

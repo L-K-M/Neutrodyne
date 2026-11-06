@@ -35,9 +35,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -236,6 +239,7 @@ private fun ManageRow(
     handle: @Composable () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
     val enabled = !state.busy && state.draggingId == null
     val moveUp = stringResource(Res.string.groups_manage_up)
     val moveDown = stringResource(Res.string.groups_manage_down)
@@ -251,6 +255,7 @@ private fun ManageRow(
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
             .testTag("groupRow${group.id}")
+            .focusRequester(focusRequester)
             .onPreviewKeyEvent {
                 val direction =
                     when (it.key) {
@@ -264,8 +269,22 @@ private fun ManageRow(
                 } else {
                     false
                 }
-            }.onSecondaryClick { if (enabled) menuOpen = true }
-            .semantics {
+            }.onSecondaryClick {
+                if (enabled) {
+                    focusRequester.requestFocus()
+                    menuOpen = true
+                }
+            }.onPreviewKeyEvent { event ->
+                // 08 Context menus: the Menu key and Shift+F10 open the row's menu, so the
+                // move and delete actions stay reachable without a pointer.
+                val menuKey = event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed)
+                if (enabled && event.type == KeyEventType.KeyDown && menuKey) {
+                    menuOpen = true
+                    true
+                } else {
+                    false
+                }
+            }.semantics {
                 customActions =
                     if (enabled) {
                         moves.map { (label, move) ->
@@ -278,7 +297,12 @@ private fun ManageRow(
                         emptyList()
                     }
             }.combinedClickable(
-                onClick = { if (enabled) onEdit(group.id) },
+                // Click-to-focus keeps the keyboard context menu reachable after a pointer
+                // activation (the episode and downloads rows do the same).
+                onClick = {
+                    focusRequester.requestFocus()
+                    if (enabled) onEdit(group.id)
+                },
                 onLongClick = { if (enabled) menuOpen = true },
             ).heightIn(min = 72.dp)
             .padding(vertical = 8.dp, horizontal = 4.dp),
