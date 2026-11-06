@@ -821,7 +821,7 @@ sealed interface EngineState {
     data class Error(val episodeId: Long, val error: EngineError) : EngineState
 }
 sealed interface EngineEvent {
-    data class ItemTransition(val fromEpisodeId: Long?, val toEpisodeId: Long, val reason: TransitionReason) : EngineEvent // AUTO, SEEK_TO_ITEM, SKIP
+    data class ItemTransition(val fromEpisodeId: Long?, val fromPositionMs: Long, val toEpisodeId: Long, val reason: TransitionReason) : EngineEvent // AUTO, SEEK_TO_ITEM, SKIP; fromPositionMs is the outgoing item's audible boundary position (MD1b)
     data class Discontinuity(val episodeId: Long, val reason: DiscontinuityReason, val fromMs: Long, val toMs: Long) : EngineEvent // SEEK, SILENCE_SKIP
     data class TracksKnown(val episodeId: Long, val durationMs: Long?, val chapters: List<EpisodeChapter>, val gapless: Gapless) : EngineEvent
     data class DeviceRerouted(val deviceName: String) : EngineEvent
@@ -911,6 +911,18 @@ use real Room repositories with explicit fake-engine milestones; timing tests
 use virtual time, Compose tests use the existing desktop setup, and the native
 controller boundary runs with `EngineBackend.NULL` in the desktop CI matrix.
 No audible, physical-device or soak acceptance is claimed here.
+
+**MD1b implementation note (2026-11-04).** Chapters and the sleep timer now
+take the shared core's path: `TracksKnown` carries `EpisodeChapter` rows with
+06's source (the demuxer maps MP3 containers to ID3 and the mov/MP4 family to
+MP4, and drops chapter metadata of containers outside the priority table), the
+controller replaces them per source in `ChapterRepository`, observes the
+winning rows through `ChapterIndex`, and drives `nextChapter` /
+`previousChapter` from it. `SleepTimerCore` counts while the engine advances,
+drives `setFade` at its 500-ms step, and its end-of-episode state completes the
+item in place through `PlaySessionStore.markBoundaryPlayed`. The earlier
+"Off/null until MD1b" statement is superseded; download-time chapter
+extraction (`DesktopChapterExtractor`) remains M6.
 
 ### Engine thread and commands
 
@@ -1062,9 +1074,26 @@ The ports are direct translations of Apache-2.0 code: the ported files keep thei
 
 1. When the current item's remaining media time drops below 10 s (or the demuxer reaches end of file for an unknown duration), `nd-prepare` opens the next window item: source, demuxer, decoder, input resampler.
 2. At the current item's end the engine trims the outgoing padding and the incoming delay and keeps writing the next item's PCM into the same ring; the device never stops.
-3. `ItemTransition(from, to, AUTO)` is emitted when `framesPlayed` passes the first marker of the new item, so the UI, the OS session and the position save follow what is audible.
+3. `ItemTransition(from, to, AUTO)` is emitted when `framesPlayed` passes the first marker of the new item, so the UI, the OS session and the position save follow what is audible. The event carries the outgoing item's audible boundary position, because the engine has already handed the ring over when it fires; this mirrors Media3's `oldPosition.positionMs` at `onPositionDiscontinuity` (MD1b).
 4. A next item that is remote and not yet prepared plays silence and reports `Buffering` for its time to first byte. A next item that fails to prepare is skipped with 06's rules (`Skipped` event) and the following one is tried.
 5. Goal: no gap longer than 50 ms and no device restart (MD1 AC4).
+
+**MD1b implementation note (2026-11-04).** `FfAudioEngine` keeps one clock and
+one output for the whole chain: when the current item's remaining media time
+drops below 10 s (`PREPARE_AHEAD_MS`), `nd-prepare` opens the next window item,
+and at the current item's end the engine closes the outgoing pipeline and
+keeps writing the arrival's PCM into the same ring. The device is never stopped,
+so the seam is only the decoder's own latency; the transition event fires at
+the same latency-adjusted ring position the clock reports. The outgoing
+padding and the incoming delay are the demuxer/decoder's gapless trimming
+(11 Demux and decode), so the engine adds no second trim. The engine keeps the
+outgoing item in its window until the controller's diff removes it, so the
+planner's prefix `Remove` and the arrival's prepared source survive; a tail
+edit during the preparation window drops the stale prepare and prepares the
+new successor. A next item that is not prepared at the boundary plays the ring
+out and reports `Buffering` until its first byte; a failed prepare stops the
+chain with `EngineState.Error` (error recovery and skipping remain a later
+slice).
 
 The controller then marks the outgoing item played when `PlayedRule` says so, saves the outgoing position first and advances Up next ([06 Queue and play context](06-playback.md#queue-and-play-context)).
 
@@ -1095,6 +1124,46 @@ The controller applies 06's recovery rules ([06 Error recovery](06-playback.md#e
 - **Device removed** ([Audio-route monitoring](#audio-route-monitoring)) or **device lost:** pause, save, keep the window; the next Play re-opens the default device.
 - **System sleep** ([Power](#power-suspend-wake-and-idle-sleep)): pause and save on `Suspending`; nothing resumes on wake.
 - **Start-up:** the controller loads `play_session` and the saved position and publishes `NowPlaying` with phase `NOT_LOADED` and `isPlaying = false`; nothing is resolved, fetched or decoded until the user presses Play, a media key or the tray's Play (R8.4).
+
+**MD1b implementation note (2026-11-05).** The recovery slice implements the
+table above and the device-loss reaction. The controller owns
+`RecoveryBudget`: a skip-type failure (HTTP, auth, format, no media,
+content changed) emits `PlaybackEvent.Skipped` and advances; after five
+consecutive skips, or when no successor exists, it pauses with
+`PLAYER_ERROR`. A network failure keeps the item, publishes
+`NETWORK_LOST` and re-prepares once a validated connection returns within
+the 10-min foreground window. A missing local file re-resolves to the
+stream at the same position and holds `LOCAL_FILE_MISSING` until
+playback resumes (the engine's error state is replaced by the re-prepare,
+so the issue is carried separately). A successor whose preparation fails
+at the boundary is skipped and the following item is tried.
+
+Deviations from the contracts above, forced by the implementation:
+
+- `EngineError.ContentChanged` is new. The engine re-resolves a
+  `ContentChangedException` once (dropping the cache resource); the second
+  failure maps to it, and the controller skips with
+  `UnplayableReason.Http(416)`, 06's mapping for a DAI length change.
+- `AudioEngine.onDeviceRemoved()` is new (default no-op). MD2's route
+  monitor reports a removed device through it; `FfAudioEngine` discards
+  its output, emits `DeviceLost` and enters `Error(Output)`, so the next
+  play opens the default device. The `AudioRouteMonitor`/`RouteEvent`
+  contracts live in `:desktop:system` as drawn; `NoOpAudioRouteMonitor`
+  is the MD1b placeholder until MD2 binds the per-OS monitor.
+- `NdOutput` now implements the new `AudioOutput` seam in
+  `:playback:native`, which the engine holds so its open/write/start
+  fault paths are testable without hardware; `NdOutputException` carries
+  ndmedia's negative `ND_E_*` code so the engine can distinguish a device
+  failure (`ND_E_DEVICE`) from a bad back-end.
+- "A second failure shows 'No audio output device'": the shared 06 error
+  rows have no such issue, so the controller keeps publishing
+  `PLAYER_ERROR` (the shared UI's retry action) and records the repeated
+  failure internally. No new string or issue was added.
+- A first-decode seek now lands one guard interval (50 ms) earlier. FFmpeg
+  keeps the encoder-delay skip (`avctx->delay`, from the track's initial
+  padding) across `avcodec_flush_buffers`, so a seek made before any
+  decoded frame is dropped; the guard keeps the requested position out of
+  that first frame, and the sample drop below still lands on it.
 
 ### MD0 spike and the libmpv fallback
 

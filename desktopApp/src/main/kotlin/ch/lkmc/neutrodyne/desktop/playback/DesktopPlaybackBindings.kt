@@ -6,12 +6,16 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
+import ch.lkmc.neutrodyne.desktop.system.AudioRouteMonitor
+import ch.lkmc.neutrodyne.desktop.system.NoOpAudioRouteMonitor
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
@@ -47,8 +51,16 @@ object DesktopPlaybackBindings {
     fun desktopController(
         @ApplicationScope scope: CoroutineScope,
         clock: Clock,
+        network: NetworkMonitor,
+        routeMonitor: AudioRouteMonitor,
         runtime: Provider<DesktopPlaybackRuntime>,
-    ): DesktopPlaybackController = DesktopPlaybackController(scope, clock, { runtime() })
+    ): DesktopPlaybackController =
+        DesktopPlaybackController(scope, clock, {
+            runtime()
+        }, network, routeMonitor = routeMonitor)
+
+    /** MD2 binds the per-OS monitor; until then there is no route event. */
+    @Provides fun routeMonitor(): AudioRouteMonitor = NoOpAudioRouteMonitor
 
     @Provides fun controller(value: DesktopPlaybackController): PlaybackController = value
 
@@ -67,6 +79,7 @@ object DesktopPlaybackBindings {
         media: PlaybackMediaLookup,
         positions: PositionStore,
         capabilities: YouTubeCapabilitiesSource,
+        chapterRepository: ChapterRepository,
         resolver: DesktopEpisodeSourceResolver,
         cache: SpanCache,
         engine: AudioEngine,
@@ -81,6 +94,7 @@ object DesktopPlaybackBindings {
             media,
             positions,
             capabilities,
+            chapterRepository,
             resolver,
             cache,
             engine,
