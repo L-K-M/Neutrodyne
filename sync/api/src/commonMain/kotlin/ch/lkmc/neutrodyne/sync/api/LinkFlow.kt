@@ -88,6 +88,17 @@ sealed interface LinkState {
         val serverGroups: Int,
     ) : LinkState
 
+    /**
+     * 10 "Use this device's library everywhere": the second confirmation, shown after that
+     * choice's staging pull — how many podcasts and groups the other devices will remove when
+     * they next sync (each asks first when this exceeds its mass-change thresholds). Continuing
+     * re-enters the choice and runs the merge from the staged snapshot.
+     */
+    data class ConfirmReplaceEverywhere(
+        val removedPodcasts: Int,
+        val removedGroups: Int,
+    ) : LinkState
+
     data class Merging(
         val phase: LinkPhase,
         val done: Int,
