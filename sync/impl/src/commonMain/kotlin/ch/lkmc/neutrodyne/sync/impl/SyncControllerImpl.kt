@@ -311,10 +311,21 @@ class SyncControllerImpl(
     }
 
     override fun chooseFirstLink(choice: FirstLinkChoice) {
+        val state = linkFlow.state.value
         // An empty account offers no choice: only the named upload confirmation can continue it.
-        if (linkFlow.state.value is ch.lkmc.neutrodyne.sync.api.LinkState.ConfirmUpload &&
+        if (state is ch.lkmc.neutrodyne.sync.api.LinkState.ConfirmUpload &&
             choice != FirstLinkChoice.MERGE
         ) {
+            return
+        }
+        if (choice == FirstLinkChoice.USE_DEVICE) {
+            // 10 First-link choices: the second confirmation follows the choice's staging pull,
+            // so it can name what the other devices will remove; continuing runs the merge.
+            if (state is ch.lkmc.neutrodyne.sync.api.LinkState.ConfirmReplaceEverywhere) {
+                linkJob = scope.launch { beginMerge(choice) }
+                return
+            }
+            linkJob = scope.launch { stageReplaceEverywhere() }
             return
         }
         linkJob = scope.launch { beginMerge(choice) }
@@ -732,6 +743,28 @@ class SyncControllerImpl(
                     linkFlow.failed(SyncProblem.MergeFailed)
                     refreshStatus()
                 }
+            }
+        } finally {
+            _syncing.value = false
+        }
+    }
+
+    /**
+     * 10 "Use this device's library everywhere": the staging pull whose snapshot feeds the
+     * second confirmation. The staged file survives until the confirmed merge completes, so
+     * `useDeviceEverywhere` resumes it instead of pulling again.
+     */
+    private suspend fun stageReplaceEverywhere() {
+        _syncing.value = true
+        try {
+            linkFlow.merging(ch.lkmc.neutrodyne.sync.api.LinkPhase.DOWNLOADING, 0, 1)
+            try {
+                val (podcasts, groups) = merger.stageResetEffect()
+                linkFlow.confirmReplaceEverywhere(podcasts, groups)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Throwable) {
+                linkFlow.failed(classify(failure))
             }
         } finally {
             _syncing.value = false
