@@ -44,15 +44,16 @@ class LinuxMprisSession private constructor(
     /** The path [open] exports this object under. */
     override fun getObjectPath() = MprisNames.PATH
 
-    private var published: NowPlaying? = null
+    // Written by publish on the app side, read by D-Bus method threads.
+    @Volatile private var published: NowPlaying? = null
 
-    private var rate = 1.0
+    @Volatile private var rate = 1.0
 
-    private var positionMs = 0L
+    @Volatile private var positionMs = 0L
 
-    private var durationMs: Long? = null
+    @Volatile private var durationMs: Long? = null
 
-    private var volume = 1.0
+    @Volatile private var volume = 1.0
 
     @Volatile private var closed = false
 

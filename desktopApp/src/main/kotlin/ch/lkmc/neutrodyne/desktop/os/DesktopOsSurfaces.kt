@@ -77,7 +77,7 @@ class DesktopOsSurfaces(
      * OS session and the power source. Nothing here may throw into the shutdown path.
      */
     fun close() {
-        powerPolicy.close()
+        runCatching(powerPolicy::close).onFailure { Log.w(TAG, it) { "closing the power policy failed" } }
         for (surface in listOf(session, power, inhibitor)) {
             if (surface !is AutoCloseable) continue
             runCatching(surface::close)

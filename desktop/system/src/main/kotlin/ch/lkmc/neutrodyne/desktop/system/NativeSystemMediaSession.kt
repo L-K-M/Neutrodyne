@@ -54,7 +54,7 @@ class NativeSystemMediaSession private constructor(
                     delay(POLL_MS)
                     continue
                 }
-                when (val routing = routeNativeEvent(event.kind)) {
+                when (val routing = routeNativeEvent(event)) {
                     is NativeEventRouting.Command -> commandChannel.send(routing.command)
                     NativeEventRouting.SystemEvent -> eventChannel.send(event)
                 }
@@ -140,6 +140,9 @@ internal sealed interface NativeEventRouting {
     data object SystemEvent : NativeEventRouting
 }
 
+/** The poll loop's routing of one native event; a seek keeps its target position. */
+internal fun routeNativeEvent(event: NativeSessionEvent): NativeEventRouting = routeNativeEvent(event.kind, event.value)
+
 /**
  * Classifies a native session event kind for the poll loop. Exhaustive on purpose: a kind
  * added to the native enum without a decision here is a compile error in this module, not a
@@ -149,7 +152,7 @@ internal sealed interface NativeEventRouting {
  */
 internal fun routeNativeEvent(
     kind: NativeSessionEventKind,
-    seekValueMs: Long = 0,
+    seekValueMs: Long,
 ): NativeEventRouting =
     when (kind) {
         NativeSessionEventKind.PLAY -> NativeEventRouting.Command(RemoteCommand.Play)
