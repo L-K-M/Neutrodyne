@@ -51,10 +51,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
@@ -173,9 +176,16 @@ internal fun GroupsManageScreen(
                 }
 
                 else -> {
+                    // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+                    val scrollbars = LocalScrollbars.current
+                    val scrollbarColor = ndScrollbarColor(scrollbars)
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize().testTag("groupsManageList"),
+                        modifier =
+                            Modifier
+                                .fillMaxSize()
+                                .testTag("groupsManageList")
+                                .ndScrollbar(listState, scrollbars, scrollbarColor),
                         contentPadding = PaddingValues(bottom = 96.dp),
                     ) {
                         itemsIndexed(state.groups, key = { _, group -> group.id }) { index, group ->

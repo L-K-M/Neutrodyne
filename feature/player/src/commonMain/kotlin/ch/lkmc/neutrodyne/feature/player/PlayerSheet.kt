@@ -87,7 +87,10 @@ import androidx.navigation3.runtime.NavKey
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverAspect
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
@@ -580,6 +583,10 @@ internal fun PlayerSheet(
                         }
                     }
                     if (progress > FULL_SEMANTICS_START) {
+                        // 08 Scrollbars: the desktop draws an overlay thumb at the player's end edge.
+                        val playerScroll = rememberScrollState()
+                        val playerBars = LocalScrollbars.current
+                        val playerBarColor = ndScrollbarColor(playerBars)
                         Column(
                             Modifier
                                 .fillMaxSize()
@@ -588,7 +595,8 @@ internal fun PlayerSheet(
                                     translationY =
                                         morph.controlsOffset.dp.toPx()
                                 }.padding(top = statusBar.dp, bottom = panelPeekHeight + bottomInset)
-                                .verticalScroll(rememberScrollState())
+                                .verticalScroll(playerScroll)
+                                .ndScrollbar(playerScroll, playerBars, playerBarColor)
                                 .testTag("full_player")
                                 // The panel owns accessibility while it covers the transport.
                                 .then(if (panelState.canCollapse) Modifier.clearAndSetSemantics {} else Modifier),

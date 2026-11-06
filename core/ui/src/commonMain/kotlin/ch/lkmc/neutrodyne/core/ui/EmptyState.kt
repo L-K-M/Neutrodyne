@@ -22,8 +22,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 
 /**
  * The centred list-screen empty state (08 Empty states): a 96 dp symbol in `primary`, [title]
@@ -45,9 +48,14 @@ public fun EmptyState(
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         // Lazy-list callers already own scrolling; short bounded windows need their own viewport.
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
         val scrolling =
             if (constraints.hasBoundedHeight) {
-                Modifier.verticalScroll(rememberScrollState())
+                Modifier
+                    .verticalScroll(scroll)
+                    .ndScrollbar(scroll, bars, barColor)
             } else {
                 Modifier
             }
