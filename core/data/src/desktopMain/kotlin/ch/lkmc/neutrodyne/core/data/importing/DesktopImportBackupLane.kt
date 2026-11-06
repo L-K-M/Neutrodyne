@@ -7,7 +7,6 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
-import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.backup.RestoreRunResult
 import ch.lkmc.neutrodyne.core.data.backup.RestoreRunner
@@ -15,9 +14,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
-import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ImportState
-import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.async
@@ -31,8 +28,9 @@ import kotlin.time.Instant
  * The `import-backup` lane (05 §7 desktop column, 11's lane table). Every run re-reads the
  * durable state instead of trusting pokes, in the runner's fixed order: the oldest pending
  * restore (`PREVIEW` backup session with `restoreRequestedAt` — `RestoreRunner` itself
- * serializes, one at a time), then the `COMMITTED`/`FETCHING` import sessions oldest first,
- * then the once-per-24-h `ImportSessionCleaner` pass (until `maintenance` takes it, M11b).
+ * serializes, one at a time), then the `COMMITTED`/`FETCHING` import sessions oldest first.
+ * The once-per-24-h `ImportSessionCleaner` pass this lane ran in M3–M10 moved to the
+ * `maintenance` lane's `db-maintenance` step 3 in M11b.
  *
  * The lane is mixed, not network-only: restores and cleanup are local work and must run
  * while offline. Fetches return early offline (05 §7 — the network-regained poke wakes the
@@ -53,9 +51,7 @@ internal class DesktopImportBackupLane
         private val db: NeutrodyneDatabase,
         private val restores: RestoreRunner,
         private val fetches: ImportFetchRunner,
-        private val cleaner: ImportSessionCleaner,
         private val work: LaneImportWorkScheduler,
-        private val settings: SettingsRepository,
         private val network: NetworkMonitor,
         private val reports: ImportReportPoster,
     ) : JobLane {
@@ -64,7 +60,6 @@ internal class DesktopImportBackupLane
         override suspend fun run(now: Instant) {
             runPendingRestores()
             runPendingImports()
-            cleanupIfDue(now)
         }
 
         /**
@@ -170,22 +165,6 @@ internal class DesktopImportBackupLane
             }.onFailure { Log.w(TAG, it) { "laneAttempts write failed for session $sessionId" } }
         }
 
-        /** Once per 24 h; a failed pass or stamp write simply retries on the next run. */
-        private suspend fun cleanupIfDue(now: Instant) {
-            val last =
-                suspendRunCatching { settings.get(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT) }
-                    .getOrNull() ?: return
-            if (now.toEpochMilliseconds() - last < CLEANUP_INTERVAL_MS) return
-
-            suspendRunCatching { cleaner.cleanExpired(now.toEpochMilliseconds()) }
-                .onSuccess {
-                    suspendRunCatching {
-                        val saved = settings.set(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT, now.toEpochMilliseconds())
-                        if (saved is Outcome.Failure) Log.w(TAG) { "cleanup timestamp write rejected" }
-                    }.onFailure { Log.w(TAG, it) { "cleanup timestamp write failed" } }
-                }.onFailure { Log.w(TAG, it) { "import session cleanup failed" } }
-        }
-
         private fun ImportSessionEntity.laneAttempts(): Int =
             optionsJson?.let(ImportOptionsJson::decodeOrNull)?.laneAttempts ?: 0
 
@@ -196,8 +175,5 @@ internal class DesktopImportBackupLane
         internal companion object {
             const val TAG = "ImportBackupLane"
             const val NAME = "import-backup"
-
-            /** 11's lane table: the interim cleanup runs once per 24 h. */
-            const val CLEANUP_INTERVAL_MS = 24L * 3_600_000
         }
     }
