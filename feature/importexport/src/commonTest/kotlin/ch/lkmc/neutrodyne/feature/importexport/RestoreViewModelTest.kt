@@ -139,7 +139,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
         runTest {
             val vm =
                 RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             assertEquals(listOf("inspect(7)"), backups.calls)
             assertEquals(restorePreview(), vm.uiState.value.preview)
             assertEquals(RestoreMode.MERGE, vm.uiState.value.mode)
@@ -155,7 +155,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
         runTest {
             val vm =
                 RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             vm.setCategory(RestoreCategory.HISTORY, false)
             vm.selectMode(RestoreMode.MERGE)
             assertFalse(
@@ -178,7 +178,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                 }
             val vm =
                 RestoreViewModel(7, ordered, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             vm.selectMode(RestoreMode.REPLACE)
             vm.requestRestore()
             assertTrue(vm.uiState.value.confirmingReplace)
@@ -201,7 +201,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
         runTest {
             val vm =
                 RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             vm.setCategory(RestoreCategory.HISTORY, false)
             vm.requestRestore()
             assertEquals(
@@ -228,7 +228,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                 backups.inspectOutcome = Outcome.Failure(error)
                 val vm =
                     RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                    runCurrent()
+                runCurrent()
                 assertEquals(error, vm.uiState.value.error)
                 vm.requestRestore()
                 assertTrue(backups.restoreRequests.isEmpty())
@@ -237,7 +237,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
             backups.restoreOutcome = Outcome.Failure(BackupError.RestoreRunning)
             val vm =
                 RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             vm.requestRestore()
             assertEquals(BackupError.RestoreRunning, vm.uiState.value.error)
             assertFalse(vm.uiState.value.requested)
@@ -248,7 +248,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
         runTest {
             val vm =
                 RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             vm.requestRestore()
             runCurrent()
             assertEquals(RestoreProgress.Finished(7, false), vm.uiState.value.progress)
@@ -284,7 +284,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
             backups.restoreProgress.value = RestoreProgress.Failed(id, BackupError.Storage)
             val vm =
                 RestoreViewModel(id, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             assertEquals(BackupError.Storage, vm.uiState.value.error, "A resumed restore must expose its failure")
             assertTrue(vm.uiState.value.requested)
         }
@@ -358,7 +358,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                 }
             val vm =
                 RestoreViewModel(7, accepted, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             vm.requestRestore()
             assertEquals(null, vm.uiState.value.error)
             assertTrue(vm.uiState.value.requested)
@@ -379,7 +379,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                 }
             val vm =
                 RestoreViewModel(7, earlyFailure, imports, playback, linkedSync, backgroundScope, restoreDownloads())
-                runCurrent()
+            runCurrent()
             vm.requestRestore()
             runCurrent()
             assertEquals(
