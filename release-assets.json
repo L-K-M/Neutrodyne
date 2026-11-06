@@ -27,8 +27,10 @@
       "openjdk-{jdk}-temurin-sources.tar.gz",
       "RUNTIME-SOURCES.md",
       "wix-{wix}-src.tar.gz",
-      "ffmpeg-{ffmpeg}-neutrodyne-src.tar.xz",
       "python-build-standalone-{pbsTag}-src.tar.gz"
+    ],
+    "ffmpeg-sources": [
+      "ffmpeg-{ffmpeg}-neutrodyne-src.tar.xz"
     ],
     "server": [
       "neutrodyne-server-{v}.jar",
@@ -40,6 +42,7 @@
     "android": "M0a",
     "desktop": "M0b",
     "sources": "M0b",
+    "ffmpeg-sources": "MD1b",
     "server": "MS1"
   }
 }

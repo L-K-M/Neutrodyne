@@ -50,7 +50,7 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android
+        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android,ffmpeg-sources
 
   android:
     needs: verify-tag
@@ -114,10 +114,35 @@ jobs:
           path: dist/
           retention-days: 5
 
+  # MD1b: the LGPL source offer of the FFmpeg build the release ships (11 FFmpeg
+  # LGPL obligations). The bundle is reproducible from the native lock alone, so it
+  # builds on the Linux x64 runner with the same manylinux toolchain the desktop
+  # matrix uses; `checkNativeLicences` re-checks the built libraries' licence
+  # envelope before the source is attached.
+  sources:
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Assemble the FFmpeg source bundle
+        run: |
+          ./gradlew --no-daemon --no-build-cache \
+            :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sources
+          path: playback/native/build/ffmpeg-source/ffmpeg-*-neutrodyne-src.tar.xz
+          retention-days: 5
+
   # TODO (M0b): `desktop` (matrix windows-x64 / macos-arm64 / linux-x64 /
   # linux-arm64 with the two-attempt build loop and mac_kind from verify-tag)
-  # and `sources` (openjdk-{jdk}-temurin-sources.tar.gz + RUNTIME-SOURCES.md;
-  # MD1b ffmpeg sources; MD3 PBS sources; WiX sources with each MSI).
+  # and the rest of `sources` (openjdk-{jdk}-temurin-sources.tar.gz +
+  # RUNTIME-SOURCES.md; MD3 PBS sources; WiX sources with each MSI).
   # TODO (MS1): `server-jar`, `server-image` (matrix, push-by-digest),
   # `server-image-manifest`, and `image-tags` after publish. `server-jar` runs
   # ci.yml's "Third-party notices in the server JAR" checks on the JAR it
@@ -125,7 +150,7 @@ jobs:
   # /usr/share/doc/neutrodyne-server/ and checks it there.
 
   publish:
-    needs: [verify-tag, android]
+    needs: [verify-tag, android, sources]
     environment: release # required reviewer; holds no signing secret (09)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -155,6 +180,10 @@ jobs:
         with:
           pattern: android
           path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: sources
+          path: dist
       - name: Compare the asset set with verify-tag's expected list
         env:
           EXPECTED: ${{ needs.verify-tag.outputs.expected_assets }}
@@ -175,6 +204,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           V: ${{ needs.verify-tag.outputs.version }}
+          FFMPEG: ${{ needs.verify-tag.outputs.ffmpeg_version }}
         run: |
           cat "changelogs/${{ needs.verify-tag.outputs.versionCode }}.txt" > body.md
           cat >> body.md <<EOF
@@ -186,6 +216,10 @@ jobs:
           These APKs are release builds signed with a key that is public in this repository
           (signing/neutrodyne-public.keystore), so the signature does not show who built a file.
 
+          Source bundles:
+          This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be
+          downloaded here: https://github.com/L-K-M/Neutrodyne/releases/download/$TAG/ffmpeg-$FFMPEG-neutrodyne-src.tar.xz
+
           Download only from this page and check the file:
             sha256sum --check --ignore-missing SHA256SUMS        (macOS: shasum -a 256 <file>; Windows: Get-FileHash -Algorithm SHA256 <file>)
             gh release verify-asset $TAG <file> -R L-K-M/Neutrodyne
@@ -193,8 +227,8 @@ jobs:
 
           Guides: https://github.com/L-K-M/Neutrodyne#install-and-update
           EOF
-          # TODO (M0b/MS1): desktop-packages block, source bundles and the
-          # server block of 09's release-body template join with their assets.
+          # TODO (M0b/MS1): the desktop-packages block and the server block of 09's
+          # release-body template join with their assets.
       - name: Attest every asset
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
