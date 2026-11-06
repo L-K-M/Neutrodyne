@@ -8,11 +8,7 @@ import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 
-/**
- * The YouTube watch link behind "Watch on YouTube" and external rows (04's canonical
- * `https://www.youtube.com/watch?v={id}`). A stopgap until 04's `YouTubeFeedUrls` lands with M8 —
- * the deviation is recorded in 08.
- */
+/** Canonical watch links for UI, which cannot depend on youtube:api under 01's boundaries. */
 public object YouTubeLinks {
     public fun watch(videoId: String): String = "https://www.youtube.com/watch?v=$videoId"
 }

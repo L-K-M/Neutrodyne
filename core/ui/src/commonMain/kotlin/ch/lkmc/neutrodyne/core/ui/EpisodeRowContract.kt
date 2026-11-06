@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.runtime.Immutable
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.SwipeAction
 
 /** Row layout variants (08 EpisodeRow); Downloads uses its own `DownloadEntryRow`. */
@@ -80,6 +81,7 @@ public sealed interface EpisodeAction {
     public data class WatchOnYouTube(
         override val episodeId: Long,
         val videoId: String,
+        val mode: YouTubeWatchMode = YouTubeWatchMode.EXTERNAL_OR_UNPLAYABLE,
     ) : EpisodeAction
 
     /** Long-press / toggle in selection mode (M2). */
@@ -97,3 +99,9 @@ public sealed interface EpisodeAction {
         override val episodeId: Long,
     ) : EpisodeAction
 }
+
+/** RSS keeps native actions when mixed with external channels. */
+public fun RowCaps.forSource(source: SourceType): RowCaps =
+    if (source == SourceType.RSS) copy(inAppPlayback = true, downloads = true, recheck = false) else this
+
+public enum class YouTubeWatchMode { EXTERNAL_OR_UNPLAYABLE, PLAYABLE_OVERFLOW }
