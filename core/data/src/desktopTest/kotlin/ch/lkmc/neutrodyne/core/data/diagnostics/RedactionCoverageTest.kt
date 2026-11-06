@@ -7,7 +7,6 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.common.Outcome
-import ch.lkmc.neutrodyne.core.common.Redactor
 import ch.lkmc.neutrodyne.core.common.RingBufferLogSink
 import ch.lkmc.neutrodyne.core.data.exporting.ExportDestination
 import ch.lkmc.neutrodyne.core.data.storagePathsFor
@@ -69,8 +68,9 @@ class RedactionCoverageTest {
             assertFalse(ring.linesFlow.value.any { it.contains("verbose-dbg-marker") })
             assertTrue(collected.any { it.contains("verbose-dbg-marker") })
 
-            // A contributor holding a redaction-needing value feeds toPlainText.
-            val repository = repository({ listOf(DiagnosticsLine("feed", Redactor.text(SEEDED_URL))) })
+            // A contributor emitting a raw URL: the repository's own Redactor pass (09)
+            // is what must mask it — feeding pre-redacted text would not prove the pass.
+            val repository = repository({ listOf(DiagnosticsLine("feed", SEEDED_URL)) })
             val report = repository.snapshot()
             val plain = repository.toPlainText(report)
             assertNoSecrets(listOf(plain))
@@ -132,6 +132,16 @@ class RedactionCoverageTest {
                             }
                         }
                     }
+                }
+                // 09 reads the copy byte-wise: free pages must not hold the secrets either.
+                val bytes = target.readBytes()
+                for (secret in SECRETS) {
+                    val needle = secret.encodeToByteArray()
+                    val found =
+                        (0..bytes.size - needle.size).any { i ->
+                            needle.indices.all { j -> bytes[i + j] == needle[j] }
+                        }
+                    assertFalse(found, "'$secret' in exported bytes")
                 }
                 target.delete()
             } finally {
