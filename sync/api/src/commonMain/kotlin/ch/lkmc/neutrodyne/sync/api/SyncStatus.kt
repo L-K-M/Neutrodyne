@@ -30,7 +30,10 @@ sealed interface SyncStatus {
         val serverUrl: String,
     ) : SyncStatus
 
-    /** Linked; [problem] replaces the first status line while set. */
+    /**
+     * Linked; [problem] replaces the first status line while set. [activity] is what the status
+     * card shows next to "Up to date" (08 Settings › Sync).
+     */
     data class Linked(
         val serverUrl: String,
         val accountId: String,
@@ -38,6 +41,7 @@ sealed interface SyncStatus {
         val username: String?,
         val nodeId: String,
         val lastSyncAtMs: Long?,
+        val activity: SyncActivity,
         val problem: SyncProblem?,
     ) : SyncStatus
 
@@ -45,4 +49,16 @@ sealed interface SyncStatus {
     data class Revoked(
         val serverUrl: String,
     ) : SyncStatus
+}
+
+/** What the sync machinery is doing right now (10 Live updates, 08 Settings › Sync). */
+enum class SyncActivity {
+    /** Linked and quiet. */
+    IDLE,
+
+    /** A sync round is in flight. */
+    SYNCING,
+
+    /** The server-sent events stream is connected. */
+    LIVE,
 }
