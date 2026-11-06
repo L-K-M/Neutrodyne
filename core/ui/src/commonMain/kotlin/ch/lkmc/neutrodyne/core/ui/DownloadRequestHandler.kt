@@ -105,13 +105,11 @@ public class DownloadRequestHandler(
         run { handle(ids, controller.request(ids, DownloadLane.MANUAL)) }
     }
 
-    /** M6a desktop downloads use the default root only. No folder registration or move. */
+    /** Storage actions follow the selected root, including registered desktop folders. */
     public suspend fun storageFolder(): String? =
         suspendRunCatching {
-            controller
-                .storageRoots()
-                .firstOrNull { it.kind == ch.lkmc.neutrodyne.download.api.RootKind.DESKTOP_DEFAULT }
-                ?.path
+            val rootId = controller.observeStorage().first().rootId
+            controller.storageRoots().firstOrNull { it.rootId == rootId }?.path
         }.onFailure(onFailure)
             .getOrNull()
 

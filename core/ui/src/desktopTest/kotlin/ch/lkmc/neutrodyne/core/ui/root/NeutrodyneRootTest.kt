@@ -134,6 +134,8 @@ class NeutrodyneRootTest {
             runOnIdle {
                 kotlin.test.assertEquals(1, slot?.expandRequest)
                 assertTrue(requireNotNull(slot).layout.playerPanel)
+                kotlin.test.assertEquals(412, requireNotNull(slot).layout.playerPanelWidthDp)
+                assertTrue(requireNotNull(slot).layout.contentWidthDp > 0)
             }
             runOnIdle { pending.trySend(Route.ExpandPlayer) }
             waitForIdle()
@@ -235,6 +237,7 @@ class NeutrodyneRootTest {
 
     @Test
     fun restoredExpandedPlayerMeasuresBeforeHidingSuite() =
+        // Below the 840 dp side-panel width, so the restored player stays in the sheet.
         runDesktopComposeUiTest(width = 400, height = 800) {
             var slot: PlayerSlotState? = null
             setContent {

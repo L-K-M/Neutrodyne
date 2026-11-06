@@ -50,10 +50,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
-import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
@@ -84,30 +81,22 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.action_resume_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry_download
+import ch.lkmc.neutrodyne.core.ui.resources.download_show_folder
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_about
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_allow
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_background
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_bytes
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_cancel_selection
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_completed
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_data_saver
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_dismiss
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_body
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_manual
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_failed
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_folder
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_folder_missing
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_in_progress
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_loading
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_manage
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_notification_body
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_orphans
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_partial
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_pause_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_play_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_resume_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_retry_all
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_root_missing
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_select
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_select_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_select_played
@@ -117,7 +106,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_share
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_speed
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_storage
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_storage_low
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_unknown
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_working
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
@@ -126,7 +114,6 @@ import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.download.api.DownloadEntry
 import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.DownloadStatus
-import ch.lkmc.neutrodyne.download.api.DownloadsOverview
 import ch.lkmc.neutrodyne.download.api.LiveProgress
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.jetbrains.compose.resources.stringResource
@@ -154,6 +141,7 @@ internal fun DownloadsScreen(
     onSettings: () -> Unit,
     onReload: () -> Unit,
     onNotice: (DownloadNotice) -> Unit,
+    onReveal: ((Long) -> Unit)? = null,
 ) {
     val list = rememberLazyListState()
     val rows = state.overview
@@ -224,42 +212,9 @@ internal fun DownloadsScreen(
                 }
                 return@LazyColumn
             }
-            manualDownloadNotices(rows.notices).forEach { notice ->
-                item("notice:$notice") {
-                    val action =
-                        when (notice) {
-                            DownloadNotice.ROOT_UNAVAILABLE -> {
-                                null
-                            }
-
-                            DownloadNotice.NOTIFICATIONS_OFF -> {
-                                Res.string.downloads_allow
-                            }
-
-                            DownloadNotice.STORAGE_LOW -> {
-                                if (LocalPlatformKind.current ==
-                                    PlatformKind.DESKTOP
-                                ) {
-                                    Res.string.downloads_folder
-                                } else {
-                                    Res.string.downloads_manage
-                                }
-                            }
-
-                            DownloadNotice.ORPHAN_FILES -> {
-                                Res.string.action_delete_download
-                            }
-
-                            else -> {
-                                Res.string.downloads_settings
-                            }
-                        }
-                    NdBanner(
-                        downloadNoticeText(notice, rows).asString(),
-                        primary =
-                            action?.let { NdDialogAction(stringResource(it)) { onNotice(notice) } },
-                    )
-                }
+            item("notices") {
+                ch.lkmc.neutrodyne.core.ui
+                    .DownloadNotices(rows, LocalPlatformKind.current, onNotice)
             }
             if (rows.inProgress.isEmpty() && rows.failed.isEmpty() && rows.completed.isEmpty()) {
                 item("empty") {
@@ -375,6 +330,7 @@ internal fun DownloadsScreen(
                         onPlay,
                         onShare,
                         onSelect,
+                        onReveal = onReveal,
                         selectionMode =
                             if (state.selected.isEmpty()) {
                                 DownloadSelectionMode.BROWSE
@@ -413,6 +369,7 @@ private fun DownloadEntryRow(
     onPlay: (Long?) -> Unit,
     onShare: ((Long, String) -> Unit)?,
     onSelect: (Long) -> Unit,
+    onReveal: ((Long) -> Unit)? = null,
     selectionMode: DownloadSelectionMode = DownloadSelectionMode.BROWSE,
 ) {
     val status =
@@ -435,8 +392,8 @@ private fun DownloadEntryRow(
         actions += stringResource(Res.string.action_play) to { onPlay(id) }
         actions += stringResource(Res.string.action_delete_download) to { onDelete(id) }
         actions += stringResource(Res.string.downloads_select) to { onSelect(id) }
-        if (LocalPlatformKind.current == PlatformKind.DESKTOP) {
-            actions += stringResource(Res.string.downloads_folder) to { onCommand(id, DownloadCommand.STORAGE) }
+        if (onReveal != null) {
+            actions += stringResource(Res.string.download_show_folder) to { onReveal(id) }
         }
         if (onShare != null) {
             actions += stringResource(Res.string.downloads_share) to {
@@ -686,56 +643,5 @@ private fun downloadEntryText(
         platform,
     ) ?: UiText.Res(Res.string.downloads_working)
 }
-
-@Composable
-private fun downloadNoticeText(
-    notice: DownloadNotice,
-    overview: DownloadsOverview,
-): UiText =
-    when (notice) {
-        DownloadNotice.DATA_SAVER -> {
-            UiText.Res(Res.string.downloads_data_saver)
-        }
-
-        DownloadNotice.BACKGROUND_RESTRICTED -> {
-            UiText.Res(Res.string.downloads_background)
-        }
-
-        DownloadNotice.NOTIFICATIONS_OFF -> {
-            UiText.Res(Res.string.downloads_notification_body)
-        }
-
-        DownloadNotice.STORAGE_LOW -> {
-            UiText.Res(
-                Res.string.downloads_storage_low,
-                listOf(overview.inProgress.count { it.status.waitReason == WaitReason.STORAGE }),
-            )
-        }
-
-        DownloadNotice.ROOT_UNAVAILABLE -> {
-            UiText.Res(
-                if (LocalPlatformKind.current ==
-                    PlatformKind.ANDROID
-                ) {
-                    Res.string.downloads_root_missing
-                } else {
-                    Res.string.downloads_folder_missing
-                },
-            )
-        }
-
-        DownloadNotice.ORPHAN_FILES -> {
-            UiText.Res(
-                Res.string.downloads_orphans,
-                listOf(
-                    downloadSize(overview.storage.orphanBytes),
-                ),
-            )
-        }
-
-        else -> {
-            UiText.Res(Res.string.downloads_working)
-        }
-    }
 
 private enum class DownloadSelectionMode { BROWSE, SELECT }

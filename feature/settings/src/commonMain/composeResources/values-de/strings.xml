@@ -88,6 +88,7 @@
 
     <string name="settings_desktop">Desktop</string>
     <string name="desktop_section_window">Fenster</string>
+    <string name="desktop_section_downloads">Downloads</string>
     <string name="desktop_close_title">Beim Schließen des Fensters</string>
     <string name="desktop_close_quit">Beenden, wenn nichts wiedergegeben oder heruntergeladen wird</string>
     <string name="desktop_close_quit_summary">Neutrodyne läuft im Tray weiter, solange es wiedergibt oder herunterlädt, und beendet sich dann</string>
