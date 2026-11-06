@@ -179,6 +179,39 @@ class LinuxMprisSessionTest {
         }
     }
 
+    @Test(timeout = TEST_TIMEOUT_MS)
+    fun aDroppedSeekBroadcastsNoSeekedAndADispatchedOneDoes() {
+        val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")
+        assumeTrue("private session bus required", address?.startsWith("unix:") == true)
+
+        LinuxMprisSession.open(address).use { session ->
+            DBusConnectionBuilder.forAddress(address).build().use { client ->
+                // The export scan registered MprisPlayer.Seeked for this member, so the
+                // signal deserializes to that class — subscribe to it, not a test twin.
+                val seeked = ConcurrentLinkedQueue<MprisPlayer.Seeked>()
+                client.addSigHandler(MprisPlayer.Seeked::class.java, DBusSigHandler { seeked += it })
+                // The AddMatch rule must reach the bus before the first signal is due.
+                Thread.sleep(MATCH_RULE_SETTLE_MS)
+
+                // Nothing is playing: the seek is dropped, so nothing may signal.
+                client.player().Seek(SEEK_US)
+                Thread.sleep(UNCHANGED_WAIT_MS)
+                assertTrue("a dropped seek broadcast Seeked", seeked.isEmpty())
+
+                // A stale track id or a negative position drops SetPosition the same way.
+                session.publish(testNowPlaying(), SKIP_MS, SKIP_MS, SPEED_PRESETS)
+                session.SetPosition(DBusPath("/not/the/current/track"), 1_000_000)
+                session.SetPosition(currentTrack(), -1)
+                Thread.sleep(UNCHANGED_WAIT_MS)
+                assertTrue("a dropped SetPosition broadcast Seeked", seeked.isEmpty())
+
+                // A seek that reaches the command stream does signal Seeked.
+                client.player().Seek(SEEK_US)
+                await("Seeked") { seeked.isNotEmpty() }
+            }
+        }
+    }
+
     @Test
     fun wrongTrackCannotSeekTheCurrentEpisode() =
         runBlocking {
@@ -218,6 +251,9 @@ class LinuxMprisSessionTest {
                 }
         }
     }
+
+    private fun currentTrack(): DBusPath =
+        DBusPath("/ch/lkmc/neutrodyne/episode/${testNowPlaying().episodeId}")
 
     private fun DBusConnection.properties(): Properties =
         getRemoteObject(MprisNames.BUS, MprisNames.PATH, Properties::class.java)
