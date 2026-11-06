@@ -235,6 +235,34 @@ class DesktopAppGraphTest {
         assertThat(graph.initializers.filterIsInstance<DatabaseOpenInitializer>()).hasSize(1)
     }
 
+    /**
+     * MD2's OS integration: the per-OS media session resolves — a real one where the OS
+     * offers it (Linux CI's private bus exports MPRIS) or the documented unavailable session
+     * with its reason — the idle-sleep inhibitor resolves per OS, and the surfaces wiring
+     * starts at band 250 between the runner and playback's restore.
+     */
+    @Test
+    fun theOsSurfacesResolveWithTheirInitializerBetweenRunnerAndPlayback() {
+        val session = graph.systemMediaSession
+        val kind = session::class.simpleName
+        assertThat(
+            kind,
+        ).isAnyOf("LinuxMprisSession", "MacNowPlayingSession", "WindowsSmtcSession", "UnavailableSystemMediaSession")
+        if (session is ch.lkmc.neutrodyne.desktop.system.UnavailableSystemMediaSession) {
+            assertThat(session.reason).isNotEmpty()
+        }
+        assertThat(
+            graph.idleSleepInhibitor::class.simpleName,
+        ).isAnyOf("LinuxIdleSleepInhibitor", "PendingIdleSleepInhibitor")
+        assertThat(graph.osSurfaces).isSameInstanceAs(graph.osSurfaces)
+
+        val orders =
+            graph.initializers.associate { (it::class.simpleName ?: it::class.toString()) to it.order }
+        assertThat(orders.getValue("DesktopOsSurfacesInitializer")).isEqualTo(250)
+        assertThat(orders.getValue("DesktopOsSurfacesInitializer"))
+            .isLessThan(orders.getValue("DesktopPlaybackInitializer"))
+    }
+
     /** The same keys as `app/src/test/.../AndroidAppGraphTest` (01 Graph tests rule 11). */
     @Test
     fun everyM0bKeyHasAnEntry() {

@@ -9,8 +9,6 @@ import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
-import ch.lkmc.neutrodyne.core.common.PowerEvent
-import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
 import ch.lkmc.neutrodyne.core.database.DesktopDatabaseFactory
@@ -34,8 +32,6 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
 
 /**
  * Platform basics of the desktop process (01 Components and scopes, the `DesktopCoreBindings`
@@ -115,15 +111,6 @@ object DesktopCoreBindings {
     @StrictMigrations
     fun strictMigrations(buildInfo: BuildInfo): Boolean = buildInfo.debug
 
-    /**
-     * Interim: no suspend/resume notices exist until `:desktop:system`'s `OsPowerMonitor` (MD2)
-     * contributes itself to [AppScope]; `DesktopNetworkMonitor` needs a monitor now. MD2's
-     * contribution makes this duplicate and Metro fails the build — delete this then.
-     */
-    @Provides
-    @SingleIn(AppScope::class)
-    fun powerMonitor(): PowerMonitor = NoEventsPowerMonitor
-
     /** The subscribe transaction's and group reorder's fractional-index port (10 Ordered lists). */
     @Provides
     fun orderKeys(): OrderKeys =
@@ -141,8 +128,4 @@ object DesktopCoreBindings {
     /** The desktop has no notification channels (05 Notification channels); this stays the binding. */
     @Provides
     fun groupChannelSync(): GroupChannelSync = NoGroupChannels
-}
-
-private object NoEventsPowerMonitor : PowerMonitor {
-    override val events: Flow<PowerEvent> = flowOf()
 }

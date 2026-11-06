@@ -219,6 +219,9 @@ internal object DesktopShell {
         val handshakeScope = CoroutineScope(SupervisorJob() + handshakeDispatcher)
         val handshake = InstanceHandshake(dirs, SecureRandom(), buildInfo.versionName)
         val activator = WindowActivator()
+        // The OS surfaces' hooks (11 Linux MPRIS): Raise shows the window like a hand-off;
+        // Quit is bound inside `application` below, where the clean exit path exists.
+        graph.shellActions.raise = activator::bringToFront
         val serveJob =
             handshakeScope.launch {
                 handshake.serve { request -> onHandoff(request, activator, openHandler) }
@@ -235,6 +238,11 @@ internal object DesktopShell {
                 lock = lock,
                 fileSink = fileSink,
                 stopServices = {
+                    // The OS surfaces go down first: no more remote commands or wake
+                    // notices, and the idle-sleep inhibition is released before playback
+                    // flushes its last position.
+                    runCatching { graph.osSurfaces.close() }
+                        .onFailure { Log.w(TAG, it) { "OS surfaces close failed" } }
                     runCatching { runBlocking { graph.desktopPlaybackController.shutdown() } }
                         .onFailure { Log.w(TAG, it) { "playback shutdown failed" } }
                     stopServices(
@@ -273,6 +281,9 @@ internal object DesktopShell {
                 downloads = { graph.downloadController() },
             )
         application {
+            // MPRIS Quit reaches the same clean-exit path as the tray's Quit item; Compose
+            // ends the application on the event thread.
+            graph.shellActions.quit = { java.awt.EventQueue.invokeLater { exitApplication() } }
             NeutrodyneWindow(
                 installers = graph.entryInstallers,
                 failedDownloads =

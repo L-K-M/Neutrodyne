@@ -8,27 +8,29 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import org.freedesktop.dbus.DBusPath
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
+import org.freedesktop.dbus.errors.NotSupported
+import org.freedesktop.dbus.interfaces.Properties
 import org.freedesktop.dbus.types.Variant
 
 /**
- * The MD0 MPRIS prototype (11 Media session integration, AC4): exports
- * `org.mpris.MediaPlayer2.neutrodyne` at `/org/mpris/MediaPlayer2` through
- * dbus-java so Linux media keys and shell applets reach the engine as
- * [RemoteCommand]s.
+ * The Linux [SystemMediaSession] (11 Linux MPRIS): exports
+ * `org.mpris.MediaPlayer2.neutrodyne` at `/org/mpris/MediaPlayer2` through dbus-java so
+ * media keys and shell applets reach the shared controller as [RemoteCommand]s.
  *
  * dbus-java dispatches `org.freedesktop.DBus.Properties` Get/Set/GetAll to the
- * `@DBusBoundProperty` methods on [MprisRoot]/[MprisPlayer]; the state they
- * read is volatile because property queries run on the bus worker thread
- * while [publish] runs on the app's thread. Commands are posted to a buffered
- * flow — never executed on the bus thread (11: command handling belongs to
- * the playback thread).
+ * `@DBusBoundProperty` methods on [MprisRoot]/[MprisPlayer]; the state they read is volatile
+ * because property queries run on the bus worker thread while [publish] runs on the app's
+ * thread. Commands are posted to a buffered flow — never executed on the bus thread (11:
+ * command handling belongs to the playback thread). `PropertiesChanged` is signalled for the
+ * properties that actually changed between publishes; the spec never signals `Position`.
  *
- * Spike scope: Raise/Quit/OpenUri/Fullscreen are no-ops (there is no window
- * or app lifecycle yet) and `Stop` maps to [RemoteCommand.Pause]; position
- * answers the last published value without interpolation.
+ * [shell] receives `Raise()`/`Quit()` on the bus thread; the wiring hops to the application
+ * scope before touching the window or the shutdown path. `OpenUri` answers
+ * `org.freedesktop.DBus.Error.NotSupported` (11 Remote commands' table).
  */
 class LinuxMprisSession private constructor(
     private val connection: DBusConnection,
+    private val shell: MprisShellActions,
 ) : SystemMediaSession,
     MprisRoot,
     MprisPlayer {
@@ -42,7 +44,8 @@ class LinuxMprisSession private constructor(
     /** The path [open] exports this object under. */
     override fun getObjectPath() = MprisNames.PATH
 
-    @Volatile private var current: NowPlaying? = null
+    // Written by publish on the app side, read by D-Bus method threads.
+    @Volatile private var published: NowPlaying? = null
 
     @Volatile private var rate = 1.0
 
@@ -60,10 +63,28 @@ class LinuxMprisSession private constructor(
         skipForwardMs: Long,
         speedPresets: List<Float>,
     ) {
-        current = nowPlaying
-        rate = (nowPlaying?.position?.speed ?: 1f).toDouble()
+        val changed = mutableMapOf<String, Variant<*>>()
+        val metadata = metadataOf(nowPlaying)
+        if (metadata != metadataOf(published)) {
+            // Maps need the explicit a{sv} signature: dbus-java cannot infer element types
+            // from a Variant's runtime value (the artist array's "as" is the same rule).
+            changed["Metadata"] = Variant(metadata, METADATA_SIGNATURE)
+        }
+        val status = playbackStatus(nowPlaying)
+        if (status != playbackStatus(published)) changed["PlaybackStatus"] = Variant(status)
+
+        // The advertised Rate window is the contract; a non-finite or out-of-range speed is
+        // clamped onto it (the MD0 review's unclamped-publish finding).
+        val nextRate = rateOf(nowPlaying).coerceIn(MIN_RATE, MAX_RATE)
+        if (nextRate != rate) {
+            rate = nextRate
+            changed["Rate"] = Variant(rate)
+        }
+
+        published = nowPlaying
         positionMs = nowPlaying?.position?.positionMs ?: 0
         durationMs = nowPlaying?.position?.durationMs
+        if (changed.isNotEmpty()) propertiesChanged(changed)
     }
 
     override fun close() {
@@ -72,13 +93,14 @@ class LinuxMprisSession private constructor(
         runCatching { connection.unExportObject(MprisNames.PATH) }
         runCatching { connection.releaseBusName(MprisNames.BUS) }
         connection.close()
+        commandChannel.close()
     }
 
     // -- org.mpris.MediaPlayer2 ------------------------------------------------
 
-    override fun Raise() = Unit
+    override fun Raise() = shell.raise()
 
-    override fun Quit() = Unit
+    override fun Quit() = shell.quit()
 
     override fun isFullscreen() = false
 
@@ -86,9 +108,9 @@ class LinuxMprisSession private constructor(
 
     override fun getCanSetFullscreen() = false
 
-    override fun getCanRaise() = false
+    override fun getCanRaise() = true
 
-    override fun getCanQuit() = false
+    override fun getCanQuit() = true
 
     override fun getHasTrackList() = false
 
@@ -96,9 +118,9 @@ class LinuxMprisSession private constructor(
 
     override fun getDesktopEntry() = DESKTOP_ENTRY
 
-    override fun getSupportedUriSchemes() = URI_SCHEMES
+    override fun getSupportedUriSchemes() = emptyList<String>()
 
-    override fun getSupportedMimeTypes() = MIME_TYPES
+    override fun getSupportedMimeTypes() = emptyList<String>()
 
     // -- org.mpris.MediaPlayer2.Player ------------------------------------------
 
@@ -110,13 +132,13 @@ class LinuxMprisSession private constructor(
 
     override fun PlayPause() = emit(RemoteCommand.Toggle)
 
-    // MPRIS Stop is not in RemoteCommand; pausing is the closest match.
+    // MPRIS Stop is not in RemoteCommand; pausing keeps the session, like Android (11).
     override fun Stop() = emit(RemoteCommand.Pause)
 
     override fun Play() = emit(RemoteCommand.Play)
 
     override fun Seek(offset: Long) {
-        val target = positionMs + offset / US_PER_MS
+        val target = (positionMs + offset / US_PER_MS).coerceAtLeast(0)
         emit(RemoteCommand.SeekTo(target))
         emitSeeked(target)
     }
@@ -125,22 +147,19 @@ class LinuxMprisSession private constructor(
         trackId: DBusPath,
         position: Long,
     ) {
-        val item = current ?: return
+        val item = published ?: return
         if (trackId.path != "$TRACK_PATH/${item.episodeId}" || position < 0) return
         val target = position / US_PER_MS
         emit(RemoteCommand.SeekTo(target))
         emitSeeked(target)
     }
 
-    // The spike cannot hand a URI to the engine; MD1 decides policy.
-    override fun OpenUri(uri: String) = Unit
+    override fun OpenUri(uri: String) {
+        // The player takes items only through its own queue, never a URI from the bus.
+        throw NotSupported("Neutrodyne does not open URIs from MPRIS")
+    }
 
-    override fun getPlaybackStatus() =
-        when {
-            current == null -> "Stopped"
-            current?.isPlaying == true -> "Playing"
-            else -> "Paused"
-        }
+    override fun getPlaybackStatus() = playbackStatus(published)
 
     override fun getLoopStatus() = "None"
 
@@ -150,6 +169,7 @@ class LinuxMprisSession private constructor(
         require(rate.isFinite()) { "playback rate must be finite" }
         val clamped = rate.coerceIn(MIN_RATE, MAX_RATE)
         this.rate = clamped
+        propertiesChanged(mapOf("Rate" to Variant(clamped)))
         emit(RemoteCommand.SetRate(clamped.toFloat()))
     }
 
@@ -157,19 +177,7 @@ class LinuxMprisSession private constructor(
 
     override fun setShuffle(shuffle: Boolean) = Unit
 
-    override fun getMetadata(): Map<String, Variant<*>> {
-        val item = current ?: return emptyMap()
-        return buildMap {
-            put("mpris:trackid", Variant(DBusPath("$TRACK_PATH/${item.episodeId}")))
-            put("xesam:title", Variant(item.title))
-            // Collections inside a Variant need the explicit signature; the
-            // marshaller cannot infer the element type of listOf(x).
-            put("xesam:artist", Variant(listOf(item.podcastTitle), "as"))
-            put("xesam:album", Variant(item.podcastTitle))
-            item.artwork.url?.let { put("mpris:artUrl", Variant(it)) }
-            durationMs?.let { put("mpris:length", Variant(it * US_PER_MS)) }
-        }
-    }
+    override fun getMetadata(): Map<String, Variant<*>> = metadataOf(published)
 
     override fun getVolume() = volume
 
@@ -183,17 +191,47 @@ class LinuxMprisSession private constructor(
 
     override fun getMaximumRate() = MAX_RATE
 
-    override fun getCanGoNext() = current?.hasNext == true
+    override fun getCanGoNext() = published?.hasNext == true
 
-    override fun getCanGoPrevious() = false
+    override fun getCanGoPrevious() = true
 
-    override fun getCanPlay() = current != null
+    override fun getCanPlay() = true
 
-    override fun getCanPause() = current != null
+    override fun getCanPause() = true
 
     override fun getCanSeek() = durationMs != null
 
     override fun getCanControl() = true
+
+    private fun playbackStatus(item: NowPlaying?): String =
+        when {
+            item == null -> "Stopped"
+            item.isPlaying -> "Playing"
+            else -> "Paused"
+        }
+
+    private fun metadataOf(item: NowPlaying?): Map<String, Variant<*>> =
+        if (item == null) {
+            emptyMap()
+        } else {
+            buildMap {
+                put("mpris:trackid", Variant(DBusPath("$TRACK_PATH/${item.episodeId}")))
+                put("xesam:title", Variant(item.title))
+                // Collections inside a Variant need the explicit signature; the
+                // marshaller cannot infer the element type of listOf(x).
+                put("xesam:artist", Variant(listOf(item.podcastTitle), "as"))
+                put("xesam:album", Variant(item.podcastTitle))
+                item.artwork.url?.let { put("mpris:artUrl", Variant(it)) }
+                lengthOf(item)?.let { put("mpris:length", Variant(it * US_PER_MS)) }
+            }
+        }
+
+    private fun lengthOf(item: NowPlaying?): Long? = item?.position?.durationMs
+
+    private fun rateOf(item: NowPlaying?): Double {
+        val speed = item?.position?.speed ?: return DEFAULT_RATE
+        return if (speed.isFinite()) speed.toDouble() else DEFAULT_RATE
+    }
 
     private fun emit(command: RemoteCommand) {
         commandChannel.trySend(command)
@@ -203,41 +241,42 @@ class LinuxMprisSession private constructor(
         runCatching { connection.sendMessage(SeekedSignal(MprisNames.PATH, positionMs * US_PER_MS)) }
     }
 
+    private fun propertiesChanged(changed: Map<String, Variant<*>>) {
+        runCatching {
+            connection.sendMessage(
+                Properties.PropertiesChanged(MprisNames.PATH, MprisNames.PLAYER, changed, emptyList()),
+            )
+        }
+    }
+
     companion object {
         private const val US_PER_MS = 1_000L
         private const val MIN_RATE = 0.5
         private const val MAX_RATE = 3.0
+        private const val DEFAULT_RATE = 1.0
         private const val COMMAND_BUFFER = 64
         private const val TRACK_PATH = "/ch/lkmc/neutrodyne/episode"
-        private const val DESKTOP_ENTRY = "neutrodyne"
-        private val URI_SCHEMES = listOf("file", "http", "https")
-        private val MIME_TYPES =
-            listOf(
-                "audio/mpeg",
-                "audio/mp4",
-                "audio/aac",
-                "audio/ogg",
-                "audio/vorbis",
-                "audio/opus",
-                "audio/flac",
-                "audio/x-wav",
-                "audio/webm",
-                "video/webm",
-            )
+        private const val METADATA_SIGNATURE = "a{sv}"
+
+        /** The desktop-entry id 11's table pins; the entry file carries `.desktop`. */
+        private const val DESKTOP_ENTRY = "ch.lkmc.neutrodyne"
 
         /**
          * Exports the session on the session bus, or on the bus at
-         * [busAddress] (the private-bus test passes `dbus-daemon
-         * --print-address` output here).
+         * [busAddress] (the private-bus test passes `dbus-run-session`
+         * output here). [shell] receives `Raise`/`Quit` on the bus thread.
          */
-        fun open(busAddress: String? = null): LinuxMprisSession {
+        fun open(
+            busAddress: String? = null,
+            shell: MprisShellActions = MprisShellActions.NONE,
+        ): LinuxMprisSession {
             val connection =
                 when (busAddress) {
                     null -> DBusConnectionBuilder.forSessionBus().build()
                     else -> DBusConnectionBuilder.forAddress(busAddress).build()
                 }
             return try {
-                val session = LinuxMprisSession(connection)
+                val session = LinuxMprisSession(connection, shell)
                 connection.exportObject(MprisNames.PATH, session)
                 connection.requestBusName(MprisNames.BUS)
                 session
@@ -246,5 +285,21 @@ class LinuxMprisSession private constructor(
                 throw e
             }
         }
+    }
+}
+
+/** `Raise()`/`Quit()` from the bus thread; implementations hop to their own thread. */
+interface MprisShellActions {
+    fun raise()
+
+    fun quit()
+
+    companion object {
+        val NONE =
+            object : MprisShellActions {
+                override fun raise() = Unit
+
+                override fun quit() = Unit
+            }
     }
 }
