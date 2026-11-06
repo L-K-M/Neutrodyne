@@ -17,6 +17,26 @@ grep -Eq '^OK \(1 test\)' "$output/seed.txt"
 adb shell bmgr enable true
 adb shell bmgr transport com.android.localtransport/.LocalTransport | tee "$output/transport.txt"
 grep -q 'Selected transport' "$output/transport.txt"
+# LocalTransport registers asynchronously; a backupnow before the registration
+# completes is rejected with "Transport rejected package because it wasn't able
+# to process it at the time" (nightly 2026-11-06, api29). bmgr-check.sh waits
+# for the same observable before its init; do the same here.
+transport_wait=60
+deadline=$((SECONDS + transport_wait))
+registered=""
+while [ "$SECONDS" -lt "$deadline" ]; do
+  if adb shell bmgr list transports | tr -d '\r' \
+      | grep -Eq '^[[:space:]*]*com\.android\.localtransport/\.LocalTransport$'; then
+    registered=1; break
+  fi
+  sleep 2
+done
+test -n "$registered" || { echo "::error::local transport did not register within ${transport_wait}s"; exit 1; }
+selected="$(adb shell bmgr list transports | tr -d '\r' | sed -n 's/^ *\* //p' | head -1)"
+test "$selected" = "com.android.localtransport/.LocalTransport" || {
+  echo "::error::local transport is not the selected transport: $selected"
+  exit 1
+}
 adb shell settings put secure backup_local_transport_parameters 'is_encrypted=true,fake_encryption_flag=true'
 # Pending is bounded and never treated as a completed snapshot.
 for attempt in 1 2 3 4 5; do
