@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.desktop
 
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
@@ -442,6 +443,41 @@ class DesktopNativePlaybackTest {
                     directory.toFile().deleteRecursively()
                 }
             }
+        }
+
+    /**
+     * Download-time extraction (06 Chapters, 11 Chapters and metadata): the desktop reader opens
+     * the local container with the same FFmpeg build the engine loads and yields the chapters that
+     * `ChapterRepository.ensureLocalLoaded` writes before playback.
+     */
+    @Test
+    fun desktopChapterExtractorReadsContainerChaptersFromDownloadedFiles() =
+        runBlocking {
+            val root = Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")))
+            val target = requireNotNull(System.getProperty("neutrodyne.nativeTarget"))
+            val ffmpeg = root.resolve("playback/native/build/ffmpeg/$target")
+            val corpus = root.resolve("playback/engine/src/test/resources/media")
+            val extractor = DesktopChapterExtractor(ffmpeg, Dispatchers.IO)
+            val fixtures =
+                listOf(
+                    ChapterFixture("id3chap_3s.mp3", ChapterSource.ID3, listOf("Intro", "Middle", "Outro")),
+                    ChapterFixture("m4a_chapters_3s.m4a", ChapterSource.MP4, listOf("First", "Second", "Third")),
+                )
+            for (fixture in fixtures) {
+                val directory = Files.createTempDirectory("md1b-extractor")
+                val file = directory.resolve(fixture.name)
+                Files.copy(corpus.resolve(fixture.name), file)
+                val result = extractor.read(file.toUri().toString())
+                assertTrue(result is EmbeddedChapterResult.Read, "$fixture.name: $result")
+                val chapters = result.chapters
+                assertEquals(fixture.titles, chapters.map { it.title })
+                assertTrue(chapters.all { it.source == fixture.source })
+                assertEquals(listOf(0L, 1_000L, 2_000L), chapters.map { it.startMs })
+                directory.toFile().deleteRecursively()
+            }
+            val missing = extractor.read(Path.of("/nonexistent", "episode.mp3").toUri().toString())
+            assertEquals(EmbeddedChapterResult.MissingFile, missing)
+            assertEquals(EmbeddedChapterResult.Unavailable, extractor.read("https://media.example/episode.mp3"))
         }
 
     private class FakeRouteMonitor : AudioRouteMonitor {
