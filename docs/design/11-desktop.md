@@ -916,6 +916,23 @@ item in place through `PlaySessionStore.markBoundaryPlayed`. The earlier
 "Off/null until MD1b" statement is superseded; download-time chapter
 extraction (`DesktopChapterExtractor`) remains M6.
 
+**MD1b implementation note (2026-11-06).** Download-time chapter extraction
+is implemented: `DesktopChapterExtractor` (`:playback:desktop`) opens the
+local file with the same `FfmpegPipeline`/FFmpeg build the engine loads and
+returns the container's ID3/MP4 chapters, and the desktop graph binds it as
+the `EmbeddedChapterReader` behind `ChapterRepository.ensureLocalLoaded`, so
+a downloaded episode's chapters are stored before playback. The earlier
+"remains M6" statement is superseded.
+
+The same slice closes the completed-boundary replay of 06's M5 note: the
+end-of-episode timer's item stays current (the controller passes a `frozen`
+check to `QueueWindowPlanner`, the seam Android's `QueueProjector` already
+uses, so the planner's "current marked played" advance/end rule does not
+retire it), and a user seek or Play arms a replay — a fresh `since` lets its
+saves through the played-after-start guard again, and the first actual
+playback clears the played mark. `replayFromStart` re-prepares the item at 0
+because the mark-played chain reset its position.
+
 ### Engine thread and commands
 
 `FfAudioEngine` owns one platform thread, `nd-engine`, and a second, `nd-prepare`, that opens the next item's source, demuxer and decoder so a slow network open never stalls output. Commands from `nd-playback` go into a lock-free queue; the engine thread drains it between blocks. Because `nd-engine` may sit in a blocking AVIO read (up to the 30-s source wait) while the ring plays out, play and pause act on the device outside the queue through a **desired-state register** (2026-10-05): `nd-playback` writes an atomic `wantPlaying` with a generation number for both commands and then calls `nd_out_start` or `nd_out_stop` itself (miniaudio allows starting and stopping a device from any thread except its data callback, [miniaudio](https://github.com/mackron/miniaudio)), so the user hears play and pause at once — play starts the ring's buffered audio even while a read blocks — and the read simply continues; after every drain and before every `nd_out_start` it might make (a transition, a device re-open), the engine re-applies `wantPlaying` idempotently, so an older queued command can never restart a device the user has paused since (the earlier queued `play` with a no-op `pause` could: Play then Pause during a 30-s read left audio playing while the UI said paused); `seekTo` and `setWindow` raise the pipeline's interrupt flag and call `ByteSource.abort()`, so the blocked read returns `AVERROR_EXIT` within one 1-s wait slice and the engine reopens at the new position.
@@ -1573,6 +1590,15 @@ Following FFmpeg's compliance checklist ([FFmpeg legal](https://ffmpeg.org/legal
 4. Notices: the release body and README carry "This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be downloaded here" with the link to that asset; the Licences screen names FFmpeg with its licence text.
 5. Our licence terms permit modification and reverse engineering (LGPL-2.1 §6); the Unlicense does.
 6. AAC and HE-AAC are decoded by our FFmpeg build on every OS (patent note in `THIRD_PARTY_NOTICES.md`, risk [L7](../PLAN.md#8-risks-and-mitigations)).
+
+**Implementation note (2026-11-06).** `release.yml`'s `sources` job
+assembles the bundle with `:playback:native:assembleFfmpegSource` after
+`checkNativeLicences`, and `publish` attaches it. `verify-tag.sh` expands the
+`{ffmpeg}` name from `native-components.lock`, and
+`scripts/ci/tests/release-ffmpeg-source.test.py` proves the asset group, the
+workflow wiring and the expansion without a real tag. The desktop Licences
+screen carries FFmpeg's own `COPYING.LGPLv2.1` (a separate entry from JNA's
+variant) and miniaudio's MIT-0 text.
 
 ### Image scan rules
 
