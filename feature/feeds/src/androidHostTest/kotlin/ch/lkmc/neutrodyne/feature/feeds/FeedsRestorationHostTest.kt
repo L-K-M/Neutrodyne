@@ -78,7 +78,7 @@ class FeedsRestorationHostTest {
                 }
             }
         }
-        val list = compose.onNode(hasTestTag("feed-list") and hasAnyAncestor(hasTestTag("feed-page:${ref.encode()}")))
+        val list = compose.onNode(hasTestTag("feed_list") and hasAnyAncestor(hasTestTag("feed-page:${ref.encode()}")))
         list.performScrollToIndex(35)
         val before = list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
         assertTrue(before > 0)
