@@ -42,6 +42,15 @@ internal object WindowIcons {
     fun trayIconPainter(): Painter? =
         painter(if (AppDirs.DesktopOs.current() == AppDirs.DesktopOs.MACOS) TRAY_TEMPLATE else trayIconName())
 
+    /**
+     * The tray icon as an AWT image — the Windows notification channel's fallback icon
+     * (11 Notifications) picks the same PNG the window tray uses.
+     */
+    fun trayImage(): java.awt.Image? =
+        locate(trayIconName())
+            ?.takeIf(File::isFile)
+            ?.let { file -> Toolkit.getDefaultToolkit().createImage(file.readBytes()) }
+
     /** The primary screen once per start; null under headless AWT (smoke without a display). */
     fun primaryScreen(): Screen? =
         runCatching {

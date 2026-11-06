@@ -91,4 +91,46 @@ object LinuxDesktopEntryWriter {
                 if (c == '\\') append("\\\\") else append(c)
             }
         }
+
+    /**
+     * The per-user applications-menu entry of [Links and files from the
+     * OS](#links-and-files-from-the-os) (11): Name, GenericName, Comment, Categories,
+     * MimeType and StartupWMClass match the DEB/RPM package template verbatim; Exec and
+     * TryExec carry this extraction's launcher, Icon the absolute path of the per-user
+     * icon the installer copied. Re-running after the archive moved rewrites the same
+     * values — stale paths are refreshed, never duplicated.
+     */
+    fun menuEntry(
+        launcher: String,
+        iconPath: String,
+    ): String =
+        buildString {
+            appendLine("[Desktop Entry]")
+            appendLine("Type=Application")
+            appendLine("Name=Neutrodyne")
+            appendLine("GenericName=Podcast player")
+            appendLine("Comment=Podcasts organised in groups")
+            appendLine("Exec=${execValue(launcher, listOf(ARGS_FIELD))}")
+            appendLine("TryExec=${tryExecValue(launcher)}")
+            appendLine("Icon=${stringEscape(iconPath)}")
+            appendLine("Terminal=false")
+            appendLine("Categories=AudioVideo;Audio;Player;")
+            appendLine("MimeType=$MIME_TYPES")
+            appendLine("StartupWMClass=$STARTUP_WM_CLASS")
+        }
+
+    /** The package template's `MimeType` list, frozen with the entry name (D61). */
+    const val MIME_TYPES =
+        "text/x-opml;x-scheme-handler/neutrodyne;x-scheme-handler/feed;" +
+            "x-scheme-handler/podcast;x-scheme-handler/pcast;x-scheme-handler/itpc;"
+
+    /** AWT's default WM_CLASS, derived from the main class (11; Unverified exact string, S13). */
+    const val STARTUP_WM_CLASS = "ch-lkmc-neutrodyne-desktop-MainKt"
+
+    /** The frozen entry id and file name (D61). */
+    const val ENTRY_ID = "ch.lkmc.neutrodyne"
+
+    const val ENTRY_FILE_NAME = "$ENTRY_ID.desktop"
+
+    private const val ARGS_FIELD = "%U"
 }

@@ -136,6 +136,8 @@ internal fun ApplicationScope.NeutrodyneWindow(
     busySignal: AppBusySignal,
     clock: Clock,
     onQuitRequest: () -> Unit,
+    onWindowFocusGain: () -> Unit = {},
+    portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
@@ -245,7 +247,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
             window.background = java.awt.Color(argb, true)
             onDispose { }
         }
-        WindowEffects(activator = activator, background = background)
+        WindowEffects(activator = activator, background = background, onFocusGain = onWindowFocusGain)
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
@@ -260,6 +262,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 viewModelFactory = viewModelFactory,
                 playbackController = playbackController,
                 playbackState = playbackState,
+                portal = portal,
                 openHandler = openHandler,
                 failedDownloads = failedDownloads,
                 updateChecker = updateChecker,
@@ -423,8 +426,12 @@ private fun windowShortcut(
 private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
     activator: WindowActivator,
     background: Boolean,
+    onFocusGain: () -> Unit,
 ) {
     val density = LocalDensity.current
+    // Referenced inside the effect below: a restarting effect must read the current
+    // callback, not capture the composition-time lambda.
+    val focusGain by androidx.compose.runtime.rememberUpdatedState(onFocusGain)
     DisposableEffect(window, density) {
         window.minimumSize =
             with(density) {
@@ -437,7 +444,18 @@ private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
         // 11's `--background` start: iconified until the user restores it.
         if (background) window.extendedState = window.extendedState or Frame.ICONIFIED
         activator.register(window)
-        onDispose { activator.unregister(window) }
+        // 03's desktop new-episode poster: focus clears the unseen set.
+        val focusListener =
+            object : java.awt.event.WindowFocusListener {
+                override fun windowGainedFocus(event: java.awt.event.WindowEvent) = focusGain()
+
+                override fun windowLostFocus(event: java.awt.event.WindowEvent) = Unit
+            }
+        window.addWindowFocusListener(focusListener)
+        onDispose {
+            window.removeWindowFocusListener(focusListener)
+            activator.unregister(window)
+        }
     }
 }
 
@@ -488,9 +506,10 @@ private fun DesktopApplicationMenu(
  * the data folder (08 Banners and the startup gate). [viewModelFactory] is the graph's
  * `metroViewModel()` seam: every VM-backed entry resolves through it here, exactly where the
  * window, the UI test and smoke mode compose the same tree (01 Feature entry installers).
- * [banners] is the bound `DesktopNotifier` (11's in-app banner fallback until MD2's OS
- * notifier lands): its stream feeds the root snackbar and its taps come back through
- * `userMessageAction`, where the notification's route is applied.
+ * [banners] is the in-app banner fallback of the bound `DesktopNotifier` (11
+ * Notifications: MD2's OS notifier posts here when the OS channel cannot deliver): its
+ * stream feeds the root snackbar and its taps come back through `userMessageAction`,
+ * where the notification's route is applied.
  */
 @Composable
 internal fun NeutrodyneWindowContent(
@@ -504,6 +523,7 @@ internal fun NeutrodyneWindowContent(
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
+    portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
@@ -524,7 +544,7 @@ internal fun NeutrodyneWindowContent(
         }
     }
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
-    val platformActions = rememberDesktopPlatformActions()
+    val platformActions = rememberDesktopPlatformActions(portal)
     val nowPlaying by playbackState.nowPlaying.collectAsState()
     val panelHidden by (
         settings?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)

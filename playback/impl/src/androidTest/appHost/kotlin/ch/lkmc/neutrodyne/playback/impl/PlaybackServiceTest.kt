@@ -14,8 +14,6 @@ import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
@@ -293,15 +291,13 @@ class PlaybackServiceTest {
             }
             try {
                 graph.settingsRepository.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER)
-                val connectivity = app.getSystemService(ConnectivityManager::class.java)
                 phase("metered/await-metered")
+                // Await the precondition through the same NetworkMonitor the metered gate reads:
+                // the API 26 image's synchronous activeNetwork/capabilities read can stay stale
+                // long after the default-network callback delivered the metered cellular caps.
                 await {
-                    connectivity
-                        .getNetworkCapabilities(connectivity.activeNetwork)
-                        ?.let {
-                            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                                !it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-                        } == true
+                    graph.networkMonitor.status.value
+                        .let { it.isConnected && it.isMetered }
                 }
                 val events = CopyOnWriteArrayList<PlaybackEvent>()
                 val collecting =

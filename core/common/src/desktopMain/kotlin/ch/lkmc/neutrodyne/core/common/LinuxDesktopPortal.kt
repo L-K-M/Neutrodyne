@@ -13,10 +13,26 @@ interface LinuxDesktopPortal {
 
     /**
      * Portal `org.freedesktop.portal.FileChooser.OpenFile` with `directory: true`; [title] is the
-     * dialog title, [start] an optional initial directory. `null` = no portal answered.
+     * dialog title, [start] an optional initial directory. The outcome distinguishes the three
+     * cases 11's folder-chooser table needs: a picked folder, the user's dismissal (no dialog
+     * may open afterwards), and no portal answering (the caller falls back to `JFileChooser`).
      */
     suspend fun chooseDirectory(
         title: String,
         start: String?,
-    ): String?
+    ): DirectoryChoice
+}
+
+/** The outcome of [LinuxDesktopPortal.chooseDirectory]. */
+sealed interface DirectoryChoice {
+    /** The user picked [path]. */
+    data class Chosen(
+        val path: String,
+    ) : DirectoryChoice
+
+    /** The portal answered, but the user dismissed the dialog; nothing else may open. */
+    data object Cancelled : DirectoryChoice
+
+    /** No portal answered (no service, no bus, transport error) — callers use their fallback. */
+    data object Unavailable : DirectoryChoice
 }
