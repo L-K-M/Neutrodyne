@@ -1480,6 +1480,9 @@ internal class FeedRefresher(
     suspend fun lastParseWarnings(podcastId: Long): List<ParseWarning> =
         warningsLock.withLock { parseWarnings[podcastId].orEmpty() }
 
+    /** A snapshot of the whole LRU, for the M11b diagnostics PARSE_WARNINGS card. */
+    suspend fun allParseWarnings(): Map<Long, List<ParseWarning>> = warningsLock.withLock { parseWarnings.toMap() }
+
     private suspend fun writeDiagnostics(
         request: RefreshRequest,
         report: RefreshReport,
