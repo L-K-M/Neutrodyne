@@ -16,4 +16,11 @@
     <string name="drop_to_import">Drop to import</string>
     <string name="drop_to_add">Drop to add podcast</string>
     <string name="desktop_cannot_open_file">Neutrodyne can&apos;t open this file</string>
+    <string name="crash_dialog_title">Neutrodyne closed unexpectedly last time</string>
+    <string name="crash_dialog_message">Neutrodyne closed unexpectedly last time. Send a report by email?</string>
+    <string name="crash_dialog_show_report">Show report</string>
+    <string name="crash_dialog_send_email">Send by email</string>
+    <string name="crash_dialog_dont_send">Don&apos;t send</string>
+    <string name="crash_dialog_subject">Neutrodyne crash %1$s</string>
+    <string name="crash_dialog_truncated">[truncated to %1$d characters — attach the full file %2$s]</string>
 </resources>
