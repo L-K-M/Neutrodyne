@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: Unlicense
+import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
 plugins {
     alias(libs.plugins.neutrodyne.kmp.feature)
+    alias(libs.plugins.roborazzi)
 }
 
 kotlin {
+    targets.named("android") {
+        (this as KotlinMultiplatformAndroidLibraryTarget).withHostTest { isIncludeAndroidResources = true }
+    }
+
     sourceSets {
         desktopTest.dependencies {
             implementation(libs.cmp.ui.test)
@@ -21,3 +27,5 @@ kotlin {
         }
     }
 }
+
+roborazzi { outputDir.set(layout.projectDirectory.dir("screenshots")) }
