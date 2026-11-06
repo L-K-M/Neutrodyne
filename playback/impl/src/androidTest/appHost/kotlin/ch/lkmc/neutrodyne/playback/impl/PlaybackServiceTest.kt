@@ -100,6 +100,7 @@ class PlaybackServiceTest {
     private val notifications get() = app.getSystemService(NotificationManager::class.java)
     private var ids = emptyList<Long>()
     private var cover: File? = null
+    private var feedNumber = 0
     private var phase = "setup"
     private val observation = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -693,7 +694,8 @@ class PlaybackServiceTest {
                     // example.com URL would open a real HTTPS connection, which is both
                     // nondeterministic and an OkHttp HTTP/2 shutdown leak on API 26.
                     title = "Playback fixture",
-                    feedUrl = server.url("/feed.xml").toString(),
+                    // A test may seed more than once; the feed key follows the feed URL.
+                    feedUrl = server.url("/feed-${feedNumber++}.xml").toString(),
                     artworkKey = key,
                 ) {
                     copy(artworkUrl = coverUrl)
