@@ -468,7 +468,7 @@ class DesktopNativePlaybackTest {
                 val file = directory.resolve(fixture.name)
                 Files.copy(corpus.resolve(fixture.name), file)
                 val result = extractor.read(file.toUri().toString())
-                assertTrue(result is EmbeddedChapterResult.Read, "$fixture.name: $result")
+                assertTrue(result is EmbeddedChapterResult.Read, "${fixture.name}: $result")
                 val chapters = result.chapters
                 assertEquals(fixture.titles, chapters.map { it.title })
                 assertTrue(chapters.all { it.source == fixture.source })
@@ -478,6 +478,8 @@ class DesktopNativePlaybackTest {
             val missing = extractor.read(Path.of("/nonexistent", "episode.mp3").toUri().toString())
             assertEquals(EmbeddedChapterResult.MissingFile, missing)
             assertEquals(EmbeddedChapterResult.Unavailable, extractor.read("https://media.example/episode.mp3"))
+            // A malformed URI (URISyntaxException) is unavailable, not a failure of the caller.
+            assertEquals(EmbeddedChapterResult.Unavailable, extractor.read("file:///not a valid uri"))
         }
 
     private class FakeRouteMonitor : AudioRouteMonitor {

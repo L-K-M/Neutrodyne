@@ -39,6 +39,7 @@ jobs:
       youtube_engine: ${{ steps.verify.outputs.youtube_engine }}
       mac_kind: ${{ steps.verify.outputs.mac_kind }}
       expected_assets: ${{ steps.verify.outputs.expected_assets }}
+      ffmpeg_version: ${{ steps.verify.outputs.ffmpeg_version }}
     permissions:
       contents: read
       actions: read # gh api check-runs / workflow runs for the CI-success check

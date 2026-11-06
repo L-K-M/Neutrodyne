@@ -34,6 +34,8 @@ class DesktopChapterExtractor(
                 localPath(fileUri)
             } catch (_: IllegalArgumentException) {
                 return EmbeddedChapterResult.Unavailable
+            } catch (_: java.net.URISyntaxException) {
+                return EmbeddedChapterResult.Unavailable
             }
         if (!Files.isRegularFile(path)) return EmbeddedChapterResult.MissingFile
         return withContext(io) {

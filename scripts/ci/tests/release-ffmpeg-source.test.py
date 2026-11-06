@@ -17,6 +17,7 @@ so the expansion is the shipped code path, not a copy of it.
 """
 
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -69,6 +70,17 @@ class ReleaseFfmpegSourceTest(unittest.TestCase):
         sources = text.split("  sources:", 1)[1].split("  # TODO (M0b)", 1)[0]
         self.assertIn(":playback:native:assembleFfmpegSource", sources)
         self.assertIn("ffmpeg-*-neutrodyne-src.tar.xz", sources)
+
+    def test_every_consumed_verify_tag_output_is_declared(self):
+        # A `needs.verify-tag.outputs.X` that the job does not declare is an empty string,
+        # which would turn the release body's FFmpeg source link into `ffmpeg--...`.
+        text = RELEASE.read_text(encoding="utf-8")
+        job = text.split("  verify-tag:", 1)[1]
+        declared_block = job.split("    outputs:", 1)[1].split("    permissions:", 1)[0]
+        declared = set(re.findall(r"^\s+([A-Za-z_]+):", declared_block, re.MULTILINE))
+        consumed = set(re.findall(r"needs\.verify-tag\.outputs\.([A-Za-z_]+)", text))
+        self.assertIn("ffmpeg_version", consumed)
+        self.assertEqual(set(), consumed - declared)
 
     def test_verify_tag_expands_the_bundle_name(self):
         with tempfile.TemporaryDirectory() as directory:
