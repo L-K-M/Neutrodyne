@@ -252,8 +252,7 @@ class LinuxMprisSessionTest {
         }
     }
 
-    private fun currentTrack(): DBusPath =
-        DBusPath("/ch/lkmc/neutrodyne/episode/${testNowPlaying().episodeId}")
+    private fun currentTrack(): DBusPath = DBusPath("/ch/lkmc/neutrodyne/episode/${testNowPlaying().episodeId}")
 
     private fun DBusConnection.properties(): Properties =
         getRemoteObject(MprisNames.BUS, MprisNames.PATH, Properties::class.java)

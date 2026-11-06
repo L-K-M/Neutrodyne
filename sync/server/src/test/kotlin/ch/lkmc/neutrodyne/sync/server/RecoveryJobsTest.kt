@@ -139,7 +139,14 @@ class RecoveryJobsTest {
                     }
                 }
             val config = f.config.copy(backupsKeep = 1)
-            val job = BackupJob(f.store, config, AccountBackups(f.store, config, f.inputs, writer), f.services.metrics, f.inputs)
+            val job =
+                BackupJob(
+                    f.store,
+                    config,
+                    AccountBackups(f.store, config, f.inputs, writer),
+                    f.services.metrics,
+                    f.inputs,
+                )
             // Server-side retention and the pre-migration cleanup run only on a clean night.
             val stale = config.dataDir.resolve("backups/neutrodyne-server-2000-01-01.db")
             Files.createDirectories(stale.parent)
@@ -147,14 +154,23 @@ class RecoveryJobsTest {
             val migration =
                 config.dataDir.resolve("backups/neutrodyne-server-pre-migration-v1-old.db").also {
                     Files.writeString(it, "old")
-                    Files.setLastModifiedTime(it, java.nio.file.attribute.FileTime.fromMillis(f.now - 8 * DAY_MS))
+                    Files.setLastModifiedTime(
+                        it,
+                        java.nio.file.attribute.FileTime
+                            .fromMillis(f.now - 8 * DAY_MS),
+                    )
                 }
 
             assertFailsWith<Exception> { job.run() }
 
             assertEquals(listOf(bad.id, good.id), writer.attempted)
             Files.list(config.dataDir.resolve("account-backups/${good.id}")).use { assertEquals(1, it.count()) }
-            assertEquals("failure", f.services.metrics.snapshot().backupResult)
+            assertEquals(
+                "failure",
+                f.services.metrics
+                    .snapshot()
+                    .backupResult,
+            )
             assertTrue(Files.exists(stale))
             assertTrue(Files.exists(migration))
         }
