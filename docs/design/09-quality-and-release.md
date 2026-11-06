@@ -742,13 +742,13 @@ it differs from the desktop runtime's source ([10 Image sources and the runtime
 exception](10-sync.md#image-sources-and-the-runtime-exception)). The desktop
 release jobs, the runtime/WiX/FFmpeg/PBS source jobs and the server deploy
 scripts are re-applied from the M0b, MD1b and MS1 candidate branches onto the
-current code. **Open on this branch:** the `server-image` job runs MS1's
-`HealthCheck` and the `doctor`/`backup`/`restore` CLI, which the M11b base does
-not carry yet; the image build, the GHCR push and `image-tags` are therefore
-verified structurally (the workflow and `test-server-image.py`), not by a real
-tag. The same holds for `gh release verify`, `verify-asset` and
-`gh attestation verify` on a published release: they run only on a real tag,
-which this slice must not create.
+current code; the `server-image` job's `HealthCheck` and
+`doctor`/`backup`/`restore` CLI arrive with #324, which this branch has merged.
+**Open on this branch:** the image build, the GHCR push, `image-tags`,
+`gh release verify`, `verify-asset` and `gh attestation verify` on a published
+release run only on a real tag, which this slice must not create; they are
+verified structurally (the workflow test and `test-server-image.py`), not by a
+release.
 
 Jobs and steps, in order (target: tag → published release with every asset in < 60 min, N11 and PLAN M11 AC2; [Time budgets](#time-budgets)):
 
