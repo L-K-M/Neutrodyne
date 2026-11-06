@@ -679,7 +679,8 @@ internal class AndroidServiceBridge(
         projector.detach()
         recovery.detach()
         player.removeListener(this)
-        // The teardown job emits the flush's Stopped; the bridge then clears `active`.
+        // The teardown job emits the flush's Stopped after the save; the bridge clears `active`
+        // before that boundary, so a release reading it sees nothing playing.
         val teardown = tracker.detach(snapshot) { access.sync.stopped() }
         access.sync.detachAfter(teardown)
         access.applicationScope.launch(Dispatchers.Main.immediate, start = CoroutineStart.UNDISPATCHED) {
