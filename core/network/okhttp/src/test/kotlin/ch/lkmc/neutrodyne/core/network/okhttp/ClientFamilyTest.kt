@@ -23,7 +23,7 @@ class ClientFamilyTest {
     private fun allKinds(clients: NetworkClients): List<OkHttpClient> = HttpClientKind.entries.map(clients::get)
 
     @Test
-    fun `all seven kinds derive from one dispatcher and pool`() {
+    fun `all kinds derive from one dispatcher and pool`() {
         val clients = newNetworkClients()
         val core = clients.base.dispatcher
         for ((kind, client) in HttpClientKind.entries.zip(allKinds(clients))) {
@@ -51,6 +51,26 @@ class ClientFamilyTest {
         assertThat(clients.download.readTimeoutMillis).isEqualTo(60_000)
         assertThat(clients[HttpClientKind.YOUTUBE].callTimeoutMillis).isEqualTo(60_000)
         assertThat(clients[HttpClientKind.SYNC].callTimeoutMillis).isEqualTo(60_000)
+    }
+
+    @Test
+    fun `sync stream carries no read or call timeout`() {
+        val clients = newNetworkClients()
+        val stream = clients[HttpClientKind.SYNC_STREAM]
+        // 10 Live updates: the SSE stream outlives the family's 30 s read timeout; the client's
+        // heartbeat watchdog, not OkHttp, closes a dead stream.
+        assertThat(stream.readTimeoutMillis).isEqualTo(0)
+        assertThat(stream.callTimeoutMillis).isEqualTo(0)
+        assertThat(stream.connectTimeoutMillis).isEqualTo(15_000)
+        // It is the sync client with relaxed timeouts: same SYNC-mode guard and DNS chain,
+        // no `base` auth interceptor (10).
+        val access = LocalNetworkAccess()
+        val android = newNetworkClients(access = access, platform = fakePlatform(PlatformKind.ANDROID, 37))
+        assertThat(android[HttpClientKind.SYNC_STREAM].dns).isInstanceOf(LocalNetworkGuardDns::class.java)
+        assertThat(stream.networkInterceptors.any { it is AuthInterceptor }).isFalse()
+        assertThat(stream.interceptors[0]).isSameInstanceAs(LocalNetworkGuard.PASS_THROUGH)
+        assertThat(android[HttpClientKind.SYNC_STREAM].interceptors[0])
+            .isInstanceOf(LocalNetworkGuardInterceptor::class.java)
     }
 
     @Test
