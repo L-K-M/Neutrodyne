@@ -831,6 +831,10 @@ class DesktopPlaybackController(
         val projection = projector ?: return
         val outgoingId = engineCurrentId ?: return
         val outgoing = projection.entries.firstOrNull { it.item.episodeId == outgoingId } ?: return
+        // A failure for an item the projection already dropped is stale: no
+        // skip to record and no budget to spend for it.
+        val failedIndex = projection.entries.indexOfFirst { it.item.episodeId == failedId }
+        if (failedIndex < 0) return
         val reason = unplayableReason(error)
         if (reason == null || !budget.trySkip()) {
             // A network or device failure preparing the successor is not a skip.
@@ -839,8 +843,6 @@ class DesktopPlaybackController(
         }
         notifications.emit(PlaybackEvent.Skipped(failedId, titleOf(failedId), reason))
         val departure = value.saver.capture(position(), durationMs, PlaybackExit.END)?.departure
-        val failedIndex = projection.entries.indexOfFirst { it.item.episodeId == failedId }
-        if (failedIndex < 0) return
         val next = projection.entries.getOrNull(failedIndex + 1)
         val revision = SessionRevision(outgoingId, projection.generation)
         val generation =
