@@ -157,11 +157,11 @@ class ServerCliTest {
                 err = captured.errStream,
             )
         assertEquals(ExitCodes.ERROR, cli.run())
-        assertTrue(captured.errText().contains("port already in use"), captured.errText())
+        assertTrue(captured.errText().contains("serve failed"), captured.errText())
     }
 
     @Test
-    fun `a starter failure without a message still names the exception`() {
+    fun `a starter failure without a message is still actionable`() {
         val captured = Captured()
         val cli =
             ServerCli(
@@ -172,6 +172,6 @@ class ServerCliTest {
                 err = captured.errStream,
             )
         assertEquals(ExitCodes.ERROR, cli.run())
-        assertTrue(captured.errText().contains("serve failed: java.lang.RuntimeException"), captured.errText())
+        assertTrue(captured.errText().contains("serve failed; check configuration"), captured.errText())
     }
 }
