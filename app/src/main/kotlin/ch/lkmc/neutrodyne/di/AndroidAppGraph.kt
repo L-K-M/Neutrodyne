@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
+import dev.zacsweers.metro.IntoSet
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
@@ -161,6 +162,13 @@ interface AndroidAppGraph : DownloadComponentsInjector {
      */
     @Provides
     fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
+
+    /** The diagnostics ring is Android's only level-mutable sink ("Detailed log", 09). */
+    @Provides
+    @IntoSet
+    fun provideRingLevelMutable(
+        sink: ch.lkmc.neutrodyne.core.common.RingBufferLogSink,
+    ): ch.lkmc.neutrodyne.core.common.LevelMutableLogSink = sink
 
     @DependencyGraph.Factory
     fun interface Factory {
