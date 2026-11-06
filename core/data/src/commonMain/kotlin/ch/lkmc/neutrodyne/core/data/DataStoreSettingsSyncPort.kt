@@ -100,6 +100,15 @@ internal class DataStoreSettingsSyncPort(
         local.tryEmit(LocalSyncedSetting(key, json, atMs))
     }
 
+    override suspend fun syncedLiteralValues(): Map<SettingKey<*>, String> {
+        val values = mutableMapOf<SettingKey<*>, String>()
+        for (key in AllSettingKeys.list.filter { it.synced }) {
+            val json = encode(key, settingsStore.get(key)) ?: continue
+            values[key] = json
+        }
+        return values
+    }
+
     /** Decodes [element] into [key]'s type; `null` when it is not a valid value for it. */
     private fun decode(
         key: SettingKey<*>,

@@ -464,6 +464,100 @@ class FirstLinkMergerTest {
             }
         }
 
+    /**
+     * 10 "Use this device's library everywhere" step 3: each synced setting's literal `v` is
+     * captured with a fresh clock — at or above the step's `t0`, the tick after `enabled = 1` —
+     * so this device's values win everywhere; the "Sync playback settings" switch gates them.
+     */
+    @Test
+    fun useDeviceCapturesEachSyncedSettingsLiteralVWithFreshClocks() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            val settings = FakeSettingsSyncPort()
+            try {
+                link(db, deviceId = device)
+                seedLocalPodcast(db)
+                settings.syncedValues =
+                    mapOf(
+                        ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SMART_RESUME to "true",
+                        ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SPEED to "1.5",
+                    )
+                val client = CountingClient(listOf(podcastRecord()))
+                val merger = mergerOf(db, client, library, settings = settings)
+
+                val result = merger.merge(FirstLinkChoice.USE_DEVICE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                val speedKey = ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SPEED
+                val smartKey = ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SMART_RESUME
+                val rows = db.syncOutboxDao().rows().filter { it.coll == "setting" }
+                assertEquals(setOf(speedKey.name, smartKey.name), rows.map { it.rid }.toSet())
+                for (row in rows) {
+                    assertEquals("v", row.field)
+                    assertEquals("0000000000000001", row.nodeId)
+                    assertTrue(
+                        row.hlc >= (now shl 16) && row.hlc > (1L shl 16),
+                        "a fresh clock at or above t0: ${row.hlc}",
+                    )
+                }
+                assertEquals("1.5", rows.single { it.rid == speedKey.name }.value)
+                assertEquals("true", rows.single { it.rid == smartKey.name }.value)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The switch off: no `setting` row is captured, like a local edit while it is off. */
+    @Test
+    fun useDeviceSkipsSettingsCapturesWhilePlaybackSyncIsOff() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            val settings = FakeSettingsSyncPort()
+            try {
+                link(db, deviceId = device)
+                seedLocalPodcast(db)
+                settings.syncedValues =
+                    mapOf(ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SPEED to "1.5")
+                val client = CountingClient(listOf(podcastRecord()))
+                val merger = mergerOf(db, client, library, settings = settings, syncPlaybackSettings = { false })
+
+                assertTrue(merger.merge(FirstLinkChoice.USE_DEVICE) is FirstLinkResult.Completed)
+                assertTrue(
+                    db.syncOutboxDao().rows().none { it.coll == "setting" },
+                    "rows=${db.syncOutboxDao().rows()}",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The restore variant (05 Replace ALL_DEVICES) captures the replaced settings the same way. */
+    @Test
+    fun restoreEverywhereCapturesSyncedSettingsToo() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            val settings = FakeSettingsSyncPort()
+            try {
+                link(db, deviceId = device)
+                seedLocalPodcast(db)
+                settings.syncedValues =
+                    mapOf(ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SPEED to "1.25")
+                val client = CountingClient(listOf(podcastRecord()))
+                val merger = mergerOf(db, client, library, settings = settings)
+
+                assertTrue(merger.restoreEverywhere() is FirstLinkResult.Completed)
+                val row = db.syncOutboxDao().rows().single { it.coll == "setting" }
+                assertEquals(ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys.SPEED.name, row.rid)
+                assertEquals("v", row.field)
+                assertEquals("1.25", row.value)
+            } finally {
+                db.close()
+            }
+        }
+
     // --- Fixtures -----------------------------------------------------------------------------------
 
     private fun mergerOf(
@@ -471,6 +565,8 @@ class FirstLinkMergerTest {
         client: SyncClient,
         library: FakeLibraryMerger,
         forcedSecrets: FakeSecretStore? = null,
+        settings: FakeSettingsSyncPort = FakeSettingsSyncPort(),
+        syncPlaybackSettings: () -> Boolean = { true },
     ): FirstLinkMerger {
         val secrets = forcedSecrets ?: FakeSecretStore()
         return FirstLinkMerger(
@@ -480,15 +576,41 @@ class FirstLinkMergerTest {
             engine = engine(db, client, secrets),
             libraryMerger = library,
             storagePaths = paths,
-            settings = FakeSettingsSyncPort(),
+            settings = settings,
             secrets = secrets,
             sharePasswords = { false },
+            syncPlaybackSettings = syncPlaybackSettings,
             coordinator =
                 ch.lkmc.neutrodyne.core.testing
                     .FakeCredentialCommitCoordinator(),
             effects = effects(db, secrets),
             clock = TestClock(now),
         )
+    }
+
+    /** The minimal local library a whole-library upload captures. */
+    private suspend fun seedLocalPodcast(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
+        val podcastId =
+            db
+                .podcastDao()
+                .insertPodcast(
+                    podcastEntity(
+                        syncId = podcastSyncId,
+                        feedUrl = "https://example.com/feed",
+                        feedKey = "https://example.com/feed",
+                        title = "Example",
+                    ),
+                )
+        db
+            .ingestDao()
+            .insertEpisodes(
+                listOf(
+                    ch.lkmc.neutrodyne.core.testing.database.episodeEntity(
+                        podcastId = podcastId,
+                        identityKey = "g:one",
+                    ) { copy(guid = "one") },
+                ),
+            )
     }
 
     private fun effects(
