@@ -6,7 +6,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,8 +38,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
@@ -49,12 +60,15 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
+import ch.lkmc.neutrodyne.core.designsystem.components.NdScaffold
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -68,6 +82,7 @@ import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
 import ch.lkmc.neutrodyne.core.ui.CredentialFields
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
@@ -85,6 +100,8 @@ import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.HeaderSystemBars
+import ch.lkmc.neutrodyne.core.ui.navigation.LocalHeaderSystemBarsEnabled
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -135,8 +152,8 @@ internal data class PendingUnsubscribe(
 
 /**
  * The podcast detail screen (08 Podcast detail): the header scrolls away inside the `LazyColumn`
- * while the top bar stays (M1a keeps the bar in-flow rather than overlaid on the artwork tint —
- * the gradient and shared-element hand-off arrive with M10; deviation recorded in 08). The
+ * while the top bar overlays its gradient. Coexisting panes, pinned errors and selection keep
+ * opaque app chrome; the normal single-pane header owns its inset and scrolls behind the bar. The
  * feed-state banner sits between the header and the transient filter chips.
  *
  * 08 Live row state defers map reads to each row to limit recomposition to its own slot.
@@ -181,255 +198,313 @@ internal fun PodcastScreen(
     }
     val detail = state.detail
     val navigator = LocalAppNavigator.current
-    // The offline banner is a real list item before the header: the title only joins the
-    // top bar once the header itself scrolled off, so its index shifts when offline.
+    // Offline shifts the header index. Its measured cover bottom controls the title, including
+    // wide banners and font-scaled content; the last known bound is irrelevant once the item leaves.
     val headerIndex = if (state.offline) 1 else 0
-    val headerGone by
-        remember(headerIndex) { derivedStateOf { listState.firstVisibleItemIndex > headerIndex } }
+    var artworkBottom by remember(detail?.id) { mutableFloatStateOf(Float.POSITIVE_INFINITY) }
+    var toolbarBottom by remember { mutableFloatStateOf(0f) }
+    val headerGone by remember(headerIndex, listState, detail?.id) {
+        derivedStateOf { listState.firstVisibleItemIndex > headerIndex || artworkBottom <= toolbarBottom }
+    }
+    val panes = LocalPaneLayout.current
+    val overlayBody =
+        LocalHeaderSystemBarsEnabled.current && panes.partitions == 1 && !panes.playerPanel &&
+            state.loaded && detail != null && selectedIds.isEmpty() &&
+            !hasPagingError(items) && !(items.loadState.refresh is LoadState.Loading && items.itemCount == 0)
+    val artworkBar = overlayBody && !headerGone && !state.offline
     val nowMs = LocalUiClock.current.now()
 
-    Column(modifier = modifier.fillMaxSize().episodeSelectionKeys(selection, selectAll)) {
-        if (selectedIds.isNotEmpty() && selection != null) {
-            SelectionTopBar(
-                selection,
-                selectedIds.size,
-                selectAll,
-                onPlayNext = onPlaySelectionNext,
-                onPlayLast = onPlaySelectionLast,
-            )
-        } else {
-            NdTopAppBar(
-                title = if (headerGone) detail?.displayTitle.orEmpty() else "",
-                navigation = { NavBackButton() },
-                actions = {
-                    NdTooltipIconButton(
-                        onClick = onRefresh,
-                        icon = NdIcons.Refresh,
-                        tooltip = stringResource(Res.string.feeds_refresh),
-                        enabled = !state.offline,
-                    )
-                    NdTooltipIconButton(
-                        onClick = onOpenSettings,
-                        icon = NdIcons.Settings,
-                        tooltip = stringResource(Res.string.podcast_settings),
-                    )
-                    PodcastOverflow(
-                        detail = detail,
-                        feedUrl = state.feedUrl,
-                        onOpenSettings = onOpenSettings,
-                        onMarkAllPlayedClick = onMarkAllPlayedClick,
-                        onDownloadAll = onDownloadAll,
-                        onUnsubscribe = onUnsubscribeRequest,
-                    )
+    NdScaffold(
+        modifier = modifier.fillMaxSize().episodeSelectionKeys(selection, selectAll),
+        topBar = {
+            // The overlay's 60% black scrim guarantees light icons over every artwork pixel.
+            // Swap chrome atomically at the cover boundary to preserve contrast during scrolling.
+            HeaderSystemBars(
+                if (artworkBar) {
+                    Color.Black
+                } else if (headerGone && selectedIds.isEmpty()) {
+                    MaterialTheme.colorScheme.surfaceContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
                 },
-                elevated = headerGone,
             )
-        }
-
-        when {
-            !state.loaded -> {
-                LoadingBody()
-            }
-
-            detail == null -> {
-                Unit
-            }
-
-            // `gone`: the route pops once the snackbar shows.
-            // First-page race (the Feeds screen's guard): while paging's refresh is still out the
-            // header-only list would clamp a restored scroll index before the rows exist, so the
-            // LazyColumn stays unmounted until the first page settles.
-            items.loadState.refresh is LoadState.Loading && items.itemCount == 0 -> {
-                Column(Modifier.fillMaxSize()) {
-                    PodcastHeader(
-                        detail = detail,
-                        nowMs = nowMs,
-                        groups = state.groups,
-                        onRemoveGroup = onRemoveGroup,
-                        onAddToGroups = { navigator.push(AddToGroupsKey(listOf(detail.id))) },
-                    )
-                    FeedStateBanner(
-                        detail = detail,
-                        nowMs = nowMs,
-                        onRetryFeed = onRetryFeed,
-                        onEnterCredentials = onEnterCredentials,
-                        onOpenSettings = onOpenSettings,
-                        onUnsubscribe = onUnsubscribeRequest,
-                    )
-                    ChipsRow(
-                        filters = state.filters,
-                        order = state.effectiveOrder,
-                        onFiltersChange = onFiltersChange,
-                        onOrderChange = onOrderChange,
-                    )
-                    Box(
-                        Modifier.fillMaxWidth().padding(FOOTER_PADDING),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        NdLoading()
-                    }
-                }
-            }
-
-            else -> {
-                // 08's paging-error rule, applied where the user actually is: with placeholders
-                // on, an append failure's footer would sit thousands of rows away and a
-                // prepend failure has no footer at all — every non-empty-list failure pins a
-                // banner under the app bar instead (revised 2026-10-14: the append footer row
-                // is gone; it duplicated the banner once the user scrolled to it).
-                val episodeStart = headerIndex + 1
-                ReportVisibleEpisodeIds(
-                    listState = listState,
-                    itemCount = { episodeStart + items.itemCount },
-                    idAt = { index ->
-                        val pagedIndex = index - episodeStart
-                        if (pagedIndex in 0 until items.itemCount) items.peek(pagedIndex)?.id else null
-                    },
-                    onIds = onVisibleIds,
+            if (selectedIds.isNotEmpty() && selection != null) {
+                SelectionTopBar(
+                    selection,
+                    selectedIds.size,
+                    selectAll,
+                    onPlayNext = onPlaySelectionNext,
+                    onPlayLast = onPlaySelectionLast,
                 )
-                LoadErrorBanner(items)
-                // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
-                val scrollbars = LocalScrollbars.current
-                val scrollbarColor = ndScrollbarColor(scrollbars)
-                LazyColumn(
-                    state = listState,
+            } else {
+                NdTopAppBar(
                     modifier =
-                        Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .ndScrollbar(listState, scrollbars, scrollbarColor),
-                ) {
-                    offlineBannerItem(state.offline)
-                    item(key = "header", contentType = "header") {
-                        Column {
+                        Modifier.testTag("podcast_toolbar").onGloballyPositioned {
+                            toolbarBottom = it.positionInWindow().y + it.size.height
+                        },
+                    title = if (headerGone) detail?.displayTitle.orEmpty() else "",
+                    navigation = { NavBackButton() },
+                    actions = {
+                        NdTooltipIconButton(
+                            onClick = onRefresh,
+                            icon = NdIcons.Refresh,
+                            tooltip = stringResource(Res.string.feeds_refresh),
+                            enabled = !state.offline,
+                        )
+                        NdTooltipIconButton(
+                            onClick = onOpenSettings,
+                            icon = NdIcons.Settings,
+                            tooltip = stringResource(Res.string.podcast_settings),
+                        )
+                        PodcastOverflow(
+                            detail = detail,
+                            feedUrl = state.feedUrl,
+                            onOpenSettings = onOpenSettings,
+                            onMarkAllPlayedClick = onMarkAllPlayedClick,
+                            onDownloadAll = onDownloadAll,
+                            onUnsubscribe = onUnsubscribeRequest,
+                        )
+                    },
+                    elevated = headerGone,
+                    appearance =
+                        if (artworkBar) {
+                            NdTopAppBarAppearance.ARTWORK_OVERLAY
+                        } else {
+                            NdTopAppBarAppearance.SURFACE
+                        },
+                )
+            }
+        },
+    ) { insets ->
+        val direction = LocalLayoutDirection.current
+        val headerInset = if (overlayBody && !state.offline) insets.calculateTopPadding() else 0.dp
+        Column(
+            Modifier.fillMaxSize().padding(
+                PaddingValues(
+                    start = insets.calculateStartPadding(direction),
+                    end = insets.calculateEndPadding(direction),
+                    top = if (overlayBody) 0.dp else insets.calculateTopPadding(),
+                    bottom = if (overlayBody) 0.dp else insets.calculateBottomPadding(),
+                ),
+            ),
+        ) {
+            when {
+                !state.loaded -> {
+                    LoadingBody()
+                }
+
+                detail == null -> {
+                    Unit
+                }
+
+                // `gone`: the route pops once the snackbar shows.
+                // First-page race (the Feeds screen's guard): while paging's refresh is still out the
+                // header-only list would clamp a restored scroll index before the rows exist, so the
+                // LazyColumn stays unmounted until the first page settles.
+                items.loadState.refresh is LoadState.Loading && items.itemCount == 0 -> {
+                    Column(Modifier.fillMaxSize()) {
+                        ArtworkTheme(state.colors?.seedArgb) {
                             PodcastHeader(
                                 detail = detail,
+                                colors = state.colors,
+                                onArtworkBottomInWindow = { artworkBottom = it },
                                 nowMs = nowMs,
                                 groups = state.groups,
                                 onRemoveGroup = onRemoveGroup,
-                                onAddToGroups = {
-                                    navigator.push(AddToGroupsKey(listOf(detail.id)))
-                                },
-                            )
-                            FeedStateBanner(
-                                detail = detail,
-                                nowMs = nowMs,
-                                onRetryFeed = onRetryFeed,
-                                onEnterCredentials = onEnterCredentials,
-                                onOpenSettings = onOpenSettings,
-                                onUnsubscribe = onUnsubscribeRequest,
-                            )
-                            ChipsRow(
-                                filters = state.filters,
-                                order = state.effectiveOrder,
-                                onFiltersChange = onFiltersChange,
-                                onOrderChange = onOrderChange,
+                                onAddToGroups = { navigator.push(AddToGroupsKey(listOf(detail.id))) },
                             )
                         }
-                    }
-
-                    // 08's `emptyFeed` doubles as the filtered-empty state: a fetched feed
-                    // holding zero episodes gets the bare copy, while an active filter adds
-                    // the reset action.
-                    if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading) {
-                        item(key = "empty", contentType = "empty") {
-                            EmptyState(
-                                icon = NdIcons.FilterList,
-                                title = stringResource(Res.string.podcast_no_episodes),
-                                body = "",
-                                actionLabel =
-                                    if (state.filters != FeedFilters()) {
-                                        stringResource(Res.string.feeds_show_played)
-                                    } else {
-                                        null
-                                    },
-                                onAction =
-                                    if (state.filters != FeedFilters()) {
-                                        { onFiltersChange(FeedFilters()) }
-                                    } else {
-                                        null
-                                    },
-                            )
+                        FeedStateBanner(
+                            detail = detail,
+                            nowMs = nowMs,
+                            onRetryFeed = onRetryFeed,
+                            onEnterCredentials = onEnterCredentials,
+                            onOpenSettings = onOpenSettings,
+                            onUnsubscribe = onUnsubscribeRequest,
+                        )
+                        ChipsRow(
+                            filters = state.filters,
+                            order = state.effectiveOrder,
+                            onFiltersChange = onFiltersChange,
+                            onOrderChange = onOrderChange,
+                        )
+                        Box(
+                            Modifier.fillMaxWidth().padding(FOOTER_PADDING),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            NdLoading()
                         }
                     }
+                }
 
-                    // 08's Failed shape for a first-page error — the header and chips stay
-                    // visible and the state sits where the episodes would.
-                    if (items.loadState.refresh is LoadState.Error && items.itemCount == 0) {
-                        item(key = "refreshError", contentType = "status") {
-                            EmptyState(
-                                icon = NdIcons.Error,
-                                title = stringResource(Res.string.feeds_load_error),
-                                body = "",
-                                actionLabel = stringResource(Res.string.action_retry),
-                                onAction = items::retry,
-                            )
-                        }
-                    }
-
-                    items(
-                        count = items.itemCount,
-                        key = items.itemKey { it.id },
-                        contentType = { "episode" },
-                    ) { index ->
-                        val row = items[index]
-                        if (row == null) {
-                            // 05's placeholders report the full count ahead of the loaded pages:
-                            // the stub must keep a row's height or a restored scroll index past
-                            // the loaded page slides back to wherever real rows fill the view.
-                            EpisodeRowPlaceholder()
-                        } else {
-                            val rowLive by remember(row.id, live) { derivedStateOf { live.value[row.id] } }
-                            EpisodeRow(
-                                row = row,
-                                live = rowLive,
-                                style = EpisodeRowStyle.PODCAST,
-                                caps = RowCaps.FULL.copy(offline = state.offline),
-                                highlightNew = false,
-                                selected = selectedIds.takeIf { it.isNotEmpty() }?.contains(row.id),
-                                onAction = { action ->
-                                    when {
-                                        action is EpisodeAction.ExtendSelection && selection != null -> {
-                                            selection.extend(
-                                                action.episodeId,
-                                                items.itemSnapshotList.items.map { it.id },
-                                            )
-                                        }
-
-                                        action is EpisodeAction.Select && selection != null -> {
-                                            selection.toggle(action.episodeId)
-                                        }
-
-                                        else -> {
-                                            onAction(action)
-                                        }
-                                    }
-                                },
-                            )
-                        }
-                    }
-
-                    if (detail.hasOlderPages) {
-                        item(key = "loadOlder", contentType = "footer") {
-                            Box(
-                                Modifier.fillMaxWidth().padding(FOOTER_PADDING),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                NdTextButton(
-                                    label = stringResource(Res.string.podcast_load_older),
-                                    onClick = onLoadOlder,
-                                    enabled = !state.refreshing,
+                else -> {
+                    // 08's paging-error rule, applied where the user actually is: with placeholders
+                    // on, an append failure's footer would sit thousands of rows away and a
+                    // prepend failure has no footer at all — every non-empty-list failure pins a
+                    // banner under the app bar instead (revised 2026-10-14: the append footer row
+                    // is gone; it duplicated the banner once the user scrolled to it).
+                    val episodeStart = headerIndex + 1
+                    ReportVisibleEpisodeIds(
+                        listState = listState,
+                        itemCount = { episodeStart + items.itemCount },
+                        idAt = { index ->
+                            val pagedIndex = index - episodeStart
+                            if (pagedIndex in 0 until items.itemCount) items.peek(pagedIndex)?.id else null
+                        },
+                        onIds = onVisibleIds,
+                    )
+                    LoadErrorBanner(items)
+                    // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+                    val scrollbars = LocalScrollbars.current
+                    val scrollbarColor = ndScrollbarColor(scrollbars)
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.testTag("podcast_list").weight(1f).fillMaxWidth()
+                            .ndScrollbar(listState, scrollbars, scrollbarColor),
+                        contentPadding =
+                            PaddingValues(
+                                top = if (overlayBody) insets.calculateTopPadding() else 0.dp,
+                                bottom = if (overlayBody) insets.calculateBottomPadding() else 0.dp,
+                            ),
+                    ) {
+                        offlineBannerItem(state.offline)
+                        item(key = "header", contentType = "header") {
+                            Column {
+                                ArtworkTheme(state.colors?.seedArgb) {
+                                    PodcastHeader(
+                                        detail = detail,
+                                        colors = state.colors,
+                                        modifier = Modifier.overlapHeaderChrome(headerInset),
+                                        topInset = headerInset,
+                                        onArtworkBottomInWindow = { artworkBottom = it },
+                                        nowMs = nowMs,
+                                        groups = state.groups,
+                                        onRemoveGroup = onRemoveGroup,
+                                        onAddToGroups = {
+                                            navigator.push(AddToGroupsKey(listOf(detail.id)))
+                                        },
+                                    )
+                                }
+                                FeedStateBanner(
+                                    detail = detail,
+                                    nowMs = nowMs,
+                                    onRetryFeed = onRetryFeed,
+                                    onEnterCredentials = onEnterCredentials,
+                                    onOpenSettings = onOpenSettings,
+                                    onUnsubscribe = onUnsubscribeRequest,
+                                )
+                                ChipsRow(
+                                    filters = state.filters,
+                                    order = state.effectiveOrder,
+                                    onFiltersChange = onFiltersChange,
+                                    onOrderChange = onOrderChange,
                                 )
                             }
                         }
-                    }
-                    if (items.loadState.append is LoadState.Loading) {
-                        item(key = "appendLoading", contentType = "footer") {
-                            Box(
-                                Modifier.fillMaxWidth().padding(FOOTER_PADDING),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                NdLoading()
+
+                        // 08's `emptyFeed` doubles as the filtered-empty state: a fetched feed
+                        // holding zero episodes gets the bare copy, while an active filter adds
+                        // the reset action.
+                        if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading) {
+                            item(key = "empty", contentType = "empty") {
+                                EmptyState(
+                                    icon = NdIcons.FilterList,
+                                    title = stringResource(Res.string.podcast_no_episodes),
+                                    body = "",
+                                    actionLabel =
+                                        if (state.filters != FeedFilters()) {
+                                            stringResource(Res.string.feeds_show_played)
+                                        } else {
+                                            null
+                                        },
+                                    onAction =
+                                        if (state.filters != FeedFilters()) {
+                                            { onFiltersChange(FeedFilters()) }
+                                        } else {
+                                            null
+                                        },
+                                )
+                            }
+                        }
+
+                        // 08's Failed shape for a first-page error — the header and chips stay
+                        // visible and the state sits where the episodes would.
+                        if (items.loadState.refresh is LoadState.Error && items.itemCount == 0) {
+                            item(key = "refreshError", contentType = "status") {
+                                EmptyState(
+                                    icon = NdIcons.Error,
+                                    title = stringResource(Res.string.feeds_load_error),
+                                    body = "",
+                                    actionLabel = stringResource(Res.string.action_retry),
+                                    onAction = items::retry,
+                                )
+                            }
+                        }
+
+                        items(
+                            count = items.itemCount,
+                            key = items.itemKey { it.id },
+                            contentType = { "episode" },
+                        ) { index ->
+                            val row = items[index]
+                            if (row == null) {
+                                // 05's placeholders report the full count ahead of the loaded pages:
+                                // the stub must keep a row's height or a restored scroll index past
+                                // the loaded page slides back to wherever real rows fill the view.
+                                EpisodeRowPlaceholder()
+                            } else {
+                                val rowLive by remember(row.id, live) { derivedStateOf { live.value[row.id] } }
+                                EpisodeRow(
+                                    row = row,
+                                    live = rowLive,
+                                    style = EpisodeRowStyle.PODCAST,
+                                    caps = RowCaps.FULL.copy(offline = state.offline),
+                                    highlightNew = false,
+                                    selected = selectedIds.takeIf { it.isNotEmpty() }?.contains(row.id),
+                                    onAction = { action ->
+                                        when {
+                                            action is EpisodeAction.ExtendSelection && selection != null -> {
+                                                selection.extend(
+                                                    action.episodeId,
+                                                    items.itemSnapshotList.items.map { it.id },
+                                                )
+                                            }
+
+                                            action is EpisodeAction.Select && selection != null -> {
+                                                selection.toggle(action.episodeId)
+                                            }
+
+                                            else -> {
+                                                onAction(action)
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
+
+                        if (detail.hasOlderPages) {
+                            item(key = "loadOlder", contentType = "footer") {
+                                Box(
+                                    Modifier.fillMaxWidth().padding(FOOTER_PADDING),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    NdTextButton(
+                                        label = stringResource(Res.string.podcast_load_older),
+                                        onClick = onLoadOlder,
+                                        enabled = !state.refreshing,
+                                    )
+                                }
+                            }
+                        }
+                        if (items.loadState.append is LoadState.Loading) {
+                            item(key = "appendLoading", contentType = "footer") {
+                                Box(
+                                    Modifier.fillMaxWidth().padding(FOOTER_PADDING),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    NdLoading()
+                                }
                             }
                         }
                     }
@@ -822,17 +897,34 @@ private fun EpisodeRowPlaceholder() {
  */
 @Composable
 private fun LoadErrorBanner(items: LazyPagingItems<*>) {
-    val failed =
-        items.loadState.prepend is LoadState.Error ||
-            items.loadState.append is LoadState.Error ||
-            (items.loadState.refresh is LoadState.Error && items.itemCount > 0)
-    if (!failed) return
+    if (!hasPagingError(items)) return
     NdBanner(
         message = stringResource(Res.string.feeds_load_error),
         icon = NdIcons.Error,
         primary = NdDialogAction(stringResource(Res.string.action_retry), onClick = items::retry),
     )
 }
+
+/**
+ * Keep LazyColumn's top padding for exact restore/scroll-to-item anchors. The header paints its
+ * own matching inset upward into that padding, without adding it to the lazy item's height.
+ * This modifier is used only on that unbounded-height header item.
+ */
+private fun Modifier.overlapHeaderChrome(inset: Dp): Modifier {
+    if (inset == 0.dp) return this
+    return layout { measurable, constraints ->
+        val overlap = inset.roundToPx()
+        val child = measurable.measure(constraints)
+        layout(child.width, (child.height - overlap).coerceAtLeast(0)) {
+            child.placeRelative(0, -overlap)
+        }
+    }
+}
+
+private fun hasPagingError(items: LazyPagingItems<*>): Boolean =
+    items.loadState.prepend is LoadState.Error ||
+        items.loadState.append is LoadState.Error ||
+        (items.loadState.refresh is LoadState.Error && items.itemCount > 0)
 
 /** The header placeholder while `observePodcast` has not emitted (08's skeleton). */
 @Composable
