@@ -189,6 +189,9 @@ internal object DesktopShell {
 
         // Step 5: the graph, the initializer bands and the hand-off server.
         val graph = createDesktopGraph(dirs, buildInfo, crashReporter)
+        // The diagnostics ring is a graph singleton; it joins the sinks once the graph
+        // exists (09 — the pre-graph start-up lines stay file-only).
+        Log.install(*sinks, graph.ringBufferLogSink)
         val menuActions = DesktopMenuActions()
         val openHandler =
             DesktopOpenHandler(

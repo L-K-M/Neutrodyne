@@ -106,6 +106,9 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     /** `MainActivity` maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
 
+    /** The diagnostics ring installed beside `LogcatSink` in `NeutrodyneApplication` (09). */
+    val ringBufferLogSink: ch.lkmc.neutrodyne.core.common.RingBufferLogSink
+
     /**
      * M1b: the Keystore-backed store — graph tests prove `CredentialLookup` resolves to it, so
      * `AuthInterceptor` can never be left reading `None` in the app process.
