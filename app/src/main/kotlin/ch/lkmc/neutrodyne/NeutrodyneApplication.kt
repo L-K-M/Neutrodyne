@@ -54,18 +54,18 @@ class NeutrodyneApplication :
             return
         }
 
-        Log.install(
-            LogcatSink(if (BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.WARN),
-            // The diagnostics ring buffer — the graph singleton, so the repository sees it.
-            graph.ringBufferLogSink,
-        )
+        val logcat = LogcatSink(if (BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.WARN)
         if (role == ProcessRole.YTX) {
+            // `graph` throws outside the main process (D73), so :ytx logs to logcat only.
+            Log.install(logcat)
             ytxGraph = createGraphFactory<YtxGraph.Factory>().create(this)
             ProcessStartProbe.record(ProcessStartProbe.Event.YTX_GRAPH_CREATED)
             ProcessStartProbe.writeReport(this)
             return
         }
 
+        // The diagnostics ring buffer is the main graph's singleton, so the repository sees it.
+        Log.install(logcat, graph.ringBufferLogSink)
         ProcessStartProbe.record(ProcessStartProbe.Event.INITIALIZERS_LAUNCHED)
         graph.appScope.launch { runInitializers(graph.initializers) }
 
