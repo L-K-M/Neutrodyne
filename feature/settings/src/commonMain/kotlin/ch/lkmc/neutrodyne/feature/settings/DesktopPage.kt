@@ -54,19 +54,23 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * Settings › Desktop (08 Settings › Desktop; 11 Desktop settings). This slice carries the Window
- * section: the "When the window is closed" radio pair writes `desktop.close_behaviour`, and "Start
- * at login" toggles the OS login item through [DesktopIntegration] — the switch shows what the OS
- * reports, not the stored intent, so an entry the user removed or disabled in the OS reads
- * correctly. The row is hidden where registration is unsupported (dev runs, macOS until its
- * registrar lands); the downloads-folder, language, links and accessibility rows join it in their
- * own slices. `desktopIntegration` is `null` off the desktop — the page is unreachable there.
+ * Settings › Desktop (08 Settings › Desktop; 11 Desktop settings). One page holds the window
+ * section — the "When the window is closed" radio pair writes `desktop.close_behaviour`, and
+ * "Start at login" toggles the OS login item through [DesktopIntegration] — and the downloads
+ * section supplied by [downloadsFolder] (11 Change folder: [DesktopDownloadFolderSection]). The
+ * login switch shows what the OS reports, not the stored intent, so an entry the user removed or
+ * disabled in the OS reads correctly; the row is hidden where registration is unsupported (dev
+ * runs, macOS until its registrar lands). `desktopIntegration` is `null` off the desktop — the
+ * page is unreachable there — and the downloads slot defaults to empty so the page composes
+ * without a download graph; the language, links and accessibility rows join it in their own
+ * slices.
  */
 @Composable
 internal fun DesktopPage(
     settings: SettingsRepository,
     desktopIntegration: DesktopIntegration?,
     desktopOs: DesktopOs?,
+    downloadsFolder: @Composable () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHost = LocalSnackbarHost.current
@@ -162,6 +166,8 @@ internal fun DesktopPage(
                     }
                 }
             }
+            // 08's page order: WINDOW, then DOWNLOADS (11 Change folder).
+            downloadsFolder()
         }
     }
 }
