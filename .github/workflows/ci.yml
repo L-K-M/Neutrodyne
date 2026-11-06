@@ -149,6 +149,7 @@ jobs:
           python3 scripts/ci/tests/native-msys-reexec.test.py
           python3 scripts/ci/tests/release-assets.test.py
           python3 scripts/ci/tests/release-body.test.py
+          python3 scripts/ci/test-server-image.py
       - name: Preserve a formatting repair patch
         if: failure()
         run: |
