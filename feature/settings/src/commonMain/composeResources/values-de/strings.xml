@@ -120,6 +120,14 @@
     <string name="diagnostics_export_done">Datenbankkopie exportiert</string>
     <string name="diagnostics_export_failed">Datenbankexport fehlgeschlagen</string>
     <string name="diagnostics_export_cancelled">Export abgebrochen</string>
+    <string name="diagnostics_export_no_space">Nicht genügend Speicherplatz</string>
+    <string name="diagnostics_export_confirm_title">Datenbankkopie exportieren?</string>
+    <string name="diagnostics_export_confirm_body">Die Kopie enthält deine Abonnements, Titel und Hörverlauf. Adressen, Shownotes und Beschreibungen werden maskiert.</string>
+    <string name="diagnostics_export_confirm_go">Exportieren</string>
+    <string name="diagnostics_report_problem">Problem melden</string>
+    <string name="diagnostics_battery_settings">Akku-Einstellungen öffnen</string>
+    <string name="diagnostics_open_log_folder">Protokollordner öffnen</string>
+    <string name="diagnostics_loading">Diagnose wird gesammelt…</string>
     <string name="diagnostics_verbose_log">Detailliertes Protokoll für 24 Stunden</string>
     <string name="diagnostics_verbose_log_summary">Behält Debug-Zeilen im Diagnoseprotokoll für die nächsten 24 Stunden</string>
     <string name="diagnostics_section_app">App</string>

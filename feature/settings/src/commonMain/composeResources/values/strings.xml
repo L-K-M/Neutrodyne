@@ -127,6 +127,14 @@
     <string name="diagnostics_export_done">Database copy exported</string>
     <string name="diagnostics_export_failed">Database export failed</string>
     <string name="diagnostics_export_cancelled">Export cancelled</string>
+    <string name="diagnostics_export_no_space">Not enough storage space</string>
+    <string name="diagnostics_export_confirm_title">Export database copy?</string>
+    <string name="diagnostics_export_confirm_body">The copy includes your subscriptions, titles and listening history. Addresses, show notes and descriptions are masked.</string>
+    <string name="diagnostics_export_confirm_go">Export</string>
+    <string name="diagnostics_report_problem">Report a problem</string>
+    <string name="diagnostics_battery_settings">Open battery settings</string>
+    <string name="diagnostics_open_log_folder">Open log folder</string>
+    <string name="diagnostics_loading">Collecting diagnostics…</string>
     <string name="diagnostics_verbose_log">Detailed log for 24 hours</string>
     <string name="diagnostics_verbose_log_summary">Keeps debug-level lines in the diagnostics log for the next 24 hours</string>
     <string name="diagnostics_section_app">App</string>
