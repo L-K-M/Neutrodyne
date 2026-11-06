@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.testing.FakeAudioEngine
+import ch.lkmc.neutrodyne.core.testing.FakeLevelMutableLogSink
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
@@ -835,7 +836,7 @@ internal class PlaybackFixture(
     val graph =
         createDynamicGraphFactory<DesktopAppGraph.Factory>(
             PlaybackTestBindings(engine, clock, network, routeMonitor),
-        ).create(dirs, info, DesktopCrashReporter(dirs, info, clock, RecentLogBuffer()))
+        ).create(dirs, info, DesktopCrashReporter(dirs, info, clock, RecentLogBuffer()), FakeLevelMutableLogSink())
     val controller get() = graph.desktopPlaybackController
 
     suspend fun seed(): Long {
@@ -958,7 +959,12 @@ internal class PlaybackFixture(
         val bindings = PlaybackTestBindings(engine, clock, network, routeMonitor)
         val other =
             createDynamicGraphFactory<DesktopAppGraph.Factory>(bindings)
-                .create(dirs, info, DesktopCrashReporter(dirs, info, clock, RecentLogBuffer()))
+                .create(
+                    dirs,
+                    info,
+                    DesktopCrashReporter(dirs, info, clock, RecentLogBuffer()),
+                    FakeLevelMutableLogSink(),
+                )
         // Both graphs open the same on-disk DB, as a subsequent app process would.
         runBlocking { other.databaseOpener.awaitOpen() }
         extraGraphs += other
