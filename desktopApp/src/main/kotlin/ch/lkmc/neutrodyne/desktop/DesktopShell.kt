@@ -229,9 +229,14 @@ internal object DesktopShell {
         // the notification carries one, applies its route through the shared router — the
         // same path the banner fallback's "Open" action takes; navigation stays on the AWT
         // thread (`applyRoute` dispatches).
+        val newEpisodeSeenClear = {
+            val poster = graph.newEpisodePoster
+            if (poster is ch.lkmc.neutrodyne.desktop.notifications.DesktopNewEpisodePoster) poster.clearUnseen()
+        }
         graph.appScope.launch {
             graph.osNotifier.clicks.collect { notification ->
                 activator.bringToFront()
+                newEpisodeSeenClear()
                 notification.route?.let { uri ->
                     val route =
                         IntentRouter.route(RouteInput(RouteInput.Action.VIEW, uri = uri, internal = true))
@@ -327,6 +332,7 @@ internal object DesktopShell {
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,
                 onQuitRequest = ::exitApplication,
+                onWindowFocused = newEpisodeSeenClear,
             )
         }
         openEvents.close()

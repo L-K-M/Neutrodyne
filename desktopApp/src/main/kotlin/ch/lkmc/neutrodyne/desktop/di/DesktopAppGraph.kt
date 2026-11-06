@@ -30,7 +30,6 @@ import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
-import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
@@ -173,6 +172,12 @@ interface DesktopAppGraph {
     val desktopNotifier: DesktopNotifier
 
     /**
+     * MD2: the desktop new-episode poster (03) — grouping by group, the unseen set cleared
+     * by window focus and notification clicks; replaces M2's temporary no-op binding.
+     */
+    val newEpisodePoster: NewEpisodePoster
+
+    /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through
      * [provideDatabase], which blocks until the band-100 open finishes — held behind a lambda at
      * the call site so an early quit never pays it, and by then the runner is the started
@@ -204,6 +209,13 @@ interface DesktopAppGraph {
     @Binds
     val OsDesktopNotifier.asDesktopNotifier: DesktopNotifier
 
+    /**
+     * 03's desktop new-episode poster. Bound here, not contributed, so the journey tests'
+     * graphs can keep providing their fake without a duplicate-binding clash.
+     */
+    @Binds
+    val ch.lkmc.neutrodyne.desktop.notifications.DesktopNewEpisodePoster.asNewEpisodePoster: NewEpisodePoster
+
     @Provides
     @SingleIn(AppScope::class)
     fun osDesktopNotifier(
@@ -222,15 +234,6 @@ interface DesktopAppGraph {
      */
     @Provides
     fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
-
-    /** Temporary C4 binding; platform posting arrives in MD2. */
-    @Provides
-    fun provideNewEpisodePoster(): NewEpisodePoster =
-        object : NewEpisodePoster {
-            override suspend fun post(notices: List<NewEpisodeNotice>) = Unit
-
-            override suspend fun removePodcasts(podcastIds: List<Long>) = Unit
-        }
 
     @DependencyGraph.Factory
     fun interface Factory {

@@ -136,6 +136,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     busySignal: AppBusySignal,
     clock: Clock,
     onQuitRequest: () -> Unit,
+    onWindowFocused: () -> Unit = {},
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
@@ -245,7 +246,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
             window.background = java.awt.Color(argb, true)
             onDispose { }
         }
-        WindowEffects(activator = activator, background = background)
+        WindowEffects(activator = activator, background = background, onFocusGained = onWindowFocused)
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
@@ -423,6 +424,7 @@ private fun windowShortcut(
 private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
     activator: WindowActivator,
     background: Boolean,
+    onFocusGained: () -> Unit,
 ) {
     val density = LocalDensity.current
     DisposableEffect(window, density) {
@@ -437,7 +439,18 @@ private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
         // 11's `--background` start: iconified until the user restores it.
         if (background) window.extendedState = window.extendedState or Frame.ICONIFIED
         activator.register(window)
-        onDispose { activator.unregister(window) }
+        // 03's desktop new-episode poster: focus clears the unseen set.
+        val focusListener =
+            object : java.awt.event.WindowFocusListener {
+                override fun windowGainedFocus(event: java.awt.event.WindowEvent) = onFocusGained()
+
+                override fun windowLostFocus(event: java.awt.event.WindowEvent) = Unit
+            }
+        window.addWindowFocusListener(focusListener)
+        onDispose {
+            window.removeWindowFocusListener(focusListener)
+            activator.unregister(window)
+        }
     }
 }
 
