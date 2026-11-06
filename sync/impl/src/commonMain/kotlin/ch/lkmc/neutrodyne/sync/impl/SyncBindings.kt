@@ -28,6 +28,17 @@ object SyncBindings {
     @SingleIn(AppScope::class)
     fun syncTokenStore(secrets: SecretStore): SyncTokenStore = SyncTokenStore(secrets)
 
+    /**
+     * 10 Settings capture: the local synced-key recorder. The controller installs it while the
+     * link is committed and "Sync playback settings" is on, and clears it otherwise.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun settingsCapture(
+        db: NeutrodyneDatabase,
+        settings: SettingsSyncPort,
+    ): SettingsCapture = SettingsCapture(db, settings)
+
     /** 10 Durable apply effects: the engine's rounds and the first-link merge share one drain. */
     @Provides
     @SingleIn(AppScope::class)

@@ -1142,6 +1142,7 @@ private class Harness(
             clock = clock,
             address = address,
             flags = flags,
+            settingsCapture = SettingsCapture(db, settings),
             build = build,
             merger = merger,
             gate = gate,
