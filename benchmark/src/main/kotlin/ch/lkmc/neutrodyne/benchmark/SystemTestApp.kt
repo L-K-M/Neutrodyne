@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Base64
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
@@ -108,13 +109,27 @@ internal class SystemTestApp {
         node(By.res("nav_discover")).click()
         clickText("Add by URL")
         node(By.clazz("android.widget.EditText")).text = server.feedUrl
-        device.pressBack()
+        dismissIme()
         clickText("Subscribe")
         node(By.text(FixtureServer.PODCAST))
         clickText("Subscribe")
         clickText("Open")
         node(By.text(FixtureServer.EPISODE))
     }
+
+    /**
+     * Setting text through accessibility does not raise the IME, and a dialog that auto-focused its field
+     * may have: pressing back unconditionally would dismiss the Add-by-URL dialog itself when no IME is
+     * up. Only a shown keyboard is dismissed.
+     */
+    private fun dismissIme() {
+        if (!imeShown()) return
+        device.pressBack()
+        await("IME hidden") { !imeShown() }
+    }
+
+    private fun imeShown(): Boolean =
+        instrumentation.uiAutomation.windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
 
     companion object {
         const val PACKAGE = "ch.lkmc.neutrodyne"
