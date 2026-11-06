@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.PlayContextInfo
+import ch.lkmc.neutrodyne.core.model.PlaySessionInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
@@ -196,42 +197,44 @@ class DesktopPlaybackController(
                 value.planner.snapshots(),
                 value.queue.observeSession(),
                 value.capabilities.capabilities,
-            ) { queue, session, _ ->
-                queue to session?.context
-            }.flatMapLatest { (queue, info) ->
-                val ids = (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
-                value.media.observe(ids).map { Triple(queue, info, it) }
-            }.collect { (queue, info, media) ->
-                guarded {
-                    val projection = requireNotNull(projector)
-                    val plan =
-                        value.planner.plan(queue, media, playerWindow(), frozen = ::frozenForPlanner)
-                            ?: return@guarded
-                    context = info
-                    val oldId = current.value?.episodeId
-                    if (plan.playback == WindowPlayback.LOAD_PAUSED) {
-                        value.engine.pause()
-                        wantPlaying = false
+            ) { queue, _, _ -> queue }
+                .flatMapLatest { queue ->
+                    val ids =
+                        (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
+                    value.media.observe(ids).map { queue to it }
+                }.collect { (queue, media) ->
+                    guarded {
+                        val projection = requireNotNull(projector)
+                        val plan =
+                            value.planner.plan(queue, media, playerWindow(), frozen = ::frozenForPlanner)
+                                ?: return@guarded
+                        // Read the session with the queue: the session and queue flows invalidate
+                        // independently, so a cached context could be cleared by a stale pairing.
+                        context = coherentContext(queue, value.queue.observeSession().first(), context)
+                        val oldId = current.value?.episodeId
+                        if (plan.playback == WindowPlayback.LOAD_PAUSED) {
+                            value.engine.pause()
+                            wantPlaying = false
+                        }
+                        val replacement = plan.operations.filterIsInstance<WindowOp.SetAll>().singleOrNull()
+                        // Restore metadata without preparing output. The first play uses PlayStarter.
+                        if (!prepared) {
+                            restore(queue, media)
+                            return@guarded
+                        }
+                        if (replacement != null && oldId != queue.current?.episodeId) flushPause()
+                        if (replacement != null) prepareSettings(plan.entries)
+                        projection.apply(queue, plan.entries, plan.operations, engineCurrentId)
+                        pendingTracksKnown.keys.retainAll { id ->
+                            projection.entries.any { it.item.episodeId == id }
+                        }
+                        if (replacement != null || plan.operations.any { it == WindowOp.Clear }) {
+                            loaded(replacement?.startPositionMs ?: 0)
+                        }
+                        publish()
+                        if (plan.currentAction != CurrentAction.KEEP) advance(PlaybackExit.MARKED_PLAYED)
                     }
-                    val replacement = plan.operations.filterIsInstance<WindowOp.SetAll>().singleOrNull()
-                    // Restore metadata without preparing output. The first play uses PlayStarter.
-                    if (!prepared) {
-                        restore(queue, media)
-                        return@guarded
-                    }
-                    if (replacement != null && oldId != queue.current?.episodeId) flushPause()
-                    if (replacement != null) prepareSettings(plan.entries)
-                    projection.apply(queue, plan.entries, plan.operations, engineCurrentId)
-                    pendingTracksKnown.keys.retainAll { id ->
-                        projection.entries.any { it.item.episodeId == id }
-                    }
-                    if (replacement != null || plan.operations.any { it == WindowOp.Clear }) {
-                        loaded(replacement?.startPositionMs ?: 0)
-                    }
-                    publish()
-                    if (plan.currentAction != CurrentAction.KEEP) advance(PlaybackExit.MARKED_PLAYED)
                 }
-            }
         }
         scope.launch { value.engine.state.collect { state -> guarded { engineState(state) } } }
         // SharedFlow has no replay. Subscribe before setWindow can emit preparation metadata.
@@ -409,6 +412,9 @@ class DesktopPlaybackController(
 
             is StartOutcome.Committed -> {
                 val old = projector?.entries?.firstOrNull()?.item
+                // Publish the generation before projectStart's suspending reads, so the
+                // collector cannot mistake this own write for a foreign session and load it paused.
+                value.planner.appliedOwnGeneration(outcome.queue.generation)
                 if (!projectStart(outcome.queue, outcome.startPositionMs, ticket)) return PlayResult.ServiceUnavailable
                 requireIntent(ticket)
                 if (old != null && old.episodeId != outcome.queue.current?.episodeId) history.record(old)
@@ -684,12 +690,14 @@ class DesktopPlaybackController(
             } else {
                 value.sessions.onTransition(departure, next.episodeId, next.origin, revision, clock.now())
             } ?: return
+        // Publish the generation before the suspending reads below, so the collector cannot
+        // mistake this own write for a foreign session and load it paused.
+        value.planner.appliedOwnGeneration(generation)
         val committed = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
         if (committed.generation != generation || committed.current?.episodeId != next?.episodeId) return
         if (next == null) {
             value.engine.pause()
             projection.apply(committed, emptyList(), listOf(WindowOp.Clear), currentId)
-            value.planner.appliedOwnGeneration(generation)
             wantPlaying = false
             loaded(0)
             return
@@ -849,12 +857,14 @@ class DesktopPlaybackController(
             } else {
                 value.sessions.onTransition(departure, next.item.episodeId, next.item.origin, revision, clock.now())
             } ?: return
+        // Publish the generation before the suspending reads below, so the collector cannot
+        // mistake this own write for a foreign session and load it paused.
+        value.planner.appliedOwnGeneration(generation)
         val committed = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
         if (committed.generation != generation || committed.current?.episodeId != next?.item?.episodeId) return
         if (next == null) {
             value.engine.pause()
             projection.apply(committed, emptyList(), listOf(WindowOp.Clear), outgoingId)
-            value.planner.appliedOwnGeneration(generation)
             wantPlaying = false
             loaded(0)
             return
@@ -1110,10 +1120,14 @@ class DesktopPlaybackController(
             )
         val issue =
             pendingIssue
-                ?: (state as? EngineState.Error)?.error?.let {
-                    when (it) {
+                ?: (state as? EngineState.Error)?.error?.let { error ->
+                    when (error) {
+                        // A missing local file is re-resolved at once, so pendingIssue holds the
+                        // UI issue until the re-resolve; the raw error must not leak it early.
+                        EngineError.LocalFileMissing -> null
+
                         EngineError.Network -> PlaybackIssue.NETWORK_LOST
-                        EngineError.LocalFileMissing -> PlaybackIssue.LOCAL_FILE_MISSING
+
                         else -> PlaybackIssue.PLAYER_ERROR
                     }
                 }
@@ -1334,16 +1348,19 @@ class DesktopPlaybackController(
         serial {
             requireIntent(ticket)
             val value = runtime ?: return@serial
-            value.sessions.clearCurrent(
-                value.saver.capture(position(), durationMs, PlaybackExit.DISMISS)?.departure,
-                clock.now(),
-                allowed = { ticket == intent.get() },
-            )
+            val generation =
+                value.sessions.clearCurrent(
+                    value.saver.capture(position(), durationMs, PlaybackExit.DISMISS)?.departure,
+                    clock.now(),
+                    allowed = { ticket == intent.get() },
+                )
+            // Publish the generation before the suspending reads below, so the collector cannot
+            // mistake this own write for a foreign session and load it paused.
+            value.planner.appliedOwnGeneration(generation)
             requireIntent(ticket)
             value.engine.pause()
             val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
             requireNotNull(projector).apply(queue, emptyList(), listOf(WindowOp.Clear), engineCurrentId)
-            value.planner.appliedOwnGeneration(queue.generation)
             wantPlaying = false
             loaded(0)
             history.clear()
@@ -1460,3 +1477,20 @@ class DesktopPlaybackController(
         const val FOREGROUND_WINDOW_MS = 10 * 60_000L
     }
 }
+
+/**
+ * The queue and session flows invalidate independently, so a fresh queue emission can meet a
+ * stale session emission. Only a session that carries the queue's generation is the context of
+ * that queue; any other pairing keeps the last coherent context, or a transition landing in the
+ * gap would resolve the arrival's settings with a null group.
+ */
+internal fun coherentContext(
+    queue: VirtualQueue,
+    session: PlaySessionInfo?,
+    previous: PlayContextInfo?,
+): PlayContextInfo? =
+    when {
+        session != null && session.generation == queue.generation -> session.context
+        previous != null -> previous
+        else -> null
+    }
