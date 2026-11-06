@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.MergeValueOrigin
 import ch.lkmc.neutrodyne.core.model.MergedRecord
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -31,6 +32,7 @@ import ch.lkmc.neutrodyne.feeds.backup.QueueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingValueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import ch.lkmc.neutrodyne.feeds.backup.UpNextRefV1
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
@@ -78,6 +80,8 @@ class LibraryMergerImplTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
         )
 
     private val impl =
