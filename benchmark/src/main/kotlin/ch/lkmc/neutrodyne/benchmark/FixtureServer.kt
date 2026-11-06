@@ -25,8 +25,12 @@ internal class FixtureServer(
         }
     val requests = CopyOnWriteArrayList<Request>()
     private val server = MockWebServer()
-    val mediaUrl get() = server.url("/episode.wav").toString()
-    val feedUrl get() = server.url("/feed.xml").toString()
+
+    // server.url() reports the bound address's reverse-DNS name ("localhost" on the devices),
+    // not the literal 127.0.0.1; both loopback guards (the probe's URL check and the fixture
+    // initializer's seed require) accept only the address the server was bound to.
+    val mediaUrl get() = "http://127.0.0.1:${server.port}/episode.wav"
+    val feedUrl get() = "http://127.0.0.1:${server.port}/feed.xml"
 
     data class Request(
         val path: String,

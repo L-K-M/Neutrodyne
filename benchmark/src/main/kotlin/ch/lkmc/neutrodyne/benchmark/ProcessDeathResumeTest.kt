@@ -64,12 +64,14 @@ class ProcessDeathResumeTest {
         assertEquals(-1, reset.getInt("lastStopReason"))
         val partBytes = reset.getLong("partBytes")
         assertTrue(partBytes in MIN_PART_BYTES until server.media.size.toLong())
-        // The persisted byte checkpoint is deliberately not the source of the expected Range.
+        // The persisted byte checkpoint is deliberately not the source of the expected Range: the
+        // engine resumes from the surviving .part length minus 07's torn-tail trim.
+        val resumeFrom = partBytes - TORN_TAIL_BYTES
         assertEquals(FixtureServer.ETAG, reset.getString("etag"))
         app.background()
         app.probe("resume")
         app.await("server observed Range from surviving part length") {
-            server.requests.any { it.range == "bytes=$partBytes-" && it.ifRange == FixtureServer.ETAG }
+            server.requests.any { it.range == "bytes=$resumeFrom-" && it.ifRange == FixtureServer.ETAG }
         }
         var completed = JSONObject()
         app.await("resumed download completes", SystemTestApp.TRANSFER_TIMEOUT_MS) {
@@ -82,10 +84,13 @@ class ProcessDeathResumeTest {
         val mediaRequests = server.requests.filter { it.path == "/episode.wav" }
         assertEquals("one initial GET and one resumed GET", 2, mediaRequests.size)
         assertEquals(null, mediaRequests.first().range)
-        assertEquals("bytes=$partBytes-", mediaRequests.last().range)
+        assertEquals("bytes=$resumeFrom-", mediaRequests.last().range)
     }
 
     private companion object {
         const val MIN_PART_BYTES = 131_072L
+
+        /** 07 Transfer lifecycle recovery: a STOP_PROCESS_DEATH resume truncates min(64 KiB, length). */
+        const val TORN_TAIL_BYTES = 64L * 1024
     }
 }
