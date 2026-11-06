@@ -51,6 +51,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.ui.EmptyState
@@ -67,6 +68,7 @@ import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
+import ch.lkmc.neutrodyne.core.ui.resources.download_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_podcasts
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_caught_up
@@ -101,6 +103,7 @@ internal fun FeedPage(
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    onDownloadAll: (() -> Unit)? = null,
     onPlay: () -> Unit = {},
     onImport: () -> Unit = {},
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
@@ -139,6 +142,7 @@ internal fun FeedPage(
                     onFiltersChange = onFiltersChange,
                     onAction = onAction,
                     onMarkAllPlayedClick = onMarkAllPlayedClick,
+                    onDownloadAll = onDownloadAll,
                     visitBaseline = visitBaseline,
                 )
             }
@@ -159,6 +163,7 @@ private fun FeedList(
     onFiltersChange: (FeedFilters) -> Unit,
     onAction: (EpisodeAction) -> Unit,
     onMarkAllPlayedClick: () -> Unit,
+    onDownloadAll: (() -> Unit)?,
     visitBaseline: Long?,
     selection: EpisodeSelectionController?,
     emptyGroupName: String?,
@@ -178,7 +183,7 @@ private fun FeedList(
 
     if (refreshState is LoadState.Loading && items.itemCount == 0) {
         Column(Modifier.fillMaxSize()) {
-            FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick)
+            FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick, onDownloadAll)
             repeat(SKELETON_ROWS) { SkeletonRow() }
         }
         return
@@ -255,7 +260,7 @@ private fun FeedList(
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().testTag("feed_list")) {
             offlineBannerItem(state.offline)
             item(key = "header", contentType = "header") {
-                FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick)
+                FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick, onDownloadAll)
             }
             items(
                 count = items.itemCount,
@@ -385,6 +390,7 @@ private fun FeedHeader(
     onFiltersChange: (FeedFilters) -> Unit,
     onRefresh: () -> Unit,
     onMarkAllPlayedClick: () -> Unit,
+    onDownloadAll: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -406,6 +412,13 @@ private fun FeedHeader(
                 contentDescription = stringResource(Res.string.action_more),
             )
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                onDownloadAll?.let { download ->
+                    DropdownMenuItem(text = { Text(stringResource(Res.string.download_all)) }, onClick = {
+                        menuOpen =
+                            false
+                        ; download()
+                    })
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(Res.string.feeds_refresh)) },
                     onClick = {

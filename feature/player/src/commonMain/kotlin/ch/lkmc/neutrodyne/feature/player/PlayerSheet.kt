@@ -125,6 +125,7 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_expand
 import ch.lkmc.neutrodyne.feature.player.resources.player_file_missing
 import ch.lkmc.neutrodyne.feature.player.resources.player_forward
 import ch.lkmc.neutrodyne.feature.player.resources.player_forward_value
+import ch.lkmc.neutrodyne.feature.player.resources.player_hide_panel
 import ch.lkmc.neutrodyne.feature.player.resources.player_mark_skip
 import ch.lkmc.neutrodyne.feature.player.resources.player_metered_blocked
 import ch.lkmc.neutrodyne.feature.player.resources.player_minutes
@@ -275,6 +276,7 @@ internal fun PlayerSheet(
 
             val expandLabel = stringResource(Res.string.player_expand)
             val collapseLabel = stringResource(Res.string.player_collapse)
+            val hidePanelLabel = stringResource(Res.string.player_hide_panel)
             val dismissLabel = stringResource(Res.string.player_dismiss)
             val playLabel =
                 stringResource(
@@ -321,7 +323,9 @@ internal fun PlayerSheet(
                     customActions =
                         buildList {
                             add(
-                                CustomAccessibilityAction(collapseLabel) {
+                                CustomAccessibilityAction(
+                                    if (slot.layout.playerPanel) hidePanelLabel else collapseLabel,
+                                ) {
                                     if (slot.layout.playerPanel) setPanelHidden(true) else collapse()
                                     true
                                 },
@@ -558,7 +562,7 @@ internal fun PlayerSheet(
                     NdIconButton(
                         { if (slot.layout.playerPanel) setPanelHidden(true) else collapse() },
                         NdIcons.Close,
-                        collapseLabel,
+                        if (slot.layout.playerPanel) hidePanelLabel else collapseLabel,
                     )
                     Text(nowPlayingLabel, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     PlayerMenu(
@@ -624,19 +628,22 @@ internal fun PlayerSheet(
             }
             if (slot.layout.playerPanel) {
                 ArtworkTheme(ui.colors?.seedArgb) {
-                    AdaptivePlayerBody(
-                        if (tabletopHinge(slot.posture) != null) {
-                            PlayerContentLayout.TABLETOP
-                        } else {
-                            PlayerContentLayout.PORTRAIT
-                        },
-                        slot.posture,
-                        adaptiveHeader,
-                        adaptiveArt,
-                        fullControls,
-                        adaptiveTabs,
-                        Modifier.fillMaxSize().testTag("player_side_panel").then(fullPlayerSemantics),
-                    )
+                    // The panel hosts the compact full player; keep both tags for the shell tests.
+                    Box(Modifier.fillMaxSize().testTag("full_player")) {
+                        AdaptivePlayerBody(
+                            if (tabletopHinge(slot.posture) != null) {
+                                PlayerContentLayout.TABLETOP
+                            } else {
+                                PlayerContentLayout.PORTRAIT
+                            },
+                            slot.posture,
+                            adaptiveHeader,
+                            adaptiveArt,
+                            fullControls,
+                            adaptiveTabs,
+                            Modifier.fillMaxSize().testTag("player_side_panel").then(fullPlayerSemantics),
+                        )
+                    }
                 }
                 return@Box
             }

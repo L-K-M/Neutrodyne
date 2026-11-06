@@ -470,11 +470,12 @@ private fun ReadyRoot(
                                 )
                             }
                             if (layout.playerPanel) {
-                                Box(Modifier.width(if (windowWidthDp >= 1200) 412.dp else 360.dp)) {
+                                Box(Modifier.width(layout.playerPanelWidthDp.dp)) {
                                     player(
                                         PlayerSlotState(
                                             layout,
                                             navigateFromPlayer,
+                                            hidePanel = actions.hidePlayerPanel,
                                             windowWidthDp = windowWidthDp,
                                             posture = posture,
                                             expandRequest = expandRequest,
@@ -500,6 +501,11 @@ private fun ReadyRoot(
                             contentBottomPx = contentBottomPx,
                             expandRequest = expandRequest,
                             collapseRequest = collapseRequest + playerNavigationRequests,
+                            revealPanel =
+                                actions.revealPlayerPanel.takeIf {
+                                    platform == BuildInfo.Platform.DESKTOP &&
+                                        windowWidthDp >= PLAYER_PANEL_MIN_WINDOW_DP
+                                },
                             onExpandedSettled = { expandedSettled = it },
                         ),
                     )
