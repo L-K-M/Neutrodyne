@@ -17,11 +17,22 @@ grep -Eq '^OK \(1 test\)' "$output/seed.txt"
 adb shell bmgr enable true
 adb shell bmgr transport com.android.localtransport/.LocalTransport | tee "$output/transport.txt"
 grep -q 'Selected transport' "$output/transport.txt"
-# LocalTransport registers and initializes asynchronously: a backupnow before the init
-# completes is rejected with "Transport rejected package because it wasn't able to process
-# it at the time" (nightly 2026-11-06, api29). A bounded retry is allowed only for the
-# observed rc0 + a single "Initialization result: -1000" publish-before-store race
-# (05's Testing with bmgr); anything else fails closed, as does exhaustion.
+adb shell settings put secure backup_local_transport_parameters 'is_encrypted=true,fake_encryption_flag=true'
+# Pending is bounded and never treated as a completed snapshot.
+for attempt in 1 2 3 4 5; do
+  adb shell am broadcast --include-stopped-packages \
+    -n "$pkg/ch.lkmc.neutrodyne.SnapshotNowReceiver" | tee "$output/snapshot.txt"
+  if grep -Eq 'result=-1, data="ok ' "$output/snapshot.txt"; then break; fi
+  grep -q 'data="pending"' "$output/snapshot.txt"
+  sleep 5
+done
+grep -Eq 'result=-1, data="ok ' "$output/snapshot.txt"
+# LocalTransport initializes asynchronously: a backupnow before the init completes is
+# rejected with "Transport rejected package because it wasn't able to process it at the
+# time" (nightly 2026-11-06, api29). Run the init after the snapshot, as bmgr-check.sh
+# does, and require its real result. A bounded retry is allowed only for the observed
+# rc0 + a single "Initialization result: -1000" publish-before-store race (05's
+# Testing with bmgr); anything else fails closed, as does exhaustion.
 transport=com.android.localtransport/.LocalTransport
 init_attempts=0
 while :; do
@@ -44,16 +55,6 @@ while :; do
     *) echo "::error::bmgr init $transport ambiguous output ($init_results result lines): $(tr -d '\r' < "$output/init.txt" | tr '\n' ' ')"; exit 1 ;;
   esac
 done
-adb shell settings put secure backup_local_transport_parameters 'is_encrypted=true,fake_encryption_flag=true'
-# Pending is bounded and never treated as a completed snapshot.
-for attempt in 1 2 3 4 5; do
-  adb shell am broadcast --include-stopped-packages \
-    -n "$pkg/ch.lkmc.neutrodyne.SnapshotNowReceiver" | tee "$output/snapshot.txt"
-  if grep -Eq 'result=-1, data="ok ' "$output/snapshot.txt"; then break; fi
-  grep -q 'data="pending"' "$output/snapshot.txt"
-  sleep 5
-done
-grep -Eq 'result=-1, data="ok ' "$output/snapshot.txt"
 adb shell bmgr backupnow "$pkg" | tee "$output/backup.txt"
 grep -q "Package $pkg with result: Success" "$output/backup.txt"
 # LocalTransport's directory moved between platform releases. Require exactly one archive.
