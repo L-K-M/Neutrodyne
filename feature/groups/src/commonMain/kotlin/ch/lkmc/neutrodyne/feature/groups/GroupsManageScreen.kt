@@ -48,12 +48,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.Group
+import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
 import ch.lkmc.neutrodyne.core.ui.GroupMosaicLayout
 import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
@@ -159,7 +159,7 @@ internal fun GroupsManageScreen(
 
                 state.groups.isEmpty() -> {
                     Column(Modifier.fillMaxSize()) {
-                        NdEmptyState(
+                        EmptyState(
                             icon = NdIcons.GridView,
                             title = stringResource(Res.string.groups_manage_empty),
                             body = stringResource(Res.string.groups_manage_empty_body),
