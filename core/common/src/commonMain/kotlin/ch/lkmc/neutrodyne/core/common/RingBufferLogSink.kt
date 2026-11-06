@@ -23,43 +23,43 @@ class RingBufferLogSink
     constructor(
         private val clock: Clock,
         private val capacity: Int = DEFAULT_CAPACITY,
-    ) : LogSink {
-    @Volatile
-    var minLevel: LogLevel = LogLevel.INFO
+    ) : LevelMutableLogSink {
+        @Volatile
+        override var minLevel: LogLevel = LogLevel.INFO
 
-    private val lock = Any()
-    private val lines = ArrayDeque<String>(capacity)
+        private val lock = Any()
+        private val lines = ArrayDeque<String>(capacity)
 
-    private val _lines = MutableStateFlow<List<String>>(emptyList())
+        private val mutableLines = MutableStateFlow<List<String>>(emptyList())
 
-    /** Newest-last snapshot, updated on every kept line. */
-    val linesFlow: StateFlow<List<String>> = _lines.asStateFlow()
+        /** Newest-last snapshot, updated on every kept line. */
+        val linesFlow: StateFlow<List<String>> = mutableLines.asStateFlow()
 
-    override fun log(
-        level: LogLevel,
-        tag: String,
-        message: String,
-    ) {
-        if (level.ordinal < minLevel.ordinal) return
-        val at = Instant.fromEpochMilliseconds(clock.now())
-        val line = "$at $level $tag $message"
-        synchronized(lock) {
-            if (lines.size == capacity) lines.removeFirst()
-            lines.addLast(line)
-            _lines.value = lines.toList()
+        override fun log(
+            level: LogLevel,
+            tag: String,
+            message: String,
+        ) {
+            if (level.ordinal < minLevel.ordinal) return
+            val at = Instant.fromEpochMilliseconds(clock.now())
+            val line = "$at $level $tag $message"
+            synchronized(lock) {
+                if (lines.size == capacity) lines.removeFirst()
+                lines.addLast(line)
+                mutableLines.value = lines.toList()
+            }
+        }
+
+        /** Drops the buffer — tests and process teardown only. */
+        fun clear() {
+            synchronized(lock) {
+                lines.clear()
+                mutableLines.value = emptyList()
+            }
+        }
+
+        companion object {
+            /** 09's LOG section: the last 500 redacted log lines. */
+            const val DEFAULT_CAPACITY = 500
         }
     }
-
-    /** Drops the buffer — tests and process teardown only. */
-    fun clear() {
-        synchronized(lock) {
-            lines.clear()
-            _lines.value = emptyList()
-        }
-    }
-
-    companion object {
-        /** 09's LOG section: the last 500 redacted log lines. */
-        const val DEFAULT_CAPACITY = 500
-    }
-}
