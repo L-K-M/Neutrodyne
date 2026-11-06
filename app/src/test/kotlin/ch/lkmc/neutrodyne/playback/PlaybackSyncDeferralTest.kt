@@ -308,10 +308,11 @@ class PlaybackSyncDeferralTest {
             assertThat(db.podcastDao().bySyncId(podcastSyncId)).isNotNull()
             assertThat(db.syncHeldDao().count()).isEqualTo(1)
 
-            // The player stops: the real bridge's Stopped releases the deferral through the
-            // scheduler's event wiring, and the removal applies.
-            bridge.updateActive(null, isPlaying = false, sinceMs = 0)
+            // The player stops exactly as production does: the bridge clears `active` before its
+            // Stopped boundary (06 Sync interplay), so the release reading the port sees nothing
+            // playing and the removal applies through the scheduler's event wiring.
             bridge.stopped()
+            assertThat(bridge.active.value).isNull()
             withTimeout(10_000) {
                 awaitUntil { db.podcastDao().bySyncId(podcastSyncId) == null }
             }

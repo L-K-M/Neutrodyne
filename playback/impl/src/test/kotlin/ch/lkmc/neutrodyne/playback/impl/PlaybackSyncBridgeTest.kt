@@ -168,7 +168,7 @@ class PlaybackSyncBridgeTest {
             }
         }
 
-    @Test fun teardownEmitsStoppedAndThenClearsActive() =
+    @Test fun teardownClearsActiveBeforeStopped() =
         runTest {
             val f = AdapterFixture(this)
             val id = f.seed(1).single()
@@ -182,12 +182,20 @@ class PlaybackSyncBridgeTest {
 
             f.stopActivePublisher()
             f.projector.detach()
-            val teardown = f.tracker.detach(f.tracker.flush(PositionFlushReason.DESTROY)) { f.sync.stopped() }
+            // 06 Sync interplay: a release reading the port at the boundary must already see
+            // `active` null, so capture it at the moment the bridge emits Stopped.
+            var activeWhenStopped: ActivePlayback? = null
+            val teardown =
+                f.tracker.detach(f.tracker.flush(PositionFlushReason.DESTROY)) {
+                    f.sync.stopped()
+                    activeWhenStopped = f.sync.active.value
+                }
             f.sync.detachAfter(teardown)
             f.applier.detach().join()
             teardown?.join()
             runCurrent()
             awaitAdapter { f.sync.active.value == null }
+            assertNull(activeWhenStopped)
             assertEquals(PlaybackSyncEvent.Stopped, awaitEvent(received) { it is PlaybackSyncEvent.Stopped })
             f.exo.release()
             f.serviceJob.cancel()

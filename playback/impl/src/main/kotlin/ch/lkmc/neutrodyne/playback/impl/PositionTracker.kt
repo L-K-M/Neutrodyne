@@ -182,7 +182,7 @@ internal class PositionTracker(
         return teardownSnapshot?.let { snapshot ->
             applicationScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 withContext(NonCancellable) { result(saver.flush(snapshot)) }
-                // 06 `onDestroy`: the flush's Stopped follows the save, before `active = null`.
+                // 06 `onDestroy`: the flush's Stopped follows the save and the `active` clear.
                 after()
             }
         }

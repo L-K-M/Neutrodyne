@@ -75,6 +75,11 @@ public class PlaybackSyncBridge(
     }
 
     public fun stopped() {
+        // 06 Sync interplay: the boundary is observable only after the matching save, and
+        // `active` must already be null — a release reading the port at `Stopped` (10's
+        // while-playing deferral) has to see that nothing plays any more.
+        updateActive(null, isPlaying = false, sinceMs = 0)
+        guard.currentChanged(null)
         boundaries.tryEmit(PlaybackSyncEvent.Stopped)
     }
 
@@ -83,8 +88,9 @@ public class PlaybackSyncBridge(
     }
 
     /**
-     * 06 `onDestroy`: `active = null` after the flush's `Stopped` — the teardown job emits it once
-     * its `NonCancellable` save completes, so waiting for the job keeps the ordering.
+     * 06 `onDestroy`: joins the teardown flush. [stopped] has already cleared `active` before its
+     * boundary; the repeat covers a teardown with no flush (no loaded item), where no boundary
+     * fires.
      */
     public fun detachAfter(teardown: Job?) {
         notifyPlayer = null
