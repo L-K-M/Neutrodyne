@@ -28,8 +28,11 @@ class LinuxMenuEntryInstaller(
     /** The Settings row's state: no launcher (dev) reads unsupported, not "absent". */
     fun status(): LinuxMenuEntryState {
         if (launcher() == null) return LinuxMenuEntryState.UNSUPPORTED
-        return if (Files.isRegularFile(entryFile())) LinuxMenuEntryState.INSTALLED
-        else LinuxMenuEntryState.NOT_INSTALLED
+        return if (Files.isRegularFile(entryFile())) {
+            LinuxMenuEntryState.INSTALLED
+        } else {
+            LinuxMenuEntryState.NOT_INSTALLED
+        }
     }
 
     /** Writes entry and icons; `false` (logged) when the launcher or images are missing. */
@@ -49,7 +52,6 @@ class LinuxMenuEntryInstaller(
     }
 
     private fun entryFile(): Path = dataHome.resolve("applications").resolve(LinuxDesktopEntryWriter.ENTRY_FILE_NAME)
-
 
     /**
      * Copies every packaged `hicolor/<size>x<size>/apps/neutrodyne.png` under
@@ -76,9 +78,7 @@ class LinuxMenuEntryInstaller(
             val preferred = target.resolve("256x256").resolve("apps").resolve(ICON_NAME)
             when {
                 Files.isRegularFile(preferred) -> preferred
-
                 chosen != null -> chosen
-
                 else -> null
             }
         } catch (e: IOException) {
@@ -89,7 +89,10 @@ class LinuxMenuEntryInstaller(
 
     /** `hicolor/256x256/...` → 256; 0 when the name is unexpected. */
     private fun iconSize(icon: Path): Int =
-        icon.parent.parent.fileName.toString().substringBefore('x').toIntOrNull() ?: 0
+        icon.parent.parent.fileName
+            .toString()
+            .substringBefore('x')
+            .toIntOrNull() ?: 0
 
     /** Same-directory temp file plus rename — a torn write never leaves half an entry. */
     private fun writeEntry(content: String) {

@@ -237,7 +237,9 @@ class DbusDesktopPortalTest {
     ) : AutoCloseable {
         private val bus: DBusConnection = DBusConnectionBuilder.forAddress(address).build()
         val calls = ConcurrentLinkedQueue<String>()
-        val root: Path = java.nio.file.Files.createTempDirectory("nd-reveal")
+        val root: Path =
+            java.nio.file.Files
+                .createTempDirectory("nd-reveal")
 
         private val manager =
             object : FileManager1 {

@@ -99,7 +99,9 @@ class OsDesktopNotifierTest {
         route = route,
     )
 
-    private class FakeChannel(deliver: Boolean = true) : OsNotificationChannel {
+    private class FakeChannel(
+        deliver: Boolean = true,
+    ) : OsNotificationChannel {
         val posts = mutableListOf<DesktopNotification>()
         val cancels = mutableListOf<String>()
         var closed = false

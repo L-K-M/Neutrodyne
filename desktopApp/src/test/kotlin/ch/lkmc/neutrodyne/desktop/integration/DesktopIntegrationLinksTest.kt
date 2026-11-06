@@ -16,46 +16,50 @@ import org.junit.Test
  */
 class DesktopIntegrationLinksTest {
     @Test
-    fun aNonApplicableInstallHidesTheRows() = runTest {
-        val integration = DesktopIntegrationImpl(UnsupportedRegistrar, NotApplicableLinks, FakeSettingsRepository())
+    fun aNonApplicableInstallHidesTheRows() =
+        runTest {
+            val integration = DesktopIntegrationImpl(UnsupportedRegistrar, NotApplicableLinks, FakeSettingsRepository())
 
-        assertThat(integration.linkHandlers.value).isNull()
-        assertThat(integration.canAddToApplicationsMenu).isFalse()
-    }
-
-    @Test
-    fun theFlowReportsTheOsStateAndRegisterReReadsIt() = runTest {
-        val links = RecordingLinks(handled = false)
-        val integration = DesktopIntegrationImpl(UnsupportedRegistrar, links, FakeSettingsRepository())
-
-        assertThat(integration.linkHandlers.value).isFalse()
-
-        links.nextHandled = true
-        assertThat(integration.registerLinkHandlers()).isTrue()
-
-        assertThat(integration.linkHandlers.value).isTrue()
-        assertThat(links.registerCalls).isEqualTo(1)
-    }
+            assertThat(integration.linkHandlers.value).isNull()
+            assertThat(integration.canAddToApplicationsMenu).isFalse()
+        }
 
     @Test
-    fun aFailedWriteReturnsFalseAndKeepsTheOsTruth() = runTest {
-        val links = RecordingLinks(handled = false, succeed = false)
-        val integration = DesktopIntegrationImpl(UnsupportedRegistrar, links, FakeSettingsRepository())
+    fun theFlowReportsTheOsStateAndRegisterReReadsIt() =
+        runTest {
+            val links = RecordingLinks(handled = false)
+            val integration = DesktopIntegrationImpl(UnsupportedRegistrar, links, FakeSettingsRepository())
 
-        assertThat(integration.registerLinkHandlers()).isFalse()
-        assertThat(integration.linkHandlers.value).isFalse()
-    }
+            assertThat(integration.linkHandlers.value).isFalse()
+
+            links.nextHandled = true
+            assertThat(integration.registerLinkHandlers()).isTrue()
+
+            assertThat(integration.linkHandlers.value).isTrue()
+            assertThat(links.registerCalls).isEqualTo(1)
+        }
 
     @Test
-    fun theMenuRowDelegatesToTheSeam() = runTest {
-        val links = RecordingLinks(handled = false, menu = true)
-        val integration = DesktopIntegrationImpl(UnsupportedRegistrar, links, FakeSettingsRepository())
+    fun aFailedWriteReturnsFalseAndKeepsTheOsTruth() =
+        runTest {
+            val links = RecordingLinks(handled = false, succeed = false)
+            val integration = DesktopIntegrationImpl(UnsupportedRegistrar, links, FakeSettingsRepository())
 
-        assertThat(integration.canAddToApplicationsMenu).isTrue()
-        assertThat(integration.addToApplicationsMenu()).isTrue()
-        assertThat(links.menuCalls).isEqualTo(1)
-        assertThat(integration.linkHandlers.value).isTrue()
-    }
+            assertThat(integration.registerLinkHandlers()).isFalse()
+            assertThat(integration.linkHandlers.value).isFalse()
+        }
+
+    @Test
+    fun theMenuRowDelegatesToTheSeam() =
+        runTest {
+            val links = RecordingLinks(handled = false, menu = true)
+            val integration = DesktopIntegrationImpl(UnsupportedRegistrar, links, FakeSettingsRepository())
+
+            assertThat(integration.canAddToApplicationsMenu).isTrue()
+            assertThat(integration.addToApplicationsMenu()).isTrue()
+            assertThat(links.menuCalls).isEqualTo(1)
+            assertThat(integration.linkHandlers.value).isTrue()
+        }
 
     private object UnsupportedRegistrar : LoginItemRegistrar {
         override fun status(): LoginItemState = LoginItemState.UNSUPPORTED

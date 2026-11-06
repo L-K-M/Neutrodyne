@@ -333,7 +333,7 @@ internal object DesktopShell {
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,
                 onQuitRequest = ::exitApplication,
-                onWindowFocused = newEpisodeSeenClear,
+                onWindowFocusGain = newEpisodeSeenClear,
             )
         }
         openEvents.close()

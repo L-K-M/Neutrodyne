@@ -40,56 +40,56 @@ class DesktopIntegrationImpl
         private val links: DesktopLinkRegistration,
         private val settings: SettingsRepository,
     ) : DesktopIntegration {
-    private val state = MutableStateFlow(readStatus(initial = true))
-    override val loginItem: StateFlow<LoginItemState> = state
+        private val state = MutableStateFlow(readStatus(initial = true))
+        override val loginItem: StateFlow<LoginItemState> = state
 
-    /** Seeded from the OS and re-read after every link action (the OS entry is the truth). */
-    private val linkState = MutableStateFlow<Boolean?>(if (links.applicable) links.handled() else null)
-    override val linkHandlers: StateFlow<Boolean?> = linkState
+        /** Seeded from the OS and re-read after every link action (the OS entry is the truth). */
+        private val linkState = MutableStateFlow<Boolean?>(if (links.applicable) links.handled() else null)
+        override val linkHandlers: StateFlow<Boolean?> = linkState
 
-    override val canAddToApplicationsMenu: Boolean
-        get() = links.canAddToApplicationsMenu
+        override val canAddToApplicationsMenu: Boolean
+            get() = links.canAddToApplicationsMenu
 
-    override suspend fun setStartAtLogin(enabled: Boolean): Outcome<Unit, StartAtLoginError> {
-        if (readStatus() == LoginItemState.UNSUPPORTED) {
-            return Outcome.Failure(StartAtLoginError.Unsupported)
-        }
-        try {
-            if (enabled) registrar.register() else registrar.unregister()
-        } catch (e: LoginItemException) {
+        override suspend fun setStartAtLogin(enabled: Boolean): Outcome<Unit, StartAtLoginError> {
+            if (readStatus() == LoginItemState.UNSUPPORTED) {
+                return Outcome.Failure(StartAtLoginError.Unsupported)
+            }
+            try {
+                if (enabled) registrar.register() else registrar.unregister()
+            } catch (e: LoginItemException) {
+                state.value = readStatus()
+                return Outcome.Failure(StartAtLoginError.Failed(e.message.orEmpty()))
+            }
+            // Intent survives installs; the row itself always reads the OS entry back.
+            settings.set(DesktopSettingKeys.START_AT_LOGIN, enabled)
             state.value = readStatus()
-            return Outcome.Failure(StartAtLoginError.Failed(e.message.orEmpty()))
+            return Outcome.Success(Unit)
         }
-        // Intent survives installs; the row itself always reads the OS entry back.
-        settings.set(DesktopSettingKeys.START_AT_LOGIN, enabled)
-        state.value = readStatus()
-        return Outcome.Success(Unit)
+
+        override suspend fun registerLinkHandlers(): Boolean = applyLinks { links.register() }
+
+        override suspend fun addToApplicationsMenu(): Boolean = applyLinks { links.addToMenu() }
+
+        /** Runs the action, then reports the OS state either way — like the login toggle. */
+        private fun applyLinks(action: () -> Boolean): Boolean {
+            val succeeded = action()
+            if (links.applicable) linkState.value = links.handled()
+            return succeeded
+        }
+
+        /** The OS entry, or the documented fallback when the OS cannot answer the read. */
+        private fun readStatus(initial: Boolean = false): LoginItemState =
+            runCatching { registrar.status() }
+                .onFailure { failure ->
+                    Log.w(
+                        TAG,
+                        failure,
+                    ) { "login item status read failed${if (initial) " at construction" else ""}" }
+                }.fold(
+                    onSuccess = { it },
+                    onFailure = { if (initial) LoginItemState.UNSUPPORTED else state.value },
+                )
     }
-
-    override suspend fun registerLinkHandlers(): Boolean = applyLinks { links.register() }
-
-    override suspend fun addToApplicationsMenu(): Boolean = applyLinks { links.addToMenu() }
-
-    /** Runs the action, then reports the OS state either way — like the login toggle. */
-    private fun applyLinks(action: () -> Boolean): Boolean {
-        val succeeded = action()
-        if (links.applicable) linkState.value = links.handled()
-        return succeeded
-    }
-
-    /** The OS entry, or the documented fallback when the OS cannot answer the read. */
-    private fun readStatus(initial: Boolean = false): LoginItemState =
-        runCatching { registrar.status() }
-            .onFailure { failure ->
-                Log.w(
-                    TAG,
-                    failure,
-                ) { "login item status read failed${if (initial) " at construction" else ""}" }
-            }.fold(
-                onSuccess = { it },
-                onFailure = { if (initial) LoginItemState.UNSUPPORTED else state.value },
-            )
-}
 
 private const val TAG = "DesktopIntegration"
 

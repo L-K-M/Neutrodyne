@@ -49,7 +49,15 @@ class DesktopNewEpisodePosterTest {
     @Test
     fun aSingleEpisodeShowsPodcastAndEpisodeAndRoutesToIt() =
         runBlocking {
-            poster.post(listOf(notice(groupUuid = "g1", groupName = "Tech", episodes = listOf(line(11, 1, "Podcast A", "Episode 1")))))
+            poster.post(
+                listOf(
+                    notice(
+                        groupUuid = "g1",
+                        groupName = "Tech",
+                        episodes = listOf(line(11, 1, "Podcast A", "Episode 1")),
+                    ),
+                ),
+            )
 
             val item = posted.single()
             assertThat(item.id).isEqualTo("new-episodes")

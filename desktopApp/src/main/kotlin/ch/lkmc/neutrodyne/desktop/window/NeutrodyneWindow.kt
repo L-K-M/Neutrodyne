@@ -136,7 +136,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     busySignal: AppBusySignal,
     clock: Clock,
     onQuitRequest: () -> Unit,
-    onWindowFocused: () -> Unit = {},
+    onWindowFocusGain: () -> Unit = {},
     portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
@@ -247,7 +247,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
             window.background = java.awt.Color(argb, true)
             onDispose { }
         }
-        WindowEffects(activator = activator, background = background, onFocusGained = onWindowFocused)
+        WindowEffects(activator = activator, background = background, onFocusGain = onWindowFocusGain)
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
@@ -426,9 +426,12 @@ private fun windowShortcut(
 private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
     activator: WindowActivator,
     background: Boolean,
-    onFocusGained: () -> Unit,
+    onFocusGain: () -> Unit,
 ) {
     val density = LocalDensity.current
+    // Referenced inside the effect below: a restarting effect must read the current
+    // callback, not capture the composition-time lambda.
+    val focusGain by androidx.compose.runtime.rememberUpdatedState(onFocusGain)
     DisposableEffect(window, density) {
         window.minimumSize =
             with(density) {
@@ -444,7 +447,7 @@ private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
         // 03's desktop new-episode poster: focus clears the unseen set.
         val focusListener =
             object : java.awt.event.WindowFocusListener {
-                override fun windowGainedFocus(event: java.awt.event.WindowEvent) = onFocusGained()
+                override fun windowGainedFocus(event: java.awt.event.WindowEvent) = focusGain()
 
                 override fun windowLostFocus(event: java.awt.event.WindowEvent) = Unit
             }

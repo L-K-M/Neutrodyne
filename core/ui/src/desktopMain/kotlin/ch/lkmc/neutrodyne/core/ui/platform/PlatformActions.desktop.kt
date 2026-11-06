@@ -90,8 +90,14 @@ internal class DesktopPlatformActions(
                 // — a dismissed portal dialog must not open a second chooser.
                 portal?.let { p ->
                     when (val choice = p.chooseDirectory(title, null)) {
-                        is DirectoryChoice.Chosen -> return choice.path
-                        DirectoryChoice.Cancelled -> return null
+                        is DirectoryChoice.Chosen -> {
+                            return choice.path
+                        }
+
+                        DirectoryChoice.Cancelled -> {
+                            return null
+                        }
+
                         DirectoryChoice.Unavailable -> {}
                     }
                 }

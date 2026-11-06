@@ -54,18 +54,17 @@ class DbusDesktopPortal internal constructor(
     override suspend fun showItems(file: String): Boolean =
         withContext(Dispatchers.IO) {
             runCatching {
-                    val uri = Path.of(file).toUri().toASCIIString()
-                    bus()
-                        .getRemoteObject(FileManagerNames.BUS, FileManagerNames.PATH, FileManager1::class.java)
-                        .ShowItems(listOf(uri), "")
-                }
-                .fold(
-                    onSuccess = { true },
-                    onFailure = {
-                        Log.w(TAG, it) { "FileManager1.ShowItems unavailable; caller falls back" }
-                        false
-                    },
-                )
+                val uri = Path.of(file).toUri().toASCIIString()
+                bus()
+                    .getRemoteObject(FileManagerNames.BUS, FileManagerNames.PATH, FileManager1::class.java)
+                    .ShowItems(listOf(uri), "")
+            }.fold(
+                onSuccess = { true },
+                onFailure = {
+                    Log.w(TAG, it) { "FileManager1.ShowItems unavailable; caller falls back" }
+                    false
+                },
+            )
         }
 
     override suspend fun chooseDirectory(

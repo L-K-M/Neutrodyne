@@ -20,16 +20,22 @@ class LinuxMenuEntryInstallerTest {
         launcher: String?,
         icons: Path?,
         dataHome: Path = Files.createTempDirectory(root, "home"),
-    ) = dataHome to LinuxMenuEntryInstaller(
-        dataHome = dataHome,
-        launcher = { launcher },
-        iconsSource = { icons },
-    )
+    ) = dataHome to
+        LinuxMenuEntryInstaller(
+            dataHome = dataHome,
+            launcher = { launcher },
+            iconsSource = { icons },
+        )
 
     private fun packagedIcons(vararg sizes: Int): Path {
         val root = Files.createTempDirectory(this.root, "source").resolve("desktop-integration")
         for (size in sizes) {
-            val png = root.resolve("hicolor").resolve("${size}x$size").resolve("apps").resolve("neutrodyne.png")
+            val png =
+                root
+                    .resolve("hicolor")
+                    .resolve("${size}x$size")
+                    .resolve("apps")
+                    .resolve("neutrodyne.png")
             Files.createDirectories(png.parent)
             Files.write(png, ByteArray(size))
         }
@@ -53,7 +59,7 @@ class LinuxMenuEntryInstallerTest {
 
         val icon256 = home.resolve("icons/hicolor/256x256/apps/neutrodyne.png")
         assertThat(Files.isRegularFile(icon256)).isTrue()
-        assertThat(content).contains("Icon=${icon256.toString()}")
+        assertThat(content).contains("Icon=$icon256")
         assertThat(Files.isRegularFile(home.resolve("icons/hicolor/128x128/apps/neutrodyne.png"))).isTrue()
         assertThat(Files.isRegularFile(home.resolve("icons/hicolor/512x512/apps/neutrodyne.png"))).isTrue()
         assertThat(installer.status()).isEqualTo(LinuxMenuEntryState.INSTALLED)

@@ -409,7 +409,8 @@ class SettingsScreensTest {
             waitUntil("the registration lands", TIMEOUT_MS) { integration.registerLinkHandlersCalls == 1 }
             waitUntil("the state re-reads", TIMEOUT_MS) {
                 onAllNodesWithText("Neutrodyne opens feed:, podcast:, pcast: and itpc: links")
-                    .fetchSemanticsNodes().isNotEmpty()
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
             }
         }
 

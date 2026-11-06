@@ -196,7 +196,13 @@ internal fun DesktopPage(
                     supportingContent = {
                         Text(
                             stringResource(
-                                if (linkHandlers == true) Res.string.desktop_links_open_on else Res.string.desktop_links_not_setup,
+                                if (linkHandlers ==
+                                    true
+                                ) {
+                                    Res.string.desktop_links_open_on
+                                } else {
+                                    Res.string.desktop_links_not_setup
+                                },
                             ),
                         )
                     },
@@ -223,7 +229,13 @@ internal fun DesktopPage(
                     supportingContent = {
                         Text(
                             stringResource(
-                                if (linkHandlers == true) Res.string.desktop_links_menu_done else Res.string.desktop_links_menu_summary,
+                                if (linkHandlers ==
+                                    true
+                                ) {
+                                    Res.string.desktop_links_menu_done
+                                } else {
+                                    Res.string.desktop_links_menu_summary
+                                },
                             ),
                         )
                     },

@@ -199,11 +199,12 @@ class DesktopNotifierTest {
     ) = DesktopNotification(
         id = id,
         kind = NotificationKind.APP_UPDATE,
-        title = when (id) {
-            "download-failed" -> "Download failed"
-            "new-episodes" -> "New episodes"
-            else -> "Update"
-        },
+        title =
+            when (id) {
+                "download-failed" -> "Download failed"
+                "new-episodes" -> "New episodes"
+                else -> "Update"
+            },
         body = body,
         route = route,
     )
@@ -288,7 +289,9 @@ class DesktopNotifierTest {
         private val capabilities: List<String> = listOf("actions", "body", "body-markup"),
     ) : AutoCloseable {
         private val bus: DBusConnection = DBusConnectionBuilder.forAddress(address).build()
-        private val nextId = java.util.concurrent.atomic.AtomicInteger(1)
+        private val nextId =
+            java.util.concurrent.atomic
+                .AtomicInteger(1)
 
         val calls = ConcurrentLinkedQueue<NotifyCall>()
         val closed = ConcurrentLinkedQueue<UInt32>()
@@ -340,7 +343,11 @@ class DesktopNotifierTest {
         }
 
         fun close(id: UInt32) {
-            runCatching { bus.sendMessage(NotificationsApi.NotificationClosed(NotificationsNames.PATH, id, UInt32(1L))) }
+            runCatching {
+                bus.sendMessage(
+                    NotificationsApi.NotificationClosed(NotificationsNames.PATH, id, UInt32(1L)),
+                )
+            }
         }
 
         override fun close() = bus.close()

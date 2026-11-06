@@ -123,8 +123,8 @@ internal class LinuxDbusNotifications internal constructor(
                 closed
             }
         runCatching {
-                synchronized(lock) { api }?.CloseNotification(UInt32(serverId))
-            }.onFailure { Log.w(TAG, it) { "CloseNotification failed for $id" } }
+            synchronized(lock) { api }?.CloseNotification(UInt32(serverId))
+        }.onFailure { Log.w(TAG, it) { "CloseNotification failed for $id" } }
     }
 
     override fun close() {
@@ -152,7 +152,12 @@ internal class LinuxDbusNotifications internal constructor(
         return try {
             val conn = connect()
             opened = conn
-            val remote = conn.getRemoteObject(NotificationsNames.BUS, NotificationsNames.PATH, NotificationsApi::class.java)
+            val remote =
+                conn.getRemoteObject(
+                    NotificationsNames.BUS,
+                    NotificationsNames.PATH,
+                    NotificationsApi::class.java,
+                )
             conn.addSigHandler(NotificationsApi.ActionInvoked::class.java, DBusSigHandler(::onActionInvoked))
             conn.addSigHandler(NotificationsApi.NotificationClosed::class.java, DBusSigHandler(::onNotificationClosed))
             val caps = runCatching { remote.GetCapabilities() }.getOrDefault(emptyList())

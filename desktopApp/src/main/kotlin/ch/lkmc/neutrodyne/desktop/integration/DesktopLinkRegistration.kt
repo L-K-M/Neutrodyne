@@ -90,21 +90,29 @@ object DesktopLinkBindings {
     ): DesktopLinkRegistration {
         val launcher = System.getProperty(JPACKAGE_APP_PATH)
         return when (val desktop = buildInfo.desktop) {
-            is BuildInfo.Desktop ->
+            is BuildInfo.Desktop -> {
                 when (desktop.os) {
-                    DesktopOs.WINDOWS -> WindowsLinkRegistration(UrlSchemeRegistrar(JnaWindowsRegistry, launcher))
+                    DesktopOs.WINDOWS -> {
+                        WindowsLinkRegistration(UrlSchemeRegistrar(JnaWindowsRegistry, launcher))
+                    }
 
-                    DesktopOs.LINUX ->
+                    DesktopOs.LINUX -> {
                         if (desktop.installKind == InstallKind.TAR_GZ) {
                             LinuxTarGzLinkRegistration(menuInstaller)
                         } else {
                             NoLinkRegistration // DEB and RPM install the entry
                         }
+                    }
 
-                    DesktopOs.MACOS -> NoLinkRegistration // CFBundleURLTypes at install time
+                    DesktopOs.MACOS -> {
+                        NoLinkRegistration
+                    } // CFBundleURLTypes at install time
                 }
+            }
 
-            null -> NoLinkRegistration
+            null -> {
+                NoLinkRegistration
+            }
         }
     }
 
