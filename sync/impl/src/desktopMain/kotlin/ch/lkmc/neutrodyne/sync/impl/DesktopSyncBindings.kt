@@ -34,14 +34,6 @@ import kotlinx.coroutines.launch
 @ContributesTo(AppScope::class)
 @BindingContainer
 object DesktopSyncBindings {
-    /**
-     * The desktop `PlaybackSyncPort` stays dormant until 11's `DesktopPlaybackController` lands
-     * with MD1a.2 (06 Sync interplay, implementation note 2026-11-05).
-     */
-    @Provides
-    fun playbackSyncPort(): ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort =
-        ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
-
     @Provides
     @SingleIn(AppScope::class)
     internal fun desktopSyncLane(
