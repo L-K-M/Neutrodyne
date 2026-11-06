@@ -1923,6 +1923,16 @@ Settings › Desktop exists only on the desktop (`PlatformInfo`), layout by 08 (
 
 Rows of shared settings that do not apply on the desktop are hidden with a one-line explanation where users may look for them: metered-network and Wi-Fi-only rows, "only while charging", "Pause for navigation prompts", the notification-permission prompt, Auto Backup ([Behaviour differences from Android](#behaviour-differences-from-android)).
 
+**Implementation note (2026-11-06, MD4 context menus and screenshots).** The row context
+menus belong to the shared rows (08's section); the desktop shell only provides
+`LocalScrollbars`, and the Feeds group tab's menu is the Feeds screen's. MD4 AC2's matrix is
+the episode-row states in light and dark at 600, 900 and 1,400 dp, captured in the PR tier so
+CI verifies the acceptance evidence on every change; the five destinations' own width matrix
+is M10's. The scrollbars draw through `Modifier.ndScrollbar` on the lists, grids, settings
+pages, show notes and sheets, and overlay each surface's existing end padding. The Linux
+screen-reader statement of [Linux screen-reader gap](#linux-screen-reader-gap) now also
+appears in Settings › About (EN and DE), not only in the README and the Install & updates help.
+
 ---
 
 ## Accessibility
