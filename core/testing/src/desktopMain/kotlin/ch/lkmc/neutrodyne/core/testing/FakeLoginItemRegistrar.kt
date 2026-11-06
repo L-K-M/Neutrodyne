@@ -25,7 +25,16 @@ class FakeLoginItemRegistrar(
     /** Set to make [register] throw, like an OS refusing the write. */
     var registerError: LoginItemException? = null
 
-    override fun status(): LoginItemState = state
+    /**
+     * Set to make [status] throw, like a registry/IO/JNA error reading the OS entry. The
+     * last successful [state] stays readable for the failure-path assertions.
+     */
+    var statusError: RuntimeException? = null
+
+    override fun status(): LoginItemState {
+        statusError?.let { throw it }
+        return state
+    }
 
     override fun register() {
         registerCalls++
