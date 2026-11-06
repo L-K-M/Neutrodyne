@@ -61,6 +61,13 @@ interface SettingsSyncPort {
         value: Any?,
         atMs: Long,
     )
+
+    /**
+     * Every synced key's current value as its wire JSON ([encode] text, defaults included), for
+     * the whole-library captures of 10's first link ("Use this device's library everywhere"
+     * step 3). Keys whose value fails to encode are omitted.
+     */
+    suspend fun syncedLiteralValues(): Map<SettingKey<*>, String>
 }
 
 /** One local synced-key change, with the value's JSON text and the wall time of the write. */

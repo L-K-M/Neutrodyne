@@ -165,6 +165,7 @@ object SyncBindings {
             settings = settings,
             secrets = secrets,
             sharePasswords = { flags.sharePasswords },
+            syncPlaybackSettings = { flags.syncPlaybackSettings },
             coordinator = coordinator,
             effects = effects,
             clock = clock,
