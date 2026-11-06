@@ -12,9 +12,14 @@ import java.nio.file.Path
  * at the copied 256×256 PNG, a moved archive re-runs into a refreshed (not duplicated)
  * entry, and a dev run without `jpackage.app-path` reports unsupported and writes
  * nothing. No process is started — these tests would notice: nothing here executes.
+ * The runs are OS-wide on purpose: the desktop-entry string escape doubles the icon
+ * path's backslashes, which only a Windows path exercises.
  */
 class LinuxMenuEntryInstallerTest {
     private val root = Files.createTempDirectory("menu-entry")
+
+    /** The desktop-entry string escape over an icon path: only `\` is rewritten. */
+    private fun escapedIcon(icon: Path): String = icon.toString().replace("\\", "\\\\")
 
     private fun installer(
         launcher: String?,
@@ -74,7 +79,7 @@ class LinuxMenuEntryInstallerTest {
 
         val entry = home.resolve("applications").resolve(LinuxDesktopEntryWriter.ENTRY_FILE_NAME)
         assertThat(Files.readString(entry))
-            .contains("Icon=${home.resolve("icons/hicolor/128x128/apps/neutrodyne.png")}")
+            .contains("Icon=${escapedIcon(home.resolve("icons/hicolor/128x128/apps/neutrodyne.png"))}")
     }
 
     @Test
