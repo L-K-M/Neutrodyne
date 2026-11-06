@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -110,6 +111,7 @@ class SyncSettingsScreenTest {
             username = "anna",
             nodeId = "0000000000000001",
             lastSyncAtMs = null,
+            activity = SyncActivity.IDLE,
             problem = null,
         )
 
