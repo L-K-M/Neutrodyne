@@ -144,7 +144,10 @@ internal class DatabaseDiagnosticsContributor
             }.getOrDefault(emptyList())
     }
 
-/** The SYNC card (09): enabled state, masked server, last sync and pending local changes. */
+/**
+ * The SYNC card (09): enabled state, protocol, last sync and pending local changes. The
+ * server's address never appears — diagnostics end up in public issues (09's SYNC rule).
+ */
 @ContributesIntoSet(AppScope::class)
 internal class SyncDiagnosticsContributor
     @Inject
@@ -160,11 +163,7 @@ internal class SyncDiagnosticsContributor
                     DiagnosticsLine("enabled", (state?.enabled == true).toString()),
                 )
             if (state != null) {
-                val server = state.serverUrl
-                if (!server.isNullOrBlank()) {
-                    lines += DiagnosticsLine("serverHost", Redactor.text(server))
-                }
-                state.accountId?.let { lines += DiagnosticsLine("account", Redactor.text(it)) }
+                state.protocol?.let { lines += DiagnosticsLine("protocol", it.toString()) }
                 val lastSync = state.lastSyncAt
                 lines += DiagnosticsLine("lastSyncAt", lastSync?.toString() ?: "never")
                 state.lastError?.let {

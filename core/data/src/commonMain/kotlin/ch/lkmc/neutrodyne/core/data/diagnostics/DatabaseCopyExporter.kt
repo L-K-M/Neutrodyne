@@ -118,9 +118,15 @@ internal class DatabaseCopyExporter
             const val MIN_FREE_BYTES = 50L * 1_048_576
             private const val TAG = "DbCopyExporter"
 
-            /** `neutrodyne-diagnostics-<yyyy-MM-dd-HHmm>.db` in UTC (02). */
+            /**
+             * `neutrodyne-diagnostics-<yyyy-MM-dd-HHmm>.db` in UTC (02). month/day are Int
+             * only on the desktop's newer kotlinx-datetime; the deprecated accessors are
+             * the common denominator.
+             */
+            @Suppress("DEPRECATION")
             fun fileName(now: Long): String {
                 val t = Instant.fromEpochMilliseconds(now).toLocalDateTime(TimeZone.UTC)
+
                 fun Int.pad() = toString().padStart(2, '0')
                 return "$NAME_PREFIX${t.year}-${t.monthNumber.pad()}-${t.dayOfMonth.pad()}" +
                     "-${t.hour.pad()}${t.minute.pad()}$NAME_SUFFIX"
