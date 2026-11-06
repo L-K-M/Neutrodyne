@@ -55,6 +55,10 @@ while :; do
     *) echo "::error::bmgr init $transport ambiguous output ($init_results result lines): $(tr -d '\r' < "$output/init.txt" | tr '\n' ' ')"; exit 1 ;;
   esac
 done
+# The init result is published before the transport finishes storing it (05's
+# Testing with bmgr); a backupnow immediately after the init is rejected with
+# "Transport rejected package because it wasn't able to process it at the time".
+sleep 5
 adb shell bmgr backupnow "$pkg" | tee "$output/backup.txt"
 grep -q "Package $pkg with result: Success" "$output/backup.txt"
 # LocalTransport's directory moved between platform releases. Require exactly one archive.

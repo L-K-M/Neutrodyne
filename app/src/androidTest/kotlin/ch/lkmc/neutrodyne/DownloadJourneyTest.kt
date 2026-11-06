@@ -183,6 +183,9 @@ class DownloadJourneyTest {
     fun visibleApi33DownloadUsesDataSyncForegroundWorker() =
         runBlocking {
             val id = seed("cbr_128k_2s.mp3", 120, rate = TransferRate.THROTTLED)
+            // The engine's drain stops until the network reports validated; requesting
+            // before that tears the FGS down before the dump can observe it.
+            await { graph.networkMonitor.status.value.isValidated }
             request(id)
             await {
                 db
