@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceRenameRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.InviteRedeemRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LinkApproveRequest
@@ -200,7 +201,8 @@ class AuthHttpTest {
                     setBody(SyncJson.encodeToString(DeviceRenameRequest(" New name ")))
                 }
             renamed.expect(HttpStatusCode.OK)
-            assertTrue(renamed.bodyAsText().contains("New name"))
+            // The server trims the name; an untrimmed echo would still contain the substring.
+            assertEquals("New name", SyncJson.decodeFromString(DeviceDto.serializer(), renamed.bodyAsText()).name)
             client.delete("/api/v1/devices/${alice.deviceId}") { api(alice.token) }.expect(HttpStatusCode.NoContent)
             client.get("/api/v1/account") { api(alice.token) }.expect(HttpStatusCode.Unauthorized)
             client.get("/api/v1/account") { api(bob.token) }.expect(HttpStatusCode.OK)
