@@ -2,12 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.domain
 
-import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Outcome
-import dev.zacsweers.metro.BindingContainer
-import dev.zacsweers.metro.ContributesTo
-import dev.zacsweers.metro.Provides
-import dev.zacsweers.metro.SingleIn
 
 /**
  * The sync-side cooperations of a restore on a linked device (05 Restore while linked, MS2).
@@ -60,16 +55,4 @@ object NoLinkedRestoreCoordinator : LinkedRestoreCoordinator {
         backupPodcastKeys: Set<String>,
         backupGroupNames: Set<String>,
     ): Outcome<AllDevicesReachEffect, BackupError> = Outcome.Failure(BackupError.Unsupported)
-}
-
-/**
- * Binds the fail-closed default until `:sync:impl`'s coordinator lands with the first-link
- * merger port (the next PR of this stack); that binding replaces this one.
- */
-@BindingContainer
-@ContributesTo(AppScope::class)
-object LinkedRestoreCoordinatorBindings {
-    @Provides
-    @SingleIn(AppScope::class)
-    fun linkedRestoreCoordinator(): LinkedRestoreCoordinator = NoLinkedRestoreCoordinator
 }
