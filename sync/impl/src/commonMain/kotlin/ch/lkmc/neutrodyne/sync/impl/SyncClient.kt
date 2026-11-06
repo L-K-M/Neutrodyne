@@ -122,6 +122,8 @@ class SyncTransportException(
     val status: Int,
     val code: String?,
     message: String,
+    /** `Retry-After` seconds for `429` responses; the events stream obeys it before reconnecting. */
+    val retryAfterSeconds: Long? = null,
 ) : Exception(message)
 
 /**
@@ -182,7 +184,12 @@ class KtorSyncClient(
         userCode: String,
         approve: Boolean,
     ) {
-        postJson<Unit>(baseUrl, "/api/v1/auth/link/confirm", LinkConfirmRequest(userCode, approve), token)
+        postJson<LinkConfirmRequest, Unit>(
+            baseUrl,
+            "/api/v1/auth/link/confirm",
+            LinkConfirmRequest(userCode, approve),
+            token,
+        )
     }
 
     override suspend fun logout() {
@@ -230,17 +237,18 @@ class KtorSyncClient(
     private suspend fun postNoContent(
         baseUrl: String,
         path: String,
-        body: Any? = null,
         token: String? = null,
     ) {
-        val response = request(baseUrl, path, body ?: Unit, token != null, token)
+        val response = request(baseUrl, path, Unit, token != null, token)
         if (!response.status.isSuccess()) throw problem(response)
     }
 
-    private suspend fun request(
+    // The body parameter is reified through every caller: `SyncJson.encodeToString` resolves
+    // the serializer statically, so a statically `Any`-typed body would find no serializer.
+    private suspend inline fun <reified B : Any> request(
         baseUrl: String,
         path: String,
-        body: Any,
+        body: B,
         auth: Boolean,
         token: String? = null,
     ): io.ktor.client.statement.HttpResponse {
@@ -253,10 +261,10 @@ class KtorSyncClient(
         }
     }
 
-    private suspend inline fun <reified T> postJson(
+    private suspend inline fun <reified B : Any, reified T> postJson(
         baseUrl: String,
         path: String,
-        body: Any,
+        body: B,
         token: String? = null,
         auth: Boolean = true,
     ): T {
@@ -265,10 +273,10 @@ class KtorSyncClient(
         return SyncJson.decodeFromString<T>(response.bodyAsText())
     }
 
-    private suspend inline fun <reified T> patchJson(
+    private suspend inline fun <reified B : Any, reified T> patchJson(
         baseUrl: String,
         path: String,
-        body: Any,
+        body: B,
     ): T {
         val response =
             client.patch(baseUrl.trimEnd('/') + path) {
@@ -298,7 +306,12 @@ class KtorSyncClient(
         val text = runCatching { response.bodyAsText() }.getOrDefault("")
         val code =
             runCatching { SyncJson.decodeFromString(ProblemDto.serializer(), text).code }.getOrNull()
-        return SyncTransportException(response.status.value, code, "sync request failed: ${response.status}")
+        return SyncTransportException(
+            response.status.value,
+            code,
+            "sync request failed: ${response.status}",
+            response.headers["Retry-After"]?.toLongOrNull(),
+        )
     }
 
     private suspend fun delete(
