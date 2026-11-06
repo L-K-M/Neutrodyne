@@ -558,6 +558,8 @@ data class LaneStatus(val running: Boolean, val lastStartAt: Instant?, val lastE
 
 `downloads-move` is the lane name of `DesktopMoveLane`, which PLAN's lane list does not show separately; it is idle unless a move is pending.
 
+**Implementation note (2026-11-06, M11b).** `DesktopMaintenanceLane` exists on the `maintenance` lane and keeps the 24 h cadence (stored in `diagnostics.maintenance_last_run_at`) plus the 10-minute start guard. One piece of 02's `VACUUM` guard has no counterpart yet: "no sync round in progress" needs the `sync` lane, which lands with MS2 — the lane passes `vacuumBlocker = null` until then, while the playback, download and free-space guards are all in place.
+
 ### Wake and restart catch-up
 
 R8.7 requires overdue work to start within 2 min after a wake or restart.
