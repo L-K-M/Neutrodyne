@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.common.Redactor
 import ch.lkmc.neutrodyne.core.common.RingBufferLogSink
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.exporting.ExportDestination
@@ -67,15 +68,18 @@ internal class DiagnosticsRepositoryImpl
                                                         DiagnosticsLine(
                                                             "unavailable",
                                                             throwable::class.simpleName ?: "error",
-                                                            DiagnosticsSeverity.PROBLEM,
+                                                            DiagnosticsSeverity.WARNING,
                                                         ),
                                                     )
                                                 }
                                         }
                                             ?: listOf(
-                                                DiagnosticsLine("unavailable", "timeout", DiagnosticsSeverity.PROBLEM),
+                                                DiagnosticsLine("unavailable", "timeout", DiagnosticsSeverity.WARNING),
                                             )
-                                    if (lines.isEmpty()) null else DiagnosticsSection(contributor.section, lines)
+                                    // 09: values pass Redactor once more — contributors should already have
+                                    // redacted, but stop-reason and parse-warning texts can quote URLs.
+                                    val redacted = lines.map { it.copy(value = Redactor.text(it.value)) }
+                                    if (redacted.isEmpty()) null else DiagnosticsSection(contributor.section, redacted)
                                 }
                             }.awaitAll()
                             .filterNotNull()
