@@ -64,7 +64,7 @@ class LinuxMenuEntryInstallerTest {
 
         val icon256 = home.resolve("icons/hicolor/256x256/apps/neutrodyne.png")
         assertThat(Files.isRegularFile(icon256)).isTrue()
-        assertThat(content).contains("Icon=$icon256")
+        assertThat(content).contains("Icon=${escapedIcon(icon256)}")
         assertThat(Files.isRegularFile(home.resolve("icons/hicolor/128x128/apps/neutrodyne.png"))).isTrue()
         assertThat(Files.isRegularFile(home.resolve("icons/hicolor/512x512/apps/neutrodyne.png"))).isTrue()
         assertThat(installer.status()).isEqualTo(LinuxMenuEntryState.INSTALLED)
