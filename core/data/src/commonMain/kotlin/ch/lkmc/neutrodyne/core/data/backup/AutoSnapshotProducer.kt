@@ -10,7 +10,6 @@ import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
-import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.hasRestoreIntent
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -74,7 +73,6 @@ import kotlin.coroutines.cancellation.CancellationException
 internal class AutoSnapshotProducer(
     private val db: NeutrodyneDatabase,
     private val writer: BackupWriter,
-    private val cleaner: ImportSessionCleaner,
     private val readers: ArchiveReaderFactory,
     private val settings: SettingsRepository,
     private val snapshots: SnapshotScheduler,
@@ -147,7 +145,8 @@ internal class AutoSnapshotProducer(
     /**
      * One pass of 05's Snapshot production algorithm: the enabled gate, the restore-lane
      * guard (native work or a committed durable intent — either side of a crash window),
-     * the foreign probe, the M3 interim import-session cleanup, then the level ladder.
+     * the foreign probe, then the level ladder. The import-session cleanup it ran as the
+     * M3 interim lives in `db-maintenance` since M11b (02 step 3).
      * Every guard failure returns a distinct [SnapshotResult] and preserves the current file.
      */
     suspend fun produce(): SnapshotResult {
@@ -193,10 +192,6 @@ internal class AutoSnapshotProducer(
 
         // Step 3: a foreign or unprovably-local snapshot is never overwritten.
         if (snapshotProbe() == SnapshotProbe.FOREIGN) return SnapshotResult.GuardedForeign
-
-        // Step 4 (interim until 02's db-maintenance lands, M11b): the host sweeps sessions.
-        suspendRunCatching { cleaner.cleanExpired() }
-            .onFailure { Log.w(TAG, it) { "import-session cleanup failed during snapshot production" } }
 
         // `files/backup/` is this lane's own directory — the writer stages into it but never
         // creates it, so the first write's parent must exist before the ladder starts.

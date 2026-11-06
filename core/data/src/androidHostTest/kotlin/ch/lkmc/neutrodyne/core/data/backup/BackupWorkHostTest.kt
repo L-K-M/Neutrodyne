@@ -17,7 +17,6 @@ import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.NoPayloadSource
 import ch.lkmc.neutrodyne.core.data.androidBuildInfo
 import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
-import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.importing.WorkManagerImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.newDb
@@ -211,25 +210,17 @@ class BackupWorkHostTest {
         }
 
     @Test
-    fun `a disabled flag clears the armed poke but keeps the sweep`() =
+    fun `a disabled flag clears the armed poke`() =
         runTest {
             val db = openDb()
             settings.set(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED, false)
             snapshots.requestSoon()
-            // An expired DONE session — §9's sweep must still run with snapshots off.
-            val expired =
-                db.seedImportSession(
-                    state = ImportState.DONE,
-                    createdAt = 0L,
-                    finishedAt = 0L,
-                )
 
             initializer(db).run()
             advanceUntilIdle()
 
             awaitReal { !snapshots.soonWorkLive() }
             specOf(infoOf(RestoreWorkData.WORK_SNAPSHOT).id)
-            awaitReal { db.importDao().sessionById(expired) == null }
         }
 
     @Test
@@ -342,7 +333,6 @@ class BackupWorkHostTest {
             work = Provider { imports },
             db = Provider { db },
             settings = settings,
-            cleaner = Provider { ImportSessionCleaner(db, payloads, clock, Dispatchers.IO) },
             appScope = appScope,
         )
     }
@@ -366,20 +356,6 @@ class BackupWorkHostTest {
                     androidBuildInfo(),
                     clock,
                     fileSystem,
-                    Dispatchers.IO,
-                ),
-            cleaner =
-                ImportSessionCleaner(
-                    db,
-                    PayloadStore(
-                        storagePaths = storagePaths,
-                        fileSystem = fileSystem,
-                        payloads = NoPayloadSource(),
-                        httpClients = testClients(),
-                        netErrors = testNetErrors,
-                        io = Dispatchers.IO,
-                    ),
-                    clock,
                     Dispatchers.IO,
                 ),
             readers =

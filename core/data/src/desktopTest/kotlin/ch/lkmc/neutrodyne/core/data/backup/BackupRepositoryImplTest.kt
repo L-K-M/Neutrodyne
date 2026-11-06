@@ -15,7 +15,6 @@ import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
 import ch.lkmc.neutrodyne.core.data.exporting.exportDirOf
 import ch.lkmc.neutrodyne.core.data.importing.ImportClassifier
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
-import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.LaneImportWorkScheduler
@@ -171,7 +170,7 @@ class BackupRepositoryImplTest {
             netErrors = testClassifier,
             io = Dispatchers.Default,
         )
-    private val cleaner = ImportSessionCleaner(db, payloads, clock, Dispatchers.IO)
+
     private val exporter = OpmlExporter(db, secrets, clock, Dispatchers.Default)
     private val androidInfo = testBuildInfo().copy(platform = BuildInfo.Platform.ANDROID)
 
@@ -250,7 +249,6 @@ class BackupRepositoryImplTest {
         AutoSnapshotProducer(
             db = db,
             writer = writer,
-            cleaner = cleaner,
             readers = ZipGuard(),
             settings = settings,
             snapshots = snapshots,
