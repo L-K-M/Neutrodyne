@@ -96,7 +96,7 @@ internal class DiagnosticsViewModel(
                     userMessages.post(UiText.Res(Res.string.diagnostics_export_done))
                 }
 
-                is Outcome.Failure ->
+                is Outcome.Failure -> {
                     userMessages.post(
                         UiText.Res(
                             if (outcome.error == DiagnosticsError.CANCELLED) {
@@ -106,6 +106,7 @@ internal class DiagnosticsViewModel(
                             },
                         ),
                     )
+                }
             }
         }
     }
