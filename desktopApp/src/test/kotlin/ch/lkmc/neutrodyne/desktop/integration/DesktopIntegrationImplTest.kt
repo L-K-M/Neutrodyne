@@ -83,4 +83,45 @@ class DesktopIntegrationImplTest {
                 .isEqualTo(Outcome.Failure(StartAtLoginError.Unsupported))
             assertThat(unsupported.loginItem.value).isEqualTo(LoginItemState.UNSUPPORTED)
         }
+
+    @Test
+    fun `a failing status read reports unsupported instead of failing construction`() {
+        val registrar = FakeLoginItemRegistrar()
+        registrar.statusError = IllegalStateException("registry read failed")
+
+        val integration = DesktopIntegrationImpl(registrar, settings)
+
+        assertThat(integration.loginItem.value).isEqualTo(LoginItemState.UNSUPPORTED)
+    }
+
+    @Test
+    fun `a failing status read never fails the toggle and keeps the last known state`() =
+        runTest {
+            integration.setStartAtLogin(true)
+            assertThat(integration.loginItem.value).isEqualTo(LoginItemState.REGISTERED)
+            registrar.statusError = IllegalStateException("registry read failed")
+
+            val outcome = integration.setStartAtLogin(false)
+
+            // The OS write itself succeeded, so the outcome is honest; only the read-back is
+            // blind, and the flow keeps the last state it could see.
+            assertThat(outcome).isEqualTo(Outcome.Success(Unit))
+            assertThat(registrar.unregisterCalls).isEqualTo(1)
+            assertThat(integration.loginItem.value).isEqualTo(LoginItemState.REGISTERED)
+            assertThat(settings.get(DesktopSettingKeys.START_AT_LOGIN)).isFalse()
+        }
+
+    @Test
+    fun `a failing status read still reports a refused write`() =
+        runTest {
+            registrar.statusError = IllegalStateException("registry read failed")
+            registrar.registerError =
+                ch.lkmc.neutrodyne.core.common
+                    .LoginItemException("registry write denied")
+
+            val outcome = integration.setStartAtLogin(true)
+
+            assertThat(outcome).isInstanceOf(Outcome.Failure::class.java)
+            assertThat((outcome as Outcome.Failure).error).isInstanceOf(StartAtLoginError.Failed::class.java)
+        }
 }

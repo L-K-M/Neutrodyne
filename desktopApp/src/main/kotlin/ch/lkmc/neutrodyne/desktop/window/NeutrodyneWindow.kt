@@ -352,24 +352,47 @@ private fun requestClose(
  * the window went to the taskbar instead of a tray — persisted through
  * `desktop.tray_hint_shown` so it shows exactly once.
  */
-private fun maybeShowNoTrayHint(
+internal fun maybeShowNoTrayHint(
     appScope: CoroutineScope,
     settings: SettingsRepository?,
     banners: DesktopBannerNotifier,
 ) {
     appScope.launch {
-        val repo = settings ?: return@launch
-        if (repo.get(DesktopSettingKeys.TRAY_HINT_SHOWN)) return@launch
-        repo.set(DesktopSettingKeys.TRAY_HINT_SHOWN, true)
-        banners.post(
+        suspendRunCatching {
+            val title = getString(Res.string.no_tray_hint_title)
+            val body = getString(Res.string.no_tray_hint_body)
+            showNoTrayHintOnce(settings, banners::post, title, body)
+        }.onFailure { Log.w("NeutrodyneWindow", it) { "no-tray hint failed" } }
+    }
+}
+
+/**
+ * The hint's one-time rule, separate from Compose string resolution so the ordering guard
+ * stays unit-testable: the banner is posted first and the `desktop.tray_hint_shown` flag
+ * written only after the post returned, so a failing post leaves the hint showable instead
+ * of suppressing it forever. Any failure is captured for the caller to log.
+ */
+internal suspend fun showNoTrayHintOnce(
+    settings: SettingsRepository?,
+    post: suspend (DesktopNotification) -> Unit,
+    title: String,
+    body: String,
+) {
+    suspendRunCatching {
+        val repo = settings ?: return@suspendRunCatching
+        if (repo.get(DesktopSettingKeys.TRAY_HINT_SHOWN)) return@suspendRunCatching
+        post(
             DesktopNotification(
                 id = NOTIFICATION_ID_NO_TRAY,
                 kind = NotificationKind.APP_SHELL,
-                title = getString(Res.string.no_tray_hint_title),
-                body = getString(Res.string.no_tray_hint_body),
+                title = title,
+                body = body,
                 route = null,
             ),
         )
+        // Only a returned post counts: a throw above leaves the flag clear, so the hint can
+        // be shown again on a later close instead of being suppressed forever.
+        repo.set(DesktopSettingKeys.TRAY_HINT_SHOWN, true)
     }
 }
 
