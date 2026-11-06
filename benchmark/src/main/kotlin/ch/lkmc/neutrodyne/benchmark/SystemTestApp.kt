@@ -108,13 +108,22 @@ internal class SystemTestApp {
     fun subscribe(server: FixtureServer) {
         node(By.res("nav_discover")).click()
         clickText("Add by URL")
-        node(By.clazz("android.widget.EditText")).text = server.feedUrl
+        // The sheet composes over Discover's search field: the URL field is addressed by its
+        // test tag, never by EditText class (a class query can match the search field behind
+        // the modal, leaving the confirm disabled and the click dead).
+        node(By.res("add_url_field")).text = server.feedUrl
         dismissIme()
-        clickText("Subscribe")
+        clickConfirm()
         node(By.text(FixtureServer.PODCAST))
-        clickText("Subscribe")
+        clickConfirm()
         clickText("Open")
         node(By.text(FixtureServer.EPISODE))
+    }
+
+    /** The sheet's confirm action, by tag: its label changes between steps (Subscribe/Open). */
+    private fun clickConfirm() {
+        await("add sheet confirm enabled") { node(By.res("add_confirm")).isEnabled }
+        node(By.res("add_confirm")).click()
     }
 
     /**

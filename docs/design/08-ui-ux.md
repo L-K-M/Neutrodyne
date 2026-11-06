@@ -3306,7 +3306,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 | `FeedsUiState`, `FeedTabUi`, `FeedSourceRef`, `FeedItem`, `FeedsViewModel` | Feeds UI | `:feature:feeds` |
 | `DownloadEntryRow` | Downloads screen row over 07's `DownloadEntry` | `:feature:downloads` |
 | `ArtworkSyncScheduler.enqueueNow`, `ArtworkRepository.observeColors(key, fallbackPodcastId)` | artwork scheduling and colours | `:core:artwork`, `:core:domain` |
-| Test tags `feeds_pager`, `feed_list`, `library_grid`, `mini_player`, `player_sheet`, `podcast_list` | UI Automator handles for 09's journeys (also used by the desktop's `runComposeUiTest`) | `:feature:*` |
+| Test tags `feeds_pager`, `feed_list`, `library_grid`, `mini_player`, `player_sheet`, `podcast_list`, `add_url_field`, `add_confirm` | UI Automator handles for 09's journeys (also used by the desktop's `runComposeUiTest`); the Add sheet's two tags address its URL field and confirm action, whose class and label queries cannot distinguish them from the search field and step labels behind the modal | `:feature:*` |
 | Test tag `episode_date_block` | the PODCAST date block's `testTag` (used by the desktop `runComposeUiTest` regression for 200 % text) | `:core:ui` |
 | Sync screen composables and ViewModels (`SyncSettingsScreen`, `LinkSetupScreen`, `SyncApproveSheet`, `SyncDevicesScreen`, `HeldChangesDialog`, `SyncDiagnosticsScreen`, their `*ViewModel`s) | Sync UI | `:feature:sync` |
 | `DesktopIntegrationImpl` | `DesktopIntegration` over 11's registrars | `:desktopApp` |
