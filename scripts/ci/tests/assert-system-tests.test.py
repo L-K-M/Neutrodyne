@@ -79,42 +79,77 @@ class EvidenceTest(unittest.TestCase):
 
 SCRIPT = Path(__file__).resolve().parents[1] / "system-tests.sh"
 
+PACKAGES = ("ch.lkmc.neutrodyne", "ch.lkmc.neutrodyne.benchmark")
+
 
 class CleanupTest(unittest.TestCase):
-    def run_case(self, build=0, adb=0, installed=True):
+    def run_case(self, build=0, uninstall=0, installed=True, emulator=True):
+        """Runs the script against a stub adb that talks like a real device.
+
+        Real `adb shell` output ends each line with CR LF, getprop answers the
+        emulator question, and every uninstall call is recorded in a log file.
+        """
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "scripts/ci").mkdir(parents=True)
             shutil.copy(SCRIPT, root / "scripts/ci/system-tests.sh")
             (root / "scripts/ci/assert-system-tests.py").write_text("# gate tested separately\n")
             (root / "bin").mkdir()
+            listing = "".join(f"package:{name}\r\n" for name in PACKAGES) if installed else ""
+            record = root / "uninstalled.txt"
             stubs = {
                 "gradlew": f"exit {build}",
                 "bin/git": "printf '%040d\\n' 0",
-                "bin/adb": ("if [ \"$1\" = shell ]; then\n" +
-                            ("echo package:ch.lkmc.neutrodyne\necho package:ch.lkmc.neutrodyne.benchmark\n" if installed else ":\n") +
-                            f"else exit {adb}; fi"),
+                "bin/adb": (
+                    "#!/bin/sh\n"
+                    "if [ \"$1\" = shell ] && [ \"$2\" = getprop ]; then\n"
+                    f"  echo {1 if emulator else 0}\n"
+                    "elif [ \"$1\" = shell ]; then\n"
+                    f"  printf '{listing}'\n"
+                    "elif [ \"$1\" = uninstall ]; then\n"
+                    f"  echo \"uninstall $2\" >> {record}\n"
+                    f"  exit {uninstall}\n"
+                    "else\n"
+                    f"  exit {uninstall}\n"
+                    "fi\n"
+                ),
             }
             for name, body in stubs.items():
                 path = root / name
-                path.write_text("#!/bin/sh\n" + body + "\n")
+                path.write_text(body if name == "bin/adb" else "#!/bin/sh\n" + body + "\n")
                 path.chmod(0o755)
             result = subprocess.run(["bash", "scripts/ci/system-tests.sh", "smoke", "connected"],
                                     cwd=root, env=dict(os.environ, PATH=f"{root / 'bin'}:{os.environ['PATH']}"),
                                     capture_output=True, text=True)
-            return result.returncode
+            record_lines = record.read_text().splitlines() if record.exists() else []
+            uninstalled = [line.split()[1] for line in record_lines if line.split()]
+            return result.returncode, uninstalled
 
-    def test_successful_cleanup(self):
-        self.assertEqual(0, self.run_case())
+    def test_successful_cleanup_uninstalls_both_packages(self):
+        # adb shell CRLF line endings must not defeat the exact package match.
+        code, uninstalled = self.run_case()
+        self.assertEqual(0, code)
+        self.assertEqual(sorted(PACKAGES), sorted(uninstalled))
 
     def test_uninstall_failure_fails_successful_test_run(self):
-        self.assertEqual(1, self.run_case(adb=3))
+        self.assertEqual(1, self.run_case(uninstall=3)[0])
 
     def test_build_failure_survives_cleanup_failure(self):
-        self.assertEqual(7, self.run_case(build=7, adb=3))
+        code, _ = self.run_case(build=7, uninstall=3)
+        self.assertEqual(7, code)
 
     def test_already_uninstalled_is_clean(self):
-        self.assertEqual(0, self.run_case(adb=3, installed=False))
+        code, uninstalled = self.run_case(uninstall=3, installed=False)
+        self.assertEqual(0, code)
+        self.assertEqual([], uninstalled)
+
+    def test_physical_device_never_runs_or_uninstalls(self):
+        # The connected leg clears and uninstalls the published application ID:
+        # a non-emulator device must be refused before Gradle runs, and the
+        # cleanup must not uninstall anything from it either.
+        code, uninstalled = self.run_case(emulator=False)
+        self.assertEqual(2, code)
+        self.assertEqual([], uninstalled)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,12 @@ esac
 variant=benchmarkRelease
 if [ "$device" = connected ]; then
   task=connectedBenchmarkReleaseAndroidTest
+  # The connected leg installs, clears and uninstalls the published application ID:
+  # run only on the disposable emulator the workflow booted, never a plugged-in phone.
+  if [ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" != "1" ]; then
+    echo "system-tests.sh: connected profile requires an emulator (ro.kernel.qemu != 1); refusing" >&2
+    exit 2
+  fi
 else
   task="${device}BenchmarkReleaseAndroidTest"
 fi
@@ -26,15 +32,21 @@ printf '{"profile":"%s","device":"%s","targetVariant":"%s","publishedReleaseCove
 cleanup() {
   local status=$?
   if [ "$device" = connected ]; then
-    local packages
-    if packages=$(adb shell pm list packages); then
-      for package in ch.lkmc.neutrodyne ch.lkmc.neutrodyne.benchmark; do
-        if grep -Fxq "package:$package" <<< "$packages"; then
-          adb uninstall "$package" || { [ "$status" -ne 0 ] || status=1; }
-        fi
-      done
-    else
+    if [ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" != "1" ]; then
+      echo "system-tests.sh: device is not an emulator; not uninstalling the published app ID" >&2
       [ "$status" -ne 0 ] || status=1
+    else
+      local packages
+      # adb shell lines end with CR, which would defeat the exact match below.
+      if packages=$(adb shell pm list packages | tr -d '\r'); then
+        for package in ch.lkmc.neutrodyne ch.lkmc.neutrodyne.benchmark; do
+          if grep -Fxq "package:$package" <<< "$packages"; then
+            adb uninstall "$package" || { [ "$status" -ne 0 ] || status=1; }
+          fi
+        done
+      else
+        [ "$status" -ne 0 ] || status=1
+      fi
     fi
   fi
   exit "$status"
