@@ -65,6 +65,8 @@ android {
     sourceSets["androidTest"].assets.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
     // The very same assertions run on desktop, Robolectric and the real Android runtime.
     sourceSets["androidTest"].kotlin.srcDir("../feeds/src/replay/kotlin")
+    sourceSets["androidTest"].kotlin.srcDir("src/externalModeTest/kotlin")
+    sourceSets["androidTest"].assets.srcDir("../youtube/impl/src/test/resources")
     // Exercise the device gate's decisions on the host without copying its implementation.
     sourceSets["androidTest"].kotlin.srcDir("src/restoreTest/kotlin")
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
