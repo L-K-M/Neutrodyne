@@ -206,9 +206,15 @@ class DownloadJourneyTest {
             val dump = device.executeShellCommand("dumpsys activity services ${app.packageName}")
             assertTrue(dump.contains("androidx.work.impl.foreground.SystemForegroundService"))
             // The service's ActivityManager record exposes the effective FGS type, not just a manifest bit.
+            val serviceLines =
+                dump
+                    .lineSequence()
+                    .filter { it.contains("foregroundServiceType") || it.contains("SystemForegroundService") }
+                    .joinToString("\n")
             assertTrue(
                 dump.contains("foregroundServiceType=0x00000001") ||
                     dump.contains("foregroundServiceType=1") || dump.contains("foregroundServiceType=0x1"),
+                "foregroundServiceType not in the service dump:\n$serviceLines",
             )
         }
 
