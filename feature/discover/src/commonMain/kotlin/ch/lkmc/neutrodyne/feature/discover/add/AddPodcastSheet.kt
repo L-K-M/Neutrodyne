@@ -93,6 +93,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
 import ch.lkmc.neutrodyne.core.ui.resources.membership_create
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name
 import ch.lkmc.neutrodyne.core.ui.resources.membership_new
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.discover.ProviderDisclosure
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
@@ -227,7 +228,11 @@ internal fun AddPodcastSheet(
                 KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { if (submitEnabled) submit() }),
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .ndTextFieldFocus(),
         )
 
         when (step) {
@@ -330,6 +335,7 @@ internal fun AddPodcastSheet(
                         isError = state.groupError != null,
                         supportingText = state.groupError?.let { { Text(it.asString()) } },
                         enabled = !state.creatingGroup && !step.subscribing,
+                        modifier = Modifier.ndTextFieldFocus(),
                     )
                     NdTextButton(
                         label = stringResource(Res.string.membership_create),
@@ -393,7 +399,7 @@ private fun AuthFields(
             onValueChange = onUsername,
             label = { Text(stringResource(Res.string.add_auth_username)) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().contentType(ContentType.Username),
+            modifier = Modifier.fillMaxWidth().contentType(ContentType.Username).ndTextFieldFocus(),
         )
         OutlinedTextField(
             value = password,
@@ -415,7 +421,12 @@ private fun AuthFields(
             keyboardOptions =
                 KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { onSubmit() }),
-            modifier = Modifier.fillMaxWidth().contentType(ContentType.Password).padding(top = FIELD_GAP),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .contentType(ContentType.Password)
+                    .padding(top = FIELD_GAP)
+                    .ndTextFieldFocus(),
         )
     }
 }

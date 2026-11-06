@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.model.ProviderStatus
 import ch.lkmc.neutrodyne.core.ui.PrivacyInventory
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.discover_apple_links
 import ch.lkmc.neutrodyne.feature.settings.resources.discover_apple_links_help
@@ -123,7 +124,7 @@ internal fun DiscoverSettingsScreen(
                 { country = it },
                 label = { Text(stringResource(Res.string.discover_country_edit)) },
                 singleLine = true,
-                modifier = Modifier.testTag("discover-country"),
+                modifier = Modifier.testTag("discover-country").ndTextFieldFocus(),
             )
             Text(stringResource(Res.string.discover_country_hint, state.systemCountry))
             TextButton(onClick = { onCountry(country) }) { Text(stringResource(Res.string.discover_save)) }
@@ -201,7 +202,7 @@ private fun KeyEditor(
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                     singleLine = true,
-                    modifier = Modifier.testTag("pi-key"),
+                    modifier = Modifier.testTag("pi-key").ndTextFieldFocus(),
                 )
                 OutlinedTextField(
                     secret,
@@ -210,7 +211,7 @@ private fun KeyEditor(
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                     singleLine = true,
-                    modifier = Modifier.testTag("pi-secret"),
+                    modifier = Modifier.testTag("pi-secret").ndTextFieldFocus(),
                 )
             }
         },
