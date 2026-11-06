@@ -212,9 +212,9 @@ class DownloadJourneyTest {
                     .filter { it.contains("foregroundServiceType") || it.contains("SystemForegroundService") }
                     .joinToString("\n")
             assertTrue(
+                "foregroundServiceType not in the service dump:\n$serviceLines",
                 dump.contains("foregroundServiceType=0x00000001") ||
                     dump.contains("foregroundServiceType=1") || dump.contains("foregroundServiceType=0x1"),
-                "foregroundServiceType not in the service dump:\n$serviceLines",
             )
         }
 
