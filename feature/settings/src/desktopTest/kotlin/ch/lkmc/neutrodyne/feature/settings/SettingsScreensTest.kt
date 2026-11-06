@@ -384,6 +384,57 @@ class SettingsScreensTest {
         }
 
     @Test
+    fun linkRowsAppearOnlyWhenApplicable() =
+        runComposeUiTest {
+            setSettingsRoot(desktopIntegration = FakeDesktopIntegration(initialLinksHandled = null))
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            // Not applicable: neither the section header nor the rows exist.
+            onNodeWithText("Links").assertDoesNotExist()
+            onNodeWithText("Open podcast links with Neutrodyne").assertDoesNotExist()
+        }
+
+    @Test
+    fun linkHandlersRowRunsSetUpAndReflectsTheState() =
+        runComposeUiTest {
+            val integration = FakeDesktopIntegration(initialLinksHandled = false)
+            setSettingsRoot(desktopIntegration = integration)
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Open podcast links with Neutrodyne").performScrollTo().assertIsDisplayed()
+            onNodeWithText("Not set up").assertIsDisplayed()
+            onNodeWithText("Set up").performScrollTo().performClick()
+            waitUntil("the registration lands", TIMEOUT_MS) { integration.registerLinkHandlersCalls == 1 }
+            waitUntil("the state re-reads", TIMEOUT_MS) {
+                onAllNodesWithText("Neutrodyne opens feed:, podcast:, pcast: and itpc: links")
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+        }
+
+    @Test
+    fun applicationsMenuRowCallsTheIntegration() =
+        runComposeUiTest {
+            val integration =
+                FakeDesktopIntegration(
+                    initialLinksHandled = false,
+                    canAddToApplicationsMenu = true,
+                )
+            setSettingsRoot(desktopIntegration = integration)
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Add to applications menu").performScrollTo().assertIsDisplayed()
+            onNodeWithText("Adds Neutrodyne and its icon to your applications menu").assertIsDisplayed()
+            onAllNodesWithText("Set up").onLast().performScrollTo().performClick()
+            waitUntil("the menu entry lands", TIMEOUT_MS) { integration.addToApplicationsMenuCalls == 1 }
+            waitUntil("the state re-reads", TIMEOUT_MS) {
+                onAllNodesWithText("In the applications menu").fetchSemanticsNodes().isNotEmpty()
+            }
+        }
+
+    @Test
     fun desktopRowIsHiddenOnAndroid() =
         runComposeUiTest {
             setSettingsRoot(platformInfo = FakePlatformInfo.ANDROID)

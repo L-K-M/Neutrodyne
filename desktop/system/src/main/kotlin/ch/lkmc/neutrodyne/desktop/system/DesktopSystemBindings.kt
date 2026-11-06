@@ -17,6 +17,9 @@ import java.nio.file.Path
 @ContributesTo(AppScope::class)
 @BindingContainer
 object DesktopSystemBindings {
+    /** Where the Compose launcher points at the merged resources of a packaged image. */
+    private const val RESOURCES_DIR_PROPERTY = "compose.application.resources.dir"
+
     /**
      * The OS's start-at-login registrar (11 Start at login). `dirs.config`'s parent is the
      * Linux config home whose `autostart/` holds the entry; Windows and macOS ignore it.
@@ -31,6 +34,22 @@ object DesktopSystemBindings {
             os = buildInfo.desktop?.os,
             launcher = System.getProperty(LoginItemRegistrars.JPACKAGE_APP_PATH),
             configHome = dirs.config.parent,
+        )
+
+    /**
+     * The tar.gz "Add to applications menu" installer (11 Links and files from the OS):
+     * the XDG data home from [AppDirs], the launcher from `jpackage.app-path` and the
+     * packaged icons from the image's merged resources directory.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun linuxMenuEntryInstaller(dirs: AppDirs): LinuxMenuEntryInstaller =
+        LinuxMenuEntryInstaller(
+            dataHome = dirs.data.parent,
+            launcher = { System.getProperty(LoginItemRegistrars.JPACKAGE_APP_PATH) },
+            iconsSource = {
+                System.getProperty(RESOURCES_DIR_PROPERTY)?.let(java.nio.file.Path::of)
+            },
         )
 
     /**

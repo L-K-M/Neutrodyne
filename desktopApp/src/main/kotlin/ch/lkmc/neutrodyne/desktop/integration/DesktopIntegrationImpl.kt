@@ -28,15 +28,27 @@ import kotlinx.coroutines.flow.StateFlow
  * toggle: it is logged, the initial read reports `UNSUPPORTED` (nothing is known about the
  * entry) and later reads keep the last state the flow could see (11 Start at login's OS
  * entry is the truth; inventing a state the OS did not report would lie about it).
+ *
+ * The links half (MD2's links slice) delegates to [DesktopLinkRegistration] — the same
+ * OS-truth rule: `linkHandlers` reads what the OS says, the actions return success.
  */
 @SingleIn(AppScope::class)
-@Inject
-class DesktopIntegrationImpl(
-    private val registrar: LoginItemRegistrar,
-    private val settings: SettingsRepository,
-) : DesktopIntegration {
+class DesktopIntegrationImpl
+    @Inject
+    internal constructor(
+        private val registrar: LoginItemRegistrar,
+        private val links: DesktopLinkRegistration,
+        private val settings: SettingsRepository,
+    ) : DesktopIntegration {
     private val state = MutableStateFlow(readStatus(initial = true))
     override val loginItem: StateFlow<LoginItemState> = state
+
+    /** Seeded from the OS and re-read after every link action (the OS entry is the truth). */
+    private val linkState = MutableStateFlow<Boolean?>(if (links.applicable) links.handled() else null)
+    override val linkHandlers: StateFlow<Boolean?> = linkState
+
+    override val canAddToApplicationsMenu: Boolean
+        get() = links.canAddToApplicationsMenu
 
     override suspend fun setStartAtLogin(enabled: Boolean): Outcome<Unit, StartAtLoginError> {
         if (readStatus() == LoginItemState.UNSUPPORTED) {
@@ -52,6 +64,17 @@ class DesktopIntegrationImpl(
         settings.set(DesktopSettingKeys.START_AT_LOGIN, enabled)
         state.value = readStatus()
         return Outcome.Success(Unit)
+    }
+
+    override suspend fun registerLinkHandlers(): Boolean = applyLinks { links.register() }
+
+    override suspend fun addToApplicationsMenu(): Boolean = applyLinks { links.addToMenu() }
+
+    /** Runs the action, then reports the OS state either way — like the login toggle. */
+    private fun applyLinks(action: () -> Boolean): Boolean {
+        val succeeded = action()
+        if (links.applicable) linkState.value = links.handled()
+        return succeeded
     }
 
     /** The OS entry, or the documented fallback when the OS cannot answer the read. */
