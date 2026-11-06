@@ -112,6 +112,7 @@ class SyncControllerImpl(
     private val clock: Clock,
     private val address: SyncServerAddress,
     private val flags: SyncFlags,
+    private val settingsCapture: SettingsCapture,
     private val build: BuildInfo,
     private val merger: FirstLinkMerger,
     private val gate: LocalNetworkGate,
@@ -222,6 +223,21 @@ class SyncControllerImpl(
                     SyncStatus.NotConfigured
                 }
             }
+        // 10 Settings capture: the recorder follows the committed link and the switch; the
+        // persisted switch is the authority, so refresh the cache before deciding.
+        flags.syncPlaybackSettings = address.syncPlaybackSettings()
+        syncSettingsRecorder(state)
+    }
+
+    /**
+     * 10 Settings capture: installs the local synced-key recorder while the link is committed
+     * (`enabled`, `linkedAt`, not revoked) and "Sync playback settings" is on; clears it while
+     * unlinked or the switch is off. Without this the recorder only exists in tests, so a local
+     * edit after the link records no outbox intent in production.
+     */
+    private fun syncSettingsRecorder(state: SyncStateEntity?) {
+        val linked = state != null && state.enabled && state.linkedAt != null && state.lastError != SYNC_ERROR_REVOKED
+        if (linked && flags.syncPlaybackSettings) settingsCapture.install() else settingsCapture.clear()
     }
 
     override fun startLink(
@@ -522,6 +538,7 @@ class SyncControllerImpl(
     override suspend fun setSyncPlaybackSettings(enabled: Boolean) {
         address.setSyncPlaybackSettings(enabled)
         flags.syncPlaybackSettings = enabled
+        syncSettingsRecorder(db.syncStateDao().get())
     }
 
     override suspend fun setShareFeedPasswords(enabled: Boolean) {

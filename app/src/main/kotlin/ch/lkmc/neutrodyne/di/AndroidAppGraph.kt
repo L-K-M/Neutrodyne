@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -96,6 +97,12 @@ interface AndroidAppGraph : DownloadComponentsInjector {
 
     /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
     val settingsRepository: SettingsRepository
+
+    /**
+     * 10 Settings capture: the production port the recorder drives. Graph tests resolve it to
+     * prove a remote apply changes DataStore without echoing a local outbox intent.
+     */
+    val settingsSyncPort: SettingsSyncPort
 
     val appUpdateChecker: AppUpdateChecker
     val updateNotices: UpdateNotices
