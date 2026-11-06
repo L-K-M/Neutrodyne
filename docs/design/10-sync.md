@@ -784,6 +784,13 @@ graph keeps `NoPlaybackSync` until `DesktopPlaybackController` lands with
 MD1a.2 (06's implementation note), where the deferral stays dormant and
 removals apply directly.
 
+**Update (2026-11-06, MS2 rest).** The desktop graph binds the real port
+too (`DesktopPlaybackController.syncPort`, 06's 2026-11-06 update), so
+the while-playing deferral is live on both platforms; the desktop
+end-to-end proof is `DesktopPlaybackSyncDeferralTest` (the real
+controller, scheduler, engine and applier over Room and the in-memory
+server, mirroring the Android `PlaybackSyncDeferralTest`).
+
 ### Now playing and handoff
 
 - `session/current` holds the current episode reference and the play context of the device that last wrote it (`by`). The writing device pushes it with the position cadence; the current item is never in Up next, so without the session record the episode playing on the phone would vanish from the desktop's queue view.
@@ -1356,6 +1363,28 @@ clocks) instead of dropping them. The step 3 synced-settings captures
 (each synced key's literal `v` with clocks ≥ `t0`) remain open — the
 settings port offers no bulk read; a local edit after the link captures
 and converges them anyway.
+
+**Update (2026-11-06, MS2 rest).** The step 3 synced-settings captures
+are implemented: `SettingsSyncPort.syncedLiteralValues()` is the bulk
+read (every synced key's current value as its wire JSON, defaults
+included, implemented beside `SettingsRepository` over the portable
+store), and `useDeviceEverywhere` — and the restore variant
+`restoreEverywhere`, whose Replace made the backup's settings this
+device's — captures each returned key as a literal `v` outbox intent
+with a fresh clock at or above the step's `t0` (the tick after
+`enabled = 1` and the cursor adoption), gated by the "Sync playback
+settings" switch exactly as a local edit's recorder is. The second
+confirmation is implemented too: `chooseFirstLink(USE_DEVICE)` runs
+`FirstLinkMerger.stageResetEffect()` — the staging pull plus the effect
+count of [Use this device's library everywhere](#use-this-devices-library-everywhere) step 1 —
+and shows `LinkState.ConfirmReplaceEverywhere` (08's wording and
+counts); "Replace everywhere" re-enters the choice and the merge resumes
+the staged snapshot, Cancel aborts the link with nothing merged or
+pruned. One adjacent gap surfaced while wiring this and stays open:
+`SettingsCapture` (the local synced-key recorder) is installed by tests
+only — no production graph installs it yet, so the sentence above about
+a local edit converging "anyway" does not hold in production; the
+whole-library captures above do not depend on it.
 
 ### Use the server's library on this device
 
