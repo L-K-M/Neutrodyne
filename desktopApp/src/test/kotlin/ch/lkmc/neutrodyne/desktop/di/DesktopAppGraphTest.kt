@@ -92,6 +92,19 @@ class DesktopAppGraphTest {
         }
 
     @Test
+    fun theDesktopNotifierBindsTheOsNotifierOverTheBanners() {
+        try {
+            // The bound DesktopNotifier is MD2's OS notifier; the banner stays reachable as
+            // its fallback (11 Notifications' fallback column).
+            assertThat(graph.desktopNotifier).isSameInstanceAs(graph.osNotifier)
+            assertThat(graph.osNotifier.description).isNotEmpty()
+            graph.osNotifier.close()
+        } finally {
+            graph.appScope.cancel()
+        }
+    }
+
+    @Test
     fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
         try {
             assertThat(graph.appUpdateChecker::class.simpleName).isEqualTo("AppUpdateCheckerImpl")

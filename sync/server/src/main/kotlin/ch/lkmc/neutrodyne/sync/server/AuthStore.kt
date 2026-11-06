@@ -37,6 +37,8 @@ internal interface AuthRead {
 
     fun liveCounts(accountId: Long): Map<SyncCollection, Int>
 
+    fun recentAudit(limit: Int): List<AuditEntry>
+
     fun storedRecordCount(): Long
 
     fun pendingLinks(now: Long): Int

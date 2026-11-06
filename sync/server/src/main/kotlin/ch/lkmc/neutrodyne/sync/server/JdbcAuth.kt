@@ -81,6 +81,11 @@ internal open class JdbcAuthRead(
                 SyncCollection.fromWire(it.getString(1)) to it.getInt(2)
             }.toMap()
 
+    override fun recentAudit(limit: Int): List<AuditEntry> =
+        connection.query("SELECT account_id,at,event,ip FROM audit ORDER BY id DESC LIMIT ?", limit.coerceIn(1, 200)) {
+            AuditEntry(it.nullableLong("account_id"), it.getLong("at"), it.getString("event"), it.getString("ip"))
+        }
+
     override fun storedRecordCount(): Long = connection.query("SELECT COUNT(*) FROM record") { it.getLong(1) }.single()
 
     override fun pendingLinks(now: Long): Int =

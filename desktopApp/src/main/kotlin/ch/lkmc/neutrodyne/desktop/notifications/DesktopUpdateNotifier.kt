@@ -15,7 +15,7 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import org.jetbrains.compose.resources.getString
 
-/** Uses the existing banner backend until MD2 supplies native OS notification delivery. */
+/** Posts over the bound `DesktopNotifier` (MD2: OS delivery, banner fallback). */
 @ContributesBinding(AppScope::class)
 @Inject
 internal class DesktopUpdateNotifier(

@@ -302,6 +302,21 @@ R8.3, R1.1. The OS hands Neutrodyne `.opml` files and `feed:`, `podcast:`, `pcas
 | `feed:`, `podcast:`, `pcast:`, `itpc:` | `UrlSchemeRegistrar`, only if unclaimed or already ours | same | `CFBundleURLTypes` | `x-scheme-handler/feed;…` in our desktop entry | the user desktop entry above |
 
 - **Compose DSL.** The Compose Gradle plugin 1.12.1 has `nativeDistributions.fileAssociation(mimeType, extension, description, linuxIconFile, windowsIconFile, macOSIconFile)` and `macOS.infoPlist { extraKeysRawXml }`, which is how custom URL schemes reach `Info.plist` ([native distributions](https://kotlinlang.org/docs/multiplatform/compose-native-distribution.html); DSL classes checked in [compose-gradle-plugin 1.12.1](https://repo1.maven.org/maven2/org/jetbrains/compose/compose-gradle-plugin/1.12.1/)). On macOS, `Desktop.setOpenURIHandler` and `setOpenFileHandler` deliver events only to a bundled app whose `Info.plist` has `CFBundleDocumentTypes` ([java.awt.Desktop](https://docs.oracle.com/en/java/javase/25/docs/api/java.desktop/java/awt/Desktop.html)), which the `.opml` association provides.
+**Implementation notes (2026-11-05, MD2's links slice).** The Windows run-time row ships
+as `UrlSchemeRegistrar` (`:desktopApp`, over the `WindowsRegistry` seam of
+`:desktop:system`) with a band-0–99 initializer on packaged Windows starts;
+`DefaultIcon` is written as `"<launcher>",0`. The tar.gz "Add to applications menu"
+action ships as `LinuxMenuEntryInstaller` (`:desktop:system`) around
+`LinuxDesktopEntryWriter.menuEntry`: entry and hicolor icons strictly under the XDG data
+home, the entry's `Icon` the copied 256×256 PNG (largest when 256 is absent), re-run
+refreshes stale paths. Settings › Desktop shows the LINKS section of 08's wireframe
+through `DesktopIntegration`: "Open podcast links with Neutrodyne" where the OS registers
+schemes at run time (Windows; Linux tar.gz, whose state reads the per-user entry and
+whose "Set up" writes it) and "Add to applications menu" on Linux tar.gz; install kinds
+that register at install time hide both. The installer configuration of the table
+(Compose `fileAssociation`, `CFBundleURLTypes`, the DEB/RPM entry's `MimeType`) was
+already delivered with M0b's packaging.
+
 - **Windows URL schemes at run time.** jpackage has no URL-scheme option, and adding registry components to the MSI would need a changed `main.wxs`, a template of the JDK under GPL-2.0 with the Classpath Exception that must not be copied into this repository ([D3](../PLAN.md#3-key-decisions); jpackage resources: [jpackage](https://docs.oracle.com/en/java/javase/25/docs/specs/man/jpackage.html)). `UrlSchemeRegistrar` therefore writes per-user keys under `HKCU\Software\Classes\<scheme>` at every start of a packaged build (`URL Protocol` = "", `DefaultIcon`, `shell\open\command` = `"<launcher>" "%1"`; [registering an application to a URL scheme](https://learn.microsoft.com/en-us/previous-versions/windows/internet-explorer/ie-developer/platform-apis/aa767914(v=vs.85))). `neutrodyne` is always (re)written. The four podcast schemes are written only when the key is absent or its command already names a `Neutrodyne.exe`, so another podcast app's registration is never taken over silently; Settings › Desktop › "Open podcast links with Neutrodyne" takes them over on request. Unverified: whether Windows 10/11 asks the user to confirm a protocol handler that has a user choice; MD2 AC4 records it. The keys survive an uninstall ([Uninstall and data retention](#uninstall-and-data-retention)).
 - **Linux desktop entry.** DEB and RPM install our own desktop entry `ch.lkmc.neutrodyne.desktop` and hicolor icons through package files we write ourselves (the DEB resources `control`, `postinst` and `postrm`, the RPM spec `neutrodyne.spec`, [Linux DEB, RPM and tar.gz](#linux-deb-rpm-and-targz)) and pass through jpackage's resource directory (jpackage 25 looks these names up as overridable resources, [`LinuxDebBundler.java`](https://raw.githubusercontent.com/openjdk/jdk25u/master/src/jdk.jpackage/linux/classes/jdk/jpackage/internal/LinuxDebBundler.java)); jpackage's own desktop integration stays off (no Linux icon, shortcut or file association options), because jpackage names its entry `<package>-<launcher>.desktop` ([`DesktopIntegration.java`](https://raw.githubusercontent.com/openjdk/jdk25u/master/src/jdk.jpackage/linux/classes/jdk/jpackage/internal/DesktopIntegration.java)), here `neutrodyne-Neutrodyne.desktop`, and the frozen name is `ch.lkmc.neutrodyne.desktop` ([D61](../PLAN.md#3-key-decisions)). The scripts are written from the Desktop Entry specification ([desktop entry spec](https://specifications.freedesktop.org/desktop-entry-spec/latest/)), never copied from jpackage's GPL-2.0+CE templates. Unverified: that jpackage 25 accepts a complete replacement RPM spec and DEB scripts from the resource directory; S13 checks. Fallback: jpackage's entry with a `Neutrodyne.desktop` template override carrying our `MimeType` line, and D61's Linux entry name amended to `neutrodyne-Neutrodyne.desktop` ([Open questions](#open-questions) 2).
 
@@ -484,6 +499,12 @@ interface LinuxDesktopPortal {                           // :desktop:system (dbu
     suspend fun showItems(file: String): Boolean         // org.freedesktop.FileManager1.ShowItems
     suspend fun chooseDirectory(title: String, start: String?): String?   // portal FileChooser; null = no portal
 }
+// Implementation note (2026-11-05, MD2's links slice): chooseDirectory returns a
+// DirectoryChoice (Chosen | Cancelled | Unavailable), not String?. A dismissal must end
+// the pick without opening the JFileChooser fallback ("when no portal answers" is the
+// fallback's only trigger), and "no portal answered" must reach it — one null cannot say
+// both. DbusDesktopPortal implements the FileChooser race-free: the handle_token rule
+// pins the request path before the call, and cancelling closes the Request.
 
 // :core:data desktopMain
 class DesktopJobRunner(
@@ -723,6 +744,25 @@ Policy: `DeviceRemoved` for the device in use → pause and save; `DefaultChange
 | Linux | `org.freedesktop.Notifications.Notify` on the session bus: app name "Neutrodyne", icon `neutrodyne`, `replaces_id` per notification ID, action `default`, hint `desktop-entry` = `ch.lkmc.neutrodyne` ([notification spec](https://specifications.freedesktop.org/notification-spec/latest/)) | `ActionInvoked` → route | No notification server: in-app banners only |
 
 Notification clicks after the app has quit start the app (Windows and macOS) or do nothing (Linux); no route is applied then. Unverified: Windows toast behaviour without a registered activator CLSID (MD2 records it).
+
+**Implementation notes (2026-11-05, MD2's links slice).** `OsDesktopNotifier`
+(`:desktop:system`) is bound in `DesktopAppGraph` over `DesktopBannerNotifier`: every post
+reaches the OS channel first and the banners whenever the channel reports undelivered, so
+the owners' notifiers (03's `DesktopNewEpisodePoster`, 07's download notices, 09's update
+notice, 05's import report) stay source-agnostic. Linux ships the table's
+`org.freedesktop.Notifications` row complete — `GetCapabilities` decides whether the
+reserved `default` action is sent, `ActionInvoked` becomes a click, `CloseNotification`
+retracts, `NotificationClosed` drops the id mapping — and 03's `DesktopNewEpisodePoster`
+arrived with it (grouping, the unseen set cleared by window focus and clicks). Windows and
+macOS ship the native rows' *fallbacks* as their only back ends, because the WinRT toast
+and `UNUserNotificationCenter` need the shim (`nd_notify_post`, no native code was written
+in this slice): Windows uses the toast row's own fallback, AWT `TrayIcon.displayMessage`
+on a tray icon shown 10 s (`AwtTrayNotifications`, no click reporting — AWT balloons
+report none); macOS shows in-app banners only, like a denied authorisation, and logs that
+the back end is pending. `WindowsShortcutIdentity` (the toast's AppUserModelID identity)
+is not part of this slice. Clicks that do arrive show the window and apply the route
+through `IntentRouter` on the AWT thread — the same path the banner fallback's "Open"
+takes.
 
 ### ndmedia interface
 
@@ -1246,6 +1286,10 @@ W4 registry/path note above remains applicable.
 | Linux | `LinuxDesktopPortal.showItems` → `org.freedesktop.FileManager1.ShowItems([file URI], "")` over D-Bus in `:desktop:system` ([file manager interface](https://www.freedesktop.org/wiki/Specifications/file-manager-interface/)) | `Desktop.open(parent)` (folder without selection) |
 
 No `explorer.exe`, `open` or `xdg-open` process is started (only `:youtube:ytdlp-desktop` may start processes, [PLAN 5.1](../PLAN.md#51-module-graph) rule 6).
+
+*(2026-11-05, MD2's links slice: the Linux row's reveal now awaits the portal's answer
+and runs the `Desktop.open(parent)` fallback when `ShowItems` reports `false` — the glue
+previously fired the call and returned success.)*
 
 ### Disk full
 
@@ -1953,8 +1997,8 @@ Serves N1, N4, N5, N7, N8, N11 for the desktop; risks T19, T20, T24, T25, T26. R
 | `AppDirsTest` | `desktopTest` (pure) | each OS with and without `LOCALAPPDATA`, `XDG_*` absolute, relative (ignored) and unset; macOS paths from `user.home`; `ensureCreated` sets `0700` on POSIX; an image root inside a data directory (and a data directory inside the image root) is refused before anything is written | M0b |
 | `SingleInstanceTest` | `desktopTest`, two JVMs started by the test (test sources are outside the `ProcessBuilder` rule) | second launch delivers its arguments and exits 0 without creating a window; owner still starting (no port file) → retries then succeeds; wrong token rejected; oversize line rejected; owner killed → the lock is free at once; stale `instance.port` overwritten (M0 AC11) | M0b |
 | `DesktopOpenHandlerTest` | `desktopTest` | every input row of [Links and files from the OS](#links-and-files-from-the-os) → its route; relative paths resolved against `cwd`; > 20 inputs truncated; directory and unknown type → message; inputs before the first frame queued in order | M3, MD2 |
-| `UrlSchemeRegistrarTest` | nightly on `windows-2025` | `neutrodyne` written; a foreign `feed` handler is not overwritten; one of ours is updated to the current launcher; "take over" overwrites | MD2 |
-| `LinuxDesktopEntryTest` | `desktopTest` (pure, fake home) | `LinuxDesktopEntryWriter` for the menu and the autostart entry: extraction paths containing spaces, `(`, `$`, `\`, `"`, a backtick and `%` give an always double-quoted Exec with `%U` (or `--background`), the four inner characters backslash-escaped, `%` written `%%` in Exec only, then every `\` doubled by the string escape (a literal `\` reads `\\\\` and a literal `$` reads `\\$` in Exec), and a TryExec and Icon with only the string escape, no quotes and no `%` rewriting; a path with a control character or `=` is refused and writes nothing; MimeType kept; moving the archive and re-running refreshes Exec, TryExec and Icon without duplicating the entry; writes only under `~/.local/share`, never under `/usr/share`, and starts no process | MD2 |
+| `UrlSchemeRegistrarTest` | `desktopApp` `desktopTest` (map-backed registry); nightly on `windows-2025` exercises the real `HKCU` | `neutrodyne` written; a foreign `feed` handler is not overwritten; one of ours is updated to the current launcher; "take over" overwrites; a dev run without `jpackage.app-path` writes nothing | MD2 |
+| `LinuxDesktopEntryTest` (as `LinuxDesktopEntryWriterTest`, `LinuxMenuEntryWriterTest`, `LinuxMenuEntryInstallerTest`, 2026-11-05) | `desktopTest` (pure, fake home) | `LinuxDesktopEntryWriter` for the menu and the autostart entry: extraction paths containing spaces, `(`, `$`, `\`, `"`, a backtick and `%` give an always double-quoted Exec with `%U` (or `--background`), the four inner characters backslash-escaped, `%` written `%%` in Exec only, then every `\` doubled by the string escape (a literal `\` reads `\\\\` and a literal `$` reads `\\$` in Exec), and a TryExec and Icon with only the string escape, no quotes and no `%` rewriting; a path with a control character or `=` is refused and writes nothing; MimeType kept; moving the archive and re-running refreshes Exec, TryExec and Icon without duplicating the entry; writes only under `~/.local/share`, never under `/usr/share`, and starts no process | MD2 |
 | `CloseBehaviourTest` | `desktopTest` with fakes | idle close quits within 2 s; close while playing or downloading hides and shows the tray; `KEEP_RUNNING` always hides; hidden and idle for 10 min quits (`TestClock`); no tray support → iconify (MD2 AC3) | M0b, MD2 |
 | `NeutrodyneWindowContentTest` | `desktopTest` with `runComposeUiTest` | the window content renders the five labelled destinations through the real entry installers and opens Settings › About and Licences; the licences list carries the OpenJDK runtime entry from the build's generated `aboutlibraries.json` (PLAN M0 AC5) | M0b |
 | `DesktopLicencesSourceTest` | `desktopTest` | the generated `aboutlibraries.json` parses and carries the manual OpenJDK runtime entry with the GPL-2.0/Classpath/GCC texts and the source-asset name; the dangling custom-licence reference of plugin 15.2.0 is repaired at load (01 M0 checklist step 33) | M0b |
@@ -1962,6 +2006,7 @@ Serves N1, N4, N5, N7, N8, N11 for the desktop; risks T19, T20, T24, T25, T26. R
 | `PowerPolicyTest` | `desktopTest` with fake `PowerMonitor`, `IdleSleepInhibitor`, engine | `Suspending` → pause and an event position save before returning; `Resumed` → nothing plays, pools evicted, lanes poked; inhibitor held exactly while playing (MD2 AC2) | MD2 |
 | `LinuxMprisSessionTest` | `desktopTest` on Linux CI with a private `dbus-daemon --session` | bus name owned; `Metadata`, `PlaybackStatus`, `Rate` limits; `PlayPause`, `Next`, `Seek`, `SetPosition` with a wrong track ID ignored; `Seeked` at once on seek and at most once per second on silence skips; `Raise`, `Quit` (MD2 AC1) | MD2 |
 | `DesktopNotifierTest` | `desktopTest` (Linux back end over the private bus; fakes elsewhere) | one notification per event; `replaces_id` reuse; click → route; no server → banner fallback | MD2 |
+| `DbusDesktopPortalTest`, `DesktopPlatformActionsFolderTest` | `desktopTest` on the private bus / pure | FileChooser round trip (chosen, dismissed, unavailable) through the `handle_token` path with the `directory` option; cancelling closes the Request; `ShowItems` sends the file URI and `false` without a file manager; a dismissed portal dialog ends the pick without the `JFileChooser` fallback | MD2 |
 | `SpanCacheTest` | `desktopTest` | spans written, extended, read across span boundaries; LRU eviction by `lastAccess` with pinned resources kept; limit change applies at once; `ep:` resource emptied at a new pin; `yt:` reused across sessions and dropped on a `clen` mismatch; write failure → uncached reads continue; `clear` keeps current pins | MD1a |
 | `HttpByteSourceTest` | `desktopTest` + MockWebServer | `Range`/`If-Range` resume after a cut; server ignoring `Range` (200) → restart from 0 without corrupting spans; 403 then success after re-resolve; changed total length → `ContentChangedException`; throttled server → `Buffering` then playback; `Accept-Encoding: identity` and the User-Agent sent (MD1 AC2) | MD1a |
 | `DesktopEpisodeSourceResolverTest` | `desktopTest` with fakes for `LocalMediaIndex`, `YouTubeStreamResolver`, capabilities | local file wins; a new pin starts an empty resource; stale final URL dropped on `attempt` 1; YouTube key `yt:{videoId}:{formatId}`; external mode → `Unsupported` before any resolve; `availableAtMs` waits ≤ 30 s | MD1a, MD3 |
@@ -2062,7 +2107,7 @@ S13 ([S13 desktop packaging and performance](#s13-desktop-packaging-and-performa
 | `AudioEngine`, `FfAudioEngine`, `EngineItem`, `EngineWindowDiff`, `EngineState`, `EngineEvent`, `EngineError`, `TransitionReason`, `DiscontinuityReason`, `Gapless`, `DesktopSourceResolver`, `ResolvedSource`, `ByteSource`, `FileByteSource`, `HttpByteSource`, `SpanCache`, `LookAheadLoader`, `AvioBridge`, `DemuxerFactory`, `Demuxer`, `FfDemuxer`, `DecoderFactory`, `Decoder`, `FfDecoder`, `FfmpegLibrary`, `SilenceSkipper`, `Sonic`, `GainStage`, `TimelineClock`, `MpvAudioEngine` (fallback only) | classes | `:playback:engine` |
 | `ndmedia` (`nd_out_*`, `nd_events_init`, `nd_session_publish`, `nd_power_keep_awake`, `nd_notify_post`, `nd_win_*`, `nd_mac_login_item`), `NdmediaLibrary`, `NdOutput`, `ffoffsets.c`, `ffmpeg-layout.json`, `ffmpeg-license.txt` | native library, classes, files | `:playback:native` |
 | `DesktopPlaybackController`, `DesktopQueueProjector`, `DesktopEpisodeSourceResolver`, `DesktopPlaybackModule`, `DesktopChapterExtractor` | classes | `:playback:desktop` |
-| `SystemMediaSession`, `RemoteCommand`, `WindowsSmtcSession`, `MacNowPlayingSession`, `LinuxMprisSession`, `IdleSleepInhibitor`, `AudioRouteMonitor`, `RouteEvent`, `TrayController`, `TrayAction`, `LoginItemRegistrar` (`WindowsRunKeyRegistrar`, `MacLoginItemRegistrar`, `XdgAutostartRegistrar`), `LoginItemState`, `LinuxDesktopEntryWriter` (2026-10-06), `OsPowerMonitor`, `OsDesktopNotifier`, `DbusDesktopPortal` | classes | `:desktop:system` |
+| `SystemMediaSession`, `RemoteCommand`, `WindowsSmtcSession`, `MacNowPlayingSession`, `LinuxMprisSession`, `IdleSleepInhibitor`, `AudioRouteMonitor`, `RouteEvent`, `TrayController`, `TrayAction`, `LoginItemRegistrar` (`WindowsRunKeyRegistrar`, `MacLoginItemRegistrar`, `XdgAutostartRegistrar`), `LoginItemState`, `LinuxDesktopEntryWriter` (2026-10-06), `LinuxMenuEntryInstaller`, `OsPowerMonitor`, `OsDesktopNotifier`, `DbusDesktopPortal` | classes | `:desktop:system` |
 | `JobLanePoker`, `PowerMonitor`, `PowerEvent`, `DesktopNotifier`, `DesktopNotification`, `NotificationKind`, `LinuxDesktopPortal` *(ports, 2026-10-05)* | ports | `:core:common` `desktopMain` |
 | `YtxProcess`, `YtxChild`, `StdioYtxTransport`, `PythonRuntimeLocator`, `DesktopEngineStorePaths`, `DesktopEngineUpdateLane`, `QuickJsBridge`, `host_stdio.py`, `bootstrap.py` | classes, Python files | `:youtube:ytdlp-desktop`, `youtube/engine/python/neutrodyne_ytx/` |
 | Stdio message types `hello`, `call`, `ok`, `err`, `cancel`, `jsc`, `jsc_ok`, `jsc_err`, `status` | protocol | [Stdio protocol](#stdio-protocol) |

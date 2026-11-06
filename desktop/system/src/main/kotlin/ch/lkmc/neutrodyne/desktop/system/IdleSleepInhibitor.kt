@@ -10,6 +10,7 @@ import org.freedesktop.dbus.annotations.DBusInterfaceName
 import org.freedesktop.dbus.connections.impl.DBusConnection
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBusInterface
+import org.freedesktop.dbus.messages.DBusSignal
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
 
@@ -179,4 +180,15 @@ internal interface PortalInhibit : DBusInterface {
 @DBusInterfaceName("org.freedesktop.portal.Request")
 internal interface PortalRequest : DBusInterface {
     fun Close()
+
+    /**
+     * `Response(u response, a{sv} results)` — every portal request's answer, emitted on the
+     * request handle's object path. Nested here (dbus-java derives a signal's interface and
+     * member names from the enclosing type and this class's name); used by `DbusDesktopPortal`.
+     */
+    class Response(
+        path: String,
+        response: UInt32,
+        results: Map<String, Variant<*>>,
+    ) : DBusSignal(path, response, results)
 }
