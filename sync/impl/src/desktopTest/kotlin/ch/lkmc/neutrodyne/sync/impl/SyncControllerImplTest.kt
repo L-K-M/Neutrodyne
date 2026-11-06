@@ -914,6 +914,17 @@ private class Harness(
 
     fun close() {
         controllerJob.cancel()
+        // Cancellation is asynchronous: the controller's io blocks run on
+        // Dispatchers.Default, and closing the pool while one is still between
+        // statements surfaced as "Connection pool is closed" on loaded CI
+        // runners. Pump the scheduler until every controller coroutine has
+        // unwound, mirroring await(), before the database closes.
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (!controllerJob.isCompleted) {
+            check(System.nanoTime() < deadline) { "the controller job did not unwind after cancellation" }
+            scope.testScheduler.runCurrent()
+            Thread.sleep(1)
+        }
         db.close()
     }
 }
