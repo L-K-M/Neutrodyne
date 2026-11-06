@@ -24,7 +24,8 @@
 # server join as their jobs land).
 #
 # Outputs (GITHUB_OUTPUT and stdout): version, versionCode, make_latest,
-# youtube_engine, mac_kind, expected_assets (newline-separated asset names).
+# youtube_engine, mac_kind, ffmpeg_version, expected_assets (newline-separated
+# asset names).
 
 set -euo pipefail
 
@@ -131,25 +132,18 @@ if [ "$MAJOR" -ge 1 ]; then MAC_KIND=dmg; else MAC_KIND=mac-zip; fi
 
 # --- expected assets ------------------------------------------------------------
 
-EXPECTED="$(PRODUCTS="$PRODUCTS" MAC_EXT="$([ "$MAC_KIND" = dmg ] && echo dmg || echo zip)" \
-    python3 - "$REPO_ROOT/release-assets.json" "$VERSION" <<'PYEOF'
-import json, os, sys
+# The lock-driven placeholders ({jdk}, {wix}, {ffmpeg}, {pbsTag},
+# {server_runtime_source}) resolve through release_assets.py, the same module
+# make-release-body.py reads, so the expected set and the release body cannot
+# disagree about which components ship. An asset whose placeholder does not ship
+# is left out (the PBS source before MD3, the server runtime tarball while it
+# matches the desktop runtime's source).
+MAC_EXT="$([ "$MAC_KIND" = dmg ] && echo dmg || echo zip)"
+EXPECTED="$(python3 "$SCRIPT_DIR/release_assets.py" expected "$REPO_ROOT" "$PRODUCTS" "$VERSION" "$MAC_EXT")" || exit 1
 
-doc = json.load(open(sys.argv[1], encoding="utf-8"))
-version = sys.argv[2]
-products = set(os.environ["PRODUCTS"].split(","))
-mac_ext = os.environ["MAC_EXT"]
-
-names = list(doc["always"])
-for group in products:
-    files = doc["groups"].get(group)
-    if files is None:
-        sys.exit(f"verify-tag: release-assets.json has no group '{group}'")
-    names += files
-for n in names:
-    print(n.replace("{v}", version).replace("{mac_ext}", mac_ext))
-PYEOF
-)" || exit 1
+# The FFmpeg source bundle's version is the one the release body links.
+FFMPEG_VERSION="$(python3 "$SCRIPT_DIR/release_assets.py" placeholders "$REPO_ROOT" | sed -n 's/^{ffmpeg}=//p')"
+[ -n "$FFMPEG_VERSION" ] || fail "native-components.lock has no [ffmpeg] version"
 
 echo "verify-tag: tag $TAG, version $VERSION ($GC), make_latest=$MAKE_LATEST, engine=$ENGINE, mac_kind=$MAC_KIND"
 echo "verify-tag: expected assets:"
@@ -160,6 +154,7 @@ out versionCode "$GC"
 out make_latest "$MAKE_LATEST"
 out youtube_engine "$ENGINE"
 out mac_kind "$MAC_KIND"
+out ffmpeg_version "$FFMPEG_VERSION"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     { echo "expected_assets<<__NL_EOF__"; echo "$EXPECTED"; echo "__NL_EOF__"; } >> "$GITHUB_OUTPUT"
 fi
