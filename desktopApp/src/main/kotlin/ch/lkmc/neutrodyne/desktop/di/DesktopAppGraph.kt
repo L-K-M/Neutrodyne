@@ -30,6 +30,7 @@ import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
@@ -127,6 +128,12 @@ interface DesktopAppGraph {
 
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
+
+    /**
+     * 10 Settings capture: the production port the recorder drives. Graph tests resolve it to
+     * prove a remote apply changes DataStore without echoing a local outbox intent.
+     */
+    val settingsSyncPort: SettingsSyncPort
 
     val appUpdateChecker: AppUpdateChecker
     val updateNotices: UpdateNotices
