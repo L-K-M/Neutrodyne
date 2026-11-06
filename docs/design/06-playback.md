@@ -381,7 +381,7 @@ Serves R7.4, R7.5, R8.5 (cross-device resume), N1, N2. Delivered in MS2 (port, r
 
 **Up next from sync.** `SyncApplier` adds, moves and removes `queue_entry` rows — never the current item and never an effectively played episode ([10 Episode-state rules](10-sync.md#episode-state-rules) rule 1). Like UI edits they do not bump the generation, so the projector diffs them without touching index 0.
 
-**Implementation note (2026-11-05, MS2).** Android's `PlaybackSyncBridge` (`:playback:impl`) implements the port as specified above: `active` is published from the player (`null` while no service runs or the phase is `NOT_LOADED`), the `PAUSED`/`STOPPED`/`TRANSITIONED` boundaries are emitted after the matching pause save, transition or session transaction commits (the teardown flush's `STOPPED` precedes `active = null`), `onRemoteMarkedPlayed` freezes synchronously through `RemotePlayedGuard` with the lift on the item change or the stored row becoming unplayed again, and the paused-item pickup runs on both resume paths (the UI `play()`'s already-current start and `beforePlay` for media keys, the notification, Bluetooth and Auto). The desktop graph keeps `NoPlaybackSync` until `DesktopPlaybackController` lands with MD1a.2 after it merges.
+**Implementation note (2026-11-05, MS2).** Android's `PlaybackSyncBridge` (`:playback:impl`) implements the port as specified above: `active` is published from the player (`null` while no service runs or the phase is `NOT_LOADED`), the `PAUSED`/`STOPPED`/`TRANSITIONED` boundaries are emitted after the matching pause save, transition or session transaction commits (the teardown flush's `STOPPED` follows the save and the `active` clear; the 2026-11-06 capture update corrected the earlier order), `onRemoteMarkedPlayed` freezes synchronously through `RemotePlayedGuard` with the lift on the item change or the stored row becoming unplayed again, and the paused-item pickup runs on both resume paths (the UI `play()`'s already-current start and `beforePlay` for media keys, the notification, Bluetooth and Auto). The desktop graph keeps `NoPlaybackSync` until `DesktopPlaybackController` lands with MD1a.2 after it merges.
 
 **Update (2026-11-06, MS2 rest).** The desktop graph binds the real port too:
 `DesktopPlaybackController` (`:playback:desktop`) publishes `active` from its
@@ -397,10 +397,19 @@ on the already-current resume path. Two deviations the desktop shape forces: the
 port is a member forwarder (`DesktopPlaybackController.syncPort`), not an
 interface of the controller, because `PlaybackStateSource`'s own `events`
 property would clash with the port's `events` in the JVM; and a `STOPPED`
-boundary is emitted after `active` has turned `null` (not before it, as the
-Android teardown note records for the destroy flush), because a release reading
-`active` at the boundary must see that nothing plays any more — the final save
-still precedes the boundary. `NoPlaybackSync` is gone from both graphs.
+boundary is emitted after `active` has turned `null` (the Android bridge
+now does the same; see the 2026-11-06 capture update below), because a release
+reading `active` at the boundary must see that nothing plays any more — the
+final save still precedes the boundary. `NoPlaybackSync` is gone from both
+graphs.
+
+**Update (2026-11-06, MS2 capture).** The Android `PlaybackSyncBridge`
+clears `active` (and lifts the remote-played freeze) before emitting
+`STOPPED`, so a release reading the port at the boundary sees nothing
+playing — the desktop order of the note above, now on both platforms.
+The final save still precedes the boundary. `PlaybackSyncDeferralTest`
+stops as production does (it no longer clears `active` by hand first), so
+the while-playing deferral applying pins the order.
 
 Core tests run in `commonTest` on the desktop JVM with `TestClock` and the `:core:testing` fakes; both adapters' suites pass M4 AC1, AC2 and AC6 through the core (PLAN M4 AC17, M5 AC8, MD1 AC1 and AC3, MS3 AC2 and AC3; [Testing](#testing)).
 
