@@ -27,8 +27,10 @@
       "openjdk-{jdk}-temurin-sources.tar.gz",
       "RUNTIME-SOURCES.md",
       "wix-{wix}-src.tar.gz",
-      "ffmpeg-{ffmpeg}-neutrodyne-src.tar.xz",
       "python-build-standalone-{pbsTag}-src.tar.gz"
+    ],
+    "ffmpeg-sources": [
+      "ffmpeg-{ffmpeg}-neutrodyne-src.tar.xz"
     ],
     "server": [
       "neutrodyne-server-{v}.jar",
@@ -40,10 +42,11 @@
     ]
   },
   "milestones": {
-    "comment": "the milestone a group starts shipping; verify-tag.sh --products names the active groups (M0a: android). {jdk}, {wix}, {ffmpeg} and {pbsTag} come from the lockfiles when those groups join.",
+    "comment": "the milestone a group starts shipping; verify-tag.sh --products names the active groups (M0a: android). {jdk}, {wix}, {ffmpeg}, {pbsTag} and {server_runtime_source} come from the lockfiles when those groups join.",
     "android": "M0a",
     "desktop": "M0b",
     "sources": "M0b",
+    "ffmpeg-sources": "MD1b",
     "server": "MS1",
     "server-sources": "MS1"
   }

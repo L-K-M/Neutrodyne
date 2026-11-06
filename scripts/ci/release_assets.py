@@ -64,7 +64,11 @@ def toml_section_prop(path: Path, section: str, key: str) -> str | None:
 
 def placeholders(repo_root: Path) -> dict[str, str | None]:
     """Every placeholder the asset names can carry, or None when it does not ship."""
-    runtime_source = lock_prop(repo_root / RUNTIME_LOCK, "sourceTarball.name")
+    jdk = lock_prop(repo_root / RUNTIME_LOCK, "version")
+    # The desktop release asset's name, not the upstream tarball's name: the
+    # sources job renames Adoptium's OpenJDK25U-jdk-sources_*.tar.gz to
+    # openjdk-{jdk}-temurin-sources.tar.gz.
+    desktop_runtime_asset = f"openjdk-{jdk}-temurin-sources.tar.gz" if jdk else None
     server_source = None
     server_lock = repo_root / SERVER_SOURCE_LOCK
     if server_lock.is_file():
@@ -73,7 +77,7 @@ def placeholders(repo_root: Path) -> dict[str, str | None]:
         except (OSError, KeyError, ValueError):
             server_source = None
     return {
-        "{jdk}": lock_prop(repo_root / RUNTIME_LOCK, "version"),
+        "{jdk}": jdk,
         "{wix}": lock_prop(repo_root / WIX_LOCK, "version"),
         "{ffmpeg}": toml_section_prop(repo_root / NATIVE_LOCK, "ffmpeg", "version"),
         "{pbsTag}": toml_section_prop(repo_root / PYTHON_LOCK, "pbsSource", "tag"),
@@ -81,7 +85,7 @@ def placeholders(repo_root: Path) -> dict[str, str | None]:
         # not the desktop runtime's source (10 Image sources and the runtime
         # exception). A matching name would be the same asset twice.
         "{server_runtime_source}": (
-            server_source if server_source and server_source != runtime_source else None
+            server_source if server_source and server_source != desktop_runtime_asset else None
         ),
     }
 

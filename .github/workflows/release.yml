@@ -58,7 +58,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
           scripts/ci/verify-tag.sh "${{ github.ref_name }}"
-          --products=android,desktop,sources,server,server-sources
+          --products=android,desktop,sources,ffmpeg-sources,server,server-sources
 
   android:
     needs: verify-tag
@@ -315,7 +315,8 @@ jobs:
           # when it differs from the desktop runtime's source (10 Image sources
           # and the runtime exception); verify-tag leaves it out otherwise.
           runtime="$(python3 -c 'import json;print(json.load(open("sync/server/deploy/image-sources.lock.json"))["runtime"]["name"])')"
-          desktop="$(grep -E '^sourceTarball.name=' desktopApp/runtime.lock | cut -d= -f2-)"
+          jdk="$(grep -E '^version=' desktopApp/runtime.lock | tail -1 | cut -d= -f2-)"
+          desktop="openjdk-$jdk-temurin-sources.tar.gz"
           if [ "$runtime" = "$desktop" ]; then rm -f "dist/$runtime"; fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -490,7 +491,7 @@ jobs:
       - name: Release body
         env:
           TAG: ${{ github.ref_name }}
-          PRODUCTS: android,desktop,sources,server,server-sources
+          PRODUCTS: android,desktop,sources,ffmpeg-sources,server,server-sources
           IMAGE: ${{ needs.server-image-manifest.outputs.image }}
           FFMPEG: ${{ needs.verify-tag.outputs.ffmpeg_version }}
         run: |

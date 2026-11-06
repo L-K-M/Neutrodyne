@@ -92,7 +92,7 @@ class ReleaseBodyTest(unittest.TestCase):
         return out.read_text(encoding="utf-8")
 
     def test_full_release_carries_every_ac13_section(self):
-        body = self.render("android,desktop,sources,server,server-sources")
+        body = self.render("android,desktop,sources,ffmpeg-sources,server,server-sources")
         required = [
             "release builds signed with a key that is public in this repository",
             "Download only from this page",
@@ -130,7 +130,7 @@ class ReleaseBodyTest(unittest.TestCase):
         self.assertIn("Obtainium (Android)", body)
 
     def test_ffmpeg_link_names_the_lock_version(self):
-        body = self.render("android,desktop,sources,server,server-sources")
+        body = self.render("android,desktop,sources,ffmpeg-sources,server,server-sources")
         self.assertIn(
             "https://github.com/L-K-M/Neutrodyne/releases/download/v1.0.0/"
             "ffmpeg-9.0.2-neutrodyne-src.tar.xz",

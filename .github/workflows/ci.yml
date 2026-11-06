@@ -152,6 +152,7 @@ jobs:
           python3 scripts/ci/test-server-image.py
           python3 scripts/ci/tests/release-workflow.test.py
           python3 scripts/ci/tests/check-apk-published.test.py
+          python3 scripts/ci/tests/release-ffmpeg-source.test.py
       - name: Preserve a formatting repair patch
         if: failure()
         run: |

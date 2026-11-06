@@ -67,6 +67,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Real core rules and Room repositories; engine milestones are hardware-free and explicit. */
 class DesktopPlaybackControllerTest {
@@ -467,6 +468,99 @@ class DesktopPlaybackControllerTest {
                     fixture.controller.nowPlaying.value!!
                         .isPlaying,
                 )
+            }
+        }
+
+    /** A user seek on the completed boundary item arms the replay; the played mark clears at the
+     *  first actual playback and saves resume (06's M5 note). */
+    @Test
+    fun aSeekOnTheCompletedBoundaryItemStartsAReplay() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.controller.setSleepTimer(SleepTimerMode.EndOfEpisode)
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.sleepTimer
+                        .filter { it == SleepTimerState.EndOfEpisode(1) }
+                        .first()
+                }
+                fixture.engine.end()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.sleepTimer
+                        .filter { it == SleepTimerState.Off }
+                        .first()
+                }
+                val db = fixture.graph.databaseOpener.requireDatabase()
+                assertNotNull(db.episodeStateDao().byEpisode(1)?.playedAt)
+                // Time passes before the user seeks, so the armed replay's saves clear the guard.
+                fixture.clock.advanceBy(10_000.milliseconds)
+                fixture.controller.seekTo(5_000)
+                withTimeout(TIMEOUT_MS) {
+                    while (fixture.engine.position != 5_000L) delay(5)
+                }
+                assertEquals(5_000L, fixture.engine.position)
+                // Seeking while paused arms the replay but does not clear the played mark yet.
+                assertNotNull(db.episodeStateDao().byEpisode(1)?.playedAt)
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.graph
+                        .positionStore()
+                        .observe(1)
+                        .filter { it?.playedAt == null }
+                        .first()
+                }
+                fixture.engine.position = 7_000
+                fixture.controller.pause()
+                fixture.awaitPaused()
+                assertEquals(7_000L, fixture.awaitPosition(1, 7_000L))
+            }
+        }
+
+    /** A Play on the completed boundary item replays it from the start; the played mark clears at
+     *  the first actual playback. */
+    @Test
+    fun playOnTheCompletedBoundaryItemReplaysFromTheStart() =
+        runBlocking {
+            PlaybackFixture().use { fixture ->
+                fixture.seed()
+                assertEquals(PlayResult.Started, fixture.controller.playEpisode(1))
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                fixture.controller.setSleepTimer(SleepTimerMode.EndOfEpisode)
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.sleepTimer
+                        .filter { it == SleepTimerState.EndOfEpisode(1) }
+                        .first()
+                }
+                fixture.engine.end()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.controller.sleepTimer
+                        .filter { it == SleepTimerState.Off }
+                        .first()
+                }
+                val db = fixture.graph.databaseOpener.requireDatabase()
+                assertNotNull(db.episodeStateDao().byEpisode(1)?.playedAt)
+                fixture.clock.advanceBy(10_000.milliseconds)
+                assertEquals(PlayResult.Started, fixture.controller.play())
+                assertEquals(0L, fixture.engine.position)
+                fixture.engine.ready()
+                fixture.awaitPlaying()
+                withTimeout(TIMEOUT_MS) {
+                    fixture.graph
+                        .positionStore()
+                        .observe(1)
+                        .filter { it?.playedAt == null }
+                        .first()
+                }
+                fixture.engine.position = 9_000
+                fixture.controller.pause()
+                fixture.awaitPaused()
+                assertEquals(9_000L, fixture.awaitPosition(1, 9_000L))
             }
         }
 

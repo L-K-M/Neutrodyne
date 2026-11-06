@@ -97,7 +97,7 @@ class ReleaseAssetsTest(unittest.TestCase):
         )
 
     def test_full_product_set_expands_the_locks(self):
-        result = self.verify("android,desktop,sources,server,server-sources")
+        result = self.verify("android,desktop,sources,ffmpeg-sources,server,server-sources")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         expected = [
             "neutrodyne-0.1.0-arm64-v8a.apk",
