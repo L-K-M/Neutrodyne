@@ -87,7 +87,8 @@ case "$TARGET" in
         cc $CFLAGS -fPIC -dynamiclib -arch arm64 -mmacosx-version-min=13.0 \
             -install_name "@rpath/libndmedia.dylib" \
             "$SRC" "$ROOT/session_mac.m" -fobjc-arc -o "$OUT" \
-            -framework AppKit -framework MediaPlayer -framework AudioToolbox -framework CoreAudio -framework CoreFoundation
+            -framework AppKit -framework MediaPlayer -framework AudioToolbox -framework CoreAudio \
+            -framework CoreFoundation -framework IOKit -framework ServiceManagement
         ;;
     windows-x64)
         OUT="$BUILD_ROOT/ndmedia.dll"
@@ -147,7 +148,6 @@ case "$TARGET" in
             "$(cygpath -w "$ROOT/session_win.cpp")" ndmedia.obj \
             -link -OUT:ndmedia.dll ole32.lib uuid.lib advapi32.lib user32.lib shell32.lib runtimeobject.lib) ||
             die "cl failed"
-        rm -f "$BUILD_ROOT/ndmedia.lib" "$BUILD_ROOT/ndmedia.exp" "$BUILD_ROOT/ndmedia.obj"
         ;;
     *) die "unknown target $TARGET" ;;
 esac
@@ -164,6 +164,28 @@ else
     cc -std=c11 -I"$ROOT" "$ROOT/tests/json_test.c" -o "$TEST_PROGRAM" || die "JSON test compile failed"
 fi
 "$TEST_PROGRAM" || die "device-name JSON boundary test failed"
+
+# The power shim's create/release/idempotent contract, linked against the
+# built library on the two OSes that implement it (Linux keeps the portal path).
+case "$TARGET" in
+    macos-arm64)
+        POWER_PROGRAM="$CACHE/power-check-$TARGET"
+        cc -std=c11 -I"$ROOT" "$ROOT/tests/power_test.c" -o "$POWER_PROGRAM" \
+            -L"$BUILD_ROOT" -lndmedia -Wl,-rpath,"$BUILD_ROOT" || die "power test compile failed"
+        "$POWER_PROGRAM" || die "power boundary test failed"
+        ;;
+    windows-x64)
+        POWER_PROGRAM="$CACHE/power-check-$TARGET.exe"
+        cp "$BUILD_ROOT/ndmedia.dll" "$CACHE/ndmedia.dll"
+        cl -nologo -std:c11 -MD -I"$(cygpath -w "$ROOT")" \
+            "$(cygpath -w "$ROOT/tests/power_test.c")" \
+            "$(cygpath -w "$BUILD_ROOT/ndmedia.lib")" \
+            -Fe"$(cygpath -w "$POWER_PROGRAM")" -Fo"$(cygpath -w "$CACHE/power-check.obj")" ||
+            die "power test compile failed"
+        "$POWER_PROGRAM" || die "power boundary test failed"
+        ;;
+esac
+rm -f "$BUILD_ROOT/ndmedia.lib" "$BUILD_ROOT/ndmedia.exp" "$BUILD_ROOT/ndmedia.obj"
 
 [ -f "$OUT" ] || die "expected $OUT"
 BYTES=$(stat -c %s "$OUT" 2>/dev/null || stat -f %z "$OUT")

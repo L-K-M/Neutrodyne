@@ -8,11 +8,16 @@
 #include <string.h>
 #include <systemmediatransportcontrolsinterop.h>
 #include <wchar.h>
+#include <windows.foundation.h>
 #include <windows.h>
 #include <windows.media.h>
+#include <windows.storage.h>
+#include <windows.storage.streams.h>
 
 using namespace ABI::Windows::Media;
 using namespace ABI::Windows::Foundation;
+using namespace ABI::Windows::Storage;
+using namespace ABI::Windows::Storage::Streams;
 using Positions = ITypedEventHandler<SystemMediaTransportControls *, PlaybackPositionChangeRequestedEventArgs *>;
 using Buttons =
     ITypedEventHandler<SystemMediaTransportControls *, SystemMediaTransportControlsButtonPressedEventArgs *>;
@@ -37,6 +42,7 @@ class AtomicWord {
 };
 SRWLOCK mutex = SRWLOCK_INIT;
 SRWLOCK lifecycle = SRWLOCK_INIT;
+SRWLOCK powerLifecycle = SRWLOCK_INIT;
 class Guard {
     SRWLOCK *held;
 
@@ -56,7 +62,18 @@ AtomicWord failure{S_OK};
 AtomicWord readyResult{S_OK};
 HANDLE worker = nullptr, readyEvent = nullptr;
 HWND window = nullptr;
-wchar_t title[TEXT_CAPACITY]{}, artist[TEXT_CAPACITY]{}, endpoint[ENDPOINT_CAPACITY]{};
+wchar_t title[TEXT_CAPACITY]{}, artist[TEXT_CAPACITY]{}, album[TEXT_CAPACITY]{}, artPath[TEXT_CAPACITY]{};
+wchar_t endpoint[ENDPOINT_CAPACITY]{};
+wchar_t thumbnailArt[TEXT_CAPACITY]{};
+
+// SetThreadExecutionState is per-thread: a release from a different thread would
+// leave the acquire set. The power state therefore lives on one dedicated thread
+// that outlives every acquire/release pair.
+HANDLE powerThread = nullptr;
+HANDLE powerRequest = nullptr;
+HANDLE powerDone = nullptr;
+LONG powerCommand = 0;
+LONG powerResult = 0;
 
 HRESULT copyEndpoint(LPCWSTR id) {
     size_t length = id ? wcslen(id) : 0;
@@ -232,16 +249,79 @@ HRESULT text(const wchar_t *value, HSTRING *out) {
     return WindowsCreateString(value, static_cast<UINT32>(wcslen(value)), out);
 }
 
+// Best effort: the thumbnail is the pinned artwork file through
+// RandomAccessStreamReference::CreateFromFile. Unverified for unpackaged apps;
+// a failure leaves the thumbnail unset (11 Windows SMTC).
+HRESULT put_thumbnail(ISystemMediaTransportControlsDisplayUpdater *updater, const wchar_t *path) {
+    if (!path || !path[0])
+        return S_OK;
+    HSTRING fileClassName = nullptr, referenceClassName = nullptr, pathString = nullptr;
+    IStorageFileStatics *fileStatics = nullptr;
+    IRandomAccessStreamReferenceStatics *referenceStatics = nullptr;
+    IAsyncOperation<StorageFile *> *operation = nullptr;
+    IAsyncInfo *info = nullptr;
+    IStorageFile *file = nullptr;
+    IRandomAccessStreamReference *reference = nullptr;
+    AsyncStatus status = AsyncStatus_Started;
+    HRESULT result = text(L"Windows.Storage.StorageFile", &fileClassName);
+    if (SUCCEEDED(result))
+        result = RoGetActivationFactory(fileClassName, __uuidof(IStorageFileStatics),
+                                        reinterpret_cast<void **>(&fileStatics));
+    if (SUCCEEDED(result))
+        result = text(L"Windows.Storage.Streams.RandomAccessStreamReference", &referenceClassName);
+    if (SUCCEEDED(result))
+        result = RoGetActivationFactory(referenceClassName, __uuidof(IRandomAccessStreamReferenceStatics),
+                                        reinterpret_cast<void **>(&referenceStatics));
+    if (SUCCEEDED(result))
+        result = text(path, &pathString);
+    if (SUCCEEDED(result))
+        result = fileStatics->GetFileFromPathAsync(pathString, &operation);
+    if (SUCCEEDED(result))
+        result = operation->QueryInterface(__uuidof(IAsyncInfo), reinterpret_cast<void **>(&info));
+    for (int waited = 0; SUCCEEDED(result) && waited < 500; ++waited) {
+        result = info->get_Status(&status);
+        if (FAILED(result) || status != AsyncStatus_Started)
+            break;
+        Sleep(10);
+    }
+    if (SUCCEEDED(result) && status == AsyncStatus_Completed)
+        result = operation->GetResults(&file);
+    if (SUCCEEDED(result))
+        result = referenceStatics->CreateFromFile(file, &reference);
+    if (SUCCEEDED(result))
+        result = updater->put_Thumbnail(reference);
+    release(reference);
+    release(file);
+    release(info);
+    release(operation);
+    release(referenceStatics);
+    release(fileStatics);
+    WindowsDeleteString(pathString);
+    WindowsDeleteString(referenceClassName);
+    WindowsDeleteString(fileClassName);
+    return result;
+}
+
 HRESULT publish(ISystemMediaTransportControls *controls, ISystemMediaTransportControls2 *controls2) {
     Guard guard;
     ISystemMediaTransportControlsDisplayUpdater *updater = nullptr;
     IMusicDisplayProperties *music = nullptr;
-    HSTRING t = nullptr, a = nullptr;
+    IMusicDisplayProperties2 *music2 = nullptr;
+    HSTRING t = nullptr, a = nullptr, al = nullptr;
     HRESULT result = controls->put_PlaybackStatus(playing ? MediaPlaybackStatus_Playing : MediaPlaybackStatus_Paused);
     if (SUCCEEDED(result))
         result = controls->get_DisplayUpdater(&updater);
     if (SUCCEEDED(result))
         result = updater->put_Type(MediaPlaybackType_Music);
+    if (SUCCEEDED(result))
+        // Best effort: an unpackaged thumbnail failure leaves the artwork unset. The
+        // path cache keeps a five-second playing publish from reopening the file.
+        if (wcscmp(artPath, thumbnailArt) != 0 && SUCCEEDED(put_thumbnail(updater, artPath))) {
+            if (artPath[0])
+                memcpy(thumbnailArt, artPath, (wcslen(artPath) + 1) * sizeof(wchar_t));
+            else
+                thumbnailArt[0] = 0;
+        }
     if (SUCCEEDED(result))
         result = updater->get_MusicProperties(&music);
     if (SUCCEEDED(result))
@@ -249,9 +329,15 @@ HRESULT publish(ISystemMediaTransportControls *controls, ISystemMediaTransportCo
     if (SUCCEEDED(result))
         result = text(artist, &a);
     if (SUCCEEDED(result))
+        result = text(album, &al);
+    if (SUCCEEDED(result))
         result = music->put_Title(t);
     if (SUCCEEDED(result))
         result = music->put_Artist(a);
+    if (SUCCEEDED(result))
+        result = music->QueryInterface(__uuidof(IMusicDisplayProperties2), reinterpret_cast<void **>(&music2));
+    if (SUCCEEDED(result))
+        result = music2->put_AlbumTitle(al);
     if (SUCCEEDED(result))
         result = updater->Update();
     IInspectable *timelineObject = nullptr;
@@ -284,6 +370,8 @@ HRESULT publish(ISystemMediaTransportControls *controls, ISystemMediaTransportCo
     release(timelineObject);
     WindowsDeleteString(t);
     WindowsDeleteString(a);
+    WindowsDeleteString(al);
+    release(music2);
     release(music);
     release(updater);
     return result;
@@ -435,6 +523,20 @@ HRESULT utf8(const char *value, wchar_t *buffer, int capacity) {
         return HRESULT_FROM_WIN32(GetLastError());
     return S_OK;
 }
+
+DWORD WINAPI powerRun(void *) noexcept {
+    for (;;) {
+        WaitForSingleObject(powerRequest, INFINITE);
+        LONG command = InterlockedExchange(&powerCommand, 0);
+        if (command < 0)
+            break;
+        EXECUTION_STATE state =
+            SetThreadExecutionState(command == 1 ? (ES_CONTINUOUS | ES_SYSTEM_REQUIRED) : ES_CONTINUOUS);
+        InterlockedExchange(&powerResult, state != NULL ? 0 : static_cast<LONG>(GetLastError()));
+        SetEvent(powerDone);
+    }
+    return 0;
+}
 } // namespace
 
 extern "C" ND_API int nd_session_open(void) {
@@ -468,12 +570,17 @@ extern "C" ND_API int nd_session_open(void) {
     }
     return result;
 }
-extern "C" ND_API int nd_session_publish(const char *t, const char *a, int64_t duration, int64_t position, float rate,
-                                         int p) {
-    wchar_t nextTitle[TEXT_CAPACITY], nextArtist[TEXT_CAPACITY];
-    HRESULT result = utf8(t, nextTitle, TEXT_CAPACITY);
+extern "C" ND_API int nd_session_publish(const nd_media_info *m) {
+    if (!m)
+        return ND_E_ARG;
+    wchar_t nextTitle[TEXT_CAPACITY], nextArtist[TEXT_CAPACITY], nextAlbum[TEXT_CAPACITY], nextArt[TEXT_CAPACITY];
+    HRESULT result = utf8(m->title, nextTitle, TEXT_CAPACITY);
     if (SUCCEEDED(result))
-        result = utf8(a, nextArtist, TEXT_CAPACITY);
+        result = utf8(m->artist, nextArtist, TEXT_CAPACITY);
+    if (SUCCEEDED(result))
+        result = utf8(m->album, nextAlbum, TEXT_CAPACITY);
+    if (SUCCEEDED(result))
+        result = utf8(m->art_path, nextArt, TEXT_CAPACITY);
     if (FAILED(result))
         return result;
     Guard guard;
@@ -481,10 +588,12 @@ extern "C" ND_API int nd_session_publish(const char *t, const char *a, int64_t d
         return ND_E_STATE;
     memcpy(title, nextTitle, (wcslen(nextTitle) + 1) * sizeof(wchar_t));
     memcpy(artist, nextArtist, (wcslen(nextArtist) + 1) * sizeof(wchar_t));
-    playing = p != 0;
-    durationMs = duration;
-    positionMs = position;
-    playbackRate = rate;
+    memcpy(album, nextAlbum, (wcslen(nextAlbum) + 1) * sizeof(wchar_t));
+    memcpy(artPath, nextArt, (wcslen(nextArt) + 1) * sizeof(wchar_t));
+    playing = m->playing != 0;
+    durationMs = m->duration_ms;
+    positionMs = m->position_ms;
+    playbackRate = m->rate;
     return PostMessageW(window, publishMessage, 0, 0) ? 0 : ND_E_STATE;
 }
 extern "C" ND_API int nd_session_poll(int64_t *value) {
@@ -514,4 +623,34 @@ extern "C" ND_API void nd_session_close(void) {
         CloseHandle(worker);
         worker = nullptr;
     }
+}
+extern "C" ND_API int nd_power_keep_awake(int on) {
+    if (on != 0 && on != 1)
+        return ND_E_ARG;
+    Guard powerGuard(&powerLifecycle);
+    if (powerThread == nullptr) {
+        powerRequest = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        powerDone = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (powerRequest == nullptr || powerDone == nullptr) {
+            DWORD error = GetLastError();
+            if (powerRequest != nullptr)
+                CloseHandle(powerRequest);
+            if (powerDone != nullptr)
+                CloseHandle(powerDone);
+            powerRequest = powerDone = nullptr;
+            return HRESULT_FROM_WIN32(error);
+        }
+        powerThread = CreateThread(nullptr, 0, powerRun, nullptr, 0, nullptr);
+        if (powerThread == nullptr) {
+            DWORD error = GetLastError();
+            CloseHandle(powerRequest);
+            CloseHandle(powerDone);
+            powerRequest = powerDone = nullptr;
+            return HRESULT_FROM_WIN32(error);
+        }
+    }
+    InterlockedExchange(&powerCommand, on != 0 ? 1 : 2);
+    SetEvent(powerRequest);
+    WaitForSingleObject(powerDone, INFINITE);
+    return static_cast<int>(InterlockedExchange(&powerResult, 0));
 }

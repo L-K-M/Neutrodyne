@@ -32,6 +32,7 @@ class MediaSessionCoordinatorTest {
     private fun TestScope.coordinator(
         nanos: () -> Long = { 0L },
         setRate: (suspend (Float) -> Unit)? = null,
+        artworkPath: (NowPlaying) -> String? = { null },
     ) = MediaSessionCoordinator(
         scope = backgroundScope,
         state = state,
@@ -42,6 +43,7 @@ class MediaSessionCoordinatorTest {
         speedPresets = MutableStateFlow(listOf(1f, 2f)),
         hardwareButtons = hardware,
         setExternalRate = setRate,
+        artworkPath = artworkPath,
         nanos = nanos,
     )
 
@@ -61,6 +63,19 @@ class MediaSessionCoordinatorTest {
             assertThat(latest.skipBackMs).isEqualTo(10_000L)
             assertThat(latest.skipForwardMs).isEqualTo(30_000L)
             assertThat(latest.speedPresets).containsExactly(1f, 2f).inOrder()
+        }
+
+    @Test
+    fun thePinnedArtworkPathReachesTheSession() =
+        runTest {
+            coordinator(artworkPath = { "/art/${it.artwork.key}.jpg" }).start()
+            runCurrent()
+
+            val item = testNowPlaying()
+            state.nowPlaying.value = item
+            runCurrent()
+
+            assertThat(session.published.last().artworkPath).isEqualTo("/art/${item.artwork.key}.jpg")
         }
 
     @Test
@@ -171,6 +186,7 @@ class MediaSessionCoordinatorTest {
             val skipBackMs: Long,
             val skipForwardMs: Long,
             val speedPresets: List<Float>,
+            val artworkPath: String?,
         )
 
         val published = mutableListOf<Published>()
@@ -185,8 +201,9 @@ class MediaSessionCoordinatorTest {
             skipBackMs: Long,
             skipForwardMs: Long,
             speedPresets: List<Float>,
+            artworkPath: String?,
         ) {
-            published += Published(nowPlaying, skipBackMs, skipForwardMs, speedPresets)
+            published += Published(nowPlaying, skipBackMs, skipForwardMs, speedPresets, artworkPath)
         }
 
         override val commands = sink.asSharedFlow()

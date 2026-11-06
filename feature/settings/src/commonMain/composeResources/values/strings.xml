@@ -108,5 +108,6 @@
     <string name="desktop_login_summary">Starts Neutrodyne in the background when you sign in</string>
     <string name="desktop_login_disabled_os">Disabled in Task Manager</string>
     <string name="desktop_login_approval">Allow Neutrodyne in System Settings › General › Login Items</string>
+    <string name="desktop_login_translocated">Move Neutrodyne to Applications first</string>
     <string name="desktop_login_open_settings">Open System Settings</string>
 </resources>

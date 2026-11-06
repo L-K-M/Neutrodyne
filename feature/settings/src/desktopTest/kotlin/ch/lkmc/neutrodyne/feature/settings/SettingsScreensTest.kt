@@ -453,6 +453,18 @@ class SettingsScreensTest {
         }
 
     @Test
+    fun startAtLoginTranslocatedShowsTheMoveHint() =
+        runComposeUiTest {
+            setSettingsRoot(
+                desktopIntegration = FakeDesktopIntegration(LoginItemState.TRANSLOCATED),
+            )
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Move Neutrodyne to Applications first").assertIsDisplayed()
+        }
+
+    @Test
     fun startAtLoginDisabledByOsStillShowsEnabled() =
         runComposeUiTest {
             setSettingsRoot(desktopIntegration = FakeDesktopIntegration(LoginItemState.DISABLED_BY_OS))

@@ -12,6 +12,7 @@ import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder
 import org.freedesktop.dbus.interfaces.DBusInterface
 import org.freedesktop.dbus.types.UInt32
 import org.freedesktop.dbus.types.Variant
+import java.nio.file.Path
 
 /**
  * Keeps the computer from idle-sleeping while an episode plays (11 Power's policy row 1).
@@ -30,16 +31,38 @@ object IdleSleepInhibitors {
     fun create(
         os: DesktopOs?,
         busAddress: String? = null,
+        ndmedia: Path? = null,
     ): IdleSleepInhibitor =
         when (os) {
             DesktopOs.LINUX -> LinuxIdleSleepInhibitor(busAddress)
-            else -> PendingIdleSleepInhibitor
+            DesktopOs.MACOS -> native(ndmedia) { MacIdleSleepInhibitor(it) }
+            DesktopOs.WINDOWS -> native(ndmedia) { WindowsIdleSleepInhibitor(it) }
+            null -> PendingIdleSleepInhibitor
         }
+
+    /**
+     * The native inhibitor, or the documented pending one when the library cannot be
+     * opened (a dev run without `buildNdmedia`): playback continues without inhibition.
+     */
+    private inline fun native(
+        directory: Path?,
+        wrap: (Path) -> IdleSleepInhibitor,
+    ): IdleSleepInhibitor =
+        if (directory == null) {
+            PendingIdleSleepInhibitor
+        } else {
+            runCatching { wrap(directory) }
+                .onFailure { Log.w(TAG, it) { "native idle-sleep inhibitor unavailable" } }
+                .getOrDefault(PendingIdleSleepInhibitor)
+        }
+
+    private const val TAG = "IdleSleep"
 }
 
 /**
- * macOS/Windows until `ndmedia` grows `nd_power_keep_awake`: documented as pending (11
- * Power's dated note), never a silent no-op — the first [acquire] logs what is missing.
+ * The documented fallback when no mechanism can be taken (a dev run without the
+ * native library, or an OS with no shim): never a silent no-op — the first
+ * [acquire] logs what is missing.
  */
 object PendingIdleSleepInhibitor : IdleSleepInhibitor {
     private const val TAG = "IdleSleep"

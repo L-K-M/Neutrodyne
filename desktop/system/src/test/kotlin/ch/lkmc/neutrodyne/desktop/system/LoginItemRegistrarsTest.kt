@@ -6,7 +6,7 @@ import com.google.common.truth.Truth.assertThat
 import java.nio.file.Path
 import kotlin.test.Test
 
-/** The registrar factory's OS dispatch, including the deferred macOS registrar. */
+/** The registrar factory's OS dispatch, including the macOS SMAppService binding. */
 class LoginItemRegistrarsTest {
     @Test
     fun `windows and linux get their registrars`() {
@@ -17,9 +17,17 @@ class LoginItemRegistrarsTest {
     }
 
     @Test
-    fun `macos and a missing linux config home get the unsupported registrar`() {
+    fun `macos without the native library and a missing linux config home get the unsupported registrar`() {
         assertThat(LoginItemRegistrars.create(DesktopOs.MACOS, null, null))
             .isSameInstanceAs(UnsupportedLoginItemRegistrar)
+        assertThat(
+            LoginItemRegistrars.create(
+                DesktopOs.MACOS,
+                null,
+                null,
+                NdmediaDirectory(Path.of("/nonexistent")),
+            ),
+        ).isSameInstanceAs(UnsupportedLoginItemRegistrar)
         assertThat(LoginItemRegistrars.create(DesktopOs.LINUX, null, null))
             .isSameInstanceAs(UnsupportedLoginItemRegistrar)
         assertThat(LoginItemRegistrars.create(null, null, null))

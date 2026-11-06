@@ -101,5 +101,6 @@
     <string name="desktop_login_summary">Startet Neutrodyne im Hintergrund, wenn du dich anmeldest</string>
     <string name="desktop_login_disabled_os">Im Task-Manager deaktiviert</string>
     <string name="desktop_login_approval">Neutrodyne in Systemeinstellungen › Allgemein › Anmeldeobjekte erlauben</string>
+    <string name="desktop_login_translocated">Verschiebe Neutrodyne zuerst in den Ordner Programme</string>
     <string name="desktop_login_open_settings">Systemeinstellungen öffnen</string>
 </resources>

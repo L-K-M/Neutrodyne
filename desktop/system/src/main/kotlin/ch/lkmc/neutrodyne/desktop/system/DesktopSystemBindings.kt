@@ -24,10 +24,12 @@ object DesktopSystemBindings {
     fun loginItemRegistrar(
         buildInfo: BuildInfo,
         dirs: AppDirs,
+        ndmedia: NdmediaDirectory,
     ): LoginItemRegistrar =
         LoginItemRegistrars.create(
             os = buildInfo.desktop?.os,
             launcher = System.getProperty(LoginItemRegistrars.JPACKAGE_APP_PATH),
             configHome = dirs.config.parent,
+            ndmedia = ndmedia,
         )
 }
