@@ -21,10 +21,10 @@ import kotlinx.coroutines.withContext
  * `COMMITTED`/`FETCHING` are live work and never sweep — and a `PREVIEW` session whose
  * restore was already requested is the restore host's, not garbage.
  *
- * Until `db-maintenance` ships (M11b) the interim hosts run this directly: Android's
- * `AutoSnapshotWorker` as its first step, the desktop `import-backup` lane once per 24 h.
- * Each expired session's file goes before its row; a deletion failure keeps the row so the
- * next pass retries the file instead of orphaning it.
+ * `db-maintenance` (02 step 3, M11b) owns the daily call on both platforms — it took over
+ * from the M3–M10 interim hosts (Android's `AutoSnapshotWorker`, the desktop `import-backup`
+ * lane). Each expired session's file goes before its row; a deletion failure keeps the row
+ * so the next pass retries the file instead of orphaning it.
  */
 @Inject
 internal class ImportSessionCleaner(

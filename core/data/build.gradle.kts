@@ -84,6 +84,8 @@ kotlin {
         desktopTest.dependencies {
             implementation(libs.okhttp.tls)
             implementation(libs.androidx.datastore.preferences.core)
+            // The diagnostics-export scrub test opens its own driver connections (M11b).
+            implementation(libs.androidx.sqlite.bundled)
             implementation(libs.androidx.paging.testing)
             implementation(libs.okhttp.mockwebserver3)
             implementation(libs.okhttp.mockwebserver3.junit4)

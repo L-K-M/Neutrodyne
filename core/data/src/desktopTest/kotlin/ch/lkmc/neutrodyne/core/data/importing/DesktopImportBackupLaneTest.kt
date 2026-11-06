@@ -36,7 +36,6 @@ import ch.lkmc.neutrodyne.core.data.storagePathsFor
 import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.data.testClassifier
 import ch.lkmc.neutrodyne.core.data.testUserAgent
-import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.ImportFormat
@@ -47,7 +46,6 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.SourceType
-import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
@@ -86,18 +84,18 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 /**
  * The `import-backup` lane (05 §7's desktop column, 11's lane table) over the real
- * `RestoreRunner`, `ImportFetchRunner` and `ImportSessionCleaner` against a real Room
- * database. Covers the run order (pending restores oldest first, then committed imports,
- * then the 24 h cleanup), the offline split (local restore/cleanup still run; fetches wait
- * for the monitor), online-only `laneAttempts`, scheduler-driven cancellation that leaves
- * durable work for replay, and a mid-restore cancel that the next run replays from the
- * durable intent — exactly what a process quit leaves behind.
+ * `RestoreRunner` and `ImportFetchRunner` against a real Room database. Covers the run
+ * order (pending restores oldest first, then committed imports), the offline split (local
+ * restores still run; fetches wait for the monitor), online-only `laneAttempts`,
+ * scheduler-driven cancellation that leaves durable work for replay, and a mid-restore
+ * cancel that the next run replays from the durable intent — exactly what a process quit
+ * leaves behind. The interim import-session cleanup this lane ran in M3–M10 belongs to
+ * `DesktopMaintenanceLane` now (`DbMaintenanceTest`).
  */
 class DesktopImportBackupLaneTest {
     private val driver = CommitCancellingDriver()
@@ -184,7 +182,6 @@ class DesktopImportBackupLaneTest {
             clock = clock,
             io = Dispatchers.IO,
         )
-    private val cleaner = ImportSessionCleaner(db, payloads, clock, Dispatchers.IO)
     private val adapter = StubSourceAdapter()
     private val lane = laneFor(adapter)
 
@@ -249,7 +246,7 @@ class DesktopImportBackupLaneTest {
         }
 
     @Test
-    fun offlineRunsRestoresAndCleanupButNeverFetches() =
+    fun offlineRunsRestoresButNeverFetches() =
         runTest {
             network.setStatus(FakeNetworkMonitor.OFFLINE)
             seedSourcePodcast(FEED_A)
@@ -258,7 +255,6 @@ class DesktopImportBackupLaneTest {
             queueItem(importId, ordinal = 0, url = FEED_B, podcastId = pendingPodcast(FEED_B))
             adapter.results[FEED_A] = adapterParsed(parsedFeed())
             adapter.results[FEED_B] = adapterParsed(parsedFeed())
-            val expiredId = expiredSession()
 
             lane.run(now())
 
@@ -269,8 +265,6 @@ class DesktopImportBackupLaneTest {
             assertEquals(ImportState.COMMITTED, session(restoreId).state)
             assertEquals(ImportState.COMMITTED, session(importId).state, "offline: never fetched")
             assertTrue(adapter.calls.isEmpty())
-            assertNull(db.importDao().sessionById(expiredId), "cleanup is local work too")
-            assertEquals(clock.now(), settings.get(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT))
 
             network.setStatus(FakeNetworkMonitor.ONLINE)
             lane.run(now())
@@ -372,7 +366,7 @@ class DesktopImportBackupLaneTest {
         }
 
     @Test
-    fun aCorruptSessionDoesNotBlockLaterImportsOrCleanup() =
+    fun aCorruptSessionDoesNotBlockLaterImports() =
         runTest {
             val corrupt = committedSession(createdAt = MARKER - 1)
             db.importDao().setOptionsJson(corrupt, "{broken")
@@ -380,12 +374,10 @@ class DesktopImportBackupLaneTest {
             val healthy = committedSession()
             queueItem(healthy, ordinal = 0, url = FEED_B, podcastId = pendingPodcast(FEED_B))
             adapter.results[FEED_B] = adapterParsed(parsedFeed())
-            val expired = expiredSession()
 
             lane.run(now())
 
             assertEquals(ImportState.DONE, session(healthy).state)
-            assertNull(db.importDao().sessionById(expired))
             assertEquals("{broken", session(corrupt).optionsJson, "unknown metadata must never be reset to defaults")
         }
 
@@ -462,47 +454,6 @@ class DesktopImportBackupLaneTest {
             assertNotNull(db.podcastDao().byFeedKey(feedKey(FEED_A)))
         }
 
-    // --- The 24 h cleanup ----------------------------------------------------------------------------
-
-    @Test
-    fun cleanupRunsOncePer24hAndStampsOnlyASuccessfulPass() =
-        runTest {
-            val expiredId = expiredSession()
-            lane.run(now())
-            assertNull(db.importDao().sessionById(expiredId))
-            assertEquals(clock.now(), settings.get(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT))
-
-            // Inside the window a newly expired session waits for the next pass.
-            val younger = expiredSession()
-            clock.nowMs += 60_000
-            lane.run(now())
-            assertNotNull(db.importDao().sessionById(younger), "the second run skipped cleanup")
-
-            // Past the window the pass sweeps again and re-stamps.
-            clock.nowMs += DesktopImportBackupLane.CLEANUP_INTERVAL_MS
-            lane.run(now())
-            assertNull(db.importDao().sessionById(younger))
-            assertEquals(clock.now(), settings.get(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT))
-        }
-
-    @Test
-    fun aFailedCleanupPassRetriesOnTheNextRun() =
-        runTest {
-            // The stamp write fails — the pass ran but nothing was recorded, so the next run
-            // cleans again rather than trusting a stamp that never landed.
-            val expiredId = expiredSession()
-            settings.failNextSet = SettingsError.WriteFailed
-            lane.run(now())
-
-            assertEquals(0L, settings.get(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT))
-            assertNull(db.importDao().sessionById(expiredId), "the sweep itself ran")
-
-            val younger = expiredSession()
-            clock.nowMs += 60_000
-            lane.run(now())
-            assertNull(db.importDao().sessionById(younger), "an unstamped pass re-runs cleanup")
-        }
-
     // --- Fixtures ------------------------------------------------------------------------------------
 
     private fun laneFor(stub: StubSourceAdapter): DesktopImportBackupLane {
@@ -518,9 +469,7 @@ class DesktopImportBackupLaneTest {
             db = db,
             restores = restores,
             fetches = ImportFetchRunner(db, engine, snapshots, reports, clock),
-            cleaner = cleaner,
             work = work,
-            settings = settings,
             network = network,
             reports = reports,
         )
@@ -606,13 +555,6 @@ class DesktopImportBackupLaneTest {
             createdAt = createdAt,
         )
 
-    private suspend fun expiredSession(): Long =
-        db.seedImportSession(
-            state = ImportState.DONE,
-            createdAt = clock.now() - SESSION_TTL_MS - 2_000,
-            finishedAt = clock.now() - SESSION_TTL_MS - 1_000,
-        )
-
     private suspend fun queueItem(
         sessionId: Long,
         ordinal: Int,
@@ -642,8 +584,5 @@ class DesktopImportBackupLaneTest {
         const val FEED_A = "https://a.example.com/feed.xml"
         const val FEED_B = "https://b.example.com/feed.xml"
         const val MARKER = TestClock.DEFAULT_NOW
-
-        /** 05 §9's seven-day cleanup window (`ImportSessionCleaner`'s private constant). */
-        const val SESSION_TTL_MS = 7L * 86_400_000
     }
 }

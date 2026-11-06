@@ -193,6 +193,12 @@ interface DesktopAppGraph {
     val jobRunner: DesktopJobRunner
 
     /**
+     * The diagnostics ring sink (09). The shell installs its sinks before the graph exists,
+     * then re-installs with this singleton appended — only post-graph lines reach it.
+     */
+    val ringBufferLogSink: ch.lkmc.neutrodyne.core.common.RingBufferLogSink
+
+    /**
      * `metroViewModel()`/`assistedMetroViewModel()` resolve through `LocalMetroViewModelFactory`,
      * provided at the window root (01 Feature entry installers) — the Library grid is the first
      * VM-backed entry.
