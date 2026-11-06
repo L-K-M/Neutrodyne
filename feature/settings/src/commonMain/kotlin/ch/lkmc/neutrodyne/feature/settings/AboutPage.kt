@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_debug_build
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_desktop
+import ch.lkmc.neutrodyne.feature.settings.resources.about_screen_readers
 import ch.lkmc.neutrodyne.feature.settings.resources.about_source
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_abi
@@ -77,6 +78,11 @@ internal fun AboutPage(buildInfo: BuildInfo) {
             }
             Text(
                 stringResource(licenceStatementFor(buildInfo.platform)),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            // 11's Linux screen-reader gap statement (MD4 AC4), shared with the README and help.
+            Text(
+                stringResource(Res.string.about_screen_readers),
                 style = MaterialTheme.typography.bodyMedium,
             )
             SettingsRow(
