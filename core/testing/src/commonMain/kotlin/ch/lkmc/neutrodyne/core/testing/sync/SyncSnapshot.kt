@@ -50,6 +50,9 @@ fun canonicalSyncSnapshot(
     val redirects = mutableMapOf<SyncAddress, SyncAddress>()
     for ((address, state) in records.entries.sortedBy { it.key.key }) {
         val target = terminalSyncAddress(address, records)
+        // A redirect stub without content forwards nothing: the server only routes a key it
+        // never stored (an unqueued episode's rekey), so its target need not exist.
+        if (target != address && state.isContentless()) continue
         raw[target] = RecordMerger.merge(raw[target], state.copy(mergedInto = null)).record
     }
     for (address in knownAddresses) {
@@ -191,3 +194,6 @@ internal fun canonicalJson(value: JsonElement): String =
             value.toString()
         }
     }
+
+private fun RecordState.isContentless(): Boolean =
+    fields.isEmpty() && growSets.isEmpty() && match == null && matchClocks.isEmpty()
