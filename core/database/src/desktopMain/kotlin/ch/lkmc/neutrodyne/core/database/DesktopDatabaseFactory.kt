@@ -28,6 +28,13 @@ class DesktopDatabaseFactory(
 
     override fun exists(): Boolean = Files.exists(file)
 
+    override fun usableSpaceBytes(): Long? =
+        try {
+            Files.getFileStore(file.parent).usableSpace
+        } catch (_: IOException) {
+            null
+        }
+
     override fun quarantine(stamp: String) {
         // The stamp becomes a directory name and is read back from `quarantine-pending`;
         // an epoch-millis shape keeps it inside the quarantine directory.

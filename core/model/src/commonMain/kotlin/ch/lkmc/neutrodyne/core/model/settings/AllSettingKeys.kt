@@ -24,6 +24,7 @@ object AllSettingKeys {
             DownloadSettingKeys.ALL +
             BackupSettingKeys.ALL +
             DesktopSettingKeys.ALL +
+            DiagnosticsSettingKeys.ALL +
             UpdateSettingKeys.ALL
 
     /**
