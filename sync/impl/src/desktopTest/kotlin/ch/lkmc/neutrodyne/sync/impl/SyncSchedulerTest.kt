@@ -278,6 +278,69 @@ class SyncSchedulerTest {
             assertEquals(2, deps.rounds.size)
         }
 
+    // --- the events stream's remote-signal poke ---------------------------------------------------
+
+    @Test
+    fun `a remote changed signal runs one coalesced SSE round`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+
+            deps.scheduler.onRemoteChanged()
+            deps.scheduler.onRemoteChanged()
+            deps.scheduler.onRemoteChanged()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS)
+            runCurrent()
+            deps.await { deps.rounds.isNotEmpty() }
+
+            assertEquals(listOf(SyncRoundReason.SSE), deps.rounds)
+            assertTrue(deps.pushes.isEmpty())
+        }
+
+    @Test
+    fun `a signal while unlinked schedules nothing`() =
+        runTest {
+            val deps = deps()
+
+            deps.scheduler.onRemoteChanged()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS)
+            runCurrent()
+            deps.awaitQuiet()
+
+            assertTrue(deps.rounds.isEmpty())
+            assertTrue(deps.pushes.isEmpty())
+        }
+
+    @Test
+    fun `a non-interactive platform defers the signal to its push`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            deps.interactive = false
+
+            deps.scheduler.onRemoteChanged()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS)
+            runCurrent()
+            deps.await { deps.pushes.isNotEmpty() }
+
+            assertEquals(listOf(SyncRoundReason.SSE), deps.pushes)
+        }
+
+    @Test
+    fun `a 401 in a scheduled round stops sync work instead of deferring`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            deps.roundFailure = SyncTransportException(401, null, "revoked")
+
+            deps.scheduler.onRemoteChanged()
+            testScheduler.advanceTimeBy(SSE_ROUND_DELAY_MS)
+            runCurrent()
+            deps.await { deps.unlinked }
+
+            assertTrue(deps.pushes.isEmpty(), "dead credentials never ride the push fallback")
+        }
+
     // --- the undo-window maturity poke ---------------------------------------------------------
 
     /**
@@ -345,6 +408,8 @@ class SyncSchedulerTest {
     ) {
         var interactive: Boolean = true
         var roundFails: Boolean = false
+        var roundFailure: Throwable? = null
+        var unlinked: Boolean = false
         var releaseDeferred: suspend () -> Unit = {}
 
         private val clock = scope.clock
@@ -353,6 +418,7 @@ class SyncSchedulerTest {
             SyncScheduler(
                 db = db,
                 round = { reason ->
+                    roundFailure?.let { throw it }
                     if (roundFails) throw RuntimeException("round failed")
                     rounds += reason
                 },
@@ -370,7 +436,9 @@ class SyncSchedulerTest {
 
                         override suspend fun onLinked() = Unit
 
-                        override suspend fun onUnlinked() = Unit
+                        override suspend fun onUnlinked() {
+                            unlinked = true
+                        }
                     },
                 releaseDeferred = { this@Deps.releaseDeferred() },
             )

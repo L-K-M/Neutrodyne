@@ -22,6 +22,7 @@ import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -100,13 +101,29 @@ class DesktopSyncTriggers
         private var started = false
         private var lastFocusMs: Long? = null
 
+        /**
+         * 10 Live updates: the events stream's gate — the SSE connection stays open while the
+         * machine is awake; `Suspending` closes it and `Resumed` re-opens it (beside the
+         * existing resume round below).
+         */
+        internal val awake = MutableStateFlow(true)
+
         /** Starts the power-resume collector once (the initializer calls it). */
         fun start() {
             if (started) return
             started = true
             scope.launch {
                 power.events.collect { event ->
-                    if (event == PowerEvent.Resumed) pokeLane()
+                    when (event) {
+                        PowerEvent.Suspending -> {
+                            awake.value = false
+                        }
+
+                        PowerEvent.Resumed -> {
+                            awake.value = true
+                            pokeLane()
+                        }
+                    }
                 }
             }
         }
@@ -147,11 +164,14 @@ class DesktopSyncSchedulingInitializer
         // Lazy (01 DI rule 7): the scheduler's dependencies reach the database (band 100).
         private val scheduler: Provider<SyncScheduler>,
         private val triggers: Provider<DesktopSyncTriggers>,
+        private val events: Provider<SyncEventsClient>,
     ) : AppInitializer {
         override val order: Int = 210
 
         override suspend fun run() {
             scheduler().start()
             triggers().start()
+            // 10 Live updates: the SSE gate — open while the app runs and the machine is awake.
+            events().start(triggers().awake, SSE_HEARTBEAT_DESKTOP_SECONDS)
         }
     }

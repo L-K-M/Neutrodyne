@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
+import ch.lkmc.neutrodyne.sync.api.SyncActivity
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
 import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -46,7 +47,9 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
@@ -450,6 +453,51 @@ class SyncControllerImplTest {
                         .get()
                         ?.linkedAt,
                 )
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * 10 Live updates on the status card (08 Settings › Sync): IDLE while quiet, LIVE while the
+     * events stream holds, SYNCING while a round flies — and back to LIVE when it lands.
+     */
+    @Test
+    fun theStatusCardFollowsTheStreamAndTheRound() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.network.setStatus(
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeNetworkMonitor.ONLINE,
+                )
+                h.client.discovery = { defaultDiscovery().copy(features = listOf("link", "sse")) }
+                h.controller.refreshStatus()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity == SyncActivity.IDLE
+                }
+
+                h.eventTransport.thenOpen(idleEventSession())
+                h.events.start(flowOf(true), 60)
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity == SyncActivity.LIVE
+                }
+
+                // A round trumps LIVE while in flight.
+                val hold = CompletableDeferred<Unit>()
+                h.client.syncHandler = { _, changes ->
+                    hold.await()
+                    defaultSyncResponse(changes)
+                }
+                h.controller.syncNow()
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity == SyncActivity.SYNCING
+                }
+                hold.complete(Unit)
+                await(h) {
+                    (h.controller.status.value as? SyncStatus.Linked)?.activity == SyncActivity.LIVE
+                }
             } finally {
                 h.close()
             }
@@ -1091,14 +1139,15 @@ private class Harness(
 
     /** Records the scheduler's platform callbacks: link arm and work cancellation. */
     val schedulerCalls = mutableListOf<String>()
+    val network =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeNetworkMonitor()
     val scheduler =
         SyncScheduler(
             db = db,
             round = { reason -> engine.round(reason) },
             playback = NoPlaybackSync,
-            network =
-                ch.lkmc.neutrodyne.core.testing
-                    .FakeNetworkMonitor(),
+            network = network,
             clock = clock,
             scope = controllerScope,
             hooks =
@@ -1131,6 +1180,21 @@ private class Harness(
             podcastIndexKey = "",
             podcastIndexSecret = "",
         )
+
+    /** The events client's scripted transport — its stream the activity line follows. */
+    val eventTransport = FakeSyncEventTransport()
+    val events =
+        SyncEventsClient(
+            db = db,
+            transport = eventTransport,
+            discover = { url -> client.discover(url) },
+            address = address,
+            tokens = tokens,
+            network = network,
+            scope = controllerScope,
+            onRemoteChanged = { scheduler.onRemoteChanged() },
+            onRevoked = { scheduler.onUnlinked() },
+        )
     val controller =
         SyncControllerImpl(
             db = db,
@@ -1148,6 +1212,7 @@ private class Harness(
             gate = gate,
             errors = classifier,
             scheduler = scheduler,
+            events = events,
             noticeBus = noticeBus,
             io = kotlinx.coroutines.Dispatchers.Default,
             scope = controllerScope,

@@ -24,6 +24,9 @@ internal const val OUTBOX_DEBOUNCE_MS = 2_000L
 /** 10 Scheduling: a round at most every 60 s while playing when `pos`/`session` rows are pending. */
 internal const val PLAYING_TICK_MS = 60_000L
 
+/** 10 Live updates: a remote `changed` signal runs a round within 500 ms; bursts coalesce. */
+internal const val SSE_ROUND_DELAY_MS = 500L
+
 /**
  * The platform half of 10's scheduling tables. `SyncScheduler` (shared) owns the triggers; the
  * platform decides where an outbox push goes and what link/unlink arms.
@@ -69,6 +72,12 @@ class SyncScheduler(
     private val hooks: SyncScheduleHooks,
     /** The engine's deferred-removal release (10 Mass-change guard rule 4). */
     private val releaseDeferred: suspend () -> Unit = {},
+    /**
+     * The events client's link re-check (10 Live updates): link, unlink and revoke all reach
+     * the SSE stream's gate through here, so the stream opens and closes promptly instead of
+     * reading `sync_state` on a stream cadence.
+     */
+    private val linkStateChanged: suspend () -> Unit = {},
 ) {
     /** Serializes this scheduler's rounds; the engine's own mutex covers rounds from other callers. */
     private val roundMutex = Mutex()
@@ -130,15 +139,38 @@ class SyncScheduler(
         }
     }
 
-    /** A link completed: arm the platform's periodic mechanism. */
-    suspend fun onLinked() = hooks.onLinked()
+    /** A link completed: arm the platform's periodic mechanism and the events stream. */
+    suspend fun onLinked() {
+        hooks.onLinked()
+        linkStateChanged()
+    }
 
     /** Unlink or revoke: drop the in-memory undo bookkeeping and cancel the platform's work. */
     suspend fun onUnlinked() {
+        // The stream closes first: it should not read another event while work still cancels.
+        linkStateChanged()
         groupDeletes.clear()
         maturityJob?.cancel()
         debounceJob?.cancel()
+        remoteRoundJob?.cancel()
         hooks.onUnlinked()
+    }
+
+    private var remoteRoundJob: Job? = null
+
+    /**
+     * 10 Live updates: a remote `changed` signal runs one `SSE` round inside the 500-ms
+     * budget; bursts coalesce onto the pending job, and the round itself pulls whatever
+     * changed — the event's cursor is never used.
+     */
+    internal fun onRemoteChanged() {
+        if (remoteRoundJob?.isActive == true) return
+        remoteRoundJob =
+            scope.launch {
+                delay(SSE_ROUND_DELAY_MS)
+                remoteRoundJob = null
+                roundOrFallback(SyncRoundReason.SSE)
+            }
     }
 
     /** `true` while a captured change may legitimately reach the server (R7.1). */
@@ -197,7 +229,13 @@ class SyncScheduler(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Throwable) {
-            hooks.schedulePush(reason)
+            // A 401 already marked the link revoked inside the round: stop every sync trigger
+            // the way the worker does (10 Errors) rather than scheduling dead credentials.
+            if ((failure as? SyncTransportException)?.status == STATUS_UNAUTHORIZED) {
+                onUnlinked()
+            } else {
+                hooks.schedulePush(reason)
+            }
         }
     }
 
@@ -247,6 +285,7 @@ class SyncScheduler(
 
     private companion object {
         const val OUTBOX_TABLE = "sync_outbox"
+        const val STATUS_UNAUTHORIZED = 401
     }
 }
 
