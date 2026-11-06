@@ -789,7 +789,9 @@ too (`DesktopPlaybackController.syncPort`, 06's 2026-11-06 update), so
 the while-playing deferral is live on both platforms; the desktop
 end-to-end proof is `DesktopPlaybackSyncDeferralTest` (the real
 controller, scheduler, engine and applier over Room and the in-memory
-server, mirroring the Android `PlaybackSyncDeferralTest`).
+server, mirroring the Android `PlaybackSyncDeferralTest`). The Android
+bridge clears `active` before its `Stopped` boundary (06's 2026-11-06
+capture update), so the release at that boundary sees nothing playing.
 
 ### Now playing and handoff
 
@@ -1380,11 +1382,24 @@ count of [Use this device's library everywhere](#use-this-devices-library-everyw
 and shows `LinkState.ConfirmReplaceEverywhere` (08's wording and
 counts); "Replace everywhere" re-enters the choice and the merge resumes
 the staged snapshot, Cancel aborts the link with nothing merged or
-pruned. One adjacent gap surfaced while wiring this and stays open:
-`SettingsCapture` (the local synced-key recorder) is installed by tests
-only — no production graph installs it yet, so the sentence above about
-a local edit converging "anyway" does not hold in production; the
+pruned. One adjacent gap surfaced while wiring this: `SettingsCapture`
+(the local synced-key recorder) was installed by tests only, so the
+sentence above about a local edit converging "anyway" did not hold in
+production. The 2026-11-06 capture update below closes it; the
 whole-library captures above do not depend on it.
+
+**Update (2026-11-06, MS2 capture).** `SettingsCapture` is installed by
+both production graphs. `SyncControllerImpl` installs the recorder from
+`refreshStatus` while the link is committed (`enabled`, `linkedAt`, not
+revoked) and "Sync playback settings" is on, clears it on unlink,
+revoke and the switch off, and re-installs it when the switch turns back
+on; the persisted switch is read at every status refresh. The recorder is
+the same literal-`v` intent path the whole-library captures use, so a
+local synced-key edit after the link now records its outbox intent in
+production. The Android and desktop graph tests prove a linked local
+edit through the production `SettingsRepository` records the `setting`
+row, an unlinked or switch-off edit records nothing, and a remote
+`applyRemote` changes DataStore without echoing an outbox row.
 
 ### Use the server's library on this device
 
