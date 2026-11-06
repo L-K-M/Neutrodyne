@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.core.navigation.DiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -28,6 +29,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.about_version
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_abi
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_desktop
 import ch.lkmc.neutrodyne.feature.settings.resources.app_name
+import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_title
 import ch.lkmc.neutrodyne.feature.settings.resources.install_help_title
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
@@ -78,6 +80,12 @@ internal fun AboutPage(buildInfo: BuildInfo) {
                 title = stringResource(Res.string.install_help_title),
                 summary = null,
                 onClick = { navigator.push(InstallHelpKey()) },
+            )
+            SettingsRow(
+                icon = NdIcons.Explore,
+                title = stringResource(Res.string.diagnostics_title),
+                summary = null,
+                onClick = { navigator.push(DiagnosticsKey) },
             )
             SettingsRow(
                 icon = NdIcons.Explore,

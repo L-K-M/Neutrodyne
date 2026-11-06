@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.common
 
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,10 +17,13 @@ import kotlin.time.Instant
  * [minLevel] is INFO normally and DEBUG while `diagnostics.verbose_log_until` is in the
  * future ("Detailed log for 24 hours"); the level observer writes it, [log] reads it.
  */
-class RingBufferLogSink(
-    private val clock: Clock,
-    private val capacity: Int = DEFAULT_CAPACITY,
-) : LogSink {
+@SingleIn(AppScope::class)
+class RingBufferLogSink
+    @Inject
+    constructor(
+        private val clock: Clock,
+        private val capacity: Int = DEFAULT_CAPACITY,
+    ) : LogSink {
     @Volatile
     var minLevel: LogLevel = LogLevel.INFO
 

@@ -54,7 +54,11 @@ class NeutrodyneApplication :
             return
         }
 
-        Log.install(LogcatSink(if (BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.WARN))
+        Log.install(
+            LogcatSink(if (BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.WARN),
+            // The diagnostics ring buffer — the graph singleton, so the repository sees it.
+            graph.ringBufferLogSink,
+        )
         if (role == ProcessRole.YTX) {
             ytxGraph = createGraphFactory<YtxGraph.Factory>().create(this)
             ProcessStartProbe.record(ProcessStartProbe.Event.YTX_GRAPH_CREATED)
