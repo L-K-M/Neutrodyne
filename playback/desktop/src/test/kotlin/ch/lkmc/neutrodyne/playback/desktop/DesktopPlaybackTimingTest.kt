@@ -639,8 +639,8 @@ private class TimingFixture(
             clock,
             { runtime },
             network,
-            StandardTestDispatcher(test.testScheduler),
-            StandardTestDispatcher(test.testScheduler),
+            dispatcher = StandardTestDispatcher(test.testScheduler),
+            ioDispatcher = StandardTestDispatcher(test.testScheduler),
         )
 
     init {
