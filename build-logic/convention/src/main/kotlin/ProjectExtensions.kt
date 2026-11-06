@@ -40,6 +40,12 @@ internal val Project.neutrodyneNamespace: String
             else -> BASE_PACKAGE + path.replace(':', '.').replace("-", "")
         }
 
+/** The committed public keystore's signing-config name and credentials (D61, 09 Versioning and signing). */
+internal const val SIGNING_CONFIG = "neutrodynePublic"
+internal const val SIGNING_STORE = "signing/neutrodyne-public.keystore"
+internal const val SIGNING_PASSWORD = "neutrodyne"
+internal const val SIGNING_ALIAS = "neutrodyne"
+
 /** Rejects plugins the plan bans or confines (01 Common Android configuration). */
 internal fun Project.installPluginGuards() {
     pluginManager.withPlugin(
