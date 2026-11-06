@@ -18,6 +18,9 @@ class FakeDiagnosticsRepository(
     var exportResult: Outcome<String, DiagnosticsError> = Outcome.Success("file:///tmp/export.db")
     val exportCalls = mutableListOf<String?>()
 
+    /** When set, [snapshot] throws it — the "no report yet" path for ViewModel tests. */
+    var snapshotError: Throwable? = null
+
     private val _logLines = MutableStateFlow<List<String>>(emptyList())
 
     var logLines: List<String>
@@ -26,7 +29,10 @@ class FakeDiagnosticsRepository(
             _logLines.value = value
         }
 
-    override suspend fun snapshot(): DiagnosticsReport = report
+    override suspend fun snapshot(): DiagnosticsReport {
+        snapshotError?.let { throw it }
+        return report
+    }
 
     override fun toPlainText(
         report: DiagnosticsReport,

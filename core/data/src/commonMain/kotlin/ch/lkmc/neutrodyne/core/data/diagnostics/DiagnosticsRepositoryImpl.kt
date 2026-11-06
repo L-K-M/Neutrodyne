@@ -72,14 +72,16 @@ internal class DiagnosticsRepositoryImpl
                                                         ),
                                                     )
                                                 }
-                                        } ?: listOf(DiagnosticsLine("unavailable", "timeout", DiagnosticsSeverity.WARNING))
+                                        }
+                                            ?: listOf(
+                                                DiagnosticsLine("unavailable", "timeout", DiagnosticsSeverity.WARNING),
+                                            )
                                     // 09: values pass Redactor once more — contributors should already have
                                     // redacted, but stop-reason and parse-warning texts can quote URLs.
                                     val redacted = lines.map { it.copy(value = Redactor.text(it.value)) }
                                     if (redacted.isEmpty()) null else DiagnosticsSection(contributor.section, redacted)
                                 }
-                            }
-                            .awaitAll()
+                            }.awaitAll()
                             .filterNotNull()
                     }
                 val logLines = logSink.linesFlow.value
@@ -87,7 +89,8 @@ internal class DiagnosticsRepositoryImpl
                     if (logLines.isEmpty()) {
                         sections
                     } else {
-                        sections + DiagnosticsSection(DiagnosticsSectionId.LOG, logLines.map { DiagnosticsLine("", it) })
+                        sections +
+                            DiagnosticsSection(DiagnosticsSectionId.LOG, logLines.map { DiagnosticsLine("", it) })
                     }
                 DiagnosticsReport(generatedAt = clock.now(), sections = withLog)
             }
@@ -114,7 +117,11 @@ internal class DiagnosticsRepositoryImpl
                     kept.forEach { builder.append(it).append('\n') }
                 } else {
                     for (line in section.lines) {
-                        builder.append(line.key).append(": ").append(line.value).append('\n')
+                        builder
+                            .append(line.key)
+                            .append(": ")
+                            .append(line.value)
+                            .append('\n')
                     }
                 }
             }
@@ -122,23 +129,27 @@ internal class DiagnosticsRepositoryImpl
         }
 
         override suspend fun exportDatabaseCopy(destination: String?): Outcome<String, DiagnosticsError> {
+            // 09's "at most one waits for its share": every export first drops the
+            // previous cache leaf so a share never hands out an older copy.
+            exporter.removeStale()
             val produced =
                 when (val outcome = exporter.produce()) {
                     is Outcome.Failure -> return outcome
                     is Outcome.Success -> outcome.value
                 }
             return when {
-                platformInfo.kind == PlatformKind.ANDROID ->
+                platformInfo.kind == PlatformKind.ANDROID -> {
                     // Android ignores `destination`: the share sheet hands out the
                     // FileProvider URI of the private cache copy (09).
                     Outcome.Success(this.destination.shareUri(produced.name) ?: produced.toString())
+                }
 
                 destination.isNullOrBlank() -> {
                     exporter.removeStale()
                     Outcome.Failure(DiagnosticsError.CANCELLED)
                 }
 
-                else ->
+                else -> {
                     when (val saved = this.destination.save(produced, destination)) {
                         is Outcome.Failure -> {
                             exporter.removeStale()
@@ -151,6 +162,7 @@ internal class DiagnosticsRepositoryImpl
                             Outcome.Success(destination)
                         }
                     }
+                }
             }
         }
 

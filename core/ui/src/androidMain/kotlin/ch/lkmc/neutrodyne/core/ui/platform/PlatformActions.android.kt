@@ -78,33 +78,50 @@ internal class AndroidPlatformActions(
 ) : PlatformActions {
     override val settings: SystemSettingsOpener =
         SystemSettingsOpener { target ->
-            val intent =
+            // 09: the battery row falls back to app details when an OEM lacks the intent.
+            val intents =
                 when (target) {
                     SystemSettingsTarget.STORAGE -> {
-                        Intent(android.os.storage.StorageManager.ACTION_MANAGE_STORAGE)
+                        listOf(Intent(android.os.storage.StorageManager.ACTION_MANAGE_STORAGE))
                     }
 
                     SystemSettingsTarget.BACKGROUND_DATA -> {
-                        Intent(
-                            android.provider.Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
-                            Uri.parse("package:${context.packageName}"),
+                        listOf(
+                            Intent(
+                                android.provider.Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+                                Uri.parse("package:${context.packageName}"),
+                            ),
                         )
                     }
 
                     SystemSettingsTarget.APP_DETAILS -> {
-                        Intent(
-                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            Uri.parse("package:${context.packageName}"),
+                        listOf(appDetailsIntent())
+                    }
+
+                    SystemSettingsTarget.BATTERY_OPTIMIZATION -> {
+                        listOf(
+                            Intent(
+                                android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
+                            ),
+                            appDetailsIntent(),
                         )
                     }
                 }
-            try {
-                context.startActivity(intent)
-                true
-            } catch (_: ActivityNotFoundException) {
-                false
+            intents.any { intent ->
+                try {
+                    context.startActivity(intent)
+                    true
+                } catch (_: ActivityNotFoundException) {
+                    false
+                }
             }
         }
+
+    private fun appDetailsIntent(): Intent =
+        Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}"),
+        )
 
     override val developerOptions: () -> Boolean = { openDeveloperOptions(context) }
 
