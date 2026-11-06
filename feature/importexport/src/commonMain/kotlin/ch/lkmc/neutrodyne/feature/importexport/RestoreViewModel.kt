@@ -51,12 +51,6 @@ internal data class RestoreUiState(
     val confirmingReplace: Boolean = false,
     val requested: Boolean = false,
     val progress: RestoreProgress? = null,
-<<<<<<< HEAD
-    val redownloadIds: List<Long> = emptyList(),
-    val meteredDownload: Boolean = false,
-    val downloadFailed: Boolean = false,
-)
-=======
     /** The linked Replace's reach (05 Restore while linked); THIS_DEVICE is the default. */
     val linkedReach: LinkedRestoreReach = LinkedRestoreReach.THIS_DEVICE,
     /** The ALL_DEVICES confirmation: the server comparison is running. */
@@ -65,12 +59,14 @@ internal data class RestoreUiState(
     val allDevicesEffect: AllDevicesReachEffect? = null,
     /** The server library could not be staged (offline); the user may retry. */
     val serverLibraryUnavailable: Boolean = false,
+    val redownloadIds: List<Long> = emptyList(),
+    val meteredDownload: Boolean = false,
+    val downloadFailed: Boolean = false,
 ) {
     /** 05: only a linked Replace asks how far it reaches. */
     val asksReach: Boolean
         get() = preview?.linkedServerHost != null && mode == RestoreMode.REPLACE
 }
->>>>>>> 787cf8d9a (Ask how far a linked Replace reaches in the restore preview)
 
 /** Backup-only controller; normal import confirmation is never part of this path. */
 internal class RestoreViewModel
