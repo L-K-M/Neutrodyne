@@ -61,11 +61,11 @@ class EventsHttpTest {
                                 ch.lkmc.neutrodyne.sync.protocol.dto
                                     .SyncRequest(changes = listOf(change)),
                             )
-                        assertEquals("event: changed", body.readLine())
+                        assertEquals("event: changed", body.readSkippingHeartbeats())
                         assertTrue(body.readLine().contains(pushed.page.cursor))
                         assertEquals("", body.readLine())
                         f.services.tokens.logout(f.principal(grant))
-                        assertNull(body.readLine())
+                        assertNull(body.readSkippingHeartbeats())
                     }
                     assertEquals(0, f.events.streamCount())
                 } finally {
@@ -90,4 +90,17 @@ class EventsHttpTest {
             a.close()
             b.close()
         }
+
+    /**
+     * With `hb=1` a slow runner can see further `: hb` blocks before the next event or the end of
+     * the stream; each must still be a well-formed heartbeat block.
+     */
+    private fun java.io.BufferedReader.readSkippingHeartbeats(): String? {
+        var line = readLine()
+        while (line == ": hb") {
+            assertEquals("", readLine())
+            line = readLine()
+        }
+        return line
+    }
 }

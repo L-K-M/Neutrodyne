@@ -113,7 +113,12 @@ class AccountCliTest {
                         AccountCliProbe::class.java.name,
                         directory.toString(),
                     ).redirectErrorStream(true).redirectOutput(log.toFile()).start()
-                assertTrue(process.waitFor(30, TimeUnit.SECONDS))
+                try {
+                    assertTrue(process.waitFor(30, TimeUnit.SECONDS), Files.readString(log))
+                } finally {
+                    // A hung probe must not outlive the test or keep the data directory busy.
+                    process.destroyForcibly()
+                }
                 assertEquals(0, process.exitValue(), Files.readString(log))
                 assertTrue(storage.store.readAuth { account(owner.id)!!.disabledAt != null })
                 assertFalse(

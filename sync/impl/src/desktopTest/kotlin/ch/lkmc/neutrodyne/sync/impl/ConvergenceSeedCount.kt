@@ -7,6 +7,8 @@ internal actual fun convergenceSeedCount(): Int = System.getProperty("neutrodyne
 
 internal actual fun convergenceRegressions(): String =
     File(
-        System.getProperty("neutrodyne.moduleDir"),
+        requireNotNull(System.getProperty("neutrodyne.moduleDir")) {
+            "neutrodyne.moduleDir is unset; run the tests through Gradle"
+        },
         "src/commonTest/resources/convergence/regressions.json",
     ).readText()
