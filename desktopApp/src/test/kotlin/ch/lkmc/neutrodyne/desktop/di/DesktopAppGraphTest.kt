@@ -44,6 +44,7 @@ import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import coil3.PlatformContext
@@ -90,6 +91,19 @@ class DesktopAppGraphTest {
                 graph.databaseOpener.requireDatabase().close()
             }
         }
+
+    @Test
+    fun theDesktopNotifierBindsTheOsNotifierOverTheBanners() {
+        try {
+            // The bound DesktopNotifier is MD2's OS notifier; the banner stays reachable as
+            // its fallback (11 Notifications' fallback column).
+            assertThat(graph.desktopNotifier).isSameInstanceAs(graph.osNotifier)
+            assertThat(graph.osNotifier.description).isNotEmpty()
+            graph.osNotifier.close()
+        } finally {
+            graph.appScope.cancel()
+        }
+    }
 
     @Test
     fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
@@ -146,6 +160,13 @@ class DesktopAppGraphTest {
             graph.desktopPlaybackController.shutdown()
             graph.databaseOpener.requireDatabase().close()
         }
+
+    /** Download-time chapters (06 Chapters): the graph binds the desktop container reader, so
+     *  `ChapterRepository.ensureLocalLoaded` can extract a downloaded episode's chapters. */
+    @Test
+    fun theDownloadTimeChapterReaderIsTheDesktopContainerExtractor() {
+        assertThat(graph.embeddedChapterReader()).isInstanceOf(DesktopChapterExtractor::class.java)
+    }
 
     @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =

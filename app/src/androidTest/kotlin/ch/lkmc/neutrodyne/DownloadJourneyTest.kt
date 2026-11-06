@@ -144,6 +144,9 @@ class DownloadJourneyTest {
             assertTrue(media.canonicalPath.startsWith(root.canonicalPath + File.separator))
             assertTrue(media.isFile && media.length() == row.downloadedBytes)
             assertTrue(media.length() >= E4_MIN_BYTES)
+            // The COMPLETED row commits before the in-memory index update; await the index
+            // instead of asserting on the intermediate state.
+            await { graph.localMediaIndex.localUriOrNull(id) != null }
             assertNotNull(graph.localMediaIndex.localUriOrNull(id))
             // The publisher disappears before local chapter enrichment and the first playback start.
             server.close()

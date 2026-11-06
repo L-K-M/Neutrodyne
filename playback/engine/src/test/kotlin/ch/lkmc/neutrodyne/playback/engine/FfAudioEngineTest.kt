@@ -2,6 +2,8 @@
 package ch.lkmc.neutrodyne.playback.engine
 
 import ch.lkmc.neutrodyne.core.testing.FakeDesktopSourceResolver
+import ch.lkmc.neutrodyne.playback.native.AudioOutput
+import ch.lkmc.neutrodyne.playback.native.NdOutputException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -133,7 +135,11 @@ class FfAudioEngineTest {
             assertEquals(600L, engine.positionMs())
             engine.play()
             await("playback after tail edit") { engine.positionMs() >= 650 }
-            synchronized(resolver) { assertEquals(listOf(item to 0), resolver.calls) }
+            // The MD1b prepare-ahead resolves the next item, but a tail edit must
+            // never resolve or restart the item the user hears.
+            synchronized(resolver) {
+                assertEquals(listOf(item to 0), resolver.calls.filter { it.first.episodeId == 1L })
+            }
         }
     }
 
@@ -248,6 +254,128 @@ class FfAudioEngineTest {
         assertFalse(closer.isAlive)
     }
 
+    /**
+     * MD1 AC4 with the null back-end: the next window item is prepared while the
+     * current one still plays, the handover keeps the device running with no gap
+     * longer than 50 ms, the transition event carries the audible boundary, and
+     * the last item still ends the engine.
+     */
+    @Test
+    fun automaticTransitionPreparesTheNextItemAndKeepsTheRingContinuous() {
+        val second = EngineItem(2, "ep:2:pin", true)
+        val resolver = resolver().apply { sources[2L to 0] = ResolvedSource.File(media()) }
+        engine(resolver).use { engine ->
+            val transitions = mutableListOf<EngineEvent.ItemTransition>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.ItemTransition>().collect { transitions += it }
+            }
+            try {
+                engine.setWindow(listOf(item, second), 0, null)
+                engine.play()
+                awaitReady(engine)
+                // The next item is prepared before the current one ends.
+                await("next item prepared") {
+                    synchronized(resolver) { resolver.calls.any { it.first.episodeId == 2L } }
+                }
+                assertTrue(engine.positionMs() < 2_000)
+                val framesBefore = requireNotNull(engine.outputFramesPlayed).invoke()
+                val underrunBefore = requireNotNull(engine.outputUnderrunFrames).invoke()
+                await("automatic transition") { transitions.isNotEmpty() }
+                val event = transitions.single()
+                assertEquals(1L, event.fromEpisodeId)
+                assertEquals(2L, event.toEpisodeId)
+                assertEquals(TransitionReason.AUTO, event.reason)
+                assertTrue(
+                    abs(event.fromPositionMs - 2_000) <= 50,
+                    "outgoing position ${event.fromPositionMs}",
+                )
+                // The device never stopped: it kept consuming frames across the
+                // boundary and the ring never emptied for longer than 50 ms.
+                val framesAfter = requireNotNull(engine.outputFramesPlayed).invoke()
+                assertTrue(framesAfter > framesBefore, "the device stopped at the transition")
+                val gapMs = (requireNotNull(engine.outputUnderrunFrames).invoke() - underrunBefore) * 1_000 / RATE
+                assertTrue(gapMs <= 50, "transition gap $gapMs ms")
+                // The clock follows the arrival from its first audible frame.
+                await("arrival position") { engine.positionMs() < 1_000 }
+                await("end of the second item") { engine.state.value == EngineState.Ended }
+                assertTrue(abs(engine.positionMs() - 2_000) <= 50)
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
+    /** The next item's preparation starts about 10 s before the end, not at the start. */
+    @Test
+    fun theNextItemIsPreparedAboutTenSecondsBeforeTheEnd() {
+        val first = EngineItem(1, "ep:1:pin", true)
+        val second = EngineItem(2, "ep:2:pin", true)
+        val file = writeTestWave(ByteArray(15 * RATE * 4))
+        try {
+            val resolver =
+                FakeDesktopSourceResolver().apply {
+                    sources[1L to 0] = ResolvedSource.File(file)
+                    sources[2L to 0] = ResolvedSource.File(media())
+                }
+            engine(resolver).use { engine ->
+                engine.setSpeed(3f)
+                engine.setWindow(listOf(first, second), 0, null)
+                engine.play()
+                awaitReady(engine)
+                await("next item prepared") {
+                    synchronized(resolver) { resolver.calls.any { it.first.episodeId == 2L } }
+                }
+                val remainingMs = 15_000 - engine.positionMs()
+                assertTrue(
+                    remainingMs in 8_000..12_000,
+                    "prepared with ${remainingMs}ms remaining at ${engine.positionMs()}ms",
+                )
+                await("end of the first item") { engine.state.value == EngineState.Ended }
+            }
+        } finally {
+            Files.delete(file)
+        }
+    }
+
+    @Test
+    fun aTailEditDuringPreparationDropsTheStalePrepare() {
+        val second = EngineItem(2, "ep:2:pin", true)
+        val third = EngineItem(3, "ep:3:pin", true)
+        val resolver =
+            resolver().apply {
+                sources[2L to 0] = ResolvedSource.File(media())
+                sources[3L to 0] = ResolvedSource.File(media())
+            }
+        engine(resolver).use { engine ->
+            val transitions = mutableListOf<EngineEvent.ItemTransition>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.ItemTransition>().collect { transitions += it }
+            }
+            try {
+                engine.setWindow(listOf(item, second), 0, null)
+                engine.play()
+                awaitReady(engine)
+                await("next item prepared") {
+                    synchronized(resolver) { resolver.calls.any { it.first.episodeId == 2L } }
+                }
+                // The queued item is replaced while its preparation is in flight.
+                engine.updateWindow(
+                    EngineWindowDiff(
+                        removed = setOf(2),
+                        inserted = listOf(PlacedItem(1, third)),
+                    ),
+                )
+                await("transition to the replacement") { transitions.isNotEmpty() }
+                assertEquals(3L, transitions.single().toEpisodeId)
+                await("end of the replacement") { engine.state.value == EngineState.Ended }
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
     @Test
     fun forbiddenOpenIsReresolvedOnceThroughAvio() {
         val directory = Files.createTempDirectory("engine-http")
@@ -278,11 +406,80 @@ class FfAudioEngineTest {
         }
     }
 
+    /** Every source the engine opened, so a test can prove each one was closed again. */
+    private class OpenedSources {
+        private val sources = java.util.concurrent.CopyOnWriteArrayList<Tracked>()
+
+        fun open(resolved: ResolvedSource): ByteSource =
+            Tracked(FileByteSource((resolved as ResolvedSource.File).path)).also { sources += it }
+
+        fun count() = sources.size
+
+        fun openOnes() = sources.count { !it.closed }
+
+        /** Whether the [index]-th source opened (0-based, in open order) was closed. */
+        fun closed(index: Int) = sources.getOrNull(index)?.closed == true
+
+        private class Tracked(
+            private val delegate: ByteSource,
+        ) : ByteSource by delegate {
+            @Volatile var closed = false
+
+            override fun close() {
+                closed = true
+                delegate.close()
+            }
+        }
+    }
+
+    @Test
+    fun anOutputOpenFailureClosesThePreparedFirstItem() {
+        val opened = OpenedSources()
+        engine(
+            output = { throw NdOutputException("nd_out_open failed with -4", NdOutputException.E_DEVICE) },
+            open = opened::open,
+        ).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("output error") { engine.state.value is EngineState.Error }
+            await("every opened source closed") { opened.count() > 0 && opened.openOnes() == 0 }
+        }
+    }
+
+    @Test
+    fun aSeekDuringPrepareAheadClosesThePreparedSuccessor() {
+        val second = EngineItem(2, "ep:2:pin", true)
+        val resolver = resolver().apply { sources[2L to 0] = ResolvedSource.File(media()) }
+        val opened = OpenedSources()
+        engine(resolver, open = opened::open).use { engine ->
+            engine.setWindow(listOf(item, second), 0, null)
+            engine.play()
+            awaitReady(engine)
+            // The 2-s item prepares its successor at once; seek before the first item ends.
+            await("successor opened") { opened.count() >= 2 }
+            assertTrue(engine.positionMs() < 1_500, "the first item must still be playing")
+            engine.seekTo(0)
+            awaitReady(engine)
+            // The seek's chain reopens both items; the successor prepared before the seek
+            // (the second source opened) belongs to the stale chain and must be closed.
+            await("the stale successor closed") { opened.closed(1) }
+        }
+    }
+
     private fun engine(
         resolver: DesktopSourceResolver = resolver(),
         rate: Int = RATE,
+        output: (() -> AudioOutput)? = null,
         open: (ResolvedSource) -> ByteSource = { FileByteSource((it as ResolvedSource.File).path) },
-    ) = FfAudioEngine(nativeDirectory("ffmpeg"), nativeDirectory("ndmedia"), resolver, open, EngineBackend.NULL, rate)
+    ): FfAudioEngine {
+        val directory = nativeDirectory("ffmpeg")
+        val ndmedia = nativeDirectory("ndmedia")
+        return if (output == null) {
+            FfAudioEngine(directory, ndmedia, resolver, open, EngineBackend.NULL, rate)
+        } else {
+            FfAudioEngine(directory, ndmedia, resolver, open, EngineBackend.NULL, rate, output)
+        }
+    }
 
     private fun resolver(file: Path = media()) =
         FakeDesktopSourceResolver().apply { sources[1L to 0] = ResolvedSource.File(file) }
@@ -307,9 +504,10 @@ class FfAudioEngineTest {
 
     private fun await(
         description: String,
+        timeoutMs: Long = 10_000L,
         condition: () -> Boolean,
     ) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(2)
         assertTrue(condition(), "timed out waiting for $description")
     }
@@ -324,6 +522,164 @@ class FfAudioEngineTest {
             }
         return Path.of(requireNotNull(System.getProperty("neutrodyne.rootDir")), "playback/native/build/$kind/$target")
     }
+
+    @Test
+    fun aRepeatedContentChangeMapsToTheContentChangedError() {
+        val failing =
+            object : ByteSource {
+                override val length: Long? get() = 100
+
+                override fun read(
+                    position: Long,
+                    dst: MemorySegment,
+                    maxBytes: Int,
+                ): Int = throw ContentChangedException("the representation changed")
+
+                override fun abort() = Unit
+
+                override fun close() = Unit
+            }
+        val resolver =
+            FakeDesktopSourceResolver().apply {
+                sources[1L to 0] = ResolvedSource.File(media())
+                sources[1L to 1] = ResolvedSource.File(media())
+            }
+        engine(resolver, open = { failing }).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("content changed error") { engine.state.value is EngineState.Error }
+            assertEquals(
+                EngineError.ContentChanged,
+                (engine.state.value as EngineState.Error).error,
+            )
+            // The first failure re-resolves once; the second maps to the error.
+            synchronized(resolver) { assertEquals(listOf(item to 0, item to 1), resolver.calls) }
+        }
+    }
+
+    @Test
+    fun anOutputWriteFailurePublishesDeviceLostAndDiscardsTheOutput() {
+        val failing = FakeOutput(FailOn.WRITE, NdOutputException.E_DEVICE)
+        engine(output = { failing }).use { engine ->
+            val lost = CompletableFuture<EngineEvent.DeviceLost>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                engine.events.filterIsInstance<EngineEvent.DeviceLost>().collect { lost.complete(it) }
+            }
+            try {
+                engine.setWindow(listOf(item), 0, null)
+                engine.play()
+                await("output error") { engine.state.value is EngineState.Error }
+                val error = engine.state.value as EngineState.Error
+                assertEquals(EngineError.Output("nd_out_write failed with -4"), error.error)
+                assertEquals(EngineEvent.DeviceLost, lost.get(5, TimeUnit.SECONDS))
+                assertTrue(failing.closed, "the failed output must be discarded")
+                // No stale output reference: a new window opens a fresh device.
+                engine.setWindow(listOf(item), 0, null)
+                await("the engine stays erroring on the discarded output") {
+                    engine.state.value is EngineState.Error
+                }
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun anOutputStartFailureBecomesAnErrorInsteadOfEscapingPlay() {
+        val failing = FakeOutput(FailOn.START, NdOutputException.E_DEVICE)
+        engine(output = { failing }).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("output error") { engine.state.value is EngineState.Error }
+            assertTrue(failing.closed)
+        }
+    }
+
+    @Test
+    fun anOutputOpenFailureBecomesAnError() {
+        engine(output = {
+            throw NdOutputException("nd_out_open failed with -4", NdOutputException.E_DEVICE)
+        }).use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            await("output error") { engine.state.value is EngineState.Error }
+            assertEquals(
+                EngineError.Output("nd_out_open failed with -4"),
+                (engine.state.value as EngineState.Error).error,
+            )
+        }
+    }
+
+    @Test
+    fun aRemovedDeviceIsDiscardedAndTheNextPlayReopens() {
+        engine().use { engine ->
+            engine.setWindow(listOf(item), 0, null)
+            engine.play()
+            awaitReady(engine)
+            engine.onDeviceRemoved()
+            await("output error") { engine.state.value is EngineState.Error }
+            assertEquals(
+                EngineError.Output("the output device was removed"),
+                (engine.state.value as EngineState.Error).error,
+            )
+            // The next play opens a fresh default device and plays again.
+            engine.setWindow(listOf(item), 0, null)
+            awaitReady(engine)
+        }
+    }
+
+    /** The engine's output seam, driven by the fault tests. */
+    private class FakeOutput(
+        private val failOn: FailOn? = null,
+        private val code: Int = NdOutputException.E_DEVICE,
+    ) : AudioOutput {
+        var writes = 0
+            private set
+        var starts = 0
+            private set
+        var closed = false
+            private set
+        private var played = 0L
+
+        override val framesPlayed: Long get() = played
+        override val underrunFrames: Long get() = 0
+
+        override fun freeFrames(): Int = 4_096
+
+        override fun write(
+            pcm: MemorySegment,
+            frames: Int,
+        ): Int {
+            writes++
+            if (failOn == FailOn.WRITE) throw NdOutputException("nd_out_write failed with $code", code)
+            played += frames
+            return frames
+        }
+
+        override fun start(): Int {
+            starts++
+            if (failOn == FailOn.START) throw NdOutputException("nd_out_start failed with $code", code)
+            return 0
+        }
+
+        override fun stop(): Int = 0
+
+        override fun clear(): Int = 0
+
+        override fun describe(): String =
+            """{"rate":44100,"channels":2,"backend":"fake","device":"fake","period":1024}"""
+
+        override fun clockReader(): () -> Long = { played }
+
+        override fun underrunReader(): () -> Long = { 0L }
+
+        override fun close() {
+            closed = true
+        }
+    }
+
+    private enum class FailOn { WRITE, START }
 
     private class BlockedSource(
         bytes: ByteArray,

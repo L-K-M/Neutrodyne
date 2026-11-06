@@ -2,7 +2,7 @@
   "uniqueId": "neutrodyne:miniaudio",
   "name": "miniaudio",
   "artifactVersion": "0.11.22",
-  "description": "MD0 native spike component; production native bundling begins in MD1.",
+  "description": "The audio output device and ring buffer compiled into ndmedia; its unchanged header is checksum-verified at build time.",
   "licenses": [
     "MIT-0-miniaudio"
   ]

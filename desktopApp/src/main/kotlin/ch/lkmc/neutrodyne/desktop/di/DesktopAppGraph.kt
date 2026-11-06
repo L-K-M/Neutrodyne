@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
@@ -30,10 +31,11 @@ import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
-import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
+import ch.lkmc.neutrodyne.desktop.system.OsDesktopNotifier
+import ch.lkmc.neutrodyne.desktop.window.WindowIcons
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
@@ -49,6 +51,7 @@ import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
+import dev.zacsweers.metro.SingleIn
 import dev.zacsweers.metro.createGraphFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -87,6 +90,9 @@ interface DesktopAppGraph {
     val downloadProgress: Provider<DownloadProgressSource>
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
+
+    /** Download-time container chapters (06 Chapters): the desktop `EmbeddedChapterReader`. */
+    val embeddedChapterReader: Provider<EmbeddedChapterReader?>
 
     /** Resolve database-backed playback ports only after the database open gate. */
     val queueRepository: Provider<QueueRepository>
@@ -155,11 +161,28 @@ interface DesktopAppGraph {
     val backupRepository: BackupRepository
 
     /**
-     * The bound [DesktopNotifier] — 11's documented in-app banner fallback while
-     * `OsDesktopNotifier` is MD2. The window feeds its [DesktopBannerNotifier.userMessages]
-     * into `RootSlots.userMessages` and attaches the route dispatch.
+     * The bound [DesktopNotifier] — MD2's `OsDesktopNotifier` (`:desktop:system`) over the
+     * in-app banner fallback ([DesktopBannerNotifier]): every post reaches the OS first and
+     * the banners whenever the OS channel cannot deliver (11 Notifications). The window
+     * feeds [DesktopBannerNotifier.userMessages] into `RootSlots.userMessages` and attaches
+     * the route dispatch; OS clicks arrive through [osNotifier].
      */
     val bannerNotifier: DesktopBannerNotifier
+
+    /** The OS notification half of the bound [DesktopNotifier] (clicks, diagnostics). */
+    val osNotifier: OsDesktopNotifier
+
+    /** The D-Bus portal for the Linux chooser and "Show in Files"; `null` off Linux. */
+    val linuxDesktopPortal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal?
+
+    /** The bound notification port: the OS notifier over the banner fallback. */
+    val desktopNotifier: DesktopNotifier
+
+    /**
+     * MD2: the desktop new-episode poster (03) — grouping by group, the unseen set cleared
+     * by window focus and notification clicks; replaces M2's temporary no-op binding.
+     */
+    val newEpisodePoster: NewEpisodePoster
 
     /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through
@@ -186,12 +209,31 @@ interface DesktopAppGraph {
     val DesktopCrashReporter.asCrashContext: CrashContext
 
     /**
-     * The `DesktopNotifier` binding: the in-app banner fallback until MD2's
-     * `OsDesktopNotifier` (`:desktop:system`) replaces it — 11 Notifications' fallback
-     * column. No OS-centre delivery exists before then.
+     * The `DesktopNotifier` binding: MD2's `OsDesktopNotifier` over the in-app banner
+     * fallback — 11 Notifications' fallback column. A post the OS channel cannot deliver
+     * shows the banner instead, so the owners' notifiers stay source-agnostic.
      */
     @Binds
-    val DesktopBannerNotifier.asDesktopNotifier: DesktopNotifier
+    val OsDesktopNotifier.asDesktopNotifier: DesktopNotifier
+
+    /**
+     * 03's desktop new-episode poster. Bound here, not contributed, so the journey tests'
+     * graphs can keep providing their fake without a duplicate-binding clash.
+     */
+    @Binds
+    val ch.lkmc.neutrodyne.desktop.notifications.DesktopNewEpisodePoster.asNewEpisodePoster: NewEpisodePoster
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun osDesktopNotifier(
+        buildInfo: BuildInfo,
+        banner: DesktopBannerNotifier,
+    ): OsDesktopNotifier =
+        OsDesktopNotifier.create(
+            os = buildInfo.desktop?.os,
+            fallback = banner,
+            trayIcon = { WindowIcons.trayImage() },
+        )
 
     /**
      * The one database accessor (02 Error handling and recovery): blocks a background caller until
@@ -199,15 +241,6 @@ interface DesktopAppGraph {
      */
     @Provides
     fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
-
-    /** Temporary C4 binding; platform posting arrives in MD2. */
-    @Provides
-    fun provideNewEpisodePoster(): NewEpisodePoster =
-        object : NewEpisodePoster {
-            override suspend fun post(notices: List<NewEpisodeNotice>) = Unit
-
-            override suspend fun removePodcasts(podcastIds: List<Long>) = Unit
-        }
 
     @DependencyGraph.Factory
     fun interface Factory {

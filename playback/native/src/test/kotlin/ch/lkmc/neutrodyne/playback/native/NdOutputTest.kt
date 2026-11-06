@@ -114,6 +114,28 @@ class NdOutputTest {
     }
 
     @Test
+    fun writeValidatesAgainstTheConfiguredFrameSize() {
+        val directory =
+            ndmediaDir() ?: run {
+                assumeTrue("no ndmedia build for this host", false)
+                return
+            }
+        // A channel count of 0 means ndmedia's default (stereo), so the guard
+        // must use the effective frame size, not the raw argument.
+        NdOutput.open(directory, "null", RATE, 0, RING_MS).use { out ->
+            Arena.ofConfined().use { arena ->
+                val frames = RATE / 100
+                val exact = arena.allocate(frames.toLong() * CHANNELS * 4)
+                assertEquals(frames, out.write(exact, frames))
+                val short = arena.allocate(frames.toLong() * CHANNELS * 4 - 1)
+                val failure =
+                    runCatching { out.write(short, frames) }.exceptionOrNull()
+                assertTrue(failure is IllegalArgumentException, "a short buffer must be refused: $failure")
+            }
+        }
+    }
+
+    @Test
     fun unknownBackendIsRejected() {
         val directory =
             ndmediaDir() ?: run {

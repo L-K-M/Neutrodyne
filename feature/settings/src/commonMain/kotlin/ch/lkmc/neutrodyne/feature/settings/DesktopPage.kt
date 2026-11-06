@@ -41,11 +41,19 @@ import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_quit
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_quit_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_quit_summary_mac
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_close_title
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_links_menu
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_links_menu_done
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_links_menu_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_links_not_setup
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_links_open
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_links_open_on
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_links_setup
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_approval
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_disabled_os
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_open_settings
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_section_links
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_section_window
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_desktop
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
@@ -62,8 +70,10 @@ import org.jetbrains.compose.resources.stringResource
  * disabled in the OS reads correctly; the row is hidden where registration is unsupported (dev
  * runs, macOS until its registrar lands). `desktopIntegration` is `null` off the desktop — the
  * page is unreachable there — and the downloads slot defaults to empty so the page composes
- * without a download graph; the language, links and accessibility rows join it in their own
- * slices.
+ * without a download graph. MD2's links slice adds the LINKS section (11 Links and files
+ * from the OS): "Open podcast links with Neutrodyne" where the OS registers schemes at run
+ * time (Windows; Linux tar.gz through its menu entry) and "Add to applications menu" on
+ * Linux tar.gz; the language and accessibility rows join with their own slices.
  */
 @Composable
 internal fun DesktopPage(
@@ -85,6 +95,12 @@ internal fun DesktopPage(
             desktopIntegration?.loginItem ?: flowOf(LoginItemState.UNSUPPORTED)
         }
     val loginItem by loginFlow.collectAsStateWithLifecycle(initialValue = LoginItemState.UNSUPPORTED)
+    val linksFlow =
+        remember(desktopIntegration) {
+            desktopIntegration?.linkHandlers ?: flowOf(null as Boolean?)
+        }
+    val linkHandlers by linksFlow.collectAsStateWithLifecycle(initialValue = null)
+    val canAddToApplicationsMenu = desktopIntegration?.canAddToApplicationsMenu == true
     val platformActions = LocalPlatformActions.current
     val macOs = desktopOs == DesktopOs.MACOS
 
@@ -166,7 +182,78 @@ internal fun DesktopPage(
                     }
                 }
             }
-            // 08's page order: WINDOW, then DOWNLOADS (11 Change folder).
+            // 08's page order: WINDOW, LINKS (Windows; Linux tar.gz), then DOWNLOADS.
+            if (linkHandlers != null || canAddToApplicationsMenu) {
+                Text(
+                    stringResource(Res.string.desktop_section_links),
+                    Modifier.padding(SECTION_PADDING),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
+            if (linkHandlers != null) {
+                ListItem(
+                    headlineContent = { Text(stringResource(Res.string.desktop_links_open)) },
+                    supportingContent = {
+                        Text(
+                            stringResource(
+                                if (linkHandlers ==
+                                    true
+                                ) {
+                                    Res.string.desktop_links_open_on
+                                } else {
+                                    Res.string.desktop_links_not_setup
+                                },
+                            ),
+                        )
+                    },
+                    trailingContent = {
+                        if (linkHandlers != true) {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        if (desktopIntegration?.registerLinkHandlers() != true) {
+                                            snackbarHost.showSnackbar(saveFailed)
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(Res.string.desktop_links_setup))
+                            }
+                        }
+                    },
+                )
+            }
+            if (canAddToApplicationsMenu) {
+                ListItem(
+                    headlineContent = { Text(stringResource(Res.string.desktop_links_menu)) },
+                    supportingContent = {
+                        Text(
+                            stringResource(
+                                if (linkHandlers ==
+                                    true
+                                ) {
+                                    Res.string.desktop_links_menu_done
+                                } else {
+                                    Res.string.desktop_links_menu_summary
+                                },
+                            ),
+                        )
+                    },
+                    trailingContent = {
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    if (desktopIntegration?.addToApplicationsMenu() != true) {
+                                        snackbarHost.showSnackbar(saveFailed)
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(stringResource(Res.string.desktop_links_setup))
+                        }
+                    },
+                )
+            }
             downloadsFolder()
         }
     }

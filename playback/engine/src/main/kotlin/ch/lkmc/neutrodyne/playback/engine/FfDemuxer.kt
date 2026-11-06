@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -44,7 +46,7 @@ class FfDemuxer
 
         override val durationMs: Long?
 
-        override val chapters: List<EngineChapter>
+        override val chapters: List<EpisodeChapter>
 
         /** The track's trimming information, published once with the track (11 Demux and decode step 6). */
         override val gapless: Gapless
@@ -219,13 +221,24 @@ class FfDemuxer
          */
         private fun durationOf(): Long? {
             val units = formatContext.readLong(layout, "AVFormatContext", "duration")
-            if (units > 0 && units != AV_NOPTS_VALUE) return units / (AV_TIME_BASE / MILLIS_PER_SECOND)
+            if (units > 0 && units != AV_NOPTS_VALUE) return units / (AV_TIME_BASE / MILLISECONDS_PER_SECOND)
             if (streamDuration <= 0 || streamDuration == AV_NOPTS_VALUE) return null
             val (num, den) = timeBase
-            return streamDuration * num * MILLIS_PER_SECOND / den
+            return FfmpegTime.ticksToScaled(streamDuration, num, den, FfmpegTime.MILLISECONDS_PER_SECOND)
         }
 
-        private fun chaptersOf(): List<EngineChapter> {
+        /**
+         * Chapters carry 06's source: ID3 `CHAP` frames of an MP3 and Nero/QuickTime
+         * chapters of an MP4 family container. Other containers' chapter metadata has no
+         * source in the priority table, so it is not published (Android drops it too).
+         */
+        private fun chaptersOf(): List<EpisodeChapter> {
+            val source =
+                when {
+                    containerName.contains(MP4_MARKER) -> ChapterSource.MP4
+                    containerName.contains(MP3_MARKER) -> ChapterSource.ID3
+                    else -> return emptyList()
+                }
             val count = formatContext.readInt(layout, "AVFormatContext", "nb_chapters")
             if (count <= 0) return emptyList()
             val array = formatContext.readAddress(layout, "AVFormatContext", "chapters")
@@ -241,24 +254,31 @@ class FfDemuxer
                         ?.let { entry ->
                             library.readCString(entry.readAddress(layout, "AVDictionaryEntry", "value"))
                         }
-                EngineChapter(
-                    startMs = start * num * MILLIS_PER_SECOND / den,
-                    endMs = end * num * MILLIS_PER_SECOND / den,
+                EpisodeChapter(
+                    startMs = FfmpegTime.ticksToScaled(start, num, den, FfmpegTime.MILLISECONDS_PER_SECOND),
+                    endMs = FfmpegTime.ticksToScaled(end, num, den, FfmpegTime.MILLISECONDS_PER_SECOND),
                     title = title?.takeIf { it.isNotBlank() },
+                    imageUrl = null,
+                    linkUrl = null,
+                    source = source,
+                    hidden = false,
                 )
             }
         }
 
         override fun seekTo(positionMs: Long) {
             require(positionMs >= 0) { "seek position must be non-negative" }
+            // The abort flag stays set until the seek's own reads begin, so the
+            // pre-seek resume is the one that matters; a second call after
+            // avformat_seek_file would be dead weight (the flag is a clear, not
+            // a permit release).
             avio.resumeReads()
             val (num, den) = timeBase
-            val target = positionMs * den / (MILLIS_PER_SECOND * num)
+            val target = FfmpegTime.msToTicks(positionMs, num, den)
             val result = library.seekFile(formatContext, streamIndex, Long.MIN_VALUE, target, Long.MAX_VALUE, 0)
             require(result >= 0) { "the seek to $positionMs ms failed: ${library.errorString(result)}" }
             // Only a return to the beginning encounters container priming again.
             primingOrigin = if (positionMs == 0L) PrimingOrigin.SEEK_ZERO else PrimingOrigin.CONTINUING
-            avio.resumeReads()
         }
 
         override fun readPacket(): AudioPacket? {
@@ -273,6 +293,13 @@ class FfDemuxer
                     error("reading a packet failed: ${library.errorString(result)}")
                 }
                 if (packet.readInt(layout, "AVPacket", "stream_index") != streamIndex) continue
+                // avcodec_send_packet treats a NULL, zero-size packet as the
+                // end-of-stream drain signal. av_read_frame never returns NULL
+                // data, but a corrupt container can emit a zero-size packet;
+                // forwarding it would drain the decoder mid-item. An empty
+                // packet carries no samples, so its side data cannot trim
+                // anything either.
+                if (packet.readInt(layout, "AVPacket", "size") <= 0) continue
 
                 val (skipSamples, discardPadding) = skipSamplesOf(packet)
                 val priming = primingOf(skipSamples)
@@ -362,10 +389,13 @@ class FfDemuxer
             /** `AV_TIME_BASE`, the unit of `AVFormatContext.duration`. */
             const val AV_TIME_BASE = 1_000_000
 
-            const val MILLIS_PER_SECOND = 1000
+            const val MILLISECONDS_PER_SECOND = 1000
 
             /** The mov demuxer's own name, as it reports itself to the engine. */
             const val MP4_MARKER = "mp4"
+
+            /** The mp3 demuxer's own name, which carries ID3 `CHAP` frames. */
+            const val MP3_MARKER = "mp3"
 
             /**
              * AAC priming in samples: the standard encoder delay of an AAC stream

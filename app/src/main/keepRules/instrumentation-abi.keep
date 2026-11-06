@@ -746,6 +746,11 @@
 -keep class ch.lkmc.neutrodyne.core.common.LocalNetworkAccess {
 }
 -keep interface ch.lkmc.neutrodyne.core.common.NetworkMonitor {
+  public kotlinx.coroutines.flow.StateFlow getStatus();
+}
+-keep class ch.lkmc.neutrodyne.core.common.NetworkStatus {
+  public boolean isConnected();
+  public boolean isMetered();
 }
 -keep class ch.lkmc.neutrodyne.core.common.Outcome$Failure {
   public <init>(java.lang.Object);
@@ -2328,6 +2333,7 @@
   public java.util.Set getInitializers();
   public ch.lkmc.neutrodyne.download.api.LocalMediaIndex getLocalMediaIndex();
   public dev.zacsweers.metrox.viewmodel.MetroViewModelFactory getMetroViewModelFactory();
+  public ch.lkmc.neutrodyne.core.common.NetworkMonitor getNetworkMonitor();
   public ch.lkmc.neutrodyne.core.domain.NewEpisodePoster getNewEpisodePoster();
   public dev.zacsweers.metro.Provider getPlayContextResolver();
   public dev.zacsweers.metro.Provider getPlaySessionStore();
