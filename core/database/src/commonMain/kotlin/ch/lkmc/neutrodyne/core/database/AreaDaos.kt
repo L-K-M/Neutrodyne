@@ -641,9 +641,118 @@ data class ArtworkPinRow(
     val localPath: String,
 )
 
-/** `MaintenanceDao` (M11b: the `db-maintenance` lane's sweeps and `PRAGMA`s). */
+/**
+ * `MaintenanceDao` (02 Retention and maintenance): the `db-maintenance` lane's sweeps. The
+ * `PRAGMA`s (`optimize`, `quick_check`, `VACUUM`) run on the raw writer connection in
+ * `DbMaintenance`, not through Room queries.
+ *
+ * Retention batch select and delete are deliberately separate calls: `DbMaintenance` wraps them
+ * in one `withWriteTransaction` so a queue or favourite write cannot slip between them.
+ */
 @Dao
-interface MaintenanceDao
+interface MaintenanceDao {
+    /**
+     * 02 Retention policy: up to [limit] deletion candidates, `id` order. [absentBefore] is
+     * `now − 90 d`, [playedSince] `now − 30 d`. The newest-episode watermark uses
+     * `sortDate DESC, id DESC` per podcast; `inFeed = 0` stubs count the same way.
+     */
+    @Query(
+        "SELECT e.id FROM episode e" +
+            " WHERE e.inFeed = 0 AND e.lastSeenAt < :absentBefore" +
+            " AND NOT EXISTS (SELECT 1 FROM download d WHERE d.episodeId = e.id)" +
+            " AND NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)" +
+            " AND NOT EXISTS (SELECT 1 FROM play_session ps WHERE ps.currentEpisodeId = e.id)" +
+            " AND NOT EXISTS (SELECT 1 FROM episode_state s WHERE s.episodeId = e.id" +
+            " AND (s.isFavorite = 1 OR (s.startedAt IS NOT NULL AND s.playedAt IS NULL)" +
+            " OR s.playedAt >= :playedSince))" +
+            " AND NOT EXISTS (SELECT 1 FROM episode_position pos WHERE pos.episodeId = e.id" +
+            " AND pos.positionMs > 0" +
+            " AND NOT EXISTS (SELECT 1 FROM episode_state s2 WHERE s2.episodeId = e.id" +
+            " AND s2.playedAt IS NOT NULL))" +
+            " AND e.id <> (SELECT e2.id FROM episode e2 WHERE e2.podcastId = e.podcastId" +
+            " ORDER BY e2.sortDate DESC, e2.id DESC LIMIT 1)" +
+            " ORDER BY e.id LIMIT :limit",
+    )
+    suspend fun retentionBatch(
+        absentBefore: Long,
+        playedSince: Long,
+        limit: Int,
+    ): List<Long>
+
+    /** The episodes' sync record ids (`p.syncId || e.identityKey`, 02 `rid` sources). */
+    @Query(
+        "SELECT p.syncId || e.identityKey FROM episode e" +
+            " JOIN podcast p ON p.id = e.podcastId WHERE e.id IN (:ids)",
+    )
+    suspend fun episodeSyncRids(ids: List<Long>): List<String>
+
+    @Query("DELETE FROM person WHERE ownerType = 'EPISODE' AND ownerId IN (:ids)")
+    suspend fun deleteEpisodePersons(ids: List<Long>): Int
+
+    @Query("DELETE FROM funding WHERE ownerType = 'EPISODE' AND ownerId IN (:ids)")
+    suspend fun deleteEpisodeFunding(ids: List<Long>): Int
+
+    /** Cascades description, transcripts, alt enclosures, chapters, state and position. */
+    @Query("DELETE FROM episode WHERE id IN (:ids)")
+    suspend fun deleteEpisodes(ids: List<Long>): Int
+
+    // ---- Step 2: orphan sweeps (02) ----------------------------------------------------------------
+
+    @Query(
+        "DELETE FROM person WHERE (ownerType = 'EPISODE' AND" +
+            " ownerId NOT IN (SELECT id FROM episode)) OR (ownerType = 'PODCAST' AND" +
+            " ownerId NOT IN (SELECT id FROM podcast))",
+    )
+    suspend fun deleteOrphanedPersons(): Int
+
+    @Query(
+        "DELETE FROM funding WHERE (ownerType = 'EPISODE' AND" +
+            " ownerId NOT IN (SELECT id FROM episode)) OR (ownerType = 'PODCAST' AND" +
+            " ownerId NOT IN (SELECT id FROM podcast))",
+    )
+    suspend fun deleteOrphanedFunding(): Int
+
+    /**
+     * Keeps the `podcastindex` row and every `sync:` token (10); anything unreferenced by a
+     * podcast goes. Runs inside `CredentialCommitCoordinator.withCredentialCommit`.
+     */
+    @Query(
+        "DELETE FROM credential WHERE origin <> 'podcastindex' AND origin NOT LIKE 'sync:%'" +
+            " AND id NOT IN (SELECT credentialId FROM podcast WHERE credentialId IS NOT NULL)",
+    )
+    suspend fun deleteUnreferencedCredentials(): Int
+
+    // ---- Step 7: VACUUM guards (02) ------------------------------------------------------------------
+
+    /** `MAX(play_session.updatedAt)`; null when no session row exists. */
+    @Query("SELECT MAX(updatedAt) FROM play_session")
+    suspend fun lastPlaySessionActivity(): Long?
+
+    /** `MAX(episode_position.updatedAt)`; null when no position exists. */
+    @Query("SELECT MAX(updatedAt) FROM episode_position")
+    suspend fun lastPositionUpdate(): Long?
+
+    /** Rows mid-transfer (`RESOLVING`…`VERIFYING`) — the desktop's "no download running" guard. */
+    @Query(
+        "SELECT COUNT(*) FROM download WHERE state IN" +
+            " ('RESOLVING', 'DOWNLOADING', 'VERIFYING')",
+    )
+    suspend fun runningDownloadCount(): Int
+
+    // ---- Step 8: diagnostics counts -------------------------------------------------------------------
+
+    @Query("SELECT COUNT(*) FROM podcast")
+    suspend fun podcastCount(): Int
+
+    @Query("SELECT COUNT(*) FROM episode")
+    suspend fun episodeCount(): Int
+
+    @Query("SELECT COUNT(*) FROM download")
+    suspend fun downloadCount(): Int
+
+    @Query("SELECT COUNT(*) FROM queue_entry")
+    suspend fun queueEntryCount(): Int
+}
 
 // A correlated count avoids a separately maintained pin ledger and guards no-op writes.
 private const val ARTWORK_REFERENCE_COUNT =
