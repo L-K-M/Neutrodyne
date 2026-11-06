@@ -190,9 +190,9 @@ internal class AdapterFixture(
             reportFailure = failures::add,
             boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
             resumePolicy = { resumePolicy },
-            localChanges = local,
             afterTransition = sync::transitioned,
             afterSessionEnd = sync::stopped,
+            localChanges = local,
         )
 
     fun attach() {

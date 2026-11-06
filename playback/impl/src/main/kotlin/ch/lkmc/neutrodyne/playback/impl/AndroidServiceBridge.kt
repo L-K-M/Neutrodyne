@@ -107,9 +107,9 @@ internal class AndroidServiceBridge(
             resumePolicy = { access.prefs.current.value.resumePolicy },
             pauseAtBoundary = { arbiter.sleepTimerArmed || arbiter.blockBeforeNext },
             boundaryCompleted = { access.hub.event(PlaybackEvent.MarkedPlayed(it)) },
-            localChanges = access.localChanges,
             afterTransition = access.sync::transitioned,
             afterSessionEnd = access.sync::stopped,
+            localChanges = access.localChanges,
         )
     private val recovery =
         ErrorRecovery(

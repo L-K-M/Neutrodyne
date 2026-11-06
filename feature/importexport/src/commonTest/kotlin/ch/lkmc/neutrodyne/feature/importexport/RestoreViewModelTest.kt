@@ -137,8 +137,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun mergeDefaultsAndReplaceSelectionFollowThePreviewContract() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             assertEquals(listOf("inspect(7)"), backups.calls)
             assertEquals(restorePreview(), vm.uiState.value.preview)
@@ -153,8 +152,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun reselectingCurrentModePreservesCategoryChoices() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.setCategory(RestoreCategory.HISTORY, false)
             vm.selectMode(RestoreMode.MERGE)
@@ -176,8 +174,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                         return backups.restore(sessionId, request)
                     }
                 }
-            val vm =
-                RestoreViewModel(7, ordered, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, ordered, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.selectMode(RestoreMode.REPLACE)
             vm.requestRestore()
@@ -199,8 +196,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun mergeRestoresOnlySelectedCategoriesWithoutPausing() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.setCategory(RestoreCategory.HISTORY, false)
             vm.requestRestore()
@@ -235,8 +231,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
             }
             backups.inspectOutcome = Outcome.Success(restorePreview())
             backups.restoreOutcome = Outcome.Failure(BackupError.RestoreRunning)
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.requestRestore()
             assertEquals(BackupError.RestoreRunning, vm.uiState.value.error)
@@ -246,8 +241,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun progressAndReportFollowTheRepositoryAndIgnoreOtherFinishedSessions() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.requestRestore()
             runCurrent()
@@ -282,8 +276,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                     )
             )
             backups.restoreProgress.value = RestoreProgress.Failed(id, BackupError.Storage)
-            val vm =
-                RestoreViewModel(id, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(id, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             assertEquals(BackupError.Storage, vm.uiState.value.error, "A resumed restore must expose its failure")
             assertTrue(vm.uiState.value.requested)
@@ -356,8 +349,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                         request: RestoreRequest,
                     ): Outcome<Unit, BackupError> = Outcome.Success(Unit)
                 }
-            val vm =
-                RestoreViewModel(7, accepted, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, accepted, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.requestRestore()
             assertEquals(null, vm.uiState.value.error)
