@@ -26,6 +26,8 @@ class AndroidDatabaseFactory(
 
     override fun exists(): Boolean = File(databasePath).exists()
 
+    override fun usableSpaceBytes(): Long? = File(databasePath).parentFile?.usableSpace
+
     override fun quarantine(stamp: String) {
         // The stamp becomes a directory name and is read back from `quarantine-pending`;
         // an epoch-millis shape keeps it inside the quarantine directory.
