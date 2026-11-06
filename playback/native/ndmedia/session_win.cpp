@@ -262,7 +262,7 @@ HRESULT put_thumbnail(ISystemMediaTransportControlsDisplayUpdater *updater, cons
     IAsyncInfo *info = nullptr;
     IStorageFile *file = nullptr;
     IRandomAccessStreamReference *reference = nullptr;
-    AsyncStatus status = AsyncStatus_Started;
+    AsyncStatus status = AsyncStatus::Started;
     HRESULT result = text(L"Windows.Storage.StorageFile", &fileClassName);
     if (SUCCEEDED(result))
         result = RoGetActivationFactory(fileClassName, __uuidof(IStorageFileStatics),
@@ -280,11 +280,11 @@ HRESULT put_thumbnail(ISystemMediaTransportControlsDisplayUpdater *updater, cons
         result = operation->QueryInterface(__uuidof(IAsyncInfo), reinterpret_cast<void **>(&info));
     for (int waited = 0; SUCCEEDED(result) && waited < 500; ++waited) {
         result = info->get_Status(&status);
-        if (FAILED(result) || status != AsyncStatus_Started)
+        if (FAILED(result) || status != AsyncStatus::Started)
             break;
         Sleep(10);
     }
-    if (SUCCEEDED(result) && status == AsyncStatus_Completed)
+    if (SUCCEEDED(result) && status == AsyncStatus::Completed)
         result = operation->GetResults(&file);
     if (SUCCEEDED(result))
         result = referenceStatics->CreateFromFile(file, &reference);
@@ -532,7 +532,7 @@ DWORD WINAPI powerRun(void *) noexcept {
             break;
         EXECUTION_STATE state =
             SetThreadExecutionState(command == 1 ? (ES_CONTINUOUS | ES_SYSTEM_REQUIRED) : ES_CONTINUOUS);
-        InterlockedExchange(&powerResult, state != NULL ? 0 : static_cast<LONG>(GetLastError()));
+        InterlockedExchange(&powerResult, state != NULL ? 0 : ND_E_DEVICE);
         SetEvent(powerDone);
     }
     return 0;
