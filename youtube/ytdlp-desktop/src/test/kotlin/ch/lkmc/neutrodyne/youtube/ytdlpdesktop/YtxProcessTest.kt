@@ -56,8 +56,10 @@ class YtxProcessTest {
                 fixture.scope.async {
                     transport.callForTest("_hang", EMPTY, fixture.deadline(60_000))
                 }
+            // The transport marks the call running before the lazy host start spawns the child;
+            // wait for the child itself, which is what this test kills.
             withTimeout(15_000) {
-                while (transport.status.value.running == 0) delay(20)
+                while (transport.status.value.running == 0 || fixture.spawner.last == null) delay(20)
             }
             val child = fixture.spawner.last
             assertNotNull(child)
@@ -250,8 +252,10 @@ class YtxProcessTest {
                         }
                     }
                 }
+            // Wait for the pool's steady state (four admitted, the fifth queued), not for the
+            // first queued transition: the admission of the fourth slot can lag the third.
             withTimeout(15_000) {
-                while (transport.status.value.queued == 0) delay(20)
+                while (transport.status.value.running < 4) delay(20)
             }
             assertEquals(4, transport.status.value.running)
             assertEquals(1, transport.status.value.queued)
