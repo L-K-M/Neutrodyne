@@ -54,25 +54,21 @@ object SyncBindings {
     @Provides
     fun syncActivity(state: SyncActivityState): SyncActivity = state
 
+    /** The one [SyncApplier]: the engine's rounds and the first-link merge share its rules. */
     @Provides
     @SingleIn(AppScope::class)
-    fun syncEngine(
+    fun syncApplier(
         db: NeutrodyneDatabase,
-        client: SyncClient,
         clock: Clock,
         secrets: SecretStore,
         settings: SettingsSyncPort,
         playback: PlaybackSyncPort,
         syncIngestHook: SyncIngestHook,
         channelSync: GroupChannelSync,
-        address: SyncServerAddress,
-        tokens: SyncTokenStore,
         flags: SyncFlags,
-        activity: SyncActivityState,
-    ): SyncEngine =
-        SyncEngine(
+    ): SyncApplier =
+        SyncApplier(
             db = db,
-            client = client,
             clock = clock,
             secrets = secrets,
             settings = settings,
@@ -80,8 +76,42 @@ object SyncBindings {
             syncIngestHook = syncIngestHook,
             channelSync = channelSync,
             sharePasswords = { flags.sharePasswords },
+        )
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncEngine(
+        db: NeutrodyneDatabase,
+        client: SyncClient,
+        applier: SyncApplier,
+        clock: Clock,
+        secrets: SecretStore,
+        flags: SyncFlags,
+        address: SyncServerAddress,
+        tokens: SyncTokenStore,
+        activity: SyncActivityState,
+    ): SyncEngine =
+        SyncEngine(
+            db = db,
+            client = client,
+            applier = applier,
+            clock = clock,
+            secrets = secrets,
+            sharePasswords = { flags.sharePasswords },
             address = address,
             tokens = tokens,
             activity = activity,
         )
+
+    /** The first-link merge; the controller drives it from the link state machine. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun firstLinkMerger(
+        db: NeutrodyneDatabase,
+        client: SyncClient,
+        applier: SyncApplier,
+        engine: SyncEngine,
+        clock: Clock,
+        activity: SyncActivityState,
+    ): FirstLinkMerger = FirstLinkMerger(db, client, applier, engine, clock, activity)
 }

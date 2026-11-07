@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
@@ -34,13 +35,20 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -52,6 +60,7 @@ class FirstLinkMergerTest {
     private val october = 1_790_000_000_000L
     private val remote = NodeId("0000000000000002")
     private val podcastSyncId = "00000000-0000-4000-8000-00000000000a"
+    private val localOnlySyncId = "00000000-0000-4000-8000-00000000000b"
 
     @Test
     fun mergeKeepsLocalPodcastsAndANewerRemoteUnplayedWins() =
@@ -91,13 +100,15 @@ class FirstLinkMergerTest {
                             ),
                         ),
                     )
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = server,
                         applier = applier(db),
+                        engine = engine(db, server, activity),
                         clock = TestClock(now),
-                        nodeId = NodeId("0000000000000001"),
+                        activity = activity,
                     )
                 val result = merger.merge(FirstLinkChoice.MERGE)
                 assertTrue(result is FirstLinkResult.Completed)
@@ -109,6 +120,180 @@ class FirstLinkMergerTest {
                 val link = db.syncStateDao().get()
                 assertTrue(link?.enabled == true)
                 assertNotNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The bootstrap writes must run with capture already enabled: a Merge onto an empty account
+     * uploads this device's library with the rows' own timestamps (10 Merge steps 4-5).
+     */
+    @Test
+    fun mergeUploadsTheLocalLibraryWhenTheAccountIsEmpty() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                db.withWriteTransaction {
+                    db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = podcastSyncId,
+                                feedUrl = "https://example.com/feed",
+                                feedKey = "https://example.com/feed",
+                                title = "Example",
+                            ),
+                        )
+                }
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = ScriptedClient(emptyList()),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val result = merger.merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Completed)
+
+                val rows = db.syncOutboxDao().rows()
+                val feedUrl = rows.firstOrNull { it.coll == "podcast" && it.field == "feedUrl" }
+                assertNotNull(feedUrl, "rows=$rows")
+                assertTrue(feedUrl.hlc ushr 16 <= now)
+                assertTrue(
+                    rows.none { it.hlc ushr 16 > now + 1_000 },
+                    "bootstrap writes keep their row timestamps, rows=$rows",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * "Use the server's library" replaces Up next with the server's set: the pull applies the
+     * server records into `queue_entry`, and the replace step prunes only local-only rows. A
+     * local entry the server also lists keeps its row under the server's order key.
+     */
+    @Test
+    fun useServerAppliesTheServerUpNextAndPrunesLocalOnlyEntries() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedLocalQueue(db)
+                val server =
+                    ScriptedClient(
+                        listOf(
+                            podcastRecord(),
+                            upNextRecord("g:srv2", orderKey = "a2"),
+                            upNextRecord("g:srv1", orderKey = "a1"),
+                            upNextRecord("g:wire", orderKey = "a3", enc = "https://cdn.example.com/alias.mp3"),
+                        ),
+                    )
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = server,
+                        applier = applier(db),
+                        engine = engine(db, server, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val result = merger.merge(FirstLinkChoice.USE_SERVER)
+                assertTrue(result is FirstLinkResult.Completed)
+
+                // The server's ordered queue survives; the local-only entries are gone.
+                // `g:alias` matched its record by enclosure, not by the stored key.
+                assertEquals(listOf("g:srv1", "g:srv2", "g:alias"), queuedIdentityKeys(db))
+                val alias = db.episodeDao().all().first { it.identityKey == "g:alias" }
+                assertEquals("a3", db.queueDao().entryByEpisode(alias.id)?.orderKey)
+                assertNull(db.podcastDao().bySyncId(localOnlySyncId))
+                assertNotNull(db.podcastDao().bySyncId(podcastSyncId))
+                val link = db.syncStateDao().get()
+                assertEquals("c:00000001:1", link?.cursor)
+                assertTrue(link?.enabled == true)
+                assertNotNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * A pull that dies after an applied page must not reach the replace step: the local rows
+     * the server lacks stay exactly as they were. The queue is never cleared before success.
+     */
+    @Test
+    fun useServerDoesNotPruneTheQueueWhenThePullFails() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedLocalQueue(db)
+                val server =
+                    ScriptedClient(
+                        listOf(
+                            podcastRecord(),
+                            upNextRecord("g:srv1", orderKey = "a1"),
+                            upNextRecord("g:srv2", orderKey = "a2"),
+                        ),
+                        firstPageHasMore = true,
+                        failAtPage = 1,
+                    )
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = server,
+                        applier = applier(db),
+                        engine = engine(db, server, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val result = merger.merge(FirstLinkChoice.USE_SERVER)
+                assertTrue(result is FirstLinkResult.Failed)
+
+                // Page one's applied server rows stay; nothing local was pruned.
+                assertEquals(listOf("g:local", "g:srv1", "g:srv2", "g:alias", "g:lone"), queuedIdentityKeys(db))
+                assertNotNull(db.podcastDao().bySyncId(localOnlySyncId))
+                val link = db.syncStateDao().get()
+                assertNull(link?.cursor)
+                assertNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A cancelled pull propagates instead of reporting Failed; the queue is untouched. */
+    @Test
+    fun mergeRethrowsCancellationFromThePull() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedLocalQueue(db)
+                val server =
+                    ScriptedClient(
+                        listOf(podcastRecord()),
+                        failAtPage = 0,
+                        failure = { CancellationException("link cancelled") },
+                    )
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = server,
+                        applier = applier(db),
+                        engine = engine(db, server, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                assertFailsWith<CancellationException> { merger.merge(FirstLinkChoice.USE_SERVER) }
+                assertEquals(listOf("g:local", "g:srv1", "g:alias", "g:lone"), queuedIdentityKeys(db))
             } finally {
                 db.close()
             }
@@ -165,16 +350,17 @@ class FirstLinkMergerTest {
                         ),
                     )
 
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = ScriptedClient(emptyList()),
                         applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
                         clock = TestClock(now),
-                        nodeId = NodeId("0000000000000001"),
+                        activity = activity,
                     )
                 val resyncResult = merger.resync()
-                java.io.File("/tmp/resync-debug.log").appendText("result=$resyncResult\n")
                 assertTrue(resyncResult is FirstLinkResult.Completed)
 
                 val outboxRows = db.syncOutboxDao().rows()
@@ -191,6 +377,298 @@ class FirstLinkMergerTest {
                 db.close()
             }
         }
+
+    /**
+     * The merge marks the shared [SyncActivityState] for its whole duration (seeding, the
+     * pull, the replace and the push) and clears it again when it returns. The pull is held
+     * at a client gate, so the observation runs against the real database and a real merge.
+     */
+    @Test
+    fun mergeMarksSyncActivityUntilItReturns() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val gate = CompletableDeferred<Unit>()
+                val client =
+                    object : SyncClient by ScriptedClient(listOf(podcastRecord())) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            gate.await()
+                            return ChangesPage(emptyList(), "c:00000001:1", false, "")
+                        }
+                    }
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = client,
+                        applier = applier(db),
+                        engine = engine(db, client, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val job = launch { merger.merge(FirstLinkChoice.MERGE) }
+                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
+                assertTrue(activity.active, "the merge must mark sync active while it runs")
+                gate.complete(Unit)
+                job.join()
+                assertEquals(0, activity.count.value, "a completed merge clears the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The merge's push rounds run through [SyncEngine.round], which marks the same counter:
+     * while a round is in flight the count is 2, and it reaches 0 only after both the round
+     * and the merge have ended.
+     */
+    @Test
+    fun mergeKeepsSyncActivityAcrossItsNestedRounds() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val gate = CompletableDeferred<Unit>()
+                val counts = mutableListOf<Int>()
+                val activity = SyncActivityState()
+                val client =
+                    object : SyncClient by ScriptedClient(listOf(podcastRecord())) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            gate.await()
+                            return ChangesPage(listOf(podcastRecord()), "c:00000001:1", false, "")
+                        }
+
+                        override suspend fun sync(
+                            since: String?,
+                            changes: List<ChangeDto>,
+                        ): SyncResponse {
+                            counts += activity.count.value
+                            return SyncResponse(emptyList(), emptyList(), "c:00000001:1", false, "")
+                        }
+                    }
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = client,
+                        applier = applier(db),
+                        engine = engine(db, client, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val job = launch { merger.merge(FirstLinkChoice.MERGE) }
+                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
+                assertTrue(activity.active, "the merge must mark sync active while it runs")
+                gate.complete(Unit)
+                job.join()
+                assertTrue(counts.isNotEmpty(), "the merge's push rounds must run through the engine")
+                assertTrue(
+                    counts.all { it == 2 },
+                    "the merge and its nested round share the counter: counts=$counts",
+                )
+                assertEquals(0, activity.count.value, "a completed merge clears the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aFailedMergeClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = ScriptedClient(emptyList(), failAtPage = 0),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val result = merger.merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Failed)
+                assertEquals(0, activity.count.value, "a failed merge must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aCancelledMergeClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client =
+                            ScriptedClient(
+                                emptyList(),
+                                failAtPage = 0,
+                                failure = { CancellationException("link cancelled") },
+                            ),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                assertFailsWith<CancellationException> { merger.merge(FirstLinkChoice.MERGE) }
+                assertEquals(0, activity.count.value, "a cancelled merge must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The resync holds the same flag for its whole pull-and-reassert duration. */
+    @Test
+    fun resyncMarksSyncActivityUntilItReturns() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val gate = CompletableDeferred<Unit>()
+                val client =
+                    object : SyncClient by ScriptedClient(emptyList()) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            gate.await()
+                            return ChangesPage(emptyList(), "c:00000001:1", false, "")
+                        }
+                    }
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = client,
+                        applier = applier(db),
+                        engine = engine(db, client, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val job = launch { merger.resync() }
+                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
+                assertTrue(activity.active, "the resync must mark sync active while it runs")
+                gate.complete(Unit)
+                job.join()
+                assertEquals(0, activity.count.value, "a completed resync clears the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aFailedResyncClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = ScriptedClient(emptyList(), failAtPage = 0),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val result = merger.resync()
+                assertTrue(result is FirstLinkResult.Failed)
+                assertEquals(0, activity.count.value, "a failed resync must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aCancelledResyncClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client =
+                            ScriptedClient(
+                                emptyList(),
+                                failAtPage = 0,
+                                failure = { CancellationException("link cancelled") },
+                            ),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                assertFailsWith<CancellationException> { merger.resync() }
+                assertEquals(0, activity.count.value, "a cancelled resync must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The engine the merge's push rounds run through, over the same scripted client. */
+    private fun engine(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        client: SyncClient,
+        activity: SyncActivityState,
+    ): SyncEngine {
+        val secrets = FakeSecretStore()
+        return SyncEngine(
+            db = db,
+            client = client,
+            applier = applier(db),
+            clock = TestClock(now),
+            secrets = secrets,
+            sharePasswords = { false },
+            address =
+                object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
+                    override suspend fun serverUrl(): String = "https://sync.example"
+
+                    override suspend fun username(): String? = null
+
+                    override suspend fun deviceName(): String? = null
+
+                    override suspend fun shareFeedPasswords(): Boolean = false
+
+                    override suspend fun syncPlaybackSettings(): Boolean = true
+
+                    override suspend fun setServerUrl(url: String?) = Unit
+
+                    override suspend fun setUsername(username: String?) = Unit
+
+                    override suspend fun setShareFeedPasswords(enabled: Boolean) = Unit
+
+                    override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
+                },
+            tokens =
+                SyncTokenStore(secrets).apply {
+                    kotlinx.coroutines.runBlocking { save("sync.example", "token") }
+                },
+            activity = activity,
+        )
+    }
 
     private fun applier(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase): SyncApplier =
         SyncApplier(
@@ -239,6 +717,29 @@ class FirstLinkMergerTest {
                 ),
         )
 
+    private fun upNextRecord(
+        key: String,
+        orderKey: String,
+        enc: String? = null,
+    ): RecordDto =
+        RecordDto(
+            coll = "upnext",
+            id =
+                buildJsonObject {
+                    put("p", podcastSyncId)
+                    put("k", key)
+                },
+            seq = 3,
+            by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            fields =
+                mapOf(
+                    "in" to FieldValue(JsonPrimitive(true), clock(october)),
+                    "ok" to FieldValue(JsonPrimitive(orderKey), clock(october)),
+                ),
+            match = enc?.let { MatchHints(enc = it) },
+            matchClocks = enc?.let { mapOf("enc" to clock(october)) } ?: emptyMap(),
+        )
+
     private fun episodeRecord(vararg fields: Pair<String, FieldValue>): RecordDto =
         RecordDto(
             coll = "episode",
@@ -255,12 +756,68 @@ class FirstLinkMergerTest {
         )
 
     private fun clock(atMs: Long): String = Hlc.of(atMs, 1, remote).toString()
+
+    /**
+     * The shared podcast's `g:srv1`/`g:srv2`/`g:local`/`g:alias` episodes and a local-only
+     * podcast's `g:lone`; `g:srv1` is already queued at a local order key, `g:local`, `g:alias`
+     * and `g:lone` are queued around it. `g:alias`'s enclosure matches the `g:wire` record.
+     */
+    private suspend fun seedLocalQueue(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
+        val shared =
+            db
+                .podcastDao()
+                .insertPodcast(
+                    podcastEntity(
+                        syncId = podcastSyncId,
+                        feedUrl = "https://example.com/feed",
+                        feedKey = "https://example.com/feed",
+                        title = "Example",
+                    ),
+                )
+        val localOnly =
+            db
+                .podcastDao()
+                .insertPodcast(
+                    podcastEntity(
+                        syncId = localOnlySyncId,
+                        feedUrl = "https://example.com/lone",
+                        feedKey = "https://example.com/lone",
+                        title = "Local only",
+                    ),
+                )
+        val episodes =
+            db
+                .ingestDao()
+                .insertEpisodes(
+                    listOf(
+                        episodeEntity(podcastId = shared, identityKey = "g:srv1"),
+                        episodeEntity(podcastId = shared, identityKey = "g:srv2"),
+                        episodeEntity(podcastId = shared, identityKey = "g:local"),
+                        episodeEntity(podcastId = localOnly, identityKey = "g:lone"),
+                        episodeEntity(podcastId = shared, identityKey = "g:alias") {
+                            copy(enclosureUrl = "https://cdn.example.com/alias.mp3")
+                        },
+                    ),
+                )
+        db.queueDao().insert(queueEntryEntity(episodes[2], orderKey = "a0"))
+        db.queueDao().insert(queueEntryEntity(episodes[0], orderKey = "a5"))
+        db.queueDao().insert(queueEntryEntity(episodes[4], orderKey = "a8"))
+        db.queueDao().insert(queueEntryEntity(episodes[3], orderKey = "a9"))
+    }
+
+    private suspend fun queuedIdentityKeys(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase): List<String> =
+        db.queueDao().entries().mapNotNull { db.episodeDao().byId(it.episodeId)?.identityKey }
 }
 
 /** A [SyncClient] that serves a fixed page, for the first-link tests. */
 private class ScriptedClient(
     private val records: List<RecordDto>,
+    private val firstPageHasMore: Boolean = false,
+    private val failAtPage: Int? = null,
+    private val failure: () -> Throwable = { java.io.IOException("sync.example unreachable") },
 ) : SyncClient {
+    private var pages = 0
+
     override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()
 
     override suspend fun login(
@@ -327,7 +884,16 @@ private class ScriptedClient(
     override suspend fun changes(
         since: String?,
         limit: Int,
-    ): ChangesPage = ChangesPage(records = records, cursor = "c:00000001:1", hasMore = false, serverTime = "")
+    ): ChangesPage {
+        val page = pages++
+        if (page == failAtPage) throw failure()
+        return ChangesPage(
+            records = records,
+            cursor = "c:00000001:1",
+            hasMore = firstPageHasMore && page == 0,
+            serverTime = "",
+        )
+    }
 
     override suspend fun reset(
         confirm: String,

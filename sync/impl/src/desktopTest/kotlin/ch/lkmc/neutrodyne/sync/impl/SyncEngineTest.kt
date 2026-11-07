@@ -359,26 +359,34 @@ class SyncEngineTest {
         private val activity: SyncActivityState = SyncActivityState(),
     ) {
         val clock = TestClock(NOW)
+        val secrets = FakeSecretStore()
         val engine =
             SyncEngine(
                 db = db,
                 client = client,
+                applier =
+                    SyncApplier(
+                        db = db,
+                        clock = clock,
+                        secrets = secrets,
+                        settings = FakeSettingsSyncPort(),
+                        playback = NoPlaybackSync,
+                        syncIngestHook = SyncIngestHook.None,
+                        channelSync =
+                            object : GroupChannelSync {
+                                override suspend fun sync() = Unit
+
+                                override suspend fun onUuidChanged(
+                                    oldUuid: String,
+                                    newUuid: String,
+                                ) = Unit
+
+                                override suspend fun onDeleted(uuid: String) = Unit
+                            },
+                        sharePasswords = { false },
+                    ),
                 clock = clock,
-                secrets = FakeSecretStore(),
-                settings = FakeSettingsSyncPort(),
-                playback = NoPlaybackSync,
-                syncIngestHook = SyncIngestHook.None,
-                channelSync =
-                    object : GroupChannelSync {
-                        override suspend fun sync() = Unit
-
-                        override suspend fun onUuidChanged(
-                            oldUuid: String,
-                            newUuid: String,
-                        ) = Unit
-
-                        override suspend fun onDeleted(uuid: String) = Unit
-                    },
+                secrets = secrets,
                 sharePasswords = { false },
                 address =
                     object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
@@ -386,9 +394,19 @@ class SyncEngineTest {
 
                         override suspend fun username(): String? = null
 
+                        override suspend fun deviceName(): String? = null
+
                         override suspend fun shareFeedPasswords(): Boolean = false
 
                         override suspend fun syncPlaybackSettings(): Boolean = true
+
+                        override suspend fun setServerUrl(url: String?) = Unit
+
+                        override suspend fun setUsername(username: String?) = Unit
+
+                        override suspend fun setShareFeedPasswords(enabled: Boolean) = Unit
+
+                        override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
                     },
                 tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
                 activity = activity,

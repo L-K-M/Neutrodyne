@@ -43,6 +43,14 @@ class SyncWorker
                 Result.success()
             } catch (cancellation: CancellationException) {
                 throw cancellation
+            } catch (failure: SyncTransportException) {
+                // 10 Errors: a rejected token revokes the link — the engine already recorded it;
+                // dead credentials fail instead of re-enqueueing forever.
+                if (failure.status == STATUS_REVOKED) {
+                    Result.failure()
+                } else {
+                    Result.retry()
+                }
             } catch (failure: Exception) {
                 Result.retry()
             }
@@ -53,5 +61,6 @@ class SyncWorker
             const val WORK_PUSH = "sync-push"
             const val WORK_PERIODIC = "sync-periodic"
             const val KEY_WORK = "work"
+            private const val STATUS_REVOKED = 401
         }
     }
