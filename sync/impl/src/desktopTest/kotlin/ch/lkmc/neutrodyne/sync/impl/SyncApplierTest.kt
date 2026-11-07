@@ -240,6 +240,81 @@ class SyncApplierTest {
             }
         }
 
+    @Test
+    fun anAbsentPlayedAtKeepsTheLocalValue() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        ch.lkmc.neutrodyne.core.database
+                            .EpisodeStateEntity(episodeId, playedAt = 9L, updatedAt = 1),
+                    )
+
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "fav" to bool(true),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anExplicitNullPlayedAtClearsTheLocalValue() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        ch.lkmc.neutrodyne.core.database
+                            .EpisodeStateEntity(episodeId, playedAt = 9L, updatedAt = 1),
+                    )
+
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(false),
+                            "playedAt" to FieldValue(kotlinx.serialization.json.JsonNull, clock(10).toString()),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(db: NeutrodyneDatabase): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
