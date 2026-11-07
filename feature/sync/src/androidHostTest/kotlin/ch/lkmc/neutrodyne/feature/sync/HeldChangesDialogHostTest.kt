@@ -2,11 +2,18 @@
 
 package ch.lkmc.neutrodyne.feature.sync
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -74,14 +81,35 @@ class HeldChangesDialogHostTest {
         compose.onNodeWithText("Auch auf diesem Gerät übernehmen?").assertIsDisplayed()
         compose.onNodeWithText("Übernehmen").assertIsDisplayed()
         compose.onNodeWithText("Meine behalten").assertIsDisplayed()
-        // Robolectric's display is short; the bottom action is in the tree below the fold.
-        compose.onNodeWithText("Später entscheiden").fetchSemanticsNode()
+        compose.onNodeWithText("Später entscheiden").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "de")
+    fun largeGermanTextKeepsEveryDecisionReachableInAShortWindow() {
+        val controller = FakeSyncController().apply { heldChanges.value = listOf(PROMPT) }
+        val navigator = RecordingAppNavigator()
+        setEntryContent(controller, navigator, fontScale = 2f, modifier = Modifier.size(320.dp, 300.dp))
+
+        compose
+            .onNodeWithText("Ein anderes Gerät hat 2 Podcasts und 1 Gruppe entfernt")
+            .performScrollTo()
+            .assertIsDisplayed()
+        for (label in listOf("Übernehmen", "Meine behalten", "Später entscheiden")) {
+            compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+        }
+        assertTrue(controller.heldResolutions.isEmpty())
+        compose.onNodeWithText("Später entscheiden").performClick()
+        assertEquals(listOf(PROMPT.id to HeldResolution.DECIDE_LATER), controller.heldResolutions)
+        assertTrue(navigator.calls.contains(RecordingAppNavigator.Call.PopEntry(SyncHeldChangesKey(PROMPT.id))))
     }
 
     /** Composes the production `SyncHeldChangesKey` entry as the dialog scene would. */
     private fun setEntryContent(
         controller: FakeSyncController,
         navigator: RecordingAppNavigator,
+        fontScale: Float = 1f,
+        modifier: Modifier = Modifier,
     ) {
         val provider =
             entryProvider<NavKey> {
@@ -89,9 +117,12 @@ class HeldChangesDialogHostTest {
             }
         val entry = provider(SyncHeldChangesKey(PROMPT.id))
         compose.setContent {
-            CompositionLocalProvider(LocalAppNavigator provides navigator) {
+            CompositionLocalProvider(
+                LocalAppNavigator provides navigator,
+                LocalDensity provides Density(LocalDensity.current.density, fontScale),
+            ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                    entry.Content()
+                    Box(modifier) { entry.Content() }
                 }
             }
         }

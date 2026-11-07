@@ -122,20 +122,22 @@ internal fun HeldChangesDialogContent(
         color = AlertDialogDefaults.containerColor,
         tonalElevation = AlertDialogDefaults.TonalElevation,
     ) {
-        Column(Modifier.padding(DIALOG_PADDING)) {
-            Text(
-                heldTitle(prompt),
-                style = MaterialTheme.typography.headlineSmall,
-                color = AlertDialogDefaults.titleContentColor,
-            )
-            Spacer(Modifier.height(BODY_GAP))
-            Text(stringResource(Res.string.sync_held_apply_here), style = MaterialTheme.typography.bodyLarge)
-            if (names.isNotEmpty()) {
-                Spacer(Modifier.height(LIST_GAP))
-                // The list caps at half the window height and scrolls beyond it (08).
-                BoxWithConstraints {
+        BoxWithConstraints {
+            val maxListHeight = maxHeight / 2
+            // The whole body must scroll when large text leaves no room for the actions.
+            Column(Modifier.padding(DIALOG_PADDING).verticalScroll(rememberScrollState())) {
+                Text(
+                    heldTitle(prompt),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = AlertDialogDefaults.titleContentColor,
+                )
+                Spacer(Modifier.height(BODY_GAP))
+                Text(stringResource(Res.string.sync_held_apply_here), style = MaterialTheme.typography.bodyLarge)
+                if (names.isNotEmpty()) {
+                    Spacer(Modifier.height(LIST_GAP))
+                    // The list caps at half the window height and scrolls beyond it (08).
                     Column(
-                        Modifier.heightIn(max = maxHeight / 2).verticalScroll(rememberScrollState()),
+                        Modifier.heightIn(max = maxListHeight).verticalScroll(rememberScrollState()),
                     ) {
                         for (name in names.take(MAX_LISTED)) {
                             Text(name, style = MaterialTheme.typography.bodyMedium)
@@ -149,42 +151,42 @@ internal fun HeldChangesDialogContent(
                         }
                     }
                 }
-            }
-            if (failed) {
-                Spacer(Modifier.height(LIST_GAP))
-                Text(
-                    stringResource(Res.string.sync_held_failed),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            Column(
-                Modifier.fillMaxWidth().padding(top = ACTIONS_GAP),
-                horizontalAlignment = Alignment.End,
-            ) {
-                NdTextButton(
-                    label = stringResource(Res.string.sync_held_apply),
-                    onClick = { onResolve(HeldResolution.APPLY) },
-                    role = NdActionRole.DESTRUCTIVE,
-                    enabled = !busy,
-                )
-                NdTextButton(
-                    label = stringResource(Res.string.sync_held_keep_mine),
-                    onClick = { onResolve(HeldResolution.KEEP_MINE) },
-                    enabled = !busy,
-                )
-                Text(
-                    stringResource(Res.string.sync_held_keep_mine_body),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(end = BUTTON_LABEL_INSET),
-                )
-                NdTextButton(
-                    label = stringResource(Res.string.sync_held_decide_later),
-                    onClick = { onResolve(HeldResolution.DECIDE_LATER) },
-                    enabled = !busy,
-                    modifier = Modifier.focusRequester(decideLaterFocus),
-                )
+                if (failed) {
+                    Spacer(Modifier.height(LIST_GAP))
+                    Text(
+                        stringResource(Res.string.sync_held_failed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Column(
+                    Modifier.fillMaxWidth().padding(top = ACTIONS_GAP),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    NdTextButton(
+                        label = stringResource(Res.string.sync_held_apply),
+                        onClick = { onResolve(HeldResolution.APPLY) },
+                        role = NdActionRole.DESTRUCTIVE,
+                        enabled = !busy,
+                    )
+                    NdTextButton(
+                        label = stringResource(Res.string.sync_held_keep_mine),
+                        onClick = { onResolve(HeldResolution.KEEP_MINE) },
+                        enabled = !busy,
+                    )
+                    Text(
+                        stringResource(Res.string.sync_held_keep_mine_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = BUTTON_LABEL_INSET),
+                    )
+                    NdTextButton(
+                        label = stringResource(Res.string.sync_held_decide_later),
+                        onClick = { onResolve(HeldResolution.DECIDE_LATER) },
+                        enabled = !busy,
+                        modifier = Modifier.focusRequester(decideLaterFocus),
+                    )
+                }
             }
         }
     }
