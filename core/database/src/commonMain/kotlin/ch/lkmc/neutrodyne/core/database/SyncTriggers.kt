@@ -326,8 +326,11 @@ object SyncTriggers {
             }
             execute(connection, "RELEASE sync_trigger_install")
         } catch (failure: Throwable) {
-            execute(connection, "ROLLBACK TO sync_trigger_install")
-            execute(connection, "RELEASE sync_trigger_install")
+            // A failing rollback must not mask the install error the caller needs to see.
+            runCatching {
+                execute(connection, "ROLLBACK TO sync_trigger_install")
+                execute(connection, "RELEASE sync_trigger_install")
+            }
             throw failure
         }
     }
