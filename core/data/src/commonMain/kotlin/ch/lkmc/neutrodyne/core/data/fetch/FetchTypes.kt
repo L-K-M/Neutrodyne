@@ -19,6 +19,7 @@ internal data class FeedRequest(
     val lastModified: String?,
     val conditional: Boolean,
     val maxBytes: Long = MAX_FEED_BYTES,
+    val accept: String = FEED_ACCEPT,
     /** Probes (autodiscovery) stop the body read after this many bytes. */
     val sniffOnlyBytes: Int? = null,
     /** Add only: cancel an HTML response after this prefix; full feed limits are unchanged. */

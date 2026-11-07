@@ -129,7 +129,7 @@ internal class FeedFetcher(
         try {
             client
                 .prepareGet(url) {
-                    header(HttpHeaders.Accept, FEED_ACCEPT)
+                    header(HttpHeaders.Accept, req.accept)
                     if (marked) header(PRE_CONFIRMATION_HEADER, "1")
                     if (req.conditional) {
                         req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }

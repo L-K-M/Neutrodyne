@@ -649,6 +649,24 @@ Episode columns (subset; full entity in [02 episode](02-data-model.md#episode)):
 | `chaptersUrl`, season, episode fields, `explicit` | null |
 | `contentHash` | Over title, `published`, description, `isShort` (never views or `<updated>`) |
 
+**Implementation note (2026-11-04, M8 current-code port).** The adapter polls
+all selected masks sequentially, tries canonical after primary 404/410, and
+keeps the fallback's actual diagnostic. Secondary failures suppress absence
+marking. `AtomDates` exposes published-only provenance without changing RSS
+hashes or the parser version. The merged digest length-frames its fields and
+includes normalized channel author, so view/updated churn stays unchanged
+while renames and Shorts reclassification ingest. Absence floors use raw
+variant windows before filtering; scrolled-out history retains user state.
+Gap pull-in covers the triggering and next two successful refreshes, keeping
+server, manual-only and failure deadlines. Metadata refresh shares one
+coalescing coordinator with detail, with 100-new/30-stale budgets and explicit
+avatar re-pinning. Atom cannot overwrite page-owned artwork or description.
+
+The thumbnail interceptor chooses true 16:9 tiers, caches candidate misses
+through Coil, and crops the last-resort letterboxed HQ image. Pinned artwork
+keeps its existing file semantics. Row artwork is a portable, unsynced
+preference; notification and other system artwork remains the channel avatar.
+
 ### Merge algorithm
 
 `YouTubeEntryRules.merge(results, enabledBits): MergedChannel` (pure), called by `YouTubeSourceAdapter` with one `VariantResult` per polled URL (`Ok(bit, entries, authorName)`, `Empty(bit)`, `Failed(bit, httpCode, cause)`; the `channel_id` fallback reports under the primary's bit with `fallback = true`):

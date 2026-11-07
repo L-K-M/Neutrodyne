@@ -1,0 +1,7 @@
+# User-chosen destinations of the recorded session, as the maintainer declares them to
+# network-capture.sh: one host=id[,id] per line.
+feeds.example.com=feeds
+feeds2.example.net=feeds
+cdn.example.com=media
+example.com=add-input,artwork
+sync.example.org=sync-server

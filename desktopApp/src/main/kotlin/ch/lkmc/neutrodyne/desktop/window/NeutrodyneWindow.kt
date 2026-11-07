@@ -55,6 +55,7 @@ import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
@@ -62,6 +63,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.LocalYouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberDesktopPlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
@@ -147,6 +149,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
+    rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
     refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController? = null,
     desktopPlaybackController: ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController? = null,
     repoUrl: String = "",
@@ -358,6 +361,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
                 prefs = prefs,
+                rowArt = rowArt,
                 installers = installers,
                 menuActions = menuActions,
                 banners = banners,
@@ -637,6 +641,7 @@ internal fun NeutrodyneWindowContent(
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
+    rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
     refresh: () -> Unit = {},
     onTextFieldFocusChange: (Boolean) -> Unit = {},
     volumeUp: () -> Unit = {},
@@ -745,6 +750,7 @@ internal fun NeutrodyneWindowContent(
         LocalPlatformActions provides platformActions,
         // 07 Storage rows: without a provider the local falls back to ANDROID wording.
         LocalPlatformKind provides PlatformKind.DESKTOP,
+        LocalYouTubeRowArt provides rowArt,
         LocalScrollbars provides DesktopScrollbars.style,
         // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.
         LocalMetroViewModelFactory provides viewModelFactory,
