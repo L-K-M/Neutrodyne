@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.membership_name
 import ch.lkmc.neutrodyne.core.ui.resources.membership_new
 import ch.lkmc.neutrodyne.core.ui.resources.membership_title_many
 import ch.lkmc.neutrodyne.core.ui.resources.membership_title_one
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import org.jetbrains.compose.resources.stringResource
 
 /** The navigation host supplies the window-based modal sheet and its dismiss gestures. */
@@ -77,6 +78,7 @@ internal fun AddToGroupsSheet(
                 enabled = !state.busy,
                 isError = state.nameError != null,
                 supportingText = state.nameError?.let { { Text(it.asString()) } },
+                modifier = Modifier.ndTextFieldFocus(),
             )
             NdTextButton(
                 label = stringResource(Res.string.membership_create),

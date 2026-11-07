@@ -21,6 +21,7 @@ import androidx.compose.ui.draganddrop.DragData
 import androidx.compose.ui.draganddrop.dragData
 import ch.lkmc.neutrodyne.desktop.DesktopOpenHandler
 import ch.lkmc.neutrodyne.desktop.resources.Res
+import ch.lkmc.neutrodyne.desktop.resources.desktop_cannot_open_file
 import ch.lkmc.neutrodyne.desktop.resources.drop_to_add
 import ch.lkmc.neutrodyne.desktop.resources.drop_to_import
 import org.jetbrains.compose.resources.stringResource
@@ -37,7 +38,15 @@ internal fun DesktopDropTarget(
         remember(handler) {
             object : DragAndDropTarget {
                 override fun onEntered(event: DragAndDropEvent) {
-                    overlay = if (event.dragData() is DragData.FilesList) DropOverlay.IMPORT else DropOverlay.ADD
+                    overlay =
+                        when (event.dragData()) {
+                            is DragData.FilesList -> DropOverlay.IMPORT
+
+                            is DragData.Text -> DropOverlay.ADD
+
+                            // Anything else (an image, a non-file transfer) cannot be opened.
+                            else -> DropOverlay.REJECT
+                        }
                 }
 
                 override fun onExited(event: DragAndDropEvent) {
@@ -72,12 +81,10 @@ internal fun DesktopDropTarget(
             ) {
                 Text(
                     stringResource(
-                        if (current ==
-                            DropOverlay.IMPORT
-                        ) {
-                            Res.string.drop_to_import
-                        } else {
-                            Res.string.drop_to_add
+                        when (current) {
+                            DropOverlay.IMPORT -> Res.string.drop_to_import
+                            DropOverlay.ADD -> Res.string.drop_to_add
+                            DropOverlay.REJECT -> Res.string.desktop_cannot_open_file
                         },
                     ),
                 )
@@ -96,4 +103,4 @@ internal fun droppedTextInputs(text: String): List<String> =
         .toList()
         .ifEmpty { listOf("") }
 
-private enum class DropOverlay { IMPORT, ADD }
+private enum class DropOverlay { IMPORT, ADD, REJECT }

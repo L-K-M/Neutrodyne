@@ -431,6 +431,10 @@ stateDiagram-v2
 | macOS conventions | Cmd+Q quits; clicking the Dock icon while hidden shows the window (`AppReopenedListener`, [java.awt.Desktop](https://docs.oracle.com/en/java/javase/25/docs/api/java.desktop/java/awt/Desktop.html)); the Dock icon stays while the app runs |
 | Window state | `desktop.window_bounds` = `{"screen":"<GraphicsDevice id>","x":…,"y":…,"width":…,"height":…,"maximised":false}` in AWT user-space pixels, written 1 s after the last move or resize and at quit. Restore on the same screen when it exists and the rectangle overlaps its usable bounds by ≥ 50 %; otherwise 1200 × 800 dp clamped to 90 % of the primary screen, centred |
 | Minimum size | 600 × 480 dp ([PO-19](../PLAN.md#48-further-product-owner-decisions)), converted with the window's density; width classes follow [08 Adaptive layouts](08-ui-ux.md#adaptive-layouts) |
+
+**Implementation note (2026-11-06, MD4).** The minimum is converted through
+`minimumWindowDimension(density)` (`WindowBounds.MIN_WIDTH/HEIGHT` in dp at the window's
+density), unit-tested at 100 % and 200 % scale.
 | Title | "Neutrodyne"; while playing "{episode title} — Neutrodyne" (the taskbar and window switchers show it) |
 
 #### Start at login
@@ -499,7 +503,7 @@ data class DesktopNotification(val id: String, val kind: NotificationKind, val t
 enum class NotificationKind { NEW_EPISODES, DOWNLOAD_FAILED, STORAGE_FULL, APP_UPDATE, ENGINE_ALERT, SYNC_HELD }
 interface LinuxDesktopPortal {                           // :desktop:system (dbus-java); null binding off Linux
     suspend fun showItems(file: String): Boolean         // org.freedesktop.FileManager1.ShowItems
-    suspend fun chooseDirectory(title: String, start: String?): String?   // portal FileChooser; null = no portal
+    suspend fun chooseDirectory(title: String, start: String?): DirectoryChoice   // portal FileChooser; note below
 }
 // Implementation note (2026-11-05, MD2's links slice): chooseDirectory returns a
 // DirectoryChoice (Chosen | Cancelled | Unavailable), not String?. A dismissal must end
@@ -1891,6 +1895,18 @@ Serves R8.9, R5.7 (desktop), N4. Delivered in M0b (window, five destinations, ma
 | Window (macOS) | Minimise, Zoom, Bring all to front (standard) |
 | Help | Install & updates help · Keyboard shortcuts · Licences · Diagnostics · Report a problem (opens the repository's issue page) |
 
+**Implementation note (2026-11-06, MD4).** The items carry the accelerators; the root's
+dispatch of the same chords remains as a fallback for menu-less compositions (the AC1
+`runComposeUiTest` checklist). The Edit menu's Undo/Cut/Copy/Paste/Select all stay disabled:
+08 assigns them to Compose's built-in text menu, whose actions the menu bar cannot reach.
+File › Refresh calls `RefreshController.refreshNow(RefreshScope.All)` (all podcasts; the
+current feed page's scope is not a window-level fact). Playback › Skip silence reads and
+writes the global `playback.skip_silence` (the Speed sheet still shows the effective
+per-podcast value). Volume up/down and Ctrl/Cmd+↑/↓ drive the new device-local
+`desktop.volume` setting (0..1, ±10 %), applied by `DesktopPlaybackController` to the engine's
+user gain. The macOS Window menu's Minimise/Zoom/Bring all to front are Compose items over the
+AWT frame; the application menu's Hide stays system-provided (AWT has no hide handler).
+
 ### Keyboard shortcuts
 
 Global shortcuts (R8.9); "Ctrl/Cmd" means Ctrl on Windows and Linux, Cmd on macOS. Space and the arrow keys act only when the focused element did not consume them (08's bubbling rule, `Modifier.onKeyEvent` in `NeutrodyneRoot`).
@@ -1913,6 +1929,12 @@ Global shortcuts (R8.9); "Ctrl/Cmd" means Ctrl on Windows and Linux, Cmd on macO
 | Ctrl/Cmd+W | Close the window (close behaviour applies) |
 | Ctrl+Q (Windows, Linux), Cmd+Q (macOS) | Quit |
 
+**Implementation note (2026-11-06, MD4).** Ctrl/Cmd+1…5 map to the radio home's five tabs —
+Feeds, Library, Up next, Downloads, Discover — which replaced the bottom bar 08's table was
+written against; Settings stays on Ctrl/Cmd+,, and the Go menu lists the same five. Ctrl/Cmd+F
+focuses the Discover search, the only destination with a search field today (the Library's
+group filter is chips, not a text field).
+
 Media keys are not UI shortcuts: they reach the player through the OS media sessions ([Remote commands](#remote-commands)).
 
 ### Tray menu
@@ -1922,6 +1944,11 @@ Show Neutrodyne · Play / Pause · Next · Quit, shown only while the window is 
 ### Drag and drop
 
 The whole window is a drop target (Compose desktop drag-and-drop): files ending in `.opml`, `.xml` or `.zip` and URL text (a link dragged from a browser) are accepted and routed exactly like OS hand-offs ([Links and files from the OS](#links-and-files-from-the-os)); an overlay "Drop to import" or "Drop to add podcast" shows while dragging; at most 20 items per drop; anything else shows "Neutrodyne can't open this file". Dragging out of the app (episodes, files) is not supported in v1.0.
+
+**Implementation note (2026-11-06, MD4).** The overlay shows "Drop to import" for any file
+drag because the dragged files' extensions can only be read on drop; the open handler then
+rejects unsupported types with the existing "Neutrodyne can't open this file" snackbar.
+Non-file, non-text transfers show that message in the overlay.
 
 ### Window sizing
 

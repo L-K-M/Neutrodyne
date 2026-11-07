@@ -37,7 +37,9 @@ import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
+import ch.lkmc.neutrodyne.playback.engine.EngineError
 import ch.lkmc.neutrodyne.playback.engine.EngineEvent
+import ch.lkmc.neutrodyne.playback.engine.EngineState
 import ch.lkmc.neutrodyne.playback.engine.Gapless
 import ch.lkmc.neutrodyne.playback.engine.SpanCache
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -536,6 +538,30 @@ class DesktopPlaybackTimingTest {
                 fixture.engine.ready()
                 runCurrent()
                 assertEquals(SleepTimerState.EndOfEpisode(1), fixture.controller.sleepTimer.value)
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun aStaleSuccessorErrorSkipsNothingAndKeepsPlaying() =
+        runTest {
+            val fixture = TimingFixture(this)
+            try {
+                val events = mutableListOf<PlaybackEvent>()
+                backgroundScope.launch { fixture.controller.events.collect { events += it } }
+                fixture.controller.play()
+                fixture.engine.ready()
+                runCurrent()
+                // The engine's error names a successor the projection no longer holds: a
+                // stale report, not a skip — no Skipped event, no spent budget, no pause.
+                fixture.engine.state.value = EngineState.Error(3, EngineError.Http(404))
+                runCurrent()
+                assertTrue(events.filterIsInstance<PlaybackEvent.Skipped>().isEmpty())
+                assertTrue(
+                    fixture.controller.nowPlaying.value!!
+                        .isPlaying,
+                )
             } finally {
                 fixture.close()
             }

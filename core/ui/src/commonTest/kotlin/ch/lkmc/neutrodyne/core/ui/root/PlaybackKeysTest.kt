@@ -19,6 +19,8 @@ class PlaybackKeysTest {
                 PlaybackKey.SKIP_FORWARD to FakePlaybackController.Action.FORWARD,
                 PlaybackKey.PREVIOUS_EPISODE to FakePlaybackController.Action.PREVIOUS,
                 PlaybackKey.NEXT_EPISODE to FakePlaybackController.Action.NEXT,
+                PlaybackKey.PREVIOUS_CHAPTER to FakePlaybackController.Action.CHAPTER_PREV,
+                PlaybackKey.NEXT_CHAPTER to FakePlaybackController.Action.CHAPTER_NEXT,
             )
         for ((key, action) in expected) {
             val controller = FakePlaybackController()
@@ -60,8 +62,6 @@ class PlaybackKeysTest {
     fun unsupportedKeysAreNotConsumed() {
         val controller = FakePlaybackController()
         for (key in listOf(
-            PlaybackKey.PREVIOUS_CHAPTER,
-            PlaybackKey.NEXT_CHAPTER,
             PlaybackKey.VOLUME_UP,
             PlaybackKey.VOLUME_DOWN,
             PlaybackKey.NEXT_FEED_PAGE,
