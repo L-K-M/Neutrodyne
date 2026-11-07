@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -68,7 +69,15 @@ class SyncSchedulerTest {
             deps.link()
             deps.writeOutbox(coll = "podcast", rid = "p1", field = "subscribed")
 
-            repeat(5) { deps.scheduler.onOutboxChanged() }
+            val burstStart = testScheduler.currentTime
+            // Room dispatches queries on real threads. Freeze the virtual scheduler while
+            // delivering this burst, or runTest can advance a debounce during a query and
+            // turn the fixture's five simultaneous changes into several spaced-out bursts.
+            runBlocking {
+                repeat(5) { deps.scheduler.onOutboxChanged() }
+            }
+            assertEquals(burstStart, testScheduler.currentTime)
+            runCurrent()
             testScheduler.advanceTimeBy(OUTBOX_DEBOUNCE_MS)
             runCurrent()
             deps.await { deps.rounds.isNotEmpty() }
