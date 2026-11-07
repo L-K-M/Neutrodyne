@@ -55,9 +55,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlin.random.Random
 
 /** Which unauthenticated call a failure came from, so a 401 maps to the right problem. */
@@ -174,6 +176,10 @@ class SyncControllerImpl(
         // The engine's rounds post one-shot notices through the shared bus; relay them into the
         // controller's flow so the shells collect one channel.
         scope.launch { noticeBus.shared.collect { _notices.emit(it) } }
+        // The held prompt is owned here: the Room flow re-emits on every `sync_held` write from
+        // any round or resolver (the scheduler's, the worker's, `resolveHeld`), so it loads
+        // persisted batches at start-up and follows later rounds without polling.
+        scope.launch { observeHeldChanges() }
     }
 
     suspend fun refreshStatus() {
@@ -527,7 +533,6 @@ class SyncControllerImpl(
                 }
             }
             db.syncHeldDao().delete(id)
-            refreshHeld()
         }
     }
 
@@ -988,24 +993,36 @@ class SyncControllerImpl(
         return false
     }
 
-    private suspend fun refreshHeld() {
-        _heldChanges.value =
-            db.syncHeldDao().all().mapNotNull { row ->
-                val batch =
-                    runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull()
-                        ?: return@mapNotNull null
-                val summary =
-                    runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
-                MassChangePrompt(
-                    id = row.id,
-                    deviceName = null,
-                    podcastTitles =
-                        summary?.get("podcasts")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                    groupNames =
-                        summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                )
-            }
+    /** Observes the table and publishes the HELD batches, oldest first (the query's order). */
+    private suspend fun observeHeldChanges() {
+        db.syncHeldDao().observeAll().collect { rows ->
+            _heldChanges.value = rows.mapNotNull(::heldPrompt)
+        }
     }
+
+    /**
+     * The reviewable prompt for one `sync_held` row. Only HELD batches are prompts: STAGED rows
+     * are provisional and DEFERRED rows wait for playback (10 Mass-change guard). A malformed
+     * batch is skipped; a malformed summary renders with empty lists, so one bad row cannot
+     * break the collection. The JSON stays behind this application service.
+     */
+    private fun heldPrompt(row: SyncHeldEntity): MassChangePrompt? {
+        if (!MassChangeGuard.isHeld(row.batch)) return null
+        val summary = runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
+        return MassChangePrompt(
+            id = row.id,
+            deviceName = null,
+            podcastTitles = summary.stringList("podcasts"),
+            groupNames = summary.stringList("groups"),
+        )
+    }
+
+    private fun JsonObject?.stringList(key: String): List<String> =
+        this
+            ?.get(key)
+            ?.let { element -> runCatching { element.jsonArray }.getOrNull() }
+            ?.mapNotNull { element -> (element as? JsonPrimitive)?.contentOrNull }
+            .orEmpty()
 }
 
 /** `spaces and hyphens ignored, case-insensitive`, as the server normalises codes (10 Link methods). */

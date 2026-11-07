@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.window
 
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
@@ -16,9 +20,13 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.navigation3.runtime.NavKey
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
 import ch.lkmc.neutrodyne.core.common.NotificationKind
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.model.settings.SyncSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.UpdateSettingKeys
 import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
 import ch.lkmc.neutrodyne.core.model.update.UpdateInfo
@@ -26,11 +34,14 @@ import ch.lkmc.neutrodyne.core.model.update.UpdateNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
+import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
 import ch.lkmc.neutrodyne.core.testing.FakeAppUpdateChecker
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeUpdateNotices
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
@@ -38,10 +49,15 @@ import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.sync.api.SyncController
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -235,6 +251,76 @@ class NeutrodyneWindowContentTest {
                 .isEqualTo(Route.Navigate(LibraryKey, listOf(ImportKey("7"))))
         }
 
+    /**
+     * The production window content maps the real controller's persisted held batch onto the
+     * root banner (08 priority 3), and the banner's Review pushes the held-changes route. The
+     * probe entry only observes the route; the mapping, banner and push are production code.
+     */
+    @Test
+    fun aPersistedHeldBatchShowsTheReviewBannerAndRoutesTheKey() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val heldId = seedLinkedAndHeld(graph)
+            var routed: Long? = null
+            val provider: () -> SyncController = { graph.syncController }
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers + heldProbeInstaller { routed = it },
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = graph.playbackController,
+                    playbackState = graph.playbackStateSource,
+                    syncController = provider,
+                )
+            }
+
+            waitUntil("the held-changes banner loads", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 2 podcasts and 1 group. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            onNodeWithText("Review").performClick()
+            waitUntil("the held-changes route is pushed", TIMEOUT_MS) { routed != null }
+            assertThat(routed).isEqualTo(heldId)
+        }
+
+    /** The desktop mapping resolves the controller only once the start-up gate reports ready. */
+    @Test
+    fun theBannerWaitsForTheStartupGateBeforeResolvingTheController() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            seedLinkedAndHeld(graph)
+            var resolutions = 0
+            val provider: () -> SyncController = {
+                resolutions++
+                graph.syncController
+            }
+            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = graph.playbackController,
+                    playbackState = graph.playbackStateSource,
+                    startup = startup,
+                    syncController = provider,
+                )
+            }
+
+            waitForIdle()
+            onNodeWithText("Updating your library…").assertExists()
+            assertThat(resolutions).isEqualTo(0)
+
+            runOnIdle { startup = StartupGateState.Ready }
+            waitUntil("the banner loads after the gate opens", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 2 podcasts and 1 group. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            assertThat(resolutions).isEqualTo(1)
+        }
+
     @Test
     fun licencesListTheOpenJdkRuntime() =
         runComposeUiTest {
@@ -294,6 +380,65 @@ class NeutrodyneWindowContentTest {
                 assertThat(runBlocking { graph.importRepository.observeOpenSessions().first() }).hasSize(2)
             } finally {
                 source.delete()
+            }
+        }
+
+    private suspend fun seedLinkedAndHeld(graph: ch.lkmc.neutrodyne.desktop.di.DesktopAppGraph): Long {
+        val db = graph.databaseOpener.requireDatabase()
+        graph.settingsRepository.set(SyncSettingKeys.SERVER_URL, "https://sync.example")
+        graph.secretStore.put("sync:sync.example", "sync", "token".toCharArray())
+        db.withWriteTransaction {
+            db.syncStateDao().upsert(
+                SyncStateEntity(
+                    enabled = true,
+                    serverUrl = "https://sync.example",
+                    accountId = "acc",
+                    deviceId = "dev",
+                    nodeId = "node",
+                    linkedAt = 1L,
+                    lastSyncAt = 1L,
+                ),
+            )
+        }
+        val batch =
+            buildJsonObject {
+                put("state", "HELD")
+                put(
+                    "podcasts",
+                    JsonArray(
+                        listOf("a", "b").map { rid ->
+                            buildJsonObject {
+                                put("rid", rid)
+                                put("clock", "0:0")
+                            }
+                        },
+                    ),
+                )
+                put(
+                    "groups",
+                    JsonArray(
+                        listOf("news").map { rid ->
+                            buildJsonObject {
+                                put("rid", rid)
+                                put("clock", "0:0")
+                            }
+                        },
+                    ),
+                )
+            }.toString()
+        val summary =
+            buildJsonObject {
+                put("podcasts", JsonArray(listOf("A", "B").map(::JsonPrimitive)))
+                put("groups", JsonArray(listOf("News").map(::JsonPrimitive)))
+            }.toString()
+        return db.syncHeldDao().insert(SyncHeldEntity(batch = batch, summary = summary, heldAt = 1))
+    }
+
+    private fun heldProbeInstaller(sink: (Long) -> Unit): EntryProviderInstaller =
+        {
+            entry<SyncHeldChangesKey>(metadata = NdSceneMetadata.dialog()) { key ->
+                sink(key.id)
+                Text("held-changes-dialog")
             }
         }
 

@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
+import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.rememberAndroidSystemUiState
@@ -42,6 +43,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberAndroidPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.startup_recovered
+import ch.lkmc.neutrodyne.core.ui.root.HeldChangesBanner
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
@@ -55,9 +57,17 @@ import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
+import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
+import ch.lkmc.neutrodyne.sync.api.SyncController
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
@@ -102,6 +112,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
+            // The held prompt waits for the start-up gate's database open before resolving the
+            // controller, so the graph's database-backed bindings are never touched on the UI
+            // thread before the gate is ready (01 Application start-up).
+            val heldChanges by
+                remember(graph) {
+                    heldChangesBannerFlow(graph.databaseOpener) { graph.syncController }
+                }.collectAsStateWithLifecycle(initialValue = null)
 
             val systemUi = rememberAndroidSystemUiState()
             val panelHidden by graph.settingsRepository
@@ -145,6 +162,7 @@ class MainActivity : AppCompatActivity() {
                             playerPanelHidden = panelHidden,
                             settingsBadge = updates.badge,
                             notice = updates.notice,
+                            heldChanges = heldChanges,
                         ),
                     actions =
                         RootActions(
@@ -236,6 +254,43 @@ class MainActivity : AppCompatActivity() {
         val ROOT_STATE_BASE = RootUiState.READY
     }
 }
+
+/**
+ * The shell's held-changes banner mapping (08 priority 3): the oldest held batch, inert until
+ * the link is committed (R7.1). The controller's prompts already carry the summary titles.
+ */
+internal fun heldChangesBanner(
+    status: SyncStatus,
+    prompts: List<MassChangePrompt>,
+): HeldChangesBanner? {
+    if (status !is SyncStatus.Linked) return null
+    val prompt = prompts.firstOrNull() ?: return null
+    return HeldChangesBanner(
+        id = prompt.id,
+        deviceName = prompt.deviceName,
+        podcastCount = prompt.podcastTitles.size,
+        groupCount = prompt.groupNames.size,
+    )
+}
+
+/**
+ * The shell's held-banner flow: waits for the start-up gate's database open, then observes the
+ * controller. The controller is resolved lazily inside the flow, so the graph's database-backed
+ * bindings are never touched on the UI thread before the gate is ready.
+ */
+internal fun heldChangesBannerFlow(
+    opener: DatabaseOpener,
+    controller: () -> SyncController,
+): Flow<HeldChangesBanner?> =
+    flow {
+        opener.openState.first { it is DatabaseOpenState.Opened }
+        val sync = controller()
+        emitAll(
+            combine(sync.status, sync.heldChanges) { status, prompts ->
+                heldChangesBanner(status, prompts)
+            },
+        )
+    }
 
 /** The shell's `DatabaseOpener → StartupGateState` mapping (01 Application start-up). */
 internal fun DatabaseOpenState.toGateState(): StartupGateState =

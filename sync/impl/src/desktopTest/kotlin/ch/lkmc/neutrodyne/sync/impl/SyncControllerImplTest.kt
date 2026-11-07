@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
+import ch.lkmc.neutrodyne.sync.api.HeldResolution
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
@@ -49,6 +50,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -942,6 +944,231 @@ class SyncControllerImplTest {
             }
         }
 
+    /**
+     * 10 Mass-change guard: a `sync_held` row that survived a process death is a reviewable batch,
+     * so a freshly built controller must load it without a resolve. Before the observable
+     * collection this stayed empty until `resolveHeld`.
+     */
+    @Test
+    fun aPersistedHeldBatchIsEmittedOnControllerStart() =
+        runTest {
+            val h = harness(this)
+            try {
+                val id = h.seedHeld(heldAt = 1, podcasts = listOf("Example"), groups = listOf("News"))
+                val restarted = h.newController(h.restartScope)
+                await(h) { restarted.heldChanges.value.any { it.id == id } }
+                val prompt = restarted.heldChanges.value.single()
+                assertEquals(id, prompt.id)
+                assertEquals(listOf("Example"), prompt.podcastTitles)
+                assertEquals(listOf("News"), prompt.groupNames)
+            } finally {
+                h.close()
+            }
+        }
+
+    /** The prompt follows the table: STAGED/DEFERRED rows never appear, HELD rows do, oldest first. */
+    @Test
+    fun heldChangesFollowsTheDaoAndIgnoresNonHeldRows() =
+        runTest {
+            val h = harness(this)
+            try {
+                assertTrue(
+                    h.controller.heldChanges.value
+                        .isEmpty(),
+                )
+                h.seedHeld(heldAt = 1, podcasts = listOf("Staged"), state = "STAGED")
+                h.tick()
+                assertTrue(
+                    h.controller.heldChanges.value
+                        .isEmpty(),
+                )
+                h.seedHeld(heldAt = 2, podcasts = listOf("Deferred"), state = "DEFERRED")
+                h.tick()
+                assertTrue(
+                    h.controller.heldChanges.value
+                        .isEmpty(),
+                )
+
+                val older = h.seedHeld(heldAt = 3, podcasts = listOf("Older"), groups = listOf("News"))
+                await(h) {
+                    h.controller.heldChanges.value
+                        .any { it.id == older }
+                }
+                val newer = h.seedHeld(heldAt = 4, podcasts = listOf("Newer"))
+                await(h) { h.controller.heldChanges.value.size == 2 }
+                assertEquals(
+                    listOf(older, newer),
+                    h.controller.heldChanges.value
+                        .map { it.id },
+                )
+
+                h.db.syncHeldDao().delete(older)
+                await(h) { h.controller.heldChanges.value.size == 1 }
+                assertEquals(
+                    newer,
+                    h.controller.heldChanges.value
+                        .single()
+                        .id,
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    /** Malformed rows are skipped or render with empty lists; they never break the collection. */
+    @Test
+    fun malformedHeldRowsDoNotCrashCollection() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.db.syncHeldDao().insert(
+                    ch.lkmc.neutrodyne.core.database
+                        .SyncHeldEntity(batch = "not json", summary = "{}", heldAt = 1),
+                )
+                h.db.syncHeldDao().insert(
+                    ch.lkmc.neutrodyne.core.database.SyncHeldEntity(
+                        batch = """{"state":"HELD","podcasts":[],"groups":[]}""",
+                        summary = "not json",
+                        heldAt = 2,
+                    ),
+                )
+                val malformedSummary =
+                    h.db.syncHeldDao().insert(
+                        ch.lkmc.neutrodyne.core.database.SyncHeldEntity(
+                            batch = """{"state":"HELD","podcasts":[{"rid":"p","clock":""}],"groups":[]}""",
+                            summary = """{"podcasts":[{}],"groups":"nope"}""",
+                            heldAt = 3,
+                        ),
+                    )
+                val good = h.seedHeld(heldAt = 4, podcasts = listOf("Good"))
+                await(h) {
+                    h.controller.heldChanges.value
+                        .any { it.id == good }
+                }
+                val prompts = h.controller.heldChanges.value
+                assertEquals(3, prompts.size)
+                assertEquals(listOf("Good"), prompts.single { it.id == good }.podcastTitles)
+                val malformed = prompts.single { it.id == malformedSummary }
+                assertTrue(malformed.podcastTitles.isEmpty())
+                assertTrue(malformed.groupNames.isEmpty())
+            } finally {
+                h.close()
+            }
+        }
+
+    /** A round the controller never ran still creates the prompt through the guard's normal path. */
+    @Test
+    fun aRoundCreatedHeldBatchReachesThePrompt() =
+        runTest {
+            val h = harness(this)
+            try {
+                repeat(11) { index ->
+                    val syncId = "00000000-0000-4000-8000-%012d".format(index)
+                    h.db.withWriteTransaction {
+                        h.db
+                            .podcastDao()
+                            .insertPodcast(
+                                podcastEntity(
+                                    syncId = syncId,
+                                    feedUrl = "https://example.com/$index/feed",
+                                    feedKey = "https://example.com/$index/feed",
+                                    title = "Show $index",
+                                ),
+                            )
+                    }
+                }
+                val roundId = 100L
+                h.db.withWriteTransaction {
+                    for (index in 0 until 11) {
+                        val syncId = "00000000-0000-4000-8000-%012d".format(index)
+                        MassChangeGuard.stagePodcast(h.db, roundId = roundId, podcastRid = syncId, clock = null)
+                    }
+                }
+                MassChangeGuard.evaluate(h.db, roundId = roundId, localPodcasts = 11, now = h.clock.now())
+                await(h) {
+                    h.controller.heldChanges.value
+                        .isNotEmpty()
+                }
+                val prompt =
+                    h.controller.heldChanges.value
+                        .single()
+                assertEquals(11, prompt.podcastTitles.size)
+                assertTrue(prompt.podcastTitles.containsAll((0 until 11).map { "Show $it" }))
+            } finally {
+                h.close()
+            }
+        }
+
+    /** Apply/Keep mine still resolve exactly the selected batch; the other prompt stays visible. */
+    @Test
+    fun resolveHeldAffectsOnlyTheSelectedBatch() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                h.addGroup()
+                val otherPodcast = "00000000-0000-4000-8000-00000000000b"
+                val otherGroup = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+                h.db.withWriteTransaction {
+                    h.db
+                        .podcastDao()
+                        .insertPodcast(
+                            podcastEntity(
+                                syncId = otherPodcast,
+                                feedUrl = "https://other.example/feed",
+                                feedKey = "https://other.example/feed",
+                                title = "Other",
+                            ),
+                        )
+                    h.db
+                        .groupDao()
+                        .insert(groupEntity(uuid = otherGroup, name = "Other group", orderKey = "a1"))
+                }
+                val first =
+                    h.seedHeld(
+                        heldAt = 1,
+                        podcasts = listOf(SyncControllerImplTest.PODCAST_SYNC_ID),
+                        groups = listOf(SyncControllerImplTest.GROUP_UUID),
+                        summaryPodcasts = listOf("Example"),
+                        summaryGroups = listOf("News"),
+                    )
+                val second =
+                    h.seedHeld(
+                        heldAt = 2,
+                        podcasts = listOf(otherPodcast),
+                        groups = listOf(otherGroup),
+                        summaryPodcasts = listOf("Other"),
+                        summaryGroups = listOf("Other group"),
+                    )
+                await(h) { h.controller.heldChanges.value.size == 2 }
+                h.seedLinked()
+
+                h.controller.resolveHeld(first, HeldResolution.APPLY)
+                await(h) { h.controller.heldChanges.value.size == 1 }
+                assertEquals(
+                    second,
+                    h.controller.heldChanges.value
+                        .single()
+                        .id,
+                )
+                assertNull(h.db.podcastDao().bySyncId(SyncControllerImplTest.PODCAST_SYNC_ID))
+                assertNull(h.db.groupDao().groupByUuid(SyncControllerImplTest.GROUP_UUID))
+                assertNotNull(h.db.podcastDao().bySyncId(otherPodcast))
+                assertNotNull(h.db.groupDao().groupByUuid(otherGroup))
+
+                h.controller.resolveHeld(second, HeldResolution.KEEP_MINE)
+                await(h) {
+                    h.controller.heldChanges.value
+                        .isEmpty()
+                }
+                val outbox = h.db.syncOutboxDao().rows()
+                assertTrue(outbox.any { it.coll == "podcast" && it.rid == otherPodcast && it.field == "*" })
+                assertTrue(outbox.any { it.coll == "group" && it.rid == otherGroup && it.field == "*" })
+            } finally {
+                h.close()
+            }
+        }
+
     private fun harness(scope: TestScope): Harness = Harness(scope, now)
 
     /**
@@ -982,6 +1209,8 @@ private class Harness(
     private val controllerJob = kotlinx.coroutines.Job()
     private val controllerScope =
         kotlinx.coroutines.CoroutineScope(scope.testScheduler + controllerJob)
+    private val restartJob = kotlinx.coroutines.Job()
+    val restartScope = kotlinx.coroutines.CoroutineScope(scope.testScheduler + restartJob)
 
     val db = TestDb.inMemory()
     val clock = TestClock(now)
@@ -1131,7 +1360,10 @@ private class Harness(
             podcastIndexKey = "",
             podcastIndexSecret = "",
         )
-    val controller =
+    val controller = newController(controllerScope)
+
+    /** A second controller over the same database, as a process restart would build. */
+    fun newController(scope: kotlinx.coroutines.CoroutineScope): SyncControllerImpl =
         SyncControllerImpl(
             db = db,
             client = client,
@@ -1150,7 +1382,7 @@ private class Harness(
             scheduler = scheduler,
             noticeBus = noticeBus,
             io = kotlinx.coroutines.Dispatchers.Default,
-            scope = controllerScope,
+            scope = scope,
         )
 
     /** Runs queued continuations and advances the poll delays by one second. */
@@ -1180,6 +1412,42 @@ private class Harness(
                 .groupDao()
                 .insert(groupEntity(uuid = SyncControllerImplTest.GROUP_UUID, name = "News", orderKey = "a0"))
         }
+    }
+
+    /** Seeds one `sync_held` row through the normal DAO path and returns its id. */
+    suspend fun seedHeld(
+        heldAt: Long,
+        podcasts: List<String> = emptyList(),
+        groups: List<String> = emptyList(),
+        summaryPodcasts: List<String> = podcasts,
+        summaryGroups: List<String> = groups,
+        state: String = "HELD",
+    ): Long {
+        val removals = { rids: List<String> ->
+            JsonArray(
+                rids.map { rid ->
+                    buildJsonObject {
+                        put("rid", rid)
+                        put("clock", "0:0")
+                    }
+                },
+            )
+        }
+        val batch =
+            buildJsonObject {
+                put("state", state)
+                put("podcasts", removals(podcasts))
+                put("groups", removals(groups))
+            }.toString()
+        val summary =
+            buildJsonObject {
+                put("podcasts", JsonArray(summaryPodcasts.map(::JsonPrimitive)))
+                put("groups", JsonArray(summaryGroups.map(::JsonPrimitive)))
+            }.toString()
+        return db.syncHeldDao().insert(
+            ch.lkmc.neutrodyne.core.database
+                .SyncHeldEntity(batch = batch, summary = summary, heldAt = heldAt),
+        )
     }
 
     /** Seeds a linked device with a stored token. */
@@ -1257,13 +1525,14 @@ private class Harness(
 
     fun close() {
         controllerJob.cancel()
+        restartJob.cancel()
         // Cancellation is asynchronous: the controller's io blocks run on
         // Dispatchers.Default, and closing the pool while one is still between
         // statements surfaced as "Connection pool is closed" on loaded CI
         // runners. Pump the scheduler until every controller coroutine has
         // unwound, mirroring await(), before the database closes.
         val deadline = System.nanoTime() + 5_000_000_000L
-        while (!controllerJob.isCompleted) {
+        while (!controllerJob.isCompleted || !restartJob.isCompleted) {
             check(System.nanoTime() < deadline) { "the controller job did not unwind after cancellation" }
             scope.testScheduler.runCurrent()
             Thread.sleep(1)

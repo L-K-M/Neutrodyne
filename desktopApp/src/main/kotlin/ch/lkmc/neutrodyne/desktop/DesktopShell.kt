@@ -298,6 +298,8 @@ internal object DesktopShell {
         // open (band 100 above) exactly like Android's StartupGate.
         // 11 Notifications' fallback: banner taps route through the root's navigator.
         graph.bannerNotifier.routeDispatch = menuActions::applyRoute
+        // Resolved lazily by the window's held-banner mapping, only after the start-up gate opens.
+        val syncControllerProvider: () -> ch.lkmc.neutrodyne.sync.api.SyncController = { graph.syncController }
         val busySignal =
             AppBusySignal(
                 nowPlaying = graph.playbackStateSource.nowPlaying,
@@ -338,6 +340,7 @@ internal object DesktopShell {
                 repoUrl = buildInfo.repoUrl,
                 onQuitRequest = ::exitApplication,
                 onWindowFocusGain = newEpisodeSeenClear,
+                syncController = syncControllerProvider,
             )
         }
         openEvents.close()

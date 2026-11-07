@@ -64,6 +64,7 @@ import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberDesktopPlatformActions
+import ch.lkmc.neutrodyne.core.ui.root.HeldChangesBanner
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.PlaybackKey
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
@@ -90,10 +91,14 @@ import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
+import ch.lkmc.neutrodyne.sync.api.SyncController
+import ch.lkmc.neutrodyne.sync.api.SyncStatus
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -151,6 +156,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController? = null,
     desktopPlaybackController: ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController? = null,
     repoUrl: String = "",
+    syncController: (() -> SyncController)? = null,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -393,6 +399,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                     userVolume?.volumeDown()
                     Unit
                 },
+                syncController = syncController,
             )
         }
         if (openHandler == null) content() else DesktopDropTarget(openHandler, content)
@@ -651,6 +658,7 @@ internal fun NeutrodyneWindowContent(
     onTextFieldFocusChange: (Boolean) -> Unit = {},
     volumeUp: () -> Unit = {},
     volumeDown: () -> Unit = {},
+    syncController: (() -> SyncController)? = null,
 ) {
     val panelScope = rememberCoroutineScope()
     val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
@@ -668,6 +676,19 @@ internal fun NeutrodyneWindowContent(
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions(portal)
     val nowPlaying by playbackState.nowPlaying.collectAsState()
+    // The held prompt is mapped only once the gate is open; the provider is resolved lazily,
+    // so the graph's database-backed bindings are never touched before the start-up gate.
+    val heldChanges by
+        produceState<HeldChangesBanner?>(null, syncController, startup) {
+            val provider = syncController ?: return@produceState
+            if (startup != StartupGateState.Ready && startup !is StartupGateState.Recovered) {
+                return@produceState
+            }
+            val sync = provider()
+            combine(sync.status, sync.heldChanges) { status, prompts ->
+                heldChangesBanner(status, prompts)
+            }.collect { value = it }
+        }
     val panelHidden by (
         settings?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
             ?: flowOf(false)
@@ -768,6 +789,7 @@ internal fun NeutrodyneWindowContent(
                     playerPanelHidden = panelHidden,
                     settingsBadge = updates?.badge ?: false,
                     notice = updates?.notice,
+                    heldChanges = heldChanges,
                 ),
             actions = actions,
             slots = slots,
@@ -777,6 +799,24 @@ internal fun NeutrodyneWindowContent(
             platform = BuildInfo.Platform.DESKTOP,
         )
     }
+}
+
+/**
+ * The desktop shell's held-changes banner mapping (08 priority 3): the oldest held batch, inert
+ * until the link is committed (R7.1).
+ */
+internal fun heldChangesBanner(
+    status: SyncStatus,
+    prompts: List<MassChangePrompt>,
+): HeldChangesBanner? {
+    if (status !is SyncStatus.Linked) return null
+    val prompt = prompts.firstOrNull() ?: return null
+    return HeldChangesBanner(
+        id = prompt.id,
+        deviceName = prompt.deviceName,
+        podcastCount = prompt.podcastTitles.size,
+        groupCount = prompt.groupNames.size,
+    )
 }
 
 private const val APPEARANCE_GATE_MS = 1_000L
