@@ -13,11 +13,13 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.withContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -383,8 +385,24 @@ class RetentionTest {
                 db.syncStateDao().upsert(
                     SyncStateEntity(enabled = true, serverUrl = "https://sync.example", linkedAt = now),
                 )
-                val job = launch { db.syncStateDao().withApplying { awaitCancellation() } }
-                while (!db.syncStateDao().isApplying()) yield()
+                val entered = CompletableDeferred<Unit>()
+                val job =
+                    launch {
+                        db.withWriteTransaction {
+                            try {
+                                db.syncStateDao().withApplying {
+                                    assertTrue(db.syncStateDao().isApplying())
+                                    entered.complete(Unit)
+                                    awaitCancellation()
+                                }
+                            } finally {
+                                withContext(NonCancellable) {
+                                    assertFalse(db.syncStateDao().isApplying(), "restore before the outer rollback")
+                                }
+                            }
+                        }
+                    }
+                entered.await()
                 job.cancelAndJoin()
                 assertFalse(db.syncStateDao().isApplying(), "a cancelled applier must clear the flag")
             } finally {

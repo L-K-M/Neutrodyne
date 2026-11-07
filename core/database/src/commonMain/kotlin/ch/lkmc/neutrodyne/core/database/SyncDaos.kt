@@ -99,7 +99,6 @@ abstract class SyncStateDao(
 
     /** True while [withApplying] runs — tests' "capture suppressed" probe. */
     suspend fun isApplying(): Boolean = get()?.applying == true
-
 }
 
 /**

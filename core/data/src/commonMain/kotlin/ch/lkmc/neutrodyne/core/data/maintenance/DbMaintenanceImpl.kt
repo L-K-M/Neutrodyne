@@ -189,7 +189,7 @@ internal class DbMaintenanceImpl(
         Log.e(TAG) { "PRAGMA quick_check reported ${bad.size} problem rows" }
         suspendRunCatching {
             if (settings.set(DiagnosticsSettingKeys.DB_QUICK_CHECK_FAILED_AT, now) !is
-                Outcome.Success
+                    Outcome.Success
             ) {
                 Log.w(TAG) { "quick-check failure stamp could not be persisted" }
             }
