@@ -8,10 +8,9 @@ import android.content.Context
 import android.os.PowerManager
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.WorkQuery
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
-import ch.lkmc.neutrodyne.core.data.maintenance.DbMaintenanceScheduler
-import ch.lkmc.neutrodyne.core.data.refresh.WorkManagerRefreshScheduler
 import ch.lkmc.neutrodyne.core.domain.DiagnosticsContributor
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsLine
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
@@ -79,11 +78,14 @@ internal class AndroidJobsContributor
 
         override suspend fun collect(): List<DiagnosticsLine> {
             val workManager = WorkManager.getInstance(application)
+            // The card is every WorkManager lane (backup, import, downloads, artwork,
+            // update check, ...), not just maintenance and refresh: a WorkQuery over
+            // all states enumerates all of the app's work without enumerating tags.
             val infos =
                 workManager
-                    .getWorkInfosByTag(DbMaintenanceScheduler.TAG_MAINTENANCE)
-                    .awaitResult() +
-                    workManager.getWorkInfosByTag(WorkManagerRefreshScheduler.TAG_REFRESH).awaitResult()
+                    .getWorkInfos(
+                        WorkQuery.Builder.fromStates(WorkInfo.State.entries.toList()).build(),
+                    ).awaitResult()
             if (infos.isEmpty()) return listOf(DiagnosticsLine("jobs", "none"))
             return infos.map { info ->
                 DiagnosticsLine(
