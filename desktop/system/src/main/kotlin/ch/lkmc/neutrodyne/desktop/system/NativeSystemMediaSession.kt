@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.system
 
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
+import ch.lkmc.neutrodyne.playback.native.NativeMediaInfo
 import ch.lkmc.neutrodyne.playback.native.NativeMediaSession
 import ch.lkmc.neutrodyne.playback.native.NativeSessionEvent
 import ch.lkmc.neutrodyne.playback.native.NativeSessionEventKind
@@ -67,14 +69,19 @@ class NativeSystemMediaSession private constructor(
         skipBackMs: Long,
         skipForwardMs: Long,
         speedPresets: List<Float>,
+        artworkPath: String?,
     ) {
         native.publish(
-            nowPlaying?.title,
-            nowPlaying?.podcastTitle.orEmpty(),
-            nowPlaying?.position?.durationMs ?: 0,
-            nowPlaying?.position?.positionMs ?: 0,
-            nowPlaying?.position?.speed ?: 1f,
-            nowPlaying?.isPlaying ?: false,
+            NativeMediaInfo(
+                title = nowPlaying?.title,
+                artist = nowPlaying?.podcastTitle,
+                album = nowPlaying?.albumTitle(),
+                artPath = artworkPath,
+                durationMs = nowPlaying?.position?.durationMs ?: 0,
+                positionMs = nowPlaying?.position?.positionMs ?: 0,
+                rate = nowPlaying?.position?.speed ?: 1f,
+                playing = nowPlaying?.isPlaying ?: false,
+            ),
         )
     }
 
@@ -101,6 +108,12 @@ class NativeSystemMediaSession private constructor(
             return NativeSystemMediaSession(NativeMediaSession.open(directory))
         }
     }
+}
+
+/** 11 Metadata: the context group's name when playing from a group, else the podcast title. */
+private fun NowPlaying.albumTitle(): String {
+    val context = context ?: return podcastTitle
+    return if (context.type == ContextType.GROUP) context.title else podcastTitle
 }
 
 class WindowsSmtcSession private constructor(

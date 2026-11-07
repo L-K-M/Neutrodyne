@@ -96,6 +96,10 @@ public data class PlayerSlotState(
      * destination's search field. The shell attaches it to the menu through the player slot.
      */
     val find: () -> Boolean = { false },
+    val windowWidthDp: Int = 360,
+    val posture: ch.lkmc.neutrodyne.core.model.WindowPosture =
+        ch.lkmc.neutrodyne.core.model
+            .WindowPosture(),
 )
 
 /** Root-level key chords dispatched to the shell's playback actions (08 Keyboard and mouse). */

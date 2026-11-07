@@ -62,6 +62,7 @@ class LinuxMprisSession private constructor(
         skipBackMs: Long,
         skipForwardMs: Long,
         speedPresets: List<Float>,
+        artworkPath: String?,
     ) {
         val changed = mutableMapOf<String, Variant<*>>()
         val metadata = metadataOf(nowPlaying)

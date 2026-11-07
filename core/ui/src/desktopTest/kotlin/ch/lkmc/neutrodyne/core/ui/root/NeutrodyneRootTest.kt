@@ -118,7 +118,7 @@ class NeutrodyneRootTest {
     }
 
     @Test
-    fun desktopPlayerRoutesKeepWidePanelBesideContent() =
+    fun playerRoutesKeepTheWidePanelVisible() =
         runDesktopComposeUiTest(width = 1200, height = 800) {
             val pending = Channel<Route>(Channel.UNLIMITED)
             var slot: PlayerSlotState? = null
@@ -132,14 +132,72 @@ class NeutrodyneRootTest {
             runOnIdle { pending.trySend(Route.ExpandPlayer) }
             waitForIdle()
             runOnIdle {
-                kotlin.test.assertEquals(0, slot?.expandRequest)
+                kotlin.test.assertEquals(1, slot?.expandRequest)
                 assertTrue(requireNotNull(slot).layout.playerPanel)
                 kotlin.test.assertEquals(412, requireNotNull(slot).layout.playerPanelWidthDp)
                 assertTrue(requireNotNull(slot).layout.contentWidthDp > 0)
             }
             runOnIdle { pending.trySend(Route.ExpandPlayer) }
             waitForIdle()
-            runOnIdle { kotlin.test.assertEquals(0, slot?.expandRequest) }
+            runOnIdle { kotlin.test.assertEquals(2, slot?.expandRequest) }
+        }
+
+    @Test
+    fun hidingTheWidePanelMovesOnePlayerComposition() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            var hidden by mutableStateOf(false)
+            var panel = false
+            var starts = 0
+            var disposals = 0
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
+                    slots =
+                        RootSlots(player = { slot ->
+                            val identity = remember { Any() }
+                            DisposableEffect(identity) {
+                                starts++
+                                onDispose { disposals++ }
+                            }
+                            SideEffect { panel = slot.layout.playerPanel }
+                            Text("Persistent player")
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            waitForIdle()
+            runOnIdle {
+                assertTrue(panel)
+                hidden = true
+            }
+            waitForIdle()
+            runOnIdle {
+                kotlin.test.assertFalse(panel)
+                hidden = false
+            }
+            waitForIdle()
+            runOnIdle {
+                assertTrue(panel)
+                kotlin.test.assertEquals(1, starts, "A resize must retain the player composition")
+                kotlin.test.assertEquals(0, disposals, "The player must not detach during a layout change")
+            }
+        }
+
+    @Test
+    fun widePanelRestoresNavigationAfterAnExpandedSheet() =
+        runDesktopComposeUiTest(width = 1200, height = 800) {
+            var hidden by mutableStateOf(true)
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = hidden),
+                    slots =
+                        RootSlots(player = { slot ->
+                            SideEffect { slot.onExpandedSettled(!slot.layout.playerPanel) }
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            runOnIdle { hidden = false }
+            onNodeWithTag("nav_feeds").assertExists()
         }
 
     @Test

@@ -117,4 +117,5 @@ include(":tools:bgactor")
 // enabled notification listener makes it trusted for media control, trusted
 // (the bind the impossibility row's PROC_STATE_BFGS grant stamp hangs on).
 include(":tools:bgtrigger")
-// M6b: include(":benchmark")   v1.x: include(":feature:widgets")
+include(":benchmark")
+// v1.x: include(":feature:widgets")

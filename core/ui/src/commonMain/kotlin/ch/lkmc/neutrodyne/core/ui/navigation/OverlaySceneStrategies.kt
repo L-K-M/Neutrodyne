@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.rememberLifecycleOwner
@@ -18,6 +19,7 @@ import androidx.navigation3.scene.SceneStrategyScope
 import ch.lkmc.neutrodyne.core.designsystem.components.NdModalBottomSheet
 import ch.lkmc.neutrodyne.core.designsystem.components.NdSheetExpansion
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
+import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
 
 /**
  * An [OverlayScene] rendering [entry] inside [NdModalBottomSheet] (01 overlay scene strategies).
@@ -38,6 +40,10 @@ private class NdSheetScene<T : Any>(
         val lifecycleOwner = rememberLifecycleOwner()
         NdModalBottomSheet(
             onDismissRequest = onBack,
+            // A modal sheet is a window of its own, so NeutrodyneRoot's resource-ID flag never
+            // reaches it: the sheet root carries the flag itself, or 08's test tags inside any
+            // sheet stay invisible to UI Automator (desktop actual: no-op).
+            modifier = Modifier.testTagsAsResourceId(),
             initialExpansion =
                 if (entry.metadata[NdSceneMetadata.KEY_HALF_HEIGHT] == true) {
                     NdSheetExpansion.HALF

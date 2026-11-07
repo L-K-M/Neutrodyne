@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Unlicense
+[Unit]
+Description=Neutrodyne Sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/java -Xmx96m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k -jar /opt/neutrodyne-server/neutrodyne-server.jar serve
+Environment=NEUTRODYNE_SERVER_DATA=/var/lib/neutrodyne-server
+Environment=NEUTRODYNE_SERVER_LISTEN=127.0.0.1:8787
+Environment=NEUTRODYNE_SERVER_PUBLIC_URL=https://sync.example.org
+DynamicUser=yes
+User=neutrodyne-server
+StateDirectory=neutrodyne-server
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+MemoryMax=320M
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
