@@ -1216,7 +1216,7 @@ jobs:
           script: |
             adb install $(find app/build/outputs/apk/release -name '*x86_64*release.apk' -print -quit)
             adb install -t app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
-            scripts/ci/bmgr-download-exclusion.sh ch.lkmc.neutrodyne
+            scripts/ci/bmgr-download-exclusion.sh ch.lkmc.neutrodyne ${{ matrix.api }}
       - name: Report failure
         if: ${{ !success() }}
         env:

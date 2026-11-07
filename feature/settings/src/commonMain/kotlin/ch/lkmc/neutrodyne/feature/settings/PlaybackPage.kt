@@ -23,10 +23,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
@@ -36,6 +39,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_not_on_desktop
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_cache_mb
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_cache_used
@@ -80,7 +84,16 @@ internal fun PlaybackPage(
     ShowUserMessages(state.messages, viewModel::onMessageShown)
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(title = stringResource(Res.string.settings_playback), navigation = { SettingsBackButton() })
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // 08 Scrollbars: the desktop draws an overlay thumb at the page's end edge.
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             SettingsRow(
                 NdIcons.PlayArrow,
                 stringResource(
@@ -298,7 +311,7 @@ internal fun PlaybackPage(
                         Text(
                             stringResource(Res.string.playback_presets_label),
                         )
-                    }, isError = !valid, singleLine = true)
+                    }, isError = !valid, singleLine = true, modifier = Modifier.ndTextFieldFocus())
                     if (!valid) {
                         Text(
                             stringResource(Res.string.playback_presets_invalid),

@@ -10,6 +10,11 @@
 -keep class ch.lkmc.neutrodyne.YtxReleaseSmokeTest { *; }
 # Class-marked smoke suites are selected by the same annotation as the device runner.
 -keep @ch.lkmc.neutrodyne.core.testing.ReleaseSmoke class * { *; }
+# Method-marked smoke cases are selected the same way; keep their declaring class
+# so its helpers, rules and teardown stay in the traced call surface.
+-keepclasseswithmembers class * {
+    @ch.lkmc.neutrodyne.core.testing.ReleaseSmoke <methods>;
+}
 -keep class ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest {
     public <init>();
     @org.junit.Before <methods>;

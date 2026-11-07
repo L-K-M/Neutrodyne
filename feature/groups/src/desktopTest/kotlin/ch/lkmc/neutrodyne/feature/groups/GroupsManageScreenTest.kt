@@ -294,6 +294,18 @@ class GroupsManageScreenTest {
             assertEquals(listOf(d, a, b, c), calls.last())
         }
 
+    /** 08 Context menus: the Menu key opens the row's menu, not just the secondary click. */
+    @Test fun keyboardContextMenuOffersMoveActions() =
+        runComposeUiTest {
+            val (a, b, c, d) = seed()
+            setManager()
+            onNodeWithTag("groupRow$d").performMouseInput { click(center) }
+            onNodeWithTag("groupRow$d").performKeyInput { pressKey(Key.Menu) }
+            onNodeWithText("Move to top").performClick()
+            waitUntil { calls.size == 1 && !vm.uiState.value.busy }
+            assertEquals(listOf(d, a, b, c), calls.last())
+        }
+
     @Test fun emptyStateCreatesTheFirstGroup() =
         runComposeUiTest {
             setManager()

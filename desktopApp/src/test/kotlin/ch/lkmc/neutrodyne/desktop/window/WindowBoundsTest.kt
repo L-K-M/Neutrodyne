@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.window
 
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -63,6 +64,23 @@ class WindowBoundsTest {
 
         assertThat(bounds.width).isEqualTo(720.dp)
         assertThat(bounds.height).isEqualTo(558.dp)
+    }
+
+    @Test
+    fun `the minimum converts through the window density`() {
+        // 11 Window sizing: 600 × 480 dp converted with the window's density (200 % = 2x).
+        val size = minimumWindowDimension(Density(2f))
+
+        assertThat(size.width).isEqualTo(1200)
+        assertThat(size.height).isEqualTo(960)
+    }
+
+    @Test
+    fun `the minimum at 100 percent is the dp value in pixels`() {
+        val size = minimumWindowDimension(Density(1f))
+
+        assertThat(size.width).isEqualTo(600)
+        assertThat(size.height).isEqualTo(480)
     }
 
     @Test

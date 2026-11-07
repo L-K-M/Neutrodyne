@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
@@ -51,6 +52,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
@@ -285,7 +288,17 @@ internal fun PodcastScreen(
                     onIds = onVisibleIds,
                 )
                 LoadErrorBanner(items)
-                LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+                // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+                val scrollbars = LocalScrollbars.current
+                val scrollbarColor = ndScrollbarColor(scrollbars)
+                LazyColumn(
+                    state = listState,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .ndScrollbar(listState, scrollbars, scrollbarColor),
+                ) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
                         Column {

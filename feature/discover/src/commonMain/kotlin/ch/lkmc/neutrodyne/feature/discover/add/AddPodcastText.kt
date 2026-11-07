@@ -107,6 +107,8 @@ internal object SubscribeErrorText {
         when (error) {
             is SubscribeError.Fetch -> AddPodcastText.describe(error.error)
 
+            SubscribeError.YouTubeNotYetAvailable -> AddPodcastText.describe(AddPodcastError.YouTubeNotYetSupported)
+
             SubscribeError.NoMedia -> UiText.Res(Res.string.feed_err_no_media)
 
             SubscribeError.InvalidUrl -> UiText.Res(Res.string.add_error_invalid_url)

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +54,7 @@ import androidx.paging.insertSeparators
 import androidx.paging.map
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
@@ -65,6 +67,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdOutlinedButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.components.rememberMonogramPainter
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.GroupError
@@ -169,6 +173,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_warn_truncated
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_count
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_later
 import ch.lkmc.neutrodyne.core.ui.resources.selection_select_all
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -379,7 +384,17 @@ private fun SessionBody(
     var showTargetPicker by rememberSaveable { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+        // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+        val listState = rememberLazyListState()
+        val scrollbars = LocalScrollbars.current
+        val scrollbarColor = ndScrollbarColor(scrollbars)
+        LazyColumn(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .ndScrollbar(listState, scrollbars, scrollbarColor),
+            state = listState,
+        ) {
             item(key = "header", contentType = "header") {
                 SessionHeader(session)
             }
@@ -822,7 +837,11 @@ private fun SearchField(
     OutlinedTextField(
         value = query,
         onValueChange = onQuery,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .ndTextFieldFocus(),
         singleLine = true,
         placeholder = { Text(stringResource(Res.string.import_search)) },
         leadingIcon = { Icon(NdIcons.Search, contentDescription = null) },
@@ -1231,6 +1250,7 @@ private fun NameDialog(
                 isError = error != null,
                 supportingText = { error?.let { Text(groupErrorText(it)) } },
                 label = { Text(stringResource(Res.string.import_target_name)) },
+                modifier = Modifier.ndTextFieldFocus(),
             )
         }
     }

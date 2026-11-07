@@ -2768,6 +2768,15 @@ Serves R8.9, N4 (keyboard operability). Applies to the desktop app and to Androi
 | Full player scrubber | ← / → | seek back / forward 5 s; Home / End to the chapter start / the next chapter |
 | Search and address fields | Enter, Esc | submit; clear, then back |
 
+**Implementation note (2026-11-06, MD4).** Compose text fields do not consume every key
+event they edit: a desktop Space key-down reaches the root's bubbling `onKeyEvent` even while
+a field is focused. `NeutrodyneRoot` therefore tracks text-field focus through
+`Modifier.ndTextFieldFocus()` (applied to every shared text field) and stands its shortcuts
+down while a field is focused. On the desktop the window menu's accelerators are cleared for
+the same duration, because AWT processes a menu accelerator before Compose's key input and the
+root cannot suppress it by consuming the event; the root's own dispatch of those chords stays
+as the fallback for menu-less compositions (the AC1 `runComposeUiTest` checklist).
+
 `KeyboardShortcutsKey` (MD4; Help › Keyboard shortcuts on the desktop) shows 11's list grouped as Playback, Navigation, Library and Window, with the platform's modifier names ("Ctrl", "⌘"). On Android `MainActivity` overrides `Activity.onProvideKeyboardShortcuts` (an Activity callback, independent of Compose) to list the root keys in the system shortcut helper (Meta+/).
 
 #### Context menus
@@ -2787,6 +2796,23 @@ Serves R8.9, N4 (keyboard operability). Applies to the desktop app and to Androi
 **Hover.** Every clickable shows the M3 hover state layer (through `clickable`'s indication); rows and tiles also reveal their overflow `(:)` button on hover and while focused, which opens the context menu; icon-only buttons show their `NdTooltipIconButton` tooltip on hover after M3's delay (Unverified that `TooltipBox` triggers on hover in the multiplatform material3 1.9.0 desktop artefact, S9; fallback: Compose desktop's `TooltipArea`, provided by the window like `LocalScrollbars`); the pointer becomes a hand only over links; covers never zoom.
 
 **Scrollbars.** Every vertically scrolling list, grid, settings page, show-notes column and sheet taller than its window draws an `NdScrollbar` at its end edge on the desktop (horizontal ones under the Discover rows); the thumb reflects paged lists with placeholders by item count, so it does not jump while pages load. The mouse wheel scrolls lists; Shift+wheel scrolls horizontal rows and the Feeds tab row; trackpads scroll in both directions.
+
+**Implementation note (2026-11-06, MD4 context menus and scrollbars).** The row menus are
+the shared rows' own `DropdownMenu`s (episode row, Up next row, downloads row, cover tile,
+Manage groups row), opened by the secondary click, the Menu key, Shift+F10 and the hover/focus
+overflow; the menu labels are the same `customActions` labels the rows publish, so a menu and
+its screen-reader actions cannot disagree. The Feeds group tab carries the catalogue's
+Play/Refresh/Edit plus the Feeds screen's Mark all as played…, Download all unplayed…, Group
+settings and Export as OPML…; the Library group tile keeps its M2 menu (Edit, Manage groups,
+Export) and its Play/Refresh remain open, as do the catalogue extras that no surface wires yet
+(Episode row Copy link and Show in folder, the mini player's Copy link and Stop and close, the
+show-notes link menu). The MS2/MS3 rows (Devices row, Continue on this device card) are
+classified as owned by their milestones in `KeyboardReachabilityChecklistTest`, because their
+screens are not in this codebase yet. The scrollbars hang `Modifier.ndScrollbar` off the list,
+grid, settings page, show-notes and sheet scroll states; the thumb overlays each surface's
+existing end padding rather than adding the 12 dp the wrapper note describes. The desktop
+screenshot matrix (MD4 AC2) captures the episode-row states in light and dark at 600, 900 and
+1,400 dp in the PR tier, so CI verifies the acceptance evidence on every change.
 
 **Drags.** In-list drags use the mouse exactly like touch: Up next and Manage groups reorder by their drag handles, the scrubber and sliders drag, the player sheet drags between its anchors. Nothing drags out of the app in v1.0; dropping files and links on the window is 11's ([11 Drag and drop](11-desktop.md#drag-and-drop)).
 

@@ -26,8 +26,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
@@ -84,7 +87,16 @@ internal fun FeedsPage(
             title = stringResource(Res.string.settings_feeds),
             navigation = { SettingsBackButton() },
         )
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // 08 Scrollbars: the desktop draws an overlay thumb at the page's end edge.
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             SettingsRow(
                 icon = NdIcons.Schedule,
                 title = stringResource(Res.string.feeds_refresh_interval),

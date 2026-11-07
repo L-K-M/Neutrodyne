@@ -19,12 +19,14 @@ object AllSettingKeys {
         AppearanceSettingKeys.ALL +
             FeedsSettingKeys.ALL +
             DiscoverSettingKeys.ALL +
+            YouTubeSettingKeys.ALL +
             GroupsSettingKeys.ALL +
             PlaybackSettingKeys.ALL +
             DownloadSettingKeys.ALL +
             BackupSettingKeys.ALL +
             DesktopSettingKeys.ALL +
-            UpdateSettingKeys.ALL
+            UpdateSettingKeys.ALL +
+            SyncSettingKeys.ALL
 
     /**
      * The shared write-side validation (05 Rules 4): [value]'s stored type must match the
@@ -87,6 +89,7 @@ internal val NO_SYNC_PREFIXES: Set<String> =
         "ui.",
         "desktop.",
         "updates.",
+        "youtube.",
         "discover.",
         "downloads.",
         "sync.",

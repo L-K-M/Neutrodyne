@@ -15,7 +15,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -44,7 +47,16 @@ internal fun PrivacyScreen(state: DiscoverSettingsState) {
     val navigator = LocalAppNavigator.current
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(title = stringResource(Res.string.privacy_title), navigation = { SettingsBackButton() })
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor)
+                .padding(16.dp),
+        ) {
             Text(stringResource(Res.string.privacy_intro))
             Text(stringResource(Res.string.privacy_inventory), style = MaterialTheme.typography.titleLarge)
             PrivacyInventory.destinations.forEach { destination ->

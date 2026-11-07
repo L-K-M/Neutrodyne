@@ -119,6 +119,13 @@ class DesktopPlaybackController(
     private var closed = false
     private var skipBackMs = DEFAULT_SKIP_BACK_MS
     private var skipForwardMs = DEFAULT_SKIP_FORWARD_MS
+
+    /**
+     * The in-app volume 0..1 (11 Menus: Volume up/down; Ctrl/Cmd+↑/↓). Stored before the
+     * runtime exists and applied in [ensureRuntime], so a launch-time restore reaches the
+     * engine it creates.
+     */
+    private var userVolume: Float = 1.0f
     private val history = PlaybackHistory()
     private val budget = RecoveryBudget(clock)
 
@@ -190,6 +197,7 @@ class DesktopPlaybackController(
         runtime?.let { return it }
         val value = withContext(ioDispatcher) { runtimeFactory() }
         runtime = value
+        value.engine.setVolume(userVolume)
         sleepSampledAt = clock.elapsedRealtime()
         projector = DesktopQueueProjector(value.engine, value.resolver)
         scope.launch {
@@ -589,6 +597,16 @@ class DesktopPlaybackController(
     override fun skipBack() = command { seek((position() - skipBackMs).coerceAtLeast(0)) }
 
     override fun skipForward() = command { seek(position() + skipForwardMs) }
+
+    /** The current in-app volume 0..1 (the menu's Volume up/down state). */
+    fun getUserVolume(): Float = userVolume
+
+    /** Sets the in-app volume 0..1; the engine follows once it exists. */
+    fun setUserVolume(linear: Float) {
+        val clamped = linear.coerceIn(0f, 1f)
+        userVolume = clamped
+        runtime?.engine?.setVolume(clamped)
+    }
 
     private suspend fun seek(requestedMs: Long) {
         if (!prepared) return

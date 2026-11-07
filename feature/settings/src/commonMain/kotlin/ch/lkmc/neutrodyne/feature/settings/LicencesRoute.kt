@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -27,13 +28,17 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_desktop
@@ -109,7 +114,16 @@ private fun LicenceList(
     val shownRegular = regular.filtered(query)
     val shownBundled = bundled.filtered(query)
 
-    LazyColumn(Modifier.fillMaxSize()) {
+    // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+    val listState = rememberLazyListState()
+    val bars = LocalScrollbars.current
+    val barColor = ndScrollbarColor(bars)
+    LazyColumn(
+        Modifier
+            .fillMaxSize()
+            .ndScrollbar(listState, bars, barColor),
+        state = listState,
+    ) {
         item {
             OutlinedTextField(
                 value = query,
@@ -119,7 +133,8 @@ private fun LicenceList(
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = SCREEN_PADDING, vertical = FIELD_GAP),
+                        .padding(horizontal = SCREEN_PADDING, vertical = FIELD_GAP)
+                        .ndTextFieldFocus(),
             )
             LicenceStatement()
             SectionHeader(

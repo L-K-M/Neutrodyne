@@ -43,10 +43,13 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdPullToRefresh
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
@@ -231,7 +234,18 @@ private fun FeedList(
         // failure has no footer at all, and keeping both surfaces duplicated the error at
         // the list end.
         LoadErrorBanner(items)
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().testTag("feed-list")) {
+        // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+        val scrollbars = LocalScrollbars.current
+        val scrollbarColor = ndScrollbarColor(scrollbars)
+        LazyColumn(
+            state = listState,
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .testTag("feed-list")
+                    .ndScrollbar(listState, scrollbars, scrollbarColor),
+        ) {
             offlineBannerItem(state.offline)
             item(key = "header", contentType = "header") {
                 FeedHeader(state.filters, onPlay, onFiltersChange, onRefresh, onMarkAllPlayedClick, onDownloadAll)

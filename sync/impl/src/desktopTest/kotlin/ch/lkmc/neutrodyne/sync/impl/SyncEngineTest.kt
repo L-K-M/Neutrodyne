@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.LinkTokenRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LoginRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -154,9 +155,99 @@ class SyncEngineTest {
             }
         }
 
+    @Test
+    fun theHasMoreDrainAdvancesTheCursor() =
+        runTest {
+            val calls = mutableListOf<String>()
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse =
+                        SyncResponse(
+                            results = emptyList(),
+                            records = emptyList(),
+                            cursor = "c:00000001:5",
+                            hasMore = true,
+                            serverTime = "",
+                        )
+
+                    override suspend fun changes(
+                        since: String?,
+                        limit: Int,
+                    ): ChangesPage {
+                        calls += since.orEmpty()
+                        return ChangesPage(
+                            records = emptyList(),
+                            cursor = "c:00000001:9",
+                            hasMore = since != "c:00000001:9",
+                            serverTime = "",
+                        )
+                    }
+                }
+            val db = TestDb.inMemory()
+            try {
+                db.withWriteTransaction {
+                    db
+                        .syncStateDao()
+                        .upsert(SyncStateEntity(enabled = true, nodeId = "a".padStart(16, '0'), hlc = 1L shl 16))
+                }
+                Device(db, client).round()
+                assertEquals(listOf("c:00000001:5", "c:00000001:9"), calls)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aMalformedRecordClockDoesNotFailTheRound() =
+        runTest {
+            val badRecord =
+                ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto(
+                    coll = "setting",
+                    id = kotlinx.serialization.json.JsonPrimitive("theme"),
+                    seq = 1,
+                    by = null,
+                    fields =
+                        mapOf(
+                            "v" to
+                                ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue(
+                                    v = kotlinx.serialization.json.JsonPrimitive("dark"),
+                                    c = "not-an-hlc",
+                                ),
+                        ),
+                )
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse =
+                        SyncResponse(
+                            results = emptyList(),
+                            records = listOf(badRecord),
+                            cursor = "c:00000001:5",
+                            hasMore = false,
+                            serverTime = "",
+                        )
+                }
+            val db = TestDb.inMemory()
+            try {
+                db.withWriteTransaction {
+                    db
+                        .syncStateDao()
+                        .upsert(SyncStateEntity(enabled = true, nodeId = "a".padStart(16, '0'), hlc = 1L shl 16))
+                }
+                Device(db, client).round()
+            } finally {
+                db.close()
+            }
+        }
+
     private class Device(
         val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
-        val client: InMemorySyncClient,
+        val client: SyncClient,
     ) {
         val clock = TestClock(NOW)
         val engine =
@@ -180,8 +271,17 @@ class SyncEngineTest {
                         override suspend fun onDeleted(uuid: String) = Unit
                     },
                 sharePasswords = { false },
-                serverUrl = { "https://sync.example" },
-                token = { "token" },
+                address =
+                    object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
+                        override suspend fun serverUrl(): String = "https://sync.example"
+
+                        override suspend fun username(): String? = null
+
+                        override suspend fun shareFeedPasswords(): Boolean = false
+
+                        override suspend fun syncPlaybackSettings(): Boolean = true
+                    },
+                tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)

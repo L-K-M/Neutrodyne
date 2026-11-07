@@ -47,11 +47,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverNetworkPolicy
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -94,6 +97,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
 import ch.lkmc.neutrodyne.core.ui.resources.membership_create
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name
 import ch.lkmc.neutrodyne.core.ui.resources.membership_new
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.discover.ProviderDisclosure
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.pluralStringResource
@@ -185,10 +189,15 @@ internal fun AddPodcastSheet(
         }
     }
 
+    // 08 Scrollbars: the desktop draws an overlay thumb at the sheet's end edge.
+    val scroll = rememberScrollState()
+    val bars = LocalScrollbars.current
+    val barColor = ndScrollbarColor(bars)
     Column(
         modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
+            .ndScrollbar(scroll, bars, barColor)
             .padding(horizontal = SHEET_PADDING),
     ) {
         Text(
@@ -230,7 +239,12 @@ internal fun AddPodcastSheet(
             singleLine = true,
             // 08's test tags: the modal sheet composes over Discover's search field, so the
             // out-of-process journeys must address this field by tag, never by class.
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).testTag("add_url_field"),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .testTag("add_url_field")
+                    .ndTextFieldFocus(),
         )
 
         when (step) {
@@ -333,6 +347,7 @@ internal fun AddPodcastSheet(
                         isError = state.groupError != null,
                         supportingText = state.groupError?.let { { Text(it.asString()) } },
                         enabled = !state.creatingGroup && !step.subscribing,
+                        modifier = Modifier.ndTextFieldFocus(),
                     )
                     NdTextButton(
                         label = stringResource(Res.string.membership_create),
@@ -400,7 +415,7 @@ private fun AuthFields(
             onValueChange = onUsername,
             label = { Text(stringResource(Res.string.add_auth_username)) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().contentType(ContentType.Username),
+            modifier = Modifier.fillMaxWidth().contentType(ContentType.Username).ndTextFieldFocus(),
         )
         OutlinedTextField(
             value = password,
@@ -422,7 +437,12 @@ private fun AuthFields(
             keyboardOptions =
                 KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { onSubmit() }),
-            modifier = Modifier.fillMaxWidth().contentType(ContentType.Password).padding(top = FIELD_GAP),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .contentType(ContentType.Password)
+                    .padding(top = FIELD_GAP)
+                    .ndTextFieldFocus(),
         )
     }
 }

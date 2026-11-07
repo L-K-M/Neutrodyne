@@ -35,11 +35,14 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -90,6 +93,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.ps_show_in_all
 import ch.lkmc.neutrodyne.core.ui.resources.section_feed
 import ch.lkmc.neutrodyne.core.ui.resources.section_general
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
@@ -134,7 +138,15 @@ internal fun PodcastSettingsScreen(
             }
             return@Column
         }
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             SectionHeader(stringResource(Res.string.section_general))
             GeneralSection(detail, state.effectiveOrder, onCustomTitle, onIncludeInAll, onOrderChange)
 
@@ -463,6 +475,7 @@ private fun CustomTitleDialog(
             onValueChange = { text = it },
             label = { Text(stringResource(Res.string.ps_custom_title)) },
             singleLine = true,
+            modifier = Modifier.ndTextFieldFocus(),
         )
     }
 }
@@ -549,6 +562,7 @@ private fun EditUrlDialog(
                 error?.let { Text(it.asString(), color = MaterialTheme.colorScheme.error) }
             },
             singleLine = true,
+            modifier = Modifier.ndTextFieldFocus(),
         )
     }
 }

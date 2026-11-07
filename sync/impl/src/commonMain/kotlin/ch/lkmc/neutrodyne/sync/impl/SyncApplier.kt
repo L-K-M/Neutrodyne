@@ -129,13 +129,21 @@ class SyncApplier(
                 SyncCollection.SETTING -> applySetting(resolved, merge)
             }
         if (outcome is RecordOutcome.Applied || outcome is RecordOutcome.Held) {
+            val pendingSetting =
+                if (coll == SyncCollection.SETTING) {
+                    val value = merge.record.fields["v"]?.v
+                    val text = (value as? JsonPrimitive)?.content ?: value?.toString()
+                    text?.let { PendingSetting(it, merge.record.maxClock?.toString() ?: "") }
+                } else {
+                    null
+                }
             clockStore.put(
                 coll.wire,
                 resolved.rid,
                 RawSyncRecord(
                     state = merge.record,
                     by = dto.by ?: stored?.by,
-                    pendingSetting = stored?.pendingSetting,
+                    pendingSetting = pendingSetting ?: stored?.pendingSetting,
                     pendingAuth = stored?.pendingAuth,
                 ),
             )
@@ -167,14 +175,15 @@ class SyncApplier(
         if (existing == null) {
             val feedUrl = merge.record.stringField("feedUrl") ?: return RecordOutcome.Invalid
             val feedKey = UrlNormalizer.forIdentity(feedUrl) ?: return RecordOutcome.Invalid
+            // Another podcast already holds this feed: the merge belongs to it, not to a second row.
+            if (db.podcastDao().byFeedKey(feedKey) != null) return RecordOutcome.Invalid
             val now = clock.now()
-            val syncId =
-                if (db.podcastDao().bySyncId(rid) == null && !db.backupDao().syncIdInUse(rid)) rid else rid
+            val syncId = rid
             val title = merge.record.stringField("title") ?: feedUrl
             val idInserted =
                 db
                     .podcastDao()
-                    .insertPodcast(
+                    .insertPodcastOrIgnore(
                         PodcastEntity(
                             syncId = syncId,
                             sourceType =
@@ -197,6 +206,7 @@ class SyncApplier(
                             artworkKey = "u-$syncId",
                         ),
                     )
+            if (idInserted == -1L) return RecordOutcome.Invalid
             // A `*` row's aliases and the overrides land with the projection.
             merge.record.growSets["feedKeys"]?.forEach { key ->
                 if (key != feedKey) {
@@ -481,7 +491,7 @@ class SyncApplier(
         db
             .episodeStateDao()
             .ensure(EpisodeStateEntity(episodeId = episodeId, updatedAt = clock.now()))
-        val playedAt = record.longField("playedAt")
+        val playedAt = record.nullableLongField("playedAt", current?.playedAt)
         val favourite = record.booleanField("fav") ?: (current?.isFavorite ?: false)
         val playCount =
             maxOf(record.longField("playCount") ?: 0L, current?.playCount?.toLong() ?: 0L)
@@ -504,7 +514,7 @@ class SyncApplier(
                     isFavorite = favourite,
                     downloadDismissedAt = current?.downloadDismissedAt,
                     measuredDurationMs =
-                        record.longField("measuredDurationMs") ?: current?.measuredDurationMs,
+                        record.nullableLongField("measuredDurationMs", current?.measuredDurationMs),
                     updatedAt = clock.now(),
                 ),
             )
@@ -737,6 +747,18 @@ private fun RecordState.stringField(name: String): String? =
     (fields[name]?.v as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
 private fun RecordState.longField(name: String): Long? = (fields[name]?.v as? JsonPrimitive)?.longOrNull
+
+/** Three states: an absent field keeps [fallback], `JsonNull` clears, a number wins. */
+private fun RecordState.nullableLongField(
+    name: String,
+    fallback: Long?,
+): Long? =
+    when (val value = fields[name]?.v) {
+        null -> fallback
+        JsonNull -> null
+        is JsonPrimitive -> value.longOrNull
+        else -> null
+    }
 
 private fun RecordState.intField(name: String): Int? = (fields[name]?.v as? JsonPrimitive)?.intOrNull
 

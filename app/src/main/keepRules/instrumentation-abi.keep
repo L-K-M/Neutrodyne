@@ -751,6 +751,7 @@
 -keep class ch.lkmc.neutrodyne.core.common.NetworkStatus {
   public boolean isConnected();
   public boolean isMetered();
+  public boolean isValidated();
 }
 -keep class ch.lkmc.neutrodyne.core.common.Outcome$Failure {
   public <init>(java.lang.Object);
@@ -868,9 +869,25 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsRepositoryContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions$ToAppScope$ProvidesDataStoreSettingsSyncPortMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions$ToAppScope$ProvidesDataStoreSettingsSyncPortMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions$ToAppScope$ProvidesDataStoreSettingsSyncPortMetroFactory {
+  ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions$ToAppScope$ProvidesDataStoreSettingsSyncPortMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions {
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions$ToAppScope$ProvidesDataStoreSyncServerAddressMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions$ToAppScope$ProvidesDataStoreSyncServerAddressMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions$ToAppScope$ProvidesDataStoreSyncServerAddressMetroFactory {
+  ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions$ToAppScope$ProvidesDataStoreSyncServerAddressMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImplContributions$ToAppScope$ProvideScopedInstanceAddPodcastResolverImplMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImplContributions$ToAppScope$ProvideScopedInstanceAddPodcastResolverImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
@@ -1425,7 +1442,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter {
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory {
   ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory$Companion Companion;
@@ -1756,6 +1773,32 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.update.WorkUpdateCheckRunnerContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.youtube.FeedYouTubeMetadataReaderContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.FeedYouTubeMetadataReaderContributions {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings {
+}
 -keep interface ch.lkmc.neutrodyne.core.database.ArtworkDao {
   public java.lang.Object upsert(ch.lkmc.neutrodyne.core.database.ArtworkEntity, kotlin.coroutines.Continuation);
 }
@@ -1790,6 +1833,17 @@
   public java.lang.Object awaitOpen(kotlin.coroutines.Continuation);
   public kotlinx.coroutines.flow.StateFlow getOpenState();
   public ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase requireDatabase();
+}
+-keep class ch.lkmc.neutrodyne.core.database.DownloadDao {
+  public java.lang.Object byEpisode(long, kotlin.coroutines.Continuation);
+}
+-keep class ch.lkmc.neutrodyne.core.database.DownloadEntity {
+  public long getDownloadedBytes();
+  public java.lang.String getFinalUri();
+  public java.lang.String getRootId();
+  public java.lang.String getRunnerToken();
+  public ch.lkmc.neutrodyne.core.model.DownloadState getState();
+  public java.lang.String getTempPath();
 }
 -keep class ch.lkmc.neutrodyne.core.database.EpisodeAltEnclosureEntity {
   public <init>(long, int, java.lang.String, java.lang.Long, java.lang.Long, java.lang.Integer, java.lang.String, java.lang.String, java.lang.String, java.lang.String, boolean, java.lang.String, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
@@ -1833,6 +1887,7 @@
 -keep class ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase {
   public ch.lkmc.neutrodyne.core.database.ArtworkDao artworkDao();
   public ch.lkmc.neutrodyne.core.database.ChapterDao chapterDao();
+  public ch.lkmc.neutrodyne.core.database.DownloadDao downloadDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeDao episodeDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeStateDao episodeStateDao();
   public ch.lkmc.neutrodyne.core.database.GroupDao groupDao();
@@ -1906,6 +1961,18 @@
 -keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceSettingsStoreMetroFactory {
   ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$DeviceSettingsStoreMetroFactory$Companion Companion;
 }
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$PortableDataStoreMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$PortableDataStoreMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$PortableDataStoreMetroFactory {
+  ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$PortableDataStoreMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$SettingsStoreMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$SettingsStoreMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$SettingsStoreMetroFactory {
+  ch.lkmc.neutrodyne.core.datastore.DataStoreBindings$SettingsStoreMetroFactory$Companion Companion;
+}
 -keep class ch.lkmc.neutrodyne.core.datastore.DataStoreBindings {
 }
 -keep class ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore {
@@ -1925,7 +1992,13 @@
 -keep interface ch.lkmc.neutrodyne.core.domain.BackupRepository {
   public java.lang.Object writeSnapshotNow(kotlin.coroutines.Continuation);
 }
+-keep interface ch.lkmc.neutrodyne.core.domain.ChapterRepository {
+  public java.lang.Object ensureLocalLoaded(long, java.lang.String, kotlin.coroutines.Continuation);
+  public kotlinx.coroutines.flow.Flow observe(long);
+}
 -keep interface ch.lkmc.neutrodyne.core.domain.DesktopIntegration {
+}
+-keep interface ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult {
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.ExportRepository {
 }
@@ -2038,6 +2111,13 @@
   public long getEpisodeId();
   public int getIndex();
 }
+-keep enum ch.lkmc.neutrodyne.core.model.DownloadLane {
+  ch.lkmc.neutrodyne.core.model.DownloadLane MANUAL;
+}
+-keep enum ch.lkmc.neutrodyne.core.model.DownloadState {
+  ch.lkmc.neutrodyne.core.model.DownloadState COMPLETED;
+  ch.lkmc.neutrodyne.core.model.DownloadState DOWNLOADING;
+}
 -keep class ch.lkmc.neutrodyne.core.model.EpisodeChapter {
   public ch.lkmc.neutrodyne.core.model.ChapterSource getSource();
   public java.lang.String getTitle();
@@ -2142,7 +2222,7 @@
 -keep interface ch.lkmc.neutrodyne.core.navigation.TopLevelKey {
 }
 -keep class ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory create(dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory {
   ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory$Companion Companion;
@@ -2270,7 +2350,7 @@
 -keep class ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState {
 }
 -keep class ch.lkmc.neutrodyne.core.ui.root.RootActions {
-  public <init>(kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function2, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public <init>(kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function2, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
   int $stable;
 }
 -keep enum ch.lkmc.neutrodyne.core.ui.root.RootNotice {
@@ -2310,6 +2390,7 @@
   public ch.lkmc.neutrodyne.core.domain.ImportReportPoster getImportReportPoster();
   public ch.lkmc.neutrodyne.core.domain.ImportRepository getImportRepository();
   public java.util.Set getInitializers();
+  public ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl getLinkFlow();
   public ch.lkmc.neutrodyne.download.api.LocalMediaIndex getLocalMediaIndex();
   public dev.zacsweers.metrox.viewmodel.MetroViewModelFactory getMetroViewModelFactory();
   public ch.lkmc.neutrodyne.core.common.NetworkMonitor getNetworkMonitor();
@@ -2326,6 +2407,7 @@
   public ch.lkmc.neutrodyne.core.domain.SearchRepository getSearchRepository();
   public ch.lkmc.neutrodyne.core.domain.SecretStore getSecretStore();
   public ch.lkmc.neutrodyne.core.domain.SettingsRepository getSettingsRepository();
+  public ch.lkmc.neutrodyne.sync.api.SyncController getSyncController();
   public ch.lkmc.neutrodyne.core.domain.update.UpdateNotices getUpdateNotices();
   public androidx.work.WorkerFactory getWorkerFactory();
   public ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource getYoutubeCapabilities();
@@ -2379,11 +2461,36 @@
 }
 -keep class ch.lkmc.neutrodyne.di.DatabaseBindings {
 }
+-keep enum ch.lkmc.neutrodyne.download.api.DeleteReason {
+  ch.lkmc.neutrodyne.download.api.DeleteReason LIFECYCLE;
+  ch.lkmc.neutrodyne.download.api.DeleteReason USER;
+}
+-keep interface ch.lkmc.neutrodyne.download.api.DownloadController {
+  public java.lang.Object cancel(java.util.Collection, kotlin.coroutines.Continuation);
+  public java.lang.Object changeRoot(java.lang.String, ch.lkmc.neutrodyne.download.api.RootChangeMode, kotlin.coroutines.Continuation);
+  public java.lang.Object delete(java.util.Collection, ch.lkmc.neutrodyne.download.api.DeleteReason, kotlin.coroutines.Continuation);
+  public java.lang.Object request(java.util.List, ch.lkmc.neutrodyne.core.model.DownloadLane, java.lang.Boolean, kotlin.coroutines.Continuation);
+}
 -keep interface ch.lkmc.neutrodyne.download.api.LocalMediaChanges {
 }
 -keep interface ch.lkmc.neutrodyne.download.api.LocalMediaIndex {
+  public java.lang.String localUriOrNull(long);
 }
 -keep interface ch.lkmc.neutrodyne.download.api.LocalMediaReadiness {
+}
+-keep class ch.lkmc.neutrodyne.download.api.RequestResult$Queued {
+  public int getQueued();
+  public java.util.Map getRejected();
+}
+-keep interface ch.lkmc.neutrodyne.download.api.RequestResult {
+}
+-keep enum ch.lkmc.neutrodyne.download.api.RootChangeMode {
+  ch.lkmc.neutrodyne.download.api.RootChangeMode NEW_DOWNLOADS_ONLY;
+}
+-keep class ch.lkmc.neutrodyne.download.api.RootChangeResult$Applied {
+  ch.lkmc.neutrodyne.download.api.RootChangeResult$Applied INSTANCE;
+}
+-keep interface ch.lkmc.neutrodyne.download.api.RootChangeResult {
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ChangesMetroFactory$Companion {
   public ch.lkmc.neutrodyne.download.api.LocalMediaChanges changes(ch.lkmc.neutrodyne.download.impl.LocalMediaIndexImpl);
@@ -3199,6 +3306,10 @@
 }
 -keep class ch.lkmc.neutrodyne.feature.settings.UpdatesSettingsViewModelContributions {
 }
+-keep class ch.lkmc.neutrodyne.feature.sync.SyncNavigation {
+  public kotlin.jvm.functions.Function1 entries(dev.zacsweers.metro.Provider);
+  ch.lkmc.neutrodyne.feature.sync.SyncNavigation INSTANCE;
+}
 -keep class ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps$Companion {
 }
 -keep class ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps {
@@ -3357,6 +3468,7 @@
   public void nextChapter();
   public void pause();
   public java.lang.Object play(kotlin.coroutines.Continuation);
+  public java.lang.Object playDownloads(java.lang.Long, kotlin.coroutines.Continuation);
   public java.lang.Object playEpisode(long, kotlin.coroutines.Continuation);
   public java.lang.Object playEpisodeAt(long, long, kotlin.coroutines.Continuation);
   public void previousChapter();
@@ -3387,6 +3499,7 @@
   public long positionAt(long);
 }
 -keep enum ch.lkmc.neutrodyne.playback.api.StreamKind {
+  ch.lkmc.neutrodyne.playback.api.StreamKind LOCAL;
   ch.lkmc.neutrodyne.playback.api.StreamKind STREAM;
 }
 -keep class ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings$MetroFactory$Companion {
@@ -3681,6 +3794,54 @@
   ch.lkmc.neutrodyne.playback.impl.StreamingCache$MetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.playback.impl.StreamingCache {
+}
+-keep interface ch.lkmc.neutrodyne.sync.api.SyncController {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$LinkFlowMetroFactory {
+  public static ch.lkmc.neutrodyne.sync.impl.SyncBindings$LinkFlowMetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$PlaybackSyncPortMetroFactory {
+  public static ch.lkmc.neutrodyne.sync.impl.SyncBindings$PlaybackSyncPortMetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncClientMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncClientMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncClientMetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncClientMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncTokenStoreMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncTokenStoreMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncTokenStoreMetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncTokenStoreMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncControllerImplContributions$ToAppScope$ProvidesSyncControllerImplMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.sync.impl.SyncControllerImplContributions$ToAppScope$ProvidesSyncControllerImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncControllerImplContributions$ToAppScope$ProvidesSyncControllerImplMetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.SyncControllerImplContributions$ToAppScope$ProvidesSyncControllerImplMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncControllerImplContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncControllerImplContributions {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncFlags$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.sync.impl.SyncFlags$MetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncFlags$MetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.SyncFlags$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncFlags {
 }
 -keep class ch.lkmc.neutrodyne.sync.protocol.OrderKey {
   public java.lang.String after(java.lang.String);
@@ -4414,6 +4575,7 @@
 }
 -keep class kotlin.sequences.SequencesKt___SequencesKt {
   public static kotlin.sequences.Sequence filter(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
+  public static java.lang.String joinToString$default(kotlin.sequences.Sequence, java.lang.CharSequence, java.lang.CharSequence, java.lang.CharSequence, int, java.lang.CharSequence, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public static kotlin.sequences.Sequence map(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
   public static java.util.List toList(kotlin.sequences.Sequence);
 }
@@ -4492,6 +4654,12 @@
 -keep class kotlin.uuid.Uuid {
   public java.lang.String toString();
   kotlin.uuid.Uuid$Companion Companion;
+}
+-keep class kotlinx.collections.immutable.ExtensionsKt {
+  public static kotlinx.collections.immutable.PersistentList persistentListOf();
+}
+-keep interface kotlinx.collections.immutable.PersistentList {
+  public kotlinx.collections.immutable.PersistentList add(java.lang.Object);
 }
 -keep class kotlinx.coroutines.AbstractCoroutine {
   public <init>(kotlin.coroutines.CoroutineContext, boolean, boolean);

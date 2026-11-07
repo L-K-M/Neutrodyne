@@ -176,6 +176,33 @@ class SettingsScreensTest {
             onNodeWithText("Source code and releases").performScrollTo().assertIsDisplayed()
         }
 
+    /** MD4 AC4: the desktop help's Screen readers section carries the Access Bridge fallback. */
+    @Test fun desktopScreenReadersHelpStatesTheBridgeAndTheLinuxGap() =
+        runComposeUiTest {
+            val previous = Locale.getDefault()
+            Locale.setDefault(Locale.ENGLISH)
+            try {
+                setSettingsRoot()
+                openSettings()
+                onAllNodesWithText("About").onFirst().performScrollTo().performClick()
+                onNodeWithText("Install & updates").performScrollTo().performClick()
+                onNodeWithText("Screen readers").performScrollTo().performClick()
+                onNodeWithText("enables Java Access Bridge for NVDA", substring = true)
+                    .assertIsDisplayed()
+                onAllNodesWithText(
+                    "assistive_technologies=com.sun.java.accessibility.AccessBridge",
+                    substring = true,
+                ).onFirst().assertIsDisplayed()
+                assertTrue(
+                    onAllNodesWithText("Screen readers are not supported on Linux", substring = true)
+                        .fetchSemanticsNodes()
+                        .isNotEmpty(),
+                )
+            } finally {
+                Locale.setDefault(previous)
+            }
+        }
+
     @Test fun androidInstallHelpExplainsAutoAndCloses() =
         runComposeUiTest {
             setSettingsRoot(buildInfo = FakeBuildInfo.copy(platform = BuildInfo.Platform.ANDROID, desktop = null))
@@ -529,6 +556,24 @@ class SettingsScreensTest {
             waitForIdle()
             onNodeWithText("Start at login").assertIsOn()
             onNodeWithText("Disabled in Task Manager").assertIsDisplayed()
+        }
+
+    /** MD4 AC4: About carries 11's Linux screen-reader statement, shared with README and help. */
+    @Test
+    fun aboutStatesTheLinuxScreenReaderGap() =
+        runComposeUiTest {
+            val previous = Locale.getDefault()
+            Locale.setDefault(Locale.ENGLISH)
+            try {
+                setSettingsRoot()
+                openSettings()
+                onNodeWithText("About").performClick()
+                waitForIdle()
+                onNodeWithText("Screen readers are not supported on Linux", substring = true)
+                    .assertIsDisplayed()
+            } finally {
+                Locale.setDefault(previous)
+            }
         }
 
     private fun ComposeUiTest.openSettings() {

@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,12 +48,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdModalBottomSheet
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.icons.groupIcon
 import ch.lkmc.neutrodyne.core.designsystem.theme.groupTones
@@ -87,6 +91,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.group_edit_title
 import ch.lkmc.neutrodyne.core.ui.resources.group_settings_title
 import ch.lkmc.neutrodyne.core.ui.resources.order_newest
 import ch.lkmc.neutrodyne.core.ui.resources.order_oldest
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import org.jetbrains.compose.resources.stringResource
 
@@ -140,9 +145,18 @@ internal fun GroupEditScreen(
             }
             return@Column
         }
+        // 08 Scrollbars: the desktop draws an overlay thumb at the grid's end edge.
+        val gridState = rememberLazyGridState()
+        val scrollbars = LocalScrollbars.current
+        val scrollbarColor = ndScrollbarColor(scrollbars)
         LazyVerticalGrid(
             columns = GridCells.Adaptive(72.dp),
-            modifier = Modifier.weight(1f).testTag("groupEditorGrid"),
+            state = gridState,
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .testTag("groupEditorGrid")
+                    .ndScrollbar(gridState, scrollbars, scrollbarColor),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding =
@@ -169,7 +183,7 @@ internal fun GroupEditScreen(
                             )
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().testTag("groupName"),
+                    modifier = Modifier.fillMaxWidth().testTag("groupName").ndTextFieldFocus(),
                 )
             }
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -256,7 +270,7 @@ internal fun GroupEditScreen(
                         onValueChange = onSearch,
                         singleLine = true,
                         label = { Text(stringResource(Res.string.group_edit_search)) },
-                        modifier = Modifier.fillMaxWidth().testTag("groupMemberSearch"),
+                        modifier = Modifier.fillMaxWidth().testTag("groupMemberSearch").ndTextFieldFocus(),
                     )
                 }
             }
@@ -302,7 +316,17 @@ internal fun GroupEditScreen(
     if (iconsOpen) {
         NdModalBottomSheet(onDismissRequest = { iconsOpen = false }) {
             Text(stringResource(Res.string.group_edit_icon), Modifier.padding(16.dp))
-            LazyVerticalGrid(columns = GridCells.Adaptive(80.dp), modifier = Modifier.heightIn(max = 400.dp)) {
+            val iconGridState = rememberLazyGridState()
+            val scrollbars = LocalScrollbars.current
+            val scrollbarColor = ndScrollbarColor(scrollbars)
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(80.dp),
+                state = iconGridState,
+                modifier =
+                    Modifier
+                        .heightIn(max = 400.dp)
+                        .ndScrollbar(iconGridState, scrollbars, scrollbarColor),
+            ) {
                 items(listOf<String?>(null) + GroupIcons.KEYS) { key ->
                     val label = key ?: stringResource(Res.string.group_edit_none)
                     Column(

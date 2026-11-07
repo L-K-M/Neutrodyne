@@ -51,10 +51,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -158,9 +161,12 @@ internal fun DownloadsScreen(
     )
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(title = stringResource(Res.string.nav_downloads), actions = { SettingsGearButton() })
+        // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+        val scrollbars = LocalScrollbars.current
+        val scrollbarColor = ndScrollbarColor(scrollbars)
         LazyColumn(
             state = list,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).ndScrollbar(list, scrollbars, scrollbarColor),
             contentPadding =
                 PaddingValues(
                     bottom =

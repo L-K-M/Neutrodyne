@@ -24,8 +24,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.BrandMark
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 
 /**
  * The centred list-screen empty state (08 Empty states): a 96 dp symbol in `primary`, [title]
@@ -48,9 +51,18 @@ public fun EmptyState(
     footer: @Composable () -> Unit = {},
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
-        // A LazyColumn item already scrolls in its parent and has unbounded height.
+        // Lazy-list callers already own scrolling; short bounded windows need their own viewport.
         val scroll = rememberScrollState()
-        val scrolling = if (constraints.hasBoundedHeight) Modifier.verticalScroll(scroll) else Modifier
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        val scrolling =
+            if (constraints.hasBoundedHeight) {
+                Modifier
+                    .verticalScroll(scroll)
+                    .ndScrollbar(scroll, bars, barColor)
+            } else {
+                Modifier
+            }
         Column(
             modifier = Modifier.fillMaxSize().then(scrolling).padding(horizontal = 32.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
