@@ -24,17 +24,19 @@ import kotlinx.coroutines.flow.flow
 
 /**
  * The documented in-app banner fallback for [DesktopNotifier] (11 Notifications: no OS
- * notification back end exists before MD2's `OsDesktopNotifier` — "in-app banners only" is
- * each OS row's fallback). Every posted notification becomes a [UserMessage] the window
- * feeds the root snackbar through `RootSlots.userMessages` — serial presentation, the
- * notification's [DesktopNotification.route] re-offered as the "Open" action and applied
- * through [IntentRouter] plus the shell's [routeDispatch] on tap.
+ * notification back end, or one that cannot deliver — "in-app banners only" is each OS
+ * row's fallback). MD2 binds `OsDesktopNotifier` over this class: every post reaches the
+ * OS first and lands here whenever the OS channel cannot deliver. Every posted
+ * notification becomes a [UserMessage] the window feeds the root snackbar through
+ * `RootSlots.userMessages` — serial presentation, the notification's
+ * [DesktopNotification.route] re-offered as the "Open" action and applied through
+ * [IntentRouter] plus the shell's [routeDispatch] on tap.
  *
  * The queue is bounded ([MAX_PENDING]); the newest notification wins past the cap. Posting a
  * second notification under the same id replaces the pending entry — `replaces_id` semantics.
  * [cancel] retracts a notification that has not been shown yet; an already-displayed banner
- * cannot be retracted, like a shown toast. This class carries no OS-centre delivery — MD2
- * replaces the binding, not the port.
+ * cannot be retracted, like a shown toast. This class carries no OS-centre delivery — the
+ * OS channels live in `:desktop:system`.
  *
  * Thread-safety: [post] is called from lane/IO threads; [userMessages] is collected on the
  * composition's main scope; [messageAction] runs on the main thread. All mutable state is

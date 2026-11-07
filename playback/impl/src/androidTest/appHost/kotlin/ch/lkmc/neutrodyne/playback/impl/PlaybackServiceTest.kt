@@ -14,8 +14,6 @@ import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
@@ -293,15 +291,13 @@ class PlaybackServiceTest {
             }
             try {
                 graph.settingsRepository.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.NEVER)
-                val connectivity = app.getSystemService(ConnectivityManager::class.java)
                 phase("metered/await-metered")
+                // Await the precondition through the same NetworkMonitor the metered gate reads:
+                // the API 26 image's synchronous activeNetwork/capabilities read can stay stale
+                // long after the default-network callback delivered the metered cellular caps.
                 await {
-                    connectivity
-                        .getNetworkCapabilities(connectivity.activeNetwork)
-                        ?.let {
-                            it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                                !it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-                        } == true
+                    graph.networkMonitor.status.value
+                        .let { it.isConnected && it.isMetered }
                 }
                 val events = CopyOnWriteArrayList<PlaybackEvent>()
                 val collecting =
@@ -825,6 +821,10 @@ class PlaybackServiceTest {
         while (SystemClock.elapsedRealtime() < deadline) {
             val remaining = deadline - SystemClock.elapsedRealtime()
             if (remaining <= 0) break
+            // A slow API 26 shade is still expanding when the action first appears: a click at
+            // its first bounds landed beside the moving button and nothing paused. Click only
+            // once SystemUI is idle and the button has stopped moving.
+            device.waitForIdle(minOf(SHADE_IDLE_MS, remaining))
             val action =
                 device.wait(
                     Until.findObject(By.descContains(label).pkg(SYSTEM_UI_PACKAGE)),
@@ -833,7 +833,12 @@ class PlaybackServiceTest {
                     ?: device.findObject(By.text(label).pkg(SYSTEM_UI_PACKAGE))
                     ?: continue
             try {
+                val bounds = action.visibleBounds
+                device.waitForIdle(minOf(SHADE_IDLE_MS, remaining))
+                if (action.visibleBounds != bounds) continue
                 action.click()
+                // Let SystemUI dispatch the action's intent before the shade collapses.
+                device.waitForIdle(minOf(SHADE_IDLE_MS, remaining))
                 device.pressBack()
                 return
             } catch (stale: StaleObjectException) {
@@ -973,6 +978,7 @@ class PlaybackServiceTest {
         const val SETTLE_MS = 500L
         const val TIMER_EXPIRY_MS = 75_000L
         const val WAIT_MS = 30_000L
+        const val SHADE_IDLE_MS = 2_000L
         const val THIRTY_MINUTES_MS = 30 * 60 * 1_000L
         val EMBEDDED_CHAPTER_FIXTURES =
             listOf(

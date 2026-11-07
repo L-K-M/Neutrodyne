@@ -92,7 +92,6 @@ if (providers.gradleProperty("neutrodyne.pseudoLocales").orNull == "true") {
         .matching { it.name in setOf("assembleRelease", "bundleRelease", "packageRelease", "signReleaseBundle") }
         .configureEach { doFirst { error("Pseudo-locale resources are for verification builds only") } }
 }
-
 tasks.withType<Test>().configureEach {
     // The selection test invokes this negative control through the pinned runner itself.
     exclude("ch/lkmc/neutrodyne/DeviceTestSelectionTest\$FailureFixture.class")
@@ -111,6 +110,11 @@ configurations
         dependencies.add(project.dependencies.project(mapOf("path" to ":core:testing")))
     }
 
+// Opt-in fixtures enter the single-variant KMP download library, so disable every
+// app variant except the disposable target. A release task with the flag must fail.
+if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
+    androidComponents.beforeVariants { it.enable = it.buildType == "benchmarkRelease" }
+}
 dependencies {
     add("baselineProfile", project(":benchmark"))
     for (feature in listOf(

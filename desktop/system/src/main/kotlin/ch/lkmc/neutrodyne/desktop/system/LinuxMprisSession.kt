@@ -62,6 +62,7 @@ class LinuxMprisSession private constructor(
         skipBackMs: Long,
         skipForwardMs: Long,
         speedPresets: List<Float>,
+        artworkPath: String?,
     ) {
         val changed = mutableMapOf<String, Variant<*>>()
         val metadata = metadataOf(nowPlaying)
@@ -124,23 +125,35 @@ class LinuxMprisSession private constructor(
 
     // -- org.mpris.MediaPlayer2.Player ------------------------------------------
 
-    override fun Next() = emit(RemoteCommand.Next)
+    override fun Next() {
+        emit(RemoteCommand.Next)
+    }
 
-    override fun Previous() = emit(RemoteCommand.Previous)
+    override fun Previous() {
+        emit(RemoteCommand.Previous)
+    }
 
-    override fun Pause() = emit(RemoteCommand.Pause)
+    override fun Pause() {
+        emit(RemoteCommand.Pause)
+    }
 
-    override fun PlayPause() = emit(RemoteCommand.Toggle)
+    override fun PlayPause() {
+        emit(RemoteCommand.Toggle)
+    }
 
     // MPRIS Stop is not in RemoteCommand; pausing keeps the session, like Android (11).
-    override fun Stop() = emit(RemoteCommand.Pause)
+    override fun Stop() {
+        emit(RemoteCommand.Pause)
+    }
 
-    override fun Play() = emit(RemoteCommand.Play)
+    override fun Play() {
+        emit(RemoteCommand.Play)
+    }
 
     override fun Seek(offset: Long) {
+        if (published == null) return
         val target = (positionMs + offset / US_PER_MS).coerceAtLeast(0)
-        emit(RemoteCommand.SeekTo(target))
-        emitSeeked(target)
+        if (emit(RemoteCommand.SeekTo(target))) emitSeeked(target)
     }
 
     override fun SetPosition(
@@ -150,8 +163,7 @@ class LinuxMprisSession private constructor(
         val item = published ?: return
         if (trackId.path != "$TRACK_PATH/${item.episodeId}" || position < 0) return
         val target = position / US_PER_MS
-        emit(RemoteCommand.SeekTo(target))
-        emitSeeked(target)
+        if (emit(RemoteCommand.SeekTo(target))) emitSeeked(target)
     }
 
     override fun OpenUri(uri: String) {
@@ -233,12 +245,11 @@ class LinuxMprisSession private constructor(
         return if (speed.isFinite()) speed.toDouble() else DEFAULT_RATE
     }
 
-    private fun emit(command: RemoteCommand) {
-        commandChannel.trySend(command)
-    }
+    /** True when the command entered the stream — only then may Seeked broadcast. */
+    private fun emit(command: RemoteCommand): Boolean = commandChannel.trySend(command).isSuccess
 
     private fun emitSeeked(positionMs: Long) {
-        runCatching { connection.sendMessage(SeekedSignal(MprisNames.PATH, positionMs * US_PER_MS)) }
+        runCatching { connection.sendMessage(MprisPlayer.Seeked(MprisNames.PATH, positionMs * US_PER_MS)) }
     }
 
     private fun propertiesChanged(changed: Map<String, Variant<*>>) {

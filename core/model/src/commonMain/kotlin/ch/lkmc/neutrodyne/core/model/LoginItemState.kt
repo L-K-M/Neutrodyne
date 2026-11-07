@@ -20,6 +20,9 @@ public enum class LoginItemState {
     /** Registered but held for the user's OS-side approval (macOS SMAppService). */
     REQUIRES_APPROVAL,
 
+    /** The bundle runs from /AppTranslocation/ and must be moved to Applications first. */
+    TRANSLOCATED,
+
     /** The entry exists but the OS disabled it (Windows `StartupApproved` byte `03`). */
     DISABLED_BY_OS,
 }

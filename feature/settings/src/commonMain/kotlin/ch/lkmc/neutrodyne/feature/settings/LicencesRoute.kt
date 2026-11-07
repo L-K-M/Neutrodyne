@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_desktop
@@ -119,7 +120,8 @@ private fun LicenceList(
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = SCREEN_PADDING, vertical = FIELD_GAP),
+                        .padding(horizontal = SCREEN_PADDING, vertical = FIELD_GAP)
+                        .ndTextFieldFocus(),
             )
             LicenceStatement()
             SectionHeader(

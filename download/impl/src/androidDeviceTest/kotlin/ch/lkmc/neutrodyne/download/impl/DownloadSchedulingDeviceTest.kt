@@ -4,11 +4,11 @@ package ch.lkmc.neutrodyne.download.impl
 import android.app.job.JobScheduler
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -16,8 +16,11 @@ import org.junit.runner.RunWith
  * harness and an integrated W4/W5 engine; compilation is not execution evidence. */
 @RunWith(AndroidJUnit4::class)
 class DownloadSchedulingDeviceTest {
-    @Test fun ac3PersistedUidtBuilderOnReal34Or36() {
-        assumeTrue(Build.VERSION.SDK_INT >= 34)
+    // U-IDT job flags exist only on API 34+; the runner must not execute the case below it:
+    // an AssumptionViolatedException is reported as a <failure> in the GMD JUnit XML.
+    @Test
+    @SdkSuppress(minSdkVersion = 34)
+    fun ac3PersistedUidtBuilderOnReal34Or36() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val job = JobSchedulerFacade(context).info(listOf(deviceRow()))
         assertTrue(job.isUserInitiated)

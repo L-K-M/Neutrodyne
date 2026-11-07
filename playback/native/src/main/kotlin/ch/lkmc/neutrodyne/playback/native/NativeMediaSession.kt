@@ -17,25 +17,35 @@ class NativeMediaSession private constructor(
     private var closed = false
 
     @Synchronized
-    fun publish(
-        title: String?,
-        artist: String,
-        durationMs: Long,
-        positionMs: Long,
-        rate: Float,
-        playing: Boolean,
-    ) {
+    fun publish(info: NativeMediaInfo) {
         check(!closed) { "media session is closed" }
         Arena.ofConfined().use { arena ->
-            val result =
-                publishCall.invokeWithArguments(
-                    title?.let(arena::allocateFrom) ?: MemorySegment.NULL,
-                    arena.allocateFrom(artist),
-                    durationMs,
-                    positionMs,
-                    rate,
-                    if (playing) 1 else 0,
-                ) as Int
+            val struct = arena.allocate(NdmediaAbi.MEDIA_INFO_SIZE)
+            struct.set(
+                NdmediaAbi.ADDRESS,
+                NdmediaAbi.MEDIA_INFO_TITLE_OFFSET,
+                info.title?.let(arena::allocateFrom) ?: MemorySegment.NULL,
+            )
+            struct.set(
+                NdmediaAbi.ADDRESS,
+                NdmediaAbi.MEDIA_INFO_ARTIST_OFFSET,
+                info.artist?.let(arena::allocateFrom) ?: MemorySegment.NULL,
+            )
+            struct.set(
+                NdmediaAbi.ADDRESS,
+                NdmediaAbi.MEDIA_INFO_ALBUM_OFFSET,
+                info.album?.let(arena::allocateFrom) ?: MemorySegment.NULL,
+            )
+            struct.set(
+                NdmediaAbi.ADDRESS,
+                NdmediaAbi.MEDIA_INFO_ART_PATH_OFFSET,
+                info.artPath?.let(arena::allocateFrom) ?: MemorySegment.NULL,
+            )
+            struct.set(ValueLayout.JAVA_LONG, NdmediaAbi.MEDIA_INFO_DURATION_OFFSET, info.durationMs)
+            struct.set(ValueLayout.JAVA_LONG, NdmediaAbi.MEDIA_INFO_POSITION_OFFSET, info.positionMs)
+            struct.set(ValueLayout.JAVA_FLOAT, NdmediaAbi.MEDIA_INFO_RATE_OFFSET, info.rate)
+            struct.set(ValueLayout.JAVA_INT, NdmediaAbi.MEDIA_INFO_PLAYING_OFFSET, if (info.playing) 1 else 0)
+            val result = publishCall.invokeExact(struct) as Int
             check(result >= 0) { "native media publish failed: $result" }
         }
     }
@@ -65,16 +75,7 @@ class NativeMediaSession private constructor(
     }
 
     companion object {
-        private val PUBLISH =
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.ADDRESS,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_FLOAT,
-                ValueLayout.JAVA_INT,
-            )
+        private val PUBLISH = FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS)
         private val POLL = FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS)
 
         fun open(directory: Path): NativeMediaSession {
@@ -91,6 +92,18 @@ class NativeMediaSession private constructor(
         }
     }
 }
+
+/** One publish: the media-session metadata of 11's SMTC and Now Playing rows. */
+data class NativeMediaInfo(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val artPath: String?,
+    val durationMs: Long,
+    val positionMs: Long,
+    val rate: Float,
+    val playing: Boolean,
+)
 
 enum class NativeSessionEventKind(
     val code: Int,

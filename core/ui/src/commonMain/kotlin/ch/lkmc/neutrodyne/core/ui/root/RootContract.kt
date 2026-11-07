@@ -86,6 +86,16 @@ public data class PlayerSlotState(
     val hidePanel: () -> Unit = {},
     /** The sheet hides navigation only after settling over it. */
     val onExpandedSettled: (Boolean) -> Unit = {},
+    /**
+     * The root's back action (Esc; the desktop Go menu's Back), false when nothing handled it.
+     * The shell attaches it to the menu through the player slot.
+     */
+    val back: () -> Boolean = { false },
+    /**
+     * The root's Find action (Ctrl/Cmd+F; the desktop Edit menu's Find): focuses the current
+     * destination's search field. The shell attaches it to the menu through the player slot.
+     */
+    val find: () -> Boolean = { false },
     val windowWidthDp: Int = 360,
     val posture: ch.lkmc.neutrodyne.core.model.WindowPosture =
         ch.lkmc.neutrodyne.core.model
@@ -149,6 +159,18 @@ public class RootActions(
      * catalogue).
      */
     public val userMessageAction: (Long) -> Unit = {},
+    /**
+     * The File menu's Refresh and Ctrl/Cmd+R / F5 (11 Keyboard shortcuts): the shell wires it to
+     * its refresh controller. The default is inert.
+     */
+    public val refresh: () -> Unit = {},
+    /**
+     * Reports every transition of the root's tracked text-field focus (08 Keyboard and mouse).
+     * The desktop shell clears the window menu's accelerators while it is active, because an
+     * AWT menu accelerator is processed before Compose's key input and cannot be suppressed by
+     * consuming the event.
+     */
+    public val onTextFieldFocusChange: (Boolean) -> Unit = {},
     /** Persist the pager selection through the shell's settings service before opening Feeds. */
     public val selectFeedSource: suspend (String?) -> Boolean = { false },
     public val hidePlayerPanel: () -> Unit = {},

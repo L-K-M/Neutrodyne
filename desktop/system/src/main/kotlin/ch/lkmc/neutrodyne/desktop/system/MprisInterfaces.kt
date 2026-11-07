@@ -137,10 +137,15 @@ internal interface MprisPlayer : DBusInterface {
 
     @DBusBoundProperty
     fun getCanControl(): Boolean
-}
 
-/** MPRIS `Seeked` signal; spec requires it after every Seek/SetPosition. */
-internal class SeekedSignal(
-    path: String,
-    positionUs: Long,
-) : DBusSignal(path, MprisNames.PLAYER, "Seeked", positionUs)
+    /**
+     * MPRIS `Seeked` signal; the session broadcasts it when a Seek/SetPosition
+     * was actually dispatched to the player. dbus-java derives the interface
+     * and member names from the declaring class, so it must stay nested here —
+     * a top-level signal class throws at construction.
+     */
+    class Seeked(
+        path: String,
+        positionUs: Long,
+    ) : DBusSignal(path, positionUs)
+}

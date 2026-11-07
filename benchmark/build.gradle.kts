@@ -10,6 +10,8 @@ android {
         targetSdk = 37
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    // Resolution 9: use the recorded fallback while the plain release mapping is
+    // unverified. The target is minified and profileable, never the published APK.
     buildTypes {
         create("benchmarkRelease") {
             isDebuggable = true
@@ -22,6 +24,12 @@ android {
             device = "Pixel 6"
             apiLevel = 34
             systemImageSource = "aosp"
+            require64Bit = true
+        }
+        managedDevices.localDevices.create("api36") {
+            device = "Pixel 6"
+            apiLevel = 36
+            systemImageSource = "aosp-atd"
             require64Bit = true
         }
     }
@@ -46,4 +54,6 @@ dependencies {
     implementation(libs.androidx.test.uiautomator)
     implementation(libs.androidx.benchmark.macro.junit4)
     implementation(libs.junit4)
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp.mockwebserver3)
 }

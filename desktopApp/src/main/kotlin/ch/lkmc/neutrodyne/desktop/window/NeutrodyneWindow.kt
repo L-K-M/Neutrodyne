@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,16 +53,19 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.CloseBehaviour
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberDesktopPlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
+import ch.lkmc.neutrodyne.core.ui.root.PlaybackKey
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
@@ -92,11 +96,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import java.awt.Desktop
-import java.awt.Dimension
 import java.awt.Frame
 import java.awt.SystemTray
 import java.awt.desktop.AppReopenedListener
@@ -136,11 +140,16 @@ internal fun ApplicationScope.NeutrodyneWindow(
     busySignal: AppBusySignal,
     clock: Clock,
     onQuitRequest: () -> Unit,
+    onWindowFocusGain: () -> Unit = {},
+    portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
+    refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController? = null,
+    desktopPlaybackController: ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController? = null,
+    repoUrl: String = "",
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -152,6 +161,55 @@ internal fun ApplicationScope.NeutrodyneWindow(
         settings?.observe(DesktopSettingKeys.CLOSE_BEHAVIOUR)
             ?: kotlinx.coroutines.flow.flowOf(CloseBehaviour.QUIT_WHEN_IDLE)
     ).collectAsState(initial = CloseBehaviour.QUIT_WHEN_IDLE)
+    // The root reports every text-field focus transition so the menu can clear its
+    // accelerators (AWT processes them before Compose's key input; 08 Keyboard and mouse).
+    var textFieldFocused by remember { mutableStateOf(false) }
+    val skipSilenceEnabled by (
+        settings?.observe(PlaybackSettingKeys.SKIP_SILENCE)
+            ?: kotlinx.coroutines.flow.flowOf(false)
+    ).collectAsState(initial = false)
+    val speedPresets by (
+        settings
+            ?.observe(PlaybackSettingKeys.SPEED_PRESETS)
+            ?.map { PlaybackSettingKeys.parseSpeedPresets(it) ?: emptyList() }
+            ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    ).collectAsState(initial = emptyList())
+    val userVolume =
+        remember(desktopPlaybackController, settings, appScope) {
+            desktopPlaybackController?.let { DesktopUserVolume(it, settings, appScope) }
+        }
+    LaunchedEffect(userVolume) { userVolume?.restore() }
+    // 11 Menus' Refresh and Ctrl/Cmd+R / F5: the window-level action both paths share.
+    val refreshAll = {
+        refreshController?.refreshNow(ch.lkmc.neutrodyne.core.domain.RefreshScope.All)
+        Unit
+    }
+    val playbackMenuActions =
+        remember(playbackController, userVolume) {
+            object : PlaybackMenuActions {
+                override fun togglePlayPause() = playbackController.togglePlayPause()
+
+                override fun skipBack() = playbackController.skipBack()
+
+                override fun skipForward() = playbackController.skipForward()
+
+                override fun previousChapter() = playbackController.previousChapter()
+
+                override fun nextChapter() = playbackController.nextChapter()
+
+                override fun previousEpisode() = playbackController.skipToPrevious()
+
+                override fun nextEpisode() = playbackController.skipToNext()
+
+                override fun volumeUp() {
+                    userVolume?.volumeUp()
+                }
+
+                override fun volumeDown() {
+                    userVolume?.volumeDown()
+                }
+            }
+        }
 
     // 11's hidden-idle quit: any state change restarts the continuous 10 idle minutes.
     val quitRequest by rememberUpdatedState(onQuitRequest)
@@ -245,8 +303,57 @@ internal fun ApplicationScope.NeutrodyneWindow(
             window.background = java.awt.Color(argb, true)
             onDispose { }
         }
-        WindowEffects(activator = activator, background = background)
-        DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
+        WindowEffects(activator = activator, background = background, onFocusGain = onWindowFocusGain)
+        // The menu's actions are attached here, where the window's own services and state are
+        // in scope; the navigation and player-slot actions arrive from the content below.
+        val closeRequest = {
+            requestClose(
+                behaviour = closeBehaviour,
+                busy = busy,
+                onQuit = onQuitRequest,
+                onHide = { hidden = true },
+                onIconify = {
+                    activator.iconify()
+                    maybeShowNoTrayHint(appScope, settings, banners)
+                },
+            )
+        }
+        SideEffect {
+            menuActions.refresh = refreshAll
+            menuActions.closeWindow = closeRequest
+            menuActions.quit = onQuitRequest
+            menuActions.playback = playbackMenuActions
+            menuActions.setSpeed = { speed ->
+                appScope.launch {
+                    playbackController.setSpeed(
+                        speed,
+                        ch.lkmc.neutrodyne.core.model.SettingScope.GLOBAL,
+                    )
+                }
+            }
+            menuActions.openSpeedSheet = { menuActions.pushKey(SpeedKey) }
+            menuActions.setSleepTimer = { mode -> playbackController.setSleepTimer(mode) }
+            menuActions.setSkipSilence = { enabled ->
+                appScope.launch {
+                    playbackController.setSkipSilence(enabled, ch.lkmc.neutrodyne.core.model.SettingScope.GLOBAL)
+                }
+            }
+            menuActions.reportProblem = {
+                runCatching {
+                    java.awt.Desktop
+                        .getDesktop()
+                        .browse(java.net.URI.create("$repoUrl/issues"))
+                }.onFailure { Log.w("NeutrodyneWindow", it) { "opening the issue page failed" } }
+            }
+        }
+        DesktopMenuBar(
+            actions = menuActions,
+            enabled = openState is DatabaseOpenState.Opened,
+            textFieldFocused = textFieldFocused,
+            isPlaying = nowPlaying?.isPlaying == true,
+            skipSilenceEnabled = skipSilenceEnabled,
+            speedPresets = speedPresets,
+        )
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
@@ -260,11 +367,22 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 viewModelFactory = viewModelFactory,
                 playbackController = playbackController,
                 playbackState = playbackState,
+                portal = portal,
                 openHandler = openHandler,
                 failedDownloads = failedDownloads,
                 updateChecker = updateChecker,
                 updateNotices = updateNotices,
                 settings = settings,
+                refresh = refreshAll,
+                onTextFieldFocusChange = { textFieldFocused = it },
+                volumeUp = {
+                    userVolume?.volumeUp()
+                    Unit
+                },
+                volumeDown = {
+                    userVolume?.volumeDown()
+                    Unit
+                },
             )
         }
         if (openHandler == null) content() else DesktopDropTarget(openHandler, content)
@@ -423,29 +541,37 @@ private fun windowShortcut(
 private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
     activator: WindowActivator,
     background: Boolean,
+    onFocusGain: () -> Unit,
 ) {
     val density = LocalDensity.current
+    // Referenced inside the effect below: a restarting effect must read the current
+    // callback, not capture the composition-time lambda.
+    val focusGain by androidx.compose.runtime.rememberUpdatedState(onFocusGain)
     DisposableEffect(window, density) {
-        window.minimumSize =
-            with(density) {
-                Dimension(
-                    WindowBounds.MIN_WIDTH.roundToPx(),
-                    WindowBounds.MIN_HEIGHT.roundToPx(),
-                )
-            }
+        window.minimumSize = minimumWindowDimension(density)
 
         // 11's `--background` start: iconified until the user restores it.
         if (background) window.extendedState = window.extendedState or Frame.ICONIFIED
         activator.register(window)
-        onDispose { activator.unregister(window) }
+        // 03's desktop new-episode poster: focus clears the unseen set.
+        val focusListener =
+            object : java.awt.event.WindowFocusListener {
+                override fun windowGainedFocus(event: java.awt.event.WindowEvent) = focusGain()
+
+                override fun windowLostFocus(event: java.awt.event.WindowEvent) = Unit
+            }
+        window.addWindowFocusListener(focusListener)
+        onDispose {
+            window.removeWindowFocusListener(focusListener)
+            activator.unregister(window)
+        }
     }
 }
 
 /**
  * The macOS application menu (11 Menus): About, Settings… (Cmd+,) and Quit (Cmd+Q) arrive
- * through `java.awt.Desktop` handlers. AWT builds and labels these items.
- * The File menu stays separate; the remaining menus arrive in MD4 (11 Desktop UX).
- * On the other OSes this composes nothing.
+ * through `java.awt.Desktop` handlers. AWT builds and labels these items; Hide stays
+ * system-provided. On the other OSes this composes nothing (their File menu carries Quit).
  */
 @Composable
 private fun DesktopApplicationMenu(
@@ -488,9 +614,10 @@ private fun DesktopApplicationMenu(
  * the data folder (08 Banners and the startup gate). [viewModelFactory] is the graph's
  * `metroViewModel()` seam: every VM-backed entry resolves through it here, exactly where the
  * window, the UI test and smoke mode compose the same tree (01 Feature entry installers).
- * [banners] is the bound `DesktopNotifier` (11's in-app banner fallback until MD2's OS
- * notifier lands): its stream feeds the root snackbar and its taps come back through
- * `userMessageAction`, where the notification's route is applied.
+ * [banners] is the in-app banner fallback of the bound `DesktopNotifier` (11
+ * Notifications: MD2's OS notifier posts here when the OS channel cannot deliver): its
+ * stream feeds the root snackbar and its taps come back through `userMessageAction`,
+ * where the notification's route is applied.
  */
 @Composable
 internal fun NeutrodyneWindowContent(
@@ -504,11 +631,16 @@ internal fun NeutrodyneWindowContent(
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
+    portal: ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal? = null,
     openHandler: DesktopOpenHandler? = null,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
     updateChecker: AppUpdateChecker? = null,
     updateNotices: UpdateNotices? = null,
     settings: SettingsRepository? = null,
+    refresh: () -> Unit = {},
+    onTextFieldFocusChange: (Boolean) -> Unit = {},
+    volumeUp: () -> Unit = {},
+    volumeDown: () -> Unit = {},
 ) {
     val panelScope = rememberCoroutineScope()
     val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
@@ -524,7 +656,7 @@ internal fun NeutrodyneWindowContent(
         }
     }
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
-    val platformActions = rememberDesktopPlatformActions()
+    val platformActions = rememberDesktopPlatformActions(portal)
     val nowPlaying by playbackState.nowPlaying.collectAsState()
     val panelHidden by (
         settings?.observe(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN)
@@ -549,6 +681,10 @@ internal fun NeutrodyneWindowContent(
             playbackController,
             playbackState,
             settings,
+            refresh,
+            onTextFieldFocusChange,
+            volumeUp,
+            volumeDown,
         ) {
             RootActions(
                 retryStartup = onRetryStartup,
@@ -556,7 +692,25 @@ internal fun NeutrodyneWindowContent(
                 disableUpdateChecks = { currentUpdates?.disable?.invoke() },
                 continueHere = {},
                 dismissRemoteSession = {},
-                playbackKey = { key -> dispatchPlaybackKey(key, playbackController, playbackState.nowPlaying.value) },
+                playbackKey = { key ->
+                    when (key) {
+                        // 11's volume chords are the desktop's in-app gain (08 Keyboard and
+                        // mouse); the shared dispatch leaves them to the shell.
+                        PlaybackKey.VOLUME_UP -> {
+                            volumeUp()
+                            true
+                        }
+
+                        PlaybackKey.VOLUME_DOWN -> {
+                            volumeDown()
+                            true
+                        }
+
+                        else -> {
+                            dispatchPlaybackKey(key, playbackController, playbackState.nowPlaying.value)
+                        }
+                    }
+                },
                 manageStorage =
                     dataDir?.let { dir ->
                         { platformActions.reveal?.reveal(dir.toString()) }
@@ -566,6 +720,8 @@ internal fun NeutrodyneWindowContent(
                 userMessageAction = { id -> banners?.messageAction(id) },
                 hidePlayerPanel = { setPanelVisibility(PlayerPanelVisibility.HIDDEN) },
                 revealPlayerPanel = { setPanelVisibility(PlayerPanelVisibility.SHOWN) },
+                refresh = refresh,
+                onTextFieldFocusChange = onTextFieldFocusChange,
             )
         }
     val slots =
@@ -576,6 +732,8 @@ internal fun NeutrodyneWindowContent(
                     currentUpdates?.feedback?.invoke()
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
+                    menuActions.attachBack(it.back)
+                    menuActions.attachFind(it.find)
                     openHandler?.let { DesktopInputFeedback(it) }
                     PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
                 },

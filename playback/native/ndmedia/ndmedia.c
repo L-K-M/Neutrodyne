@@ -56,8 +56,11 @@ struct nd_out {
     atomic_int started;
     atomic_int stopping;
     atomic_int stopped;
+    /* Owned by the audio thread while the device runs: nd_out_start resets it
+       only while the device is stopped, and nd_out_stop never writes it. */
     atomic_size_t ramp_pos;
     size_t ramp_frames;
+    atomic_int stop_ramp_armed;
     char device_name[256];
 };
 
@@ -131,6 +134,15 @@ static void nd_data_callback(ma_device *dev, void *out, const void *in, ma_uint3
     if (stopping) {
         /* The stop ramp wins over the ring so the fade stays linear even with
            queued audio; then silence until nd_out_stop calls ma_device_stop. */
+        if (!atomic_load_explicit(&o->stop_ramp_armed, memory_order_relaxed)) {
+            /* Arm the fade from the current gain: mirroring the start-ramp
+               position makes a stop issued mid-ramp continuous, and a full
+               fade follows a completed start ramp. */
+            size_t current = atomic_load_explicit(&o->ramp_pos, memory_order_relaxed);
+            atomic_store_explicit(&o->ramp_pos, current < o->ramp_frames ? o->ramp_frames - current : 0,
+                                  memory_order_relaxed);
+            atomic_store_explicit(&o->stop_ramp_armed, 1, memory_order_relaxed);
+        }
         size_t pos = atomic_load_explicit(&o->ramp_pos, memory_order_relaxed);
         size_t fr, k;
         size_t remaining = pos < o->ramp_frames ? o->ramp_frames - pos : 0;
@@ -274,11 +286,13 @@ ND_API int nd_out_open(const nd_out_config *cfg, nd_out **out) {
     atomic_init(&o->stopping, 0);
     atomic_init(&o->stopped, 0);
     atomic_init(&o->ramp_pos, o->ramp_frames); /* no ramp before first start */
+    atomic_init(&o->stop_ramp_armed, 0);
     /* Test the actual allocated objects, including their ABI alignment. MSVC's
        macro classification does not establish this per-object property. */
     if (!atomic_is_lock_free(&o->r) || !atomic_is_lock_free(&o->w) || !atomic_is_lock_free(&o->frames_played) ||
         !atomic_is_lock_free(&o->underrun_frames) || !atomic_is_lock_free(&o->started) ||
-        !atomic_is_lock_free(&o->stopping) || !atomic_is_lock_free(&o->stopped) || !atomic_is_lock_free(&o->ramp_pos)) {
+        !atomic_is_lock_free(&o->stopping) || !atomic_is_lock_free(&o->stopped) || !atomic_is_lock_free(&o->ramp_pos) ||
+        !atomic_is_lock_free(&o->stop_ramp_armed)) {
         nd_out_close(o);
         return ND_E_BACKEND;
     }
@@ -330,9 +344,11 @@ ND_API int nd_out_start(nd_out *o) {
         return ND_E_ARG;
     if (atomic_load_explicit(&o->started, memory_order_relaxed))
         return 0;
+    /* The device is stopped here, so no callback can be reading ramp_pos. */
     atomic_store_explicit(&o->ramp_pos, 0, memory_order_relaxed);
     atomic_store_explicit(&o->stopping, 0, memory_order_relaxed);
     atomic_store_explicit(&o->stopped, 0, memory_order_relaxed);
+    atomic_store_explicit(&o->stop_ramp_armed, 0, memory_order_relaxed);
     if (ma_device_start(&o->device) != MA_SUCCESS)
         return ND_E_DEVICE;
     atomic_store_explicit(&o->started, 1, memory_order_release);
@@ -345,7 +361,8 @@ ND_API int nd_out_stop(nd_out *o) {
         return ND_E_ARG;
     if (!atomic_load_explicit(&o->started, memory_order_relaxed))
         return 0;
-    atomic_store_explicit(&o->ramp_pos, 0, memory_order_relaxed);
+    /* Publish the stop only. The callback owns ramp_pos and arms the fade on
+       its next buffer, so an in-flight callback never sees a reset position. */
     atomic_store_explicit(&o->stopping, 1, memory_order_release);
     while (!atomic_load_explicit(&o->stopped, memory_order_acquire) && waited < ND_STOP_WAIT_MS) {
         nd_sleep_ms(1);
@@ -355,6 +372,7 @@ ND_API int nd_out_stop(nd_out *o) {
         return ND_E_DEVICE;
     atomic_store_explicit(&o->started, 0, memory_order_release);
     atomic_store_explicit(&o->stopping, 0, memory_order_relaxed);
+    atomic_store_explicit(&o->stop_ramp_armed, 0, memory_order_relaxed);
     return 0;
 }
 

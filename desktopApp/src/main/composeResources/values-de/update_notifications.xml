@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="notification_app_update_title">Neutrodyne %1$s ist verfügbar</string>
+    <string name="notification_other_podcasts">Andere Podcasts</string>
+    <string name="notification_more_groups">und %1$d weitere</string>
+    <plurals name="notification_new_episodes_title">
+        <item quantity="one">%1$d neue Episode</item>
+        <item quantity="other">%1$d neue Episoden</item>
+    </plurals>
 </resources>

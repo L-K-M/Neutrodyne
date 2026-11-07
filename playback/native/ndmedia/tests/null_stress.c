@@ -52,9 +52,23 @@ int main(void) {
         assert(clock[0] == RATE && clock[1] == nd_out_underrun_frames(output));
         printf("null stress %d: played=%" PRId64 " underrun=%" PRId64 "\n", iteration, clock[0], clock[1]);
         assert(nd_out_clear(output) == 0);
+        /* Start and stop inside the 5-ms ramp: the callback owns ramp_pos, so
+           the engine thread's stop must never reset it under an in-flight
+           callback. The toggle must stay clean and the ring consistent. */
+        int64_t playedBeforeToggles = nd_out_frames_played(output);
+        for (int toggle = 0; toggle < 50; ++toggle) {
+            assert(nd_out_clear(output) >= 0);
+            assert(nd_out_write(output, pcm, RATE / 100) > 0);
+            assert(nd_out_start(output) == 0);
+            assert(nd_out_stop(output) == 0);
+        }
+        assert(nd_out_clear(output) >= 0);
+        assert(nd_out_free_frames(output) == RING_FRAMES);
+        int64_t playedAfterToggles = nd_out_frames_played(output);
+        assert(playedAfterToggles >= playedBeforeToggles);
         nd_out_close(output);
         yield();
-        assert(clock[0] == RATE);
+        assert(clock[0] == playedAfterToggles);
     }
     free(pcm);
     return 0;

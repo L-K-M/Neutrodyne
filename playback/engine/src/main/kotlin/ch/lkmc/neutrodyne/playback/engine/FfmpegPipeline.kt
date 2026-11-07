@@ -73,9 +73,21 @@ class FfmpegPipeline
                 "the seek to $positionMs ms produced no timestamped audio"
             } / MICROS_PER_MS
 
-        /** Return the actual cropped PCM, or null when no audio remains. */
+        /**
+         * Return the actual cropped PCM, or null when no audio remains.
+         *
+         * FFmpeg's decoder keeps the encoder-delay skip (`avctx->delay`, set from
+         * the track's initial padding) across [FfDecoder.flushBuffers], so when a
+         * seek is the first decode of a pipeline the decoder drops the first frame
+         * it produces. Seeking one guard interval earlier keeps the requested
+         * position out of that dropped frame; the sample drop below still lands
+         * on the requested position. Below the guard the target is within the
+         * first frame's span anyway, so the dropped frame costs at most one
+         * frame of accuracy, inside the 50-ms budget.
+         */
         fun seekFrame(positionMs: Long): AudioFrame? {
-            demuxer.seekTo(positionMs)
+            val seekTarget = if (positionMs >= FIRST_FRAME_GUARD_MS) positionMs - FIRST_FRAME_GUARD_MS else positionMs
+            demuxer.seekTo(seekTarget)
             decoder.flushBuffers()
             decoder.discardPendingSamples()
             val targetUs = Math.multiplyExact(positionMs, MICROS_PER_MS)
@@ -135,5 +147,8 @@ class FfmpegPipeline
 
             private const val MICROS_PER_MS = 1_000L
             private const val MICROS_PER_SECOND = 1_000_000L
+
+            /** One guard interval: longer than an AAC/MP3/Opus frame. */
+            private const val FIRST_FRAME_GUARD_MS = 50L
         }
     }

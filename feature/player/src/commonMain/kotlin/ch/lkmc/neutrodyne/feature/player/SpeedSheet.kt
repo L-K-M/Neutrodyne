@@ -47,6 +47,7 @@ import ch.lkmc.neutrodyne.core.ui.AttributionText
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.speed_apply
 import ch.lkmc.neutrodyne.feature.player.resources.speed_apply_to
@@ -332,7 +333,7 @@ internal fun SpeedSheet(
                         }
                     },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().ndTextFieldFocus(),
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     NdTextButton(

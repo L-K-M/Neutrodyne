@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
@@ -67,6 +68,7 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     val refreshController: RefreshController
     val playbackMaintenance: PlaybackMaintenance
     val localMediaIndex: LocalMediaIndex
+    val networkMonitor: NetworkMonitor
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
 

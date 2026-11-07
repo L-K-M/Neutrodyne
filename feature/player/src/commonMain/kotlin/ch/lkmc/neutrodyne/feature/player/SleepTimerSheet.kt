@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.sleep_custom
 import ch.lkmc.neutrodyne.feature.player.resources.sleep_end
@@ -102,6 +103,7 @@ internal fun SleepTimerSheet(
                         isError = input.isNotEmpty() && minutes == null,
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.ndTextFieldFocus(),
                     )
                     TextButton(
                         onClick = { minutes?.let { onSet(SleepTimerMode.Minutes(it)) } },
