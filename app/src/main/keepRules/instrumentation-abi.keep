@@ -751,6 +751,7 @@
 -keep class ch.lkmc.neutrodyne.core.common.NetworkStatus {
   public boolean isConnected();
   public boolean isMetered();
+  public boolean isValidated();
 }
 -keep class ch.lkmc.neutrodyne.core.common.Outcome$Failure {
   public <init>(java.lang.Object);
@@ -4462,6 +4463,7 @@
 }
 -keep class kotlin.sequences.SequencesKt___SequencesKt {
   public static kotlin.sequences.Sequence filter(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
+  public static java.lang.String joinToString$default(kotlin.sequences.Sequence, java.lang.CharSequence, java.lang.CharSequence, java.lang.CharSequence, int, java.lang.CharSequence, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public static kotlin.sequences.Sequence map(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
   public static java.util.List toList(kotlin.sequences.Sequence);
 }
