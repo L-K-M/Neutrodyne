@@ -72,8 +72,10 @@ abstract class SyncStateDao(
      * yet, so [block] must itself guarantee "no outbox rows" — as retention does.
      */
     suspend fun <T> withApplying(block: suspend () -> T): T {
-        setApplying(true)
         try {
+            // A cancellation can land after this UPDATE commits but before the block starts;
+            // keeping it inside the try makes the finally clear the flag in that window too.
+            setApplying(true)
             return block()
         } finally {
             // The suspend DAO call would be skipped on a cancelled caller; the open
