@@ -21,7 +21,12 @@ require(args.seeds > 0, 'Server validation failed')
 suites = [ET.parse(p).getroot() for p in args.directory.glob('TEST-*.xml')]
 required = {'ServerConvergenceTest': 2}
 if not args.convergence_only:
-    required['ServerConformanceTest'] = len(list(pathlib.Path('sync/protocol/vectors').glob('*.json')))
+    # The floor is the vector count, resolved from this script's location: a
+    # caller's working directory must never shrink it to zero.
+    vectors = pathlib.Path(__file__).resolve().parents[2] / 'sync/protocol/vectors'
+    vector_count = len(list(vectors.glob('*.json')))
+    require(vector_count > 0, f'no protocol vectors found under {vectors}')
+    required['ServerConformanceTest'] = vector_count
 for name, minimum in required.items():
     matches = [s for s in suites if s.get('name', '').endswith('.' + name)]
     require(matches, f'required suite {name} is absent')
