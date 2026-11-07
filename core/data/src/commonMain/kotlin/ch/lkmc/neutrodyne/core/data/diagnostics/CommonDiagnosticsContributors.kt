@@ -138,8 +138,9 @@ internal class DatabaseDiagnosticsContributor
 
         private fun statsEntries(json: String): List<Pair<String, String>> =
             runCatching {
-                (Json.parseToJsonElement(json) as? JsonObject).orEmpty().map { (key, value) ->
-                    key to value.jsonPrimitive.content
+                (Json.parseToJsonElement(json) as? JsonObject).orEmpty().mapNotNull { (key, value) ->
+                    // One object/array entry must not drop the whole stats block.
+                    runCatching { key to value.jsonPrimitive.content }.getOrNull()
                 }
             }.getOrDefault(emptyList())
     }
