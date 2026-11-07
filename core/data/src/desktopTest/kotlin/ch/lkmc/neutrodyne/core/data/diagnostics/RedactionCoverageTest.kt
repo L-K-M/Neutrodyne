@@ -105,6 +105,7 @@ class RedactionCoverageTest {
                 }
 
                 val target = File.createTempFile("nd-redact-copy", ".db")
+                target.deleteOnExit()
                 target.delete()
                 db.useWriterConnection { conn ->
                     conn.usePrepared("VACUUM INTO '${target.absolutePath}'") { it.step() }
