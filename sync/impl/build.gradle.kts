@@ -11,7 +11,9 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
         }
         desktopTest.dependencies {
-            implementation(libs.ktor.client.mock)
+            // KtorSyncClientTest: the real SYNC client stack against a scripted server.
+            implementation(libs.okhttp.mockwebserver3)
+            implementation(libs.okio)
         }
         commonMain.dependencies {
             implementation(project(":sync:api"))
