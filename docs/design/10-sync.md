@@ -1878,7 +1878,7 @@ services:
     restart: unless-stopped
     environment:
       NEUTRODYNE_SERVER_PUBLIC_URL: https://sync.example.org
-      NEUTRODYNE_SERVER_TRUSTED_PROXIES: 172.31.87.0/24
+      NEUTRODYNE_SERVER_TRUSTED_PROXIES: ${SYNC_SUBNET:-172.31.87.0/24}
     volumes:
       - neutrodyne-data:/data
     networks: [sync]
@@ -1898,12 +1898,19 @@ services:
 networks:
   sync:
     ipam:
-      config: [{subnet: 172.31.87.0/24}]
+      config: [{subnet: "${SYNC_SUBNET:-172.31.87.0/24}"}]
 volumes:
   neutrodyne-data: {}
   caddy-data: {}
   caddy-config: {}
 ```
+
+`SYNC_SUBNET` names the compose network's subnet and, through the same variable,
+the CIDR the server trusts `X-Forwarded-*` from, so the two cannot drift apart.
+The default `172.31.87.0/24` sits inside `172.16.0.0/12` and can collide with
+routes the host already has (an AWS default VPC is `172.31.0.0/16`); set
+`SYNC_SUBNET` to a free range on such a host. The shipped `compose.yaml` pins
+the Caddy image by digest because the `caddy:2` tag is mutable.
 
 ```text
 # Caddyfile
