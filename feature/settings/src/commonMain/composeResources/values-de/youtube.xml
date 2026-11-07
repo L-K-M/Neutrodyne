@@ -1,0 +1,5 @@
+<resources>
+    <string name="youtube_title">YouTube</string>
+    <string name="youtube_suggest_rss">RSS-Feed des Podcasts vorschlagen</string>
+    <string name="youtube_mark_played">Beim Öffnen auf YouTube als gespielt markieren</string>
+</resources>

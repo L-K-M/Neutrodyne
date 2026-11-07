@@ -408,6 +408,7 @@ internal class PodcastRepositoryImpl(
             showType = p.showType,
             includeInAll = p.includeInAll,
             hasOlderPages = p.pagingNextUrl != null,
+            youtubeVariants = p.youtubeVariants,
         )
     }
 
