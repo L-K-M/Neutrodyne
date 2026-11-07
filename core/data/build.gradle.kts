@@ -51,6 +51,7 @@ kotlin {
             implementation(project(":feeds:jvm"))
             implementation(libs.androidx.work.runtime)
             implementation(libs.androidx.lifecycle.process)
+            implementation(libs.kotlinx.coroutines.guava)
         }
         desktopMain.dependencies {
             implementation(project(":feeds:jvm"))
