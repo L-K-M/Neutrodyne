@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 import androidx.baselineprofile.gradle.consumer.BaselineProfileConsumerExtension
 import com.android.build.api.dsl.ApplicationExtension
+import com.android.build.api.variant.ApplicationAndroidComponentsExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.kotlin.dsl.configure
@@ -74,9 +75,9 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     }
                     // Every build type, including those androidx.baselineprofile creates, uses the public key
                     configureEach { signingConfig = signingConfigs.getByName(SIGNING_CONFIG) }
-                    // The plugin copies release's legacy minify flag, not AGP 9's optimization {} block, so
-                    // benchmarkRelease is minified explicitly to measure what users run (S19, 2026-10-06)
-                    matching { it.name == BENCHMARK_RELEASE }.configureEach { optimization { enable = true } }
+                    // The plugin's initWith(release) runs after this container's configureEach callbacks,
+                    // so the benchmarkRelease and nonMinifiedRelease optimization flags are set in the
+                    // finalizeDsl callback below, once the plugin has created both build types.
                 }
                 packaging { jniLibs { useLegacyPackaging = false } }
             }
@@ -95,6 +96,23 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 automaticGenerationDuringBuild = false
             }
 
+            // The plugin copies release's optimization {} block through initWith(release), so the
+            // two derived build types are configured only after the plugin has created them, in a
+            // finalizeDsl callback registered after the plugin's own.
+            // benchmarkRelease is minified like the published build to measure what users run
+            // (S19, 2026-10-06); nonMinifiedRelease stays unminified so the profile generator sees
+            // the original class and method descriptors (D96, 09 Macrobenchmark and profiles).
+            extensions.configure<ApplicationAndroidComponentsExtension> {
+                finalizeDsl { app ->
+                    app.buildTypes.matching { it.name == BENCHMARK_RELEASE }.configureEach {
+                        optimization { enable = true }
+                    }
+                    app.buildTypes.matching { it.name == NON_MINIFIED_RELEASE }.configureEach {
+                        optimization { enable = false }
+                    }
+                }
+            }
+
             configureLicensee()
             registerDependencyPolicy()
             registerManifestPermissions()
@@ -108,6 +126,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
         const val RELEASE = "release"
         const val DEBUG = "debug"
         const val BENCHMARK_RELEASE = "benchmarkRelease"
+        const val NON_MINIFIED_RELEASE = "nonMinifiedRelease"
         const val TEST_KEEP_RULES = "proguard-test.pro"
         const val SIGNING_CONFIG = "neutrodynePublic"
         const val PUBLIC_PASSWORD = "neutrodyne"
