@@ -99,6 +99,54 @@ class DbusDesktopPortalTest {
     }
 
     @Test(timeout = TEST_TIMEOUT_MS)
+    fun aWrongHandleAnswerClosesTheResponseMatch() {
+        val address = busAddress()
+        runBlocking {
+            val bus = DBusConnectionBuilder.forAddress(address).build()
+            try {
+                FakePortal(address).use { portal ->
+                    portal.misdirect = true
+                    DbusDesktopPortal({ bus }).use { underTest ->
+                        assertThat(withTimeout(AWAIT_MS) { underTest.chooseDirectory(TITLE, null) })
+                            .isEqualTo(DirectoryChoice.Unavailable)
+
+                        // The error path is an outcome too: its match must not linger.
+                        assertThat(bus.responseMatches()).isEqualTo(0)
+                    }
+                }
+            } finally {
+                runCatching { bus.close() }
+            }
+        }
+    }
+
+    @Test(timeout = TEST_TIMEOUT_MS)
+    fun aResponseSignalledWhileTheHandleIsWrongResumesExactlyOnce() {
+        val address = busAddress()
+        runBlocking {
+            // The fake emits the Response for the predictable path *and* answers the
+            // call with a path the match rule does not cover, so the signal thread and
+            // the error path both reach the outcome gate.
+            val bus = DBusConnectionBuilder.forAddress(address).build()
+            try {
+                FakePortal(address).use { portal ->
+                    portal.misdirect = true
+                    portal.misdirectUris = listOf(folderUri)
+                    DbusDesktopPortal({ bus }).use { underTest ->
+                        val outcome = withTimeout(AWAIT_MS) { underTest.chooseDirectory(TITLE, null) }
+
+                        // Exactly one of the two outcomes won the gate; the match is gone.
+                        assertThat(outcome).isAnyOf(DirectoryChoice.Chosen(folderPath), DirectoryChoice.Unavailable)
+                        assertThat(bus.responseMatches()).isEqualTo(0)
+                    }
+                }
+            } finally {
+                runCatching { bus.close() }
+            }
+        }
+    }
+
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun aBusWithoutThePortalAnswersUnavailable() {
         val address = busAddress()
         runBlocking {
@@ -207,6 +255,12 @@ class DbusDesktopPortalTest {
         val openCalls = ConcurrentLinkedQueue<OpenCall>()
         val closedTokens = ConcurrentLinkedQueue<String>()
 
+        /** When set, [OpenFile] answers with a path the match rule does not cover. */
+        var misdirect: Boolean = false
+
+        /** When non-null, the wrong handle is answered with a Response for these uris. */
+        var misdirectUris: List<String>? = null
+
         private val fileChooser =
             object : PortalFileChooser {
                 override fun getObjectPath() = PortalNames.PATH
@@ -222,6 +276,18 @@ class DbusDesktopPortalTest {
                     requests[token] = path
                     bus.exportObject(path, FakeRequest(token, closedTokens))
                     openCalls += OpenCall(title, options, token)
+                    if (misdirect) {
+                        misdirectUris?.let { uris ->
+                            bus.sendMessage(
+                                PortalRequest.Response(
+                                    path,
+                                    UInt32(RESPONSE_OK),
+                                    mapOf("uris" to Variant(uris, "as")),
+                                ),
+                            )
+                        }
+                        return DBusPath("${PortalNames.PATH}/request/wrong/path")
+                    }
                     return DBusPath(path)
                 }
             }

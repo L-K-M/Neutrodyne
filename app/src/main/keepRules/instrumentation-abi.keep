@@ -751,6 +751,7 @@
 -keep class ch.lkmc.neutrodyne.core.common.NetworkStatus {
   public boolean isConnected();
   public boolean isMetered();
+  public boolean isValidated();
 }
 -keep class ch.lkmc.neutrodyne.core.common.Outcome$Failure {
   public <init>(java.lang.Object);
@@ -1833,6 +1834,17 @@
   public kotlinx.coroutines.flow.StateFlow getOpenState();
   public ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase requireDatabase();
 }
+-keep class ch.lkmc.neutrodyne.core.database.DownloadDao {
+  public java.lang.Object byEpisode(long, kotlin.coroutines.Continuation);
+}
+-keep class ch.lkmc.neutrodyne.core.database.DownloadEntity {
+  public long getDownloadedBytes();
+  public java.lang.String getFinalUri();
+  public java.lang.String getRootId();
+  public java.lang.String getRunnerToken();
+  public ch.lkmc.neutrodyne.core.model.DownloadState getState();
+  public java.lang.String getTempPath();
+}
 -keep class ch.lkmc.neutrodyne.core.database.EpisodeAltEnclosureEntity {
   public <init>(long, int, java.lang.String, java.lang.Long, java.lang.Long, java.lang.Integer, java.lang.String, java.lang.String, java.lang.String, java.lang.String, boolean, java.lang.String, java.lang.String, java.lang.String, int, kotlin.jvm.internal.DefaultConstructorMarker);
 }
@@ -1875,6 +1887,7 @@
 -keep class ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase {
   public ch.lkmc.neutrodyne.core.database.ArtworkDao artworkDao();
   public ch.lkmc.neutrodyne.core.database.ChapterDao chapterDao();
+  public ch.lkmc.neutrodyne.core.database.DownloadDao downloadDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeDao episodeDao();
   public ch.lkmc.neutrodyne.core.database.EpisodeStateDao episodeStateDao();
   public ch.lkmc.neutrodyne.core.database.GroupDao groupDao();
@@ -1979,7 +1992,13 @@
 -keep interface ch.lkmc.neutrodyne.core.domain.BackupRepository {
   public java.lang.Object writeSnapshotNow(kotlin.coroutines.Continuation);
 }
+-keep interface ch.lkmc.neutrodyne.core.domain.ChapterRepository {
+  public java.lang.Object ensureLocalLoaded(long, java.lang.String, kotlin.coroutines.Continuation);
+  public kotlinx.coroutines.flow.Flow observe(long);
+}
 -keep interface ch.lkmc.neutrodyne.core.domain.DesktopIntegration {
+}
+-keep interface ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult {
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.ExportRepository {
 }
@@ -2091,6 +2110,13 @@
   public int getCount();
   public long getEpisodeId();
   public int getIndex();
+}
+-keep enum ch.lkmc.neutrodyne.core.model.DownloadLane {
+  ch.lkmc.neutrodyne.core.model.DownloadLane MANUAL;
+}
+-keep enum ch.lkmc.neutrodyne.core.model.DownloadState {
+  ch.lkmc.neutrodyne.core.model.DownloadState COMPLETED;
+  ch.lkmc.neutrodyne.core.model.DownloadState DOWNLOADING;
 }
 -keep class ch.lkmc.neutrodyne.core.model.EpisodeChapter {
   public ch.lkmc.neutrodyne.core.model.ChapterSource getSource();
@@ -2435,11 +2461,36 @@
 }
 -keep class ch.lkmc.neutrodyne.di.DatabaseBindings {
 }
+-keep enum ch.lkmc.neutrodyne.download.api.DeleteReason {
+  ch.lkmc.neutrodyne.download.api.DeleteReason LIFECYCLE;
+  ch.lkmc.neutrodyne.download.api.DeleteReason USER;
+}
+-keep interface ch.lkmc.neutrodyne.download.api.DownloadController {
+  public java.lang.Object cancel(java.util.Collection, kotlin.coroutines.Continuation);
+  public java.lang.Object changeRoot(java.lang.String, ch.lkmc.neutrodyne.download.api.RootChangeMode, kotlin.coroutines.Continuation);
+  public java.lang.Object delete(java.util.Collection, ch.lkmc.neutrodyne.download.api.DeleteReason, kotlin.coroutines.Continuation);
+  public java.lang.Object request(java.util.List, ch.lkmc.neutrodyne.core.model.DownloadLane, java.lang.Boolean, kotlin.coroutines.Continuation);
+}
 -keep interface ch.lkmc.neutrodyne.download.api.LocalMediaChanges {
 }
 -keep interface ch.lkmc.neutrodyne.download.api.LocalMediaIndex {
+  public java.lang.String localUriOrNull(long);
 }
 -keep interface ch.lkmc.neutrodyne.download.api.LocalMediaReadiness {
+}
+-keep class ch.lkmc.neutrodyne.download.api.RequestResult$Queued {
+  public int getQueued();
+  public java.util.Map getRejected();
+}
+-keep interface ch.lkmc.neutrodyne.download.api.RequestResult {
+}
+-keep enum ch.lkmc.neutrodyne.download.api.RootChangeMode {
+  ch.lkmc.neutrodyne.download.api.RootChangeMode NEW_DOWNLOADS_ONLY;
+}
+-keep class ch.lkmc.neutrodyne.download.api.RootChangeResult$Applied {
+  ch.lkmc.neutrodyne.download.api.RootChangeResult$Applied INSTANCE;
+}
+-keep interface ch.lkmc.neutrodyne.download.api.RootChangeResult {
 }
 -keep class ch.lkmc.neutrodyne.download.impl.AndroidDownloadBindings$ChangesMetroFactory$Companion {
   public ch.lkmc.neutrodyne.download.api.LocalMediaChanges changes(ch.lkmc.neutrodyne.download.impl.LocalMediaIndexImpl);
@@ -3417,6 +3468,7 @@
   public void nextChapter();
   public void pause();
   public java.lang.Object play(kotlin.coroutines.Continuation);
+  public java.lang.Object playDownloads(java.lang.Long, kotlin.coroutines.Continuation);
   public java.lang.Object playEpisode(long, kotlin.coroutines.Continuation);
   public java.lang.Object playEpisodeAt(long, long, kotlin.coroutines.Continuation);
   public void previousChapter();
@@ -3447,6 +3499,7 @@
   public long positionAt(long);
 }
 -keep enum ch.lkmc.neutrodyne.playback.api.StreamKind {
+  ch.lkmc.neutrodyne.playback.api.StreamKind LOCAL;
   ch.lkmc.neutrodyne.playback.api.StreamKind STREAM;
 }
 -keep class ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings$MetroFactory$Companion {
@@ -4544,6 +4597,7 @@
 }
 -keep class kotlin.sequences.SequencesKt___SequencesKt {
   public static kotlin.sequences.Sequence filter(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
+  public static java.lang.String joinToString$default(kotlin.sequences.Sequence, java.lang.CharSequence, java.lang.CharSequence, java.lang.CharSequence, int, java.lang.CharSequence, kotlin.jvm.functions.Function1, int, java.lang.Object);
   public static kotlin.sequences.Sequence map(kotlin.sequences.Sequence, kotlin.jvm.functions.Function1);
   public static java.util.List toList(kotlin.sequences.Sequence);
 }

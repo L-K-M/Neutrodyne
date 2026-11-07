@@ -85,16 +85,20 @@ class DbusDesktopPortal internal constructor(
 
             suspendCancellableCoroutine { continuation ->
                 var match: AutoCloseable? = null
+                val finished = OnceOnly()
 
                 /**
                  * The one exit for every outcome: the `Response` match rule must never
                  * outlive the wait. `invokeOnCancellation` only runs on cancel, so the
                  * answer and error paths close it themselves — before resuming, or the
-                 * caller could observe the match still installed.
+                 * caller could observe the match still installed. The gate makes the
+                 * first outcome win: a signal thread and an error path that both reach
+                 * this function no longer double-resume the continuation.
                  */
                 fun finish(choice: DirectoryChoice) {
+                    if (!finished.claim()) return
                     runCatching { match?.close() }
-                    if (continuation.isActive) continuation.resume(choice)
+                    continuation.resume(choice)
                 }
 
                 val handler =
@@ -115,11 +119,14 @@ class DbusDesktopPortal internal constructor(
                         )
                     }.getOrNull()
                 if (match == null) {
-                    continuation.resume(DirectoryChoice.Unavailable)
+                    finish(DirectoryChoice.Unavailable)
                     return@suspendCancellableCoroutine
                 }
                 continuation.invokeOnCancellation {
-                    runCatching { match.close() }
+                    // Cancellation is an outcome too: it takes the gate so a late
+                    // signal cannot resume, and closes the match once. The request
+                    // close always runs, so the portal's dialog does not linger.
+                    if (finished.claim()) runCatching { match?.close() }
                     closeRequest(requestPath)
                 }
                 try {

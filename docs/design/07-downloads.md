@@ -1903,6 +1903,17 @@ Fixtures: `download/impl/testdata/media/` (registered as test resources of `desk
 | `bmgr` check | 09's nightly `bmgr` job (android-emulator-runner, API 31 and API 36 for `data_extraction_rules.xml`; the legacy `backup_rules.xml` path is covered by `BackupRulesTest` and the API 28/29 negative diagnostic, [PO-50](../PLAN.md#48-further-product-owner-decisions); `scripts/ci/bmgr-check.sh`); 07 adds its assertion in M6 | **M6 acceptance 7**: `adb shell bmgr enable true`; `bmgr transport com.android.localtransport/.LocalTransport`; download a 30 MB episode; `bmgr backupnow ch.lkmc.neutrodyne`; the local transport's stored backup for the package (Unverified path) contains no `Podcasts/` or `downloads/` entry |
 | `YouTubeReleaseSmokeTest` (09's E7, owned by 04) | GMD API 36 and API 37 16 KB image, on the release APK (R8, as published) and the debug APK | **M9 acceptance 9**: one chunked YouTube download through `:ytx` with recorded responses and a MockWebServer googlevideo stand-in completes and verifies ([04 Testing](04-youtube.md#testing)) |
 
+**Implementation note (2026-11-07, nightly-green).** The `DataSyncWorkerTest`
+row above says the API 33 case reads the FGS type from `dumpsys activity
+services`. API 33's `ServiceRecord.dump()` does not print the runtime FGS type:
+it prints `isForeground=… foregroundId=… foregroundNoti=…`, and the `types=`
+line only exists from Android 14 (`types=%08X`, later `types=0x%08X`). The case
+therefore asserts the effective foreground state (`isForeground=true` and the
+worker's `foregroundId=2001`) plus the service's declared
+`foregroundServiceType` (`dataSync`) read from `PackageManager`; the worker's
+`ForegroundInfo` requests the same type. The runtime type itself is not
+observable in the text dump on API 33.
+
 **W6 AC11 device evidence: Unverified (2026-10-19).** On an API 34+ device,
 start a UIDT download with additional MANUAL rows queued, use Task Manager
 "Stop", then relaunch: active UIDT-owned and queued MANUAL rows must be

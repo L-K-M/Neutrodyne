@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -272,14 +273,30 @@ class DesktopAppGraphTest {
         if (session is ch.lkmc.neutrodyne.desktop.system.UnavailableSystemMediaSession) {
             assertThat(session.reason).isNotEmpty()
         }
-        assertThat(
-            graph.idleSleepInhibitor::class.simpleName,
-        ).isAnyOf(
-            "LinuxIdleSleepInhibitor",
-            "MacIdleSleepInhibitor",
-            "WindowsIdleSleepInhibitor",
-            "PendingIdleSleepInhibitor",
-        )
+        // The inhibitor must be this OS's, not merely one of the four: the cross-OS
+        // isAnyOf above would pass a wrong-OS binding. macOS and Windows fall back to
+        // the pending inhibitor when the native library cannot be opened.
+        when (buildInfo.desktop?.os) {
+            DesktopOs.LINUX -> {
+                assertThat(graph.idleSleepInhibitor::class.simpleName)
+                    .isEqualTo("LinuxIdleSleepInhibitor")
+            }
+
+            DesktopOs.MACOS -> {
+                assertThat(graph.idleSleepInhibitor::class.simpleName)
+                    .isAnyOf("MacIdleSleepInhibitor", "PendingIdleSleepInhibitor")
+            }
+
+            DesktopOs.WINDOWS -> {
+                assertThat(graph.idleSleepInhibitor::class.simpleName)
+                    .isAnyOf("WindowsIdleSleepInhibitor", "PendingIdleSleepInhibitor")
+            }
+
+            null -> {
+                assertThat(graph.idleSleepInhibitor::class.simpleName)
+                    .isEqualTo("PendingIdleSleepInhibitor")
+            }
+        }
         assertThat(graph.osSurfaces).isSameInstanceAs(graph.osSurfaces)
 
         val orders =

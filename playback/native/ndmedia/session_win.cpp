@@ -284,8 +284,25 @@ HRESULT put_thumbnail(ISystemMediaTransportControlsDisplayUpdater *updater, cons
             break;
         Sleep(10);
     }
-    if (SUCCEEDED(result) && status == AsyncStatus::Completed)
+    if (SUCCEEDED(result) && status == AsyncStatus::Completed) {
         result = operation->GetResults(&file);
+    } else if (SUCCEEDED(result)) {
+        // The wait ended without a file: a still-running operation is cancelled,
+        // and CreateFromFile never receives the null IStorageFile a timeout,
+        // Canceled or Error would leave behind.
+        if (status == AsyncStatus::Started)
+            info->Cancel();
+        if (status == AsyncStatus::Canceled) {
+            result = HRESULT_FROM_WIN32(ERROR_CANCELLED);
+        } else if (status == AsyncStatus::Error) {
+            HRESULT error = E_FAIL;
+            if (FAILED(info->get_ErrorCode(&error)))
+                error = E_FAIL;
+            result = error;
+        } else {
+            result = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+        }
+    }
     if (SUCCEEDED(result))
         result = referenceStatics->CreateFromFile(file, &reference);
     if (SUCCEEDED(result))
@@ -315,8 +332,10 @@ HRESULT publish(ISystemMediaTransportControls *controls, ISystemMediaTransportCo
         result = updater->put_Type(MediaPlaybackType_Music);
     if (SUCCEEDED(result))
         // Best effort: an unpackaged thumbnail failure leaves the artwork unset. The
-        // path cache keeps a five-second playing publish from reopening the file.
-        if (wcscmp(artPath, thumbnailArt) != 0 && SUCCEEDED(put_thumbnail(updater, artPath))) {
+        // path cache keeps a five-second playing publish from reopening the file,
+        // success or failure: a failing path is remembered until the path changes.
+        if (wcscmp(artPath, thumbnailArt) != 0) {
+            put_thumbnail(updater, artPath);
             if (artPath[0])
                 memcpy(thumbnailArt, artPath, (wcslen(artPath) + 1) * sizeof(wchar_t));
             else

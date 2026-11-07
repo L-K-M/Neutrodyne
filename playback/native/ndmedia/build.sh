@@ -185,6 +185,15 @@ case "$TARGET" in
             -Fe"$(cygpath -w "$POWER_PROGRAM")" -Fo"$(cygpath -w "$CACHE/power-check.obj")" ||
             die "power test compile failed"
         "$POWER_PROGRAM" || die "power boundary test failed"
+        # The thumbnail failure path runs the real SMTC session: a missing artwork
+        # file must not fault the Windows runtime with a null IStorageFile.
+        THUMBNAIL_PROGRAM="$CACHE/thumbnail-check-$TARGET.exe"
+        cl -nologo -std:c11 -MD -I"$(cygpath -w "$ROOT")" \
+            "$(cygpath -w "$ROOT/tests/thumbnail_test.c")" \
+            "$(cygpath -w "$BUILD_ROOT/ndmedia.lib")" \
+            -Fe"$(cygpath -w "$THUMBNAIL_PROGRAM")" -Fo"$(cygpath -w "$CACHE/thumbnail-check.obj")" ||
+            die "thumbnail test compile failed"
+        "$THUMBNAIL_PROGRAM" || die "thumbnail boundary test failed"
         ;;
 esac
 rm -f "$BUILD_ROOT/ndmedia.lib" "$BUILD_ROOT/ndmedia.exp" "$BUILD_ROOT/ndmedia.obj"
