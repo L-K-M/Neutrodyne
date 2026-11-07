@@ -6,6 +6,9 @@ import androidx.room3.RoomDatabase
 import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.artwork.ArtworkStore
 import ch.lkmc.neutrodyne.core.artwork.PinReason
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogLevel
+import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.maintenance.DbMaintenanceImpl
@@ -15,6 +18,7 @@ import ch.lkmc.neutrodyne.core.database.SyncClockEntity
 import ch.lkmc.neutrodyne.core.database.SyncParkedEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.DbMaintenance
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
@@ -36,6 +40,8 @@ import kotlinx.serialization.json.long
 import okio.FileSystem
 import okio.Path
 import org.junit.Test
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -53,6 +59,15 @@ class DbMaintenanceTest {
     private val settings = FakeSettingsRepository()
     private val credentials = FakeCredentialCommitCoordinator()
     private val artworks = FakeArtworkStore()
+    private val logRecords = mutableListOf<Triple<LogLevel, String, String>>()
+
+    @BeforeTest
+    fun captureLogs() {
+        Log.install(LogSink { level, tag, message -> logRecords += Triple(level, tag, message) })
+    }
+
+    @AfterTest
+    fun releaseLogs() = Log.install()
 
     private fun maintenance(usableSpace: Long? = null): DbMaintenance =
         DbMaintenanceImpl(
@@ -247,6 +262,19 @@ class DbMaintenanceTest {
                 "failed",
                 stats.jsonObject["vacuum"]?.jsonPrimitive?.content,
                 "a vacuum attempt that throws must not read as skipped",
+            )
+        }
+
+    @Test
+    fun aFailedStatsWriteIsLogged() =
+        runTest {
+            settings.failNextSet = SettingsError.WriteFailed
+
+            maintenance().run(clock.now())
+
+            assertTrue(
+                logRecords.any { it.first == LogLevel.WARN },
+                "a discarded settings write must leave a warn line, got: $logRecords",
             )
         }
 
