@@ -15,8 +15,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import java.nio.file.Files
+import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /** `DatabaseCopyExporter`'s guards — what must fail rather than produce a copy. */
 class DatabaseCopyExporterTest {
@@ -87,6 +89,46 @@ class DatabaseCopyExporterTest {
                 // With the database size unreadable, the guard must not treat it as zero:
                 // produce() used to sail through and hand back a copy.
                 assertEquals(Outcome.Failure(DiagnosticsError.FAILED), exporter.produce())
+            } finally {
+                db.close()
+            }
+        }
+
+    /** Counts how often work actually hops onto the injected IO dispatcher. */
+    private class RecordingDispatcher(
+        private val delegate: CoroutineDispatcher,
+    ) : CoroutineDispatcher() {
+        var dispatches = 0
+            private set
+
+        override fun dispatch(
+            context: CoroutineContext,
+            block: Runnable,
+        ) {
+            dispatches++
+            delegate.dispatch(context, block)
+        }
+    }
+
+    @Test
+    fun removeStaleSweepsOnTheIoDispatcher() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val io = RecordingDispatcher(Dispatchers.Default)
+                val exporter =
+                    DatabaseCopyExporter(
+                        db,
+                        FakeFactory(databasePath = "unused.db", usable = null),
+                        driver,
+                        storagePaths,
+                        FileSystem.SYSTEM,
+                        TestClock(),
+                        io,
+                    )
+
+                exporter.removeStale()
+                assertTrue(io.dispatches > 0, "the export-dir sweep must run on io")
             } finally {
                 db.close()
             }
