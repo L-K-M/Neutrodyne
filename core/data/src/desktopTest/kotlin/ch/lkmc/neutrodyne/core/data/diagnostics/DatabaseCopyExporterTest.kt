@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data.diagnostics
 
+import androidx.room3.useWriterConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -16,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
-import androidx.room3.useWriterConnection
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import java.nio.file.Files

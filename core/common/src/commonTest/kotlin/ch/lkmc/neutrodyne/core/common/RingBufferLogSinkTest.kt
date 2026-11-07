@@ -33,6 +33,11 @@ class RingBufferLogSinkTest {
         sink.log(LogLevel.ERROR, "Tag", "a\nb\nc\nd")
 
         assertEquals(3, sink.linesFlow.value.size)
-        assertTrue(sink.linesFlow.value.first().endsWith("b"), "oldest rendered line drops out")
+        assertTrue(
+            sink.linesFlow.value
+                .first()
+                .endsWith("b"),
+            "oldest rendered line drops out",
+        )
     }
 }

@@ -39,7 +39,11 @@ class AndroidJobsContributorTest {
 
     @After
     fun cleanup() {
-        WorkManager.getInstance(application).cancelAllWork().result.get()
+        WorkManager
+            .getInstance(application)
+            .cancelAllWork()
+            .result
+            .get()
     }
 
     @Test
