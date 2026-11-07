@@ -13,21 +13,30 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSection
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSeverity
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_copy_report
+import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_export_confirm
+import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_export_confirm_body
 import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_export_db
 import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_refresh
 import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_section_app
@@ -48,11 +57,12 @@ import ch.lkmc.neutrodyne.feature.settings.resources.diagnostics_verbose_log_sum
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
+import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 
 /**
  * Settings › About › Diagnostics (08): the section cards from `DiagnosticsRepository`'s
  * snapshot, "Copy report" to the clipboard, "Export database copy" through the platform
- * share/save seam and the 24-hour detailed-log switch.
+ * share/save seam behind 09's content confirmation and the 24-hour detailed-log switch.
  */
 @Composable
 internal fun DiagnosticsPage(vm: DiagnosticsViewModel = metroViewModel()) {
@@ -64,6 +74,10 @@ internal fun DiagnosticsPage(vm: DiagnosticsViewModel = metroViewModel()) {
     val actions = LocalPlatformActions.current
     val scope = rememberCoroutineScope()
     val diagnosticsTitle = stringResource(Res.string.diagnostics_title)
+    var confirmExport by rememberSaveable { mutableStateOf(false) }
+    // Set while the desktop save dialog is open: the ViewModel's `exporting` flag only
+    // starts once `exportDatabaseCopy` runs, so the row needs this earlier guard.
+    var saverInFlight by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
@@ -104,35 +118,54 @@ internal fun DiagnosticsPage(vm: DiagnosticsViewModel = metroViewModel()) {
                 icon = NdIcons.Download,
                 title = stringResource(Res.string.diagnostics_export_db),
                 summary = null,
-                enabled = !state.exporting,
-                onClick = {
-                    val share = actions.share
-                    if (share != null) {
-                        // Android: the repository mints the FileProvider URI; the sheet
-                        // hands it out (09 Destinations).
-                        vm.exportDatabaseCopy(null) { uri ->
-                            share.shareFile(
-                                uri,
-                                "application/octet-stream",
-                                uri.substringAfterLast('/'),
-                            )
-                        }
-                    } else {
-                        scope.launch {
-                            val uri =
-                                actions.saver.create(EXPORT_SUGGESTED_NAME, "application/octet-stream")
-                            vm.exportDatabaseCopy(uri) { saved ->
-                                actions.reveal?.reveal(saved)
-                            }
-                        }
-                    }
-                },
+                enabled = !state.exporting && !saverInFlight,
+                onClick = { confirmExport = true },
             )
             val report = state.report ?: return@Column
             for (section in report.sections) {
                 DiagnosticsSectionCard(section)
             }
         }
+    }
+
+    // 09's pre-export statement, both platforms: only an explicit Export runs the
+    // share sheet, the save dialog or the repository call.
+    if (confirmExport) {
+        NdDialog(
+            onDismissRequest = { confirmExport = false },
+            icon = NdIcons.Download,
+            title = stringResource(Res.string.diagnostics_export_db),
+            text = stringResource(Res.string.diagnostics_export_confirm_body),
+            confirm =
+                NdDialogAction(stringResource(Res.string.diagnostics_export_confirm)) {
+                    confirmExport = false
+                    val share = actions.share
+                    if (share != null) {
+                        // Android: the repository mints the FileProvider URI; the sheet
+                        // hands it out (09 Destinations).
+                        vm.exportDatabaseCopy(null) { uri ->
+                            share.shareFile(uri, EXPORT_MIME, uri.substringAfterLast('/'))
+                        }
+                    } else if (!saverInFlight) {
+                        // A repeat confirm cannot stack a second save dialog.
+                        saverInFlight = true
+                        scope.launch {
+                            try {
+                                val uri = actions.saver.create(EXPORT_SUGGESTED_NAME, EXPORT_MIME)
+                                vm.exportDatabaseCopy(uri) { saved ->
+                                    actions.reveal?.reveal(saved)
+                                }
+                            } finally {
+                                saverInFlight = false
+                            }
+                        }
+                    }
+                },
+            dismiss =
+                NdDialogAction(stringResource(UiRes.string.action_cancel)) {
+                    confirmExport = false
+                },
+        )
     }
 }
 
@@ -179,3 +212,5 @@ private fun sectionTitle(id: DiagnosticsSectionId) =
 
 /** The desktop save dialog's suggestion; the exporter stamps the real name itself (02). */
 private const val EXPORT_SUGGESTED_NAME = "neutrodyne-diagnostics.db"
+
+private const val EXPORT_MIME = "application/octet-stream"
