@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
@@ -34,6 +35,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -41,6 +43,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -52,6 +55,7 @@ class FirstLinkMergerTest {
     private val october = 1_790_000_000_000L
     private val remote = NodeId("0000000000000002")
     private val podcastSyncId = "00000000-0000-4000-8000-00000000000a"
+    private val localOnlySyncId = "00000000-0000-4000-8000-00000000000b"
 
     @Test
     fun mergeKeepsLocalPodcastsAndANewerRemoteUnplayedWins() =
@@ -155,6 +159,126 @@ class FirstLinkMergerTest {
                     rows.none { it.hlc ushr 16 > now + 1_000 },
                     "bootstrap writes keep their row timestamps, rows=$rows",
                 )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * "Use the server's library" replaces Up next with the server's set: the pull applies the
+     * server records into `queue_entry`, and the replace step prunes only local-only rows. A
+     * local entry the server also lists keeps its row under the server's order key.
+     */
+    @Test
+    fun useServerAppliesTheServerUpNextAndPrunesLocalOnlyEntries() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedLocalQueue(db)
+                val server =
+                    ScriptedClient(
+                        listOf(
+                            podcastRecord(),
+                            upNextRecord("g:srv2", orderKey = "a2"),
+                            upNextRecord("g:srv1", orderKey = "a1"),
+                            upNextRecord("g:wire", orderKey = "a3", enc = "https://cdn.example.com/alias.mp3"),
+                        ),
+                    )
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = server,
+                        applier = applier(db),
+                        engine = engine(db, server),
+                        clock = TestClock(now),
+                    )
+                val result = merger.merge(FirstLinkChoice.USE_SERVER)
+                assertTrue(result is FirstLinkResult.Completed)
+
+                // The server's ordered queue survives; the local-only entries are gone.
+                // `g:alias` matched its record by enclosure, not by the stored key.
+                assertEquals(listOf("g:srv1", "g:srv2", "g:alias"), queuedIdentityKeys(db))
+                val alias = db.episodeDao().all().first { it.identityKey == "g:alias" }
+                assertEquals("a3", db.queueDao().entryByEpisode(alias.id)?.orderKey)
+                assertNull(db.podcastDao().bySyncId(localOnlySyncId))
+                assertNotNull(db.podcastDao().bySyncId(podcastSyncId))
+                val link = db.syncStateDao().get()
+                assertEquals("c:00000001:1", link?.cursor)
+                assertTrue(link?.enabled == true)
+                assertNotNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * A pull that dies after an applied page must not reach the replace step: the local rows
+     * the server lacks stay exactly as they were. The queue is never cleared before success.
+     */
+    @Test
+    fun useServerDoesNotPruneTheQueueWhenThePullFails() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedLocalQueue(db)
+                val server =
+                    ScriptedClient(
+                        listOf(
+                            podcastRecord(),
+                            upNextRecord("g:srv1", orderKey = "a1"),
+                            upNextRecord("g:srv2", orderKey = "a2"),
+                        ),
+                        firstPageHasMore = true,
+                        failAtPage = 1,
+                    )
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = server,
+                        applier = applier(db),
+                        engine = engine(db, server),
+                        clock = TestClock(now),
+                    )
+                val result = merger.merge(FirstLinkChoice.USE_SERVER)
+                assertTrue(result is FirstLinkResult.Failed)
+
+                // Page one's applied server rows stay; nothing local was pruned.
+                assertEquals(listOf("g:local", "g:srv1", "g:srv2", "g:alias", "g:lone"), queuedIdentityKeys(db))
+                assertNotNull(db.podcastDao().bySyncId(localOnlySyncId))
+                val link = db.syncStateDao().get()
+                assertNull(link?.cursor)
+                assertNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A cancelled pull propagates instead of reporting Failed; the queue is untouched. */
+    @Test
+    fun mergeRethrowsCancellationFromThePull() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedLocalQueue(db)
+                val server =
+                    ScriptedClient(
+                        listOf(podcastRecord()),
+                        failAtPage = 0,
+                        failure = { CancellationException("link cancelled") },
+                    )
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = server,
+                        applier = applier(db),
+                        engine = engine(db, server),
+                        clock = TestClock(now),
+                    )
+                assertFailsWith<CancellationException> { merger.merge(FirstLinkChoice.USE_SERVER) }
+                assertEquals(listOf("g:local", "g:srv1", "g:alias", "g:lone"), queuedIdentityKeys(db))
             } finally {
                 db.close()
             }
@@ -324,6 +448,29 @@ class FirstLinkMergerTest {
                 ),
         )
 
+    private fun upNextRecord(
+        key: String,
+        orderKey: String,
+        enc: String? = null,
+    ): RecordDto =
+        RecordDto(
+            coll = "upnext",
+            id =
+                buildJsonObject {
+                    put("p", podcastSyncId)
+                    put("k", key)
+                },
+            seq = 3,
+            by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            fields =
+                mapOf(
+                    "in" to FieldValue(JsonPrimitive(true), clock(october)),
+                    "ok" to FieldValue(JsonPrimitive(orderKey), clock(october)),
+                ),
+            match = enc?.let { MatchHints(enc = it) },
+            matchClocks = enc?.let { mapOf("enc" to clock(october)) } ?: emptyMap(),
+        )
+
     private fun episodeRecord(vararg fields: Pair<String, FieldValue>): RecordDto =
         RecordDto(
             coll = "episode",
@@ -340,12 +487,68 @@ class FirstLinkMergerTest {
         )
 
     private fun clock(atMs: Long): String = Hlc.of(atMs, 1, remote).toString()
+
+    /**
+     * The shared podcast's `g:srv1`/`g:srv2`/`g:local`/`g:alias` episodes and a local-only
+     * podcast's `g:lone`; `g:srv1` is already queued at a local order key, `g:local`, `g:alias`
+     * and `g:lone` are queued around it. `g:alias`'s enclosure matches the `g:wire` record.
+     */
+    private suspend fun seedLocalQueue(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
+        val shared =
+            db
+                .podcastDao()
+                .insertPodcast(
+                    podcastEntity(
+                        syncId = podcastSyncId,
+                        feedUrl = "https://example.com/feed",
+                        feedKey = "https://example.com/feed",
+                        title = "Example",
+                    ),
+                )
+        val localOnly =
+            db
+                .podcastDao()
+                .insertPodcast(
+                    podcastEntity(
+                        syncId = localOnlySyncId,
+                        feedUrl = "https://example.com/lone",
+                        feedKey = "https://example.com/lone",
+                        title = "Local only",
+                    ),
+                )
+        val episodes =
+            db
+                .ingestDao()
+                .insertEpisodes(
+                    listOf(
+                        episodeEntity(podcastId = shared, identityKey = "g:srv1"),
+                        episodeEntity(podcastId = shared, identityKey = "g:srv2"),
+                        episodeEntity(podcastId = shared, identityKey = "g:local"),
+                        episodeEntity(podcastId = localOnly, identityKey = "g:lone"),
+                        episodeEntity(podcastId = shared, identityKey = "g:alias") {
+                            copy(enclosureUrl = "https://cdn.example.com/alias.mp3")
+                        },
+                    ),
+                )
+        db.queueDao().insert(queueEntryEntity(episodes[2], orderKey = "a0"))
+        db.queueDao().insert(queueEntryEntity(episodes[0], orderKey = "a5"))
+        db.queueDao().insert(queueEntryEntity(episodes[4], orderKey = "a8"))
+        db.queueDao().insert(queueEntryEntity(episodes[3], orderKey = "a9"))
+    }
+
+    private suspend fun queuedIdentityKeys(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase): List<String> =
+        db.queueDao().entries().mapNotNull { db.episodeDao().byId(it.episodeId)?.identityKey }
 }
 
 /** A [SyncClient] that serves a fixed page, for the first-link tests. */
 private class ScriptedClient(
     private val records: List<RecordDto>,
+    private val firstPageHasMore: Boolean = false,
+    private val failAtPage: Int? = null,
+    private val failure: () -> Throwable = { java.io.IOException("sync.example unreachable") },
 ) : SyncClient {
+    private var pages = 0
+
     override suspend fun discover(baseUrl: String): DiscoveryDocument = unsupported()
 
     override suspend fun login(
@@ -412,7 +615,16 @@ private class ScriptedClient(
     override suspend fun changes(
         since: String?,
         limit: Int,
-    ): ChangesPage = ChangesPage(records = records, cursor = "c:00000001:1", hasMore = false, serverTime = "")
+    ): ChangesPage {
+        val page = pages++
+        if (page == failAtPage) throw failure()
+        return ChangesPage(
+            records = records,
+            cursor = "c:00000001:1",
+            hasMore = firstPageHasMore && page == 0,
+            serverTime = "",
+        )
+    }
 
     override suspend fun reset(
         confirm: String,
