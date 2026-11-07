@@ -37,10 +37,11 @@ interface DiagnosticsRepository {
 
     /**
      * Runs 02's diagnostics export (`VACUUM INTO` + `DiagExportScrub` + `VACUUM`). On
-     * Android [destination] is ignored: the scrubbed copy is produced in the shared
-     * `cache/export/` and the returned string is its FileProvider `content:` URI for the
-     * share sheet. On the desktop [destination] is the `file:` URI the save dialog
-     * returned — the copy is written there and the string is its path; `null` answers
+     * Android the scrubbed copy is produced in the shared `cache/export/` and the
+     * returned string is its FileProvider `content:` URI for the share sheet — there
+     * [destination] is ignored and may be `null`. On the desktop [destination] is the
+     * `file:` URI the save dialog returned — the copy is written there and the string
+     * is its path — and **only on the desktop** does `null` answer
      * [DiagnosticsError.CANCELLED] without producing anything.
      *
      * Implementation note 2026-11-06: 09's sketch has no `destination` parameter; the
