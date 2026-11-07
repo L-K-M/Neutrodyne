@@ -31,4 +31,8 @@
         <item quantity="other">Mark all episodes in %1$d podcasts as played?</item>
     </plurals>
     <string name="group_actions">Group actions</string>
+    <string name="grid_size">Grid size</string>
+    <string name="grid_small">Small</string>
+    <string name="grid_medium">Medium</string>
+    <string name="grid_large">Large</string>
 </resources>

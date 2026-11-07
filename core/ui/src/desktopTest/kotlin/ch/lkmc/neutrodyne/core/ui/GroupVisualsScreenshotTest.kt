@@ -2,11 +2,12 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -53,12 +54,16 @@ class GroupVisualsScreenshotTest {
                 AppearancePrefs(dynamicColor = false),
                 SystemUiState(dark = dark, contrast = 0.0, reducedMotion = true),
             ) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
-                        .padding(16.dp),
-                ) { content() }
+                Surface(
+                    Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                    contentColor = MaterialTheme.colorScheme.onBackground,
+                ) {
+                    Box(Modifier.padding(16.dp)) {
+                        assertEquals(MaterialTheme.colorScheme.onBackground, LocalContentColor.current)
+                        content()
+                    }
+                }
             }
         }
         waitForIdle()

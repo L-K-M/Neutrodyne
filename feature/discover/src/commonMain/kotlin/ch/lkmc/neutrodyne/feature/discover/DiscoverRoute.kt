@@ -77,6 +77,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.discovery_top
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
 import ch.lkmc.neutrodyne.core.ui.root.LocalDiscoverSearchFocus
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import org.jetbrains.compose.resources.stringResource
 
@@ -153,7 +154,7 @@ internal fun DiscoverScreen(
                         } else {
                             false
                         }
-                    },
+                    }.ndTextFieldFocus(),
         )
         ProviderDisclosure(state.providers, Modifier.padding(horizontal = 16.dp), onProvidersVisible)
         FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -116,6 +117,8 @@ public class LibraryViewModel(
                 state.copy(groupCounts = counts.toPersistentMap())
             }.combine(settings.observe(AppearanceSettingKeys.LIBRARY_SEGMENT)) { state, segment ->
                 state.copy(segment = segment)
+            }.combine(settings.observe(AppearanceSettingKeys.LIBRARY_DENSITY)) { state, density ->
+                state.copy(density = density)
             }
 
     public val uiState: StateFlow<LibraryUiState> =
@@ -173,6 +176,10 @@ public class LibraryViewModel(
         if (ids.isEmpty()) return
 
         write { unsubscribeUseCase(ids.distinct()) }
+    }
+
+    public fun setDensity(density: LibraryDensity) {
+        writeSetting { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, density) }
     }
 
     public fun setSort(sort: LibrarySort) {

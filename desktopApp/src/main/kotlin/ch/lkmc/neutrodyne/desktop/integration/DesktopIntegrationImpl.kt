@@ -30,7 +30,9 @@ import kotlinx.coroutines.flow.StateFlow
  * entry is the truth; inventing a state the OS did not report would lie about it).
  *
  * The links half (MD2's links slice) delegates to [DesktopLinkRegistration] — the same
- * OS-truth rule: `linkHandlers` reads what the OS says, the actions return success.
+ * OS-truth rule: `linkHandlers` reads what the OS says, the actions return success. A
+ * `handled()` that throws (registry/JNA or filesystem read) is logged and treated like a
+ * failed `status()`: unknown at construction, last-known afterwards.
  */
 @SingleIn(AppScope::class)
 class DesktopIntegrationImpl
@@ -44,7 +46,7 @@ class DesktopIntegrationImpl
         override val loginItem: StateFlow<LoginItemState> = state
 
         /** Seeded from the OS and re-read after every link action (the OS entry is the truth). */
-        private val linkState = MutableStateFlow<Boolean?>(if (links.applicable) links.handled() else null)
+        private val linkState = MutableStateFlow(readHandled(initial = true))
         override val linkHandlers: StateFlow<Boolean?> = linkState
 
         override val canAddToApplicationsMenu: Boolean
@@ -73,8 +75,23 @@ class DesktopIntegrationImpl
         /** Runs the action, then reports the OS state either way — like the login toggle. */
         private fun applyLinks(action: () -> Boolean): Boolean {
             val succeeded = action()
-            if (links.applicable) linkState.value = links.handled()
+            linkState.value = readHandled()
             return succeeded
+        }
+
+        /** The OS link truth, or the documented fallback when the OS cannot answer the read. */
+        private fun readHandled(initial: Boolean = false): Boolean? {
+            if (!links.applicable) return null
+            return runCatching { links.handled() }
+                .onFailure { failure ->
+                    Log.w(
+                        TAG,
+                        failure,
+                    ) { "link handlers read failed${if (initial) " at construction" else ""}" }
+                }.fold(
+                    onSuccess = { it },
+                    onFailure = { if (initial) null else linkState.value },
+                )
         }
 
         /** The OS entry, or the documented fallback when the OS cannot answer the read. */

@@ -167,11 +167,16 @@ jobs:
           java -jar sync/server/build/libs/neutrodyne-server-*.jar serve &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=false
           for _ in $(seq 1 60); do
-            curl -fsS http://127.0.0.1:8787/readyz && break
+            if curl --max-time 5 -fsS http://127.0.0.1:8787/readyz >/dev/null; then ready=true; break; fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8787/readyz
+          if [[ "$ready" != true ]]; then
+            echo "::error::server did not answer /readyz within 60s"
+            exit 1
+          fi
+          curl --max-time 5 -fsS http://127.0.0.1:8787/readyz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-server

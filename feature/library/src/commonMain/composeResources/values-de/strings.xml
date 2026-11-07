@@ -30,4 +30,8 @@
         <item quantity="other">Alle Folgen in %1$d Podcasts als gespielt markieren?</item>
     </plurals>
     <string name="group_actions">Gruppenaktionen</string>
+    <string name="grid_size">Covergrösse</string>
+    <string name="grid_small">Klein</string>
+    <string name="grid_medium">Mittel</string>
+    <string name="grid_large">Gross</string>
 </resources>

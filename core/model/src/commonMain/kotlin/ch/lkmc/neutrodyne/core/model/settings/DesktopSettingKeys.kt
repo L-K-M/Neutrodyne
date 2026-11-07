@@ -44,6 +44,13 @@ object DesktopSettingKeys {
     val TRAY_HINT_SHOWN: SettingKey.Bool =
         SettingKey.Bool(name = "desktop.tray_hint_shown", default = false, file = SettingsFile.DEVICE)
 
+    /**
+     * The in-app volume 0..1 (11 Menus: Volume up/down; Ctrl/Cmd+↑/↓). Device-local like every
+     * `desktop.*` key; the Android app keeps the system volume.
+     */
+    val VOLUME: SettingKey.Float32 =
+        SettingKey.Float32(name = "desktop.volume", default = 1.0f, file = SettingsFile.DEVICE)
+
     val ALL: List<SettingKey<*>> =
         listOf(
             LAST_IMPORT_CLEANUP_AT,
@@ -51,5 +58,6 @@ object DesktopSettingKeys {
             CLOSE_BEHAVIOUR,
             START_AT_LOGIN,
             TRAY_HINT_SHOWN,
+            VOLUME,
         )
 }

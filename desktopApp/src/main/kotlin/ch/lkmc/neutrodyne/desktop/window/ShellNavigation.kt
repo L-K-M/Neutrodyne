@@ -2,12 +2,58 @@
 package ch.lkmc.neutrodyne.desktop.window
 
 import androidx.navigation3.runtime.NavKey
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import java.awt.Frame
 import java.awt.Window
 import javax.swing.SwingUtilities
+
+/** The Playback menu's transport and volume actions (11 Menus), attached by the window. */
+internal interface PlaybackMenuActions {
+    fun togglePlayPause()
+
+    fun skipBack()
+
+    fun skipForward()
+
+    fun previousChapter()
+
+    fun nextChapter()
+
+    fun previousEpisode()
+
+    fun nextEpisode()
+
+    fun volumeUp()
+
+    fun volumeDown()
+
+    companion object {
+        /** The menu's state before the window attaches the controller-backed actions. */
+        val Inert: PlaybackMenuActions =
+            object : PlaybackMenuActions {
+                override fun togglePlayPause() = Unit
+
+                override fun skipBack() = Unit
+
+                override fun skipForward() = Unit
+
+                override fun previousChapter() = Unit
+
+                override fun nextChapter() = Unit
+
+                override fun previousEpisode() = Unit
+
+                override fun nextEpisode() = Unit
+
+                override fun volumeUp() = Unit
+
+                override fun volumeDown() = Unit
+            }
+    }
+}
 
 /**
  * Hands shell-driven navigation (the macOS application menu) to the root's `AppNavigator`
@@ -23,10 +69,60 @@ internal class DesktopMenuActions {
     @Volatile
     private var navigator: AppNavigator? = null
 
+    @Volatile
+    private var backAction: () -> Boolean = { false }
+
+    @Volatile
+    private var findAction: () -> Boolean = { false }
+
+    // Window-level actions, attached by `NeutrodyneWindow` before the menu composes.
+    @Volatile
+    var refresh: () -> Unit = {}
+
+    @Volatile
+    var closeWindow: () -> Unit = {}
+
+    @Volatile
+    var quit: () -> Unit = {}
+
+    @Volatile
+    var playback: PlaybackMenuActions = PlaybackMenuActions.Inert
+
+    @Volatile
+    var setSpeed: (Float) -> Unit = {}
+
+    @Volatile
+    var openSpeedSheet: () -> Unit = {}
+
+    @Volatile
+    var setSleepTimer: (SleepTimerMode) -> Unit = {}
+
+    @Volatile
+    var setSkipSilence: (Boolean) -> Unit = {}
+
+    @Volatile
+    var reportProblem: () -> Unit = {}
+
     /** Called from the player slot's composition inside the root (`navigation::push`). */
     fun attachPush(navigate: (NavKey) -> Unit) {
         push = navigate
     }
+
+    /** The root's back action (Esc; the Go menu's Back), attached from the player slot. */
+    fun attachBack(back: () -> Boolean) {
+        backAction = back
+    }
+
+    /** The root's Find action (Ctrl/Cmd+F; the Edit menu's Find). */
+    fun attachFind(find: () -> Boolean) {
+        findAction = find
+    }
+
+    /** Runs the root's back action; false when nothing handled it. */
+    fun back(): Boolean = backAction()
+
+    /** Runs the root's Find action; false when no destination has a search field. */
+    fun find(): Boolean = findAction()
 
     /** The full navigator — also attached from the player slot's composition. */
     fun attachNavigator(navigator: AppNavigator) {

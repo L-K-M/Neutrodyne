@@ -20,6 +20,7 @@ kotlin {
             implementation(project(":core:datastore"))
             implementation(project(":core:network"))
             implementation(project(":feeds"))
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

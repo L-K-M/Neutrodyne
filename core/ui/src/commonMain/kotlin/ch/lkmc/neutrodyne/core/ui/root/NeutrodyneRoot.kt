@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -28,11 +29,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,16 +78,24 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.HingeOrientation
+import ch.lkmc.neutrodyne.core.model.HingeState
+import ch.lkmc.neutrodyne.core.model.WindowHinge
+import ch.lkmc.neutrodyne.core.model.WindowPosture
+import ch.lkmc.neutrodyne.core.model.WindowRectDp
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
+import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
@@ -102,6 +113,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
@@ -301,10 +313,32 @@ private fun ReadyRoot(
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
             navChromeDp = navChromeDp,
-            // Desktop MD1 activates the shared panel; Android's adaptive player remains M10.
-            hasNowPlaying = state.hasNowPlaying && platform == BuildInfo.Platform.DESKTOP,
+            hasNowPlaying = state.hasNowPlaying,
             panelHidden = state.playerPanelHidden,
         )
+    val posture =
+        remember(windowInfo.windowPosture, density) {
+            WindowPosture(
+                windowInfo.windowPosture.hingeList
+                    .map { hinge ->
+                        val bounds = hinge.bounds
+                        WindowHinge(
+                            WindowRectDp(
+                                bounds.left / density.density,
+                                bounds.top / density.density,
+                                bounds.right / density.density,
+                                bounds.bottom / density.density,
+                            ),
+                            if (hinge.isVertical) HingeOrientation.VERTICAL else HingeOrientation.HORIZONTAL,
+                            if (hinge.isFlat) HingeState.FLAT else HingeState.HALF_OPENED,
+                            hinge.isSeparating,
+                        )
+                    }.toImmutableList(),
+            )
+        }
+    // Moving the same composition preserves its collectors, tabs and sheet state on resize.
+    val currentPlayer by rememberUpdatedState(slots.player)
+    val player = remember { movableContentOf<PlayerSlotState> { currentPlayer(it) } }
     // The pane directive keeps the library's spacing/hinge values; only the partition count is ours.
     val directive =
         remember(windowInfo, layout.partitions) {
@@ -348,14 +382,35 @@ private fun ReadyRoot(
         if (eventDispatcher != null) eventDispatcher.addInput(backInput)
         onDispose { if (eventDispatcher != null) eventDispatcher.removeInput(backInput) }
     }
+    val desktopBack: () -> Boolean = {
+        if (eventDispatcher != null && backInput.hasEnabledHandlers) {
+            backInput.triggerBack()
+        } else {
+            navigation.pop()
+        }
+    }
 
     val importContentFocus = remember { FocusRequester() }
     val discoverSearchFocus = remember { DiscoverSearchFocus() }
+    // The root's global shortcuts stand down while a tracked text field is focused (08 Keyboard
+    // and mouse); text fields report through `Modifier.ndTextFieldFocus()`. The shell learns
+    // about every transition so it can clear the window menu's accelerators, which AWT
+    // processes before Compose's key input.
+    val textFieldFocus =
+        remember(actions.onTextFieldFocusChange) {
+            TextFieldFocusState(actions.onTextFieldFocusChange)
+        }
+    // 11's Find: the current destination's search field. Only Discover has one today (the
+    // Library's group filter is chips, not a text field), so the action is Discover-only.
+    val find: () -> Boolean = {
+        navigation.selectedTab == DiscoverKey && discoverSearchFocus.request()
+    }
     val miniInset = if (!layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
         LocalDiscoverSearchFocus provides discoverSearchFocus,
         LocalPaneLayout provides layout,
         LocalMiniPlayerInset provides miniInset,
+        LocalTextFieldFocusState provides textFieldFocus,
     ) {
         Box(
             modifier =
@@ -364,11 +419,18 @@ private fun ReadyRoot(
                     .testTagsAsResourceId()
                     .onGloballyPositioned { viewportBottomPx = it.boundsInRoot().bottom }
                     .onKeyEvent { event ->
-                        if (platform == BuildInfo.Platform.DESKTOP && navigation.selectedTab == DiscoverKey &&
+                        // A focused text field owns the keyboard: the root's shortcuts stand
+                        // down. The shell also clears the window menu's accelerators for this
+                        // duration, because AWT processes them before Compose's key input.
+                        if (textFieldFocus.active && event.type == KeyEventType.KeyDown &&
+                            isRootShortcut(event)
+                        ) {
+                            true
+                        } else if (platform == BuildInfo.Platform.DESKTOP &&
                             event.type == KeyEventType.KeyDown && event.key == Key.F &&
                             (event.isCtrlPressed || event.isMetaPressed) &&
                             !event.isAltPressed && !event.isShiftPressed &&
-                            discoverSearchFocus.request()
+                            find()
                         ) {
                             true
                         } else {
@@ -376,14 +438,9 @@ private fun ReadyRoot(
                                 event = event,
                                 platform = platform,
                                 navigation = navigation,
-                                desktopBack = {
-                                    if (eventDispatcher != null && backInput.hasEnabledHandlers) {
-                                        backInput.triggerBack()
-                                    } else {
-                                        navigation.pop()
-                                    }
-                                },
+                                desktopBack = desktopBack,
                                 dispatch = actions.playbackKey,
+                                refresh = actions.refresh,
                             )
                         }
                     },
@@ -439,13 +496,22 @@ private fun ReadyRoot(
                                 )
                             }
                             if (layout.playerPanel) {
-                                slots.player(
-                                    PlayerSlotState(
-                                        layout,
-                                        navigateFromPlayer,
-                                        hidePanel = actions.hidePlayerPanel,
-                                    ),
-                                )
+                                Box(Modifier.width(layout.playerPanelWidthDp.dp)) {
+                                    player(
+                                        PlayerSlotState(
+                                            layout,
+                                            navigateFromPlayer,
+                                            hidePanel = actions.hidePlayerPanel,
+                                            windowWidthDp = windowWidthDp,
+                                            posture = posture,
+                                            expandRequest = expandRequest,
+                                            collapseRequest = collapseRequest + playerNavigationRequests,
+                                            onExpandedSettled = { expandedSettled = it },
+                                            back = desktopBack,
+                                            find = find,
+                                        ),
+                                    )
+                                }
                             }
                         }
                     }
@@ -454,9 +520,11 @@ private fun ReadyRoot(
 
             if (!layout.playerPanel) {
                 Box(Modifier.fillMaxSize()) {
-                    slots.player(
+                    player(
                         PlayerSlotState(
                             layout = layout,
+                            windowWidthDp = windowWidthDp,
+                            posture = posture,
                             navigate = navigateFromPlayer,
                             contentBottomPx = contentBottomPx,
                             expandRequest = expandRequest,
@@ -467,6 +535,8 @@ private fun ReadyRoot(
                                         windowWidthDp >= PLAYER_PANEL_MIN_WINDOW_DP
                                 },
                             onExpandedSettled = { expandedSettled = it },
+                            back = desktopBack,
+                            find = find,
                         ),
                     )
                 }
@@ -571,6 +641,7 @@ private fun dispatchRootKey(
     navigation: NavigationState,
     desktopBack: () -> Boolean,
     dispatch: (PlaybackKey) -> Boolean,
+    refresh: () -> Unit,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown || event.isAltPressed) return false
     val ctrl = event.isCtrlPressed || event.isMetaPressed
@@ -578,6 +649,67 @@ private fun dispatchRootKey(
     val desktop = platform == BuildInfo.Platform.DESKTOP
 
     if (event.key == Key.Escape && desktop && !ctrl && !shift) return desktopBack()
+
+    // 11's menu accelerators. In the window the menu item's own accelerator fires first (AWT
+    // processes it before Compose's key input), so these chords are the fallback for menu-less
+    // compositions — the AC1 `runComposeUiTest` checklist — and the path a focused text field
+    // reaches once the shell has cleared the accelerators.
+    if (desktop && ctrl && !shift) {
+        when (event.key) {
+            Key.N -> {
+                navigation.push(AddPodcastKey(null))
+                return true
+            }
+
+            Key.O -> {
+                navigation.push(ImportFileKey)
+                return true
+            }
+
+            Key.R -> {
+                refresh()
+                return true
+            }
+
+            Key.Comma -> {
+                navigation.push(SettingsHomeKey)
+                return true
+            }
+
+            Key.One -> {
+                navigation.selectTab(FeedsKey)
+                return true
+            }
+
+            Key.Two -> {
+                navigation.selectTab(LibraryKey)
+                return true
+            }
+
+            Key.Three -> {
+                navigation.selectTab(UpNextKey)
+                return true
+            }
+
+            Key.Four -> {
+                navigation.selectTab(DownloadsKey)
+                return true
+            }
+
+            Key.Five -> {
+                navigation.selectTab(DiscoverKey)
+                return true
+            }
+
+            else -> {
+                Unit
+            }
+        }
+    }
+    if (desktop && event.key == Key.F5) {
+        refresh()
+        return true
+    }
 
     val key: PlaybackKey =
         when {
@@ -638,6 +770,27 @@ private fun dispatchRootKey(
             }
         }
     return dispatch(key)
+}
+
+/**
+ * Whether [event] is one of the root's shortcuts, so a focused text field can consume it (08
+ * Keyboard and mouse). Mirrors [dispatchRootKey]'s chord set; the window's Ctrl/Cmd+W and Q stay
+ * out because the window's close/quit handler owns them.
+ */
+private fun isRootShortcut(event: KeyEvent): Boolean {
+    val ctrl = event.isCtrlPressed || event.isMetaPressed
+    val shift = event.isShiftPressed
+    return when (event.key) {
+        Key.Spacebar -> !ctrl && !shift
+        Key.DirectionLeft, Key.DirectionRight -> true
+        Key.DirectionUp, Key.DirectionDown -> ctrl
+        Key.Escape -> !ctrl && !shift
+        Key.Tab -> ctrl
+        Key.F, Key.N, Key.O, Key.R, Key.Comma -> ctrl
+        Key.F5 -> true
+        Key.One, Key.Two, Key.Three, Key.Four, Key.Five -> ctrl
+        else -> false
+    }
 }
 
 /**

@@ -120,6 +120,61 @@ class RecoveryJobsTest {
             assertTrue(Files.exists(protected))
         }
 
+    @Test fun aFailedAccountExportStillExportsTheOthersAndFailsTheRun() =
+        authServices { f ->
+            val bad = f.account("bad")
+            val good = f.account("good")
+            val writer =
+                object : AccountBackupWriter {
+                    private val delegate = AccountArchiveWriter(f.inputs)
+                    val attempted = mutableListOf<Long>()
+
+                    override suspend fun export(
+                        snapshot: AccountSnapshot,
+                        destination: java.nio.file.Path,
+                    ): java.nio.file.Path {
+                        attempted += snapshot.accountId
+                        if (snapshot.accountId == bad.id) error("poisoned account export")
+                        return delegate.export(snapshot, destination)
+                    }
+                }
+            val config = f.config.copy(backupsKeep = 1)
+            val job =
+                BackupJob(
+                    f.store,
+                    config,
+                    AccountBackups(f.store, config, f.inputs, writer),
+                    f.services.metrics,
+                    f.inputs,
+                )
+            // Server-side retention and the pre-migration cleanup run only on a clean night.
+            val stale = config.dataDir.resolve("backups/neutrodyne-server-2000-01-01.db")
+            Files.createDirectories(stale.parent)
+            Files.writeString(stale, "stale")
+            val migration =
+                config.dataDir.resolve("backups/neutrodyne-server-pre-migration-v1-old.db").also {
+                    Files.writeString(it, "old")
+                    Files.setLastModifiedTime(
+                        it,
+                        java.nio.file.attribute.FileTime
+                            .fromMillis(f.now - 8 * DAY_MS),
+                    )
+                }
+
+            assertFailsWith<Exception> { job.run() }
+
+            assertEquals(listOf(bad.id, good.id), writer.attempted)
+            Files.list(config.dataDir.resolve("account-backups/${good.id}")).use { assertEquals(1, it.count()) }
+            assertEquals(
+                "failure",
+                f.services.metrics
+                    .snapshot()
+                    .backupResult,
+            )
+            assertTrue(Files.exists(stale))
+            assertTrue(Files.exists(migration))
+        }
+
     @Test fun gcRequiresAppliedCursorAndExpiresTheBoundaryOnly() =
         authServices { f ->
             val account = f.account()

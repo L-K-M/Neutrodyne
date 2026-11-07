@@ -61,6 +61,18 @@ class DesktopIntegrationLinksTest {
             assertThat(integration.linkHandlers.value).isTrue()
         }
 
+    @Test
+    fun aThrowingReadLeavesTheStateUnknownInsteadOfFailingConstruction() =
+        runTest {
+            val links = ThrowingLinks()
+            val integration = DesktopIntegrationImpl(UnsupportedRegistrar, links, FakeSettingsRepository())
+
+            assertThat(integration.linkHandlers.value).isNull()
+            assertThat(integration.registerLinkHandlers()).isTrue()
+            assertThat(links.registerCalls).isEqualTo(1)
+            assertThat(integration.linkHandlers.value).isNull()
+        }
+
     private object UnsupportedRegistrar : LoginItemRegistrar {
         override fun status(): LoginItemState = LoginItemState.UNSUPPORTED
 
@@ -109,5 +121,22 @@ class DesktopIntegrationLinksTest {
             if (succeed) nextHandled = true
             return succeed
         }
+    }
+
+    private class ThrowingLinks : DesktopLinkRegistration {
+        override val applicable: Boolean = true
+        override val canAddToApplicationsMenu: Boolean = false
+
+        var registerCalls = 0
+            private set
+
+        override fun handled(): Boolean = throw IllegalStateException("registry read failed")
+
+        override fun register(): Boolean {
+            registerCalls++
+            return true
+        }
+
+        override fun addToMenu(): Boolean = true
     }
 }

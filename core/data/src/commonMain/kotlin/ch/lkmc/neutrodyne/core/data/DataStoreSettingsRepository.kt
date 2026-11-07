@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
@@ -11,6 +12,7 @@ import ch.lkmc.neutrodyne.core.datastore.SettingStore
 import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
@@ -34,6 +36,8 @@ import kotlinx.coroutines.flow.map
 internal class DataStoreSettingsRepository(
     private val settingsStore: SettingsStore,
     private val deviceSettingsStore: DeviceSettingsStore,
+    private val syncPort: SettingsSyncPort,
+    private val clock: Clock,
 ) : SettingsRepository {
     override fun <T : Any> observe(key: SettingKey<T>): Flow<T> = store(key).observe(key)
 
@@ -49,10 +53,17 @@ internal class DataStoreSettingsRepository(
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
         }
 
+        // 10 Settings capture: the durable Room intent lands before DataStore, so a crash
+        // between the two recovers the write and a recorder failure leaves DataStore unchanged.
+        syncPort.recordLocal(key, value)
+
         // Only non-cancellation failures land here (IOException from DataStore, 01: logged at WARN).
         return suspendRunCatching { store(key).set(key, value) }
             .fold(
-                onSuccess = { Outcome.Success(Unit) },
+                onSuccess = {
+                    syncPort.emitLocal(key, value, clock.now())
+                    Outcome.Success(Unit)
+                },
                 onFailure = { failure ->
                     Log.w(LOG_TAG, failure) { "write of '${key.name}' failed" }
                     Outcome.Failure(SettingsError.WriteFailed)
@@ -61,7 +72,9 @@ internal class DataStoreSettingsRepository(
     }
 
     override suspend fun reset(key: SettingKey<*>) {
+        syncPort.recordLocal(key, null)
         store(key).reset(key)
+        syncPort.emitLocal(key, null, clock.now())
     }
 
     override fun observePortableSnapshot(): Flow<Map<String, Any>> {

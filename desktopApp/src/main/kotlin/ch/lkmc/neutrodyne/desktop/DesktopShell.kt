@@ -339,6 +339,9 @@ internal object DesktopShell {
                 updateChecker = graph.appUpdateChecker,
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,
+                refreshController = graph.refreshController,
+                desktopPlaybackController = graph.desktopPlaybackController,
+                repoUrl = buildInfo.repoUrl,
                 onQuitRequest = ::exitApplication,
                 onWindowFocusGain = newEpisodeSeenClear,
             )
