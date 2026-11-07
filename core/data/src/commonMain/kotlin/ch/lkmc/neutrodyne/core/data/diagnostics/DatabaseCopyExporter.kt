@@ -59,9 +59,12 @@ internal class DatabaseCopyExporter
          */
         suspend fun produce(): Outcome<Path, DiagnosticsError> =
             withContext(io) {
+                // The free-space guard needs the real database size; treating an unreadable
+                // size as zero would skip the guard and hand out a copy anyway.
                 val dbBytes =
                     suspendRunCatching { fileSystem.metadata(factory.databasePath.toPath()).size }
-                        .getOrNull() ?: 0L
+                        .getOrNull()
+                        ?: return@withContext Outcome.Failure(DiagnosticsError.FAILED)
                 val usable = factory.usableSpaceBytes()
                 if (usable != null && usable < dbBytes * 2 + MIN_FREE_BYTES) {
                     return@withContext Outcome.Failure(DiagnosticsError.NOT_ENOUGH_SPACE)
