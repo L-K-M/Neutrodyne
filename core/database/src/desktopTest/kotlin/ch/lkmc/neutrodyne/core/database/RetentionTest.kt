@@ -39,7 +39,7 @@ class RetentionTest {
     private suspend fun NeutrodyneDatabase.candidates(): List<Long> =
         maintenanceDao().retentionBatch(absentBefore, playedSince, BATCH_LIMIT)
 
-    /** The production delete chain of `DbMaintenance` step 1, minus its loop and deadline. */
+    /** The production delete chain of `DbMaintenance` step 1, minus its deadline. */
     private suspend fun NeutrodyneDatabase.retentionSweep(): Int =
         withWriteTransaction {
             syncStateDao().withApplying {
@@ -52,7 +52,10 @@ class RetentionTest {
                     syncClockDao().deleteRids("upnext", rids)
                     maintenanceDao().deleteEpisodePersons(ids)
                     maintenanceDao().deleteEpisodeFunding(ids)
-                    deleted += maintenanceDao().deleteEpisodes(ids)
+                    // A batch that selects rows but deletes none would spin forever.
+                    val removed = maintenanceDao().deleteEpisodes(ids)
+                    check(removed > 0) { "retention selected ${ids.size} rows but deleted none" }
+                    deleted += removed
                 }
                 deleted
             }
@@ -345,17 +348,16 @@ class RetentionTest {
                 assertEquals(1, personCount(db, OwnerType.PODCAST) + personCount(db, OwnerType.EPISODE))
 
                 // Step 3a: parked rows older than 180 days go; younger stay.
-                val stale =
-                    db
-                        .syncParkedDao()
-                        .park(
-                            SyncParkedEntity(
-                                podcastSyncId = "s",
-                                identityKey = "k",
-                                record = "{}",
-                                receivedAt = now - 181L * 86_400_000,
-                            ),
-                        )
+                db
+                    .syncParkedDao()
+                    .park(
+                        SyncParkedEntity(
+                            podcastSyncId = "s",
+                            identityKey = "k",
+                            record = "{}",
+                            receivedAt = now - 181L * 86_400_000,
+                        ),
+                    )
                 db
                     .syncParkedDao()
                     .park(
