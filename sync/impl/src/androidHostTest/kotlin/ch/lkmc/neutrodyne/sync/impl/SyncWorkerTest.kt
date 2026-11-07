@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
+import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.CancellationException
@@ -56,32 +57,36 @@ class SyncWorkerTest {
         try {
             // The real round fails at its first suspending address read, before any HTTP call.
             val address =
-                object : SyncServerAddress {
+                object : SyncServerAddress by FakeSyncServerAddress() {
                     override suspend fun serverUrl(): String = throw failure
-
-                    override suspend fun username(): String? = null
-
-                    override suspend fun shareFeedPasswords(): Boolean = false
-
-                    override suspend fun syncPlaybackSettings(): Boolean = true
                 }
             val client =
                 Proxy.newProxyInstance(SyncClient::class.java.classLoader, arrayOf(SyncClient::class.java)) { _, _, _ ->
                     error("The cancelled round must not reach the HTTP client")
                 } as SyncClient
+            val clock = TestClock()
+            val secrets = FakeSecretStore()
+            val settings = FakeSettingsSyncPort()
             val engine =
                 SyncEngine(
-                    db,
-                    client,
-                    TestClock(),
-                    FakeSecretStore(),
-                    FakeSettingsSyncPort(),
-                    NoPlaybackSync,
-                    SyncIngestHook.None,
-                    FakeGroupChannelSync(),
+                    db = db,
+                    client = client,
+                    applier =
+                        SyncApplier(
+                            db = db,
+                            clock = clock,
+                            secrets = secrets,
+                            settings = settings,
+                            playback = NoPlaybackSync,
+                            syncIngestHook = SyncIngestHook.None,
+                            channelSync = FakeGroupChannelSync(),
+                            sharePasswords = { false },
+                        ),
+                    clock = clock,
+                    secrets = secrets,
                     sharePasswords = { false },
-                    address,
-                    SyncTokenStore(FakeSecretStore()),
+                    address = address,
+                    tokens = SyncTokenStore(secrets),
                 )
             val worker =
                 TestListenableWorkerBuilder<SyncWorker>(app)
