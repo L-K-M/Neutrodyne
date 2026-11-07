@@ -21,10 +21,22 @@ trap cleanup EXIT
 # container's network namespace because Docker's embedded resolver would hide
 # DNS queries from a host-side capture.
 start_capture() {
-    # $1 names the phase; uses the global $server_pid and $server_ip. It runs
-    # right after each server start so startup traffic is covered too: the JVM
-    # cannot dial out before the app runs, and the update check is disabled
-    # here (its earliest attempt is the first 60 s tick anyway).
+    # $1 names the phase; uses the global $server. The runtime publishes the
+    # init pid and address asynchronously after up -d returns, so wait for
+    # both before nsenter can attach. The capture runs right after each server
+    # start so startup traffic is covered too: the JVM cannot dial out before
+    # the app runs, and the update check is disabled here (its earliest
+    # attempt is the first 60 s tick anyway).
+    for _ in $(seq 1 50); do
+        server_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$server" 2>/dev/null || true)"
+        server_pid="$(docker inspect -f '{{.State.Pid}}' "$server" 2>/dev/null || true)"
+        [[ "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$server_pid" =~ ^[0-9]+$ && "$server_pid" -gt 0 ]] && break
+        sleep 0.1
+    done
+    [[ "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$server_pid" =~ ^[0-9]+$ && "$server_pid" -gt 0 ]] || {
+        echo 'server container never published its address and pid' >&2
+        exit 1
+    }
     # shellcheck disable=SC2024 # the fds are opened by this shell into $work; tee would merge stderr into the capture
     sudo nsenter -t "$server_pid" -n tcpdump -nn -l -i any \
         "(tcp or udp) and ((src host $server_ip and not src port 8787) or dst port 53)" \
@@ -77,8 +89,6 @@ mkdir "$work/certs"
 "${compose[@]}" up -d neutrodyne-server caddy
 server="$("${compose[@]}" ps -q neutrodyne-server)"
 caddy="$("${compose[@]}" ps -q caddy)"
-server_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$server")"
-server_pid="$(docker inspect -f '{{.State.Pid}}' "$server")"
 # Exec'd JVMs are bounded: they share the compose mem_limit (320m) with serve.
 probe_jvm=(/usr/bin/java -Xmx32m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
 cli_jvm=(/usr/bin/java -Xmx64m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
@@ -145,8 +155,6 @@ stop_capture startup
 "${compose[@]}" run --rm --no-deps neutrodyne-server restore /data/smoke.db
 "${compose[@]}" up -d neutrodyne-server
 server="$("${compose[@]}" ps -q neutrodyne-server)"
-server_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$server")"
-server_pid="$(docker inspect -f '{{.State.Pid}}' "$server")"
 start_capture restart
 ready=false
 for _ in $(seq 1 60); do
