@@ -127,11 +127,50 @@ component's own upstream notice at the pinned version:
 
 ## Python components (desktop, `youtube/ytdlp-desktop/python-components.lock`)
 
-Empty until MD3 lands the python-build-standalone stack. Will hold CPython and its bundled
-libraries per PYTHON.json SPDX ids, certifi CA data (MPL-2.0, `kind = "data"`), and — subject to
-PO-48 — the pinned PBS build patches as `kind = "pbs-patches"` with MPL-2.0, whose corresponding
-source is the `python-build-standalone-<tag>-src.tar.gz` asset attached to the release
-(`scripts/ci/check-runtime-sources.sh --release`).
+Every desktop installer and ZIP bundles the python-build-standalone CPython child process
+(release `20261003`, CPython 3.14.8, `install_only_stripped`, trimmed by
+`scripts/engine/trim-python.sh`); each entry has a manual AboutLibraries definition under
+`desktopApp/config/libraries/`, whose licence text is the component's own upstream notice at the
+pinned version:
+
+- **CPython 3.14.8** — Python-2.0. Its licence text in
+  `desktopApp/config/licenses/python_2_0.json` is CPython's full licence verbatim: the
+  PSF/BeOpen/CNRI/CWI stack plus the "Licenses and Acknowledgements for Incorporated Software"
+  appendix of CPython 3.14.8's `Doc/license.rst`.
+- **OpenSSL 3.5.9** — Apache-2.0 — Copyright The OpenSSL Project Authors.
+- **SQLite 3.53.1** — public domain (the "blessing" dedication).
+- **libffi 3.4.8** — MIT — Copyright (c) 1996-2022 Anthony Green, Red Hat, Inc and others.
+- **expat 2.8.5** — MIT — Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark
+  Cooper; Copyright (c) 2001-2025 Expat maintainers.
+- **mpdecimal 4.0.0** (`Modules/_decimal/libmpdec`) — BSD-2-Clause — Copyright (c) 2008-2020
+  Stefan Krah.
+- **zstd 1.5.7** — BSD-3-Clause — Copyright (c) Meta Platforms, Inc. and affiliates.
+- **xz (liblzma) 5.8.4** — public domain ("liblzma is in the public domain", xz COPYING; Lasse
+  Collin and the XZ Utils authors), recorded as 0BSD.
+- **bzip2 1.0.8** — bzip2-1.0.6 — Copyright (C) 1996-2019 Julian R Seward.
+- **zlib 1.3.2** — Zlib — Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler.
+- **libedit 20240808-3.1** — BSD-3-Clause — Copyright (c) 1992, 1993 The Regents of the
+  University of California; derived from software contributed to Berkeley by Christos Zoulas of
+  Cornell University.
+- **ncurses 6.5** — X11 (MIT-style) — Copyright 2018-2020,2021 Thomas E. Dickey; Copyright
+  1998-2017,2018 Free Software Foundation, Inc.
+- **python-build-standalone build patches** (`kind = "pbs-patches"`) — MPL-2.0 — the project's
+  own build patches, compiled into the CPython it ships, unmodified by us; the pinned source is
+  the `python-build-standalone-20261003-src.tar.gz` asset attached to every release
+  (`scripts/ci/check-runtime-sources.sh --release`).
+- **certifi CA bundle 2026.06.17** — MPL-2.0 — unmodified data (`kind = "data"`); certificate
+  data from Mozilla, extracted from the archive's pip-vendored certifi and shipped as
+  `common/engine/cacert.pem`.
+- **neutrodyne_ytx shim** — Unlicense — our own Python code
+  (`youtube/engine/python/neutrodyne_ytx`).
+
+- **yt-dlp 2026.08.19** and **yt-dlp-ejs 0.8.0**: Unlicense: unmodified official
+  zipimport release in `youtube/ytdlp/engine/yt-dlp`; signed checksums verified at build time.
+  The ejs data includes **meriyah 6.1.4**: ISC: Copyright (c) 2019 and later, KFlash and
+  others; and **astring 1.9.0**: MIT: Copyright (c) 2015, David Bonnet
+  <david@bonnet.cc>. Exact upstream notices from the bundled `lib.min.js` header are in
+  `desktopApp/config/licenses/isc-meriyah.json` and `mit-astring.json`. No JS provider
+  or additional Python packages ship in MD3.
 
 ## Native components
 
