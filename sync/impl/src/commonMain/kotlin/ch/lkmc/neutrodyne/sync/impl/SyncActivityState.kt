@@ -17,8 +17,8 @@ import kotlinx.coroutines.flow.update
 class SyncActivityState : SyncActivity {
     private val activeCount = MutableStateFlow(0)
 
-    /** The in-flight round count; tests and diagnostics observe it. */
-    val count: StateFlow<Int> = activeCount.asStateFlow()
+    /** The in-flight round count; tests observe it. */
+    internal val count: StateFlow<Int> = activeCount.asStateFlow()
 
     override val active: Boolean get() = activeCount.value > 0
 
