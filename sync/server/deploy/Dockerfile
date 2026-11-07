@@ -19,6 +19,8 @@ LABEL org.opencontainers.image.source="https://github.com/${REPOSITORY}" \
       ch.lkmc.neutrodyne.sources="${IMAGE_REPOSITORY}:${VERSION}-sources https://github.com/${REPOSITORY}/releases/tag/v${VERSION}"
 # The probe JVM is bounded: it runs inside the same 320 MiB cgroup as serve, and an
 # unbounded default heap (25 % of the limit) can OOM-kill the server process.
-HEALTHCHECK --interval=30s --timeout=5s CMD ["/usr/bin/java", "-Xmx32m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-cp", "/app/neutrodyne-server.jar", "ch.lkmc.neutrodyne.sync.server.HealthCheck"]
+# start-period gives slow hosts (a Raspberry Pi takes seconds, not the 0.9 s an
+# x86 CI runner needs) room before failed probes count toward unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD ["/usr/bin/java", "-Xmx32m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-cp", "/app/neutrodyne-server.jar", "ch.lkmc.neutrodyne.sync.server.HealthCheck"]
 ENTRYPOINT ["/usr/bin/java", "-Xmx96m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-jar", "/app/neutrodyne-server.jar"]
 CMD ["serve"]

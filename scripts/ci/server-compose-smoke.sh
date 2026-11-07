@@ -83,15 +83,27 @@ server_pid="$(docker inspect -f '{{.State.Pid}}' "$server")"
 probe_jvm=(/usr/bin/java -Xmx32m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
 cli_jvm=(/usr/bin/java -Xmx64m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k)
 start_capture startup
+ready=false
 for _ in $(seq 1 90); do
-    if docker exec "$server" "${probe_jvm[@]}" -cp /app/neutrodyne-server.jar ch.lkmc.neutrodyne.sync.server.HealthCheck; then break; fi
+    if docker exec "$server" "${probe_jvm[@]}" -cp /app/neutrodyne-server.jar ch.lkmc.neutrodyne.sync.server.HealthCheck; then ready=true; break; fi
     sleep 1
 done
+if [[ "$ready" != true ]]; then
+    docker inspect -f 'server container: status={{.State.Status}} exit={{.State.ExitCode}} oomKilled={{.State.OOMKilled}}' "$server" || true
+    docker logs --tail 50 "$server" 2>&1 || true
+    exit 1
+fi
 docker exec "$server" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar doctor
+ready=false
 for _ in $(seq 1 60); do
-    if docker cp "$caddy:/data/caddy/pki/authorities/local/root.crt" "$work/certs/ca.crt" 2>/dev/null; then break; fi
+    if docker cp "$caddy:/data/caddy/pki/authorities/local/root.crt" "$work/certs/ca.crt" 2>/dev/null; then ready=true; break; fi
     sleep 1
 done
+if [[ "$ready" != true ]]; then
+    echo 'Caddy never wrote its local CA certificate' >&2
+    docker logs --tail 50 "$caddy" 2>&1 || true
+    exit 1
+fi
 # Issue nginx's leaf from Caddy's test CA, confined to the temporary smoke directory.
 docker cp "$caddy:/data/caddy/pki/authorities/local/root.key" "$work/certs/ca.key"
 openssl req -new -newkey rsa:2048 -nodes -keyout "$work/certs/key.pem" -out "$work/certs/request.pem" -subj '/CN=sync.local' >/dev/null 2>&1
@@ -136,10 +148,16 @@ server="$("${compose[@]}" ps -q neutrodyne-server)"
 server_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$server")"
 server_pid="$(docker inspect -f '{{.State.Pid}}' "$server")"
 start_capture restart
+ready=false
 for _ in $(seq 1 60); do
-    if curl --cacert "$work/certs/ca.crt" -fsS https://sync.local:9443/readyz >/dev/null; then break; fi
+    if curl --max-time 5 --cacert "$work/certs/ca.crt" -fsS https://sync.local:9443/readyz >/dev/null; then ready=true; break; fi
     sleep 1
 done
+if [[ "$ready" != true ]]; then
+    echo 'server did not become ready after restore' >&2
+    docker logs --tail 50 "$server" 2>&1 || true
+    exit 1
+fi
 invite_output="$(docker exec "$server" "${cli_jvm[@]}" -jar /app/neutrodyne-server.jar user invite smoke)"
 export SMOKE_INVITE="${invite_output##*shown once): }"
 python3 scripts/ci/server-smoke.py after-restore --url https://sync.local:9443 --ca "$work/certs/ca.crt" --state "$work/state.json"

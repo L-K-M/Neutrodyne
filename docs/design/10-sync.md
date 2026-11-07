@@ -1867,13 +1867,14 @@ LABEL org.opencontainers.image.source="https://github.com/{owner}/Neutrodyne" \
       org.opencontainers.image.licenses="Unlicense" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.description="Neutrodyne Sync server"
-HEALTHCHECK --interval=30s --timeout=5s CMD ["/usr/bin/java", "-Xmx32m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-cp", "/app/neutrodyne-server.jar", "ch.lkmc.neutrodyne.sync.server.HealthCheck"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD ["/usr/bin/java", "-Xmx32m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-cp", "/app/neutrodyne-server.jar", "ch.lkmc.neutrodyne.sync.server.HealthCheck"]
 ENTRYPOINT ["/usr/bin/java", "-Xmx96m", "-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1", "-Xss512k", "-jar", "/app/neutrodyne-server.jar"]
 CMD ["serve"]
 ```
 
 - The base contains Temurin OpenJDK 25 and its dependencies, and its default entry point is the equivalent of `java -jar` ([distroless Java](https://github.com/GoogleContainerTools/distroless/blob/main/java/README.md)); there is no shell, so the health check and the CLI run through `java`. `data/` is an empty directory in the build context, copied with the non-root owner so a new named volume starts writable.
 - **Implementation note (2026-11-02, MS1).** The `HEALTHCHECK` probe JVM is bounded (`-Xmx32m` and the serve flags) because it runs inside the same 320 MiB cgroup as `serve`. Separately, the probe pins `HttpClient.Version.HTTP_1_1`: with the default HTTP/2 preference the JDK client sends an h2c `Upgrade` header, the server's bounded request-body read then waits on the upgrade stream, and the probe timed out against a healthy CIO server (CI run 41381036782, server job: `HttpTimeoutException`; reproduced locally with the packaged JAR — HTTP/2 times out, HTTP/1.1 answers 200). `HealthCheckTest` now runs the probe against a real CIO server. The CI image check and the compose smoke run every exec'd probe/CLI JVM with the same bounded flags.
+- **Implementation note (2026-11-04).** The `HEALTHCHECK` gained `--start-period=30s`: the container reports healthy in about a second on developer hardware, and thirty seconds gives Raspberry-Pi-class hosts headroom before failed probes count toward `unhealthy`.
 - The image ships OpenJDK and the base image's GPL and LGPL components (glibc, the GCC runtime) under [D3](../PLAN.md#3-key-decisions)'s runtime exception ([Image sources and the runtime exception](#image-sources-and-the-runtime-exception)).
 
 ### Reverse proxy with Caddy
