@@ -233,6 +233,48 @@ class DiagExportScrubTest {
         }
 
     @Test
+    fun scrubMasksVarcharAndClobColumns() =
+        runTest {
+            val db = TestDb.file(dbDir.toPath())
+            try {
+                // SQLite's TEXT affinity also covers CHAR, CLOB and VARCHAR(n) declarations;
+                // a column declared any of them must be scrubbed by default.
+                db.useWriterConnection { conn ->
+                    conn.usePrepared(
+                        "CREATE TABLE scrub_probe(" +
+                            "id INTEGER PRIMARY KEY, note VARCHAR(64), memo CLOB, n NUMERIC)",
+                    ) { it.step() }
+                    conn.usePrepared(
+                        "INSERT INTO scrub_probe VALUES (1, 'probe SECRETNOTE', 'memo SECRETMEMO', 5)",
+                    ) { it.step() }
+                }
+                copyFile.delete()
+                db.useWriterConnection { conn ->
+                    conn.usePrepared("VACUUM INTO '${copyFile.absolutePath}'") { it.step() }
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    DiagExportScrub.scrub(connection)
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    val row = buildList {
+                        connection.prepare("SELECT note, memo, n FROM scrub_probe").use { stmt ->
+                            while (stmt.step()) add(
+                                Triple(stmt.getText(0), stmt.getText(1), stmt.getText(2)),
+                            )
+                        }
+                    }.single()
+                    assertEquals("…#1", row.first)
+                    assertEquals("…#1", row.second)
+                    assertEquals("5", row.third)
+                }
+            } finally {
+                db.close()
+                dbDir.deleteRecursively()
+                copyFile.delete()
+            }
+        }
+
+    @Test
     fun scrubKeepsUniqueIndicesValid() =
         runTest {
             val db = TestDb.file(dbDir.toPath())
