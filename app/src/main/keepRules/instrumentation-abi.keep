@@ -2138,7 +2138,7 @@
 -keep interface ch.lkmc.neutrodyne.core.navigation.TopLevelKey {
 }
 -keep class ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory create(dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory {
   ch.lkmc.neutrodyne.core.network.ConnectivityNetworkMonitorContributions$ToAppScope$ProvidesConnectivityNetworkMonitorMetroFactory$Companion Companion;
