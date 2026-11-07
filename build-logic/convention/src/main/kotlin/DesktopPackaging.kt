@@ -12,6 +12,7 @@ import org.gradle.api.file.RelativePath
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
@@ -27,6 +28,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Files
 import java.security.MessageDigest
 import javax.inject.Inject
 
@@ -326,11 +328,17 @@ internal fun imageJarName(file: File): String {
 }
 
 /**
- * Writes the Licensee-checked runtime classpath as `sha256  name` lines (09 Build-output
- * checks): `check-desktop-image.sh` asserts every JAR of an image is one of these files.
- * Same-named JARs — `api-desktop.jar` comes from four modules, and androidx artefacts appear
- * twice via the `org.jetbrains.androidx` republish — are no collision here: the recorded name
- * is the mangled image name, which differs by content.
+ * Writes the Licensee-checked runtime classpath as `<canonical sha256>  name` lines
+ * (09 Build-output checks): `check-desktop-image.sh` asserts every JAR of an image is
+ * one of these files. Same-named JARs — `api-desktop.jar` comes from four modules, and
+ * androidx artefacts appear twice via the `org.jetbrains.androidx` republish — are no
+ * collision here: the recorded name is the mangled image name, which differs by content.
+ *
+ * The hash is canonical jar content, not the file's bytes: packaging recompresses the
+ * image JARs after Compose has already mangled their names, so a byte hash would report
+ * every JAR as differing. The digest covers each entry's name and uncompressed content
+ * SHA-256, sorted by entry name — the same canonicalisation `jar_content_hash` performs
+ * in the checker. A non-zip file falls back to its raw byte hash on both sides.
  */
 abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:InputFiles
@@ -345,10 +353,295 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         val lines =
             runtimeClasspath.files
                 .filter { it.isFile }
-                .map { "${sha256Of(it)}  ${imageJarName(it)}" }
+                .map { "${canonicalSha256Of(it)}  ${imageJarName(it)}" }
                 .toSortedSet()
                 .joinToString("\n", postfix = "\n")
         manifest.get().asFile.writeText(lines)
+    }
+
+    /**
+     * SHA-256 over `<entry name>\0<sha256hex(uncompressed content)>\n` per entry, sorted
+     * by name — identical to `jar_content_hash` in check-desktop-image.sh. Mach-O
+     * entries are normalized first (see [normalizedEntryBytes]).
+     */
+    private fun canonicalSha256Of(file: File): String {
+        val zip =
+            try {
+                java.util.zip.ZipFile(file)
+            } catch (_: java.util.zip.ZipException) {
+                return sha256Of(file)
+            }
+        val outer = MessageDigest.getInstance("SHA-256")
+        zip.use { z ->
+            z.entries().toList().sortedBy { it.name }.forEach { entry ->
+                val inner = MessageDigest.getInstance("SHA-256")
+                if (!entry.isDirectory) {
+                    val bytes = z.getInputStream(entry).use { it.readBytes() }
+                    inner.update(normalizedEntryBytes(entry.name, bytes))
+                }
+                outer.update(entry.name.toByteArray(Charsets.UTF_8))
+                outer.update(0)
+                outer.update(
+                    inner
+                        .digest()
+                        .joinToString("") { "%02x".format(it) }
+                        .toByteArray(Charsets.US_ASCII),
+                )
+                outer.update('\n'.code.toByte())
+            }
+        }
+        return outer.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Mach-O entries are normalized before hashing: macOS packaging re-signs natives
+     * inside image JARs in place, and re-signing a published dylib is not byte-reversible
+     * (`codesign --remove-signature` cannot restore the pre-sign bytes). The normalized
+     * form — shared byte-for-byte with `norm_macho` in check-desktop-image.sh — emits
+     * `ncmds`/`sizeofcmds` minus the signature slots, zeroes each LC_CODE_SIGNATURE
+     * command, emits `__LINKEDIT`'s filesize minus the blob bytes inside it and its
+     * vmsize as the architecture-page-rounded non-signature extent, and cuts the
+     * `[dataoff, dataoff+datasize)` blob region. Everything else stays byte-exact, so
+     * mutated content still fails.
+     */
+    private fun normalizedEntryBytes(
+        name: String,
+        data: ByteArray,
+    ): ByteArray = if (name.substringAfterLast('.') in MACHO_EXTS) normalizeMacho(data) else data
+
+    private fun normalizeMacho(b: ByteArray): ByteArray {
+        if (b.size >= 8 && u32(b, 0, be = true) == FAT_MAGIC) {
+            val nfat = u32(b, 4, be = true).toInt()
+            if (nfat < 0 || nfat > 64 || 8 + 20L * nfat > b.size) return b
+            val out = java.io.ByteArrayOutputStream(b.size)
+            out.write(b, 0, 8)
+            var prevEnd = 8 + 20L * nfat
+            for (i in 0 until nfat) {
+                val ro = 8 + 20 * i
+                val off = u32(b, ro + 8, be = true)
+                val size = u32(b, ro + 12, be = true)
+                val align = u32(b, ro + 16, be = true)
+                // lipo packs slices back to back, each at its 2^align boundary —
+                // the offset is then a function of bound fields, not a free one.
+                if (align > 30) return b
+                val bound = 1L shl align.toInt()
+                if (off != (prevEnd + bound - 1) / bound * bound) return b
+                if (off + size > b.size) return b
+                val thin = normalizeThinMacho(b.copyOfRange(off.toInt(), (off + size).toInt()))
+                if (thin.sigSize > size) return b
+                out.write(b, ro, 8)
+                out.write(ZERO4, 0, 4)
+                out.write(u32Bytes(size - thin.sigSize, be = true), 0, 4)
+                out.write(b, ro + 16, 4)
+                out.write(thin.emit)
+                prevEnd = off + size
+            }
+            return out.toByteArray()
+        }
+        return normalizeThinMacho(b).emit
+    }
+
+    private class ThinResult(
+        val emit: ByteArray,
+        val sigSize: Long,
+    )
+
+    private fun normalizeThinMacho(b: ByteArray): ThinResult {
+        if (b.size < 28) return ThinResult(b, 0)
+        val is64: Boolean
+        val be: Boolean
+        when (u32(b, 0, be = false)) {
+            MH_MAGIC_64 -> {
+                is64 = true
+                be = false
+            }
+
+            MH_MAGIC -> {
+                is64 = false
+                be = false
+            }
+
+            MH_CIGAM_64 -> {
+                is64 = true
+                be = true
+            }
+
+            MH_CIGAM -> {
+                is64 = false
+                be = true
+            }
+
+            else -> {
+                return ThinResult(b, 0)
+            }
+        }
+        val hdr = if (is64) 32 else 28
+        val ncmds = u32(b, 16, be)
+        val sizeofcmds = u32(b, 20, be)
+        if (ncmds > 4096) return ThinResult(b, 0)
+        // arm64/arm64_32 pages are 16K, other slices 4K — codesign rounds the
+        // linkedit VM reservation to the target's page.
+        val page =
+            if (u32(b, 4, be) == CPU_TYPE_ARM64 || u32(b, 4, be) == CPU_TYPE_ARM64_32) {
+                0x4000L
+            } else {
+                0x1000L
+            }
+        val cmds = mutableListOf<LongArray>()
+        val blobs = mutableListOf<LongArray>()
+        var off = hdr
+        for (i in 0 until ncmds.toInt()) {
+            if (off + 8 > b.size) return ThinResult(b, 0)
+            val cmd = u32(b, off, be)
+            val csz = u32(b, off + 4, be)
+            if (csz < 8 || off + csz > b.size) return ThinResult(b, 0)
+            cmds += longArrayOf(cmd, csz, off.toLong())
+            if (cmd == LC_CODE_SIGNATURE) {
+                blobs += longArrayOf(u32(b, off + 8, be), u32(b, off + 12, be))
+            }
+            off += csz.toInt()
+        }
+        val cszSum = cmds.filter { it[0] == LC_CODE_SIGNATURE }.sumOf { it[1] }
+        if (blobs.size.toLong() > ncmds || cszSum > sizeofcmds) return ThinResult(b, 0)
+        val out = java.io.ByteArrayOutputStream(b.size)
+        out.write(b, 0, 16)
+        out.write(u32Bytes(ncmds - blobs.size, be), 0, 4)
+        out.write(u32Bytes(sizeofcmds - cszSum, be), 0, 4)
+        out.write(b, 24, hdr - 24)
+        for (c in cmds) {
+            val cmd = c[0]
+            val csz = c[1].toInt()
+            val co = c[2].toInt()
+            if (cmd == LC_CODE_SIGNATURE) {
+                out.write(ByteArray(csz))
+                continue
+            }
+            val cb = b.copyOfRange(co, co + csz)
+            if ((cmd == LC_SEGMENT || cmd == LC_SEGMENT_64) && isLinkeditName(cb)) {
+                val vs: Long
+                val foff: Long
+                val fsize: Long
+                if (is64) {
+                    vs = u64(cb, 32, be)
+                    foff = u64(cb, 40, be)
+                    fsize = u64(cb, 48, be)
+                } else {
+                    vs = u32(cb, 28, be)
+                    foff = u32(cb, 32, be)
+                    fsize = u32(cb, 36, be)
+                }
+                val inside =
+                    blobs
+                        .filter { foff <= it[0] && it[0] + it[1] <= foff + fsize }
+                        .sumOf { it[1] }
+                val rounded = (fsize + page - 1) / page * page
+                if (inside > fsize || (vs != fsize && vs != rounded)) {
+                    return ThinResult(b, 0)
+                }
+                val nonSig = fsize - inside
+                val nonSigRounded = (nonSig + page - 1) / page * page
+                if (is64) {
+                    put64(cb, 32, nonSigRounded, be)
+                    put64(cb, 48, nonSig, be)
+                } else {
+                    put32(cb, 28, nonSigRounded, be)
+                    put32(cb, 36, nonSig, be)
+                }
+            }
+            out.write(cb)
+        }
+        var emit = out.toByteArray() + b.copyOfRange(off, b.size)
+        val base = out.size() - off
+        var shift = 0L
+        for (blob in blobs.sortedBy { it[0] }) {
+            val start = blob[0] + base - shift
+            if (0 <= start && start < emit.size) {
+                val end = minOf(emit.size.toLong(), start + blob[1]).toInt()
+                emit = emit.copyOfRange(0, start.toInt()) + emit.copyOfRange(end, emit.size)
+            }
+            shift += blob[1]
+        }
+        return ThinResult(emit, blobs.sumOf { it[1] })
+    }
+
+    private fun isLinkeditName(cb: ByteArray): Boolean {
+        val name = cb.copyOfRange(8, 24).takeWhile { it != 0.toByte() }.toByteArray()
+        return name.toString(Charsets.US_ASCII) == "__LINKEDIT"
+    }
+
+    private fun u32(
+        b: ByteArray,
+        o: Int,
+        be: Boolean,
+    ): Long =
+        if (o + 4 > b.size) {
+            0
+        } else if (be) {
+            ((b[o].toLong() and 0xff) shl 24) or
+                ((b[o + 1].toLong() and 0xff) shl 16) or
+                ((b[o + 2].toLong() and 0xff) shl 8) or
+                (b[o + 3].toLong() and 0xff)
+        } else {
+            (b[o].toLong() and 0xff) or
+                ((b[o + 1].toLong() and 0xff) shl 8) or
+                ((b[o + 2].toLong() and 0xff) shl 16) or
+                ((b[o + 3].toLong() and 0xff) shl 24)
+        }
+
+    private fun u64(
+        b: ByteArray,
+        o: Int,
+        be: Boolean,
+    ): Long =
+        if (o + 8 > b.size) {
+            0
+        } else if (be) {
+            (u32(b, o, true) shl 32) or u32(b, o + 4, true)
+        } else {
+            (u32(b, o + 4, false) shl 32) or u32(b, o, false)
+        }
+
+    private fun u32Bytes(
+        v: Long,
+        be: Boolean,
+    ): ByteArray {
+        val w = ByteArray(4)
+        put32(w, 0, v, be)
+        return w
+    }
+
+    private fun put32(
+        b: ByteArray,
+        o: Int,
+        v: Long,
+        be: Boolean,
+    ) {
+        if (be) {
+            b[o] = (v shr 24).toByte()
+            b[o + 1] = (v shr 16).toByte()
+            b[o + 2] = (v shr 8).toByte()
+            b[o + 3] = v.toByte()
+        } else {
+            b[o] = v.toByte()
+            b[o + 1] = (v shr 8).toByte()
+            b[o + 2] = (v shr 16).toByte()
+            b[o + 3] = (v shr 24).toByte()
+        }
+    }
+
+    private fun put64(
+        b: ByteArray,
+        o: Int,
+        v: Long,
+        be: Boolean,
+    ) {
+        if (be) {
+            put32(b, o, v shr 32, true)
+            put32(b, o + 4, v, true)
+        } else {
+            put32(b, o, v, false)
+            put32(b, o + 4, v shr 32, false)
+        }
     }
 
     private fun sha256Of(file: File): String {
@@ -366,6 +659,19 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
 
     private companion object {
         private const val BUFFER_BYTES = 1 shl 16
+
+        private const val FAT_MAGIC = 0xCAFEBABEL
+        private const val MH_MAGIC_64 = 0xFEEDFACFL
+        private const val MH_MAGIC = 0xFEEDFACEL
+        private const val MH_CIGAM_64 = 0xCFFAEDFEL
+        private const val MH_CIGAM = 0xCEFAEDFEL
+        private const val LC_SEGMENT = 0x1L
+        private const val LC_SEGMENT_64 = 0x19L
+        private const val LC_CODE_SIGNATURE = 0x1DL
+        private const val CPU_TYPE_ARM64 = 0x0100000CL
+        private const val CPU_TYPE_ARM64_32 = 0x0200000CL
+        private val MACHO_EXTS = setOf("dylib", "jnilib", "so")
+        private val ZERO4 = ByteArray(4)
     }
 }
 
@@ -378,6 +684,36 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
  * invocations stay `:desktopApp:packageDeb` and `:desktopApp:packageRpm`).
  */
 abstract class JPackageImageTask : Exec()
+
+/**
+ * Restores the executable bit on the bundled Python tree inside a packaged image.
+ * Compose's `createDistributable` copies `appResourcesRootDir` with `File.copyTo`, which
+ * does not carry POSIX permissions, so the interpreter arrives non-executable and the
+ * engine child cannot start (the image scan's required-layout rule catches it). The staged
+ * tree's modes are the truth; `chmod` does not touch the Mach-O bytes, so the ad-hoc
+ * signatures jpackage sealed over the nested binaries stay valid. A no-op on Windows,
+ * where the execute bit does not exist.
+ */
+abstract class RestoreDesktopPythonPermissions : DefaultTask() {
+    @get:InputDirectory
+    abstract val stagedPython: DirectoryProperty
+
+    @get:InputDirectory
+    abstract val imagePython: DirectoryProperty
+
+    @TaskAction
+    fun restore() {
+        if (System.getProperty("os.name").startsWith("Windows")) return
+        val staged = stagedPython.get().asFile
+        val image = imagePython.get().asFile
+        staged.walkTopDown().forEach { file ->
+            val target = image.toPath().resolve(file.relativeTo(staged).path).toFile()
+            if (file.isFile && target.isFile) {
+                Files.setPosixFilePermissions(target.toPath(), Files.getPosixFilePermissions(file.toPath()))
+            }
+        }
+    }
+}
 
 /** The Windows portable ZIP: the app image archived (11 Windows MSI and ZIP). */
 abstract class WindowsZipTask : Zip()
@@ -623,6 +959,29 @@ internal fun Project.registerDesktopPackagingTasks(
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
     }
+
+    // Compose's createDistributable copies the staged resources without POSIX
+    // permissions, so the bundled Python interpreter arrives non-executable; this
+    // task restores the staged modes after the image is sealed (11 Image scan rules).
+    val restorePythonPermissions =
+        tasks.register<RestoreDesktopPythonPermissions>("restoreDesktopPythonPermissions") {
+            group = "build"
+            description =
+                "Restores the executable bit on the bundled Python tree inside the app image (11 Image scan rules)."
+            stagedPython.set(layout.buildDirectory.dir("desktop-resources/${target.id}/engine/python"))
+            imagePython.set(
+                appImage.map { img ->
+                    img.dir(
+                        when (target.osWire) {
+                            "macos" -> "Contents/app/resources/engine/python"
+                            "windows" -> "app/resources/engine/python"
+                            else -> "lib/app/resources/engine/python"
+                        },
+                    )
+                },
+            )
+        }
+    tasks.named("createDistributable") { finalizedBy(restorePythonPermissions) }
 
     tasks.register<WriteDesktopRuntimeClasspath>("writeDesktopRuntimeClasspath") {
         description = "Writes the runtime-classpath manifest check-desktop-image.sh checks image JARs against."
