@@ -31,12 +31,7 @@ class PythonRuntimeLocatorTest {
 
     @Test fun engineResourcePythonIsUsedWhenNoExplicitPath() {
         val dir = tempRoot("res")
-        val exe =
-            dir
-                .resolve("python")
-                .apply { mkdirs() }
-                .resolve(if (isWindows()) "python.exe" else "python3")
-                .apply { writeBytes(byteArrayOf()) }
+        val exe = interpreterIn(dir).apply { writeBytes(byteArrayOf()) }
         val locator =
             DesktopPythonRuntimeLocator(
                 explicit = { null },
@@ -45,6 +40,35 @@ class PythonRuntimeLocatorTest {
                 probe = { PythonRuntime(it, "3.14") },
             )
         assertEquals(exe, locator.locate()?.executable)
+    }
+
+    @Test fun bundledResourcesWinOverTheDevStandaloneTree() {
+        val bundled = tempRoot("bundled")
+        val bundledExe = interpreterIn(bundled).apply { writeBytes(byteArrayOf()) }
+        val dev = tempRoot("dev")
+        interpreterIn(dev).apply { writeBytes(byteArrayOf()) }
+        val locator =
+            DesktopPythonRuntimeLocator(
+                explicit = { null },
+                engineResources = { bundled },
+                devStandalone = { dev },
+                probe = { PythonRuntime(it, "3.14") },
+            )
+        assertEquals(bundledExe, locator.locate()?.executable)
+    }
+
+    @Test fun devStandaloneTreeIsUsedWhenResourcesCarryNoInterpreter() {
+        val resources = tempRoot("res")
+        val dev = tempRoot("dev")
+        val devExe = interpreterIn(dev).apply { writeBytes(byteArrayOf()) }
+        val locator =
+            DesktopPythonRuntimeLocator(
+                explicit = { null },
+                engineResources = { resources },
+                devStandalone = { dev },
+                probe = { PythonRuntime(it, "3.14") },
+            )
+        assertEquals(devExe, locator.locate()?.executable)
     }
 
     @Test fun missingInterpreterYieldsNullNotAnException() {
@@ -91,6 +115,17 @@ class PythonRuntimeLocatorTest {
         assertNull(locator.locate())
         assertNull(locator.locate())
         assertEquals(2, probes)
+    }
+
+    private fun interpreterIn(resources: java.io.File): java.io.File {
+        val exe =
+            if (isWindows()) {
+                resources.resolve("python/python.exe")
+            } else {
+                resources.resolve("python/bin/python3")
+            }
+        exe.parentFile.mkdirs()
+        return exe
     }
 
     private fun isWindows(): Boolean = System.getProperty("os.name").startsWith("Windows")

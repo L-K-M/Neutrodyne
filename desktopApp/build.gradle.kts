@@ -208,6 +208,47 @@ if (packagingInstallKind.isPresent) {
     }
 }
 
+// MD3: the bundled engine runtime (11 Resources layout). `:youtube:ytdlp-desktop` fetches and
+// trims the pinned python-build-standalone archive; this task stages the trimmed tree at
+// <os>-<arch>/engine/python/ and the yt-dlp zip, keys, shim and certifi's CA bundle at
+// common/engine/, where Compose's prepareAppResources merges them into the image. Only when the
+// engine is bundled; the emergency build omits engine/ entirely.
+if (youtubeEngine) {
+    val pythonProject = project(":youtube:ytdlp-desktop")
+    val packagingTarget = packaging.targetId.get()
+    val syncEngineRuntimeResources =
+        tasks.register<Sync>("syncEngineRuntimeResources") {
+            group = "build"
+            description =
+                "Stages the bundled python-build-standalone runtime and engine resources into " +
+                    "desktop-resources (11 Resources layout)."
+            // Task-path strings resolve lazily, so :youtube:ytdlp-desktop need not be configured
+            // before :desktopApp (Gradle configures the shell first).
+            dependsOn(
+                ":youtube:ytdlp-desktop:fetchPythonStandalone",
+                ":youtube:ytdlp-desktop:trimPythonStandalone",
+                ":youtube:ytdlp-desktop:syncEngineResources",
+            )
+            into(layout.buildDirectory.dir("desktop-resources"))
+            from(
+                pythonProject.layout.buildDirectory.dir("python-standalone/$packagingTarget/trimmed/python"),
+            ) {
+                into("$packagingTarget/engine/python")
+            }
+            from(pythonProject.layout.buildDirectory.dir("python-standalone/$packagingTarget/trimmed/cacert.pem")) {
+                into("common/engine")
+            }
+            from(pythonProject.layout.buildDirectory.dir("engine-resources")) {
+                into("common/engine")
+            }
+        }
+    // createDistributable is registered by Compose's afterEvaluate, so wire it lazily.
+    tasks.matching { it.name == "createDistributable" }
+        .configureEach { dependsOn(syncEngineRuntimeResources) }
+    tasks.matching { it.name == "prepareAppResources" }
+        .configureEach { dependsOn(syncEngineRuntimeResources) }
+}
+
 val generateBuildInfoProperties =
     tasks.register<WriteBuildInfoProperties>("generateBuildInfoProperties") {
         val installKind = packagingInstallKind.getOrElse("dev")

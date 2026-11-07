@@ -70,8 +70,9 @@ class DesktopEngineStorePaths(
 
 /**
  * Where the engine's bundled inputs live this launch (11 "Python runtime"): the packaged
- * `common/engine/` resource directory, the dev build's `syncEngineResources` output, or an
- * explicit `neutrodyne.engineResources` override for tests.
+ * resource directory Compose merges (`<resources>/engine/`, from `common/engine/` and
+ * `<os>-<arch>/engine/`), the dev build's `syncEngineResources` output, or an explicit
+ * `neutrodyne.engineResources` override for tests.
  */
 object EngineResources {
     fun standard(
@@ -82,7 +83,7 @@ object EngineResources {
     ): () -> File? =
         {
             System.getProperty("neutrodyne.engineResources")?.let(::File)?.takeIf(File::isDirectory)
-                ?: packagedResources()?.resolve("common/engine")?.takeIf(File::isDirectory)
+                ?: packagedResources()?.resolve("engine")?.takeIf(File::isDirectory)
                 ?: rootDir()
                     ?.resolve("youtube/ytdlp-desktop/build/engine-resources")
                     ?.takeIf(File::isDirectory)

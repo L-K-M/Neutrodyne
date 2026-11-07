@@ -6,11 +6,13 @@ import java.io.File
 /**
  * Which CPython runs the engine child (11 "Python runtime").
  *
- * The bundled python-build-standalone runtime arrives with the packaging slice; this slice's
- * locator resolves an explicit development path or the packaged/dev resource locations and
- * probes the interpreter once for its `<major>.<minor>` marker suffix. A null [PythonRuntimeLocator.locate]
+ * The bundled python-build-standalone runtime arrives with the packaging slice; the locator
+ * resolves an explicit development path, then the packaged resources (`<resources>/engine/python/`,
+ * the tree `trimPythonStandalone` staged), then the dev build's trimmed tree, and probes the
+ * interpreter once for its `<major>.<minor>` marker suffix. A null [PythonRuntimeLocator.locate]
  * maps to `HostState.UNUSABLE`, never a crash: the engine reports ENGINE_FAILED and keeps the
- * external capability path.
+ * external capability path. An arbitrary PATH interpreter is never a production candidate
+ * ([PythonRuntimeSearch] is the development/test seam).
  */
 data class PythonRuntime(
     val executable: File,
@@ -67,8 +69,8 @@ class DesktopPythonRuntimeLocator(
     override fun locate(): PythonRuntime? {
         val candidate =
             explicit()?.takeIf(File::isFile)
-                ?: engineResources()?.resolve("python/${exeName()}")?.takeIf(File::isFile)
-                ?: devStandalone()?.resolve(exeName())?.takeIf(File::isFile)
+                ?: engineResources()?.let(::interpreterIn)?.takeIf(File::isFile)
+                ?: devStandalone()?.let(::interpreterIn)?.takeIf(File::isFile)
                 ?: return null
         // Only a working interpreter is memoized: a broken one is re-probed so that
         // retryStart picks up a binary the user fixed or replaced in place.
@@ -78,6 +80,12 @@ class DesktopPythonRuntimeLocator(
             memoizedPath = candidate
         }
     }
+
+    /** The interpreter inside a staged runtime tree (11 Resources layout): `python/python.exe` on
+     * Windows, `python/bin/python3` elsewhere. */
+    private fun interpreterIn(resources: File): File =
+        if (isWindows()) resources.resolve("python/python.exe")
+        else resources.resolve("python/bin/${exeName()}")
 
     private fun exeName(): String = if (isWindows()) "python.exe" else "python3"
 
@@ -98,6 +106,8 @@ class DesktopPythonRuntimeLocator(
                     rootDir()
                         ?.resolve("youtube/ytdlp-desktop/build/python-standalone")
                         ?.resolve(currentTarget())
+                        ?.resolve("trimmed")
+                        ?.resolve("python")
                         ?.takeIf(File::isDirectory)
                 },
             )
