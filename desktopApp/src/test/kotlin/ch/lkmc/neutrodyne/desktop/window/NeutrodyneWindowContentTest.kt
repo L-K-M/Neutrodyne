@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.window
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
@@ -16,9 +19,13 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.navigation3.runtime.NavKey
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
 import ch.lkmc.neutrodyne.core.common.NotificationKind
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.database.SyncHeldEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.model.settings.SyncSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.UpdateSettingKeys
 import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
 import ch.lkmc.neutrodyne.core.model.update.UpdateInfo
@@ -30,7 +37,10 @@ import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.testing.FakeAppUpdateChecker
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeUpdateNotices
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
@@ -38,10 +48,15 @@ import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.sync.api.SyncController
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -235,6 +250,189 @@ class NeutrodyneWindowContentTest {
                 .isEqualTo(Route.Navigate(LibraryKey, listOf(ImportKey("7"))))
         }
 
+    /**
+     * The production window content maps the real controller's persisted held batch onto the
+     * root banner (08 priority 3), and the banner's Review opens the production held-changes
+     * dialog through the graph's real entry installers.
+     */
+    @Test
+    fun aPersistedHeldBatchOpensTheProductionReviewDialog() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            seedLinkedAndHeld(graph)
+            setHeldContent()
+
+            waitUntil("the held-changes banner loads", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 2 podcasts and 1 group. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            onNodeWithText("Review").performClick()
+
+            waitUntil("the held-changes dialog opens", TIMEOUT_MS) {
+                onAllNodesWithText("Apply this on this device too?").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Another device removed 2 podcasts and 1 group").assertIsDisplayed()
+            onNodeWithText("Held Show A").assertIsDisplayed()
+            onNodeWithText("Held Show B").assertIsDisplayed()
+            onNodeWithText("Held Group").assertIsDisplayed()
+            onNodeWithText("Apply").assertIsDisplayed()
+            onNodeWithText("Keep mine").assertIsDisplayed()
+            onNodeWithText("Decide later").assertIsDisplayed()
+        }
+
+    /**
+     * Apply through the production dialog runs the real resolution end to end: the batch's
+     * podcast and group are deleted and the row closes, while a second held batch stays
+     * offered on the banner (10 Mass-change guard step 3).
+     */
+    @Test
+    fun applyingThroughTheHeldDialogRemovesOnlyTheSelectedBatch() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val db = graph.databaseOpener.requireDatabase()
+            seedLinked(graph)
+            db.withWriteTransaction {
+                db.podcastDao().insertPodcast(podcastEntity(syncId = "p-1", title = "First show"))
+                db.groupDao().insert(groupEntity(uuid = GROUP_UUID, name = "First group", orderKey = "a0"))
+                db.podcastDao().insertPodcast(podcastEntity(syncId = "p-2", title = "Second show"))
+            }
+            seedHeldRow(
+                db,
+                listOf("p-1"),
+                listOf(GROUP_UUID),
+                listOf("First show"),
+                listOf("First group"),
+                heldAt = 1,
+            )
+            seedHeldRow(db, listOf("p-2"), emptyList(), listOf("Second show"), emptyList(), heldAt = 2)
+            setHeldContent()
+
+            waitUntil("the oldest batch's banner loads", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 1 podcast and 1 group. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            onNodeWithText("Review").performClick()
+            waitUntil("the held-changes dialog opens", TIMEOUT_MS) {
+                onAllNodesWithText("Apply this on this device too?").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Apply").performClick()
+
+            waitUntil("the dialog closes after Apply", TIMEOUT_MS) {
+                onAllNodesWithText("Apply this on this device too?").fetchSemanticsNodes().isEmpty()
+            }
+            assertThat(runBlocking { db.podcastDao().bySyncId("p-1") }).isNull()
+            assertThat(runBlocking { db.groupDao().groupByUuid(GROUP_UUID) }).isNull()
+            assertThat(runBlocking { db.podcastDao().bySyncId("p-2") }).isNotNull()
+            waitUntil("the second batch's banner loads", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 1 podcast and 0 groups. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+        }
+
+    /** Decide later closes the dialog without a write: the batch stays offered, the library keeps its rows. */
+    @Test
+    fun decidingLaterKeepsTheBatchOffered() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val db = graph.databaseOpener.requireDatabase()
+            seedLinked(graph)
+            db.withWriteTransaction {
+                db.podcastDao().insertPodcast(podcastEntity(syncId = "p-1", title = "First show"))
+            }
+            val heldId =
+                seedHeldRow(db, listOf("p-1"), emptyList(), listOf("First show"), emptyList(), heldAt = 1)
+            setHeldContent()
+
+            waitUntil("the held-changes banner loads", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 1 podcast and 0 groups. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            onNodeWithText("Review").performClick()
+            waitUntil("the held-changes dialog opens", TIMEOUT_MS) {
+                onAllNodesWithText("Apply this on this device too?").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Decide later").performClick()
+
+            waitUntil("the dialog closes after Decide later", TIMEOUT_MS) {
+                onAllNodesWithText("Apply this on this device too?").fetchSemanticsNodes().isEmpty()
+            }
+            assertThat(runBlocking { db.syncHeldDao().byId(heldId) }).isNotNull()
+            assertThat(runBlocking { db.podcastDao().bySyncId("p-1") }).isNotNull()
+            onNodeWithText("Another device removed 1 podcast and 0 groups. Apply here too?")
+                .assertIsDisplayed()
+        }
+
+    /** A batch resolved elsewhere drops out of the prompt flow; the open dialog closes itself. */
+    @Test
+    fun aHeldBatchDecidedElsewhereClosesTheDialog() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val heldId = seedLinkedAndHeld(graph)
+            setHeldContent()
+
+            waitUntil("the held-changes banner loads", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 2 podcasts and 1 group. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            onNodeWithText("Review").performClick()
+            waitUntil("the held-changes dialog opens", TIMEOUT_MS) {
+                onAllNodesWithText("Apply this on this device too?").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            runBlocking {
+                graph.databaseOpener
+                    .requireDatabase()
+                    .syncHeldDao()
+                    .delete(heldId)
+            }
+
+            waitUntil("the dialog closes", TIMEOUT_MS) {
+                onAllNodesWithText("Apply this on this device too?").fetchSemanticsNodes().isEmpty()
+            }
+        }
+
+    /** The desktop mapping resolves the controller only once the start-up gate reports ready. */
+    @Test
+    fun theBannerWaitsForTheStartupGateBeforeResolvingTheController() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            seedLinkedAndHeld(graph)
+            var resolutions = 0
+            val provider: () -> SyncController = {
+                resolutions++
+                graph.syncController
+            }
+            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    playbackController = graph.playbackController,
+                    playbackState = graph.playbackStateSource,
+                    startup = startup,
+                    syncController = provider,
+                )
+            }
+
+            waitForIdle()
+            onNodeWithText("Updating your library…").assertExists()
+            assertThat(resolutions).isEqualTo(0)
+
+            runOnIdle { startup = StartupGateState.Ready }
+            waitUntil("the banner loads after the gate opens", TIMEOUT_MS) {
+                onAllNodesWithText("Another device removed 2 podcasts and 1 group. Apply here too?")
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            assertThat(resolutions).isEqualTo(1)
+        }
+
     @Test
     fun licencesListTheOpenJdkRuntime() =
         runComposeUiTest {
@@ -297,6 +495,85 @@ class NeutrodyneWindowContentTest {
             }
         }
 
+    private suspend fun seedLinkedAndHeld(graph: ch.lkmc.neutrodyne.desktop.di.DesktopAppGraph): Long {
+        seedLinked(graph)
+        return seedHeldRow(
+            graph.databaseOpener.requireDatabase(),
+            podcasts = listOf("a", "b"),
+            groups = listOf("news"),
+            summaryPodcasts = listOf("Held Show A", "Held Show B"),
+            summaryGroups = listOf("Held Group"),
+            heldAt = 1,
+        )
+    }
+
+    private suspend fun seedLinked(graph: ch.lkmc.neutrodyne.desktop.di.DesktopAppGraph) {
+        val db = graph.databaseOpener.requireDatabase()
+        graph.settingsRepository.set(SyncSettingKeys.SERVER_URL, "https://sync.example")
+        graph.secretStore.put("sync:sync.example", "sync", "token".toCharArray())
+        db.withWriteTransaction {
+            db.syncStateDao().upsert(
+                SyncStateEntity(
+                    enabled = true,
+                    serverUrl = "https://sync.example",
+                    accountId = "acc",
+                    deviceId = "dev",
+                    nodeId = "node",
+                    linkedAt = 1L,
+                    lastSyncAt = 1L,
+                ),
+            )
+        }
+    }
+
+    /** One `sync_held` row in HELD state, as the guard's 10 step 2 write would have left it. */
+    private suspend fun seedHeldRow(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        podcasts: List<String>,
+        groups: List<String>,
+        summaryPodcasts: List<String>,
+        summaryGroups: List<String>,
+        heldAt: Long,
+    ): Long {
+        val removals = { rids: List<String> ->
+            JsonArray(
+                rids.map { rid ->
+                    buildJsonObject {
+                        put("rid", rid)
+                        put("clock", "0:0")
+                    }
+                },
+            )
+        }
+        val batch =
+            buildJsonObject {
+                put("state", "HELD")
+                put("podcasts", removals(podcasts))
+                put("groups", removals(groups))
+            }.toString()
+        val summary =
+            buildJsonObject {
+                put("podcasts", JsonArray(summaryPodcasts.map(::JsonPrimitive)))
+                put("groups", JsonArray(summaryGroups.map(::JsonPrimitive)))
+            }.toString()
+        return db.syncHeldDao().insert(SyncHeldEntity(batch = batch, summary = summary, heldAt = heldAt))
+    }
+
+    /** The window content with the graph's real installers and the lazy held-banner controller. */
+    private fun ComposeUiTest.setHeldContent() {
+        val provider: () -> SyncController = { graph.syncController }
+        setContent {
+            NeutrodyneWindowContent(
+                installers = graph.entryInstallers,
+                menuActions = DesktopMenuActions(),
+                viewModelFactory = graph.metroViewModelFactory,
+                playbackController = graph.playbackController,
+                playbackState = graph.playbackStateSource,
+                syncController = provider,
+            )
+        }
+    }
+
     private fun ComposeUiTest.setWindowContent() {
         // The default (Feeds) tab is VM-backed: its repositories come from the graph's database
         // accessor, which gates on the open — idempotent, so per-test awaits stay harmless.
@@ -317,6 +594,7 @@ class NeutrodyneWindowContentTest {
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+        const val GROUP_UUID = "00000000-0000-4000-8000-000000000001"
 
         val UPDATE_INFO =
             UpdateInfo(

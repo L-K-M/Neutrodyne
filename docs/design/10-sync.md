@@ -41,7 +41,7 @@ Neutrodyne Sync keeps **user state** — subscriptions, groups, listening state,
 | Module | Kind ([PLAN 5.1](../PLAN.md#51-module-graph)) | Contents from this document |
 |---|---|---|
 | `:sync:protocol` (`ch.lkmc.neutrodyne.sync.protocol`) | KMP, `commonMain` only, depends on nothing project-internal; its JVM variant is used by `:sync:server` | `Hlc`, `HlcClock`, `NodeId`, `OrderKey`, `FieldKind`, `FieldSpec`, `SyncCollection`, `RecordId`, `RecordState`, `FieldState`, `RecordMerger`, `MergeResult`, `EpisodeStateRules`, `SurvivorRule`, the DTOs of [Protocol](#protocol), `SyncErrorCode`, `ProtocolLimits`, `PROTOCOL_VERSION = 1`, `SyncJson`, `ConformanceVectors` (files `sync/protocol/vectors/*.json`) |
-| `:sync:api` (`ch.lkmc.neutrodyne.sync.api`) | KMP, `commonMain` only | `SyncController`, `SyncStatus`, `LinkFlow`, `LinkMethod`, `LinkState`, `FirstLinkChoice`, `MassChangePrompt`, `HeldDecision`, `RemoteSessionOffer`, `SyncNotice`, `SyncDisclosure`, `SyncDevice`, `ServerInfo`, `SyncError` |
+| `:sync:api` (`ch.lkmc.neutrodyne.sync.api`) | KMP, `commonMain` only | `SyncController`, `SyncStatus`, `LinkFlow`, `LinkMethod`, `LinkState`, `FirstLinkChoice`, `MassChangePrompt`, `HeldResolution`, `HeldResolveResult`, `RemoteSessionOffer`, `SyncNotice`, `SyncDisclosure`, `SyncDevice`, `ServerInfo`, `SyncError` |
 | `:core:domain` | contracts | `PlaybackSyncPort` (implemented by the playback adapters, consumed by sync), `PrePlaySync` (implemented by sync, consumed by `:playback:core`), `SyncIngestHook` (implemented by sync, consumed by 03's ingestion) |
 | `:sync:impl` (`ch.lkmc.neutrodyne.sync.impl`) | KMP shared implementation | `commonMain`: `SyncEngine`, `SyncClient`, `SyncEventsClient`, `OutboxReader`, `ChangeBuilder`, `SyncApplier`, `EpisodeMatcher`, `SyncParkedStateApplier`, `FirstLinkMerger`, `MassChangeGuard`, `SessionAdopter`, `SettingsCapture`, `SyncPrePlay`, `ServerDiscovery`, `SyncTokenStore`, `SyncScheduler`, `SyncBackoff`, `SyncControllerImpl`; `androidMain`: `WorkManagerSyncScheduler`, `SyncWorker`, `LocalNetworkPermissionGate`; `desktopMain`: `DesktopSyncLane` |
 | `:feature:sync` | KMP feature | Settings › Sync screens and dialogs (layout and wording: [08 Sync screens](08-ui-ux.md#sync-screens)) |
@@ -61,7 +61,7 @@ interface SyncController {
     suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncError>   // on a linked device
     suspend fun confirmLink(userCode: String, approve: Boolean): Outcome<Unit, SyncError>
     suspend fun syncNow(): Outcome<SyncReport, SyncError>
-    suspend fun resolveHeld(id: Long, decision: HeldDecision)
+    suspend fun resolveHeld(id: Long, resolution: HeldResolution): HeldResolveResult
     suspend fun devices(): Outcome<List<SyncDevice>, SyncError>
     suspend fun renameDevice(deviceId: String, name: String): Outcome<Unit, SyncError>
     suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncError>
@@ -74,7 +74,17 @@ interface SyncController {
 }
 enum class LinkMethod { CODE, INVITE, PASSWORD }
 enum class FirstLinkChoice { MERGE, USE_SERVER_LIBRARY, USE_THIS_LIBRARY_EVERYWHERE }
-enum class HeldDecision { APPLY, KEEP_MINE, DECIDE_LATER }
+enum class HeldResolution { APPLY, KEEP_MINE, DECIDE_LATER }
+
+// MS2 deviation: the dialog needs an explicit outcome, so resolveHeld reports one instead of
+// returning Unit — Gone when another resolution decided the batch first, Failed when the write
+// failed before commit (the batch stays held and retryable), Resolved otherwise. Apply and
+// Keep mine mutate and delete the held row in one transaction.
+sealed interface HeldResolveResult {
+    data object Resolved : HeldResolveResult
+    data object Gone : HeldResolveResult
+    data object Failed : HeldResolveResult
+}
 
 interface LinkFlow {                                            // one per attempt; cancel() abandons it
     val state: StateFlow<LinkState>
@@ -126,8 +136,8 @@ sealed interface SyncNotice {
     data class Resynced(val addedFromThisDevice: Int) : SyncNotice      // after 410 cursor_expired
     data class FeedPasswordNeeded(val podcastIds: List<Long>) : SyncNotice
 }
-data class MassChangePrompt(val id: Long, val fromDevice: String?, val podcastTitles: List<String>,
-                            val groupNames: List<String>, val heldAtMs: Long)
+data class MassChangePrompt(val id: Long, val deviceName: String?, val podcastTitles: List<String>,
+                            val groupNames: List<String>)
 data class SyncDisclosure(val serverHost: String, val encrypted: Boolean, val privateFeedLinks: Int,
                           val sharesFeedPasswords: Boolean)
 ```

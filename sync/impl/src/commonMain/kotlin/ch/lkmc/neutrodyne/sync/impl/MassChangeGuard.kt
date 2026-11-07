@@ -268,6 +268,12 @@ object MassChangeGuard {
         state: HeldState,
     ): Boolean = stateOf(row.batch) == state && decode(row.batch).let { it.podcasts.any { r -> r.rid == rid } }
 
+    /**
+     * Whether a `sync_held` row is a HELD batch, the only state the prompt reviews (10 step 3);
+     * STAGED is provisional and DEFERRED waits for playback. Malformed JSON is not held.
+     */
+    internal fun isHeld(json: String): Boolean = runCatching { stateOf(json) == HeldState.HELD }.getOrDefault(false)
+
     /** The batch state a row's JSON carries; legacy rows without the field read as STAGED. */
     private fun stateOf(json: String): HeldState {
         val obj = SyncJson.parseToJsonElement(json).jsonObject

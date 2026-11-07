@@ -6,6 +6,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -20,6 +21,7 @@ import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.sync.api.DiscoveredServer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
+import ch.lkmc.neutrodyne.sync.api.HeldResolveResult
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
@@ -55,9 +57,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlin.random.Random
 
 /** Which unauthenticated call a failure came from, so a 401 maps to the right problem. */
@@ -72,6 +76,7 @@ private const val ACCESS_DENIED = "access_denied"
 private const val MIN_LINK_INTERVAL_SECONDS = 5
 private const val SLOW_DOWN_INCREMENT_SECONDS = 5
 private const val UNLINK_PUSH_BUDGET_MS = 5_000L
+private const val TAG = "SyncController"
 private const val DELETE_CONFIRMATION = "DELETE"
 private const val RESET_MODE_PURGE = "purge"
 
@@ -174,6 +179,10 @@ class SyncControllerImpl(
         // The engine's rounds post one-shot notices through the shared bus; relay them into the
         // controller's flow so the shells collect one channel.
         scope.launch { noticeBus.shared.collect { _notices.emit(it) } }
+        // The held prompt is owned here: the Room flow re-emits on every `sync_held` write from
+        // any round or resolver (the scheduler's, the worker's, `resolveHeld`), so it loads
+        // persisted batches at start-up and follows later rounds without polling.
+        scope.launch { observeHeldChanges() }
     }
 
     suspend fun refreshStatus() {
@@ -498,36 +507,34 @@ class SyncControllerImpl(
         }
     }
 
-    override fun resolveHeld(
+    override suspend fun resolveHeld(
         id: Long,
         resolution: HeldResolution,
-    ) {
-        scope.launch {
-            val row = db.syncHeldDao().byId(id) ?: return@launch
-            val batch = runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull() ?: return@launch
-            when (resolution) {
-                HeldResolution.APPLY -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.apply(db, batch, clock.now())
-                        }
+    ): HeldResolveResult {
+        // Decide later is a keep, not a write: the batch stays offered (10 Mass-change guard step 3).
+        if (resolution == HeldResolution.DECIDE_LATER) return HeldResolveResult.Resolved
+        return try {
+            db.withWriteTransaction {
+                val row = db.syncHeldDao().byId(id) ?: return@withWriteTransaction HeldResolveResult.Gone
+                if (!MassChangeGuard.isHeld(row.batch)) return@withWriteTransaction HeldResolveResult.Failed
+                val batch = SyncJson.decodeFromString<HeldBatch>(row.batch)
+                db.syncStateDao().withApplying {
+                    when (resolution) {
+                        HeldResolution.APPLY -> MassChangeGuard.apply(db, batch, clock.now())
+                        HeldResolution.KEEP_MINE -> MassChangeGuard.keepMine(db, batch, clock)
+                        HeldResolution.DECIDE_LATER -> Unit // returned above
                     }
                 }
-
-                HeldResolution.KEEP_MINE -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.keepMine(db, batch, clock)
-                        }
-                    }
-                }
-
-                HeldResolution.DECIDE_LATER -> {
-                    return@launch
-                }
+                // The row's delete rides the same transaction, so a failure can never leave an
+                // applied batch still offered for review.
+                db.syncHeldDao().delete(id)
+                HeldResolveResult.Resolved
             }
-            db.syncHeldDao().delete(id)
-            refreshHeld()
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Log.w(TAG) { "resolveHeld($id, $resolution) failed (${failure::class.simpleName})" }
+            HeldResolveResult.Failed
         }
     }
 
@@ -988,24 +995,36 @@ class SyncControllerImpl(
         return false
     }
 
-    private suspend fun refreshHeld() {
-        _heldChanges.value =
-            db.syncHeldDao().all().mapNotNull { row ->
-                val batch =
-                    runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull()
-                        ?: return@mapNotNull null
-                val summary =
-                    runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
-                MassChangePrompt(
-                    id = row.id,
-                    deviceName = null,
-                    podcastTitles =
-                        summary?.get("podcasts")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                    groupNames =
-                        summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                )
-            }
+    /** Observes the table and publishes the HELD batches, oldest first (the query's order). */
+    private suspend fun observeHeldChanges() {
+        db.syncHeldDao().observeAll().collect { rows ->
+            _heldChanges.value = rows.mapNotNull(::heldPrompt)
+        }
     }
+
+    /**
+     * The reviewable prompt for one `sync_held` row. Only HELD batches are prompts: STAGED rows
+     * are provisional and DEFERRED rows wait for playback (10 Mass-change guard). A malformed
+     * batch is skipped; a malformed summary renders with empty lists, so one bad row cannot
+     * break the collection. The JSON stays behind this application service.
+     */
+    private fun heldPrompt(row: SyncHeldEntity): MassChangePrompt? {
+        if (!MassChangeGuard.isHeld(row.batch)) return null
+        val summary = runCatching { SyncJson.parseToJsonElement(row.summary).jsonObject }.getOrNull()
+        return MassChangePrompt(
+            id = row.id,
+            deviceName = null,
+            podcastTitles = summary.stringList("podcasts"),
+            groupNames = summary.stringList("groups"),
+        )
+    }
+
+    private fun JsonObject?.stringList(key: String): List<String> =
+        this
+            ?.get(key)
+            ?.let { element -> runCatching { element.jsonArray }.getOrNull() }
+            ?.mapNotNull { element -> (element as? JsonPrimitive)?.contentOrNull }
+            .orEmpty()
 }
 
 /** `spaces and hyphens ignored, case-insensitive`, as the server normalises codes (10 Link methods). */
