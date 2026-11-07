@@ -75,7 +75,7 @@ internal class DbMaintenanceImpl(
             stats.durationsMs[name] = clock.elapsedRealtime() - start
         }
 
-        step("retention") { stats.episodesDeleted = retentionSweep(now, deadlineElapsedMs, stats) }
+        step("retention") { retentionSweep(now, deadlineElapsedMs, stats) }
         step("orphans") { orphanSweep(stats) }
         step("imports") { stats.sessionsDeleted = importSessionCleaner.cleanExpired(now) }
         step("sync") {
@@ -103,11 +103,10 @@ internal class DbMaintenanceImpl(
         now: Long,
         deadlineElapsedMs: Long?,
         stats: Stats,
-    ): Int {
+    ) {
         val dao = db.maintenanceDao()
         val absentBefore = now - RETENTION_ABSENT_MS
         val playedSince = now - RETENTION_PLAYED_MS
-        var deleted = 0
         while (true) {
             if (deadlineElapsedMs != null && clock.elapsedRealtime() >= deadlineElapsedMs) {
                 stats.stoppedEarly = true
@@ -126,12 +125,12 @@ internal class DbMaintenanceImpl(
                         dao.deleteEpisodes(ids)
                     }
                 }
-            deleted += batch
+            // Counted per committed batch so a mid-sweep failure keeps the partial progress.
+            stats.episodesDeleted += batch
             if (batch == 0) break
             // The desktop lane has no deadline; yielding keeps the writer lock shareable.
             yield()
         }
-        return deleted
     }
 
     // ---- Step 2: orphan sweeps ----------------------------------------------------------------------

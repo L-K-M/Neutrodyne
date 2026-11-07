@@ -147,6 +147,36 @@ class DbMaintenanceTest {
         }
 
     @Test
+    fun aMidSweepFailureKeepsTheCommittedDeleteCount() =
+        runTest {
+            val pid = db.podcastDao().insertPodcast(podcastEntity(feedKey = "k"))
+            db.episodeDao().insertStub(
+                episodeEntity(podcastId = pid, identityKey = "newest", sortDate = clock.now()),
+            )
+            // One full batch of candidates commits, then the doomed row aborts batch two.
+            repeat(500) { seedGoneEpisode(pid, "g$it", sortDate = 5L) }
+            seedGoneEpisode(pid, "doom", sortDate = 4L)
+            db.useWriterConnection { conn ->
+                conn.usePrepared(
+                    "CREATE TEMP TRIGGER retention_doom AFTER DELETE ON episode" +
+                        " WHEN OLD.identityKey = 'doom' BEGIN SELECT RAISE(ABORT, 'doom'); END",
+                ) {
+                    it.step()
+                }
+            }
+
+            maintenance().run(clock.now())
+
+            val stats = Json.parseToJsonElement(settings.get(DiagnosticsSettingKeys.MAINTENANCE_STATS))
+            assertEquals(
+                500,
+                stats.jsonObject["episodesDeleted"]?.jsonPrimitive?.int,
+                "committed batches must still count when a later batch fails",
+            )
+            assertEquals(2, db.maintenanceDao().episodeCount(), "newest + aborted doom row remain")
+        }
+
+    @Test
     fun parkedRowsSurviveWhileUnlinked() =
         runTest {
             db
