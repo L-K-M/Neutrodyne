@@ -233,9 +233,10 @@ object SyncTriggers {
                     if (event == "ins") {
                         "NEW.positionMs > 0"
                     } else {
-                        "NEW.positionMs IS NOT OLD.positionMs OR " +
+                        // Metadata at zero is not an explicit reset of another device's progress.
+                        "NEW.positionMs IS NOT OLD.positionMs OR (NEW.positionMs > 0 AND (" +
                             "NEW.durationMs IS NOT OLD.durationMs OR " +
-                            "NEW.positionSource IS NOT OLD.positionSource"
+                            "NEW.positionSource IS NOT OLD.positionSource))"
                     }
                 val literal =
                     "CASE WHEN NEW.positionMs = 0 THEN '{\"ms\":0,\"reset\":true}' ELSE " +

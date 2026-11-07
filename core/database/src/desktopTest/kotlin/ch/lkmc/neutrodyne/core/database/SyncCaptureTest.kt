@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -133,6 +134,29 @@ class SyncCaptureTest {
                                 assertEquals(rows, outbox.rows(), "$table identical write")
                             }
                         }
+                    }
+                }
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun positionMetadataAtZeroDoesNotCaptureAReset() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                for (assignment in listOf("durationMs=200", "positionSource='DOWNLOAD'")) {
+                    db.withWriteTransaction {
+                        db.useWriterConnection { connection ->
+                            connection.exec("DELETE FROM sync_outbox")
+                            connection.exec("UPDATE episode_position SET $assignment WHERE episodeId=1")
+                        }
+                        assertNull(
+                            db.syncOutboxDao().get("episode", episodeRid, "pos"),
+                            "Metadata at zero must not reset another device's playback: $assignment",
+                        )
                     }
                 }
             } finally {
