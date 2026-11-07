@@ -110,10 +110,17 @@ internal class DiagnosticsViewModel(
                         userMessages.post(
                             UiText.Res(
                                 when (outcome.error) {
-                                    DiagnosticsError.CANCELLED -> Res.string.diagnostics_export_cancelled
-                                    DiagnosticsError.NOT_ENOUGH_SPACE ->
+                                    DiagnosticsError.CANCELLED -> {
+                                        Res.string.diagnostics_export_cancelled
+                                    }
+
+                                    DiagnosticsError.NOT_ENOUGH_SPACE -> {
                                         Res.string.diagnostics_export_no_space
-                                    else -> Res.string.diagnostics_export_failed
+                                    }
+
+                                    else -> {
+                                        Res.string.diagnostics_export_failed
+                                    }
                                 },
                             ),
                         )
