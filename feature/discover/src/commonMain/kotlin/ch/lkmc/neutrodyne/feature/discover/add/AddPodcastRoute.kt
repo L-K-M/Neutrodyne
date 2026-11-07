@@ -68,6 +68,8 @@ internal fun AddPodcastRoute(
         state = state,
         onResolve = viewModel::resolve,
         onAutoResolve = viewModel::autoResolve,
+        onUsePodcast = viewModel::usePodcast,
+        onSubscribeOwner = viewModel::subscribeOwner,
         onCredentials = viewModel::resolveWithCredentials,
         onCancelResolve = viewModel::cancelResolve,
         onLookupOnce = viewModel::lookupOnce,
