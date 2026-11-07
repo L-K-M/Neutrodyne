@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
@@ -186,7 +187,13 @@ internal class DbMaintenanceImpl(
         }
         stats.quickCheck = "failed"
         Log.e(TAG) { "PRAGMA quick_check reported ${bad.size} problem rows" }
-        suspendRunCatching { settings.set(DiagnosticsSettingKeys.DB_QUICK_CHECK_FAILED_AT, now) }
+        suspendRunCatching {
+            if (settings.set(DiagnosticsSettingKeys.DB_QUICK_CHECK_FAILED_AT, now) !is
+                Outcome.Success
+            ) {
+                Log.w(TAG) { "quick-check failure stamp could not be persisted" }
+            }
+        }
     }
 
     /** 02 step 7's five guards, each recorded so the diagnostics row can say why it skipped. */
@@ -298,8 +305,11 @@ internal class DbMaintenanceImpl(
                 put("durationsMs", buildJsonObject { stats.durationsMs.forEach { (k, v) -> put(k, v) } })
             }
         suspendRunCatching {
-            settings.set(DiagnosticsSettingKeys.MAINTENANCE_LAST_RUN_AT, now)
-            settings.set(DiagnosticsSettingKeys.MAINTENANCE_STATS, json.toString())
+            val stamped = settings.set(DiagnosticsSettingKeys.MAINTENANCE_LAST_RUN_AT, now)
+            val recorded = settings.set(DiagnosticsSettingKeys.MAINTENANCE_STATS, json.toString())
+            if (stamped !is Outcome.Success || recorded !is Outcome.Success) {
+                Log.w(TAG) { "db-maintenance stats record could not be persisted" }
+            }
         }
     }
 
