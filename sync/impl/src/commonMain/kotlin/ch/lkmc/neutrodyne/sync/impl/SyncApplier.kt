@@ -167,14 +167,15 @@ class SyncApplier(
         if (existing == null) {
             val feedUrl = merge.record.stringField("feedUrl") ?: return RecordOutcome.Invalid
             val feedKey = UrlNormalizer.forIdentity(feedUrl) ?: return RecordOutcome.Invalid
+            // Another podcast already holds this feed: the merge belongs to it, not to a second row.
+            if (db.podcastDao().byFeedKey(feedKey) != null) return RecordOutcome.Invalid
             val now = clock.now()
-            val syncId =
-                if (db.podcastDao().bySyncId(rid) == null && !db.backupDao().syncIdInUse(rid)) rid else rid
+            val syncId = rid
             val title = merge.record.stringField("title") ?: feedUrl
             val idInserted =
                 db
                     .podcastDao()
-                    .insertPodcast(
+                    .insertPodcastOrIgnore(
                         PodcastEntity(
                             syncId = syncId,
                             sourceType =
@@ -197,6 +198,7 @@ class SyncApplier(
                             artworkKey = "u-$syncId",
                         ),
                     )
+            if (idInserted == -1L) return RecordOutcome.Invalid
             // A `*` row's aliases and the overrides land with the projection.
             merge.record.growSets["feedKeys"]?.forEach { key ->
                 if (key != feedKey) {
