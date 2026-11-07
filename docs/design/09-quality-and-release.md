@@ -2421,3 +2421,15 @@ The pre-existing W6 `:download:impl` device component remains an exception
 to the device-module list above: its smoke tests access internal builders.
 W10 adds all integrated journeys to `:app`; it does not widen production
 visibility merely to relocate those internal smoke tests.
+
+**Implementation note (2026-11-07, nightly-green).** The API29 leg of
+`bmgr-download-exclusion` cannot produce a positive archive: API 29's stock
+`LocalTransport.checkFullBackupSize` rejects a zero-size payload, and the app's
+`xml-v28/backup_rules.xml` includes the snapshot/settings only under
+`requireFlags="clientSideEncryption"` or `"deviceToDeviceTransfer"`, which the
+stock transport does not set (its `fake_encryption_flag` is the distinct
+test-only `FLAG_FAKE_CLIENT_SIDE_ENCRYPTION_ENABLED` bit). This is the legacy
+negative diagnostic 05 already documents for API 28/29. The leg now passes the
+emulator API level to `scripts/ci/bmgr-download-exclusion.sh` and, on API29,
+requires the documented refusal and the absence of an archive; the positive
+archive check runs on API36 (the `data_extraction_rules.xml` path, API 31+).
