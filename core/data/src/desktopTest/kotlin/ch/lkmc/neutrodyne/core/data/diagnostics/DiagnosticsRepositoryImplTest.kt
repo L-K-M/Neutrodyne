@@ -143,4 +143,24 @@ class DiagnosticsRepositoryImplTest {
             "rendered report exceeds the byte budget: ${text.encodeToByteArray().size}",
         )
     }
+
+    @Test
+    fun androidWithoutAShareUriFailsInsteadOfReturningACachePath() =
+        runTest {
+            val dbFile = temp.resolve("neutrodyne.db")
+            Files.write(dbFile, byteArrayOf(1, 2, 3))
+            val repo =
+                repository(
+                    FakePlatform(PlatformKind.ANDROID),
+                    destination = FakeDestination(share = null),
+                    factory = FakeFactory(databasePath = dbFile.toString(), usable = Long.MAX_VALUE),
+                )
+
+            // A null FileProvider URI left Success holding the private cache path —
+            // the screen would "share" a filesystem path no other app can read.
+            assertEquals(
+                Outcome.Failure(DiagnosticsError.FAILED),
+                repo.exportDatabaseCopy(null),
+            )
+        }
 }
