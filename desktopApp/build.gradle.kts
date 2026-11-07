@@ -221,7 +221,7 @@ if (youtubeEngine) {
             group = "build"
             description =
                 "Stages the bundled python-build-standalone runtime and engine resources into " +
-                    "desktop-resources (11 Resources layout)."
+                "desktop-resources (11 Resources layout)."
             // Task-path strings resolve lazily, so :youtube:ytdlp-desktop need not be configured
             // before :desktopApp (Gradle configures the shell first).
             dependsOn(
@@ -243,9 +243,11 @@ if (youtubeEngine) {
             }
         }
     // createDistributable is registered by Compose's afterEvaluate, so wire it lazily.
-    tasks.matching { it.name == "createDistributable" }
+    tasks
+        .matching { it.name == "createDistributable" }
         .configureEach { dependsOn(syncEngineRuntimeResources) }
-    tasks.matching { it.name == "prepareAppResources" }
+    tasks
+        .matching { it.name == "prepareAppResources" }
         .configureEach { dependsOn(syncEngineRuntimeResources) }
 }
 

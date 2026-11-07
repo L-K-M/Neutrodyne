@@ -13,8 +13,8 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import org.gradle.process.ExecOperations
 import org.gradle.kotlin.dsl.register
+import org.gradle.process.ExecOperations
 import java.io.File
 import java.net.URI
 import java.net.http.HttpClient
@@ -58,7 +58,7 @@ internal fun Project.registerPythonStandalone() {
             group = "build"
             description =
                 "Downloads the pinned python-build-standalone archive for ${target.id} and checks " +
-                    "its SHA-256 against python-components.lock (11 CPython selection and pins)."
+                "its SHA-256 against python-components.lock (11 CPython selection and pins)."
             this.lockFile.set(lockFile)
             targetId.set(target.id)
             archive.set(pythonStandalone.map { it.file("archive") })
@@ -69,7 +69,7 @@ internal fun Project.registerPythonStandalone() {
         group = "build"
         description =
             "Trims the fetched python-build-standalone archive with scripts/engine/trim-python.sh " +
-                "(11 Trim list and checks)."
+            "(11 Trim list and checks)."
         dependsOn(fetch)
         this.lockFile.set(lockFile)
         archive.set(fetch.flatMap { it.archive })
@@ -199,9 +199,10 @@ abstract class TrimPythonStandalone : DefaultTask() {
             throw GradleException("missing trim script $script (11 Trim list and checks)")
         }
         val archiveFile = archive.get().asFile
-        execOperations.exec {
-            commandLine("bash", script.absolutePath, archiveFile.absolutePath, out.absolutePath)
-        }.assertNormalExitValue()
+        execOperations
+            .exec {
+                commandLine("bash", script.absolutePath, archiveFile.absolutePath, out.absolutePath)
+            }.assertNormalExitValue()
         val python = File(out, "python")
         if (!python.isDirectory) {
             throw GradleException("trim-python.sh produced no python/ tree under ${out.absolutePath}")

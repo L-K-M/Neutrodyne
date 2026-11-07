@@ -84,8 +84,11 @@ class DesktopPythonRuntimeLocator(
     /** The interpreter inside a staged runtime tree (11 Resources layout): `python/python.exe` on
      * Windows, `python/bin/python3` elsewhere. */
     private fun interpreterIn(resources: File): File =
-        if (isWindows()) resources.resolve("python/python.exe")
-        else resources.resolve("python/bin/${exeName()}")
+        if (isWindows()) {
+            resources.resolve("python/python.exe")
+        } else {
+            resources.resolve("python/bin/${exeName()}")
+        }
 
     private fun exeName(): String = if (isWindows()) "python.exe" else "python3"
 
