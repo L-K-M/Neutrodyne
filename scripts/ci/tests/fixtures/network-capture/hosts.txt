@@ -1,0 +1,19 @@
+# Recorded fresh-install session (synthetic): subscribe two feeds, refresh, stream, download,
+# search, add and play a YouTube channel, link a test sync server, check for updates, check the
+# engine update. One host per line, as scripts/ci/network-capture.sh writes them.
+feeds.example.com
+feeds2.example.net
+cdn.example.com
+example.com
+itunes.apple.com
+rss.marketingtools.apple.com
+api.fyyd.de
+api.podcastindex.org
+www.youtube.com
+i.ytimg.com
+yt3.googleusercontent.com
+rr3---sn-vgqsenlk.googlevideo.com
+l-k-m.github.io
+github.com
+release-assets.githubusercontent.com
+sync.example.org
