@@ -71,8 +71,16 @@ class DesktopMaintenanceLaneTest {
             val restarted = DesktopMaintenanceLane(maintenance, settings)
             clock.nowMs += 30.minutes.inWholeMilliseconds
             restarted.run(now())
+            // Tick past the restarted guard while still inside the 24 h window — without
+            // this wait the run returns at the guard and the stamp is never consulted.
+            clock.nowMs += 11.minutes.inWholeMilliseconds
             restarted.run(now())
             assertEquals(1, maintenance.calls.size, "a restart inside 24 h does not re-run")
+
+            // Once the stamp ages past the interval the next pass fires.
+            clock.nowMs += 24.hours.inWholeMilliseconds
+            restarted.run(now())
+            assertEquals(2, maintenance.calls.size, "the stamp re-arms the daily pass")
         }
 
     @Test
