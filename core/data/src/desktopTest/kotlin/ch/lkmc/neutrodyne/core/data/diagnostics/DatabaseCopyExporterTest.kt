@@ -10,8 +10,13 @@ import ch.lkmc.neutrodyne.core.database.DatabaseFactory
 import ch.lkmc.neutrodyne.core.domain.DiagnosticsError
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import androidx.room3.useWriterConnection
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import java.nio.file.Files
@@ -129,6 +134,47 @@ class DatabaseCopyExporterTest {
 
                 exporter.removeStale()
                 assertTrue(io.dispatches > 0, "the export-dir sweep must run on io")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aHeldWriterTurnsBusyInsideTheWaitBound() =
+        runTest {
+            val db = TestDb.inMemory()
+            val dbFile = temp.resolve("held.db")
+            Files.write(dbFile, byteArrayOf(1))
+            try {
+                // Occupy the pool's single writer connection so acquisition outlives the bound.
+                val holding = CompletableDeferred<Unit>()
+                val holder =
+                    launch(Dispatchers.Default) {
+                        db.useWriterConnection {
+                            holding.complete(Unit)
+                            awaitCancellation()
+                        }
+                    }
+                holding.await()
+                try {
+                    val exporter =
+                        DatabaseCopyExporter(
+                            db,
+                            FakeFactory(databasePath = dbFile.toString(), usable = Long.MAX_VALUE),
+                            driver,
+                            storagePaths,
+                            FileSystem.SYSTEM,
+                            TestClock(),
+                            Dispatchers.Default,
+                            writerWaitMs = 200,
+                        )
+                    assertEquals(
+                        Outcome.Failure(DiagnosticsError.DATABASE_BUSY),
+                        exporter.produce(),
+                    )
+                } finally {
+                    holder.cancelAndJoin()
+                }
             } finally {
                 db.close()
             }
