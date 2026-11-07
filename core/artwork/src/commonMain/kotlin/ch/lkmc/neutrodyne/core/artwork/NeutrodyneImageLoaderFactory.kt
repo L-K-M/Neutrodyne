@@ -16,7 +16,7 @@ import okio.Path.Companion.toPath
  * process with `SingletonImageLoader.setSafe` by `NeutrodyneApplication` and the desktop's main.
  * The network fetcher and memory sizing are platform contributions; the disk cache is
  * `<cache>/coil` at 256 MB on both. Coil ignores `Cache-Control` — freshness is the store's
- * monthly refresh, not HTTP caching. `YouTubeThumbnailInterceptor` joins at M8,
+ * monthly refresh, not HTTP caching. `YouTubeThumbnailInterceptor` selects video sizes;
  * `TinyImageInterceptor` rejects tiny cover originals.
  */
 @Inject
@@ -35,6 +35,7 @@ public class NeutrodyneImageLoaderFactory(
             .components {
                 network.install(this)
                 add(ArtworkRefMapper(store()))
+                add(YouTubeThumbnailInterceptor(store()))
                 add(TinyImageInterceptor())
             }.memoryCache { memory.build(context) }
             .apply { memory.configure(this) }

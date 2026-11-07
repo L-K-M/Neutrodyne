@@ -69,6 +69,7 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
 import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
 import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
@@ -465,37 +466,36 @@ private fun LeadingSlot(
     row: EpisodeRow,
     style: EpisodeRowStyle,
 ) {
-    // Unavailable art is decorative; the readable metadata must retain full text contrast.
+    // Unavailable art is decorative; readable metadata retains full text contrast.
     val artworkAlpha = if (row.availability == Availability.AVAILABLE) 1f else DIMMED_ALPHA
+    if (row.sourceType == SourceType.YOUTUBE_CHANNEL) {
+        val video = LocalYouTubeRowArt.current == YouTubeRowArt.VIDEO_THUMBNAIL
+        CoverArt(
+            ref = if (video) row.artwork else row.podcastArtwork,
+            monogram = rememberMonogram(if (video) row.title else row.podcastTitle),
+            modifier =
+                Modifier
+                    .size(width = if (video) VIDEO_THUMB_WIDTH else COVER_SIZE, height = COVER_SIZE)
+                    .alpha(artworkAlpha)
+                    .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
+            aspect = if (video) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
+            avgArgb = if (video) row.artworkAvgArgb else row.podcastArtworkAvgArgb,
+        )
+        return
+    }
+
     when (style) {
         EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE -> {
-            if (row.sourceType != SourceType.RSS) {
-                // YouTube rows show the 16:9 thumbnail (08; CHANNEL_AVATAR arrives with M8's setting).
-                CoverArt(
-                    ref = row.artwork,
-                    monogram = rememberMonogram(row.title),
-                    modifier =
-                        Modifier
-                            .size(
-                                width = VIDEO_THUMB_WIDTH,
-                                height = COVER_SIZE,
-                            ).alpha(artworkAlpha)
-                            .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
-                    aspect = CoverAspect.WIDE_16_9,
-                    avgArgb = row.artworkAvgArgb,
-                )
-            } else {
-                CoverArt(
-                    ref = row.artwork,
-                    monogram = rememberMonogram(row.podcastTitle),
-                    modifier =
-                        Modifier
-                            .size(COVER_SIZE)
-                            .alpha(artworkAlpha)
-                            .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
-                    avgArgb = row.artworkAvgArgb,
-                )
-            }
+            CoverArt(
+                ref = row.artwork,
+                monogram = rememberMonogram(row.podcastTitle),
+                modifier =
+                    Modifier
+                        .size(COVER_SIZE)
+                        .alpha(artworkAlpha)
+                        .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
+                avgArgb = row.artworkAvgArgb,
+            )
         }
 
         EpisodeRowStyle.PODCAST -> {

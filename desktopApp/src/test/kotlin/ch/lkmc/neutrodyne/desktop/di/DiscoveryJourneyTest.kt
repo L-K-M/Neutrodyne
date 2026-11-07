@@ -17,7 +17,6 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
@@ -248,18 +247,18 @@ class DiscoveryJourneyTest {
                     if (entry == Entry.PREVIEW) {
                         onNodeWithTag("nav_discover").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
                         repeat(2) {
-                            onRoot().performKeyInput { pressKey(Key.Escape) }
+                            onNodeWithTag("nav_discover").performKeyInput { pressKey(Key.Escape) }
                             waitForIdle()
                         }
                         onNodeWithText("history").assertDoesNotExist()
                         onNodeWithTag("nav_discover").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
-                        onRoot().performKeyInput {
+                        onNodeWithTag("nav_discover").performKeyInput {
                             keyDown(Key.CtrlLeft)
                             pressKey(Key.F)
                             keyUp(Key.CtrlLeft)
                         }
                         onNode(hasSetTextAction()).assertIsFocused()
-                        onRoot().performKeyInput { pressKey(Key.Tab) }
+                        onNodeWithTag("nav_discover").performKeyInput { pressKey(Key.Tab) }
                         onNodeWithText("Add by URL").assertIsFocused()
                     }
                 }
