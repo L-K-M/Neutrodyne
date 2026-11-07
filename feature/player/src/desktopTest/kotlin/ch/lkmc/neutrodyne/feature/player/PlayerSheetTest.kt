@@ -39,9 +39,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
@@ -696,6 +699,20 @@ class PlayerSheetTest {
                 fixture.now = sampleNow().copy(hasNext = false)
             }
             onNodeWithContentDescription("Next episode").assertIsNotEnabled()
+        }
+
+    /** 08 Context menus: the mini player's menu offers the catalogue's Expand and Dismiss. */
+    @Test fun miniPlayerContextMenuOffersExpandAndDismiss() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Collapsed)
+            setContent { fixture.Content() }
+            onNodeWithTag("mini_player").performMouseInput { rightClick(center) }
+            onNodeWithText("Expand player").assertIsDisplayed()
+            onNodeWithText("Dismiss player").assertIsDisplayed()
+            onNodeWithText("Dismiss player").performClick()
+            assertEquals(listOf("dismiss"), fixture.calls)
+            onNodeWithTag("mini_player").performKeyInput { pressKey(Key.Menu) }
+            onNodeWithText("Go to episode").assertIsDisplayed()
         }
 
     @Test fun sleepTimerShortcutNavigatesAndSurfacesTheLiveSummary() =

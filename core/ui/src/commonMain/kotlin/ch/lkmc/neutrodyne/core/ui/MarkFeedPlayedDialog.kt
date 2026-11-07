@@ -22,9 +22,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
@@ -71,7 +74,14 @@ public fun MarkFeedPlayedDialog(
                 null
             },
     ) {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             Column(Modifier.selectableGroup()) {
                 for (option in MarkPlayedOption.entries) {
                     val label =

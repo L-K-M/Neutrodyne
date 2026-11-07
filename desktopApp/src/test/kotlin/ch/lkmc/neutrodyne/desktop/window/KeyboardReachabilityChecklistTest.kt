@@ -5,20 +5,23 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 /**
- * MD4 AC1's keyboard half: every action of 08's custom-actions catalogue that the shell owns
- * (the root shortcuts of 08 Keyboard and mouse and 11 Keyboard shortcuts, and the window menu
- * of 11 Menus) is reachable by keyboard or menu. The per-row actions whose only path is the
- * context menu are a later MD4 slice and are listed here as [Reachability.OPEN]; the M10
- * per-screen keys (Enter, Alt+↑/↓, Delete, Page Up/Down) belong to the shared UI, not this
- * shell, so they are not claimed either.
+ * MD4 AC1: every action of 08's custom-actions catalogue is reachable on the desktop by
+ * keyboard, the window menu or a row context menu. The shell owns the global playback,
+ * navigation and window actions (08 Keyboard and mouse, 11 Keyboard shortcuts and Menus);
+ * the per-row actions are the shared rows' context menus (secondary click, Menu, Shift+F10).
  *
- * The keyboard paths themselves are driven by `RootShortcutTest` (core:ui desktopTest); the
- * menu paths by `DesktopImportMenuTest`'s menu structure assertions.
+ * The keyboard paths themselves are driven by `RootShortcutTest` (core:ui desktopTest) and
+ * the context menus by `ContextMenuCatalogueTest` (core:ui desktopTest) and the per-row
+ * gesture tests; the menu paths by `DesktopImportMenuTest`'s menu structure assertions.
+ *
+ * The catalogue also carries the MS2/MS3 sync rows. Their screens are not part of this
+ * codebase yet, so they are classified [Reachability.MS2]/[Reachability.MS3] and are
+ * re-checked when those milestones land; `Use mobile data (Android)` is Android-only.
  */
 class KeyboardReachabilityChecklistTest {
     @Test
-    fun everyCatalogueActionIsReachableOrListedOpen() {
-        val unclassified = CATALOGUE.filter { it.reachability == Reachability.OPEN && it.detail.isBlank() }
+    fun everyCatalogueActionIsReachableOrOwnedByItsMilestone() {
+        val unclassified = CATALOGUE.filter { it.detail.isBlank() }
 
         assertThat(unclassified).isEmpty()
         assertThat(CATALOGUE.map { it.element to it.action }.distinct().size).isEqualTo(CATALOGUE.size)
@@ -26,10 +29,13 @@ class KeyboardReachabilityChecklistTest {
 
     @Test
     fun theShellOwnsTheGlobalPlaybackNavigationAndWindowActions() {
-        val paths = CATALOGUE.filter { it.reachability != Reachability.OPEN }.map { it.element to it.action }
+        val paths =
+            CATALOGUE
+                .filter { it.reachability in setOf(Reachability.KEYBOARD, Reachability.MENU, Reachability.CONTEXT) }
+                .map { it.element to it.action }
 
         // Playback transports and the window-level actions are the shell's; the per-row
-        // actions stay with the context-menu slice.
+        // actions belong to the shared rows' context menus.
         assertThat(paths).containsAtLeast(
             "Episode row" to "Play / Pause / Resume",
             "Episode row" to "Open podcast",
@@ -53,10 +59,10 @@ class KeyboardReachabilityChecklistTest {
     }
 
     @Test
-    fun theContextMenuSliceOwnsThePerRowActions() {
-        val open = CATALOGUE.filter { it.reachability == Reachability.OPEN }.map { it.element to it.action }
+    fun theContextMenusCarryThePerRowActions() {
+        val context = CATALOGUE.filter { it.reachability == Reachability.CONTEXT }.map { it.element to it.action }
 
-        assertThat(open).containsAtLeast(
+        assertThat(context).containsAtLeast(
             "Episode row" to "Play next",
             "Episode row" to "Play last",
             "Episode row" to "Download / Pause / Resume / Cancel / Retry / Delete download",
@@ -76,15 +82,25 @@ class KeyboardReachabilityChecklistTest {
             "Downloads row" to "Cancel",
             "Downloads row" to "Retry",
             "Downloads row" to "Share file",
+        )
+    }
+
+    @Test
+    fun theOnlyUnreachableRowsAreTheAbsentSyncScreens() {
+        val sync = CATALOGUE.filter { it.reachability in setOf(Reachability.MS2, Reachability.MS3) }
+
+        assertThat(sync.map { it.element to it.action }).containsExactly(
             "Continue on this device card" to "Play",
             "Continue on this device card" to "Dismiss",
             "Devices row" to "Rename",
             "Devices row" to "Remove",
         )
+        assertThat(CATALOGUE.filter { it.reachability == Reachability.ANDROID }.map { it.element to it.action })
+            .containsExactly("Downloads row" to "Use mobile data (Android)")
     }
 }
 
-private enum class Reachability { KEYBOARD, MENU, OPEN }
+private enum class Reachability { KEYBOARD, MENU, CONTEXT, ANDROID, MS2, MS3 }
 
 private data class CatalogueAction(
     val element: String,
@@ -94,56 +110,56 @@ private data class CatalogueAction(
 )
 
 /**
- * 08's custom-actions catalogue, classified by the desktop paths this shell provides. The
- * `detail` names the shortcut or menu item; OPEN rows are the context-menu slice's.
+ * 08's custom-actions catalogue, classified by the desktop paths the app provides. The
+ * `detail` names the shortcut, menu item or owning milestone.
  */
 private val CATALOGUE =
     listOf(
         // Episode row
         CatalogueAction("Episode row", "Play / Pause / Resume", Reachability.KEYBOARD, "Space; Playback › Play/Pause"),
-        CatalogueAction("Episode row", "Watch on YouTube", Reachability.OPEN, "context menu"),
-        CatalogueAction("Episode row", "Play next", Reachability.OPEN, "context menu"),
-        CatalogueAction("Episode row", "Play last", Reachability.OPEN, "context menu"),
+        CatalogueAction("Episode row", "Watch on YouTube", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Episode row", "Play next", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Episode row", "Play last", Reachability.CONTEXT, "context menu"),
         CatalogueAction(
             "Episode row",
             "Download / Pause / Resume / Cancel / Retry / Delete download",
-            Reachability.OPEN,
+            Reachability.CONTEXT,
             "context menu",
         ),
-        CatalogueAction("Episode row", "Mark played / Mark unplayed", Reachability.OPEN, "context menu"),
+        CatalogueAction("Episode row", "Mark played / Mark unplayed", Reachability.CONTEXT, "context menu"),
         CatalogueAction("Episode row", "Open podcast", Reachability.KEYBOARD, "Enter (row primary action)"),
-        CatalogueAction("Episode row", "Check again", Reachability.OPEN, "context menu"),
-        CatalogueAction("Episode row", "Select", Reachability.OPEN, "context menu"),
+        CatalogueAction("Episode row", "Check again", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Episode row", "Select", Reachability.CONTEXT, "context menu"),
         // Swipe-enabled rows: the configured swipe actions appear in the list above.
         // Up next row
         CatalogueAction("Up next row", "Move up", Reachability.KEYBOARD, "Alt+↑"),
         CatalogueAction("Up next row", "Move down", Reachability.KEYBOARD, "Alt+↓"),
-        CatalogueAction("Up next row", "Move to top", Reachability.OPEN, "context menu"),
+        CatalogueAction("Up next row", "Move to top", Reachability.CONTEXT, "context menu"),
         CatalogueAction("Up next row", "Remove from Up next", Reachability.KEYBOARD, "Delete"),
         // Manage groups row
         CatalogueAction("Manage groups row", "Move up", Reachability.KEYBOARD, "Alt+↑"),
         CatalogueAction("Manage groups row", "Move down", Reachability.KEYBOARD, "Alt+↓"),
-        CatalogueAction("Manage groups row", "Move to top", Reachability.OPEN, "context menu"),
+        CatalogueAction("Manage groups row", "Move to top", Reachability.CONTEXT, "context menu"),
         CatalogueAction("Manage groups row", "Edit", Reachability.KEYBOARD, "Enter (row primary action)"),
         CatalogueAction("Manage groups row", "Delete", Reachability.KEYBOARD, "Delete"),
         // Cover tile
         CatalogueAction("Cover tile", "Open", Reachability.KEYBOARD, "Enter"),
-        CatalogueAction("Cover tile", "Select", Reachability.OPEN, "context menu"),
-        CatalogueAction("Cover tile", "Add to groups", Reachability.OPEN, "context menu"),
-        CatalogueAction("Cover tile", "Unsubscribe", Reachability.OPEN, "context menu"),
+        CatalogueAction("Cover tile", "Select", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Cover tile", "Add to groups", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Cover tile", "Unsubscribe", Reachability.CONTEXT, "context menu"),
         // Group tile and tab
         CatalogueAction("Group tile and tab", "Open feed", Reachability.KEYBOARD, "Enter"),
-        CatalogueAction("Group tile and tab", "Play", Reachability.OPEN, "context menu"),
-        CatalogueAction("Group tile and tab", "Refresh", Reachability.OPEN, "context menu"),
-        CatalogueAction("Group tile and tab", "Edit", Reachability.OPEN, "context menu"),
+        CatalogueAction("Group tile and tab", "Play", Reachability.CONTEXT, "Feeds group tab menu"),
+        CatalogueAction("Group tile and tab", "Refresh", Reachability.CONTEXT, "Feeds group tab menu"),
+        CatalogueAction("Group tile and tab", "Edit", Reachability.CONTEXT, "Library tile and Feeds tab menus"),
         // Feeds pager
         CatalogueAction("Feeds pager", "Next group", Reachability.KEYBOARD, "Ctrl+Tab"),
         CatalogueAction("Feeds pager", "Previous group", Reachability.KEYBOARD, "Ctrl+Shift+Tab"),
         // Mini player
         CatalogueAction("Mini player", "Play/Pause", Reachability.KEYBOARD, "Space"),
         CatalogueAction("Mini player", "Skip forward", Reachability.KEYBOARD, "→"),
-        CatalogueAction("Mini player", "Expand player", Reachability.OPEN, "context menu"),
-        CatalogueAction("Mini player", "Dismiss (paused)", Reachability.OPEN, "context menu"),
+        CatalogueAction("Mini player", "Expand player", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Mini player", "Dismiss (paused)", Reachability.CONTEXT, "context menu"),
         // Full player
         CatalogueAction("Full player", "Collapse player", Reachability.KEYBOARD, "Esc"),
         CatalogueAction("Full player", "Chapter next", Reachability.KEYBOARD, "Shift+→"),
@@ -151,19 +167,19 @@ private val CATALOGUE =
         // Downloads row
         CatalogueAction("Downloads row", "Play", Reachability.KEYBOARD, "Enter"),
         CatalogueAction("Downloads row", "Pause/Resume", Reachability.KEYBOARD, "Space"),
-        CatalogueAction("Downloads row", "Download now", Reachability.OPEN, "context menu"),
-        CatalogueAction("Downloads row", "Use mobile data (Android)", Reachability.OPEN, "Android only"),
-        CatalogueAction("Downloads row", "Cancel", Reachability.OPEN, "context menu"),
-        CatalogueAction("Downloads row", "Retry", Reachability.OPEN, "context menu"),
+        CatalogueAction("Downloads row", "Download now", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Downloads row", "Use mobile data (Android)", Reachability.ANDROID, "Android only"),
+        CatalogueAction("Downloads row", "Cancel", Reachability.CONTEXT, "context menu"),
+        CatalogueAction("Downloads row", "Retry", Reachability.CONTEXT, "context menu"),
         CatalogueAction("Downloads row", "Delete", Reachability.KEYBOARD, "Delete"),
-        CatalogueAction("Downloads row", "Share file", Reachability.OPEN, "context menu"),
+        CatalogueAction("Downloads row", "Share file", Reachability.CONTEXT, "context menu"),
         CatalogueAction("Downloads row", "Open episode", Reachability.KEYBOARD, "Enter"),
         // Continue on this device card (MS3)
-        CatalogueAction("Continue on this device card", "Play", Reachability.OPEN, "context menu"),
-        CatalogueAction("Continue on this device card", "Dismiss", Reachability.OPEN, "context menu"),
+        CatalogueAction("Continue on this device card", "Play", Reachability.MS3, "MS3 card; not in this branch"),
+        CatalogueAction("Continue on this device card", "Dismiss", Reachability.MS3, "MS3 card; not in this branch"),
         // Devices row (MS2)
-        CatalogueAction("Devices row", "Rename", Reachability.OPEN, "context menu"),
-        CatalogueAction("Devices row", "Remove", Reachability.OPEN, "context menu"),
+        CatalogueAction("Devices row", "Rename", Reachability.MS2, "MS2 devices row; not in this branch"),
+        CatalogueAction("Devices row", "Remove", Reachability.MS2, "MS2 devices row; not in this branch"),
         // The window-level actions of 11 Menus and 11 Keyboard shortcuts.
         CatalogueAction("Window", "Add podcast", Reachability.KEYBOARD, "Ctrl/Cmd+N; File › Add podcast…"),
         CatalogueAction("Window", "Import OPML or backup", Reachability.KEYBOARD, "Ctrl/Cmd+O; File › Import"),

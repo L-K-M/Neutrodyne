@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.feeds
 
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,8 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -66,15 +70,22 @@ import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
+import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.download_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all_groups
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_mark_all_played
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_next_group
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_previous_group
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_ungrouped
+import ch.lkmc.neutrodyne.core.ui.resources.group_edit_title
+import ch.lkmc.neutrodyne.core.ui.resources.group_export_opml
 import ch.lkmc.neutrodyne.core.ui.resources.group_hidden
+import ch.lkmc.neutrodyne.core.ui.resources.group_settings_title
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
+import ch.lkmc.neutrodyne.core.ui.resources.play
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -106,6 +117,9 @@ internal fun FeedsScreen(
     onVisitStart: (FeedSource) -> Unit = {},
     onVisitEnd: (FeedSource) -> Unit = {},
     onAllGroups: () -> Unit = {},
+    onEditGroup: (Long) -> Unit = {},
+    onGroupSettings: (Long) -> Unit = {},
+    onExportGroup: (Long) -> Unit = {},
     suggestedGroups: @Composable () -> Unit = {},
     selection: EpisodeSelectionController? = null,
     onPlayEpisode: ((FeedSource, Long) -> Unit)? = null,
@@ -249,31 +263,118 @@ internal fun FeedsScreen(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 NdTabRow(pager.currentPage.coerceIn(tabs.indices), Modifier.weight(1f)) {
                     tabs.forEachIndexed { index, entry ->
-                        Tab(
-                            modifier = Modifier.testTag("feed-tab:${entry.ref.encode()}"),
-                            selected = pager.currentPage == index,
-                            onClick = { scope.launch { pager.animateScrollToPage(index) } },
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    GroupTabLabel(
-                                        name =
-                                            when (entry.tab.source) {
-                                                FeedSource.All -> stringResource(Res.string.feeds_all)
-                                                FeedSource.Ungrouped -> stringResource(Res.string.feeds_ungrouped)
-                                                else -> entry.tab.title
-                                            },
-                                        colorArgb = entry.tab.colorArgb,
-                                        iconKey = entry.tab.iconKey,
-                                        unplayedCount = entry.unplayed,
-                                        newCount = entry.newCount,
-                                        selected = pager.currentPage == index,
-                                    )
-                                    if (entry.transient) {
-                                        Icon(NdIcons.VisibilityOff, stringResource(Res.string.group_hidden))
+                        var menuOpen by remember(entry.ref) { mutableStateOf(false) }
+                        val tabFocus = remember { FocusRequester() }
+                        val group = (entry.tab.source as? FeedSource.Group)?.groupId
+                        Box {
+                            Tab(
+                                modifier =
+                                    Modifier
+                                        .testTag("feed-tab:${entry.ref.encode()}")
+                                        .focusRequester(tabFocus)
+                                        .onSecondaryClick {
+                                            tabFocus.requestFocus()
+                                            menuOpen = true
+                                        }.onPreviewKeyEvent { event ->
+                                            // 08 Context menus: Menu / Shift+F10 opens the tab's menu,
+                                            // so Play, Refresh and the group actions work without a pointer.
+                                            val menuKey =
+                                                event.key == Key.Menu ||
+                                                    (event.key == Key.F10 && event.isShiftPressed)
+                                            if (event.type == KeyEventType.KeyDown && menuKey) {
+                                                menuOpen = true
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        },
+                                selected = pager.currentPage == index,
+                                onClick = {
+                                    // Click-to-focus keeps the keyboard context menu reachable.
+                                    tabFocus.requestFocus()
+                                    scope.launch { pager.animateScrollToPage(index) }
+                                },
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        GroupTabLabel(
+                                            name =
+                                                when (entry.tab.source) {
+                                                    FeedSource.All -> stringResource(Res.string.feeds_all)
+                                                    FeedSource.Ungrouped -> stringResource(Res.string.feeds_ungrouped)
+                                                    else -> entry.tab.title
+                                                },
+                                            colorArgb = entry.tab.colorArgb,
+                                            iconKey = entry.tab.iconKey,
+                                            unplayedCount = entry.unplayed,
+                                            newCount = entry.newCount,
+                                            selected = pager.currentPage == index,
+                                        )
+                                        if (entry.transient) {
+                                            Icon(NdIcons.VisibilityOff, stringResource(Res.string.group_hidden))
+                                        }
                                     }
+                                },
+                            )
+                            DropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                                modifier = Modifier.testTag("groupTabMenu"),
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.play)) },
+                                    onClick = {
+                                        menuOpen = false
+                                        onPlay(entry.tab.source)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.feeds_refresh)) },
+                                    onClick = {
+                                        menuOpen = false
+                                        onRefresh(entry.tab.source)
+                                    },
+                                )
+                                if (group != null) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(Res.string.group_edit_title)) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onEditGroup(group)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(Res.string.group_settings_title)) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onGroupSettings(group)
+                                        },
+                                    )
                                 }
-                            },
-                        )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.feeds_mark_all_played)) },
+                                    onClick = {
+                                        menuOpen = false
+                                        onMarkAllPlayedClick(entry.tab.source)
+                                    },
+                                )
+                                if (group != null) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(Res.string.download_all)) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onDownloadAll(entry.tab.source)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(Res.string.group_export_opml)) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onExportGroup(group)
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 NdIconButton(

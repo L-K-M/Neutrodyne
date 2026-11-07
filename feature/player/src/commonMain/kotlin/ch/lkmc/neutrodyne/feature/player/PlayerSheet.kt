@@ -57,9 +57,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -79,7 +87,10 @@ import androidx.navigation3.runtime.NavKey
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverAspect
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
@@ -98,6 +109,7 @@ import ch.lkmc.neutrodyne.core.ui.AttributionText
 import ch.lkmc.neutrodyne.core.ui.ChapterList
 import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
@@ -249,6 +261,8 @@ internal fun PlayerSheet(
         } else {
             modifier
         }
+    var miniMenuOpen by remember { mutableStateOf(false) }
+    val miniFocus = remember { FocusRequester() }
     Box(playerModifier.fillMaxSize()) {
         // Only the frontmost player layer owns Back.
         if (!isSidePanel) {
@@ -426,8 +440,28 @@ internal fun PlayerSheet(
                                 .fillMaxWidth()
                                 .height(MINI_HEIGHT)
                                 .graphicsLayer { alpha = morph.miniAlpha }
-                                .clickable(onClickLabel = expandLabel, onClick = expand)
-                                .clearAndSetSemantics {
+                                .focusRequester(miniFocus)
+                                .clickable(
+                                    onClickLabel = expandLabel,
+                                    onClick = {
+                                        miniFocus.requestFocus()
+                                        expand()
+                                    },
+                                ).onSecondaryClick {
+                                    miniFocus.requestFocus()
+                                    miniMenuOpen = true
+                                }.onPreviewKeyEvent { event ->
+                                    // 08 Context menus: Menu / Shift+F10 opens the mini player's
+                                    // menu, so Expand and Dismiss work without a pointer.
+                                    val menuKey =
+                                        event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed)
+                                    if (event.type == KeyEventType.KeyDown && menuKey) {
+                                        miniMenuOpen = true
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }.clearAndSetSemantics {
                                     this[SemanticsProperties.TestTag] = "mini_player"
                                     contentDescription = description
                                     onClick(expandLabel) {
@@ -516,7 +550,43 @@ internal fun PlayerSheet(
                             )
                         }
                     }
+                    DropdownMenu(expanded = miniMenuOpen, onDismissRequest = { miniMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.player_episode)) },
+                            onClick = {
+                                miniMenuOpen = false
+                                navigate(EpisodeKey(now.episodeId))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.player_podcast)) },
+                            onClick = {
+                                miniMenuOpen = false
+                                navigate(PodcastKey(now.podcastId))
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.player_expand)) },
+                            onClick = {
+                                miniMenuOpen = false
+                                expand()
+                            },
+                        )
+                        if (paused) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.player_dismiss)) },
+                                onClick = {
+                                    miniMenuOpen = false
+                                    dismiss()
+                                },
+                            )
+                        }
+                    }
                     if (progress > FULL_SEMANTICS_START) {
+                        // 08 Scrollbars: the desktop draws an overlay thumb at the player's end edge.
+                        val playerScroll = rememberScrollState()
+                        val playerBars = LocalScrollbars.current
+                        val playerBarColor = ndScrollbarColor(playerBars)
                         Column(
                             Modifier
                                 .fillMaxSize()
@@ -525,7 +595,8 @@ internal fun PlayerSheet(
                                     translationY =
                                         morph.controlsOffset.dp.toPx()
                                 }.padding(top = statusBar.dp, bottom = panelPeekHeight + bottomInset)
-                                .verticalScroll(rememberScrollState())
+                                .verticalScroll(playerScroll)
+                                .ndScrollbar(playerScroll, playerBars, playerBarColor)
                                 .testTag("full_player")
                                 // The panel owns accessibility while it covers the transport.
                                 .then(if (panelState.canCollapse) Modifier.clearAndSetSemantics {} else Modifier),

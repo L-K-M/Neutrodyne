@@ -26,8 +26,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.model.ExportLayout
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -72,7 +75,15 @@ internal fun ExportDialogContent(
         color = AlertDialogDefaults.containerColor,
         tonalElevation = AlertDialogDefaults.TonalElevation,
     ) {
-        Column(Modifier.padding(DIALOG_PADDING).verticalScroll(rememberScrollState())) {
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .padding(DIALOG_PADDING)
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             Text(
                 exportTitle(state.groupName),
                 style = MaterialTheme.typography.headlineSmall,
