@@ -42,10 +42,14 @@ class RingBufferLogSink
         ) {
             if (level.ordinal < minLevel.ordinal) return
             val at = Instant.fromEpochMilliseconds(clock.now())
-            val line = "$at $level $tag $message"
+            // A throwable's message carries its stack trace as embedded newlines (Log.emit).
+            // Split them here so the ring holds rendered lines: capacity means report lines.
+            val rendered = message.split('\n').map { "$at $level $tag $it" }
             synchronized(lock) {
-                if (lines.size == capacity) lines.removeFirst()
-                lines.addLast(line)
+                for (line in rendered) {
+                    if (lines.size == capacity) lines.removeFirst()
+                    lines.addLast(line)
+                }
                 mutableLines.value = lines.toList()
             }
         }
