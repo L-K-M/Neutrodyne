@@ -82,7 +82,7 @@ internal class DatabaseCopyExporter
                 // that is never shared, and the scrubbed file moves to its own unique
                 // share name — a re-export can never write raw data into a path a
                 // previous export's FileProvider grant still resolves.
-                val unique = Uuid.random().toString().take(UNIQUE_NAME_CHARS)
+                val unique = Uuid.random().toString()
                 val staging = exportDir / stagingName(unique)
                 val target = exportDir / fileName(clock.now(), unique)
                 try {
@@ -150,7 +150,6 @@ internal class DatabaseCopyExporter
             const val WRITER_WAIT_MS = 30_000L
             const val MIN_FREE_BYTES = 50L * 1_048_576
             private const val STAGING_INFIX = "staging-"
-            private const val UNIQUE_NAME_CHARS = 8
             private const val TAG = "DbCopyExporter"
 
             /**
