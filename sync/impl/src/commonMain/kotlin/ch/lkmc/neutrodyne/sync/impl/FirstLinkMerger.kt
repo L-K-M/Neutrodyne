@@ -12,9 +12,11 @@ import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.decodeFromString
@@ -49,6 +51,13 @@ private class PullResult(
     val maxClockPacked: Long,
     val podcastIds: Set<String>,
     val groupUuids: Set<String>,
+    val upNextRefs: List<UpNextRef>,
+)
+
+/** One live server Up-next record and its match hints, for the replace step's keep set. */
+private class UpNextRef(
+    val id: RecordId.Episode,
+    val hints: MatchHints?,
 )
 
 /**
@@ -203,6 +212,7 @@ class FirstLinkMerger(
         var maxClock = 0L
         val podcasts = mutableSetOf<String>()
         val groups = mutableSetOf<String>()
+        val upNext = mutableListOf<UpNextRef>()
         var pages = 0
         while (pages < MAX_PAGES) {
             pages++
@@ -223,6 +233,13 @@ class FirstLinkMerger(
                         }
                     }
 
+                    SyncCollection.UPNEXT -> {
+                        if ((dto.fields["in"]?.v as? JsonPrimitive)?.booleanOrNull != false) {
+                            (runCatching { RecordId.fromWire(coll, dto.id) }.getOrNull() as? RecordId.Episode)
+                                ?.let { upNext += UpNextRef(it, dto.match) }
+                        }
+                    }
+
                     else -> {
                         continue
                     }
@@ -236,7 +253,7 @@ class FirstLinkMerger(
             onProgress(LinkPhase.DOWNLOADING, applied, applied.coerceAtLeast(1))
             if (!page.hasMore) break
         }
-        return PullResult(applied, cursor, maxClock, podcasts, groups)
+        return PullResult(applied, cursor, maxClock, podcasts, groups, upNext)
     }
 
     /** Unsubscribes what the server lacks and replaces Up next and the session (10 Replace). */
@@ -264,7 +281,24 @@ class FirstLinkMerger(
                     ),
                     now,
                 )
-                db.queueDao().clear()
+                // Up next is replaced by the server's set: the pull applied its rows, so only
+                // local-only entries are pruned. A whole-table clear would erase what the
+                // adopted cursor then never re-pulls.
+                val keepRids = pull.upNextRefs.mapTo(HashSet()) { it.id.rid }
+                val keepEpisodes = mutableSetOf<Long>()
+                val matcher = EpisodeMatcher(db.backupDao())
+                for (ref in pull.upNextRefs) {
+                    val podcast = db.podcastDao().bySyncId(ref.id.podcast.value) ?: continue
+                    matcher.match(podcast.id, ref.id.key.value, ref.hints)?.let(keepEpisodes::add)
+                }
+                val staleEpisodes =
+                    db.queueDao().entries().mapNotNull { entry ->
+                        if (entry.episodeId in keepEpisodes) return@mapNotNull null
+                        val episode = db.episodeDao().byId(entry.episodeId) ?: return@mapNotNull entry.episodeId
+                        val podcast = db.podcastDao().byId(episode.podcastId) ?: return@mapNotNull entry.episodeId
+                        if (podcast.syncId + episode.identityKey in keepRids) null else entry.episodeId
+                    }
+                db.queueDao().removeEpisodes(staleEpisodes)
                 db.playSessionDao().clearContext(now)
             }
         }
