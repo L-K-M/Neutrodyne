@@ -106,10 +106,13 @@ internal class DatabaseCopyExporter
 
         /** Deletes every earlier diagnostics export — at most one waits for its share. */
         suspend fun removeStale() {
-            val children = runCatching { fileSystem.listOrNull(exportDir) }.getOrNull() ?: return
-            for (child in children) {
-                if (child.name.startsWith(NAME_PREFIX) && child.name.endsWith(NAME_SUFFIX)) {
-                    runCatching { fileSystem.delete(child) }
+            // The call sites reach here from the caller's context; the sweep is file I/O.
+            withContext(io) {
+                val children = runCatching { fileSystem.listOrNull(exportDir) }.getOrNull() ?: return@withContext
+                for (child in children) {
+                    if (child.name.startsWith(NAME_PREFIX) && child.name.endsWith(NAME_SUFFIX)) {
+                        runCatching { fileSystem.delete(child) }
+                    }
                 }
             }
         }
