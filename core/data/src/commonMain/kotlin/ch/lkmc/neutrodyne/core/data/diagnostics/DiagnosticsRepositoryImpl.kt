@@ -140,8 +140,16 @@ internal class DiagnosticsRepositoryImpl
             return when {
                 platformInfo.kind == PlatformKind.ANDROID -> {
                     // Android ignores `destination`: the share sheet hands out the
-                    // FileProvider URI of the private cache copy (09).
-                    Outcome.Success(this.destination.shareUri(produced.name) ?: produced.toString())
+                    // FileProvider URI of the private cache copy (09). A null URI is a
+                    // failure — the raw cache path would pass for a shareable URI.
+                    when (val uri = this.destination.shareUri(produced.name)) {
+                        null -> {
+                            exporter.removeStale()
+                            Outcome.Failure(DiagnosticsError.FAILED)
+                        }
+
+                        else -> Outcome.Success(uri)
+                    }
                 }
 
                 destination.isNullOrBlank() -> {
