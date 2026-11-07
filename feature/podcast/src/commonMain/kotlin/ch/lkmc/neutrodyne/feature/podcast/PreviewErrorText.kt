@@ -107,6 +107,8 @@ internal object PreviewSubscribeErrorText {
         when (error) {
             is SubscribeError.Fetch -> PreviewErrorText.describe(error.error)
 
+            SubscribeError.YouTubeNotYetAvailable -> UiText.Res(Res.string.add_error_youtube)
+
             SubscribeError.NoMedia -> UiText.Res(Res.string.feed_err_no_media)
 
             SubscribeError.InvalidUrl -> UiText.Res(Res.string.add_error_invalid_url)
