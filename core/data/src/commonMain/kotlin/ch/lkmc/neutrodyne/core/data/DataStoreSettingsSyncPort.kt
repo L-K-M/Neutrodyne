@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.domain.LocalSyncedSetting
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
@@ -47,13 +48,18 @@ internal class DataStoreSettingsSyncPort(
         json: String,
     ): Boolean {
         if (!key.synced) return false
-        val value = decode(key, json) ?: return false
+        val element = runCatching { Json.parseToJsonElement(json) }.getOrNull() ?: return false
+        // A remote reset lands as JsonNull; decode() alone cannot tell it from an invalid value.
+        if (element is JsonNull) {
+            return suspendRunCatching { settingsStore.reset(key) }.isSuccess
+        }
+        val value = decode(key, element) ?: return false
         if (!AllSettingKeys.acceptsValue(key, value)) return false
-        return runCatching { write(key, value) }.isSuccess
+        return suspendRunCatching { write(key, value) }.isSuccess
     }
 
-    override fun registerRecorder(recorder: suspend (key: SettingKey<*>, json: String) -> Unit) {
-        recorderRef = recorder
+    override fun registerRecorder(recorder: (suspend (key: SettingKey<*>, json: String) -> Unit)?) {
+        recorderRef = recorder ?: { _, _ -> }
     }
 
     override fun encode(
@@ -94,13 +100,12 @@ internal class DataStoreSettingsSyncPort(
         local.tryEmit(LocalSyncedSetting(key, json, atMs))
     }
 
-    /** Decodes [json] into [key]'s type; `null` when the text is not a valid value for it. */
+    /** Decodes [element] into [key]'s type; `null` when it is not a valid value for it. */
     private fun decode(
         key: SettingKey<*>,
-        json: String,
-    ): Any? {
-        val element = runCatching { Json.parseToJsonElement(json) }.getOrNull() ?: return null
-        return when (key) {
+        element: kotlinx.serialization.json.JsonElement,
+    ): Any? =
+        when (key) {
             is SettingKey.Bool -> {
                 (element as? JsonPrimitive)?.booleanOrNull
             }
@@ -133,7 +138,6 @@ internal class DataStoreSettingsSyncPort(
                 name?.let(key::fromStored)
             }
         }
-    }
 
     @Suppress("UNCHECKED_CAST")
     private suspend fun write(

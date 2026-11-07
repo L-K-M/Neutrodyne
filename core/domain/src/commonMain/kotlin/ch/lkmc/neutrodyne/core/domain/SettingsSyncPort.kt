@@ -35,7 +35,7 @@ interface SettingsSyncPort {
      * `null` clears it (unlinked or the switch off). The recorder is called only for keys with
      * [SettingKey.synced].
      */
-    fun registerRecorder(recorder: suspend (key: SettingKey<*>, json: String) -> Unit)
+    fun registerRecorder(recorder: (suspend (key: SettingKey<*>, json: String) -> Unit)?)
 
     /**
      * Encodes [value] under [key]'s JSON shape; `"null"` for a reset, `null` when the value is
