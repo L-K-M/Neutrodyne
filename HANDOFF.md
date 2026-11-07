@@ -863,20 +863,19 @@ A contributor (Sol, fork `BigBoyDevBox/Neutrodyne`) opened four documentation PR
   - **Staging-only `EpisodeLineV1.fc` field:** per-field clocks for first-link staging.
   - **`SyncOutboxDao.captureIntent`:** captures mark-unplayed and position resets.
   - **`LinuxDesktopEntryWriter`:** writes both the menu and autostart entries with spec-correct `Exec` quoting.
-  - **PBS patches and WiX:** both stay PO-48 proposed defaults awaiting the owner.
+  - **PBS patches and WiX:** both approved by the owner on 2026-11-07 as narrow PO-48 exceptions, with their exact pinned source attached to each release.
 
 ### Open owner questions (ask these next; each has a default in `docs/PLAN.md` §4)
 
+PO-48 was resolved on 2026-11-07: the owner approved the unmodified WiX MS-RL components and python-build-standalone MPL-2.0 patches, with their exact pinned sources and notices attached to each release. PO-10 was resolved the same day: consented crash reports go to `neutrodyne@lkmc.ch`.
+
 Most important first:
-- **PO-48 Licence classes:** the final review found two cases beyond the agreed rules.
-  - **WiX code (MS-RL)** is embedded in every Windows MSI. If declined, Windows ships as a ZIP only.
-  - **python-build-standalone carries MPL-2.0 patches** in the desktop Python. If declined, CPython must be built without them.
 - **PO-46** Desktop recovery snapshot. Default: none in v1.0; the user restores a manual backup or reconnects sync.
 - **PO-47** Sync timing promises and the mass-change threshold for small libraries.
 - **PO-37 / PO-38** Sync scope (what syncs; feed passwords) and server accounts. Default: admin-created accounts, devices linked by code.
 - **PO-39** macOS tester builds before 1.0.0. **PO-40** Windows on Arm (default: x64 under emulation). **PO-42** Ship the JDK AOT cache for faster desktop start.
 - **PO-43** Reference hardware. **PO-44** Desktop secret storage. **PO-45** Server operations defaults. **PO-41** gpodder/Open Podcast API layers (default: v1.1).
-- **Older questions still on their defaults:** PO-3, 4, 6, 7, 9–21, 24–28, 30, 36.
+- **Older questions still on their defaults:** PO-3, 4, 6, 7, 9, 11–21, 24–28, 30, 36.
 
 ## 4. How to resume if this session stops
 

@@ -66,9 +66,11 @@ module path).
     exact source attached (for example the LGPL FFmpeg build used for
     desktop playback).
   - MPL-2.0 is allowed only for unmodified files and data.
-  - Two cases go beyond these classes and await the owner's answer to PO-48
-    (see `docs/PLAN.md` §4): WiX code (MS-RL) embedded in MSI installers,
-    and python-build-standalone's MPL-2.0 patches.
+  - PO-48 admits two named exceptions (owner approval 2026-11-07):
+    unmodified WiX code (MS-RL) embedded in MSI installers, and
+    python-build-standalone's MPL-2.0 build patches, unmodified by us.
+    Attach each component's exact pinned source to every release that ships
+    it, with its licence and notices (see `docs/PLAN.md` §4).
   - YouTube extraction uses yt-dlp (Unlicense), never NewPipe Extractor.
   - Every artifact ships the notices of what it bundles. The AboutLibraries roots
     (`app/config`, `app/config/engine`, `desktopApp/config`, `sync/server/config`) hold each
