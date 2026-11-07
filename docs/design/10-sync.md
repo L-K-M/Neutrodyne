@@ -1793,13 +1793,18 @@ and both native image architectures still require their CI execution evidence.
 
 Serves R6.7, R7.8, N8, N12, N13. Delivered in M0b (JAR skeleton), MS1 (image, compose, systemd, README section), M11b (final guidance). Honours [D95](../PLAN.md#3-key-decisions), [D3](../PLAN.md#3-key-decisions), [D63](../PLAN.md#3-key-decisions), [D79](../PLAN.md#3-key-decisions). Release jobs: [09 `release.yml`](09-quality-and-release.md#releaseyml); channels: [09 Distribution channels](09-quality-and-release.md#distribution-channels).
 
-Every tag `vX.Y.Z` publishes `neutrodyne-server-{v}.jar` on the GitHub release and `ghcr.io/{owner}/neutrodyne-server:{v}` (then `{X.Y}` and `latest`, only after the release is published) for `linux/amd64` and `linux/arm64`; GHCR counts as GitHub ([PO-2](../PLAN.md#po-2-distribution-channels)). Files in `sync/server/deploy/`: `compose.yaml`, `Caddyfile`, `nginx.conf.example`, `neutrodyne-server.service`, `Dockerfile`.
+Every tag `vX.Y.Z` publishes `neutrodyne-server-{v}.jar` on the GitHub release and `ghcr.io/{owner}/neutrodyne-server:{v}` (then `{X.Y}` and `latest`, only after the release is published) for `linux/amd64` and `linux/arm64`; GHCR counts as GitHub ([PO-2](../PLAN.md#po-2-distribution-channels)). Files in `sync/server/deploy/`: `compose.yaml`, `Caddyfile`, `nginx.conf.example`, `neutrodyne-server.service.example`, `Dockerfile`.
 
 ### JAR on Java 21 or later
 
-The administrator installs any Java 21+ runtime (distribution package or Temurin) and the JAR, for example in `/opt/neutrodyne-server/`. Reference systemd unit `neutrodyne-server.service`:
+The administrator installs any Java 21+ runtime (distribution package or Temurin) and the JAR, for example in `/opt/neutrodyne-server/`. Reference systemd unit `neutrodyne-server.service.example` (copy it to `neutrodyne-server.service`, set `NEUTRODYNE_SERVER_PUBLIC_URL`, then enable):
 
 ```ini
+# Reference unit. Copy to neutrodyne-server.service, set
+# NEUTRODYNE_SERVER_PUBLIC_URL to your public HTTPS URL and adjust the JAR
+# path if needed, then enable it. Do not enable this file unedited: the
+# example.org URL is a placeholder and the server refuses non-loopback
+# listeners without an https:// public URL.
 [Unit]
 Description=Neutrodyne Sync server
 After=network-online.target
@@ -1823,9 +1828,13 @@ PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
 LockPersonality=yes
 SystemCallArchitectures=native
 MemoryMax=320M
@@ -1835,7 +1844,7 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-- `DynamicUser=yes` puts the state directory under `/var/lib/private/` behind a symlink and implies `ProtectSystem=strict` and `NoNewPrivileges` ([systemd.exec](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)). `MemoryDenyWriteExecute` is deliberately absent (the JVM's JIT needs writable executable memory).
+- `DynamicUser=yes` puts the state directory under `/var/lib/private/` behind a symlink, implies `ProtectSystem=strict` and `NoNewPrivileges`, and keeps the state directory writable under `ProtectSystem=strict` (so no `ReadWritePaths=` is needed) ([systemd.exec](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)). `CapabilityBoundingSet=` drops every capability (the JVM needs none as an unprivileged user on an unprivileged port) and `MemoryDenyWriteExecute` is deliberately absent (the JVM's JIT needs writable executable memory).
 - A web server (Caddy or nginx) on the same host terminates TLS and proxies to `127.0.0.1:8787` ([Reverse proxy with Caddy](#reverse-proxy-with-caddy), [nginx](#nginx)).
 - Account administration normally happens in the web UI. CLI commands must run as the service's user; with `DynamicUser` that is `sudo systemd-run --pty --wait -p DynamicUser=yes -p User=neutrodyne-server -p StateDirectory=neutrodyne-server -E NEUTRODYNE_SERVER_DATA=/var/lib/neutrodyne-server /usr/bin/java -jar /opt/neutrodyne-server/neutrodyne-server.jar user list`. systemd keeps one dynamic user per name, shared by every unit that names it while any of them runs ([`dynamic-user.c`](https://github.com/systemd/systemd/blob/main/src/core/dynamic-user.c)), and derives its UID from a hash of the name, so the transient unit gets the service's UID and the state directory's ownership does not change; MS1 still runs the command against a live service. A static user created by a `sysusers.d` snippet also works (systemd then uses it, [systemd.exec](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)), with `sudo -u neutrodyne-server` for the CLI.
 

@@ -1303,7 +1303,8 @@ With Docker (Linux x86-64 or arm64): copy `compose.yaml` and `Caddyfile` from `s
 release's tag, put your domain into both files and run `docker compose up -d`. The image is
 `ghcr.io/{owner}/neutrodyne-server:{v}`; Caddy obtains the TLS certificate.
 Without Docker: install Java 21 or later, download `neutrodyne-server-{v}.jar` from the release, check it
-against `SHA256SUMS`, and install `neutrodyne-server.service` (systemd) from the same folder; put Caddy or
+against `SHA256SUMS`, and install `neutrodyne-server.service` (systemd) from the same folder's
+`neutrodyne-server.service.example` after setting its public URL; put Caddy or
 nginx in front for TLS (`nginx.conf.example` keeps live updates working). The server listens only on loopback
 unless its public URL is `https://` (behind the proxy) or it is started with `--insecure-lan` for a trusted home network.
 
