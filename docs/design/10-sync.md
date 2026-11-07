@@ -1194,8 +1194,8 @@ code, invite and password methods, the approve/confirm sheet's calls, the
 three first-link choices through `FirstLinkMerger`, unlink/
 "Delete my data on the server", and device rename/revoke, all on the existing
 `SyncClient`, `SyncTokenStore` and protocol DTOs. The Settings › Sync setup
-screen and its OS-permission prompt follow in the next UI slice; this slice
-keeps the existing setup placeholder. The empty-account
+screen now follows the link state, with localized EN/DE text and the native
+Android local-network permission prompt. The empty-account
 upload is confirmed with a named step (`LinkState.ConfirmUpload`), so a wrong
 account never uploads silently. Deviations forced by the current code:
 
