@@ -104,13 +104,16 @@ internal class DiagnosticsRepositoryImpl
                 if (builder.isNotEmpty()) builder.append('\n')
                 builder.append("== ").append(section.id.name.replace('_', ' ')).append(" ==\n")
                 if (section.id == DiagnosticsSectionId.LOG) {
-                    // 09: truncate the LOG tail to fit the budget — newest lines win.
+                    // 09: truncate the LOG tail to fit the budget — newest lines win. The
+                    // builder is frozen for the loop; measure it in bytes, not UTF-16
+                    // chars, so multi-byte text cannot over-keep.
                     val lines = section.lines.map { it.value.ifEmpty { it.key } }
+                    val remaining = maxBytes - builder.toString().encodeToByteArray().size
                     val kept = mutableListOf<String>()
                     var used = 0
                     for (line in lines.asReversed()) {
                         val cost = line.encodeToByteArray().size + 1
-                        if (used + cost > maxBytes - builder.length) break
+                        if (used + cost > remaining) break
                         kept.add(0, line)
                         used += cost
                     }
