@@ -305,6 +305,36 @@ class SyncCaptureTest {
             }
         }
 
+    @Test
+    fun aLocalCaptureKeepsANewerReplayRow() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                val outbox = db.syncOutboxDao()
+                db.withWriteTransaction {
+                    db.useWriterConnection { it.exec("DELETE FROM sync_outbox") }
+                    // Packed clocks are wallMs shl 16; a far-future stamp stays newer than now.
+                    val replayClock = Long.MAX_VALUE / 2
+                    outbox.captureStored(
+                        "podcast",
+                        podcastSyncId,
+                        "customTitle",
+                        replayClock,
+                        "0000000000000009",
+                        "\"replay\"",
+                    )
+                    outbox.captureLiteral("podcast", podcastSyncId, "customTitle", "\"local\"")
+                }
+                val row = outbox.get("podcast", podcastSyncId, "customTitle")!!
+                assertEquals("0000000000000009", row.nodeId)
+                assertEquals(SyncCaptureKind.REPLAY, row.captureKind)
+                assertEquals("\"replay\"", row.value)
+            } finally {
+                db.close()
+            }
+        }
+
     private suspend fun seed(db: NeutrodyneDatabase) {
         db.withWriteTransaction {
             db.syncStateDao().withApplying {
