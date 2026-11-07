@@ -91,11 +91,9 @@ mkdir -p "$output"
 work="$(cd "$output" && pwd -P)"
 
 pids=()
+child_names=()
 cleanup() {
-    local pid
-    for pid in ${pids[@]+"${pids[@]}"}; do
-        kill "$pid" 2>/dev/null || true
-    done
+    wait_for_enter_drain || true
 }
 trap cleanup EXIT
 
@@ -144,6 +142,7 @@ run_android() {
     "$emulator" -avd "$avd" -no-window -no-audio -no-boot-anim -no-snapshot \
         -gpu swiftshader_indirect -tcpdump "$pcap" >"$work/emulator.log" 2>&1 &
     pids+=("$!")
+    child_names+=("Android emulator")
     "$adb" wait-for-device
     local booted=0
     for _ in $(seq 1 180); do
@@ -168,17 +167,30 @@ run_android() {
 wait_for_enter_drain() {
     # The capture tools flush their files on SIGTERM; a GUI app may take longer, so give
     # everything a moment before forcing it and then reap the PIDs without hanging.
-    local pid
-    for pid in ${pids[@]+"${pids[@]}"}; do
-        kill "$pid" 2>/dev/null || true
+    local pid index status failed=0
+    local stopping=()
+    for index in "${!pids[@]}"; do
+        pid=${pids[$index]}
+        if kill "$pid" 2>/dev/null; then
+            stopping+=("$pid")
+        else
+            status=0
+            wait "$pid" 2>/dev/null || status=$?
+            if [[ "$status" -ne 0 ]]; then
+                echo "${child_names[$index]} exited unsuccessfully (status $status)" >&2
+                failed=1
+            fi
+        fi
     done
-    sleep 1
-    for pid in ${pids[@]+"${pids[@]}"}; do
+    [[ ${#stopping[@]} -eq 0 ]] || sleep 1
+    for pid in ${stopping[@]+"${stopping[@]}"}; do
         kill -9 "$pid" 2>/dev/null || true
         wait "$pid" 2>/dev/null || true
     done
     # The PIDs are reaped: clear them so the EXIT trap cannot signal a recycled PID.
     pids=()
+    child_names=()
+    return "$failed"
 }
 
 run_desktop() {
@@ -193,6 +205,7 @@ run_desktop() {
     python3 "$root/scripts/ci/network-capture-proxy.py" --listen 127.0.0.1 \
         --port "${proxy_port:-0}" --port-file "$port_file" >"$work/proxy-connects.txt" 2>"$work/proxy.log" &
     pids+=("$!")
+    child_names+=("capture proxy")
     for _ in $(seq 1 100); do
         [[ -s "$port_file" ]] && break
         sleep 0.1
@@ -215,12 +228,14 @@ run_desktop() {
     tshark -i "$interface" -f "udp port 53 or tcp port 443" -w "$pcap" \
         >"$work/tshark.log" 2>&1 &
     pids+=("$!")
+    child_names+=("desktop packet capture")
 
     # JAVA_TOOL_OPTIONS reaches the JVM through any launcher; the engine child clears its
     # environment (11), so its traffic appears only in the tshark capture.
     JAVA_TOOL_OPTIONS="-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=$port -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=$port" \
         "$app_cmd" ${app_args[@]+"${app_args[@]}"} >"$work/app.log" 2>&1 &
     pids+=("$!")
+    child_names+=("desktop app")
 
     wait_for_enter
     wait_for_enter_drain
@@ -241,6 +256,7 @@ run_server() {
     sudo nsenter -t "$pid" -n tcpdump -nn -l -i any "not port 8787" -w "$pcap" \
         >"$work/tcpdump.log" 2>&1 &
     pids+=("$!")
+    child_names+=("server packet capture")
     wait_for_enter
     wait_for_enter_drain
     finish_hosts "$pcap"

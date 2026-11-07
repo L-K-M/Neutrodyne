@@ -235,6 +235,84 @@ class NetworkCaptureCheckTest(unittest.TestCase):
         result = subprocess.run(["bash", str(SHELL), "--bogus"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
 
+    def test_a_failed_desktop_app_cannot_complete_a_capture(self):
+        status, stdout, stderr = self.desktop_capture_fixture(app_exit=7)
+        self.assertNotEqual(status, 0, stdout + stderr)
+        self.assertNotIn("capture complete:", stdout)
+        self.assertIn("desktop app", stderr)
+
+    def test_a_failed_packet_capture_cannot_reuse_its_partial_file(self):
+        status, stdout, stderr = self.desktop_capture_fixture(app_exit=0, capture_exit=9)
+        self.assertNotEqual(status, 0, stdout + stderr)
+        self.assertNotIn("capture complete:", stdout)
+        self.assertIn("desktop packet capture", stderr)
+
+    def test_a_normal_desktop_app_exit_keeps_the_capture_valid(self):
+        status, stdout, stderr = self.desktop_capture_fixture(app_exit=0)
+        self.assertEqual(status, 0, stdout + stderr)
+        self.assertIn("capture complete:", stdout)
+        self.assertIn("github.com\t", stdout)
+
+    def desktop_capture_fixture(self, app_exit, capture_exit=None):
+        tools = self.root / "bin"
+        tools.mkdir()
+        tshark = tools / "tshark"
+        tshark.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env bash
+                if [[ "$1" == "-r" ]]; then
+                    printf 'github.com\\n'
+                    exit 0
+                fi
+                while [[ $# -gt 0 ]]; do
+                    if [[ "$1" == "-w" ]]; then
+                        printf 'fixture' > "$2"
+                        break
+                    fi
+                    shift
+                done
+                if [[ -n "${ND_CAPTURE_FIXTURE_EXIT:-}" ]]; then
+                    exit "$ND_CAPTURE_FIXTURE_EXIT"
+                fi
+                trap 'exit 0' TERM
+                while :; do sleep 0.1; done
+                """,
+            ),
+            encoding="utf-8",
+        )
+        tshark.chmod(0o755)
+        marker = self.root / "app-failed"
+        app = tools / "app"
+        app.write_text('#!/usr/bin/env bash\ntouch "$1"\nexit "$2"\n', encoding="utf-8")
+        app.chmod(0o755)
+        output = self.root / "capture"
+        env = {**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ.get('PATH', '')}"}
+        if capture_exit is not None:
+            env["ND_CAPTURE_FIXTURE_EXIT"] = str(capture_exit)
+        process = subprocess.Popen(
+            [
+                "bash", str(SHELL), "--desktop", "--interface", "fixture0",
+                "--app-cmd", str(app), "--app-arg", str(marker), "--app-arg", str(app_exit),
+                "--output", str(output),
+            ],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=env,
+        )
+        try:
+            for _ in range(100):
+                if marker.exists() and (output / "desktop.pcap").exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue(marker.exists(), "the fixture app must actually run")
+            time.sleep(0.1)
+            stdout, stderr = process.communicate("\n", timeout=10)
+            return process.returncode, stdout, stderr
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=10)
+
 
 if __name__ == "__main__":
     unittest.main()
