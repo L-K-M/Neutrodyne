@@ -266,6 +266,22 @@ class DbMaintenanceTest {
         }
 
     @Test
+    fun aStepFailureLogsTheThrowable() =
+        runTest {
+            inflateFreelist()
+            clock.advanceBy(11.minutes)
+
+            maintenance(usableSpace = Long.MAX_VALUE)
+                .run(clock.now(), vacuumBlocker = { error("probe down") })
+
+            val warn = logRecords.firstOrNull { it.first == LogLevel.WARN && "vacuum" in it.third }
+            assertTrue(
+                warn?.third?.contains("IllegalStateException") == true,
+                "the step failure must render the throwable, got: $warn",
+            )
+        }
+
+    @Test
     fun aFailedStatsWriteIsLogged() =
         runTest {
             settings.failNextSet = SettingsError.WriteFailed

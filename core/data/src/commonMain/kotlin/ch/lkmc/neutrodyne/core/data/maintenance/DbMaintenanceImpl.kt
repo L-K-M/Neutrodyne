@@ -72,7 +72,7 @@ internal class DbMaintenanceImpl(
             }
             val start = clock.elapsedRealtime()
             suspendRunCatching { block() }
-                .onFailure { Log.w(TAG) { "db-maintenance step $name failed: ${it.message}" } }
+                .onFailure { Log.w(TAG, it) { "db-maintenance step $name failed" } }
             stats.durationsMs[name] = clock.elapsedRealtime() - start
         }
 
