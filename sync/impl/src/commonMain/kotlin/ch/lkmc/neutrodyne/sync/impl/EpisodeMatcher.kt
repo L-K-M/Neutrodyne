@@ -26,16 +26,16 @@ class EpisodeMatcher(
         if (candidates.isEmpty()) return null
 
         val kv = hints?.kv ?: EpisodeKeys.VERSION
-        if (kv != EpisodeKeys.VERSION) {
-            // A newer key version skips key matching (02): the app cannot compute it.
-            if (kv > EpisodeKeys.VERSION) return null
+        // A newer key version skips key matching only (02): the app cannot compute it, but the
+        // enclosure and guid rungs below still apply.
+        if (kv == EpisodeKeys.VERSION) {
+            candidates.firstOrNull { it.identityKey == key }?.let { return it.id }
+        } else if (kv < EpisodeKeys.VERSION) {
             val versioned =
                 candidates.firstOrNull { candidate ->
                     EpisodeKeys.keyFor(candidate.toKeyInput(), kv) == key
                 }
             if (versioned != null) return versioned.id
-        } else {
-            candidates.firstOrNull { it.identityKey == key }?.let { return it.id }
         }
 
         val enclosureKey = hints?.enc?.let(UrlNormalizer::forIdentity)

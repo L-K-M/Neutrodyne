@@ -38,11 +38,12 @@ class ChangeBuilder(
                 val id = runCatching { RecordId.fromRid(collection, rid) }.getOrNull() ?: return@mapNotNull null
                 val rekey = recordRows.firstOrNull { it.field == REKEY_FIELD }
                 if (rekey != null) {
-                    return@mapNotNull rekeyChange(collection, id, rekey)
+                    rekeyChange(collection, id, rekey)?.let { return@mapNotNull it }
                 }
                 val fields = mutableMapOf<String, FieldValue>()
                 var hints: MatchHints? = null
                 for (row in recordRows.sortedBy { it.field }) {
+                    if (row.field == REKEY_FIELD) continue
                     val clock = outboxClock(row) ?: continue
                     if (row.field == "*") {
                         addAllFields(source, collection, rid, clock, fields)

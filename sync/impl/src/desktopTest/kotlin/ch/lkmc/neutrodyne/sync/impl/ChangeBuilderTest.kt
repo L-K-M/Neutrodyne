@@ -151,6 +151,29 @@ class ChangeBuilderTest {
         }
 
     @Test
+    fun anUnparseableRekeyDoesNotSinkTheRecordsOtherFields() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                db.syncOutboxDao().upsert(row("episode", episodeRid, "~rekey", "{\"to\":garbage", 1L))
+                db.syncOutboxDao().upsert(row("episode", episodeRid, "fav", "true", 2L))
+                val change = ChangeBuilder(db, FakeSecretStore()) { false }.build(db.syncOutboxDao().rows()).single()
+
+                assertEquals(null, change.op)
+                assertEquals(
+                    true,
+                    change.fields
+                        .getValue("fav")
+                        .v
+                        .boolean(),
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun authIsOmittedUnlessSharingIsOn() =
         runTest {
             val db = TestDb.inMemory()
