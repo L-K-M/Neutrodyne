@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import okio.Path
@@ -155,16 +156,25 @@ class RedactionCoverageTest {
     fun failingAndTimingOutContributorsDegradeToLinesNotHoles() =
         runTest {
             val repository =
-                repository({ throw IllegalStateException("boom") })
+                repository(
+                    { throw IllegalStateException("boom") },
+                    // The budget is real-time inside withContext(io); the ~2 s wait is the
+                    // point: the hang must degrade to its own "unavailable" line.
+                    { awaitCancellation() },
+                )
             val report = repository.snapshot()
-            val section = report.sections.single()
-            assertEquals("unavailable", section.lines.single().key)
+            assertEquals(2, report.sections.size)
+            assertTrue(
+                report.sections.all { it.lines.single().key == "unavailable" },
+                "throw and timeout both degrade to lines: ${report.sections}",
+            )
 
             val plain = repository.toPlainText(report)
             assertTrue(plain.contains("unavailable"))
+            assertTrue(plain.contains("timeout"), "the hanging contributor times out: $plain")
         }
 
-    private fun repository(vararg lines: () -> List<DiagnosticsLine>): DiagnosticsRepositoryImpl {
+    private fun repository(vararg lines: suspend () -> List<DiagnosticsLine>): DiagnosticsRepositoryImpl {
         val contributors =
             lines
                 .map { produce ->
