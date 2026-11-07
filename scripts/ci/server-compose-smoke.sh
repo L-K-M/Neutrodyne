@@ -59,7 +59,13 @@ stop_capture() {
     capture=''
     # tcpdump must have actually attached; an empty file without a capture is not proof.
     grep -q 'listening on' "$work/capture.$1.log"
-    [[ ! -s "$work/egress.$1.txt" ]] || { cat "$work/egress.$1.txt"; echo 'Unexpected server egress' >&2; exit 1; }
+    # tcpdump -l leaves a lone newline when killed with no packets; a real packet
+    # line always carries a timestamp, so only non-whitespace content is egress.
+    if grep -q '[^[:space:]]' "$work/egress.$1.txt"; then
+        cat "$work/egress.$1.txt"
+        echo 'Unexpected server egress' >&2
+        exit 1
+    fi
 }
 cat > "$work/Caddyfile" <<'CADDY'
 sync.local {
