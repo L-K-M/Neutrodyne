@@ -211,7 +211,18 @@ class CarLibraryDeviceTest {
                         delay(50)
                     }
                 }
-                assertTrue(app.getSystemService(AudioManager::class.java).activePlaybackConfigurations.isNotEmpty())
+                // AudioService publishes AudioPlaybackConfiguration asynchronously to the
+                // session's own isPlaying signal; on the loaded api26 image it trailed the
+                // restarted track long enough to fail a single read (CI run 42328682766).
+                withTimeout(20_000) {
+                    while (app
+                            .getSystemService(AudioManager::class.java)
+                            .activePlaybackConfigurations
+                            .isEmpty()
+                    ) {
+                        delay(50)
+                    }
+                }
             } finally {
                 graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.EPISODE)
                 graph.settingsRepository.set(
