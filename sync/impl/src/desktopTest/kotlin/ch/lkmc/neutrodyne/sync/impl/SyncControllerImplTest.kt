@@ -108,9 +108,61 @@ class SyncControllerImplTest {
                 h.gate.setLocation(LocalNetworkLocation.LOCAL)
                 h.controller.discover("http://192.168.1.50")
                 await(h) { h.linkFlow.state.value is LinkState.InsecureConnection }
+                // The "not encrypted" confirmation is meaningless once traffic left.
+                assertTrue(h.client.calls.isEmpty())
                 h.controller.confirmInsecure()
                 await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
                 assertTrue(h.client.calls.contains("discover"))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aLocalServerAsksForPermissionBeforeTheDiscoveryRequest() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                h.gate.setPermissionGranted(false)
+                h.controller.discover("https://192.168.1.50")
+                await(h) { h.linkFlow.state.value is LinkState.NeedsLocalNetworkPermission }
+                // Without ACCESS_LOCAL_NETWORK the request would only time out.
+                assertTrue(h.client.calls.isEmpty())
+                h.controller.grantLocalNetwork(true)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                assertEquals(listOf("discover"), h.client.calls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aPortBearingLocalServerReachesTheGateWithoutThePort() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                h.gate.setPermissionGranted(false)
+                h.controller.discover("https://192.168.1.50:8443")
+                await(h) { h.linkFlow.state.value is LinkState.NeedsLocalNetworkPermission }
+                // The gate classifies the bare host; an explicit port must not defeat it.
+                assertEquals(listOf("192.168.1.50"), h.gate.classifiedHosts)
+                assertTrue(h.client.calls.isEmpty())
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun plainHttpToAPublicAddressWithAPortIsStillRefused() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.controller.startLink("http://sync.example:8080")
+                await(h) { h.linkFlow.state.value is LinkState.Failed }
+                assertEquals(SyncProblem.InsecureTransport, (h.linkFlow.state.value as LinkState.Failed).error)
+                assertTrue(h.client.calls.isEmpty())
             } finally {
                 h.close()
             }
@@ -125,6 +177,7 @@ class SyncControllerImplTest {
                 h.gate.setPermissionGranted(false)
                 h.controller.discover(serverUrl)
                 await(h) { h.linkFlow.state.value is LinkState.NeedsLocalNetworkPermission }
+                assertTrue(h.client.calls.isEmpty())
                 h.controller.grantLocalNetwork(false)
                 await(h) { h.linkFlow.state.value is LinkState.Failed }
                 assertEquals(
@@ -290,6 +343,70 @@ class SyncControllerImplTest {
                 h.controller.submitInvite("abcd-efgh")
                 await(h) { h.linkFlow.state.value is LinkState.Failed }
                 assertEquals(SyncProblem.InviteInvalid, (h.linkFlow.state.value as LinkState.Failed).error)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun cancellingAPasswordAuthWritesNothingAndZeroesThePassword() =
+        runTest {
+            val h = harness(this)
+            try {
+                val reply = kotlinx.coroutines.CompletableDeferred<TokenResponse>()
+                h.client.login = { _, _ -> reply.await() }
+                h.controller.discover(serverUrl)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                val password = "s3cret".toCharArray()
+                h.controller.submitPassword("alice", password)
+                await(h) { h.linkFlow.state.value is LinkState.Authorising }
+                h.controller.link?.cancel()
+                reply.complete(token())
+                h.tick()
+                Thread.sleep(20)
+                assertFalse(h.tokenStoreContains(host))
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.deviceId,
+                )
+                assertEquals(LinkState.Address, h.linkFlow.state.value)
+                assertTrue(password.all { it == '\u0000' })
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aNewLinkSupersedesAnInFlightAuth() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                val reply = kotlinx.coroutines.CompletableDeferred<TokenResponse>()
+                h.client.login = { _, _ -> reply.await() }
+                h.controller.discover(serverUrl)
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                h.controller.submitPassword("alice", "s3cret".toCharArray())
+                await(h) { h.linkFlow.state.value is LinkState.Authorising }
+                h.controller.startLink("https://other.example", LinkMethod.PASSWORD)
+                await(h) {
+                    (h.linkFlow.state.value as? LinkState.AwaitingInput)?.server?.serverUrl ==
+                        "https://other.example"
+                }
+                // The stale login's answer arrives after the new session started.
+                reply.complete(token())
+                h.tick()
+                Thread.sleep(20)
+                assertFalse(h.tokenStoreContains(host))
+                assertNull(
+                    h.db
+                        .syncStateDao()
+                        .get()
+                        ?.deviceId,
+                )
+                assertTrue(h.linkFlow.state.value is LinkState.AwaitingInput)
             } finally {
                 h.close()
             }
@@ -667,6 +784,32 @@ class SyncControllerImplTest {
                         .get()
                         ?.lastError,
                 )
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aRevokedDeviceStopsAllSyncRounds() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.client.syncHandler = { _, _ -> throw SyncTransportException(401, "unauthorized", "") }
+                h.controller.syncNow()
+                await(h) { h.controller.status.value is SyncStatus.Revoked }
+                val state = h.db.syncStateDao().get()
+                assertEquals("Revoked", state?.lastError)
+                assertEquals(false, state?.enabled)
+                // A later periodic or manual round never reaches the server again.
+                val calls = h.client.calls.count { it == "sync" }
+                h.controller.syncNow()
+                h.tick()
+                Thread.sleep(50)
+                h.controller.syncNow()
+                h.tick()
+                Thread.sleep(50)
+                assertEquals(calls, h.client.calls.count { it == "sync" })
             } finally {
                 h.close()
             }

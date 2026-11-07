@@ -23,6 +23,9 @@ class FakeLocalNetworkGate(
     var plainHttpAllowed: Boolean? = null
         private set
 
+    /** Every host the gate was asked to classify, in call order. */
+    val classifiedHosts = mutableListOf<String>()
+
     val results = mutableListOf<Boolean>()
 
     fun setLocation(value: LocalNetworkLocation) {
@@ -37,7 +40,10 @@ class FakeLocalNetworkGate(
         plainHttpAllowed = value
     }
 
-    override fun needsPermission(host: String): Boolean = location == LocalNetworkLocation.LOCAL && !permissionGranted
+    override fun needsPermission(host: String): Boolean {
+        classifiedHosts += host
+        return location == LocalNetworkLocation.LOCAL && !permissionGranted
+    }
 
     override fun hasPermission(): Boolean = permissionGranted
 
@@ -46,8 +52,10 @@ class FakeLocalNetworkGate(
         permissionGranted = granted
     }
 
-    override fun allowsPlainHttp(host: String): Boolean =
-        plainHttpAllowed ?: (location != LocalNetworkLocation.NOT_LOCAL)
+    override fun allowsPlainHttp(host: String): Boolean {
+        classifiedHosts += host
+        return plainHttpAllowed ?: (location != LocalNetworkLocation.NOT_LOCAL)
+    }
 
     override fun location(host: String): LocalNetworkLocation = location
 }

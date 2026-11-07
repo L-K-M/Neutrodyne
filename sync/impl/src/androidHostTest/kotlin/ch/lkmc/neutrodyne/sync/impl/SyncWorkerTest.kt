@@ -48,6 +48,84 @@ class SyncWorkerTest {
             }
         }
 
+    @Test
+    fun aRevokedRoundFailsInsteadOfRetrying() =
+        runBlocking {
+            val app = RuntimeEnvironment.getApplication()
+            val db = TestDb.inMemory(app)
+            try {
+                db.syncStateDao().upsert(
+                    ch.lkmc.neutrodyne.core.database.SyncStateEntity(
+                        enabled = true,
+                        serverUrl = "https://sync.example",
+                        accountId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                        nodeId = "0000000000000001",
+                        linkedAt = 1L,
+                    ),
+                )
+                val secrets = FakeSecretStore()
+                SyncTokenStore(secrets).save("sync.example", "nds_test")
+                val clock = TestClock()
+                val settings = FakeSettingsSyncPort()
+                val unscripted =
+                    Proxy.newProxyInstance(
+                        SyncClient::class.java.classLoader,
+                        arrayOf(SyncClient::class.java),
+                    ) { _, method, _ ->
+                        error("unscripted ${method.name}")
+                    } as SyncClient
+                val client =
+                    object : SyncClient by unscripted {
+                        override suspend fun sync(
+                            since: String?,
+                            changes: List<ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto>,
+                        ): ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse =
+                            throw SyncTransportException(401, "unauthorized", "")
+                    }
+                val engine =
+                    SyncEngine(
+                        db = db,
+                        client = client,
+                        applier =
+                            SyncApplier(
+                                db = db,
+                                clock = clock,
+                                secrets = secrets,
+                                settings = settings,
+                                playback = NoPlaybackSync,
+                                syncIngestHook = SyncIngestHook.None,
+                                channelSync = FakeGroupChannelSync(),
+                                sharePasswords = { false },
+                            ),
+                        clock = clock,
+                        secrets = secrets,
+                        sharePasswords = { false },
+                        address = FakeSyncServerAddress(serverUrl = "https://sync.example"),
+                        tokens = SyncTokenStore(secrets),
+                    )
+                val worker =
+                    TestListenableWorkerBuilder<SyncWorker>(app)
+                        .setWorkerFactory(
+                            object : WorkerFactory() {
+                                override fun createWorker(
+                                    appContext: Context,
+                                    workerClassName: String,
+                                    workerParameters: WorkerParameters,
+                                ): ListenableWorker = SyncWorker(appContext, workerParameters, engine)
+                            },
+                        ).build()
+                // A rejected token is not transient: the worker must not re-enqueue dead
+                // credentials, and the engine records the revocation for the status.
+                assertEquals(ListenableWorker.Result.failure(), worker.doWork())
+                val state = db.syncStateDao().get()
+                assertEquals("Revoked", state?.lastError)
+                assertEquals(false, state?.enabled)
+            } finally {
+                db.close()
+            }
+        }
+
     private suspend fun withWorker(
         failure: Exception,
         block: suspend (SyncWorker) -> Unit,

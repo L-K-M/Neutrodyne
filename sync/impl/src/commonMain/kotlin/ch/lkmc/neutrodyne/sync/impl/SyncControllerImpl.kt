@@ -46,6 +46,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,6 +59,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.coroutines.coroutineContext
 import kotlin.random.Random
 
 /** Which unauthenticated call a failure came from, so a 401 maps to the right problem. */
@@ -74,6 +76,9 @@ private const val SLOW_DOWN_INCREMENT_SECONDS = 5
 private const val UNLINK_PUSH_BUDGET_MS = 5_000L
 private const val DELETE_CONFIRMATION = "DELETE"
 private const val RESET_MODE_PURGE = "purge"
+
+/** 10 Errors: the `sync_state.lastError` marker the engine's rounds and the status map treat as a revoked link. */
+internal const val SYNC_ERROR_REVOKED = "Revoked"
 
 /**
  * The [SyncController] application service (10 Client sync engine, 08 Sync screens). The status is
@@ -156,7 +161,7 @@ class SyncControllerImpl(
                     SyncStatus.NotConfigured
                 }
 
-                state.lastError == REVOKED_ERROR -> {
+                state.lastError == SYNC_ERROR_REVOKED -> {
                     SyncStatus.Revoked(url)
                 }
 
@@ -241,17 +246,23 @@ class SyncControllerImpl(
 
     override fun submitInvite(code: String) {
         val server = pendingServer ?: return
-        scope.launch {
-            linkFlow.authorising()
-            try {
-                val token = client.redeemInvite(server.serverUrl, normaliseUserCode(code), deviceInfo())
-                authorised(server, token)
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Throwable) {
-                linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.INVITE))
+        val nodeId = pendingNodeId ?: return
+        val deviceId = pendingDeviceId ?: return
+        // The auth runs as the tracked link job: cancel/supersede ends it before a stale
+        // response can write this or the next session's token and state.
+        linkJob?.cancel()
+        linkJob =
+            scope.launch {
+                linkFlow.authorising()
+                try {
+                    val token = client.redeemInvite(server.serverUrl, normaliseUserCode(code), deviceInfo())
+                    authorised(server, token, nodeId, deviceId)
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Throwable) {
+                    linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.INVITE))
+                }
             }
-        }
     }
 
     override fun submitPassword(
@@ -259,19 +270,23 @@ class SyncControllerImpl(
         password: CharArray,
     ) {
         val server = pendingServer ?: return
-        scope.launch {
-            linkFlow.authorising()
-            try {
-                val token = client.login(server.serverUrl, username, password.concatToString(), deviceInfo())
-                authorised(server, token)
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Throwable) {
-                linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.LOGIN))
-            } finally {
-                password.fill('\u0000')
+        val nodeId = pendingNodeId ?: return
+        val deviceId = pendingDeviceId ?: return
+        linkJob?.cancel()
+        linkJob =
+            scope.launch {
+                linkFlow.authorising()
+                try {
+                    val token = client.login(server.serverUrl, username, password.concatToString(), deviceInfo())
+                    authorised(server, token, nodeId, deviceId)
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Throwable) {
+                    linkFlow.failed(mapAuthFailure(failure, LinkAuthKind.LOGIN))
+                } finally {
+                    password.fill('\u0000')
+                }
             }
-        }
     }
 
     override fun chooseFirstLink(choice: FirstLinkChoice) {
@@ -494,7 +509,9 @@ class SyncControllerImpl(
     /**
      * Normalises and checks the typed address: a plain `http://` to a public address is refused
      * before any request, a local one asks for confirmation, and Android 17 gates local networks
-     * behind `ACCESS_LOCAL_NETWORK`.
+     * behind `ACCESS_LOCAL_NETWORK`. Both consents run before the discovery request is sent — the
+     * plaintext confirmation is meaningless once traffic left, and without the permission the
+     * request would only time out (10 Local-network gate).
      */
     private suspend fun preflight(address: String): DiscoveredServer? {
         val normalized =
@@ -502,23 +519,16 @@ class SyncControllerImpl(
                 linkFlow.failed(SyncProblem.Server(400))
                 return null
             }
-        val host = hostOf(normalized)
+        val host =
+            bareHostOf(normalized) ?: run {
+                linkFlow.failed(SyncProblem.Server(400))
+                return null
+            }
         if (normalized.startsWith("http://") && !gate.allowsPlainHttp(host)) {
             linkFlow.failed(SyncProblem.InsecureTransport)
             return null
         }
-        val discovered =
-            when (val result = discovery.discover(normalized)) {
-                is DiscoveryResult.Failure -> {
-                    linkFlow.failed(result.problem)
-                    return null
-                }
-
-                is DiscoveryResult.Success -> {
-                    result.server
-                }
-            }
-        if (discovered.serverUrl.startsWith("http://")) {
+        if (normalized.startsWith("http://")) {
             val confirmed = awaitInsecure(host)
             if (!confirmed) {
                 linkFlow.showAddress()
@@ -532,7 +542,16 @@ class SyncControllerImpl(
                 return null
             }
         }
-        return discovered
+        return when (val result = discovery.discover(normalized)) {
+            is DiscoveryResult.Failure -> {
+                linkFlow.failed(result.problem)
+                null
+            }
+
+            is DiscoveryResult.Success -> {
+                result.server
+            }
+        }
     }
 
     private suspend fun runDeviceCode(server: DiscoveredServer) {
@@ -552,7 +571,7 @@ class SyncControllerImpl(
             try {
                 val token = client.linkToken(server.serverUrl, start.deviceCode)
                 linkFlow.authorising()
-                authorised(server, token)
+                authorised(server, token, checkNotNull(pendingNodeId), checkNotNull(pendingDeviceId))
                 return
             } catch (failure: SyncProblemException) {
                 when (failure.error) {
@@ -592,12 +611,15 @@ class SyncControllerImpl(
     private suspend fun authorised(
         server: DiscoveredServer,
         token: TokenResponse,
+        nodeId: NodeId,
+        deviceId: String,
     ) {
+        // The identity is the session the submit belongs to: a superseded or cancelled job must
+        // never write it into a newer session's state.
+        coroutineContext.ensureActive()
         tokenStore.save(hostOf(server.serverUrl), token.token)
         address.setServerUrl(server.serverUrl)
         token.username.takeIf { it.isNotBlank() }?.let { address.setUsername(it) }
-        val nodeId = checkNotNull(pendingNodeId)
-        val deviceId = checkNotNull(pendingDeviceId)
         db.withWriteTransaction {
             val existing = db.syncStateDao().get()
             db.syncStateDao().upsert(
@@ -621,6 +643,7 @@ class SyncControllerImpl(
         accountName = token.username
         refreshStatus()
 
+        coroutineContext.ensureActive()
         val summary = client.account()
         accountName = summary.username
         val localPodcasts = db.podcastDao().allForExport().size
@@ -770,13 +793,15 @@ class SyncControllerImpl(
     }
 
     private suspend fun markRevoked() {
-        db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastError = REVOKED_ERROR)) }
+        db.syncStateDao().get()?.let {
+            db.syncStateDao().upsert(it.copy(enabled = false, lastError = SYNC_ERROR_REVOKED))
+        }
         refreshStatus()
     }
 
     private suspend fun clearTransientError() {
         val state = db.syncStateDao().get() ?: return
-        if (state.lastError != null && state.lastError != REVOKED_ERROR) {
+        if (state.lastError != null && state.lastError != SYNC_ERROR_REVOKED) {
             db.syncStateDao().upsert(state.copy(lastError = null))
         }
     }
@@ -856,10 +881,6 @@ class SyncControllerImpl(
                     groupNames = summary?.get("groups")?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
                 )
             }
-    }
-
-    private companion object {
-        const val REVOKED_ERROR = "Revoked"
     }
 }
 

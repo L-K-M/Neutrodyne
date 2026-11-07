@@ -24,6 +24,40 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 /** The host of a server URL, for the token origin (`sync:<host>`). */
 fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
 
+/**
+ * The bare host of a normalised server URL, for the local-network gate's classification: userinfo
+ * and an explicit `:port` are dropped, brackets around an IPv6 literal removed, and a multi-colon
+ * remainder is treated as the literal itself. `null` for an empty or malformed authority, so the
+ * link flow fails it explicitly instead of classifying garbage as a public address.
+ */
+internal fun bareHostOf(url: String): String? {
+    val authority =
+        url
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .substringBefore('/')
+            .substringAfterLast('@')
+    val host =
+        if (authority.startsWith("[")) {
+            val end = authority.indexOf(']')
+            if (end < 0) return null
+            val rest = authority.substring(end + 1)
+            if (rest.isNotEmpty() &&
+                !(rest.startsWith(':') && rest.drop(1).isNotEmpty() && rest.drop(1).all(Char::isDigit))
+            ) {
+                return null
+            }
+            authority.substring(1, end)
+        } else if (authority.count { it == ':' } == 1) {
+            val port = authority.substringAfterLast(':')
+            if (port.isEmpty() || port.any { !it.isDigit() }) return null
+            authority.substringBeforeLast(':')
+        } else {
+            authority
+        }
+    return host.ifEmpty { null }
+}
+
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
 
@@ -52,6 +86,11 @@ class SyncEngine(
         if (serverUrl == null || token == null) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
+        // A revoked link stays dormant until a re-link clears the marker: no periodic round and
+        // no "Sync now" reaches the server again (10 Errors: 401 → Revoked stops rounds).
+        if (db.syncStateDao().get()?.lastError == SYNC_ERROR_REVOKED) {
+            return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
+        }
         var pushed = 0
         var applied = 0
         var stale = 0
@@ -70,7 +109,7 @@ class SyncEngine(
             if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
             val state = db.syncStateDao().get()
             val response =
-                client.sync(state?.cursor, changes)
+                markingRevocation { client.sync(state?.cursor, changes) }
             pushed += changes.size
             db.withWriteTransaction { handleResults(changes, response.results) }
             applied += response.records.size
@@ -85,7 +124,7 @@ class SyncEngine(
             var guard = 0
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
-                val next = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
+                val next = markingRevocation { client.changes(cursor, ProtocolLimits.MAX_RECORDS) }
                 applied += next.records.size
                 pulled += next.records.size
                 applier.applyPage(next.records, roundId)
@@ -151,4 +190,25 @@ class SyncEngine(
     }
 
     private suspend fun localPodcastCount(): Int = db.podcastDao().allForExport().size
+
+    /**
+     * 10 Errors: a rejected token revokes the link on every caller — worker and lane rounds too,
+     * not just the controller's "Sync now" — so the marker is written next to the outbox.
+     */
+    private suspend fun <T> markingRevocation(block: suspend () -> T): T =
+        try {
+            block()
+        } catch (failure: SyncTransportException) {
+            if (failure.status == STATUS_REVOKED) markRevoked()
+            throw failure
+        }
+
+    private suspend fun markRevoked() {
+        val state = db.syncStateDao().get() ?: return
+        db.syncStateDao().upsert(state.copy(enabled = false, lastError = SYNC_ERROR_REVOKED))
+    }
+
+    private companion object {
+        const val STATUS_REVOKED = 401
+    }
 }
