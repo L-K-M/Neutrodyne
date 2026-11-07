@@ -37,25 +37,26 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     includeInApk = false
                     includeInBundle = false
                 }
-                signingConfigs {
-                    // Committed and public on purpose (D61, 01 Signing config)
-                    create(SIGNING_CONFIG) {
-                        storeFile = rootProject.file("signing/neutrodyne-public.keystore")
-                        storeType = "pkcs12"
-                        storePassword = PUBLIC_PASSWORD
-                        keyAlias = PUBLIC_ALIAS
-                        keyPassword = PUBLIC_PASSWORD
-                        enableV1Signing = false
-                        enableV2Signing = true
-                        enableV3Signing = true
-                    }
-                }
                 splits {
                     abi {
                         isEnable = true
                         reset()
                         include(*PUBLISHED_ABIS)
                         isUniversalApk = false
+                    }
+                }
+                signingConfigs {
+                    // Committed and public on purpose (D61, 01 Signing config); the same block signs
+                    // :benchmark's test APK (AndroidSystemTestConventionPlugin)
+                    create(SIGNING_CONFIG) {
+                        storeFile = rootProject.file(SIGNING_STORE)
+                        storeType = "pkcs12"
+                        storePassword = SIGNING_PASSWORD
+                        keyAlias = SIGNING_ALIAS
+                        keyPassword = SIGNING_PASSWORD
+                        enableV1Signing = false
+                        enableV2Signing = true
+                        enableV3Signing = true
                     }
                 }
                 buildTypes {
@@ -109,9 +110,6 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
         const val DEBUG = "debug"
         const val BENCHMARK_RELEASE = "benchmarkRelease"
         const val TEST_KEEP_RULES = "proguard-test.pro"
-        const val SIGNING_CONFIG = "neutrodynePublic"
-        const val PUBLIC_PASSWORD = "neutrodyne"
-        const val PUBLIC_ALIAS = "neutrodyne"
         val PUBLISHED_ABIS = arrayOf("arm64-v8a", "x86_64", "armeabi-v7a")
     }
 }

@@ -158,7 +158,10 @@ class PlayJourneyTest {
 
             // M4 AC6: the queue's head is promoted and its remaining order is kept.
             phase("start/queue-first")
-            await { nowPlaying()?.episodeId == queued[0] }
+            // `NowPlaying.episodeId` publishes from the player immediately while `context`
+            // arrives on a separate session-flow collect; await the coherent pair rather
+            // than sampling the intermediate episode-id-only snapshot.
+            await { nowPlaying()?.episodeId == queued[0] && nowPlaying()?.context?.id == groupId }
             val queue = graph.playSessionStore().virtualQueue(queued.size + feedIds.size)
             assertThat(queue.current?.episodeId).isEqualTo(queued[0])
             assertThat(queue.upNext.map { it.episodeId }).isEqualTo(listOf(queued[1]))

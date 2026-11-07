@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
@@ -40,7 +43,8 @@ class FfmpegCorpusTest {
         val decodedSamples: Long,
         val rawSamples: Long,
         val container: String,
-        val chapters: List<EngineChapter>,
+        val chapters: List<EpisodeChapter>,
+        val expectedSource: ChapterSource,
         val expectedChapters: List<CorpusChapter>,
         val seekErrorMs: Long,
         val durationMs: Long?,
@@ -72,6 +76,8 @@ class FfmpegCorpusTest {
                             rawSamples = pipeline.rawDecodedSamples,
                             container = pipeline.demuxer.containerName,
                             chapters = pipeline.demuxer.chapters,
+                            expectedSource =
+                                if (entry.container == "mp4") ChapterSource.MP4 else ChapterSource.ID3,
                             expectedChapters = entry.chapters,
                             seekErrorMs = seekError(pipeline, entry),
                             durationMs = pipeline.demuxer.durationMs,
@@ -121,6 +127,27 @@ class FfmpegCorpusTest {
                             abs(actual - target) <= SEEK_TOLERANCE_MS,
                         )
                     }
+                }
+        }
+    }
+
+    @Test
+    fun `a seek near the end of every corpus file still returns audio`() {
+        // The decoder keeps the encoder-delay skip across a flush, so a seek
+        // whose target lands in the first frame after open would lose it.
+        for (entry in readManifest().files) {
+            val duration = entry.expectedSamples * 1000 / entry.sampleRate
+            FfmpegPipeline
+                .open(
+                    MemoryByteSource(corpusFile(entry.file).readBytes()),
+                    hostFfmpegDirectory(),
+                ).use { pipeline ->
+                    val target = (duration - 1).coerceAtLeast(0)
+                    val actual = pipeline.seekAndDecode(target)
+                    assertTrue(
+                        "${entry.file}: seek $target returned $actual",
+                        abs(actual - target) <= SEEK_TOLERANCE_MS,
+                    )
                 }
         }
     }
@@ -211,7 +238,7 @@ class FfmpegCorpusTest {
     }
 
     @Test
-    fun `a corrupt packet reports a decode failure instead of being skipped`() {
+    fun `corrupt packets are dropped until fifty consecutive refusals`() {
         val bytes = corpusFile("flac_2s.flac").readBytes()
         FfmpegPipeline
             .open(
@@ -220,12 +247,14 @@ class FfmpegCorpusTest {
             ).use { pipeline ->
                 val packet = requireNotNull(pipeline.demuxer.readPacket())
                 packet.data.reinterpret(packet.size.toLong()).fill(0)
-                val failed =
-                    runCatching {
-                        if (pipeline.decoder.send(packet)) pipeline.decoder.receive()
-                        Unit
-                    }.isFailure
-                assertTrue("a corrupt FLAC packet was silently discarded", failed)
+                // 11 Engine errors and recovery: a run of corrupt packets is
+                // dropped, and only a long streak ends the item.
+                repeat(MAX_CONSECUTIVE_PACKET_ERRORS - 1) {
+                    assertTrue(pipeline.decoder.send(packet))
+                    assertNull("a dropped packet produces no audio", pipeline.decoder.receive())
+                }
+                val failed = runCatching { pipeline.decoder.send(packet) }.isFailure
+                assertTrue("fifty consecutive refusals must fail the item", failed)
             }
     }
 
@@ -307,6 +336,10 @@ class FfmpegCorpusTest {
                 "expected ${measurement.expectedChapters.size}"
         }
         measurement.chapters.zip(measurement.expectedChapters).forEachIndexed { index, (actual, expected) ->
+            if (actual.source != measurement.expectedSource) {
+                return "${measurement.file} chapter $index is ${actual.source}, " +
+                    "expected ${measurement.expectedSource}"
+            }
             if (actual.title != expected.title) {
                 return "${measurement.file} chapter $index is '${actual.title}', expected '${expected.title}'"
             }

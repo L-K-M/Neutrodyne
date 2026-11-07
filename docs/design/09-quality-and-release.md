@@ -568,6 +568,75 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
 
 ### Out-of-process system tests
 
+**Implementation note (2026-10-19, M6b).** W11 preserves W10's fallback and
+records current workflow selection: `system-tests` runs E10 only for full
+nightlies; `instrumented-full` runs benchmark smoke on API36 (also for the
+downloads scope); `api37-16k` runs connected smoke. These are wired jobs, not
+executed evidence in this local worktree. The current workflows have no
+`desktop-matrix` job, so Windows/macOS/ARM lane and move coverage remains open.
+The [ledger](../evidence/m6b-acceptance.md) names tasks, receipts and gaps.
+Assembly does not close E10 or published-release acceptance. The release mapping
+below is the design target; current code enables only `benchmarkRelease`.
+
+**Implementation note (2026-10-19, M6b).** W10's self-instrumenting
+`:benchmark` producer uses the recorded `benchmarkRelease` fallback; published
+`release` mapping remains Unverified. `scripts/ci/system-tests.sh` runs E10 on
+full-image `bench34`, smoke on ATD `api36` and connected API 37. It records
+SHA/device/variant metadata, removes old XML, and requires one named, non-skipped
+pass from that variant/device. Empty, failed, skipped and duplicate results fail.
+Nightly `system-tests`, `instrumented-full` and API 37 enforce this gate.
+
+E10's test-APK server supplies a strong-ETag WAV. Assertions cover PID death and
+restart, the real reconciler's `QUEUED(SYSTEM)` reset and cleared token, matching
+server-observed `Range`/`If-Range` from actual `.part` length, and the final hash.
+`-Pneutrodyne.systemTests=true` adds a DUMP-protected fixture initializer to
+`download:impl` and disables all app variants except `benchmarkRelease`. It
+accepts only loopback seed URLs and calls the real engine without an FGS so
+`am kill` can kill the cached process. A test-APK activity backgrounds it without
+SystemUI. Startup records the real reset before parking the row until resume.
+UIDT/WorkManager lifecycle coverage stays with their device suites. Normal
+builds exclude the hook; `check-apk.sh --published` rejects its classes.
+
+Smoke uses the real UI and normal scheduling: five destinations, subscribe,
+ten seconds of actual playing state, download and back. Both suites clear data;
+connected runs uninstall both APKs, while GMD owns its disposable installation.
+Reports and variant metadata are always uploaded. Host CI builds the test APK
+and opted-in driver, and checks dependency policy and graph boundaries; Licensee
+stays on shipped shells. No schema, domain-interface or licence exceptions.
+
+Device execution is Unverified. I2 integrates M6a's real episode DownloadToggle
+and feed/podcast request handlers with W9's controls; smoke exercises that UI
+entry point instead of bypassing it. M6a's E4/downloads selectors and bmgr job
+coexist with the system-tests job and benchmark smoke legs. W11 must not record
+host compilation or passing host tests as device acceptance.
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 9 permits
+W10 to use `benchmarkRelease` if AGP 9.4 does not offer the required `release`
+test variant. The fallback differs only by profileability. Record the actual
+variant and device evidence; benchmarkRelease coverage must never be described
+as release-APK coverage. W1 performs no system-test or variant verification.
+
+**Implementation note (2026-11-06, M6b).** The first full nightly on PR #317
+(run 42184458132) never ran a system test: AGP signs only the `debug` build
+type by default, so `:benchmark`'s sole `benchmarkRelease` variant produced an
+unsigned test APK (`INSTALL_PARSE_FAILED_NO_CERTIFICATES`, reproduced locally
+with `apksigner verify`). The system-test convention plugin now signs every
+build type with the committed `neutrodynePublic` config — the same certificate
+the target app carries, which self-instrumenting a non-debuggable target
+requires anyway. A dispatched `system-tests` scope now runs the job alone
+(E10 on `bench34`, plus the `api36` smoke leg under dispatch; the schedule and
+`full` keep E10-only, `instrumented-full` keeps the nightly smoke). Review
+findings on #317: the connected leg did pre-build both benchmark APKs (its
+existence guard now checks them too); the app's D28 network security config
+already permits the fixture server's cleartext loopback traffic, so the test
+manifest's flag is inert for the target; the fixture row's startup
+reconcile-and-park now leaves terminal rows (COMPLETED/MISSING/FAILED)
+untouched so a later process start cannot rewrite the recorded reset;
+`system-tests.sh` strips adb's CR line endings before exact package matching,
+and the connected leg refuses any device that is not an emulator before
+installing or uninstalling the published application ID.
+
+
 Instrumented tests run inside the app's process, so killing the process (`am kill`, `ProcessDeathResumeTest`) or reinstalling the app kills the test. Such tests live in `:benchmark` (`com.android.test` with the `androidx.baselineprofile` 1.5.0 producer plugin, self-instrumenting, `targetProjectPath = ":app"`), drive the app with UI Automator 2.4.0 and `UiAutomation.executeShellCommand`, and are created in **M6b** (system tests); Macrobenchmarks follow in M10 and the baseline-profile generator in M11b ([Macrobenchmark and profiles](#macrobenchmark-and-profiles)). A test module builds and tests the app variant with the same build-type name ([Macrobenchmark overview](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-overview)), so `:benchmark`'s variants map one to one: **`release`** — the system tests (E10 on `bench34`) and the release smoke journeys `ReleaseSmokeJourneyTest` (on `api36` and the API 37 16 KB image: start, five destinations, "Add by URL" with a feed from a MockWebServer inside the `:benchmark` process on `127.0.0.1`, which the app reaches over loopback, play 10 s, download one episode, back) against the published `release` build type; **`benchmarkRelease`** — Macrobenchmarks; **`nonMinifiedRelease`** — `BaselineProfileGenerator`. Compose nodes are found by resource ID through `Modifier.semantics { testTagsAsResourceId = true }` on `NeutrodyneRoot` and 08's test tags ([08 Performance journeys](08-ui-ux.md#performance-journeys)). Unverified: that `com.android.test` with the producer plugin under AGP 9.4 offers a `release` variant matching `:app`'s `release` (M6b check, with S19's throwaway module as the first evidence; fallback: the system tests and smoke journeys run against `benchmarkRelease`, which differs from `release` only in being profileable and in its own source set).
 
 ### Recorded responses
@@ -674,6 +743,25 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 
 ### `nightly.yml`
 
+**Implementation note (2026-11-01, MS1).** Real-server convergence uses sixteen
+disjoint 6,250-seed SQLite shards, with combined failure reporting and retained
+XML/seed traces, alongside the existing 100,000-seed fake run. Required server
+suites reject missing, skipped and zero-case results. The reference read-only
+compose smoke holds Caddy and nginx SSE streams for five minutes with test CA
+verification, exercises auth/sync/export and backup/restore after revocation,
+and captures the server namespace separately from Caddy's certificate traffic.
+The two-hour proxy and physical client-network gates remain MS3/S17.
+
+**Implementation note (2026-11-01, MS1).** Supersedes the stub-URL instruction
+below: UPDATE_CHECK stays boolean. Inject a test fetcher; capture zero packaged-
+server egress with checking disabled and separately prove enabled destination
+policy. Separate proxy certificate traffic. MS1 owns five-minute server SSE smoke;
+MS3/S17 adds two-hour streams, keepalive races and real clients. Before AC7,
+reconcile active products with actual build/source jobs, without adding desktop
+packaging to MS1. Serialize image promotion and recheck current minor/latest
+ordering at tag movement using publish's decision, never verify-tag's preview;
+enable only assets of products actually shipped.
+
 `schedule: cron "17 2 * * *"` plus `workflow_dispatch` with input `scope` (`full`, default; `youtube-smoke` = only `release-build-smoke` and the `api36` debug leg of `instrumented-full` filtered to `YouTubeReleaseSmokeTest` and `SmokeTest`, plus, from MD3, `:youtube:ytdlp-desktop:shimTestStdio` and `StdioYtxTransportTest` on Linux x64 — ≈ 15 min, used by the hotfix path; `desktop` = only `desktop-matrix`, dispatched by PRs that change native code or a bundled component; `first-launch-restore` = only `first-launch-restore`, M3's seeded first-launch restore gate — `:app:api26DebugAndroidTest :app:api36DebugAndroidTest` with `firstLaunchSeed=restore` and the `FirstLaunchRestoreDeviceTest` class filter, [05 Testing](05-groups-opml-backup.md#testing); an opt-in scope because a run without the seed argument would only report the class's skip). Changed 2026-10-06: the `ref` dispatch input is gone — every job checks out `github.sha`, the exact commit the run's `head_sha` records, because the input's `main` default let a dispatched run test a different commit than the one `release.sh` gates on (a dispatch on another branch now selects it with GitHub's native ref picker). The Ubuntu GMD jobs (`instrumented-full`, `release-build-smoke`) install the emulator and platform-tools before their Gradle runs (`sdkmanager --install`), as `ci.yml`'s `instrumented` does: the runner image no longer ships the emulator package (added 2026-10-06). A failing job runs `scripts/ci/report-nightly.sh <job>`, which opens or updates one issue per job (label `nightly-failure`, `permissions: issues: write`) and closes it after the next green run.
 
 | Job | From | Runs | Blocks a release? |
@@ -699,6 +787,19 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 Removed 2026-10-05 (scope revision): `dev-tools-build` (developer tooling lives in `debug`, which `assemble` builds on every PR) and the `instrumented-full` leg against the `benchmark` build type (the published `release` build is tested directly). The former `mirror` job was removed with [PO-34](../PLAN.md#48-further-product-owner-decisions) ([GitHub takedown](#github-takedown)).
 
 ### `release.yml`
+
+**Implementation note (2026-11-01, MS1).** The implemented release graph selects
+`android,server,server-sources`. Desktop packaging and the future `sources`
+group remain inactive until their build jobs exist. Server sources include only
+the pinned base packages, matching runtime archive and `RUNTIME-SOURCES.md`.
+The runtime filename comes from the server source lock; a differing future
+runtime requires its own verified source asset. Native amd64/arm64 manifests
+are combined with buildx dry-run and pushed directly by digest using ORAS,
+then attested. No release image tag exists before immutable GitHub publication.
+Image promotion shares publish's concurrency group, verifies the source OCI
+artifact first, and re-reads published release ordering for minor/latest tags.
+PR checks do not waive source checks at publication. GHCR visibility, actual
+release approval and an unauthenticated public pull remain owner gates.
 
 Trigger: `push: tags: ['v*']`. Top-level `permissions: contents: read`. The build jobs read no secret and need no approval, so they run while the maintainer approves the `release` environment, which only `publish` uses (required reviewer = a maintainer; the environment holds no signing secret — the APK key is committed, [Committed keystore](#committed-keystore), and the desktop builds carry no publisher signature — and only `PODCASTINDEX_*` once Podcast Index grants written permission, after which the `android` and `desktop` jobs join the environment to read it, [D26](../PLAN.md#3-key-decisions)). Every job uses `setup-gradle` with `cache-disabled: true` (no cache-poisoning surface for published builds). Job permissions are the minimum: `packages: write` only in `server-image`, `server-image-manifest` and `image-tags`; `id-token: write`, `attestations: write` and `artifact-metadata: write` only in `server-image-manifest` and `publish` (for `actions/attest`); `contents: write` only in `publish`.
 
@@ -2059,7 +2160,7 @@ Settings › Privacy page content (09, both apps): crash-reports switch; "What N
 | [M3](../PLAN.md#m3-import-export-and-backup) | OPML/backup mutation providers; E5, E6, E9; nightly `bmgr` job on the release APK; `RecordingAppNavigator` in `:core:testing` |
 | [M4](../PLAN.md#m4-playback-core) | Media3 test-utils forcing verified; `:playback:core` tests in `commonTest`; `api34` device; 06's `PlaybackServiceTest` in nightly (incl. API 37 hardening); E3 |
 | [M5](../PLAN.md#m5-playback-features-and-system-surfaces) | manual device-matrix template in the release issue |
-| [M6](../PLAN.md#m6-downloads) | M6a: E4; `api33` device; the desktop download lanes' tests in `desktopTest`. M6b: `:benchmark` (`com.android.test` + baseline-profile producer) with its `release` variant for system tests and the release smoke journeys, `bench34`, `system-tests` job, E10, the `instrumented-full` release leg; `bmgr` assertion for `Podcasts/` |
+| [M6](../PLAN.md#m6-downloads) | M6a: E4; `api33` device; the desktop download lanes' tests in `desktopTest`; `bmgr` assertion for `Podcasts/`. M6b: `:benchmark` (`com.android.test` + baseline-profile producer) with its `release` variant for system tests and the release smoke journeys, `bench34`, `system-tests` job, E10, the `instrumented-full` release leg |
 | [M7](../PLAN.md#m7-discovery) | `PRIVACY.md` and the in-app inventory gain `apple`, `fyyd`, `podcastindex` and the autodiscovery probes of `add-input`; `PrivacyInventoryParityTest`; E1 deep-link case |
 | [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) | E8 (`ExternalYouTubeModeTest`) in `instrumented` and its desktop variant in `:desktopApp`'s JVM tests (every build is in external mode until M9a on Android and MD3 on the desktop); YouTube import-parser mutation providers; inventory `youtube-subscriptions` |
 | [M9](../PLAN.md#m9-youtube-playback-and-downloads-via-the-embedded-yt-dlp-engine) (M9a) | E7 through `:ytx` on the debug APK and the release APK (`ReplayRH` hook, `ytxReplay` argument, `ReleaseSmoke` filter); `shimTest` in `unit`; `check-apk.sh` content scan and ELF alignment check against the real engine stack; nightly `no-engine-build` (blocking), `youtube-canary` and `engine-nightly-canary`; `FakeYouTubeEngine`; PB18–PB21 from the spike on the release APK; inventory `youtube-streams` rewritten for the engine; YouTube engine lines in diagnostics and `CrashKey.YOUTUBE_HEALTH` |
@@ -2116,7 +2217,7 @@ Settings › Privacy page content (09, both apps): crash-reports switch; "What N
 | `UpdateManifestParserTest`, `DesktopAssetSelectorTest`, `GitHubUpdateSourceTest`, `AppUpdateCheckerTest`, `DesktopUpdateCheckLaneTest`, `UpdateNoticesTest` | tests | `:core:data` |
 | `BuildInfo.shippedLocales` | field request | `:core:model` (01) |
 | `privacy.crash_reports`, `diagnostics.verbose_log_until`, `updates.check_enabled`, `updates.last_check_at`, `updates.skipped_version_code`, `updates.notified_version_code`, `updates.first_run_choice_done`, `updates.verification_notice_shown_at` | setting keys | `:core:model` registry |
-| Workflows `ci.yml` (jobs `static`, `unit`, `assemble`, `desktop-smoke`, `server`, `instrumented`), `nightly.yml` (jobs `instrumented-full`, `api37-16k`, `release-build-smoke`, `system-tests`, `no-engine-build`, `desktop-matrix`, `sync-convergence`, `server-image-smoke`, `benchmark-dryrun`, `repro`, `bmgr`, `screenshots-full`, `mutation-full`, `live-canary`, `youtube-canary`, `engine-nightly-canary`; dispatch scopes `full`, `youtube-smoke`, `desktop`), `release.yml` (jobs `verify-tag`, `android`, `desktop`, `sources`, `server-jar`, `server-image`, `server-image-manifest`, `publish`, `image-tags`), `engine-canary.yml` (jobs `detect`, `gate`, `approve`, `deploy`), `record-screenshots.yml`, `keepalive.yml`; engine heartbeat `engine/ytdlp-heartbeat.json` (+ `.sig`) on GitHub Pages; GitHub environments `release`, `engine-approval`, `github-pages`; labels `run-instrumented`, `nightly-failure`, `release-blocker`, `engine-canary`, `repro`, `verification-watch`, `chaquopy`, `bundled-component` | CI | `.github/` |
+| Workflows `ci.yml` (jobs `static`, `unit`, `assemble`, `desktop-smoke`, `server`, `instrumented`), `nightly.yml` (jobs `instrumented-full`, `api37-16k`, `release-build-smoke`, `system-tests`, `no-engine-build`, `desktop-matrix`, `sync-convergence`, `server-image-smoke`, `benchmark-dryrun`, `repro`, `bmgr`, `screenshots-full`, `mutation-full`, `live-canary`, `youtube-canary`, `engine-nightly-canary`; dispatch scopes `full`, `system-tests`, `youtube-smoke`, `desktop`), `release.yml` (jobs `verify-tag`, `android`, `desktop`, `sources`, `server-jar`, `server-image`, `server-image-manifest`, `publish`, `image-tags`), `engine-canary.yml` (jobs `detect`, `gate`, `approve`, `deploy`), `record-screenshots.yml`, `keepalive.yml`; engine heartbeat `engine/ytdlp-heartbeat.json` (+ `.sig`) on GitHub Pages; GitHub environments `release`, `engine-approval`, `github-pages`; labels `run-instrumented`, `nightly-failure`, `release-blocker`, `engine-canary`, `repro`, `verification-watch`, `chaquopy`, `bundled-component` | CI | `.github/` |
 | Release assets per [Release assets](#release-assets) (`neutrodyne-{v}-{abi}.apk`, `neutrodyne-{v}-r8-mapping.zip`, `neutrodyne-{v}-{os}-{arch}.{msi,zip,dmg,deb,rpm,tar.gz}`, `neutrodyne-server-{v}.jar`, `openjdk-{jdk}-temurin-sources.tar.gz`, `RUNTIME-SOURCES.md`, `ffmpeg-{ffmpeg}-neutrodyne-src.tar.xz`, `neutrodyne-server-image-sources-{v}.tar.xz`, `neutrodyne-update.json`, `SHA256SUMS`); image `ghcr.io/{owner}/neutrodyne-server` | release | GitHub Releases, GHCR |
 | Scripts per [CI scripts](#ci-scripts) (new or renamed: `public-cert-sha256.sh`, `check-desktop-image.sh`, `check-runtime-sources.sh`, `check-server-image.sh`; extended: `check-apk.sh --published`, `make-update-json.sh`, `check-update-json.sh`, `verify-tag.sh`, `network-capture.sh --android/--desktop/--server`), `scripts/release.sh`, `scripts/l10n/update-shipped-locales.sh` | scripts | `scripts/` |
 | `release-assets.json` (the expected asset list per release stage, read by `verify-tag.sh`), `app/policy/locales.txt`, `app/lint-baseline.xml`, `app/proguard-test.pro`, `config/detekt/detekt.yml`, `renovate.json`, `changelogs/<versionCode>.txt`, `PRIVACY.md`, `SECURITY.md`, `.editorconfig`, `.clang-format`, `signing/neutrodyne-public.keystore` and `signing/README.md` (content) | files | repository |

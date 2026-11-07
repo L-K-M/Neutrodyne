@@ -131,14 +131,27 @@ if [ "$MAJOR" -ge 1 ]; then MAC_KIND=dmg; else MAC_KIND=mac-zip; fi
 
 # --- expected assets ------------------------------------------------------------
 
+# The FFmpeg source bundle's name carries the native lock's version (11 FFmpeg LGPL
+# obligations); the other lock-driven names ({jdk}, {wix}, {pbsTag}) join with their groups.
+FFMPEG_VERSION="$(awk -F' *= *' '
+    /^\[ffmpeg\]/ { insec = 1; next }
+    /^\[/ { insec = 0 }
+    insec && $1 == "version" { gsub(/"/, "", $2); print $2; exit }
+' "$REPO_ROOT/playback/native/native-components.lock")"
+[ -n "$FFMPEG_VERSION" ] || fail "native-components.lock has no [ffmpeg] version"
+
 EXPECTED="$(PRODUCTS="$PRODUCTS" MAC_EXT="$([ "$MAC_KIND" = dmg ] && echo dmg || echo zip)" \
+    FFMPEG="$FFMPEG_VERSION" \
     python3 - "$REPO_ROOT/release-assets.json" "$VERSION" <<'PYEOF'
 import json, os, sys
+from pathlib import Path
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
 version = sys.argv[2]
 products = set(os.environ["PRODUCTS"].split(","))
 mac_ext = os.environ["MAC_EXT"]
+ffmpeg = os.environ["FFMPEG"]
+server_source = json.loads(Path("sync/server/deploy/image-sources.lock.json").read_text())["runtime"]["name"]
 
 names = list(doc["always"])
 for group in products:
@@ -147,7 +160,8 @@ for group in products:
         sys.exit(f"verify-tag: release-assets.json has no group '{group}'")
     names += files
 for n in names:
-    print(n.replace("{v}", version).replace("{mac_ext}", mac_ext))
+    print(n.replace("{v}", version).replace("{mac_ext}", mac_ext).replace("{ffmpeg}", ffmpeg)
+          .replace("{server_runtime_source}", server_source))
 PYEOF
 )" || exit 1
 
@@ -160,6 +174,7 @@ out versionCode "$GC"
 out make_latest "$MAKE_LATEST"
 out youtube_engine "$ENGINE"
 out mac_kind "$MAC_KIND"
+out ffmpeg_version "$FFMPEG_VERSION"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     { echo "expected_assets<<__NL_EOF__"; echo "$EXPECTED"; echo "__NL_EOF__"; } >> "$GITHUB_OUTPUT"
 fi

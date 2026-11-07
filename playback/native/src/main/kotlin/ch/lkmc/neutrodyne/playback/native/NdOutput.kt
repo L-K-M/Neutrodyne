@@ -20,7 +20,9 @@ class NdOutput private constructor(
     private val library: NdmediaLibrary,
     private val handle: MemorySegment,
     private val counters: MemorySegment,
-) : AutoCloseable {
+    /** Bytes per interleaved frame at the configured channel count. */
+    private val frameBytes: Long,
+) : AudioOutput {
     private val write =
         library.downcall("nd_out_write", NdmediaAbi.WRITE)
     private val freeFrames =
@@ -41,16 +43,16 @@ class NdOutput private constructor(
     private var closed = false
 
     /** Media frames consumed by the device callback; underrun silence excluded. */
-    val framesPlayed: Long
+    override val framesPlayed: Long
         get() = COUNTER.getAcquire(counters, 0L) as Long
 
     /** Frames the device asked for while the ring was empty. */
-    val underrunFrames: Long
+    override val underrunFrames: Long
         get() = COUNTER.getAcquire(counters, Long.SIZE_BYTES.toLong()) as Long
 
     /** Frames of ring space the engine may still write. */
     @Synchronized
-    fun freeFrames(): Int {
+    override fun freeFrames(): Int {
         check(!closed) { "output is closed" }
         return check("free_frames", freeFrames.invokeExact(handle) as Int)
     }
@@ -61,37 +63,37 @@ class NdOutput private constructor(
      * recovers; never blocks.
      */
     @Synchronized
-    fun write(
+    override fun write(
         pcm: MemorySegment,
         frames: Int,
     ): Int {
         check(!closed) { "output is closed" }
-        require(frames >= 0 && pcm.isNative && pcm.byteSize() >= frames.toLong() * BYTES_PER_FRAME)
+        require(frames >= 0 && pcm.isNative && pcm.byteSize() >= frames.toLong() * frameBytes)
         return check("write", write.invokeExact(handle, pcm, frames) as Int)
     }
 
     @Synchronized
-    fun start(): Int {
+    override fun start(): Int {
         check(!closed) { "output is closed" }
         return check("start", start.invokeExact(handle) as Int)
     }
 
     @Synchronized
-    fun stop(): Int {
+    override fun stop(): Int {
         check(!closed) { "output is closed" }
         return check("stop", stop.invokeExact(handle) as Int)
     }
 
     /** Drops queued audio after a seek; returns the frames dropped. */
     @Synchronized
-    fun clear(): Int {
+    override fun clear(): Int {
         check(!closed) { "output is closed" }
         return check("clear", clear.invokeExact(handle) as Int)
     }
 
     /** `nd_out_describe`'s JSON: rate, channels, backend, device name, period. */
     @Synchronized
-    fun describe(): String {
+    override fun describe(): String {
         check(!closed) { "output is closed" }
         Arena.ofConfined().use { arena ->
             val buffer = arena.allocate(DESCRIBE_CAP.toLong())
@@ -101,9 +103,15 @@ class NdOutput private constructor(
     }
 
     /** The clock reader captures storage, never a device that close could free. */
-    fun clockReader(): () -> Long {
+    override fun clockReader(): () -> Long {
         val storage = counters
         return { COUNTER.getAcquire(storage, 0L) as Long }
+    }
+
+    /** The underrun reader captures the same storage as [clockReader]. */
+    override fun underrunReader(): () -> Long {
+        val storage = counters
+        return { COUNTER.getAcquire(storage, Long.SIZE_BYTES.toLong()) as Long }
     }
 
     @Synchronized
@@ -127,13 +135,15 @@ class NdOutput private constructor(
         what: String,
         code: Int,
     ): Int {
-        if (code < 0) throw NdOutputException("nd_out_$what failed with $code")
+        if (code < 0) throw NdOutputException("nd_out_$what failed with $code", code)
         return code
     }
 
     companion object {
         private const val DESCRIBE_CAP = 2_048
-        private const val BYTES_PER_FRAME = 8L
+
+        /** Mirrors ndmedia's `ND_DEFAULT_CHANNELS`: 0 in the config means stereo. */
+        private const val DEFAULT_CHANNELS = 2
         private val COUNTER = ValueLayout.JAVA_LONG.varHandle()
 
         // Pin storage while native callbacks can write it. After close, clock
@@ -168,7 +178,7 @@ class NdOutput private constructor(
             val rc = probe.invokeExact(config, slot) as Int
             if (rc < 0) {
                 library.close()
-                throw NdOutputException("nd_out_open failed with $rc")
+                throw NdOutputException("nd_out_open failed with $rc", rc)
             }
             val handle = slot.get(NdmediaAbi.ADDRESS, 0)
             LIVE_COUNTERS[handle.address()] = counters
@@ -179,8 +189,9 @@ class NdOutput private constructor(
                         FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
                     )
                 val attached = attach.invokeExact(handle, counters) as Int
-                if (attached < 0) throw NdOutputException("nd_out_attach_clock failed with $attached")
-                return NdOutput(library, handle, counters)
+                if (attached < 0) throw NdOutputException("nd_out_attach_clock failed with $attached", attached)
+                val effectiveChannels = if (channels > 0) channels else DEFAULT_CHANNELS
+                return NdOutput(library, handle, counters, effectiveChannels * Float.SIZE_BYTES.toLong())
             } catch (failure: Throwable) {
                 library.downcall("nd_out_close", NdmediaAbi.CLOSE).invokeExact(handle)
                 LIVE_COUNTERS.remove(handle.address(), counters)
@@ -193,4 +204,15 @@ class NdOutput private constructor(
 
 class NdOutputException(
     message: String,
-) : Exception(message)
+    /** ndmedia's negative `ND_E_*` code; [E_DEVICE] means the device itself failed. */
+    val code: Int,
+) : Exception(message) {
+    companion object {
+        const val E_ARG = -1
+        const val E_STATE = -2
+        const val E_BACKEND = -3
+
+        /** The device stopped or could not be opened; the engine discards its output. */
+        const val E_DEVICE = -4
+    }
+}

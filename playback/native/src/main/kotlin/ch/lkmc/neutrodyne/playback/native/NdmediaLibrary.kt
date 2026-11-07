@@ -101,4 +101,19 @@ internal object NdmediaAbi {
     const val CONFIG_SAMPLE_RATE_OFFSET = 8L
     const val CONFIG_CHANNELS_OFFSET = 12L
     const val CONFIG_RING_MS_OFFSET = 16L
+
+    /**
+     * nd_media_info { const char* title, artist, album, art_path; int64 duration_ms,
+     * position_ms; float rate; int playing; } — the C layout is four pointers,
+     * two int64s, a float and an int, size 56 on every ndmedia target.
+     */
+    const val MEDIA_INFO_SIZE = 56L
+    const val MEDIA_INFO_TITLE_OFFSET = 0L
+    const val MEDIA_INFO_ARTIST_OFFSET = 8L
+    const val MEDIA_INFO_ALBUM_OFFSET = 16L
+    const val MEDIA_INFO_ART_PATH_OFFSET = 24L
+    const val MEDIA_INFO_DURATION_OFFSET = 32L
+    const val MEDIA_INFO_POSITION_OFFSET = 40L
+    const val MEDIA_INFO_RATE_OFFSET = 48L
+    const val MEDIA_INFO_PLAYING_OFFSET = 52L
 }
