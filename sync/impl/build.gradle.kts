@@ -24,6 +24,7 @@ kotlin {
             implementation(libs.androidx.work.runtime)
         }
         findByName("androidHostTest")?.dependencies {
+            implementation(libs.androidx.work.testing)
             implementation(libs.robolectric)
             implementation(libs.junit4)
             implementation(libs.androidx.test.ext.junit)

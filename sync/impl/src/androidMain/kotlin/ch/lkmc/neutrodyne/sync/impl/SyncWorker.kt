@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
+import kotlinx.coroutines.CancellationException
 
 /**
  * The one worker behind `sync-now`, `sync-push` and `sync-periodic` (10 Scheduling on Android).
@@ -40,6 +41,8 @@ class SyncWorker
             return try {
                 engine.round(reason)
                 Result.success()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (failure: Exception) {
                 Result.retry()
             }
