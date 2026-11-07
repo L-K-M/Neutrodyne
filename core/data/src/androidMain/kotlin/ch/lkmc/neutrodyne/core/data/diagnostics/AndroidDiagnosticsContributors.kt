@@ -86,7 +86,7 @@ internal class AndroidJobsContributor
             if (infos.isEmpty()) return listOf(DiagnosticsLine("jobs", "none"))
             return infos.map { info ->
                 DiagnosticsLine(
-                    info.tags.firstOrNull { it != WorkInfo::class.qualifiedName && !it.startsWith("ch.lkmc") }
+                    info.tags.firstOrNull { !it.startsWith("ch.lkmc") }
                         ?: info.id.toString().take(8),
                     "${info.state} stop=${stopReasonName(info.stopReason)}",
                     if (info.state == WorkInfo.State.FAILED) DiagnosticsSeverity.PROBLEM else DiagnosticsSeverity.INFO,
