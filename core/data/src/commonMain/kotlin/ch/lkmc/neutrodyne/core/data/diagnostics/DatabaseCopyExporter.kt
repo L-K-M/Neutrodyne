@@ -19,6 +19,8 @@ import ch.lkmc.neutrodyne.core.domain.DiagnosticsError
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.TimeZone
@@ -27,12 +29,16 @@ import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlin.time.Instant
+import kotlin.uuid.Uuid
 
 /**
- * Produces the diagnostics database copy of 09 (D33): `VACUUM INTO` a fresh
- * `neutrodyne-diagnostics-<yyyy-MM-dd-HHmm>.db` under `<cache>/export/`, scrubbed by
- * [DiagExportScrub] on a raw driver connection, then `VACUUM`ed again so deleted bytes
- * leave the file before it is shared or copied out. The export cache sweeps leftovers.
+ * Produces the diagnostics database copy of 09 (D33): `VACUUM INTO` a private staging
+ * file under `<cache>/export/`, scrubbed by [DiagExportScrub] on a raw driver
+ * connection, `VACUUM`ed again so deleted bytes leave the file, then moved to a unique
+ * `neutrodyne-diagnostics-<yyyy-MM-dd-HHmm>-<unique>.db` share name. Raw bytes never
+ * exist under a name a FileProvider grant can resolve: a minted URI resolves by path
+ * and outlives the file's deletion, so an earlier export's name is never reused —
+ * even within the same minute. The export cache sweeps leftovers.
  *
  * Guards (09): free space under `2 × database size + 50 MB` fails [DiagnosticsError
  * .NOT_ENOUGH_SPACE]; a writer-connection wait over 30 s fails [DiagnosticsError
@@ -72,40 +78,57 @@ internal class DatabaseCopyExporter
                 }
 
                 fileSystem.createDirectories(exportDir)
-                val target = exportDir / fileName(clock.now())
-                fileSystem.delete(target)
-
-                // VACUUM INTO cannot run inside a transaction. The 30 s bound is for waiting
-                // on the writer (09): the step itself is a blocking SQLite call coroutine
-                // cancellation cannot interrupt, so a vacuum that outlives the deadline
-                // still completes — its copy is valid and must not be deleted as "busy".
-                var vacuumFinished = false
-                withTimeoutOrNull(writerWaitMs) {
-                    db.useWriterConnection { conn ->
-                        conn.usePrepared("VACUUM INTO '${target.toString().replace("'", "''")}'") { it.step() }
-                        vacuumFinished = true
-                    }
-                }
-                if (!vacuumFinished) {
-                    fileSystem.delete(target)
-                    return@withContext Outcome.Failure(DiagnosticsError.DATABASE_BUSY)
-                }
-
-                val outcome =
-                    suspendRunCatching {
-                        driver.open(target.toString()).use { connection ->
-                            DiagExportScrub.scrub(connection)
-                            connection.prepare("VACUUM").use { it.step() }
+                // Unique names per export: the raw copy is staged under a private name
+                // that is never shared, and the scrubbed file moves to its own unique
+                // share name — a re-export can never write raw data into a path a
+                // previous export's FileProvider grant still resolves.
+                val unique = Uuid.random().toString().take(UNIQUE_NAME_CHARS)
+                val staging = exportDir / stagingName(unique)
+                val target = exportDir / fileName(clock.now(), unique)
+                try {
+                    // VACUUM INTO cannot run inside a transaction. The 30 s bound is for
+                    // waiting on the writer (09): the step itself is a blocking SQLite
+                    // call coroutine cancellation cannot interrupt, so a vacuum that
+                    // outlives the deadline still completes — its copy is valid and must
+                    // not be deleted as "busy".
+                    var vacuumFinished = false
+                    withTimeoutOrNull(writerWaitMs) {
+                        db.useWriterConnection { conn ->
+                            conn.usePrepared("VACUUM INTO '${staging.toString().replace("'", "''")}'") { it.step() }
+                            vacuumFinished = true
                         }
                     }
-                outcome.fold(
-                    onSuccess = { Outcome.Success(target) },
-                    onFailure = {
-                        Log.w(TAG, it) { "diagnostics export scrub failed" }
-                        fileSystem.delete(target)
-                        Outcome.Failure(DiagnosticsError.FAILED)
-                    },
-                )
+                    if (!vacuumFinished) {
+                        return@withContext Outcome.Failure(DiagnosticsError.DATABASE_BUSY)
+                    }
+
+                    val outcome =
+                        suspendRunCatching {
+                            driver.open(staging.toString()).use { connection ->
+                                DiagExportScrub.scrub(connection)
+                                connection.prepare("VACUUM").use { it.step() }
+                            }
+                        }
+                    outcome.fold(
+                        onSuccess = {
+                            // A cancellation that raced the blocking scrub is honoured
+                            // before the copy becomes a share file.
+                            currentCoroutineContext().ensureActive()
+                            // The shareable file appears atomically, already scrubbed:
+                            // unscrubbed bytes only ever existed under the staging name.
+                            fileSystem.atomicMove(staging, target)
+                            Outcome.Success(target)
+                        },
+                        onFailure = {
+                            Log.w(TAG, it) { "diagnostics export scrub failed" }
+                            Outcome.Failure(DiagnosticsError.FAILED)
+                        },
+                    )
+                } finally {
+                    // A timed-out, failed or cancelled export leaves no raw or partial
+                    // copy behind; after a successful move the staging name is gone.
+                    suspendRunCatching { fileSystem.delete(staging, mustExist = false) }
+                }
             }
 
         /** Deletes every earlier diagnostics export — at most one waits for its share. */
@@ -126,20 +149,29 @@ internal class DatabaseCopyExporter
             const val NAME_SUFFIX = ".db"
             const val WRITER_WAIT_MS = 30_000L
             const val MIN_FREE_BYTES = 50L * 1_048_576
+            private const val STAGING_INFIX = "staging-"
+            private const val UNIQUE_NAME_CHARS = 8
             private const val TAG = "DbCopyExporter"
 
             /**
-             * `neutrodyne-diagnostics-<yyyy-MM-dd-HHmm>.db` in UTC (02). month/day are Int
-             * only on the desktop's newer kotlinx-datetime; the deprecated accessors are
-             * the common denominator.
+             * `neutrodyne-diagnostics-<yyyy-MM-dd-HHmm>-<unique>.db` in UTC (02; the
+             * unique suffix keeps a same-minute re-export off every earlier share
+             * path). month/day are Int only on the desktop's newer kotlinx-datetime;
+             * the deprecated accessors are the common denominator.
              */
             @Suppress("DEPRECATION")
-            fun fileName(now: Long): String {
+            fun fileName(
+                now: Long,
+                unique: String,
+            ): String {
                 val t = Instant.fromEpochMilliseconds(now).toLocalDateTime(TimeZone.UTC)
 
                 fun Int.pad() = toString().padStart(2, '0')
                 return "$NAME_PREFIX${t.year}-${t.monthNumber.pad()}-${t.dayOfMonth.pad()}" +
-                    "-${t.hour.pad()}${t.minute.pad()}$NAME_SUFFIX"
+                    "-${t.hour.pad()}${t.minute.pad()}-$unique$NAME_SUFFIX"
             }
+
+            /** The private intermediate name — never returned to callers, never shared. */
+            fun stagingName(unique: String): String = "$NAME_PREFIX$STAGING_INFIX$unique$NAME_SUFFIX"
         }
     }

@@ -3,13 +3,18 @@
 package ch.lkmc.neutrodyne.core.data.diagnostics
 
 import androidx.sqlite.SQLiteConnection
+import ch.lkmc.neutrodyne.core.database.DescriptionFormat
+import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 
 /**
  * Scrubs a `VACUUM INTO` diagnostics copy in place on a raw driver connection (02
  * db-maintenance worker, N3). Credential and every `sync_*` payload table is emptied; then
- * every `TEXT` column outside [KEEP] has each non-null value rewritten, derived from the
- * copy's own `sqlite_master`/`PRAGMA table_info` so a column added later is scrubbed by
- * default. Callers `VACUUM` the copy afterwards so deleted bytes leave the file.
+ * every `TEXT`-affinity column outside [KEEP] has each non-null value rewritten, and every
+ * `BLOB`-affinity column (`episode_description.html`'s codec bytes) is rewritten to the
+ * [EpisodeDescriptionCodec]-encoded `…#{rowid}` so the copy's descriptions still decode —
+ * all derived from the copy's own `sqlite_master`/`PRAGMA table_info` so a column added
+ * later is scrubbed by default. Callers `VACUUM` the copy afterwards so deleted bytes
+ * leave the file.
  *
  * Rewrite shapes (02): an absolute-URL value becomes `scheme://host/…#{rowid}`;
  * `episode.identityKey`/`episode.guid` keep their key prefix + `…#{rowid}` (`u:` keys embed
@@ -148,10 +153,13 @@ internal object DiagExportScrub {
         connection: SQLiteConnection,
         table: String,
     ) {
-        val columns = textColumns(connection, table)
-        if (columns.isEmpty()) return
+        // TEXT- and BLOB-affinity columns share the pass: a column added later under
+        // either affinity is scrubbed by default. BLOB values get the codec-encoded
+        // mask — episode_description.html must still decode on the copy.
+        val blobColumns = columns(connection, table, Affinity.BLOB).toSet()
         val scrubbed =
-            columns.filter { "$table.$it" !in KEEP }
+            (columns(connection, table, Affinity.TEXT) + blobColumns)
+                .filter { "$table.$it" !in KEEP }
         if (scrubbed.isEmpty()) return
 
         val select =
@@ -167,14 +175,18 @@ internal object DiagExportScrub {
                     var dirty = false
                     for ((index, column) in scrubbed.withIndex()) {
                         if (read.isNull(index + 1)) continue
-                        val qualified = "$table.$column"
-                        val replacement =
-                            when {
-                                qualified in FORCE_MASK -> masked(rowid)
-                                qualified in PREFIXED -> prefixMask(read.getText(index + 1), rowid)
-                                else -> valueMask(read.getText(index + 1), rowid)
-                            }
-                        write.bindText(index + 1, replacement)
+                        if (column in blobColumns) {
+                            write.bindBlob(index + 1, blobMask(rowid))
+                        } else {
+                            val qualified = "$table.$column"
+                            val replacement =
+                                when {
+                                    qualified in FORCE_MASK -> masked(rowid)
+                                    qualified in PREFIXED -> prefixMask(read.getText(index + 1), rowid)
+                                    else -> valueMask(read.getText(index + 1), rowid)
+                                }
+                            write.bindText(index + 1, replacement)
+                        }
                         dirty = true
                     }
                     if (!dirty) continue
@@ -187,19 +199,32 @@ internal object DiagExportScrub {
         }
     }
 
-    /** `TEXT`-affinity column names of [table] from `PRAGMA table_info` (cid, name, type, …). */
-    private fun textColumns(
+    /** Declared-type affinity per SQLite's rules (CHAR/CLOB/TEXT → TEXT; BLOB or empty → BLOB). */
+    private enum class Affinity { TEXT, BLOB }
+
+    /** Column names of [table] whose declared type carries [affinity], from `PRAGMA table_info`. */
+    private fun columns(
         connection: SQLiteConnection,
         table: String,
+        affinity: Affinity,
     ): List<String> =
         buildList {
             connection.prepare("PRAGMA table_info(\"${table.escaped()}\")").use { stmt ->
                 while (stmt.step()) {
-                    // SQLite's TEXT affinity: declared types containing CHAR, CLOB or TEXT.
                     val type = stmt.getText(2).uppercase()
-                    if (type.contains("TEXT") || type.contains("CHAR") || type.contains("CLOB")) {
-                        add(stmt.getText(1))
-                    }
+                    val matches =
+                        when (affinity) {
+                            // SQLite's TEXT affinity: declared types containing CHAR, CLOB or TEXT.
+                            Affinity.TEXT -> {
+                                type.contains("TEXT") || type.contains("CHAR") || type.contains("CLOB")
+                            }
+
+                            // SQLite's BLOB affinity: a BLOB marker or no declared type at all.
+                            Affinity.BLOB -> {
+                                type.contains("BLOB") || type.isEmpty()
+                            }
+                        }
+                    if (matches) add(stmt.getText(1))
                 }
             }
         }
@@ -247,6 +272,10 @@ internal object DiagExportScrub {
         if (host.isEmpty()) return masked(rowid)
         return "${value.substring(0, schemeEnd)}://$host/$MASK#$rowid"
     }
+
+    /** A BLOB value's mask: `…#{rowid}` encoded so `episode_description.html` decodes. */
+    private fun blobMask(rowid: Long): ByteArray =
+        EpisodeDescriptionCodec.encode(masked(rowid), DescriptionFormat.PLAIN_TEXT)
 
     /** `episode.identityKey`/`episode.guid`: `u:`-style prefix + `…#{rowid}`. */
     private fun prefixMask(

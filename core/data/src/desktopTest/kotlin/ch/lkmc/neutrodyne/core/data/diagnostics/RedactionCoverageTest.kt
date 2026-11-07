@@ -11,6 +11,8 @@ import ch.lkmc.neutrodyne.core.common.RingBufferLogSink
 import ch.lkmc.neutrodyne.core.data.exporting.ExportDestination
 import ch.lkmc.neutrodyne.core.data.storagePathsFor
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
+import ch.lkmc.neutrodyne.core.database.DescriptionFormat
+import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.DiagnosticsContributor
 import ch.lkmc.neutrodyne.core.domain.ExportError
@@ -19,6 +21,7 @@ import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.testing.FakePlatformInfo
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -89,12 +92,44 @@ class RedactionCoverageTest {
                 }
             val db = TestDb.file(dbDir.toPath())
             try {
-                db.podcastDao().insertPodcast(
-                    podcastEntity(
-                        feedUrl = SEEDED_URL,
-                        title = "Seeded",
-                    ),
-                )
+                val podcastId =
+                    db.podcastDao().insertPodcast(
+                        podcastEntity(
+                            feedUrl = SEEDED_URL,
+                            title = "Seeded",
+                        ),
+                    )
+                // The BLOB column the TEXT-affinity scrub missed (review I1): one episode's
+                // description stores raw UTF-8 (byte-readable in the copy), another's is
+                // deflated, so only decoding proves the secret is gone.
+                val shortEpisode =
+                    db.episodeDao().insertStub(
+                        episodeEntity(podcastId = podcastId, identityKey = "ep-desc-1"),
+                    )
+                val longEpisode =
+                    db.episodeDao().insertStub(
+                        episodeEntity(podcastId = podcastId, identityKey = "ep-desc-2"),
+                    )
+                val shortHtml =
+                    "<p>shownotes <a href=\"$SEEDED_URL\">link</a></p>"
+                val longHtml =
+                    "<p>" + "filler ".repeat(80) +
+                        "<a href=\"https://bob:DESCBLOBSECRET@descnotes.example.invalid" +
+                        "/x?auth=DESCBLOBTOKEN\">more</a></p>"
+                db.useWriterConnection { conn ->
+                    conn.usePrepared(
+                        "INSERT INTO episode_description (episodeId, html) VALUES (?, ?)",
+                    ) {
+                        it.bindLong(1, shortEpisode)
+                        it.bindBlob(2, EpisodeDescriptionCodec.encode(shortHtml, DescriptionFormat.HTML))
+                        it.step()
+                        it.reset()
+                        it.clearBindings()
+                        it.bindLong(1, longEpisode)
+                        it.bindBlob(2, EpisodeDescriptionCodec.encode(longHtml, DescriptionFormat.PLAIN_TEXT))
+                        it.step()
+                    }
+                }
                 db.syncStateDao().upsert(
                     SyncStateEntity(enabled = true, serverUrl = SYNC_SERVER, accountId = SYNC_TOKEN),
                 )
@@ -116,6 +151,17 @@ class RedactionCoverageTest {
                     connection.prepare("VACUUM").use { it.step() }
                 }
                 BundledSQLiteDriver().open(target.absolutePath).use { connection ->
+                    // The description blobs: getText() in the sweep above skips BLOB
+                    // columns, so they are decoded — the only read that exposes a
+                    // deflated secret.
+                    connection.prepare("SELECT html FROM episode_description").use { stmt ->
+                        while (stmt.step()) {
+                            val decoded = EpisodeDescriptionCodec.decode(stmt.getBlob(0)).text
+                            for (secret in SECRETS) {
+                                assertFalse(decoded.contains(secret), "'$secret' in decoded description: $decoded")
+                            }
+                        }
+                    }
                     connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").use { stmt ->
                         val tables = buildList { while (stmt.step()) add(stmt.getText(0)) }
                         for (table in tables) {
@@ -259,6 +305,9 @@ class RedactionCoverageTest {
                 "a8F3kq09ZpLm2xQr7Tz4",
                 "nds_SYNCTOKENSECRET",
                 "sync.example.invalid",
+                "DESCBLOBSECRET",
+                "DESCBLOBTOKEN",
+                "descnotes.example.invalid",
             )
     }
 }

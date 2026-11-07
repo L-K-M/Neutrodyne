@@ -3,7 +3,10 @@
 package ch.lkmc.neutrodyne.core.data.diagnostics
 
 import androidx.room3.useWriterConnection
+import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import ch.lkmc.neutrodyne.core.database.DescriptionFormat
+import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -170,6 +173,150 @@ class DiagExportScrubTest {
                 copyFile.delete()
             }
         }
+
+    /**
+     * `episode_description.html` is `BLOB`-affinity, so the TEXT-column pass never saw it
+     * (review I1). The seeded pair covers both codec storage forms: < 512 B stays raw
+     * UTF-8 (byte-readable in the copy), ≥ 512 B is raw DEFLATE (only a decoded read
+     * exposes it). After the scrub every copied blob must still decode, decode to the
+     * `…#{rowid}` mask and carry no secret — while the source database keeps the
+     * originals untouched.
+     */
+    @Test
+    fun scrubRewritesEncodedDescriptionsToCodecMasks() =
+        runTest {
+            val db = TestDb.file(dbDir.toPath())
+            try {
+                val podcastId =
+                    db.podcastDao().insertPodcast(
+                        podcastEntity(feedUrl = "https://desc.example.invalid/feed", title = "Desc"),
+                    )
+                val shortEpisode =
+                    db.episodeDao().insertStub(
+                        episodeEntity(podcastId = podcastId, identityKey = "ep-desc-1"),
+                    )
+                val longEpisode =
+                    db.episodeDao().insertStub(
+                        episodeEntity(podcastId = podcastId, identityKey = "ep-desc-2"),
+                    )
+                val shortHtml =
+                    "<p>notes <a href=\"https://alice:s3cret@notes1.example.invalid" +
+                        "/ep?token=SECRETTOKEN\">link</a></p>"
+                val longHtml =
+                    "<p>" + "filler ".repeat(80) +
+                        "<a href=\"https://bob:DESCBLOBSECRET@notes2.example.invalid" +
+                        "/x?auth=DESCBLOBTOKEN\">more</a></p>"
+                val shortBlob = EpisodeDescriptionCodec.encode(shortHtml, DescriptionFormat.HTML)
+                val longBlob = EpisodeDescriptionCodec.encode(longHtml, DescriptionFormat.PLAIN_TEXT)
+                // Both storage forms are exercised: the short body is stored verbatim, the
+                // long one is a deflate stream whose secret never appears in file bytes.
+                assertEquals(RAW_HTML_TAG, shortBlob[0])
+                assertEquals(DEFLATED_TEXT_TAG, longBlob[0])
+                db.useWriterConnection { conn ->
+                    conn.usePrepared(
+                        "INSERT INTO episode_description (episodeId, html) VALUES (?, ?)",
+                    ) {
+                        it.bindLong(1, shortEpisode)
+                        it.bindBlob(2, shortBlob)
+                        it.step()
+                        it.reset()
+                        it.clearBindings()
+                        it.bindLong(1, longEpisode)
+                        it.bindBlob(2, longBlob)
+                        it.step()
+                    }
+                }
+
+                copyFile.delete()
+                db.useWriterConnection { conn ->
+                    conn.usePrepared("VACUUM INTO '${copyFile.absolutePath}'") { it.step() }
+                }
+
+                // The seeded descriptions decode to their secrets before the scrub — the
+                // fixture is real codec data, not a text column dressed as a blob.
+                driver.open(copyFile.absolutePath).use { connection ->
+                    val decoded = decodedDescriptions(connection)
+                    assertTrue(decoded[0].contains("s3cret"), "seeded raw description: $decoded")
+                    assertTrue(decoded[1].contains("DESCBLOBSECRET"), "seeded deflated description: $decoded")
+                }
+
+                driver.open(copyFile.absolutePath).use { connection ->
+                    DiagExportScrub.scrub(connection)
+                    connection.prepare("VACUUM").use { it.step() }
+                }
+
+                driver.open(copyFile.absolutePath).use { connection ->
+                    val decoded = decodedDescriptions(connection)
+                    assertEquals(2, decoded.size)
+                    for (text in decoded) {
+                        assertTrue(
+                            text.matches(Regex("…#\\d+")),
+                            "a copied description must decode to the mask, got: $text",
+                        )
+                        for (secret in DESC_SECRETS) {
+                            assertFalse(text.contains(secret), "'$secret' in decoded description")
+                        }
+                    }
+                }
+
+                // The raw short encoding sat in the copy byte-for-byte; the final VACUUM
+                // must have removed it from the file's pages entirely.
+                val bytes = copyFile.readBytes()
+                for (secret in DESC_SECRETS) {
+                    val needle = secret.encodeToByteArray()
+                    val found =
+                        (0..bytes.size - needle.size).any { i ->
+                            needle.indices.all { j -> bytes[i + j] == needle[j] }
+                        }
+                    assertFalse(found, "'$secret' still in exported bytes")
+                }
+
+                // The source database is read-only for the export: its descriptions still
+                // decode to the seeded originals.
+                db.useWriterConnection { conn ->
+                    conn.usePrepared(
+                        "SELECT html FROM episode_description ORDER BY episodeId",
+                    ) { stmt ->
+                        val decoded =
+                            buildList {
+                                while (stmt.step()) add(EpisodeDescriptionCodec.decode(stmt.getBlob(0)).text)
+                            }
+                        assertEquals(listOf(shortHtml, longHtml), decoded)
+                    }
+                }
+            } finally {
+                db.close()
+                dbDir.deleteRecursively()
+                copyFile.delete()
+            }
+        }
+
+    private fun decodedDescriptions(connection: SQLiteConnection): List<String> =
+        buildList {
+            connection
+                .prepare("SELECT html FROM episode_description ORDER BY episodeId")
+                .use { stmt ->
+                    while (stmt.step()) {
+                        // decode() never throws on the copy: a scrub that wrote an invalid
+                        // blob fails here even if its text looked masked.
+                        add(EpisodeDescriptionCodec.decode(stmt.getBlob(0)).text)
+                    }
+                }
+        }
+
+    private companion object {
+        const val RAW_HTML_TAG: Byte = 0x00
+        const val DEFLATED_TEXT_TAG: Byte = 0x03
+        val DESC_SECRETS =
+            listOf(
+                "s3cret",
+                "SECRETTOKEN",
+                "DESCBLOBSECRET",
+                "DESCBLOBTOKEN",
+                "notes1.example.invalid",
+                "notes2.example.invalid",
+            )
+    }
 
     @Test
     fun scrubMasksUrlFragments() =
