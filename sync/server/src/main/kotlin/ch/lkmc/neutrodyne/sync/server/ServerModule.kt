@@ -160,7 +160,7 @@ internal class InsecureTransportGuard(
 
             val resolved =
                 ClientAddress(config.trustedProxies).resolve(
-                    peerHost = call.request.local.remoteHost,
+                    peerHost = call.request.local.remoteAddress,
                     forwardedFor =
                         call.request.headers
                             .getAll(HttpHeaders.XForwardedFor)

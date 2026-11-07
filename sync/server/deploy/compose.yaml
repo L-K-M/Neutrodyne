@@ -5,7 +5,11 @@ services:
     restart: unless-stopped
     environment:
       NEUTRODYNE_SERVER_PUBLIC_URL: https://${SYNC_HOST:-sync.example.org}
-      NEUTRODYNE_SERVER_TRUSTED_PROXIES: 172.31.87.0/24
+      # Must cover the proxies' addresses; it follows SYNC_SUBNET so the two
+      # cannot drift apart. The default sits inside 172.16.0.0/12 and can
+      # collide with routes the host already has (an AWS default VPC is
+      # 172.31.0.0/16): choose another SYNC_SUBNET on such a host.
+      NEUTRODYNE_SERVER_TRUSTED_PROXIES: ${SYNC_SUBNET:-172.31.87.0/24}
       NEUTRODYNE_SERVER_UPDATE_CHECK: ${UPDATE_CHECK:-true}
     volumes:
       - neutrodyne-data:/data
@@ -17,7 +21,8 @@ services:
     security_opt: ["no-new-privileges:true"]
     mem_limit: 320m
   caddy:
-    image: caddy:2
+    # caddy:2; the tag is mutable, so the image is pinned by digest.
+    image: caddy:2@sha256:ce773ec7a742ce15ee6bf2bb5f65882b9e2a4487b10733e6f1484f86e6b5d8bc
     restart: unless-stopped
     environment:
       SYNC_HOST: ${SYNC_HOST:-sync.example.org}
@@ -30,7 +35,7 @@ services:
 networks:
   sync:
     ipam:
-      config: [{subnet: 172.31.87.0/24}]
+      config: [{subnet: "${SYNC_SUBNET:-172.31.87.0/24}"}]
 volumes:
   neutrodyne-data: {}
   caddy-data: {}

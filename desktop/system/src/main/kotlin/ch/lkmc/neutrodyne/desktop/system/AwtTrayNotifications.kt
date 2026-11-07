@@ -27,9 +27,10 @@ import java.util.concurrent.TimeUnit
  */
 internal class AwtTrayNotifications(
     private val icon: () -> Image?,
+    private val tray: TrayBridge = AwtTrayBridge(),
 ) : OsNotificationChannel {
     private val lock = Any()
-    private var trayIcon: TrayIcon? = null
+    private var trayIcon: TrayIconRef? = null
     private var removal: ScheduledFuture<*>? = null
     private val scheduler =
         Executors.newSingleThreadScheduledExecutor { runnable ->
@@ -44,7 +45,13 @@ internal class AwtTrayNotifications(
         synchronized(lock) {
             try {
                 val current = ensureIcon() ?: return false
-                current.displayMessage(n.title, n.body, TrayIcon.MessageType.INFO)
+                try {
+                    tray.message(current, n.title, n.body)
+                } catch (e: Exception) {
+                    // A balloon that could not post leaves its icon behind otherwise.
+                    removeIcon()
+                    throw e
+                }
                 scheduleRemoval()
                 true
             } catch (e: Exception) {
@@ -65,13 +72,11 @@ internal class AwtTrayNotifications(
     }
 
     /** The shared icon, added on first use; `null` when this desktop has no tray. */
-    private fun ensureIcon(): TrayIcon? {
+    private fun ensureIcon(): TrayIconRef? {
         trayIcon?.let { return it }
-        if (!SystemTray.isSupported()) return null
+        if (!tray.supported()) return null
         val image = icon() ?: return null
-        val created =
-            TrayIcon(image, NotificationsNames.APP_NAME).apply { isImageAutoSize = true }
-        SystemTray.getSystemTray().add(created)
+        val created = tray.add(image)
         trayIcon = created
         return created
     }
@@ -88,7 +93,7 @@ internal class AwtTrayNotifications(
     private fun removeIcon() {
         val current = trayIcon ?: return
         trayIcon = null
-        runCatching { SystemTray.getSystemTray().remove(current) }
+        runCatching { tray.remove(current) }
             .onFailure { Log.w(TAG, it) { "removing the notification tray icon failed" } }
     }
 
@@ -96,5 +101,51 @@ internal class AwtTrayNotifications(
         const val TAG = "OsNotifier"
         const val TRAY_THREAD = "nd-notify-tray"
         const val ICON_LIFETIME_S = 10L
+    }
+}
+
+/** A tray icon a [TrayBridge] added; opaque to [AwtTrayNotifications]. */
+internal interface TrayIconRef
+
+/**
+ * The AWT tray calls behind [AwtTrayNotifications], so a headless test can watch
+ * add/message/remove without a display — [TrayIcon] cannot even be constructed
+ * there.
+ */
+internal interface TrayBridge {
+    fun supported(): Boolean
+
+    fun add(image: Image): TrayIconRef
+
+    fun message(
+        icon: TrayIconRef,
+        title: String,
+        body: String,
+    )
+
+    fun remove(icon: TrayIconRef)
+}
+
+private class AwtTrayBridge : TrayBridge {
+    private class AwtIcon(
+        val icon: TrayIcon,
+    ) : TrayIconRef
+
+    override fun supported(): Boolean = SystemTray.isSupported()
+
+    override fun add(image: Image): TrayIconRef =
+        AwtIcon(TrayIcon(image, NotificationsNames.APP_NAME).apply { isImageAutoSize = true })
+            .also { SystemTray.getSystemTray().add(it.icon) }
+
+    override fun message(
+        icon: TrayIconRef,
+        title: String,
+        body: String,
+    ) {
+        (icon as AwtIcon).icon.displayMessage(title, body, TrayIcon.MessageType.INFO)
+    }
+
+    override fun remove(icon: TrayIconRef) {
+        SystemTray.getSystemTray().remove((icon as AwtIcon).icon)
     }
 }

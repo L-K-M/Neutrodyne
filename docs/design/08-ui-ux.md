@@ -2768,6 +2768,15 @@ Serves R8.9, N4 (keyboard operability). Applies to the desktop app and to Androi
 | Full player scrubber | ← / → | seek back / forward 5 s; Home / End to the chapter start / the next chapter |
 | Search and address fields | Enter, Esc | submit; clear, then back |
 
+**Implementation note (2026-11-06, MD4).** Compose text fields do not consume every key
+event they edit: a desktop Space key-down reaches the root's bubbling `onKeyEvent` even while
+a field is focused. `NeutrodyneRoot` therefore tracks text-field focus through
+`Modifier.ndTextFieldFocus()` (applied to every shared text field) and stands its shortcuts
+down while a field is focused. On the desktop the window menu's accelerators are cleared for
+the same duration, because AWT processes a menu accelerator before Compose's key input and the
+root cannot suppress it by consuming the event; the root's own dispatch of those chords stays
+as the fallback for menu-less compositions (the AC1 `runComposeUiTest` checklist).
+
 `KeyboardShortcutsKey` (MD4; Help › Keyboard shortcuts on the desktop) shows 11's list grouped as Playback, Navigation, Library and Window, with the platform's modifier names ("Ctrl", "⌘"). On Android `MainActivity` overrides `Activity.onProvideKeyboardShortcuts` (an Activity callback, independent of Compose) to list the root keys in the system shortcut helper (Meta+/).
 
 #### Context menus

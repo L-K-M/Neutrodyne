@@ -869,6 +869,10 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsRepositoryContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions {
+}
 -keep class ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImplContributions$ToAppScope$ProvideScopedInstanceAddPodcastResolverImplMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImplContributions$ToAppScope$ProvideScopedInstanceAddPodcastResolverImplMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -2292,7 +2296,7 @@
 -keep class ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState {
 }
 -keep class ch.lkmc.neutrodyne.core.ui.root.RootActions {
-  public <init>(kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function2, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public <init>(kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function2, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
   int $stable;
 }
 -keep enum ch.lkmc.neutrodyne.core.ui.root.RootNotice {

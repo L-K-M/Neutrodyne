@@ -85,10 +85,22 @@ class DbusDesktopPortal internal constructor(
 
             suspendCancellableCoroutine { continuation ->
                 var match: AutoCloseable? = null
+
+                /**
+                 * The one exit for every outcome: the `Response` match rule must never
+                 * outlive the wait. `invokeOnCancellation` only runs on cancel, so the
+                 * answer and error paths close it themselves — before resuming, or the
+                 * caller could observe the match still installed.
+                 */
+                fun finish(choice: DirectoryChoice) {
+                    runCatching { match?.close() }
+                    if (continuation.isActive) continuation.resume(choice)
+                }
+
                 val handler =
                     object : DBusSigHandler<PortalRequest.Response> {
                         override fun handle(signal: PortalRequest.Response) {
-                            if (continuation.isActive) continuation.resume(parseResponse(signal))
+                            finish(parseResponse(signal))
                         }
                     }
                 match =
@@ -107,7 +119,7 @@ class DbusDesktopPortal internal constructor(
                     return@suspendCancellableCoroutine
                 }
                 continuation.invokeOnCancellation {
-                    runCatching { match?.close() }
+                    runCatching { match.close() }
                     closeRequest(requestPath)
                 }
                 try {
@@ -119,13 +131,11 @@ class DbusDesktopPortal internal constructor(
                     // be matched safely — the timeout-free wait stays on our rule, and the
                     // caller's cancellation cleans it up.
                     if (handle.path != requestPath) {
-                        runCatching { match.close() }
-                        continuation.resume(DirectoryChoice.Unavailable)
+                        finish(DirectoryChoice.Unavailable)
                     }
                 } catch (e: Exception) {
-                    runCatching { match.close() }
                     Log.w(TAG, e) { "portal FileChooser unavailable; caller falls back" }
-                    continuation.resume(DirectoryChoice.Unavailable)
+                    finish(DirectoryChoice.Unavailable)
                 }
             }
         }

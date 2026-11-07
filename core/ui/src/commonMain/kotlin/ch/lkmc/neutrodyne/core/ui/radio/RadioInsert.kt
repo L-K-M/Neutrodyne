@@ -58,6 +58,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.radio_new_playlist
 import ch.lkmc.neutrodyne.core.ui.resources.radio_placeholder
 import ch.lkmc.neutrodyne.core.ui.resources.radio_playlists
 import ch.lkmc.neutrodyne.core.ui.resources.radio_podcasts
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import org.jetbrains.compose.resources.stringResource
 
 internal enum class RadioInsert { CHOOSER, CREATE }
@@ -171,7 +172,12 @@ internal fun RadioInsertDialog(
                                 singleLine = true,
                                 label = { RadioText(stringResource(Res.string.radio_name), 12) },
                                 placeholder = { RadioText(stringResource(Res.string.radio_placeholder), 14) },
-                                modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("radio_name"),
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(focus)
+                                        .testTag("radio_name")
+                                        .ndTextFieldFocus(),
                             )
                             RadioText(
                                 stringResource(Res.string.radio_podcasts),

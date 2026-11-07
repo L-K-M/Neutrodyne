@@ -94,8 +94,9 @@ UID 65532 with a read-only root and a private writable `/data` volume.
 Without Docker, install Java 21+, download `neutrodyne-server-<version>.jar`
 from [GitHub Releases](https://github.com/L-K-M/Neutrodyne/releases), verify
 `SHA256SUMS`, and install the
-[systemd unit](sync/server/deploy/neutrodyne-server.service). Adjust its public
-URL and JAR path, then enable and start it. Put Caddy or nginx in front for TLS;
+[systemd unit](sync/server/deploy/neutrodyne-server.service.example) as
+`neutrodyne-server.service`. Copy it, set its public URL and JAR path, then
+enable and start it. Put Caddy or nginx in front for TLS;
 [nginx.conf.example](sync/server/deploy/nginx.conf.example) preserves live
 updates. A non-loopback listener requires an HTTPS public URL or the explicit
 `serve --insecure-lan` option. Insecure LAN mode sends tokens without encryption;

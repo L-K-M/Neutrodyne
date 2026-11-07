@@ -169,6 +169,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_warn_truncated
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_count
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_later
 import ch.lkmc.neutrodyne.core.ui.resources.selection_select_all
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -822,7 +823,11 @@ private fun SearchField(
     OutlinedTextField(
         value = query,
         onValueChange = onQuery,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .ndTextFieldFocus(),
         singleLine = true,
         placeholder = { Text(stringResource(Res.string.import_search)) },
         leadingIcon = { Icon(NdIcons.Search, contentDescription = null) },
@@ -1231,6 +1236,7 @@ private fun NameDialog(
                 isError = error != null,
                 supportingText = { error?.let { Text(groupErrorText(it)) } },
                 label = { Text(stringResource(Res.string.import_target_name)) },
+                modifier = Modifier.ndTextFieldFocus(),
             )
         }
     }

@@ -87,6 +87,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.group_edit_title
 import ch.lkmc.neutrodyne.core.ui.resources.group_settings_title
 import ch.lkmc.neutrodyne.core.ui.resources.order_newest
 import ch.lkmc.neutrodyne.core.ui.resources.order_oldest
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import org.jetbrains.compose.resources.stringResource
 
@@ -169,7 +170,7 @@ internal fun GroupEditScreen(
                             )
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().testTag("groupName"),
+                    modifier = Modifier.fillMaxWidth().testTag("groupName").ndTextFieldFocus(),
                 )
             }
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -256,7 +257,7 @@ internal fun GroupEditScreen(
                         onValueChange = onSearch,
                         singleLine = true,
                         label = { Text(stringResource(Res.string.group_edit_search)) },
-                        modifier = Modifier.fillMaxWidth().testTag("groupMemberSearch"),
+                        modifier = Modifier.fillMaxWidth().testTag("groupMemberSearch").ndTextFieldFocus(),
                     )
                 }
             }

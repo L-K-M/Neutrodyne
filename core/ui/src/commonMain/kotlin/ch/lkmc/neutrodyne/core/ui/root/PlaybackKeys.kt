@@ -39,6 +39,14 @@ public fun dispatchPlaybackKey(
             controller.skipToNext()
         }
 
+        PlaybackKey.PREVIOUS_CHAPTER -> {
+            controller.previousChapter()
+        }
+
+        PlaybackKey.NEXT_CHAPTER -> {
+            controller.nextChapter()
+        }
+
         else -> {
             return false
         }
