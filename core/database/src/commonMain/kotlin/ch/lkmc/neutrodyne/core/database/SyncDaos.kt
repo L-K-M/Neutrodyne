@@ -39,8 +39,8 @@ abstract class SyncStateDao(
     suspend fun <T> withApplying(block: suspend () -> T): T =
         db.syncWriter { connection ->
             val previous = connection.scalar("SELECT applying FROM sync_state WHERE id = 0")
-            connection.execute("UPDATE sync_state SET applying = 1 WHERE id = 0")
             try {
+                connection.execute("UPDATE sync_state SET applying = 1 WHERE id = 0")
                 block()
             } finally {
                 // A cancelled caller must still restore the flag before its transaction unwinds.
@@ -96,6 +96,9 @@ abstract class SyncStateDao(
             " linkedAt = NULL, lastSyncAt = NULL, lastError = NULL WHERE id = 0",
     )
     protected abstract suspend fun resetState()
+
+    /** True while [withApplying] runs — tests' "capture suppressed" probe. */
+    suspend fun isApplying(): Boolean = get()?.applying == true
 }
 
 /**
@@ -404,6 +407,13 @@ abstract class SyncClockDao(
             }
         }
     }
+
+    /** 02: retention drops the deleted episodes' `episode`/`upnext` clock rows. */
+    @Query("DELETE FROM sync_clock WHERE coll = :coll AND rid IN (:rids)")
+    abstract suspend fun deleteRids(
+        coll: String,
+        rids: List<String>,
+    ): Int
 }
 
 /** `sync_parked` (02): received records awaiting their podcast or episode. */
@@ -415,6 +425,14 @@ interface SyncParkedDao {
     /** 10's `SyncParkedStateApplier` load after each ingest. */
     @Query("SELECT * FROM sync_parked WHERE podcastSyncId = :podcastSyncId")
     suspend fun forPodcast(podcastSyncId: String): List<SyncParkedEntity>
+
+    /** Applied rows leave the table (10). */
+    @Query("DELETE FROM sync_parked WHERE id IN (:ids)")
+    suspend fun delete(ids: List<Long>): Int
+
+    /** 02 maintenance step 3a: rows parked longer than 180 days are dropped. */
+    @Query("DELETE FROM sync_parked WHERE receivedAt < :before")
+    suspend fun expire(before: Long): Int
 
     @Query("SELECT COUNT(*) FROM sync_parked")
     suspend fun count(): Int

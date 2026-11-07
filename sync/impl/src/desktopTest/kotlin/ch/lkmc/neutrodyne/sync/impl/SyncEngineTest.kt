@@ -37,10 +37,15 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.LinkTokenRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LoginRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** AC2 at the engine level: two devices converge through the shared merge rules. */
@@ -245,9 +250,113 @@ class SyncEngineTest {
             }
         }
 
+    @Test
+    fun aRoundMarksSyncActivityUntilItReturns() =
+        runTest {
+            val gate = CompletableDeferred<Unit>()
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse {
+                        gate.await()
+                        return SyncResponse(emptyList(), emptyList(), "c:00000001:1", false, "")
+                    }
+                }
+            val db = TestDb.inMemory()
+            try {
+                seedRound(db)
+                val activity = SyncActivityState()
+                val device = Device(db, client, activity)
+                val job = launch { device.round() }
+                activity.count.first { it > 0 }
+                assertTrue(activity.active, "the round must mark sync active while it runs")
+                gate.complete(Unit)
+                job.join()
+                assertEquals(0, activity.count.value, "a completed round clears the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aFailedRoundClearsSyncActivity() =
+        runTest {
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse = error("client down")
+                }
+            val db = TestDb.inMemory()
+            try {
+                seedRound(db)
+                val activity = SyncActivityState()
+                val device = Device(db, client, activity)
+                val result = runCatching { device.round() }
+                assertTrue(result.isFailure, "the round must propagate the client failure")
+                assertEquals(0, activity.count.value, "a failed round must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aCancelledRoundClearsSyncActivity() =
+        runTest {
+            val gate = CompletableDeferred<Unit>() // never completed; the cancel interrupts the await
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse {
+                        gate.await()
+                        return SyncResponse(emptyList(), emptyList(), "c:00000001:1", false, "")
+                    }
+                }
+            val db = TestDb.inMemory()
+            try {
+                seedRound(db)
+                val activity = SyncActivityState()
+                val device = Device(db, client, activity)
+                val job = launch { device.round() }
+                activity.count.first { it > 0 }
+                job.cancelAndJoin()
+                assertEquals(0, activity.count.value, "a cancelled round must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun overlappingRoundsKeepTheActivityFlagUntilTheLastOneEnds() {
+        val activity = SyncActivityState()
+        activity.begin()
+        activity.begin()
+        activity.end()
+        assertTrue(activity.active)
+        activity.end()
+        assertFalse(activity.active)
+    }
+
+    private suspend fun seedRound(db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase) {
+        db.withWriteTransaction {
+            db
+                .syncStateDao()
+                .upsert(SyncStateEntity(enabled = true, nodeId = "a".padStart(16, '0'), hlc = 1L shl 16))
+        }
+    }
+
     private class Device(
         val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         val client: SyncClient,
+        private val activity: SyncActivityState = SyncActivityState(),
     ) {
         val clock = TestClock(NOW)
         val engine =
@@ -282,6 +391,7 @@ class SyncEngineTest {
                         override suspend fun syncPlaybackSettings(): Boolean = true
                     },
                 tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
+                activity = activity,
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)

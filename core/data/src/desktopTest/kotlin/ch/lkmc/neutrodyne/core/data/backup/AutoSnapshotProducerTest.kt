@@ -6,7 +6,6 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
-import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.newNetworkClients
 import ch.lkmc.neutrodyne.core.data.requestImportRestore
@@ -98,7 +97,7 @@ class AutoSnapshotProducerTest {
             netErrors = testClassifier,
             io = Dispatchers.Default,
         )
-    private val cleaner = ImportSessionCleaner(db, payloads, clock, Dispatchers.IO)
+
     private val exporter = OpmlExporter(db, secrets, clock, Dispatchers.Default)
     private val androidInfo = testBuildInfo().copy(platform = BuildInfo.Platform.ANDROID)
 
@@ -127,7 +126,6 @@ class AutoSnapshotProducerTest {
     ) = AutoSnapshotProducer(
         db = db,
         writer = writer,
-        cleaner = cleaner,
         readers = readers,
         settings = settings,
         snapshots = snapshots,
