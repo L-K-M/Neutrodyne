@@ -275,6 +275,50 @@ class DiagExportScrubTest {
         }
 
     @Test
+    fun aFailedScrubLeavesTheCopyUntouched() =
+        runTest {
+            val db = TestDb.file(dbDir.toPath())
+            try {
+                val original = "https://fail.example.invalid/feed?s=SECRETFAIL"
+                db.podcastDao().insertPodcast(podcastEntity(feedUrl = original, title = "Fail"))
+                // A WITHOUT ROWID table has no `rowid` column, so scrubTable's SELECT throws
+                // after earlier tables were already rewritten.
+                db.useWriterConnection { conn ->
+                    conn.usePrepared("CREATE TABLE probe(id TEXT PRIMARY KEY, note TEXT) WITHOUT ROWID") {
+                        it.step()
+                    }
+                    conn.usePrepared("INSERT INTO probe VALUES ('k', 'x')") { it.step() }
+                }
+                copyFile.delete()
+                db.useWriterConnection { conn ->
+                    conn.usePrepared("VACUUM INTO '${copyFile.absolutePath}'") { it.step() }
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    try {
+                        DiagExportScrub.scrub(connection)
+                        error("scrub should fail on the rowid-less probe table")
+                    } catch (_: androidx.sqlite.SQLiteException) {
+                        // expected: the probe table cannot be read by rowid
+                    }
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    connection.prepare("SELECT feedUrl FROM podcast").use { stmt ->
+                        stmt.step()
+                        assertEquals(
+                            original,
+                            stmt.getText(0),
+                            "a failed scrub must leave earlier tables untouched",
+                        )
+                    }
+                }
+            } finally {
+                db.close()
+                dbDir.deleteRecursively()
+                copyFile.delete()
+            }
+        }
+
+    @Test
     fun scrubKeepsUniqueIndicesValid() =
         runTest {
             val db = TestDb.file(dbDir.toPath())
