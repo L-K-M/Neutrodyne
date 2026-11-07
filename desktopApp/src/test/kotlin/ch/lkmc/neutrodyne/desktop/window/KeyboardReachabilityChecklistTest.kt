@@ -11,8 +11,8 @@ import org.junit.Test
  * the per-row actions are the shared rows' context menus (secondary click, Menu, Shift+F10).
  *
  * The keyboard paths themselves are driven by `RootShortcutTest` (core:ui desktopTest) and
- * the context menus by `ContextMenuCatalogueTest` (commonTest); the menu paths by
- * `DesktopImportMenuTest`'s menu structure assertions.
+ * the context menus by `ContextMenuCatalogueTest` (core:ui desktopTest) and the per-row
+ * gesture tests; the menu paths by `DesktopImportMenuTest`'s menu structure assertions.
  *
  * The catalogue also carries the MS2/MS3 sync rows. Their screens are not part of this
  * codebase yet, so they are classified [Reachability.MS2]/[Reachability.MS3] and are
@@ -110,8 +110,8 @@ private data class CatalogueAction(
 )
 
 /**
- * 08's custom-actions catalogue, classified by the desktop paths this shell provides. The
- * `detail` names the shortcut or menu item; OPEN rows are the context-menu slice's.
+ * 08's custom-actions catalogue, classified by the desktop paths the app provides. The
+ * `detail` names the shortcut, menu item or owning milestone.
  */
 private val CATALOGUE =
     listOf(
