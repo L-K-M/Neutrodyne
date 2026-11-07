@@ -61,13 +61,14 @@ internal enum class DesktopPackagingTarget(
 /**
  * The package-level licence metadata (DEB/RPM `--license-file`, MSI/DMG licence page, RPM
  * `License:`): the package bundles the OpenJDK runtime and third-party libraries besides our
- * Unlicense code, so the file lists them and the SPDX expression covers them. Extend both when
- * FFmpeg (LGPL-2.1-or-later) or the python-build-standalone stack joins the image.
+ * Unlicense code, so the file lists them and the SPDX expression covers them. Extended for the
+ * python-build-standalone CPython stack, the vendored yt-dlp and certifi's CA bundle (MD3).
  */
 internal const val DESKTOP_PACKAGE_LICENSE_FILE = "packaging/LICENSE-PACKAGE.txt"
 internal const val DESKTOP_PACKAGE_LICENSE =
-    "Unlicense AND Apache-2.0 AND MIT AND MIT-Modern-Variant AND BSD-3-Clause AND FTL AND libpng-2.0 AND IJG " +
-        "AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND GPL-2.0-only WITH Classpath-exception-2.0"
+    "Unlicense AND Apache-2.0 AND MIT AND MIT-Modern-Variant AND BSD-2-Clause AND BSD-3-Clause AND FTL " +
+        "AND libpng-2.0 AND IJG AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND bzip2-1.0.6 AND 0BSD " +
+        "AND ISC AND Python-2.0 AND X11 AND GPL-2.0-only WITH Classpath-exception-2.0"
 
 /** `neutrodyne-<size>.png`, the committed hicolor source names (desktopApp/icons/png). */
 private val HICOLOR_ICON_NAME = Regex("neutrodyne-(\\d+)\\.png")

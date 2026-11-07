@@ -16,6 +16,25 @@ bundles third-party components, which keep their own licences:
   Linux, the Vulkan Memory Allocator (MIT).
 - OkHttp's copy of the Public Suffix List: unmodified data under
   MPL-2.0 (source: https://publicsuffix.org/list/public_suffix_list.dat).
+- The CPython runtime bundled with the YouTube engine
+  (python-build-standalone release 20261003, CPython 3.14.8,
+  install_only_stripped, trimmed by scripts/engine/trim-python.sh):
+  CPython under the Python License 2.0 (the PSF/BeOpen/CNRI/CWI stack,
+  with its incorporated-software notices), OpenSSL 3.5.9
+  (Apache-2.0), SQLite 3.53.1 (public domain), libffi 3.4.8 (MIT),
+  expat 2.8.5 (MIT), mpdecimal 4.0.0 (BSD-2-Clause), zstd 1.5.7
+  (BSD-3-Clause), xz/liblzma 5.8.4 (public domain, recorded as 0BSD),
+  bzip2 1.0.8 (bzip2-1.0.6), zlib 1.3.2 (Zlib), libedit 20240808-3.1
+  (BSD-3-Clause) and ncurses 6.5 (X11). python-build-standalone's own
+  MPL-2.0 build patches are compiled into the CPython it ships,
+  unmodified by us; the pinned source is attached to every release as
+  python-build-standalone-20261003-src.tar.gz.
+- The YouTube engine's Python code: the vendored yt-dlp 2026.08.19
+  release (Unlicense) with yt-dlp-ejs 0.8.0 (Unlicense, including
+  meriyah 6.1.4 under ISC and astring 1.9.0 under MIT), and
+  Neutrodyne's own neutrodyne_ytx shim (Unlicense).
+- The CA certificate bundle the engine child uses (certifi's
+  cacert.pem): unmodified data under MPL-2.0.
 - The OpenJDK runtime (Eclipse Temurin), unmodified: GPL-2.0 with the
   Classpath Exception. Its notices are in the runtime's legal directory
   inside the installation (lib/runtime/legal on Linux, runtime\legal on

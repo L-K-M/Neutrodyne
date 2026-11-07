@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:zlib",
+  "name": "zlib",
+  "description": "Compression bundled in the CPython build (Linux and Windows; macOS links the system libz).",
+  "website": "https://zlib.net",
+  "developers": [],
+  "licenses": [
+    "zlib-zlib"
+  ],
+  "artifactVersion": "1.3.2",
+  "tag": "bundled"
+}

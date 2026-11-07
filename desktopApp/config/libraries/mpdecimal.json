@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:mpdecimal",
+  "name": "mpdecimal",
+  "description": "Arbitrary-precision decimal arithmetic (CPython _decimal).",
+  "website": "https://www.bytereef.org/mpdecimal/",
+  "developers": [],
+  "licenses": [
+    "bsd-2-clause-mpdecimal"
+  ],
+  "artifactVersion": "4.0.0",
+  "tag": "bundled"
+}

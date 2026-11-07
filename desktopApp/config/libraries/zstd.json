@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:zstd",
+  "name": "zstd",
+  "description": "Compression (CPython _zstd).",
+  "website": "https://github.com/facebook/zstd",
+  "developers": [],
+  "licenses": [
+    "bsd-3-clause-zstd"
+  ],
+  "artifactVersion": "1.5.7",
+  "tag": "bundled"
+}
