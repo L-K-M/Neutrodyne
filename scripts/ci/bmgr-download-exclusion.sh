@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Unlicense
 # Run only on a disposable, rootable AOSP emulator with release app/test APKs installed.
 set -euo pipefail
-pkg=${1:?Usage: bmgr-download-exclusion.sh ch.lkmc.neutrodyne}
+pkg=${1:?Usage: bmgr-download-exclusion.sh ch.lkmc.neutrodyne [api]}
 test "$pkg" = ch.lkmc.neutrodyne
+api=${2:-}
 output=build/bmgr-evidence
 mkdir -p "$output"
 adb root
@@ -79,6 +80,23 @@ done
 # Testing with bmgr); a backupnow immediately after the init is rejected with
 # "Transport rejected package because it wasn't able to process it at the time".
 sleep 5
+if [ "$api" = "29" ]; then
+  # API 29's stock LocalTransport refuses requireFlags-flagged packages at
+  # preflight (05's legacy negative diagnostic): the app's xml-v28 rules include
+  # the snapshot/settings only under clientSideEncryption or
+  # deviceToDeviceTransfer, and the stock transport sets neither (its
+  # fake_encryption_flag is a distinct test-only bit, not
+  # FLAG_CLIENT_SIDE_ENCRYPTION_ENABLED). The measured payload is zero, so
+  # checkFullBackupSize rejects the package. Require the documented refusal and
+  # no archive; the positive archive check runs on API 31+.
+  adb shell bmgr backupnow "$pkg" | tee "$output/backup.txt"
+  grep -q "Package $pkg with result: Transport rejected package" "$output/backup.txt"
+  adb shell find /data/backup /data/local/tmp /cache/backup \
+    /data/user/0/com.android.localtransport /data/user_de/0/com.android.localtransport -type f -path "*/_full/$pkg" 2>/dev/null \
+    | tr -d '\r' > "$output/paths.txt" || true
+  test ! -s "$output/paths.txt"
+  exit 0
+fi
 adb shell bmgr backupnow "$pkg" | tee "$output/backup.txt"
 grep -q "Package $pkg with result: Success" "$output/backup.txt"
 # LocalTransport's directory moved between platform releases. Require exactly one archive.
