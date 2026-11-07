@@ -39,8 +39,8 @@ abstract class SyncStateDao(
     suspend fun <T> withApplying(block: suspend () -> T): T =
         db.syncWriter { connection ->
             val previous = connection.scalar("SELECT applying FROM sync_state WHERE id = 0")
-            connection.execute("UPDATE sync_state SET applying = 1 WHERE id = 0")
             try {
+                connection.execute("UPDATE sync_state SET applying = 1 WHERE id = 0")
                 block()
             } finally {
                 // A cancelled caller must still restore the flag before its transaction unwinds.
