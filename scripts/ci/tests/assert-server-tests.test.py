@@ -82,6 +82,20 @@ class AssertServerTestsTest(unittest.TestCase):
         write_suite(self.root, "ServerConvergenceTest", cases, out)
         self.assertEqual(0, self.run_gate("--start", "0").returncode)
 
+    def test_missing_vector_directory_fails_closed(self):
+        # A script copy outside the repository resolves no vectors and must
+        # fail rather than silently dropping the conformance floor to zero.
+        fake = self.root / "scripts" / "ci"
+        fake.mkdir(parents=True)
+        copied = fake / "assert-server-tests.py"
+        copied.write_bytes(SCRIPT.read_bytes())
+        result = subprocess.run(
+            [sys.executable, str(copied), str(self.root / "xml"), "--seeds", "1000"],
+            capture_output=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(b"no protocol vectors", result.stderr)
+
     def test_convergence_only_does_not_need_conformance_or_vectors(self):
         (self.root / "TEST-ServerConformanceTest.xml").unlink()
         self.assertEqual(0, self.run_gate("--convergence-only", cwd=self.root).returncode)
