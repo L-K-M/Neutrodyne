@@ -59,6 +59,23 @@ class MigrateAllDeviceTest {
             migrate(BundledSQLiteDriver())
         }
 
+    /**
+     * M11b AC9 step-by-step half: from the first tester build's schema (version 1) through every
+     * intermediate version, validating each target schema and comparing [MigrationInvariants]
+     * after every step, on the same two drivers as the full-chain test above.
+     */
+    @Test
+    fun everyIntermediateVersionPreservesTheFixtureOnTheFrameworkDriver() =
+        runTest {
+            stepThroughEveryVersion(AndroidSQLiteDriver())
+        }
+
+    @Test
+    fun everyIntermediateVersionPreservesTheFixtureOnTheBundledDriver() =
+        runTest {
+            stepThroughEveryVersion(BundledSQLiteDriver())
+        }
+
     private suspend fun migrate(driver: androidx.sqlite.SQLiteDriver) {
         // The rule's helper is bound to the bundled driver; for the framework run a second
         // helper instance is needed (managed connections close with it).
@@ -91,6 +108,45 @@ class MigrateAllDeviceTest {
                     snapshot
                 }
         MigrationInvariants.assertPreserved(before, after)
+    }
+
+    private suspend fun stepThroughEveryVersion(driver: androidx.sqlite.SQLiteDriver) {
+        val h =
+            if (driver is BundledSQLiteDriver) {
+                helper
+            } else {
+                MigrationTestHelper(
+                    instrumentation = instrumentation,
+                    file = dbFile,
+                    driver = driver,
+                    databaseClass = NeutrodyneDatabase::class,
+                )
+            }
+        assertEquals(
+            (1 until NeutrodyneDatabase.VERSION).toList(),
+            ALL_MIGRATIONS.map { it.startVersion },
+            "the migration chain must cover every version from the first tester build",
+        )
+
+        val first =
+            h.createDatabase(1).use { conn ->
+                fixtureStatements(instrumentation.context).forEach { conn.exec(it) }
+                MigrationInvariants.capture(conn)
+            }
+        MigrationInvariants.assertFixturePopulated(first)
+
+        var previous = first
+        for (version in 1 until NeutrodyneDatabase.VERSION) {
+            val after =
+                h
+                    .runMigrationsAndValidate(version + 1, listOf(ALL_MIGRATIONS[version - 1]))
+                    .use { conn ->
+                        assertEquals(version + 1L, conn.longQuery("PRAGMA user_version"))
+                        MigrationInvariants.capture(conn)
+                    }
+            MigrationInvariants.assertPreserved(previous, after)
+            previous = after
+        }
     }
 }
 
