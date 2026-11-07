@@ -52,8 +52,12 @@ class AndroidStartupRecoveryTest {
             assertTrue(!file.exists(), "a fresh database path is required")
             if (startup == Startup.RETRY) assertTrue(file.mkdirs())
             // Constructing the whole initializer set on main exercises the lazy dependency rule.
+            // Pre-sort by the documented (order, qualifiedName) comparator: the wrappers below
+            // are anonymous and lose qualifiedName, so the runner's tie-break would otherwise
+            // fall to identity-hash toString order — which shifts with allocation order.
             val set =
                 graph.initializers
+                    .sortedWith(compareBy({ it.order }, { it::class.qualifiedName ?: it::class.toString() }))
                     .map { initializer ->
                         object : AppInitializer {
                             override val order = initializer.order
@@ -156,8 +160,10 @@ class AndroidStartupRecoveryTest {
                 "DownloadIndexInitializer",
                 // 10 Scheduling on Android arms `sync-periodic` and `SyncScheduler` at 200,
                 // behind the opened database like the other scheduling-band initializers.
-                "SyncSchedulingInitializer",
+                // Same order=200 as the refresh install: the (order, qualifiedName) comparator
+                // puts `core.data.refresh.Periodic…` before `sync.impl.SyncScheduling…`.
                 "PeriodicRefreshInitializer",
+                "SyncSchedulingInitializer",
                 "RefreshForegroundObserverInitializer",
             )
     }
