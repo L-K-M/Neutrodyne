@@ -15,6 +15,12 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "release.sh"
 TIMEOUT_SECONDS = 20
+# MS1's server jobs are required gating evidence: release.sh fails the
+# nightly gate unless both concluded success.
+MS1_SUCCESSES = (
+    {"name": "server-image-smoke", "conclusion": "success"},
+    {"name": "server-convergence-report", "conclusion": "success"},
+)
 
 
 class ReleaseNightlyGateTest(unittest.TestCase):
@@ -120,29 +126,46 @@ class ReleaseNightlyGateTest(unittest.TestCase):
                     {"name": "unit", "conclusion": "success"},
                     {"name": "repro", "conclusion": "failure"},
                     {"name": "youtube-canary", "conclusion": conclusion},
+                    *MS1_SUCCESSES,
                 ])
 
-    def test_report_only_success_does_not_prove_required_execution(self):
-        result = self.run_gate([
+    def test_ms1_success_supplies_gating_evidence(self):
+        # The MS1 jobs are required gating evidence, so the gate passes even
+        # when the instrumented job was skipped and only report-only jobs
+        # succeeded. Report-only success alone cannot supply that evidence.
+        self.assert_gate_passed([
             {"name": "instrumented-full", "conclusion": "skipped"},
             {"name": "repro", "conclusion": "success"},
             {"name": "youtube-canary", "conclusion": "success"},
+            *MS1_SUCCESSES,
         ])
-        self.assertEqual(1, result.returncode, result.stderr)
-        self.assertIn("no gating job succeeded", result.stderr)
 
     def test_required_failure_still_blocks_a_release(self):
         result = self.run_gate([
             {"name": "instrumented-full", "conclusion": "failure"},
-            {"name": "youtube-canary", "conclusion": "success"},
+            *MS1_SUCCESSES,
         ])
         self.assertEqual(1, result.returncode, result.stderr)
         self.assertIn("failed: instrumented-full", result.stderr)
 
+    def test_missing_or_failed_ms1_proof_blocks_a_release(self):
+        for jobs in (
+            [{"name": "unit", "conclusion": "success"}],
+            [
+                {"name": "unit", "conclusion": "success"},
+                {"name": "server-image-smoke", "conclusion": "failure"},
+                {"name": "server-convergence-report", "conclusion": "success"},
+            ],
+        ):
+            with self.subTest(jobs=jobs):
+                result = self.run_gate(jobs)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn("missing MS1 image/convergence proof", result.stderr)
+
     def test_empty_job_inventory_does_not_prove_execution(self):
         result = self.run_gate([])
         self.assertEqual(1, result.returncode, result.stderr)
-        self.assertIn("no gating job succeeded", result.stderr)
+        self.assertIn("missing MS1 image/convergence proof", result.stderr)
 
 
 if __name__ == "__main__":
