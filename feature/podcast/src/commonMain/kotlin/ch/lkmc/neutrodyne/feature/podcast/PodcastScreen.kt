@@ -359,8 +359,12 @@ internal fun PodcastScreen(
                     val scrollbarColor = ndScrollbarColor(scrollbars)
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.testTag("podcast_list").weight(1f).fillMaxWidth()
-                            .ndScrollbar(listState, scrollbars, scrollbarColor),
+                        modifier =
+                            Modifier
+                                .testTag("podcast_list")
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .ndScrollbar(listState, scrollbars, scrollbarColor),
                         contentPadding =
                             PaddingValues(
                                 top = if (overlayBody) insets.calculateTopPadding() else 0.dp,
