@@ -230,7 +230,13 @@ object SyncTriggers {
             }
             for (event in listOf("ins", "upd")) {
                 val predicate =
-                    if (event == "ins") "NEW.positionMs > 0" else "NEW.positionMs IS NOT OLD.positionMs"
+                    if (event == "ins") {
+                        "NEW.positionMs > 0"
+                    } else {
+                        "NEW.positionMs IS NOT OLD.positionMs OR " +
+                            "NEW.durationMs IS NOT OLD.durationMs OR " +
+                            "NEW.positionSource IS NOT OLD.positionSource"
+                    }
                 val literal =
                     "CASE WHEN NEW.positionMs = 0 THEN '{\"ms\":0,\"reset\":true}' ELSE " +
                         "'{\"ms\":' || NEW.positionMs || ',\"dur\":' ||" +
@@ -243,7 +249,7 @@ object SyncTriggers {
                         "episode",
                         episodeRid("NEW"),
                         listOf(Field("pos", predicate, literal)),
-                        if (event == "upd") listOf("positionMs") else emptyList(),
+                        if (event == "upd") listOf("positionMs", "durationMs", "positionSource") else emptyList(),
                     ),
                 )
             }
@@ -320,8 +326,11 @@ object SyncTriggers {
             }
             execute(connection, "RELEASE sync_trigger_install")
         } catch (failure: Throwable) {
-            execute(connection, "ROLLBACK TO sync_trigger_install")
-            execute(connection, "RELEASE sync_trigger_install")
+            // A failing rollback must not mask the install error the caller needs to see.
+            runCatching {
+                execute(connection, "ROLLBACK TO sync_trigger_install")
+                execute(connection, "RELEASE sync_trigger_install")
+            }
             throw failure
         }
     }

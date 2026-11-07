@@ -55,7 +55,11 @@ internal class DataStoreSettingsRepository(
 
         // 10 Settings capture: the durable Room intent lands before DataStore, so a crash
         // between the two recovers the write and a recorder failure leaves DataStore unchanged.
-        syncPort.recordLocal(key, value)
+        suspendRunCatching { syncPort.recordLocal(key, value) }
+            .onFailure { failure ->
+                Log.w(LOG_TAG, failure) { "sync recorder failed for '${key.name}'" }
+                return Outcome.Failure(SettingsError.WriteFailed)
+            }
 
         // Only non-cancellation failures land here (IOException from DataStore, 01: logged at WARN).
         return suspendRunCatching { store(key).set(key, value) }

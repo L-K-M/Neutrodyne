@@ -6,9 +6,29 @@ plugins {
 }
 
 kotlin {
+    targets.named("android") {
+        (this as com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget).apply {
+            withHostTest { }
+        }
+    }
     sourceSets {
         commonTest.dependencies {
             implementation(libs.kotlinx.serialization.json)
+        }
+        desktopTest.dependencies {
+            // KtorSyncClientTest: the real SYNC client stack against a scripted server.
+            implementation(libs.okhttp.mockwebserver3)
+            implementation(libs.okio)
+        }
+        findByName("androidMain")?.dependencies {
+            implementation(libs.androidx.work.runtime)
+        }
+        findByName("androidHostTest")?.dependencies {
+            implementation(libs.robolectric)
+            implementation(libs.junit4)
+            implementation(libs.androidx.test.ext.junit)
+            implementation(libs.androidx.test.runner)
+            implementation(project(":core:testing"))
         }
         commonMain.dependencies {
             implementation(project(":sync:api"))

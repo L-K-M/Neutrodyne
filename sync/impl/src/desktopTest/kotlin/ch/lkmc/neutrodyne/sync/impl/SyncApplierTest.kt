@@ -240,6 +240,119 @@ class SyncApplierTest {
             }
         }
 
+    @Test
+    fun anAbsentPlayedAtKeepsTheLocalValue() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        ch.lkmc.neutrodyne.core.database
+                            .EpisodeStateEntity(episodeId, playedAt = 9L, updatedAt = 1),
+                    )
+
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "fav" to bool(true),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anExplicitNullPlayedAtClearsTheLocalValue() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        ch.lkmc.neutrodyne.core.database
+                            .EpisodeStateEntity(episodeId, playedAt = 9L, updatedAt = 1),
+                    )
+
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(false),
+                            "playedAt" to FieldValue(kotlinx.serialization.json.JsonNull, clock(10).toString()),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aPodcastOnAnExistingFeedKeyIsInvalidNotAConstraintError() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val feedUrl = "https://example.com/feed/duplicate"
+                db
+                    .podcastDao()
+                    .insertPodcast(
+                        podcastEntity(
+                            syncId = "00000000-0000-4000-8000-0000000000aa",
+                            feedUrl = feedUrl,
+                            feedKey =
+                                ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+                                    .forIdentity(feedUrl)!!,
+                        ),
+                    )
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            podcastRecord(
+                                podcastSyncId,
+                                "subscribed" to bool(true),
+                                "feedUrl" to text(feedUrl),
+                                "title" to text("Duplicate feed"),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                assertEquals(1, result.invalid)
+                assertNull(db.podcastDao().bySyncId(podcastSyncId))
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(db: NeutrodyneDatabase): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
