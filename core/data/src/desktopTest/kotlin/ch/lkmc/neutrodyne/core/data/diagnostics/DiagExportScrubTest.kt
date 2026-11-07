@@ -256,13 +256,16 @@ class DiagExportScrubTest {
                     DiagExportScrub.scrub(connection)
                 }
                 driver.open(copyFile.absolutePath).use { connection ->
-                    val row = buildList {
-                        connection.prepare("SELECT note, memo, n FROM scrub_probe").use { stmt ->
-                            while (stmt.step()) add(
-                                Triple(stmt.getText(0), stmt.getText(1), stmt.getText(2)),
-                            )
-                        }
-                    }.single()
+                    val row =
+                        buildList {
+                            connection.prepare("SELECT note, memo, n FROM scrub_probe").use { stmt ->
+                                while (stmt.step()) {
+                                    add(
+                                        Triple(stmt.getText(0), stmt.getText(1), stmt.getText(2)),
+                                    )
+                                }
+                            }
+                        }.single()
                     assertEquals("…#1", row.first)
                     assertEquals("…#1", row.second)
                     assertEquals("5", row.third)

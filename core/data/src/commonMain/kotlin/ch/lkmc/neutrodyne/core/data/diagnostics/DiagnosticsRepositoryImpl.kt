@@ -148,7 +148,9 @@ internal class DiagnosticsRepositoryImpl
                             Outcome.Failure(DiagnosticsError.FAILED)
                         }
 
-                        else -> Outcome.Success(uri)
+                        else -> {
+                            Outcome.Success(uri)
+                        }
                     }
                 }
 
