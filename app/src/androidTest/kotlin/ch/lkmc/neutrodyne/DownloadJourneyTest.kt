@@ -6,6 +6,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.job.JobScheduler
 import android.content.ComponentName
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -205,16 +206,31 @@ class DownloadJourneyTest {
             await { db.downloadDao().byEpisode(id)?.state == DownloadState.DOWNLOADING }
             val dump = device.executeShellCommand("dumpsys activity services ${app.packageName}")
             assertTrue(dump.contains("androidx.work.impl.foreground.SystemForegroundService"))
-            // The service's ActivityManager record exposes the effective FGS type, not just a manifest bit.
+            // API 33's ServiceRecord dump prints the effective foreground state
+            // (isForeground/foregroundId) but not the runtime FGS type; the `types=`
+            // line only exists from Android 14. The declared type is read from the
+            // service info, and the worker's ForegroundInfo requests the same type.
             val serviceLines =
                 dump
                     .lineSequence()
-                    .filter { it.contains("foregroundServiceType") || it.contains("SystemForegroundService") }
+                    .filter { it.contains("isForeground") || it.contains("SystemForegroundService") }
                     .joinToString("\n")
             assertTrue(
-                "foregroundServiceType not in the service dump:\n$serviceLines",
-                dump.contains("foregroundServiceType=0x00000001") ||
-                    dump.contains("foregroundServiceType=1") || dump.contains("foregroundServiceType=0x1"),
+                "foreground service not active in the dump:\n$serviceLines",
+                dump.contains("isForeground=true") &&
+                    dump.contains("foregroundId=$DOWNLOAD_NOTIFICATION"),
+            )
+            assertEquals(
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                app
+                    .packageManager
+                    .getServiceInfo(
+                        ComponentName(
+                            app.packageName,
+                            "androidx.work.impl.foreground.SystemForegroundService",
+                        ),
+                        0,
+                    ).foregroundServiceType,
             )
         }
 
