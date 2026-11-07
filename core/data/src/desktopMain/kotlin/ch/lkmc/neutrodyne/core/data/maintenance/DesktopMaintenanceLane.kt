@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.DbMaintenance
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SyncActivity
 import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
@@ -23,9 +24,9 @@ import kotlin.time.Instant
  * the window: only the ten-minute start guard re-applies.
  *
  * The shared pass has no deadline here (02: "the desktop's `maintenance` lane keeps the
- * chunks but has no deadline") and no [DbMaintenance.run] vacuum blocker — the doc's "no
- * sync round in progress" guard has no sync engine to ask yet; when the `sync` lane lands
- * it supplies its `running` flag through that parameter.
+ * chunks but has no deadline"). Its [DbMaintenance.run] vacuum blocker is the shared
+ * [SyncActivity] flag: while a sync round or link merge is active the vacuum step records
+ * `skipped:sync`, and the rest of the pass runs unchanged.
  */
 @ContributesIntoSet(AppScope::class)
 internal class DesktopMaintenanceLane
@@ -33,6 +34,7 @@ internal class DesktopMaintenanceLane
     constructor(
         private val maintenance: DbMaintenance,
         private val settings: SettingsRepository,
+        private val syncActivity: SyncActivity,
     ) : JobLane {
         override val name: String = NAME
 
@@ -50,7 +52,11 @@ internal class DesktopMaintenanceLane
             if (now.toEpochMilliseconds() - last < INTERVAL.inWholeMilliseconds) return
 
             suspendRunCatching {
-                maintenance.run(now = now.toEpochMilliseconds(), deadlineElapsedMs = null)
+                maintenance.run(
+                    now = now.toEpochMilliseconds(),
+                    deadlineElapsedMs = null,
+                    vacuumBlocker = { if (syncActivity.active) "sync" else null },
+                )
             }.onFailure { Log.w(TAG, it) { "db-maintenance pass failed" } }
             suspendRunCatching {
                 settings.set(DiagnosticsSettingKeys.MAINTENANCE_LAST_RUN_AT, now.toEpochMilliseconds())

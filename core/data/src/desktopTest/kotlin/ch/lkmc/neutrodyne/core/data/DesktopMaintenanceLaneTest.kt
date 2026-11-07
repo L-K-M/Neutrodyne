@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.data.maintenance.DesktopMaintenanceLane
 import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeDbMaintenance
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSyncActivity
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -25,7 +26,8 @@ class DesktopMaintenanceLaneTest {
     private val clock = TestClock()
     private val settings = FakeSettingsRepository()
     private val maintenance = FakeDbMaintenance()
-    private val lane = DesktopMaintenanceLane(maintenance, settings)
+    private val syncActivity = FakeSyncActivity()
+    private val lane = DesktopMaintenanceLane(maintenance, settings, syncActivity)
 
     @Test
     fun nothingRunsInsideTheTenMinuteStartGuard() =
@@ -68,7 +70,7 @@ class DesktopMaintenanceLaneTest {
             assertEquals(1, maintenance.calls.size)
 
             // The relaunched process arms its own start guard again but honours the stamp.
-            val restarted = DesktopMaintenanceLane(maintenance, settings)
+            val restarted = DesktopMaintenanceLane(maintenance, settings, syncActivity)
             clock.nowMs += 30.minutes.inWholeMilliseconds
             restarted.run(now())
             // Tick past the restarted guard while still inside the 24 h window — without
@@ -81,6 +83,48 @@ class DesktopMaintenanceLaneTest {
             clock.nowMs += 24.hours.inWholeMilliseconds
             restarted.run(now())
             assertEquals(2, maintenance.calls.size, "the stamp re-arms the daily pass")
+        }
+
+    @Test
+    fun thePassGetsAVacuumBlockerThatReadsLiveSyncActivity() =
+        runTest {
+            lane.run(now())
+            clock.nowMs += DesktopMaintenanceLane.START_GUARD.inWholeMilliseconds
+            syncActivity.active = true
+            lane.run(now())
+
+            assertEquals(1, maintenance.calls.size)
+            val call = maintenance.calls.single()
+            assertTrue(call.hadVacuumBlocker, "the desktop pass must carry a vacuum blocker")
+            assertEquals("sync", call.blockerReason, "an active sync round blocks the vacuum")
+            assertEquals(
+                1,
+                maintenance.blockerEvaluations,
+                "the blocker is consulted by the pass, not by the lane before it",
+            )
+        }
+
+    @Test
+    fun anIdleSyncRoundLeavesTheVacuumBlockerOpen() =
+        runTest {
+            lane.run(now())
+            clock.nowMs += DesktopMaintenanceLane.START_GUARD.inWholeMilliseconds
+            syncActivity.active = false
+            lane.run(now())
+
+            assertEquals(null, maintenance.calls.single().blockerReason)
+        }
+
+    @Test
+    fun theSyncBlockerDoesNotSkipTheMaintenancePass() =
+        runTest {
+            lane.run(now())
+            clock.nowMs += DesktopMaintenanceLane.START_GUARD.inWholeMilliseconds
+            syncActivity.active = true
+            lane.run(now())
+
+            assertEquals(1, maintenance.calls.size, "the pass still runs; only the vacuum step skips")
+            assertEquals(clock.now(), settings.get(DiagnosticsSettingKeys.MAINTENANCE_LAST_RUN_AT))
         }
 
     @Test

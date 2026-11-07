@@ -17,8 +17,8 @@ interface DbMaintenance {
      * `null` means no deadline (the desktop lane).
      *
      * [vacuumBlocker] is consulted only when the file-side `VACUUM` guards already pass and
-     * returns a human-readable reason vacuum must not run (the desktop lane probes the job
-     * runner for an active download or sync lane); `null` means no extra guard.
+     * returns a human-readable reason vacuum must not run (the desktop lane probes the
+     * shared [SyncActivity] flag for an in-flight sync round); `null` means no extra guard.
      */
     suspend fun run(
         now: Long,

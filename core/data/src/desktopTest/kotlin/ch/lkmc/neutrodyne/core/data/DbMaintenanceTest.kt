@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.maintenance.DbMaintenanceImpl
+import ch.lkmc.neutrodyne.core.data.maintenance.DesktopMaintenanceLane
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncClockEntity
@@ -25,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSyncActivity
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -43,9 +45,11 @@ import org.junit.Test
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 
 /**
  * `DbMaintenanceImpl`'s step composition (02 db-maintenance worker) against a real database:
@@ -279,6 +283,76 @@ class DbMaintenanceTest {
                 warn?.third?.contains("IllegalStateException") == true,
                 "the step failure must render the throwable, got: $warn",
             )
+        }
+
+    @Test
+    fun theVacuumBlockerIsConsultedAtTheVacuumStep() =
+        runTest {
+            inflateFreelist()
+            clock.advanceBy(11.minutes)
+            var consulted = false
+
+            maintenance(usableSpace = Long.MAX_VALUE).run(clock.now(), vacuumBlocker = {
+                consulted = true
+                null
+            })
+
+            assertTrue(consulted, "the blocker must run once the file-side guards pass")
+            val stats = Json.parseToJsonElement(settings.get(DiagnosticsSettingKeys.MAINTENANCE_STATS))
+            assertEquals("done", stats.jsonObject["vacuum"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun theVacuumBlockerIsNotConsultedWhenAnEarlierGuardSkips() =
+        runTest {
+            // No inflated freelist: the fragmentation guard skips the vacuum step entirely.
+            var consulted = false
+
+            maintenance(usableSpace = Long.MAX_VALUE).run(clock.now(), vacuumBlocker = {
+                consulted = true
+                null
+            })
+
+            assertFalse(consulted, "the blocker must not run before the vacuum step")
+        }
+
+    @Test
+    fun theDesktopLaneSkipsVacuumWhileSyncIsActive() =
+        runTest {
+            inflateFreelist()
+            clock.advanceBy(11.minutes)
+            val lane =
+                DesktopMaintenanceLane(
+                    maintenance(usableSpace = Long.MAX_VALUE),
+                    settings,
+                    FakeSyncActivity().apply { active = true },
+                )
+            lane.run(Instant.fromEpochMilliseconds(clock.now())) // arms the ten-minute guard
+            clock.advanceBy(11.minutes)
+            lane.run(Instant.fromEpochMilliseconds(clock.now()))
+
+            val stats = Json.parseToJsonElement(settings.get(DiagnosticsSettingKeys.MAINTENANCE_STATS))
+            assertEquals("skipped:sync", stats.jsonObject["vacuum"]?.jsonPrimitive?.content)
+            assertTrue(stats.jsonObject.containsKey("episodesDeleted"), "the pass itself still ran")
+        }
+
+    @Test
+    fun theDesktopLaneRunsVacuumWhenSyncIsIdle() =
+        runTest {
+            inflateFreelist()
+            clock.advanceBy(11.minutes)
+            val lane =
+                DesktopMaintenanceLane(
+                    maintenance(usableSpace = Long.MAX_VALUE),
+                    settings,
+                    FakeSyncActivity().apply { active = false },
+                )
+            lane.run(Instant.fromEpochMilliseconds(clock.now()))
+            clock.advanceBy(11.minutes)
+            lane.run(Instant.fromEpochMilliseconds(clock.now()))
+
+            val stats = Json.parseToJsonElement(settings.get(DiagnosticsSettingKeys.MAINTENANCE_STATS))
+            assertEquals("done", stats.jsonObject["vacuum"]?.jsonPrimitive?.content)
         }
 
     @Test

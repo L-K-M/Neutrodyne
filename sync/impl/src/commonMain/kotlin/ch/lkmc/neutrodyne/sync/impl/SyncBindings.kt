@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SyncActivity
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
@@ -45,6 +46,14 @@ object SyncBindings {
             baseUrlProvider = { address.serverUrl() ?: "" },
         )
 
+    /** The shared sync-activity flag: `:core:data`'s maintenance lane reads [SyncActivity]. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncActivityState(): SyncActivityState = SyncActivityState()
+
+    @Provides
+    fun syncActivity(state: SyncActivityState): SyncActivity = state
+
     @Provides
     @SingleIn(AppScope::class)
     fun syncEngine(
@@ -59,6 +68,7 @@ object SyncBindings {
         address: SyncServerAddress,
         tokens: SyncTokenStore,
         flags: SyncFlags,
+        activity: SyncActivityState,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -72,5 +82,6 @@ object SyncBindings {
             sharePasswords = { flags.sharePasswords },
             address = address,
             tokens = tokens,
+            activity = activity,
         )
 }
