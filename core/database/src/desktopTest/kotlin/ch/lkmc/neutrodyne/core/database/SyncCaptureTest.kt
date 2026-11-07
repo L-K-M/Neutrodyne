@@ -91,7 +91,12 @@ class SyncCaptureTest {
                                 "lastPlayedAt=43|lastPlayedAt",
                                 "measuredDurationMs=99|measuredDurationMs",
                             ),
-                        "episode_position" to listOf("positionMs=10|pos"),
+                        "episode_position" to
+                            listOf(
+                                "positionMs=10|pos",
+                                "durationMs=200|pos",
+                                "positionSource='DOWNLOAD'|pos",
+                            ),
                         "queue_entry" to listOf("orderKey='b'|ok"),
                         "play_session" to
                             listOf(
