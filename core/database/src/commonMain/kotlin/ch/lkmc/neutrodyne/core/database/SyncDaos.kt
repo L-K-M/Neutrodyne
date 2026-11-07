@@ -7,7 +7,9 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import androidx.room3.withWriteTransaction
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 
 /**
  * `sync_state` singleton access (02 Sync bookkeeping). The capture-side methods
@@ -74,7 +76,9 @@ abstract class SyncStateDao(
         try {
             return block()
         } finally {
-            setApplying(false)
+            // The suspend DAO call would be skipped on a cancelled caller; the open
+            // callback's reset only covers a crash, so suppression must survive here.
+            withContext(NonCancellable) { setApplying(false) }
         }
     }
 

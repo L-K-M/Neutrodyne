@@ -12,7 +12,11 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -164,6 +168,23 @@ class RetentionTest {
                 // D23: never a sync push — the outbox stays empty.
                 assertEquals(0, db.syncOutboxDao().count())
                 assertEquals(1, db.maintenanceDao().episodeCount())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun withApplyingClearsTheFlagUnderCancellation() =
+        runTest {
+            val db = TestDb.inMemory(RuntimeEnvironment.getApplication())
+            try {
+                db.syncStateDao().upsert(
+                    SyncStateEntity(enabled = true, serverUrl = "https://sync.example", linkedAt = now),
+                )
+                val job = launch { db.syncStateDao().withApplying { awaitCancellation() } }
+                while (!db.syncStateDao().isApplying()) yield()
+                job.cancelAndJoin()
+                assertFalse(db.syncStateDao().isApplying(), "a cancelled applier must clear the flag")
             } finally {
                 db.close()
             }
