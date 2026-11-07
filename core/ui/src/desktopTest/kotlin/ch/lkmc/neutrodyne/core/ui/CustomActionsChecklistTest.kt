@@ -93,8 +93,12 @@ class CustomActionsChecklistTest {
                         ) in actions,
                         state.name,
                     )
-                    assertTrue("Play next" in actions, state.name)
-                    assertTrue("Play last" in actions, state.name)
+                    // 08's YouTube rows: Play next / Play last are shown with the engine (in-app
+                    // playback) and hidden in external mode, like the download actions below.
+                    if (state.row.sourceType == SourceType.RSS || state.caps.inAppPlayback) {
+                        assertTrue("Play next" in actions, state.name)
+                        assertTrue("Play last" in actions, state.name)
+                    }
                     assertTrue("Go to podcast" in actions, state.name)
                     val download =
                         when (state.live?.downloadState ?: state.row.downloadState) {
