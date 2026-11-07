@@ -8,7 +8,6 @@ import androidx.sqlite.SQLiteStatement
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
-import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.newNetworkClients
 import ch.lkmc.neutrodyne.core.data.storagePathsFor
@@ -85,7 +84,7 @@ class SnapshotScaleTest {
             netErrors = testClassifier,
             io = Dispatchers.Default,
         )
-    private val cleaner = ImportSessionCleaner(db, payloads, clock, Dispatchers.IO)
+
     private val exporter = OpmlExporter(db, secrets, clock, Dispatchers.Default)
     private val androidInfo = testBuildInfo().copy(platform = BuildInfo.Platform.ANDROID)
 
@@ -105,7 +104,6 @@ class SnapshotScaleTest {
                     fileSystem,
                     Dispatchers.IO,
                 ),
-            cleaner = cleaner,
             readers = ZipGuard(),
             settings = settings,
             snapshots = snapshots,

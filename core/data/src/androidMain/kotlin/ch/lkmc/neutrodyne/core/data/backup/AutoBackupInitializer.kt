@@ -8,7 +8,6 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
-import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.WorkManagerImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.hasRunnableRestoreIntent
@@ -31,8 +30,8 @@ import kotlinx.coroutines.launch
  * at band 100): arms `backup-auto-snapshot` under `UPDATE`, reconciles the enabled flag
  * against the armed debounce (a restored `backup.auto_snapshot_enabled = false` clears
  * `-now`; the periodic still runs to the worker's enabled gate), launches the library-shape
- * watcher, re-enqueues durable work a dead or unknown enqueue left behind, and runs §9's
- * session cleanup even while snapshots are disabled.
+ * watcher and re-enqueues durable work a dead or unknown enqueue left behind. §9's session
+ * cleanup ran here as the M3 interim; `db-maintenance` owns it since M11b (02 step 3).
  *
  * Every dependency arrives through `Provider`: the graph builds before band 100 opens the
  * database, so constructors must not reach it — only `run()` dereferences, on the band-200
@@ -46,7 +45,6 @@ internal class AutoBackupInitializer
         private val work: Provider<WorkManagerImportWorkScheduler>,
         private val db: Provider<NeutrodyneDatabase>,
         private val settings: Provider<SettingsRepository>,
-        private val cleaner: Provider<ImportSessionCleaner>,
         @param:ApplicationScope private val appScope: CoroutineScope,
     ) : AppInitializer {
         override val order: Int = 200
@@ -75,14 +73,6 @@ internal class AutoBackupInitializer
             appScope.launch { watchLibraryShape(baseline) }
             suspendRunCatching { reconcileDurableWork() }
                 .onFailure { Log.w(TAG, it) { "durable-work reconciliation failed" } }
-
-            // §9's sweep runs even while snapshots are disabled — the producer's own pass is
-            // behind the enabled gate, so a disabled install would otherwise keep every
-            // abandoned payload forever.
-            appScope.launch {
-                suspendRunCatching { cleaner().cleanExpired() }
-                    .onFailure { Log.w(TAG, it) { "import session cleanup failed" } }
-            }
         }
 
         /**

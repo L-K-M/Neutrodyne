@@ -17,6 +17,12 @@ interface DatabaseFactory {
 
     fun exists(): Boolean
 
+    /**
+     * Usable bytes on the volume holding [databasePath] (02's `VACUUM` free-space guard);
+     * `null` when the file system cannot report it — callers fail closed and skip the vacuum.
+     */
+    fun usableSpaceBytes(): Long?
+
     /** Moves `neutrodyne.db`, `-wal` and `-shm` into `<quarantine>/<stamp>/`. */
     fun quarantine(stamp: String)
 

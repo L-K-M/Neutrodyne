@@ -19,7 +19,6 @@ import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.importing.ImportClassifier
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
-import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.importing.hasRestoreIntent
@@ -356,7 +355,6 @@ class FirstLaunchRestoreInitializerTest {
     ) = AutoSnapshotProducer(
         db = db,
         writer = writer(db),
-        cleaner = ImportSessionCleaner(db, payloads(), clock, Dispatchers.IO),
         readers = ZipGuard(),
         settings = settings,
         snapshots = FakeSnapshotScheduler(),

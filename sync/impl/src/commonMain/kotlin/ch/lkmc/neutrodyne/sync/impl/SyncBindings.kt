@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SyncActivity
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
@@ -45,6 +46,14 @@ object SyncBindings {
             baseUrlProvider = { address.serverUrl() ?: "" },
         )
 
+    /** The shared sync-activity flag: `:core:data`'s maintenance lane reads [SyncActivity]. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncActivityState(): SyncActivityState = SyncActivityState()
+
+    @Provides
+    fun syncActivity(state: SyncActivityState): SyncActivity = state
+
     /** The one [SyncApplier]: the engine's rounds and the first-link merge share its rules. */
     @Provides
     @SingleIn(AppScope::class)
@@ -80,6 +89,7 @@ object SyncBindings {
         flags: SyncFlags,
         address: SyncServerAddress,
         tokens: SyncTokenStore,
+        activity: SyncActivityState,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -90,6 +100,7 @@ object SyncBindings {
             sharePasswords = { flags.sharePasswords },
             address = address,
             tokens = tokens,
+            activity = activity,
         )
 
     /** The first-link merge; the controller drives it from the link state machine. */

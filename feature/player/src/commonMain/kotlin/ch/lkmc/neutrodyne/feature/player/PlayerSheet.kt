@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -92,8 +94,11 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkSurface
+import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
+import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
@@ -143,6 +148,7 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_next
 import ch.lkmc.neutrodyne.feature.player.resources.player_next_chapter
 import ch.lkmc.neutrodyne.feature.player.resources.player_next_symbol
 import ch.lkmc.neutrodyne.feature.player.resources.player_not_now
+import ch.lkmc.neutrodyne.feature.player.resources.player_notes
 import ch.lkmc.neutrodyne.feature.player.resources.player_now
 import ch.lkmc.neutrodyne.feature.player.resources.player_pause
 import ch.lkmc.neutrodyne.feature.player.resources.player_paused
@@ -206,10 +212,9 @@ internal fun PlayerSheet(
     toggleTime: () -> Unit = {},
     share: (() -> Unit)? = null,
     retry: () -> Unit = toggle,
+    setPanelHidden: (Boolean) -> Unit = {},
 ) {
     val now = ui.now
-    val isSidePanel = slot.layout.playerPanel
-    val surfaceState = if (isSidePanel) remember { PlayerSheetState(PlayerSheetValue.Expanded) } else state
     val reducedMotion = LocalReducedMotion.current
     val motion = if (reducedMotion) SheetMotion.IMMEDIATE else SheetMotion.ANIMATED
     val scope = rememberCoroutineScope()
@@ -219,669 +224,852 @@ internal fun PlayerSheet(
     val panelState = remember { PlayerSheetState() }
     var selectedTabName by rememberSaveable { mutableStateOf(PlayerTab.UP_NEXT.name) }
     val selectedTab = PlayerTab.entries.firstOrNull { it.name == selectedTabName } ?: PlayerTab.UP_NEXT
-    // The Chapters tab exists only while chapters do; its saved pick cannot outlive them.
+    // The Chapters tab exists only while chapters do; its
+    // saved pick cannot outlive them.
+    LaunchedEffect(slot.layout.playerPanel) {
+        if (slot.layout.playerPanel) state.collapse(SheetMotion.IMMEDIATE)
+    }
     LaunchedEffect(ui.chapters.isEmpty()) {
         if (ui.chapters.isEmpty() && selectedTab == PlayerTab.CHAPTERS) selectedTabName = PlayerTab.UP_NEXT.name
     }
-    val expanded = !isSidePanel && surfaceState.settledExpanded && now != null
+    val expanded = state.settledExpanded && now != null && !slot.layout.playerPanel
     val settled by rememberUpdatedState(slot.onExpandedSettled)
     val dismissPaused by rememberUpdatedState(dismiss)
+    val updatePanelHidden by rememberUpdatedState(setPanelHidden)
     SideEffect { settled(expanded) }
     DisposableEffect(Unit) { onDispose { settled(false) } }
     var consumedExpand by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(slot.expandRequest, now?.episodeId) {
         if (slot.expandRequest > consumedExpand && now != null) {
             consumedExpand = slot.expandRequest
-            val reveal = slot.revealPanel
-            if (reveal != null) reveal() else surfaceState.expand(motion)
+            if (slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP) updatePanelHidden(false) else state.expand(motion)
         }
     }
     var consumedCollapse by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(slot.collapseRequest) {
         if (slot.collapseRequest > consumedCollapse) {
             consumedCollapse = slot.collapseRequest
-            surfaceState.collapse(motion)
+            state.collapse(motion)
         }
     }
     LaunchedEffect(now == null) {
-        if (now == null) surfaceState.collapse(SheetMotion.IMMEDIATE)
+        if (now == null) state.collapse(SheetMotion.IMMEDIATE)
     }
     LaunchedEffect(expanded) {
         if (!expanded) panelState.collapse(motion)
     }
-    LaunchedEffect(surfaceState.drag.settledValue) {
-        if (surfaceState.drag.settledValue == PlayerSheetValue.Dismissed) {
-            dismissPaused()
-            surfaceState.resetDismissed()
+    LaunchedEffect(state.drag.settledValue, slot.windowWidthDp) {
+        when (state.drag.settledValue) {
+            PlayerSheetValue.Dismissed -> {
+                dismissPaused()
+                state.resetDismissed()
+            }
+
+            PlayerSheetValue.Expanded -> {
+                if (slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP && !slot.layout.playerPanel) {
+                    // Dragging uses the anchors directly, so it must make the same
+                    // panel choice as the mini player's Expand action.
+                    updatePanelHidden(false)
+                    state.collapse(SheetMotion.IMMEDIATE)
+                }
+            }
+
+            PlayerSheetValue.Collapsed -> {
+                Unit
+            }
         }
     }
-    val playerModifier =
-        if (isSidePanel) {
-            modifier.width(slot.layout.playerPanelWidthDp.dp).testTag("player_side_panel")
-        } else {
-            modifier
-        }
     var miniMenuOpen by remember { mutableStateOf(false) }
     val miniFocus = remember { FocusRequester() }
-    Box(playerModifier.fillMaxSize()) {
-        // Only the frontmost player layer owns Back.
-        if (!isSidePanel) {
+    ArtworkTheme(
+        ui.colors?.seedArgb,
+        if (expanded || slot.layout.playerPanel) ArtworkSurface.FULL else ArtworkSurface.MINI,
+    ) {
+        Box(modifier.fillMaxSize()) {
+            // Only the frontmost player layer owns Back.
             PlayerBackHandler(
-                surfaceState,
-                if (panelState.canCollapse) PlayerBackAvailability.INACTIVE else PlayerBackAvailability.ACTIVE,
-            )
-        }
-        // Keep Back ownership while the closing panel leaves the visible composition.
-        PlayerBackHandler(panelState)
-        // Consent may arrive before nowPlaying exists, so it must outlive the visible sheet.
-        if (ui.consent != null) MeteredConsentDialog(consent, consentAlways, declineConsent)
-        if (now == null) return@Box
-
-        val expandLabel = stringResource(Res.string.player_expand)
-        val collapseLabel = stringResource(Res.string.player_collapse)
-        val dismissLabel = stringResource(Res.string.player_dismiss)
-        val playLabel =
-            stringResource(
-                if (now.isPlaying ||
-                    now.playWhenReady
-                ) {
-                    Res.string.player_pause
+                state,
+                if (slot.layout.playerPanel || panelState.canCollapse) {
+                    PlayerBackAvailability.INACTIVE
                 } else {
-                    Res.string.player_play
+                    PlayerBackAvailability.ACTIVE
                 },
             )
-        val forwardLabel = stringResource(Res.string.player_forward, ui.skipForwardMs / MILLIS_PER_SECOND)
-        val description =
-            stringResource(
-                Res.string.player_description,
-                now.title,
-                now.podcastTitle,
-                stringResource(if (now.isPlaying) Res.string.player_playing else Res.string.player_paused),
-            )
-        val backLabel = stringResource(Res.string.player_back, ui.skipBackMs / MILLIS_PER_SECOND)
-        val previousLabel =
-            stringResource(
-                if (ui.chapters.isEmpty()) Res.string.player_previous else Res.string.player_previous_chapter,
-            )
-        val nextLabel =
-            stringResource(
-                if (ui.chapters.isEmpty()) Res.string.player_next else Res.string.player_next_chapter,
-            )
-        val paused = !now.isPlaying && !now.playWhenReady
-        val contextTitle = now.context?.takeIf { it.type != ContextType.EXTERNAL }?.title
-        val nowPlayingLabel = stringResource(Res.string.player_now)
-        val expand: () -> Unit = {
-            val reveal = slot.revealPanel
-            if (reveal != null) reveal() else scope.launch { surfaceState.expand(motion) }
-        }
-        val collapse: () -> Unit = { scope.launch { surfaceState.collapse(motion) } }
-        val navigate: (NavKey) -> Unit = { key ->
-            if (key == SpeedKey || key == SleepTimerKey) {
-                slot.navigate(key)
-            } else {
-                scope.launch {
-                    surfaceState.collapse(motion)
-                    slot.navigate(key)
-                }
-            }
-        }
+            // Keep Back ownership while the closing panel leaves the
+            // visible composition.
+            if (!slot.layout.playerPanel) PlayerBackHandler(panelState)
+            // Consent may arrive before nowPlaying exists, so it must
+            // outlive the visible sheet.
+            if (ui.consent != null) MeteredConsentDialog(consent, consentAlways, declineConsent)
+            if (now == null) return@Box
 
-        BoxWithConstraints(Modifier.fillMaxSize().testTag("playerHost")) {
-            val heightPx = with(density) { maxHeight.toPx() }
-            val bottomInset = with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
-            val contentBottom = slot.contentBottomPx.takeIf { it > 0f } ?: heightPx
-            val collapsedPx =
-                if (isSidePanel) {
-                    0f
+            val expandLabel = stringResource(Res.string.player_expand)
+            val collapseLabel = stringResource(Res.string.player_collapse)
+            val hidePanelLabel = stringResource(Res.string.player_hide_panel)
+            val dismissLabel = stringResource(Res.string.player_dismiss)
+            val playLabel =
+                stringResource(
+                    if (now.isPlaying ||
+                        now.playWhenReady
+                    ) {
+                        Res.string.player_pause
+                    } else {
+                        Res.string.player_play
+                    },
+                )
+            val forwardLabel = stringResource(Res.string.player_forward, ui.skipForwardMs / MILLIS_PER_SECOND)
+            val description =
+                stringResource(
+                    Res.string.player_description,
+                    now.title,
+                    now.podcastTitle,
+                    stringResource(if (now.isPlaying) Res.string.player_playing else Res.string.player_paused),
+                )
+            val backLabel = stringResource(Res.string.player_back, ui.skipBackMs / MILLIS_PER_SECOND)
+            val previousLabel =
+                stringResource(
+                    if (ui.chapters.isEmpty()) Res.string.player_previous else Res.string.player_previous_chapter,
+                )
+            val nextLabel =
+                stringResource(
+                    if (ui.chapters.isEmpty()) Res.string.player_next else Res.string.player_next_chapter,
+                )
+            val paused = !now.isPlaying && !now.playWhenReady
+            val contextTitle = now.context?.takeIf { it.type != ContextType.EXTERNAL }?.title
+            val nowPlayingLabel = stringResource(Res.string.player_now)
+            val expand: () -> Unit = {
+                if (slot.windowWidthDp >=
+                    SIDE_PANEL_MIN_WINDOW_DP
+                ) {
+                    setPanelHidden(false)
                 } else {
-                    (contentBottom - with(density) { MINI_ANCHOR_SPACE.toPx() }).coerceAtLeast(0f)
+                    scope.launch { state.expand(motion) }
                 }
-            val dismissDistance = with(density) { DISMISS_DISTANCE.toPx() }
-            LaunchedEffect(collapsedPx, paused, dismissDistance) {
-                surfaceState.setAnchors(
-                    collapsedPx,
-                    dismissDistance,
-                    if (paused) SheetDismissal.ALLOWED else SheetDismissal.BLOCKED,
-                )
             }
-            val progress = if (isSidePanel) 1f else surfaceState.progress
-            val statusBar =
-                with(density) {
-                    WindowInsets.statusBars
-                        .getTop(this)
-                        .toDp()
-                        .value
+            val collapse: () -> Unit = { scope.launch { state.collapse(motion) } }
+            val fullPlayerSemantics =
+                Modifier.semantics {
+                    customActions =
+                        buildList {
+                            add(
+                                CustomAccessibilityAction(
+                                    if (slot.layout.playerPanel) hidePanelLabel else collapseLabel,
+                                ) {
+                                    if (slot.layout.playerPanel) setPanelHidden(true) else collapse()
+                                    true
+                                },
+                            )
+                            if (ui.chapters.isNotEmpty()) {
+                                add(
+                                    CustomAccessibilityAction(previousLabel) {
+                                        previous()
+                                        true
+                                    },
+                                )
+                                add(
+                                    CustomAccessibilityAction(nextLabel) {
+                                        next()
+                                        true
+                                    },
+                                )
+                            }
+                        }
                 }
-            // Measure actual lines; nonlinear Android font scaling changes their height.
-            val headerHeight =
-                with(density) {
-                    val titleHeight =
-                        textMeasurer
-                            .measure(nowPlayingLabel, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-                            .size.height
-                            .toDp()
-                    val contextHeight =
-                        contextTitle?.let {
-                            textMeasurer
-                                .measure(it, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                                .size.height
-                                .toDp()
-                        } ?: 0.dp
-                    (titleHeight + contextHeight).coerceAtLeast(MIN_PLAYER_HEADER_HEIGHT_DP.dp)
+            val navigate: (NavKey) -> Unit = { key ->
+                if (key == SpeedKey || key == SleepTimerKey) {
+                    slot.navigate(key)
+                } else {
+                    scope.launch {
+                        state.collapse(motion)
+                        slot.navigate(key)
+                    }
                 }
-            val wideArt = now.sourceType != SourceType.RSS
-            val morph =
-                PlayerMorph.at(
-                    progress,
-                    PlayerGeometry(
-                        maxWidth.value,
-                        maxHeight.value,
-                        statusBar,
-                        if (wideArt) WIDE_ART_ASPECT else 1f,
-                        startInset = (maxWidth.value - slot.layout.contentWidthDp).coerceAtLeast(0f),
-                        headerHeight = headerHeight.value,
-                        artworkLimit = if (isSidePanel) PANEL_ART_LIMIT_DP else MAX_PLAYER_ART_DP,
-                    ),
-                )
-            val panelHeight =
-                (maxHeight - statusBar.dp - headerHeight - bottomInset).coerceAtLeast(
-                    panelPeekHeight,
-                )
-            val artworkHeight = morph.artworkHeight
+            }
+
             val dragModifier =
                 Modifier.anchoredDraggable(
-                    surfaceState.drag,
+                    state.drag,
                     Orientation.Vertical,
                     flingBehavior =
                         AnchoredDraggableDefaults.flingBehavior(
-                            state = surfaceState.drag,
+                            state = state.drag,
                             positionalThreshold = { it * SETTLE_FRACTION },
                             animationSpec = NeutrodyneMotion.spatial(reducedMotion),
                         ),
                 )
-            val topPx =
-                collapsedPx * (1f - progress) +
-                    (
-                        surfaceState.drag.offset
-                            .takeIf { it.isFinite() && it > collapsedPx }
-                            ?.minus(collapsedPx) ?: 0f
+
+            val fullControls: @Composable () -> Unit = {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                    Text(
+                        now.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
-            val sheetHeight = MINI_HEIGHT + (maxHeight - MINI_HEIGHT) * progress
-            Surface(
-                modifier =
-                    Modifier
-                        .offset { IntOffset(0, topPx.roundToInt()) }
-                        .padding(start = morph.inset.dp, end = morph.endInset.dp)
-                        .fillMaxWidth()
-                        .height(sheetHeight)
-                        .testTag("player_sheet"),
-                shape = RoundedCornerShape(if (isSidePanel) 0.dp else morph.corner.dp),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                color =
+                    TextButton(onClick = { navigate(PodcastKey(now.podcastId)) }) { Text(now.podcastTitle) }
+                    if (now.isVideo) {
+                        Text(
+                            stringResource(UiRes.string.summary_video),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    ui.currentChapter?.let { current ->
+                        TextButton(
+                            onClick = {
+                                selectedTabName = PlayerTab.CHAPTERS.name
+                                scope.launch { panelState.expand(motion) }
+                            },
+                        ) {
+                            Text(
+                                stringResource(
+                                    Res.string.player_chapter,
+                                    current.index + 1,
+                                    current.chapter.title?.takeIf { it.isNotBlank() }
+                                        ?: stringResource(UiRes.string.chapter_number, current.index + 1),
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    PlayerScrubber(
+                        position?.takeIf {
+                            it.episodeId == now.episodeId
+                        } ?: now.position,
+                        positionAt,
+                        seek,
+                        back,
+                        forward,
+                        ui.skipBackMs,
+                        ui.skipForwardMs,
+                        ui.timeDisplay,
+                        toggleTime,
+                        ui.chapters,
+                    )
+                    // Share remaining width so the last action keeps its touch
+                    // target.
+                    FlowRow(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        TextButton(
+                            onClick = back,
+                            modifier =
+                                Modifier.widthIn(min = 48.dp).semantics {
+                                    contentDescription =
+                                        backLabel
+                                },
+                        ) {
+                            Text(
+                                stringResource(
+                                    Res.string.player_back_value,
+                                    ui.skipBackMs / MILLIS_PER_SECOND,
+                                ),
+                            )
+                        }
+                        TextButton(
+                            onClick = previous,
+                            modifier =
+                                Modifier.widthIn(min = 48.dp).semantics {
+                                    contentDescription =
+                                        previousLabel
+                                },
+                        ) { Text(stringResource(Res.string.player_previous_symbol)) }
+                        PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
+                        TextButton(
+                            onClick = next,
+                            // With chapters the button is nextChapter, a no-op past the
+                            // last one; a null current sits before the first chapter or
+                            // in a gap, where a next target still exists.
+                            enabled =
+                                if (ui.chapters.isEmpty()) {
+                                    now.hasNext
+                                } else {
+                                    val current = ui.currentChapter
+                                    current == null || current.index < ui.chapters.lastIndex
+                                },
+                            modifier =
+                                Modifier.widthIn(min = 48.dp).semantics {
+                                    contentDescription =
+                                        nextLabel
+                                },
+                        ) { Text(stringResource(Res.string.player_next_symbol)) }
+                        TextButton(
+                            onClick = forward,
+                            modifier =
+                                Modifier.widthIn(min = 48.dp).semantics {
+                                    contentDescription = forwardLabel
+                                },
+                        ) {
+                            Text(
+                                stringResource(
+                                    Res.string.player_forward_value,
+                                    ui.skipForwardMs / MILLIS_PER_SECOND,
+                                ),
+                            )
+                        }
+                    }
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        TextButton(onClick = { navigate(SleepTimerKey) }) {
+                            Text(
+                                when (val timer = ui.sleepTimer) {
+                                    SleepTimerState.Off -> {
+                                        stringResource(Res.string.sleep_title)
+                                    }
+
+                                    is SleepTimerState.Running -> {
+                                        val minutes =
+                                            (timer.remainingMs + MILLIS_PER_MINUTE - 1) /
+                                                MILLIS_PER_MINUTE
+                                        stringResource(Res.string.sleep_minutes, minutes.toInt())
+                                    }
+
+                                    is SleepTimerState.EndOfEpisode -> {
+                                        stringResource(Res.string.sleep_end)
+                                    }
+                                },
+                            )
+                        }
+                        TextButton(onClick = { navigate(SpeedKey) }) {
+                            Text(
+                                stringResource(
+                                    Res.string.player_speed,
+                                    (
+                                        ui.effective?.speed?.value
+                                            ?: 1f
+                                    ).toString(),
+                                ),
+                            )
+                        }
+                        TextButton(onClick = {
+                            selectedTabName = PlayerTab.UP_NEXT.name
+                            scope.launch { panelState.expand(motion) }
+                        }) { Text(stringResource(Res.string.player_queue_count, ui.upNextCount)) }
+                        if (share != null) {
+                            val sharing = LocalPlatformActions.current.share
+                            TextButton(onClick = share) {
+                                Text(
+                                    stringResource(
+                                        if (sharing !=
+                                            null
+                                        ) {
+                                            UiRes.string.action_share
+                                        } else {
+                                            UiRes.string.action_copy_link
+                                        },
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                    ui.effective?.let {
+                        Text(
+                            AttributionText.describe(it.speed.source).asString(),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    PlayerIssue(
+                        now.issue ?: if (now.phase ==
+                            PlayerPhase.ERROR
+                        ) {
+                            PlaybackIssue.PLAYER_ERROR
+                        } else {
+                            null
+                        },
+                        retry,
+                        declineConsent,
+                        retry,
+                    ) { navigate(SettingsKey(SettingsPage.PLAYBACK)) }
+                }
+            }
+            val adaptiveHeader: @Composable () -> Unit = {
+                Row(
+                    Modifier.fillMaxWidth().then(if (slot.layout.playerPanel) Modifier else dragModifier),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    NdIconButton(
+                        { if (slot.layout.playerPanel) setPanelHidden(true) else collapse() },
+                        NdIcons.Close,
+                        if (slot.layout.playerPanel) hidePanelLabel else collapseLabel,
+                    )
+                    Text(nowPlayingLabel, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    PlayerMenu(
+                        now,
+                        navigate,
+                        markPlayed,
+                        stop,
+                        ui.chapters.isNotEmpty(),
+                        nextEpisode,
+                        previousEpisode,
+                    )
+                }
+            }
+            val adaptiveArt: @Composable (Modifier) -> Unit = { artModifier ->
+                CoverArt(
+                    now.artwork,
+                    rememberMonogram(now.podcastTitle),
+                    artModifier.then(if (slot.layout.playerPanel) Modifier else dragModifier),
+                    tier = CoverTier.HERO,
+                    aspect = if (now.sourceType != SourceType.RSS) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
+                    avgArgb = ui.colors?.avgArgb,
+                    shape = NeutrodyneShapes.PlayerArt,
+                )
+            }
+            val adaptiveTabs: @Composable () -> Unit = {
+                if (slot.layout.playerPanel) {
+                    Row(Modifier.fillMaxWidth()) {
+                        PlayerTab.entries
+                            .filter { it != PlayerTab.CHAPTERS || ui.chapters.isNotEmpty() }
+                            .forEach { tab ->
+                                TextButton(onClick = { selectedTabName = tab.name }) {
+                                    Text(
+                                        when (tab) {
+                                            PlayerTab.UP_NEXT -> {
+                                                stringResource(
+                                                    Res.string.player_queue_count,
+                                                    ui.upNextCount,
+                                                )
+                                            }
+
+                                            PlayerTab.CHAPTERS -> {
+                                                stringResource(Res.string.player_chapters)
+                                            }
+
+                                            PlayerTab.NOTES -> {
+                                                stringResource(Res.string.player_notes)
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                    }
+                }
+                if (slot.layout.playerPanel || panelState.canCollapse) {
+                    Box(Modifier.fillMaxWidth().height(320.dp)) {
+                        when (selectedTab) {
+                            PlayerTab.UP_NEXT -> upNext()
+                            PlayerTab.CHAPTERS -> ChapterList(ui.chapters, ui.currentChapter, seekChapter)
+                            PlayerTab.NOTES -> notes()
+                        }
+                    }
+                }
+            }
+            if (slot.layout.playerPanel) {
+                ArtworkTheme(ui.colors?.seedArgb) {
+                    // The panel hosts the compact full player; keep both tags for the shell tests.
+                    Box(Modifier.fillMaxSize().testTag("full_player")) {
+                        AdaptivePlayerBody(
+                            if (tabletopHinge(slot.posture) != null) {
+                                PlayerContentLayout.TABLETOP
+                            } else {
+                                PlayerContentLayout.PORTRAIT
+                            },
+                            slot.posture,
+                            adaptiveHeader,
+                            adaptiveArt,
+                            fullControls,
+                            adaptiveTabs,
+                            Modifier.fillMaxSize().testTag("player_side_panel").then(fullPlayerSemantics),
+                        )
+                    }
+                }
+                return@Box
+            }
+            BoxWithConstraints(Modifier.fillMaxSize().testTag("playerHost")) {
+                val heightPx = with(density) { maxHeight.toPx() }
+                val bottomInset = with(density) { WindowInsets.safeDrawing.getBottom(this).toDp() }
+                val contentBottom = slot.contentBottomPx.takeIf { it > 0f } ?: heightPx
+                val collapsedPx = (contentBottom - with(density) { MINI_ANCHOR_SPACE.toPx() }).coerceAtLeast(0f)
+                val dismissDistance = with(density) { DISMISS_DISTANCE.toPx() }
+                LaunchedEffect(collapsedPx, paused, dismissDistance) {
+                    state.setAnchors(
+                        collapsedPx,
+                        dismissDistance,
+                        if (paused) SheetDismissal.ALLOWED else SheetDismissal.BLOCKED,
+                    )
+                }
+                val progress = state.progress
+                val statusBar =
+                    with(density) {
+                        WindowInsets.statusBars
+                            .getTop(this)
+                            .toDp()
+                            .value
+                    }
+                // Measure actual lines; nonlinear Android font scaling
+                // changes their height.
+                val headerHeight =
+                    with(density) {
+                        val titleHeight =
+                            textMeasurer
+                                .measure(nowPlayingLabel, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                                .size.height
+                                .toDp()
+                        val contextHeight =
+                            contextTitle?.let {
+                                textMeasurer
+                                    .measure(it, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                    .size.height
+                                    .toDp()
+                            } ?: 0.dp
+                        (titleHeight + contextHeight).coerceAtLeast(MIN_PLAYER_HEADER_HEIGHT_DP.dp)
+                    }
+                val wideArt = now.sourceType != SourceType.RSS
+                val morph =
+                    PlayerMorph.at(
+                        progress,
+                        PlayerGeometry(
+                            maxWidth.value,
+                            maxHeight.value,
+                            statusBar,
+                            if (wideArt) WIDE_ART_ASPECT else 1f,
+                            startInset = (maxWidth.value - slot.layout.contentWidthDp).coerceAtLeast(0f),
+                            headerHeight = headerHeight.value,
+                        ),
+                    )
+                val panelHeight =
+                    (maxHeight - statusBar.dp - headerHeight - bottomInset).coerceAtLeast(
+                        panelPeekHeight,
+                    )
+                val artworkHeight = morph.artworkHeight
+                val topPx =
+                    collapsedPx * (1f - progress) +
+                        (
+                            state.drag.offset
+                                .takeIf { it.isFinite() && it > collapsedPx }
+                                ?.minus(collapsedPx) ?: 0f
+                        )
+                val sheetColor =
                     lerp(
                         MaterialTheme.colorScheme.surfaceContainerHigh,
                         MaterialTheme.colorScheme.surface,
                         if (reducedMotion) progress.roundToInt().toFloat() else morph.backgroundMix,
-                    ),
-            ) {
-                // Pointer ownership follows the settled anchor, so fading controls cannot cancel a drag.
-                Box(
-                    Modifier.fillMaxSize().then(
-                        if (!isSidePanel && surfaceState.drag.settledValue != PlayerSheetValue.Expanded) {
-                            dragModifier
-                        } else {
-                            Modifier
-                        },
-                    ),
+                    )
+                // Release the status strip as soon as the sheet leaves it,
+                // including cancelled drags.
+                if (topPx <= 0f) {
+                    ch.lkmc.neutrodyne.core.designsystem.PlatformSystemBarAppearance(
+                        ch.lkmc.neutrodyne.core.designsystem
+                            .statusBarAppearanceFor(sheetColor),
+                        ch.lkmc.neutrodyne.core.designsystem.SystemBarOwner.Player,
+                    )
+                }
+                val sheetHeight = MINI_HEIGHT + (maxHeight - MINI_HEIGHT) * progress
+                Surface(
+                    modifier =
+                        Modifier
+                            .offset { IntOffset(0, topPx.roundToInt()) }
+                            .padding(start = morph.inset.dp, end = morph.endInset.dp)
+                            .fillMaxWidth()
+                            .height(sheetHeight)
+                            .testTag("player_sheet"),
+                    shape = RoundedCornerShape(morph.corner.dp),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    color = sheetColor,
                 ) {
-                    if (progress < MINI_SEMANTICS_END) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .height(MINI_HEIGHT)
-                                .graphicsLayer { alpha = morph.miniAlpha }
-                                .focusRequester(miniFocus)
-                                .clickable(
-                                    onClickLabel = expandLabel,
-                                    onClick = {
-                                        miniFocus.requestFocus()
-                                        expand()
-                                    },
-                                ).onSecondaryClick {
-                                    miniFocus.requestFocus()
-                                    miniMenuOpen = true
-                                }.onPreviewKeyEvent { event ->
-                                    // 08 Context menus: Menu / Shift+F10 opens the mini player's
-                                    // menu, so Expand and Dismiss work without a pointer.
-                                    val menuKey =
-                                        event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed)
-                                    if (event.type == KeyEventType.KeyDown && menuKey) {
-                                        miniMenuOpen = true
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                }.clearAndSetSemantics {
-                                    this[SemanticsProperties.TestTag] = "mini_player"
-                                    contentDescription = description
-                                    onClick(expandLabel) {
-                                        expand()
-                                        true
-                                    }
-                                    customActions =
-                                        buildList {
-                                            add(
-                                                CustomAccessibilityAction(playLabel) {
-                                                    toggle()
-                                                    true
-                                                },
-                                            )
-                                            add(
-                                                CustomAccessibilityAction(forwardLabel) {
-                                                    forward()
-                                                    true
-                                                },
-                                            )
-                                            add(
-                                                CustomAccessibilityAction(expandLabel) {
-                                                    expand()
-                                                    true
-                                                },
-                                            )
-                                            if (paused) {
-                                                add(
-                                                    CustomAccessibilityAction(dismissLabel) {
-                                                        dismiss()
-                                                        true
-                                                    },
-                                                )
-                                            }
-                                        }
-                                },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Spacer(Modifier.width(MINI_TEXT_START))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    now.title,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                                Text(
-                                    now.podcastTitle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            PlayButton(now, toggle, playLabel)
-                            if (ui.miniSkip) {
-                                TextButton(
-                                    onClick = forward,
-                                    modifier =
-                                        Modifier.semantics {
-                                            contentDescription =
-                                                forwardLabel
-                                        },
-                                ) {
-                                    Text(
-                                        stringResource(
-                                            Res.string.player_forward_value,
-                                            ui.skipForwardMs / MILLIS_PER_SECOND,
-                                        ),
-                                    )
-                                }
-                            }
-                        }
-                        val snapshot = position?.takeIf { it.episodeId == now.episodeId } ?: now.position
-                        val duration = snapshot.durationMs
-                        if (duration != null && duration > 0L) {
-                            LinearProgressIndicator(
-                                progress = { (snapshot.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
-                                modifier =
+                    val contentLayout =
+                        playerContentLayout(
+                            minOf(maxWidth.value, slot.windowWidthDp.toFloat()),
+                            maxHeight.value,
+                            slot.posture,
+                        )
+                    if (expanded && contentLayout != PlayerContentLayout.PORTRAIT) {
+                        AdaptivePlayerBody(
+                            contentLayout,
+                            slot.posture,
+                            adaptiveHeader,
+                            adaptiveArt,
+                            fullControls,
+                            adaptiveTabs,
+                            Modifier.fillMaxSize().testTag("full_player").then(fullPlayerSemantics),
+                        )
+                    } else {
+                        // Pointer ownership follows the settled anchor, so fading
+                        // controls cannot cancel a drag.
+                        Box(
+                            Modifier.fillMaxSize().then(
+                                if (state.drag.settledValue != PlayerSheetValue.Expanded) {
+                                    dragModifier
+                                } else {
                                     Modifier
-                                        .align(
-                                            Alignment.TopStart,
-                                        ).padding(top = 62.dp)
-                                        .fillMaxWidth()
-                                        .height(2.dp)
-                                        .clearAndSetSemantics {},
-                            )
-                        }
-                    }
-                    DropdownMenu(expanded = miniMenuOpen, onDismissRequest = { miniMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(Res.string.player_episode)) },
-                            onClick = {
-                                miniMenuOpen = false
-                                navigate(EpisodeKey(now.episodeId))
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(Res.string.player_podcast)) },
-                            onClick = {
-                                miniMenuOpen = false
-                                navigate(PodcastKey(now.podcastId))
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(Res.string.player_expand)) },
-                            onClick = {
-                                miniMenuOpen = false
-                                expand()
-                            },
-                        )
-                        if (paused) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(Res.string.player_dismiss)) },
-                                onClick = {
-                                    miniMenuOpen = false
-                                    dismiss()
                                 },
-                            )
-                        }
-                    }
-                    if (progress > FULL_SEMANTICS_START) {
-                        // 08 Scrollbars: the desktop draws an overlay thumb at the player's end edge.
-                        val playerScroll = rememberScrollState()
-                        val playerBars = LocalScrollbars.current
-                        val playerBarColor = ndScrollbarColor(playerBars)
-                        Column(
-                            Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    alpha = morph.controlsAlpha
-                                    translationY =
-                                        morph.controlsOffset.dp.toPx()
-                                }.padding(top = statusBar.dp, bottom = panelPeekHeight + bottomInset)
-                                .verticalScroll(playerScroll)
-                                .ndScrollbar(playerScroll, playerBars, playerBarColor)
-                                .testTag("full_player")
-                                // The panel owns accessibility while it covers the transport.
-                                .then(if (panelState.canCollapse) Modifier.clearAndSetSemantics {} else Modifier),
+                            ),
                         ) {
-                            Spacer(Modifier.height(headerHeight + artworkHeight.dp + 16.dp))
-                            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                                Text(
-                                    now.title,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                TextButton(onClick = { navigate(PodcastKey(now.podcastId)) }) { Text(now.podcastTitle) }
-                                if (now.isVideo) {
-                                    Text(
-                                        stringResource(UiRes.string.summary_video),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                ui.currentChapter?.let { current ->
-                                    TextButton(
-                                        onClick = {
-                                            selectedTabName = PlayerTab.CHAPTERS.name
-                                            scope.launch { panelState.expand(motion) }
-                                        },
-                                    ) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_chapter,
-                                                current.index + 1,
-                                                current.chapter.title?.takeIf { it.isNotBlank() }
-                                                    ?: stringResource(UiRes.string.chapter_number, current.index + 1),
-                                            ),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                                PlayerScrubber(
-                                    position?.takeIf {
-                                        it.episodeId == now.episodeId
-                                    } ?: now.position,
-                                    positionAt,
-                                    seek,
-                                    back,
-                                    forward,
-                                    ui.skipBackMs,
-                                    ui.skipForwardMs,
-                                    ui.timeDisplay,
-                                    toggleTime,
-                                    ui.chapters,
-                                )
-                                // Share remaining width so the last action keeps its touch target.
+                            if (progress < MINI_SEMANTICS_END) {
                                 Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(MINI_HEIGHT)
+                                        .graphicsLayer { alpha = morph.miniAlpha }
+                                        .focusRequester(miniFocus)
+                                        .clickable(
+                                            onClickLabel = expandLabel,
+                                            onClick = {
+                                                miniFocus.requestFocus()
+                                                expand()
+                                            },
+                                        ).onSecondaryClick {
+                                            miniFocus.requestFocus()
+                                            miniMenuOpen = true
+                                        }.onPreviewKeyEvent { event ->
+                                            // 08 Context menus: Menu / Shift+F10 opens the mini player's
+                                            // menu, so Expand and Dismiss work without a pointer.
+                                            val menuKey =
+                                                event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed)
+                                            if (event.type == KeyEventType.KeyDown && menuKey) {
+                                                miniMenuOpen = true
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        }.clearAndSetSemantics {
+                                            this[SemanticsProperties.TestTag] = "mini_player"
+                                            contentDescription = description
+                                            onClick(expandLabel) {
+                                                expand()
+                                                true
+                                            }
+                                            customActions =
+                                                buildList {
+                                                    add(
+                                                        CustomAccessibilityAction(playLabel) {
+                                                            toggle()
+                                                            true
+                                                        },
+                                                    )
+                                                    add(
+                                                        CustomAccessibilityAction(forwardLabel) {
+                                                            forward()
+                                                            true
+                                                        },
+                                                    )
+                                                    add(
+                                                        CustomAccessibilityAction(expandLabel) {
+                                                            expand()
+                                                            true
+                                                        },
+                                                    )
+                                                    if (paused) {
+                                                        add(
+                                                            CustomAccessibilityAction(dismissLabel) {
+                                                                dismiss()
+                                                                true
+                                                            },
+                                                        )
+                                                    }
+                                                }
+                                        },
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    TextButton(
-                                        onClick = back,
-                                        modifier =
-                                            Modifier.weight(1f, fill = false).semantics {
-                                                contentDescription =
-                                                    backLabel
-                                            },
-                                    ) {
+                                    Spacer(Modifier.width(MINI_TEXT_START))
+                                    Column(Modifier.weight(1f)) {
                                         Text(
-                                            stringResource(
-                                                Res.string.player_back_value,
-                                                ui.skipBackMs / MILLIS_PER_SECOND,
-                                            ),
+                                            now.title,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.titleSmall,
+                                        )
+                                        Text(
+                                            now.podcastTitle,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
-                                    TextButton(
-                                        onClick = previous,
-                                        modifier =
-                                            Modifier.weight(1f, fill = false).semantics {
-                                                contentDescription =
-                                                    previousLabel
-                                            },
-                                    ) { Text(stringResource(Res.string.player_previous_symbol)) }
-                                    PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
-                                    TextButton(
-                                        onClick = next,
-                                        // With chapters the button is nextChapter, a no-op past the
-                                        // last one; a null current sits before the first chapter or
-                                        // in a gap, where a next target still exists.
-                                        enabled =
-                                            if (ui.chapters.isEmpty()) {
-                                                now.hasNext
-                                            } else {
-                                                val current = ui.currentChapter
-                                                current == null || current.index < ui.chapters.lastIndex
-                                            },
-                                        modifier =
-                                            Modifier.weight(1f, fill = false).semantics {
-                                                contentDescription =
-                                                    nextLabel
-                                            },
-                                    ) { Text(stringResource(Res.string.player_next_symbol)) }
-                                    TextButton(
-                                        onClick = forward,
-                                        modifier =
-                                            Modifier.weight(1f, fill = false).semantics {
-                                                contentDescription = forwardLabel
-                                            },
-                                    ) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_forward_value,
-                                                ui.skipForwardMs / MILLIS_PER_SECOND,
-                                            ),
-                                        )
-                                    }
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    TextButton(onClick = { navigate(SleepTimerKey) }) {
-                                        Text(
-                                            when (val timer = ui.sleepTimer) {
-                                                SleepTimerState.Off -> {
-                                                    stringResource(Res.string.sleep_title)
-                                                }
-
-                                                is SleepTimerState.Running -> {
-                                                    val minutes =
-                                                        (timer.remainingMs + MILLIS_PER_MINUTE - 1) /
-                                                            MILLIS_PER_MINUTE
-                                                    stringResource(Res.string.sleep_minutes, minutes.toInt())
-                                                }
-
-                                                is SleepTimerState.EndOfEpisode -> {
-                                                    stringResource(Res.string.sleep_end)
-                                                }
-                                            },
-                                        )
-                                    }
-                                    TextButton(onClick = { navigate(SpeedKey) }) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_speed,
-                                                (
-                                                    ui.effective?.speed?.value
-                                                        ?: 1f
-                                                ).toString(),
-                                            ),
-                                        )
-                                    }
-                                    TextButton(onClick = {
-                                        selectedTabName = PlayerTab.UP_NEXT.name
-                                        scope.launch { panelState.expand(motion) }
-                                    }) { Text(stringResource(Res.string.player_queue_count, ui.upNextCount)) }
-                                    if (share != null) {
-                                        val sharing = LocalPlatformActions.current.share
-                                        TextButton(onClick = share) {
+                                    PlayButton(now, toggle, playLabel)
+                                    if (ui.miniSkip) {
+                                        TextButton(
+                                            onClick = forward,
+                                            modifier =
+                                                Modifier.semantics {
+                                                    contentDescription =
+                                                        forwardLabel
+                                                },
+                                        ) {
                                             Text(
                                                 stringResource(
-                                                    if (sharing !=
-                                                        null
-                                                    ) {
-                                                        UiRes.string.action_share
-                                                    } else {
-                                                        UiRes.string.action_copy_link
-                                                    },
+                                                    Res.string.player_forward_value,
+                                                    ui.skipForwardMs / MILLIS_PER_SECOND,
                                                 ),
                                             )
                                         }
                                     }
                                 }
-                                ui.effective?.let {
-                                    Text(
-                                        AttributionText.describe(it.speed.source).asString(),
-                                        style = MaterialTheme.typography.bodySmall,
+                                val snapshot = position?.takeIf { it.episodeId == now.episodeId } ?: now.position
+                                val duration = snapshot.durationMs
+                                if (duration != null && duration > 0L) {
+                                    LinearProgressIndicator(
+                                        progress = { (snapshot.positionMs.toFloat() / duration).coerceIn(0f, 1f) },
+                                        modifier =
+                                            Modifier
+                                                .align(
+                                                    Alignment.TopStart,
+                                                ).padding(top = 62.dp)
+                                                .fillMaxWidth()
+                                                .height(2.dp)
+                                                .clearAndSetSemantics {},
                                     )
                                 }
-                                PlayerIssue(
-                                    now.issue ?: if (now.phase ==
-                                        PlayerPhase.ERROR
-                                    ) {
-                                        PlaybackIssue.PLAYER_ERROR
-                                    } else {
-                                        null
+                            }
+                            DropdownMenu(expanded = miniMenuOpen, onDismissRequest = { miniMenuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.player_episode)) },
+                                    onClick = {
+                                        miniMenuOpen = false
+                                        navigate(EpisodeKey(now.episodeId))
                                     },
-                                    retry,
-                                    declineConsent,
-                                    retry,
-                                ) { navigate(SettingsKey(SettingsPage.PLAYBACK)) }
-                            }
-                        }
-                    }
-                    if (progress > FULL_SEMANTICS_START) {
-                        PlayerTabs(
-                            state = panelState,
-                            selected = selectedTab,
-                            onSelect = { selectedTabName = it.name },
-                            count = ui.upNextCount,
-                            chapterCount = ui.chapters.size,
-                            upNext = upNext,
-                            chapters = { ChapterList(ui.chapters, ui.currentChapter, seekChapter) },
-                            notes = notes,
-                            modifier =
-                                Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .zIndex(1f)
-                                    .graphicsLayer { alpha = morph.controlsAlpha }
-                                    .padding(bottom = bottomInset)
-                                    .fillMaxWidth()
-                                    .height(panelHeight),
-                        )
-                    }
-                    // Keep the header's gesture node alive until collapse settles, even after its contents fade.
-                    Row(
-                        Modifier
-                            .padding(top = statusBar.dp)
-                            .fillMaxWidth()
-                            .height(headerHeight)
-                            .graphicsLayer { alpha = morph.controlsAlpha }
-                            .then(
-                                if (!isSidePanel && surfaceState.drag.settledValue == PlayerSheetValue.Expanded) {
-                                    dragModifier.clickable(onClick = collapse)
-                                } else {
-                                    Modifier
-                                },
-                            ),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (progress > FULL_SEMANTICS_START) {
-                            NdIconButton(
-                                if (isSidePanel) slot.hidePanel else collapse,
-                                NdIcons.Close,
-                                if (isSidePanel) stringResource(Res.string.player_hide_panel) else collapseLabel,
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    nowPlayingLabel,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                contextTitle?.let {
-                                    Text(
-                                        it,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.player_podcast)) },
+                                    onClick = {
+                                        miniMenuOpen = false
+                                        navigate(PodcastKey(now.podcastId))
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.player_expand)) },
+                                    onClick = {
+                                        miniMenuOpen = false
+                                        expand()
+                                    },
+                                )
+                                if (paused) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(Res.string.player_dismiss)) },
+                                        onClick = {
+                                            miniMenuOpen = false
+                                            dismiss()
+                                        },
                                     )
                                 }
                             }
-                            PlayerMenu(
-                                now,
-                                navigate,
-                                markPlayed,
-                                stop,
-                                ui.chapters.isNotEmpty(),
-                                nextEpisode,
-                                previousEpisode,
+                            if (progress > FULL_SEMANTICS_START) {
+                                // 08 Scrollbars: the desktop draws an overlay thumb at the player's end edge.
+                                val playerScroll = rememberScrollState()
+                                val playerBars = LocalScrollbars.current
+                                val playerBarColor = ndScrollbarColor(playerBars)
+                                Column(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            alpha = morph.controlsAlpha
+                                            translationY =
+                                                morph.controlsOffset.dp.toPx()
+                                        }.padding(top = statusBar.dp, bottom = panelPeekHeight + bottomInset)
+                                        .verticalScroll(playerScroll)
+                                        .ndScrollbar(playerScroll, playerBars, playerBarColor)
+                                        .testTag("full_player")
+                                        .then(fullPlayerSemantics)
+                                        // The panel owns accessibility while it covers the
+                                        // transport.
+                                        .then(
+                                            if (panelState.canCollapse) {
+                                                Modifier.clearAndSetSemantics {}
+                                            } else {
+                                                Modifier
+                                            },
+                                        ),
+                                ) {
+                                    Spacer(Modifier.height(headerHeight + artworkHeight.dp + 16.dp))
+                                    fullControls()
+                                }
+                            }
+                            if (progress > FULL_SEMANTICS_START) {
+                                PlayerTabs(
+                                    state = panelState,
+                                    selected = selectedTab,
+                                    onSelect = { selectedTabName = it.name },
+                                    count = ui.upNextCount,
+                                    chapterCount = ui.chapters.size,
+                                    upNext = upNext,
+                                    chapters = { ChapterList(ui.chapters, ui.currentChapter, seekChapter) },
+                                    notes = notes,
+                                    modifier =
+                                        Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .zIndex(1f)
+                                            .graphicsLayer { alpha = morph.controlsAlpha }
+                                            .padding(bottom = bottomInset)
+                                            .fillMaxWidth()
+                                            .height(panelHeight),
+                                )
+                            }
+                            // Keep gesture ownership until collapse settles, after the
+                            // header fades.
+                            Row(
+                                Modifier
+                                    .padding(top = statusBar.dp)
+                                    .fillMaxWidth()
+                                    .height(headerHeight)
+                                    .graphicsLayer { alpha = morph.controlsAlpha }
+                                    .then(
+                                        if (state.drag.settledValue == PlayerSheetValue.Expanded) {
+                                            dragModifier.clickable(onClick = collapse)
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (progress > FULL_SEMANTICS_START) {
+                                    NdIconButton(collapse, NdIcons.Close, collapseLabel)
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            nowPlayingLabel,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        contextTitle?.let {
+                                            Text(
+                                                it,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    PlayerMenu(
+                                        now,
+                                        navigate,
+                                        markPlayed,
+                                        stop,
+                                        ui.chapters.isNotEmpty(),
+                                        nextEpisode,
+                                        previousEpisode,
+                                    )
+                                }
+                            }
+                            CoverArt(
+                                ref = now.artwork,
+                                avgArgb = ui.colors?.avgArgb,
+                                monogram = rememberMonogram(now.podcastTitle),
+                                title = now.podcastTitle,
+                                tier = if (progress >= MINI_SEMANTICS_END) CoverTier.HERO else CoverTier.THUMB,
+                                aspect = if (wideArt) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
+                                shape = RoundedCornerShape(morph.artworkCorner.dp),
+                                modifier =
+                                    Modifier
+                                        .offset(
+                                            morph.artworkX.dp,
+                                            morph.artworkY.dp,
+                                        ).size(morph.artworkSize.dp, artworkHeight.dp)
+                                        .then(dragModifier)
+                                        .testTag("playerArtwork"),
                             )
+                            if (now.issue != null || now.phase == PlayerPhase.ERROR) {
+                                Box(
+                                    Modifier
+                                        .offset(
+                                            (morph.artworkX + 4).dp,
+                                            (morph.artworkY + 4).dp,
+                                        ).size(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(MaterialTheme.colorScheme.error),
+                                )
+                            }
                         }
-                    }
-                    CoverArt(
-                        ref = now.artwork,
-                        monogram = rememberMonogram(now.podcastTitle),
-                        title = now.podcastTitle,
-                        tier = if (progress >= MINI_SEMANTICS_END) CoverTier.HERO else CoverTier.THUMB,
-                        aspect = if (wideArt) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
-                        shape = RoundedCornerShape(morph.artworkCorner.dp),
-                        modifier =
-                            Modifier
-                                .offset(
-                                    morph.artworkX.dp,
-                                    morph.artworkY.dp,
-                                ).size(morph.artworkSize.dp, artworkHeight.dp)
-                                .then(if (isSidePanel) Modifier else dragModifier)
-                                .testTag("playerArtwork"),
-                    )
-                    if (now.issue != null || now.phase == PlayerPhase.ERROR) {
-                        Box(
-                            Modifier
-                                .offset(
-                                    (morph.artworkX + 4).dp,
-                                    (morph.artworkY + 4).dp,
-                                ).size(8.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.error),
-                        )
                     }
                 }
             }
@@ -1143,6 +1331,7 @@ private val MINI_HEIGHT = 64.dp
 private val MINI_ANCHOR_SPACE = 72.dp
 private val MINI_TEXT_START = 64.dp
 private val DISMISS_DISTANCE = 96.dp
+private const val SIDE_PANEL_MIN_WINDOW_DP = 840
 private const val MILLIS_PER_SECOND = 1_000L
 private const val SECONDS_PER_MINUTE = 60L
 private const val MILLIS_PER_MINUTE = 60_000L
@@ -1152,5 +1341,3 @@ private val CHAPTER_TICK_WIDTH = 1.dp
 private const val SETTLE_FRACTION = 0.5f
 private const val MINI_SEMANTICS_END = 0.2f
 private const val FULL_SEMANTICS_START = 0.6f
-
-private const val PANEL_ART_LIMIT_DP = 320f

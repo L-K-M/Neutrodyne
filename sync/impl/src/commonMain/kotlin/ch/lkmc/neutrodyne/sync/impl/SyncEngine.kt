@@ -75,11 +75,22 @@ class SyncEngine(
     private val sharePasswords: () -> Boolean,
     private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress,
     private val tokens: SyncTokenStore,
+    private val activity: SyncActivityState,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
 
+    /** Marks the shared [SyncActivity] flag for the round's whole duration, including failures. */
     suspend fun round(reason: SyncRoundReason): SyncReport {
+        activity.begin()
+        try {
+            return roundInternal(reason)
+        } finally {
+            activity.end()
+        }
+    }
+
+    private suspend fun roundInternal(reason: SyncRoundReason): SyncReport {
         val started = clock.now()
         val serverUrl = address.serverUrl()
         val token = serverUrl?.let { tokens.load(hostOf(it)) }

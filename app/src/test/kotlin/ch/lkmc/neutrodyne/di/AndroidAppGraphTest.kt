@@ -446,6 +446,8 @@ class AndroidAppGraphTest {
                 "RefreshForegroundObserverInitializer" to 200..299,
                 // 05's work table: periodic arm, watcher and durable-work reconciliation.
                 "AutoBackupInitializer" to 200..299,
+                // M11b's maintenance arm belongs to the periodic scheduling band.
+                "DbMaintenanceInitializer" to 200..299,
                 // 05 Destinations: expired private exports are swept in the cleanup band.
                 "ExportFilesCleaner" to 300..399,
                 "ArtworkInitializer" to 300..300,

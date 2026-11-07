@@ -165,6 +165,7 @@ class SyncWorkerTest {
                     sharePasswords = { false },
                     address = address,
                     tokens = SyncTokenStore(secrets),
+                    activity = SyncActivityState(),
                 )
             val worker =
                 TestListenableWorkerBuilder<SyncWorker>(app)
