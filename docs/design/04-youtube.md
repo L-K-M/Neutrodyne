@@ -458,12 +458,36 @@ flowchart TD
 
 The page is about 2.5 MB; reading it fully for every subscribe is wasteful, hence head-first. Unverified: the byte size of `<head>`; M8 measures it on the recorded fixture. If the median head exceeds 512 KiB, imports fetch avatars only for the first 20 channels per refresh run on metered networks (rest on unmetered); the decision is recorded here.
 
+**Implementation note (2026-11-04, M8 current-code port).** Layer A uses
+common code with byte-bounded head/banner scanning, a shared 20 s deadline,
+and explicit HTTPS YouTube-only redirects. Known channel identity survives
+metadata failure; caller cancellation propagates. Atom metadata parsing stays
+in the feed stack through `YouTubeFeedMetadataReader`. External-only shell
+bindings do not start extraction. Feed health is device-bound and persisted;
+small libraries use the two control feeds before declaring an outage.
+
+Replay fixtures live in `youtube/impl/src/test/resources/recorded/` and are
+shared by desktop and Android host tests. Their provenance explicitly labels
+the successful response shapes as reconstructed research fixtures, rather
+than fresh successful recordings. A current successful handle/oEmbed capture
+and the channel-head median needed for the metered-avatar decision remain
+open. Synthetic fixture sizes cannot establish that policy.
+
 ### oEmbed, user feed and watch page
 
 - **oEmbed** (`OEmbedClient`, 01's API client): `GET https://www.youtube.com/oembed?url={urlencoded https://www.youtube.com/watch?v={id}}&format=json` → `author_url` (a handle URL, sometimes `/channel/` or `/user/`) and `author_name`; the URL is classified and resolved again (one hop, no loops).
 - **Legacy user feed:** `GET https://www.youtube.com/feeds/videos.xml?user={name}` (01's FEED client); channel ID from the first entry's `yt:channelId`, else feed `author/uri`. Cheaper than the page and official.
 - **Watch page fallback** (oEmbed 401/403/404, e.g. embedding disabled): watch page with the consent cookie, head-first; `meta[itemprop=channelId]` or `"channelId":"(UC…)"` within 1.5 MiB.
 - **Playlist owner:** `GET …/feeds/videos.xml?playlist_id={PL…}` → `author/uri` → `PlaylistUnsupported(ownerChannelId, ownerTitle)` so the UI can offer the channel ([D53](../PLAN.md#3-key-decisions): `PL…` feeds return the first 15 items in playlist order, so new items may never appear).
+
+**Implementation note (2026-11-04, oEmbed redirect privacy).** The current
+API family follows redirects inside OkHttp for update-manifest handling.
+Layer A therefore sends oEmbed through the FEED transport so its own bounded
+HTTPS YouTube-host redirect policy sees every hop before dialing it. An
+explicit eight-second coroutine budget preserves the API deadline; its own
+timeout becomes a retryable network failure, while caller cancellation still
+propagates. oEmbed keeps JSON headers and does not send the HTML consent
+cookie. Other API consumers and their redirect behavior are unchanged.
 
 ### Engine channel lookup
 

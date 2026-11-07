@@ -12,6 +12,7 @@ kotlin {
         resources.srcDir(rootProject.file("feeds/src/test/resources"))
         kotlin.srcDir(project.file("src/jvmTest/kotlin"))
         kotlin.srcDir(rootProject.file("feeds/src/replay/kotlin"))
+        kotlin.srcDir("src/test/kotlin")
     }
     // Host (Robolectric) tests: the WorkManager test-driver suite, the foreground observer and the
     // golden corpus on the platform parser (03 corpus leg b). The task is `testAndroidHostTest`.
@@ -23,6 +24,7 @@ kotlin {
 
     sourceSets {
         named("androidHostTest") {
+            kotlin.srcDir("src/test/kotlin")
             resources.srcDir(rootProject.file("feeds/src/test/resources"))
             kotlin.srcDir(rootProject.file("feeds/src/test/kotlin"))
             kotlin.srcDir(project.file("src/jvmTest/kotlin"))
