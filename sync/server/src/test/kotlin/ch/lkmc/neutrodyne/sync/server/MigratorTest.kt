@@ -26,6 +26,15 @@ class MigratorTest {
         }
         val backups = Files.list(dir.resolve("backups")).use { it.toList() }
         assertEquals(1, backups.size)
+        // The file name carries the pre-migration version: the copy was taken at version 1,
+        // before the upgrade transaction, not after it.
+        assertTrue(
+            backups
+                .single()
+                .fileName
+                .toString()
+                .startsWith("neutrodyne-server-pre-migration-v1-"),
+        )
         DriverManager.getConnection("jdbc:sqlite:${backups.single()}").use { connection ->
             quickCheck(connection)
             assertEquals(1, Migrator.version(connection))
@@ -62,7 +71,33 @@ class MigratorTest {
         }
         SqliteSyncStore(dir).close()
         val backup = Files.list(dir.resolve("backups")).use { it.toList().single() }
-        DriverManager.getConnection("jdbc:sqlite:$backup").use(::quickCheck)
+        assertTrue(backup.fileName.toString().startsWith("neutrodyne-server-pre-migration-v1-"))
+        DriverManager.getConnection("jdbc:sqlite:$backup").use { connection ->
+            quickCheck(connection)
+            // The failed upgrade must not leak into the copy: the backup still holds version 1
+            // and the account row, and never gained the doomed column.
+            assertEquals(1, Migrator.version(connection))
+            connection.createStatement().executeQuery("SELECT username FROM account").use {
+                assertTrue(it.next())
+                assertEquals("user1", it.getString(1))
+            }
+            assertFailsWith<java.sql.SQLException> {
+                connection.createStatement().executeQuery("SELECT doomed FROM account")
+            }
+        }
+    }
+
+    @Test fun `an up-to-date schema is served without a backup`() {
+        val dir = tempDataDir()
+        SqliteSyncStore(dir).close()
+        accountFixture(dir)
+        dbFixture(dir) { connection ->
+            assertEquals(1, Migrator.version(connection))
+            Migrator().migrate(connection, dir)
+            assertEquals(1, Migrator.version(connection))
+        }
+        // Nothing to migrate means nothing to back up: the nightly job owns routine copies.
+        assertTrue(!Files.exists(dir.resolve("backups")))
     }
 
     @Test fun `newer schema refuses startup without changing records`() {

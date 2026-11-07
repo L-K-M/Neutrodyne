@@ -124,6 +124,43 @@ class MigrateAllTest {
             }
         }
 
+    /**
+     * M11b AC9 step-by-step upgrade proof: the chain starts at the first tester build's schema
+     * (version 1, the oldest exported Room schema) and walks through every intermediate version,
+     * validating each target schema and comparing [MigrationInvariants] after every step — not
+     * only after the whole chain. The fixture is asserted populated in each AC9 category first, so
+     * preservation is never a comparison of empty tables.
+     */
+    @Test
+    fun everyIntermediateVersionPreservesTheFixtureStepByStep() =
+        runTest {
+            assertEquals(
+                (1 until NeutrodyneDatabase.VERSION).toList(),
+                ALL_MIGRATIONS.map { it.startVersion },
+                "the migration chain must cover every version from the first tester build",
+            )
+
+            val first =
+                helper.createDatabase(1).use { conn ->
+                    fixtureStatements().forEach { conn.exec(it) }
+                    MigrationInvariants.capture(conn)
+                }
+            MigrationInvariants.assertFixturePopulated(first)
+
+            var previous = first
+            for (version in 1 until NeutrodyneDatabase.VERSION) {
+                val after =
+                    helper
+                        .runMigrationsAndValidate(version + 1, listOf(ALL_MIGRATIONS[version - 1]))
+                        .use { conn ->
+                            assertEquals(version + 1L, conn.longQuery("PRAGMA user_version"))
+                            MigrationInvariants.capture(conn)
+                        }
+                MigrationInvariants.assertPreserved(previous, after)
+                previous = after
+            }
+        }
+
     @Test
     fun aColumnBoundarySlideStillChangesTheDigest() =
         runTest {

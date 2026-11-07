@@ -143,6 +143,40 @@ object MigrationInvariants {
     }
 
     /**
+     * The tables the M11b upgrade proof needs populated, by data category: podcasts, episodes,
+     * groups and memberships, positions and played state, queue, downloads, settings and the sync
+     * tables. A preservation check over an empty category would pass vacuously, so the fixture
+     * asserts these counts before migrating.
+     */
+    private val REQUIRED_CATEGORIES: List<String> =
+        listOf(
+            "podcast",
+            "episode",
+            "podcast_group",
+            "podcast_group_member",
+            "episode_position",
+            "episode_state",
+            "queue_entry",
+            "download",
+            "podcast_settings",
+            "podcast_group_settings",
+            "sync_state",
+            "sync_outbox",
+            "sync_clock",
+            "sync_parked",
+            "sync_held",
+        )
+
+    /**
+     * Asserts [snapshot] has at least one row in every category M11b AC9 names, so the
+     * preservation comparison below is meaningful rather than a comparison of empty tables.
+     */
+    fun assertFixturePopulated(snapshot: Snapshot) {
+        val empty = REQUIRED_CATEGORIES.filter { (snapshot.counts[it] ?: 0L) == 0L }
+        check(empty.isEmpty()) { "fixture has no rows in: $empty" }
+    }
+
+    /**
      * Asserts [after] preserves [before]: every projection digest matches (unless the test lists
      * the label in [tolerated] as an intended change), every table's row count is unchanged, and
      * no `sqlite_sequence` high-water mark went down.
