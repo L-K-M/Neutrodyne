@@ -247,13 +247,27 @@ class NetworkCaptureCheckTest(unittest.TestCase):
         self.assertNotIn("capture complete:", stdout)
         self.assertIn("desktop packet capture", stderr)
 
+    def test_a_desktop_app_failure_during_shutdown_is_not_discarded(self):
+        status, stdout, stderr = self.desktop_capture_fixture(app_exit="term:7")
+        self.assertNotEqual(status, 0, stdout + stderr)
+        self.assertNotIn("capture complete:", stdout)
+        self.assertIn("desktop app", stderr)
+
     def test_a_normal_desktop_app_exit_keeps_the_capture_valid(self):
         status, stdout, stderr = self.desktop_capture_fixture(app_exit=0)
         self.assertEqual(status, 0, stdout + stderr)
         self.assertIn("capture complete:", stdout)
         self.assertIn("github.com\t", stdout)
 
-    def desktop_capture_fixture(self, app_exit, capture_exit=None):
+    def test_a_reused_output_directory_uses_the_new_proxy_port(self):
+        status, stdout, stderr = self.desktop_capture_fixture(app_exit=0, stale_port="1")
+        self.assertEqual(status, 0, stdout + stderr)
+        port = (self.root / "capture" / "proxy.port").read_text().strip()
+        options = (self.root / "app-failed").read_text()
+        self.assertNotEqual(port, "1", "the fixture proxy must replace the stale file")
+        self.assertIn(f"-Dhttps.proxyPort={port}", options)
+
+    def desktop_capture_fixture(self, app_exit, capture_exit=None, stale_port=None):
         tools = self.root / "bin"
         tools.mkdir()
         tshark = tools / "tshark"
@@ -284,10 +298,39 @@ class NetworkCaptureCheckTest(unittest.TestCase):
         tshark.chmod(0o755)
         marker = self.root / "app-failed"
         app = tools / "app"
-        app.write_text('#!/usr/bin/env bash\ntouch "$1"\nexit "$2"\n', encoding="utf-8")
+        app.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env bash
+                if [[ "$2" == term:* ]]; then
+                    trap 'exit 7' TERM
+                    printf '%s' "$JAVA_TOOL_OPTIONS" > "$1"
+                    while :; do sleep 0.1; done
+                fi
+                printf '%s' "$JAVA_TOOL_OPTIONS" > "$1"
+                exit "$2"
+                """,
+            ),
+            encoding="utf-8",
+        )
         app.chmod(0o755)
         output = self.root / "capture"
         env = {**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ.get('PATH', '')}"}
+        if stale_port is not None:
+            output.mkdir()
+            (output / "proxy.port").write_text(stale_port + "\n")
+            # Make the old-port race deterministic without changing production code.
+            python = tools / "python3"
+            python.write_text(
+                "#!/usr/bin/env bash\n"
+                "exec \"$ND_CAPTURE_FIXTURE_PYTHON\" -c "
+                "'import runpy,sys,time; sys.argv=sys.argv[1:]; "
+                "time.sleep(0.4) if sys.argv[0].endswith(\"network-capture-proxy.py\") else None; "
+                "runpy.run_path(sys.argv[0],run_name=\"__main__\")' \"$@\"\n",
+                encoding="utf-8",
+            )
+            python.chmod(0o755)
+            env["ND_CAPTURE_FIXTURE_PYTHON"] = sys.executable
         if capture_exit is not None:
             env["ND_CAPTURE_FIXTURE_EXIT"] = str(capture_exit)
         process = subprocess.Popen(
@@ -302,7 +345,11 @@ class NetworkCaptureCheckTest(unittest.TestCase):
         try:
             for _ in range(100):
                 if marker.exists() and (output / "desktop.pcap").exists():
-                    break
+                    port_file = output / "proxy.port"
+                    if stale_port is None or (
+                        port_file.exists() and port_file.read_text().strip() != stale_port
+                    ):
+                        break
                 time.sleep(0.05)
             self.assertTrue(marker.exists(), "the fixture app must actually run")
             time.sleep(0.1)

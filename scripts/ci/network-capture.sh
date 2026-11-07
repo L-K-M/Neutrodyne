@@ -167,12 +167,14 @@ run_android() {
 wait_for_enter_drain() {
     # The capture tools flush their files on SIGTERM; a GUI app may take longer, so give
     # everything a moment before forcing it and then reap the PIDs without hanging.
-    local pid index status failed=0
+    local pid index status forced failed=0
     local stopping=()
+    local stopping_names=()
     for index in "${!pids[@]}"; do
         pid=${pids[$index]}
         if kill "$pid" 2>/dev/null; then
             stopping+=("$pid")
+            stopping_names+=("${child_names[$index]}")
         else
             status=0
             wait "$pid" 2>/dev/null || status=$?
@@ -183,9 +185,19 @@ wait_for_enter_drain() {
         fi
     done
     [[ ${#stopping[@]} -eq 0 ]] || sleep 1
-    for pid in ${stopping[@]+"${stopping[@]}"}; do
-        kill -9 "$pid" 2>/dev/null || true
-        wait "$pid" 2>/dev/null || true
+    for index in "${!stopping[@]}"; do
+        pid=${stopping[$index]}
+        forced=0
+        kill -9 "$pid" 2>/dev/null && forced=1
+        status=0
+        wait "$pid" 2>/dev/null || status=$?
+        # Only our requested TERM/KILL statuses are successful shutdowns. In
+        # particular, an app failure concurrent with shutdown must remain a failure.
+        if [[ "$status" -ne 0 && "$status" -ne 143 ]] &&
+            ! [[ "$status" -eq 137 && "$forced" -eq 1 ]]; then
+            echo "${stopping_names[$index]} exited unsuccessfully (status $status)" >&2
+            failed=1
+        fi
     done
     # The PIDs are reaped: clear them so the EXIT trap cannot signal a recycled PID.
     pids=()
@@ -202,6 +214,7 @@ run_desktop() {
     }
 
     local port_file="$work/proxy.port"
+    rm -f "$port_file"
     python3 "$root/scripts/ci/network-capture-proxy.py" --listen 127.0.0.1 \
         --port "${proxy_port:-0}" --port-file "$port_file" >"$work/proxy-connects.txt" 2>"$work/proxy.log" &
     pids+=("$!")
