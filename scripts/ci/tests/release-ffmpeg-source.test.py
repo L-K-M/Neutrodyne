@@ -30,7 +30,6 @@ ASSETS = REPO / "release-assets.json"
 RELEASE = REPO / ".github/workflows/release.yml"
 VERIFY_TAG = REPO / "scripts/ci/verify-tag.sh"
 NATIVE_LOCK = REPO / "playback/native/native-components.lock"
-SERVER_SOURCES_LOCK = REPO / "sync/server/deploy/image-sources.lock.json"
 
 VERSION = "0.1.0"
 VERSION_CODE = 10095
@@ -64,12 +63,11 @@ class ReleaseFfmpegSourceTest(unittest.TestCase):
         self.assertIn("assembleFfmpegSource", text)
         self.assertIn("checkNativeLicences", text)
         # The publish job must depend on the sources job and download its artifact.
-        publish = text.split("  publish:", 1)[1]
-        needs = re.search(r"^    needs: \[([^\]]*)\]", publish, re.MULTILINE).group(1)
-        self.assertIn("sources", [n.strip() for n in needs.split(",")])
-        self.assertIn("pattern: sources", publish)
+        publish = text.split("  publish:", 1)[1].split("  image-tags:", 1)[0]
+        self.assertIn("sources", publish.split("steps:", 1)[0])
+        self.assertIn("sources", publish.split("steps:", 1)[1])
         # The bundle job must produce the asset the group names.
-        sources = text.split("  sources:", 1)[1].split("  # TODO (M0b)", 1)[0]
+        sources = text.split("  sources:", 1)[1].split("  server-jar:", 1)[0]
         self.assertIn(":playback:native:assembleFfmpegSource", sources)
         self.assertIn("ffmpeg-*-neutrodyne-src.tar.xz", sources)
 
@@ -104,7 +102,6 @@ class ReleaseFfmpegSourceTest(unittest.TestCase):
     def _fixture_repo(self, root: Path):
         (root / "changelogs").mkdir(parents=True)
         (root / "playback/native").mkdir(parents=True)
-        (root / "sync/server/deploy").mkdir(parents=True)
         (root / "scripts/ci").mkdir(parents=True)
         (root / "fakebin").mkdir()
         (root / "gradle.properties").write_text(
@@ -117,8 +114,8 @@ class ReleaseFfmpegSourceTest(unittest.TestCase):
         (root / f"changelogs/{VERSION_CODE}.txt").write_text("Fixture notes.\n", encoding="utf-8")
         shutil.copy2(NATIVE_LOCK, root / "playback/native/native-components.lock")
         shutil.copy2(VERIFY_TAG, root / "scripts/ci/verify-tag.sh")
+        shutil.copy2(REPO / "scripts/ci/release_assets.py", root / "scripts/ci/release_assets.py")
         shutil.copy2(ASSETS, root / "release-assets.json")
-        shutil.copy2(SERVER_SOURCES_LOCK, root / "sync/server/deploy/image-sources.lock.json")
         (root / "fakebin/gh").write_text(
             "#!/usr/bin/env python3\n"
             "import sys\n"

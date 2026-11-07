@@ -1,9 +1,14 @@
 # SPDX-License-Identifier: Unlicense
 #
 # release.yml — tag → published immutable GitHub release (09 release.yml).
-# M0a carries verify-tag, android and publish; the desktop x4 matrix, sources,
-# server-jar, the GHCR image jobs and image-tags land with their milestones
-# (TODO stubs at the bottom of `jobs:`).
+#
+# The job graph of D79: verify-tag decides the version, the asset set and the
+# macOS kind; android, desktop (one job per target), sources, server-jar and
+# server-sources build the assets; server-image builds and pushes the image by
+# digest and server-image-manifest assembles and attests the multi-arch index;
+# publish verifies every asset, attests them, creates the draft, uploads and
+# publishes the immutable normal release; image-tags moves the GHCR tags only
+# after the release is published.
 #
 # Build jobs read no secret and need no approval, so they run while the
 # maintainer approves the `release` environment, which only `publish` uses.
@@ -51,7 +56,7 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android,ffmpeg-sources,server,server-sources
+        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android,desktop,sources,ffmpeg-sources,server,server-sources
 
   android:
     needs: verify-tag
@@ -115,6 +120,76 @@ jobs:
           path: dist/
           retention-days: 5
 
+  desktop:
+    needs: verify-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runs-on: windows-2025
+          - target: macos-arm64
+            runs-on: macos-15
+          - target: linux-x64
+            runs-on: ubuntu-24.04
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      # The KMP android targets configure AGP in every module, so every host
+      # needs an SDK even for a desktop-only build.
+      - name: Android SDK
+        shell: bash
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          sdk_dir="$HOME/android-sdk"
+          command -v cygpath >/dev/null 2>&1 && sdk_dir="$(cygpath -w "$sdk_dir")"
+          echo "ANDROID_HOME=$sdk_dir" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_dir" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-disabled: true
+      # binutils serves jlink's strip-debug and the package checks; fakeroot and
+      # rpm build/inspect the RPM; xvfb and dbus wrap the smoke starts; libegl1
+      # is skiko-linux-arm64's only unresolvable NEEDED entry.
+      - name: Host tools (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          pkgs="binutils fakeroot rpm xvfb dbus-x11 dbus-daemon"
+          [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          # shellcheck disable=SC2086 # the package list is one word per package
+          sudo apt-get install -y -qq $pkgs
+      # The build, the packaged smoke starts and the checks run in a two-attempt
+      # loop — an immutable release cannot gain assets later, so a runner flake
+      # gets one retry while a deterministic failure fails twice (09 release.yml
+      # step 3, risk P15).
+      - name: Build, smoke and check the target's packages
+        shell: bash
+        run: |
+          args="${{ matrix.target }} ${{ needs.verify-tag.outputs.version }} ${{ needs.verify-tag.outputs.mac_kind }}"
+          # shellcheck disable=SC2086 # one argument per word: target, version, mac_kind
+          scripts/ci/build-desktop-release.sh $args \
+            || { echo "::warning::attempt 1 failed — retrying once (09 two-attempt loop)"; \
+                 scripts/ci/build-desktop-release.sh $args; }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.target }}
+          path: dist/
+          retention-days: 5
+
   # MD1b: the LGPL source offer of the FFmpeg build the release ships (11 FFmpeg
   # LGPL obligations). The bundle is reproducible from the native lock alone, so it
   # builds on the Linux x64 runner with the same manylinux toolchain the desktop
@@ -130,20 +205,57 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Android SDK (AGP configures in every module)
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-disabled: true
+      # GPL-2.0 §3: the exact source of the exact runtime, verified and renamed
+      # for the release; WiX's source rides with every MSI (MS-RL). The PBS
+      # source joins from MD3's pbsSource entry, and the FFmpeg source from the
+      # native lock through assembleFfmpegSource (which also rebuilds and
+      # re-checks the LGPL envelope).
+      - name: Download and verify the source tarballs
+        run: |
+          set -e
+          mkdir -p dist
+          lock_prop() { grep -E "^$2=" "$1" | tail -1 | cut -d= -f2-; }
+          v="$(lock_prop desktopApp/runtime.lock version)"
+          url="$(lock_prop desktopApp/runtime.lock sourceTarball.url)"
+          sha="$(lock_prop desktopApp/runtime.lock sourceTarball.sha256)"
+          curl -fsSL -o "dist/openjdk-$v-temurin-sources.tar.gz" "$url"
+          echo "$sha  dist/openjdk-$v-temurin-sources.tar.gz" | sha256sum -c -
+          wv="$(lock_prop desktopApp/wix.lock version)"
+          wurl="$(lock_prop desktopApp/wix.lock source.url)"
+          wsha="$(lock_prop desktopApp/wix.lock source.sha256)"
+          curl -fsSL -o "dist/wix-$wv-src.tar.gz" "$wurl"
+          echo "$wsha  dist/wix-$wv-src.tar.gz" | sha256sum -c -
+          if grep -q '^\[pbsSource\]' youtube/ytdlp-desktop/python-components.lock; then
+            pbs_tag="$(awk '/^\[pbsSource\]/{s=1;next} /^\[/{s=0} s&&/^tag *=/{sub(/^[^=]*= *"?/,"");sub(/".*$/,"");print}' youtube/ytdlp-desktop/python-components.lock)"
+            pbs_url="$(awk '/^\[pbsSource\]/{s=1;next} /^\[/{s=0} s&&/^url *=/{sub(/^[^=]*= *"?/,"");sub(/".*$/,"");print}' youtube/ytdlp-desktop/python-components.lock)"
+            pbs_sha="$(awk '/^\[pbsSource\]/{s=1;next} /^\[/{s=0} s&&/^sha256 *=/{sub(/^[^=]*= *"?/,"");sub(/".*$/,"");print}' youtube/ytdlp-desktop/python-components.lock)"
+            curl -fsSL -o "dist/python-build-standalone-$pbs_tag-src.tar.gz" "$pbs_url"
+            echo "$pbs_sha  dist/python-build-standalone-$pbs_tag-src.tar.gz" | sha256sum -c -
+          fi
+      - name: RUNTIME-SOURCES.md
+        run: scripts/ci/make-runtime-sources-md.sh --out dist/RUNTIME-SOURCES.md
       - name: Assemble the FFmpeg source bundle
         run: |
           ./gradlew --no-daemon --no-build-cache \
             :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+          cp playback/native/build/ffmpeg-source/ffmpeg-*-neutrodyne-src.tar.xz dist/
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sources
-          path: playback/native/build/ffmpeg-source/ffmpeg-*-neutrodyne-src.tar.xz
+          path: dist/
           retention-days: 5
 
-  # TODO (M0b): `desktop` (matrix windows-x64 / macos-arm64 / linux-x64 /
-  # linux-arm64 with the two-attempt build loop and mac_kind from verify-tag)
-  # and the rest of `sources` (openjdk-{jdk}-temurin-sources.tar.gz +
-  # RUNTIME-SOURCES.md; MD3 PBS sources; WiX sources with each MSI).
   server-jar:
     needs: verify-tag
     runs-on: ubuntu-24.04
@@ -189,7 +301,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: scripts/ci/collect-server-sources.sh "${{ needs.verify-tag.outputs.version }}" dist
+      - name: Collect the exact image sources
+        run: |
+          scripts/ci/collect-server-sources.sh "${{ needs.verify-tag.outputs.version }}" dist
+          # The server runtime's source tarball is a second release asset only
+          # when it differs from the desktop runtime's source (10 Image sources
+          # and the runtime exception); verify-tag leaves it out otherwise.
+          runtime="$(python3 -c 'import json;print(json.load(open("sync/server/deploy/image-sources.lock.json"))["runtime"]["name"])')"
+          jdk="$(grep -E '^version=' desktopApp/runtime.lock | tail -1 | cut -d= -f2-)"
+          desktop="openjdk-$jdk-temurin-sources.tar.gz"
+          if [ "$runtime" = "$desktop" ]; then rm -f "dist/$runtime"; fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-server-sources
@@ -283,17 +404,19 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           docker buildx imagetools inspect "$image@$digest" --raw > index.json
           python3 -c 'import json; d=json.load(open("index.json")); assert d["mediaType"] == "application/vnd.oci.image.index.v1+json"; m=d["manifests"]; assert {x["platform"]["architecture"] for x in m} == {"amd64", "arm64"}'
-      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      - name: Attest the image by digest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.index.outputs.repository }}
           subject-digest: ${{ steps.index.outputs.digest }}
           push-to-registry: true
 
   publish:
-    needs: [verify-tag, android, sources, server-jar, server-sources, server-image-manifest]
+    needs:
+      [verify-tag, android, desktop, sources, server-jar, server-sources, server-image-manifest]
     environment: release # required reviewer; holds no signing secret (09)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     # one publisher at a time across ALL tags: two releases may build in parallel,
     # but only one creates/uploads/flips latest, so an older tag can never publish
     # last and take "latest" backwards (make_latest is recomputed in this job).
@@ -307,7 +430,7 @@ jobs:
     permissions:
       contents: write        # gh release create/edit
       packages: read         # verify the attested image against its exact sources
-      id-token: write        # actions/attest
+      id-token: write        # actions/attest-build-provenance
       attestations: write
       artifact-metadata: write
     steps:
@@ -326,6 +449,11 @@ jobs:
         with:
           pattern: sources
           path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: dist
       - name: Verify the image and exact sources before publication
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -343,6 +471,8 @@ jobs:
           expected="$(printf '%s\n' "$EXPECTED" | grep -vE 'neutrodyne-update.json|SHA256SUMS' | sort)"
           actual="$(find . -type f -printf '%P\n' | sort)"
           [ "$expected" = "$actual" ] || { echo "::error::asset set differs"; diff <(echo "$expected") <(echo "$actual"); exit 1; }
+      - name: Runtime exception checks
+        run: scripts/ci/check-runtime-sources.sh --release dist
       - name: Update manifest + checksums
         env:
           TAG: ${{ github.ref_name }}
@@ -355,41 +485,14 @@ jobs:
       - name: Release body
         env:
           TAG: ${{ github.ref_name }}
-          V: ${{ needs.verify-tag.outputs.version }}
+          PRODUCTS: android,desktop,sources,ffmpeg-sources,server,server-sources
+          IMAGE: ${{ needs.server-image-manifest.outputs.image }}
           FFMPEG: ${{ needs.verify-tag.outputs.ffmpeg_version }}
         run: |
-          cat "changelogs/${{ needs.verify-tag.outputs.versionCode }}.txt" > body.md
-          cat >> body.md <<EOF
-
-          Android — pick the APK for your device:
-            neutrodyne-$V-arm64-v8a.apk    most phones and tablets
-            neutrodyne-$V-x86_64.apk       x86_64 devices and emulators
-            neutrodyne-$V-armeabi-v7a.apk  older 32-bit phones (YouTube opens in the YouTube app)
-          These APKs are release builds signed with a key that is public in this repository
-          (signing/neutrodyne-public.keystore), so the signature does not show who built a file.
-
-          Source bundles:
-          This software uses code of FFmpeg licensed under the LGPLv2.1 and its source can be
-          downloaded here: https://github.com/L-K-M/Neutrodyne/releases/download/$TAG/ffmpeg-$FFMPEG-neutrodyne-src.tar.xz
-
-          Download only from this page and check the file:
-            sha256sum --check --ignore-missing SHA256SUMS        (macOS: shasum -a 256 <file>; Windows: Get-FileHash -Algorithm SHA256 <file>)
-            gh release verify-asset $TAG <file> -R L-K-M/Neutrodyne
-            gh attestation verify <file> -R L-K-M/Neutrodyne
-
-          Guides: https://github.com/L-K-M/Neutrodyne#install-and-update
-          EOF
-          # TODO (M0b): the desktop-packages block of 09's release-body
-          # template joins with its assets.
-          cat >> body.md <<EOF
-
-          Self-hosted sync: neutrodyne-server-$V.jar (Java 21+) and
-          ${{ needs.server-image-manifest.outputs.image }} (Linux amd64/arm64).
-          Runtime/base sources and RUNTIME-SOURCES.md accompany this release.
-          Follow https://github.com/L-K-M/Neutrodyne#run-the-server
-          EOF
+          scripts/ci/make-release-body.py --repo-root . --tag "$TAG" --products "$PRODUCTS" \
+            --digest "$IMAGE" --ffmpeg-version "$FFMPEG" --out body.md
       - name: Attest every asset
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/**
       - name: Draft release, upload assets, publish
@@ -429,6 +532,23 @@ jobs:
             # not the basename relative to the repository root
             gh release verify-asset "$TAG" "$f"
           done
+      - name: The latest release serves this tag's update manifest
+        if: steps.publish.outputs.make_latest == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION_CODE: ${{ needs.verify-tag.outputs.versionCode }}
+          REPO_URL: ${{ github.repository }}
+        run: |
+          url="https://github.com/${REPO_URL}/releases/latest/download/neutrodyne-update.json"
+          curl -fsSL "$url" -o latest-update.json
+          python3 - "$VERSION_CODE" <<'PYEOF'
+          import json, sys
+          doc = json.load(open("latest-update.json", encoding="utf-8"))
+          code = int(sys.argv[1])
+          assert doc["versionCode"] == code, f"latest update manifest names {doc['versionCode']}, not {code}"
+          print(f"latest update manifest names versionCode {code}")
+          PYEOF
 
   image-tags:
     needs: [verify-tag, publish, server-image-manifest]
@@ -443,9 +563,15 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Both source artifacts land in one directory: the server runtime's
+      # source tarball is the desktop one while the two runtimes match (10).
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-server-sources
+          path: sources
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sources
           path: sources
       - run: scripts/ci/install-oras.sh
       - name: Verify provenance, source OCI artifact and ordered tags
