@@ -481,7 +481,7 @@ class SyncApplier(
         db
             .episodeStateDao()
             .ensure(EpisodeStateEntity(episodeId = episodeId, updatedAt = clock.now()))
-        val playedAt = record.longField("playedAt")
+        val playedAt = record.nullableLongField("playedAt", current?.playedAt)
         val favourite = record.booleanField("fav") ?: (current?.isFavorite ?: false)
         val playCount =
             maxOf(record.longField("playCount") ?: 0L, current?.playCount?.toLong() ?: 0L)
@@ -504,7 +504,7 @@ class SyncApplier(
                     isFavorite = favourite,
                     downloadDismissedAt = current?.downloadDismissedAt,
                     measuredDurationMs =
-                        record.longField("measuredDurationMs") ?: current?.measuredDurationMs,
+                        record.nullableLongField("measuredDurationMs", current?.measuredDurationMs),
                     updatedAt = clock.now(),
                 ),
             )
@@ -737,6 +737,18 @@ private fun RecordState.stringField(name: String): String? =
     (fields[name]?.v as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
 private fun RecordState.longField(name: String): Long? = (fields[name]?.v as? JsonPrimitive)?.longOrNull
+
+/** Three states: an absent field keeps [fallback], `JsonNull` clears, a number wins. */
+private fun RecordState.nullableLongField(
+    name: String,
+    fallback: Long?,
+): Long? =
+    when (val value = fields[name]?.v) {
+        null -> fallback
+        JsonNull -> null
+        is JsonPrimitive -> value.longOrNull
+        else -> null
+    }
 
 private fun RecordState.intField(name: String): Int? = (fields[name]?.v as? JsonPrimitive)?.intOrNull
 
