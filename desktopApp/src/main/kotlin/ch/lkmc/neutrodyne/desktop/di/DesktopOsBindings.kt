@@ -121,10 +121,13 @@ object DesktopOsBindings {
     /** 11 Start at login's sibling: the OS pick of the idle-sleep inhibitor. */
     @Provides
     @SingleIn(AppScope::class)
-    fun idleSleepInhibitor(buildInfo: BuildInfo): IdleSleepInhibitor =
+    fun idleSleepInhibitor(
+        buildInfo: BuildInfo,
+        ndmedia: NdmediaDirectory,
+    ): IdleSleepInhibitor =
         IdleSleepInhibitors.create(
             os = buildInfo.desktop?.os,
-            ndmedia = DesktopEnginePaths.current().ndmedia,
+            ndmedia = ndmedia.path,
         )
 }
 
