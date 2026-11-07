@@ -140,7 +140,7 @@ class SyncEngine(
             records.maxOfOrNull { record ->
                 record.fields.values
                     .mapNotNull { it.c }
-                    .maxOfOrNull { Hlc.parse(it).packed } ?: 0L
+                    .maxOfOrNull { runCatching { Hlc.parse(it) }.getOrNull()?.packed ?: 0L } ?: 0L
             } ?: 0L
         if (max > 0) db.syncStateDao().raiseHlc(max)
     }
