@@ -10,6 +10,9 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlinx.serialization.json)
         }
+        desktopTest.dependencies {
+            implementation(libs.ktor.client.mock)
+        }
         commonMain.dependencies {
             implementation(project(":sync:api"))
             implementation(project(":sync:protocol"))
