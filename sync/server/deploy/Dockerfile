@@ -4,8 +4,14 @@ FROM gcr.io/distroless/java25-debian13:nonroot@sha256:bb5fd2c016691aef1cf9ff3762
 ARG VERSION
 ARG REPOSITORY=L-K-M/Neutrodyne
 ARG IMAGE_REPOSITORY=ghcr.io/l-k-m/neutrodyne-server
-COPY neutrodyne-server-${VERSION}.jar /app/neutrodyne-server.jar
-COPY THIRD_PARTY_NOTICES.md SOURCES.md /app/
+# WORKDIR creates /app as a traversable 0755 directory; a --chmod on the first
+# COPY into a not-yet-existing directory would apply to /app itself and leave
+# it untraversable for UID 65532.
+WORKDIR /app
+# --chmod: COPY preserves the build host's file mode, and a 0600 JAR (umask 077)
+# leaves /app/neutrodyne-server.jar unreadable to UID 65532.
+COPY --chmod=0644 neutrodyne-server-${VERSION}.jar /app/neutrodyne-server.jar
+COPY --chmod=0644 THIRD_PARTY_NOTICES.md SOURCES.md /app/
 COPY --chown=65532:65532 --chmod=0700 data/ /data/
 USER 65532:65532
 ENV NEUTRODYNE_SERVER_DATA=/data \
