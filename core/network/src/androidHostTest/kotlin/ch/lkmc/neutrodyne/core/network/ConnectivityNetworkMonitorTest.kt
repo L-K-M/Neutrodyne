@@ -10,9 +10,6 @@ import android.net.NetworkInfo
 import android.os.Build
 import ch.lkmc.neutrodyne.core.common.NetworkStatus
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.runCurrent
-import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,7 +27,6 @@ import org.robolectric.shadows.ShadowNetworkInfo
  * are exercised without an emulator.
  */
 @RunWith(RobolectricTestRunner::class)
-@OptIn(ExperimentalCoroutinesApi::class)
 class ConnectivityNetworkMonitorTest {
     private val app = RuntimeEnvironment.getApplication() as Application
     private val manager = checkNotNull(app.getSystemService(ConnectivityManager::class.java))
@@ -72,131 +68,182 @@ class ConnectivityNetworkMonitorTest {
         return network
     }
 
-    @Test
-    fun `no active network is disconnected`() =
-        runTest {
-            // robolectric.properties pins sdk=36; failing here means it is not on the test classpath.
-            assertThat(Build.VERSION.SDK_INT).isEqualTo(36)
-            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
-            assertThat(monitor.status.value).isEqualTo(
-                NetworkStatus(isConnected = false, isValidated = false, isMetered = false, isVpn = false),
-            )
-        }
+    private fun meteredCellular(): NetworkCapabilities {
+        val caps = ShadowNetworkCapabilities.newInstance()
+        shadowOf(caps).addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+        shadowOf(caps).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        shadowOf(caps).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return caps
+    }
 
     @Test
-    fun `validated unmetered wifi reports connected and unmetered`() =
-        runTest {
+    fun `no active network is disconnected`() {
+        // robolectric.properties pins sdk=36; failing here means it is not on the test classpath.
+        assertThat(Build.VERSION.SDK_INT).isEqualTo(36)
+        val monitor = ConnectivityNetworkMonitor(app)
+        assertThat(monitor.status.value).isEqualTo(
+            NetworkStatus(isConnected = false, isValidated = false, isMetered = false, isVpn = false),
+        )
+    }
+
+    @Test
+    fun `validated unmetered wifi reports connected and unmetered`() {
+        connect(
+            NetworkCapabilities.TRANSPORT_WIFI,
+            NetworkCapabilities.NET_CAPABILITY_INTERNET,
+            NetworkCapabilities.NET_CAPABILITY_VALIDATED,
+            NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
+        )
+        val monitor = ConnectivityNetworkMonitor(app)
+        with(monitor.status.value) {
+            assertThat(isConnected).isTrue()
+            assertThat(isValidated).isTrue()
+            assertThat(isMetered).isFalse()
+            assertThat(isVpn).isFalse()
+        }
+    }
+
+    @Test
+    fun `a connected but unvalidated metered network`() {
+        connect(
+            NetworkCapabilities.TRANSPORT_CELLULAR,
+            NetworkCapabilities.NET_CAPABILITY_INTERNET,
+        )
+        val monitor = ConnectivityNetworkMonitor(app)
+        with(monitor.status.value) {
+            assertThat(isConnected).isTrue()
+            assertThat(isValidated).isFalse()
+            assertThat(isMetered).isTrue()
+        }
+    }
+
+    @Test
+    fun `temporarily-not-metered counts as unmetered on api 30 plus`() {
+        connect(
+            NetworkCapabilities.TRANSPORT_CELLULAR,
+            NetworkCapabilities.NET_CAPABILITY_INTERNET,
+            NetworkCapabilities.NET_CAPABILITY_VALIDATED,
+            NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED,
+        )
+        val monitor = ConnectivityNetworkMonitor(app)
+        assertThat(monitor.status.value.isMetered).isFalse()
+    }
+
+    @Test
+    fun `vpn transport reports isVpn`() {
+        connect(
+            NetworkCapabilities.TRANSPORT_VPN,
+            NetworkCapabilities.NET_CAPABILITY_INTERNET,
+            NetworkCapabilities.NET_CAPABILITY_VALIDATED,
+            NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
+        )
+        val monitor = ConnectivityNetworkMonitor(app)
+        assertThat(monitor.status.value.isVpn).isTrue()
+    }
+
+    @Test
+    fun `a capabilities callback pushes a fresh status`() {
+        val network =
             connect(
                 NetworkCapabilities.TRANSPORT_WIFI,
                 NetworkCapabilities.NET_CAPABILITY_INTERNET,
                 NetworkCapabilities.NET_CAPABILITY_VALIDATED,
                 NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
             )
-            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
-            with(monitor.status.value) {
-                assertThat(isConnected).isTrue()
-                assertThat(isValidated).isTrue()
-                assertThat(isMetered).isFalse()
-                assertThat(isVpn).isFalse()
-            }
-        }
+        val monitor = ConnectivityNetworkMonitor(app)
+        assertThat(monitor.status.value.isMetered).isFalse()
+
+        // Turn metered, then fire the registered callback like the framework would.
+        val metered = ShadowNetworkCapabilities.newInstance()
+        shadowOf(metered).addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+        shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        shadow.setNetworkCapabilities(network, metered)
+        shadow.networkCallbacks.first().onCapabilitiesChanged(network, metered)
+
+        assertThat(monitor.status.value.isMetered).isTrue()
+    }
 
     @Test
-    fun `a connected but unvalidated metered network`() =
-        runTest {
-            connect(
-                NetworkCapabilities.TRANSPORT_CELLULAR,
-                NetworkCapabilities.NET_CAPABILITY_INTERNET,
-            )
-            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
-            with(monitor.status.value) {
-                assertThat(isConnected).isTrue()
-                assertThat(isValidated).isFalse()
-                assertThat(isMetered).isTrue()
-            }
+    fun `delivered caps win over a stale synchronous read`() {
+        connect(
+            NetworkCapabilities.TRANSPORT_WIFI,
+            NetworkCapabilities.NET_CAPABILITY_INTERNET,
+            NetworkCapabilities.NET_CAPABILITY_VALIDATED,
+            NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
+        )
+        val monitor = ConnectivityNetworkMonitor(app)
+        assertThat(monitor.status.value.isMetered).isFalse()
+
+        // API 26 GMD flake: getActiveNetwork/getNetworkCapabilities stayed stale for 30s
+        // while the callback stream already delivered the metered cellular caps (CI runs
+        // 42113975704 and 42145320791). The status must follow the delivered caps.
+        shadow.setActiveNetworkInfo(null)
+        val cellular = ShadowNetwork.newInstance(ConnectivityManager.TYPE_MOBILE)
+        val metered = meteredCellular()
+        shadow.networkCallbacks.first().onCapabilitiesChanged(cellular, metered)
+
+        with(monitor.status.value) {
+            assertThat(isConnected).isTrue()
+            assertThat(isValidated).isTrue()
+            assertThat(isMetered).isTrue()
         }
+    }
 
     @Test
-    fun `temporarily-not-metered counts as unmetered on api 30 plus`() =
-        runTest {
-            connect(
-                NetworkCapabilities.TRANSPORT_CELLULAR,
-                NetworkCapabilities.NET_CAPABILITY_INTERNET,
-                NetworkCapabilities.NET_CAPABILITY_VALIDATED,
-                NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED,
-            )
-            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
-            assertThat(monitor.status.value.isMetered).isFalse()
-        }
+    fun `the platform callback registers at construction`() {
+        // CI run 42328682766: when the request was filed from inside a callbackFlow
+        // produce, its Dispatchers.Default dispatch queued long enough on the loaded
+        // API 26 image that the request never reached ConnectivityService during the
+        // test's whole 30 s await; status stayed frozen at the construction seed.
+        ConnectivityNetworkMonitor(app)
+
+        assertThat(shadow.networkCallbacks).isNotEmpty()
+    }
 
     @Test
-    fun `vpn transport reports isVpn`() =
-        runTest {
-            connect(
-                NetworkCapabilities.TRANSPORT_VPN,
-                NetworkCapabilities.NET_CAPABILITY_INTERNET,
-                NetworkCapabilities.NET_CAPABILITY_VALIDATED,
-                NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
-            )
-            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
-            assertThat(monitor.status.value.isVpn).isTrue()
-        }
-
-    @Test
-    fun `a capabilities callback pushes a fresh status`() =
-        runTest {
-            val network =
-                connect(
-                    NetworkCapabilities.TRANSPORT_WIFI,
-                    NetworkCapabilities.NET_CAPABILITY_INTERNET,
-                    NetworkCapabilities.NET_CAPABILITY_VALIDATED,
-                    NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
-                )
-            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
-            runCurrent()
-            assertThat(monitor.status.value.isMetered).isFalse()
-
-            // Turn metered, then fire the registered callback like the framework would.
-            val metered = ShadowNetworkCapabilities.newInstance()
-            shadowOf(metered).addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            shadow.setNetworkCapabilities(network, metered)
-            shadow.networkCallbacks.first().onCapabilitiesChanged(network, metered)
-            runCurrent()
-
-            assertThat(monitor.status.value.isMetered).isTrue()
-        }
-
-    @Test
-    fun `delivered caps win over a stale synchronous read`() =
-        runTest {
+    fun `a retired network's lost does not drop the current caps`() {
+        // API 28+ can deliver the previous default's onLost after the new default's
+        // onAvailable/onCapabilitiesChanged; a LOST for a network that is no longer
+        // tracked must not blank the status.
+        val wifi =
             connect(
                 NetworkCapabilities.TRANSPORT_WIFI,
                 NetworkCapabilities.NET_CAPABILITY_INTERNET,
                 NetworkCapabilities.NET_CAPABILITY_VALIDATED,
                 NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
             )
-            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
-            runCurrent()
-            assertThat(monitor.status.value.isMetered).isFalse()
+        val monitor = ConnectivityNetworkMonitor(app)
+        val callback = shadow.networkCallbacks.first()
+        val cellular = ShadowNetwork.newInstance(ConnectivityManager.TYPE_MOBILE)
+        val metered = meteredCellular()
+        shadow.setNetworkCapabilities(cellular, metered)
 
-            // API 26 GMD flake: getActiveNetwork/getNetworkCapabilities stayed stale for 30s
-            // while the callback stream already delivered the metered cellular caps (CI runs
-            // 42113975704 and 42145320791). The status must follow the delivered caps.
-            shadow.setActiveNetworkInfo(null)
-            val cellular = ShadowNetwork.newInstance(ConnectivityManager.TYPE_MOBILE)
-            val metered = ShadowNetworkCapabilities.newInstance()
-            shadowOf(metered).addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-            shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            shadow.networkCallbacks.first().onCapabilitiesChanged(cellular, metered)
-            runCurrent()
+        callback.onAvailable(cellular)
+        callback.onCapabilitiesChanged(cellular, metered)
+        callback.onLost(wifi)
 
-            with(monitor.status.value) {
-                assertThat(isConnected).isTrue()
-                assertThat(isValidated).isTrue()
-                assertThat(isMetered).isTrue()
-            }
+        with(monitor.status.value) {
+            assertThat(isConnected).isTrue()
+            assertThat(isMetered).isTrue()
         }
+    }
+
+    @Test
+    fun `lost for the tracked network reports disconnected`() {
+        val wifi =
+            connect(
+                NetworkCapabilities.TRANSPORT_WIFI,
+                NetworkCapabilities.NET_CAPABILITY_INTERNET,
+                NetworkCapabilities.NET_CAPABILITY_VALIDATED,
+                NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
+            )
+        val monitor = ConnectivityNetworkMonitor(app)
+        val callback = shadow.networkCallbacks.first()
+
+        callback.onAvailable(wifi)
+        callback.onLost(wifi)
+
+        assertThat(monitor.status.value.isConnected).isFalse()
+    }
 }
