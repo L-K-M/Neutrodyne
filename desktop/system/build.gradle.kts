@@ -35,4 +35,8 @@ tasks.register<Test>("systemSessionTest") {
 
 tasks.named<Test>("test") {
     filter.excludeTestsMatching("*NativeSystemMediaSessionTest")
+    // The D-Bus tests claim well-known names (the portal, notifications, the file manager) on the
+    // one session bus that dbus-run-session gives the whole build; two forks claiming the portal
+    // name at once failed with "Failed to register bus name". One fork runs them in turn.
+    maxParallelForks = 1
 }

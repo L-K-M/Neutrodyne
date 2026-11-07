@@ -449,7 +449,9 @@ density), unit-tested at 100 % and 200 % scale.
 
 `<launcher>` is the path of the running jpackage launcher, read from the system property `jpackage.app-path`, which the jpackage 25 launcher always passes to the JVM ([`JvmLauncher.cpp`](https://raw.githubusercontent.com/openjdk/jdk25u/master/src/jdk.jpackage/share/native/applauncher/JvmLauncher.cpp)); without it (`InstallKind.DEV`) registration is skipped. On macOS the registered item is the bundle, so a translocated first start ([First install and every update](#first-install-and-every-update)) must not register: `MacLoginItemRegistrar` refuses while the bundle runs from a path containing `/AppTranslocation/` and Settings says "Move Neutrodyne to Applications first" (the same check adds a hint to the first-run card).
 
-**Implementation notes (2026-11-05, MD2 — close, tray and start at login).** `MacLoginItemRegistrar` is pending in a later MD2 slice — this slice writes no native code, so the factory binds an `UnsupportedLoginItemRegistrar` on macOS and Settings › Desktop hides the row there; `SMAppService.mainApp` through the Objective-C shim and the translocation refusal above still apply when it lands. The `REQUIRES_APPROVAL` rendering is already built and tested (the System Settings guidance with the `x-apple.systempreferences:` opener), so the deferred registrar only has to report its status. The Windows registrar implements the `StartupApproved` byte rule as the table documents, but that value stays Unverified until it is exercised on a real Windows install (MD2 AC5). A registrar reports `UNSUPPORTED` when `jpackage.app-path` is absent — dev runs — which is this paragraph's "registration is skipped" surfaced as a state, so the row is hidden rather than half-present. The tray follows the row above as Compose `Tray` on AWT `SystemTray`; its glue lives in `:desktopApp` (`NeutrodyneWindow`) over the pure, tested `TrayMenu` model and tooltip functions, so the `TrayController` of the module table is not a separate class in this slice. The one-time no-tray hint is a banner after an iconified busy close, persisted by `desktop.tray_hint_shown`.
+**Implementation notes (2026-11-05, MD2 — close, tray and start at login).** `MacLoginItemRegistrar` was pending in a later MD2 slice — that slice wrote no native code, so the factory bound an `UnsupportedLoginItemRegistrar` on macOS and Settings › Desktop hid the row there; `SMAppService.mainApp` through the Objective-C shim and the translocation refusal above still apply. The `REQUIRES_APPROVAL` rendering is already built and tested (the System Settings guidance with the `x-apple.systempreferences:` opener), so the deferred registrar only has to report its status. The Windows registrar implements the `StartupApproved` byte rule as the table documents, but that value stays Unverified until it is exercised on a real Windows install (MD2 AC5). A registrar reports `UNSUPPORTED` when `jpackage.app-path` is absent — dev runs — which is this paragraph's "registration is skipped" surfaced as a state, so the row is hidden rather than half-present. The tray follows the row above as Compose `Tray` on AWT `SystemTray`; its glue lives in `:desktopApp` (`NeutrodyneWindow`) over the pure, tested `TrayMenu` model and tooltip functions, so the `TrayController` of the module table is not a separate class in this slice. The one-time no-tray hint is a banner after an iconified busy close, persisted by `desktop.tray_hint_shown`.
+
+**Implementation note (2026-11-06, MD2 native-shim slice).** `MacLoginItemRegistrar` now ships: `SMAppService.mainApp` through `nd_mac_login_item` (status mapping incl. `requiresApproval`), the `/AppTranslocation/` refusal with the new `LoginItemState.TRANSLOCATED` row summary "Move Neutrodyne to Applications first", and the factory binds it on macOS when the native library is present (a dev run without `buildNdmedia` still falls back to `UnsupportedLoginItemRegistrar`). The real `SMAppService` behaviour of an ad-hoc-signed app across updates stays a manual check (Open questions 5); the Kotlin status mapping and the refusal are unit-tested behind the native seam. The first-run card hint named in the paragraph above is a separate surface and is not part of this slice; the Settings row hint is.
 
 ### Shell failure modes
 
@@ -547,12 +549,20 @@ data class LaneStatus(val running: Boolean, val lastStartAt: Instant?, val lastE
 
 ### Lanes
 
+**Implementation note (2026-10-19, M6b).** Both download lanes and the move
+lane are bound by `DesktopDownloadBindings` and included in the shell's lane
+order test. The AUTO lane also runs due daily maintenance while offline, even
+when no download is queued; it persists `cleanup_last_at` only after success.
+Both transfer lanes and the mover await the shared once-per-process startup.
+These host assertions do not establish packaged Windows/macOS/ARM behavior;
+see the [M6b acceptance ledger](../evidence/m6b-acceptance.md).
+
 | Lane | Class (module) | Owner of the work | Due when | Pokes |
 |---|---|---|---|---|
 | `refresh` | `DesktopRefreshLane` (`:core:data`) | [03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh) | feeds with `nextRefreshAt ≤ now` | start, window focus, manual refresh, network regained, wake |
 | `import-backup` (2026-10-05) | `DesktopImportBackupLane` (`:core:data`) | [05 Restore algorithm](05-groups-opml-backup.md#restore-algorithm), [05 7. Fetch](05-groups-opml-backup.md#7-fetch) | import sessions in `COMMITTED` or `FETCHING`, a session with `restoreRequestedAt` set and not yet `COMMITTED` (one restore at a time), and once per 24 h the interim import-session cleanup until `maintenance` takes it over (M11b) | import confirm and fix-ups, restore request, network regained, wake |
 | `downloads-manual` | `DesktopDownloadLane` (`:download:impl`, lane `MANUAL`) | [07 Desktop runners](07-downloads.md#desktop-runners) | runnable `MANUAL` rows | download request, network regained, storage freed, wake |
-| `downloads-auto` | `DesktopDownloadLane` (lane `AUTO`) | [07 Desktop runners](07-downloads.md#desktop-runners) | runnable `AUTO` rows, planner output | refresh ingested new episodes, cleanup, wake |
+| `downloads-auto` | `DesktopDownloadLane` (lane `AUTO`) | [07 Desktop runners](07-downloads.md#desktop-runners) | runnable `AUTO` rows, planner output, daily maintenance due even offline | refresh ingested new episodes, cleanup, wake |
 | `downloads-move` | `DesktopMoveLane` (`:download:impl`) | [07 Moving between roots](07-downloads.md#moving-between-roots), [Change folder](#change-folder) | a pending folder move | "Change folder…" |
 | `artwork` | `DesktopArtworkLane` (`:core:artwork`) | [08 Artwork pipeline](08-ui-ux.md#artwork-pipeline) | missing or stale pinned artwork | new podcasts or episodes ingested |
 | `app-update-check` | `DesktopUpdateCheckLane` (`:core:data`) | [09 Update check](09-quality-and-release.md#update-check) | 24 h (plus 0–1 h jitter) after `updates.last_check_at` while `updates.check_enabled` is on | "Check now" |
@@ -688,9 +698,7 @@ transports report no descriptor passing (`DefaultSocketProvider` returns false f
 `isFileDescriptorPassingSupported`, verified), the same limitation the notices row
 already records for delay inhibitors. `LinuxIdleSleepInhibitor` holds the portal's
 `Request` handle and closes it on release; a bus without the portal logs and plays
-without inhibition. macOS and Windows ship `PendingIdleSleepInhibitor` until
-`ndmedia` grows `nd_power_keep_awake` — no new native code was written in this slice,
-and the first `acquire` logs what is missing.
+without inhibition. macOS and Windows shipped `PendingIdleSleepInhibitor` in this slice; the 2026-11-06 native-shim slice replaced them (see the note below).
 
 The Windows/macOS notices cell ships through the hooks the shim already exposes:
 `nd_session_poll` delivers `SUSPEND`/`RESUME` session events (the `PBT_APMSUSPEND` and
@@ -708,14 +716,33 @@ Two residuals from the MD0 review's unknown-event finding: `NativeSystemMediaSes
 classifies polled events through an exhaustive `when`, so a kind added to the native
 enum without a decision there is a compile error rather than a silently dropped event,
 but the *raw* code-to-kind parse — where an unknown native code really surfaces —
-still lives in `NativeMediaSession.poll` (`:playback:native`, under concurrent MD1b
-edit in this slice); naming the code there is left to the engine lane. And the shim's
-current `nd_session_publish` ABI carries title, artist, duration, position, rate and
-play state only, so SMTC and Now Playing publish without artwork (Thumbnail and
-`MPMediaItemArtwork` need native work); MPRIS publishes `mpris:artUrl` from the pinned
-artwork as specified. `RemoteCommand.SetRate` is logged and dropped until the shared
-controller grows 06's non-persisting external-speed seam; published `Rate` is clamped
-to the advertised 0.5–3.0 window on every OS.
+still lives in `NativeMediaSession.poll` (`:playback:native`); naming the code there is
+left to the engine lane. And the shim's `nd_session_publish` ABI carried title, artist,
+duration, position, rate and play state only in this slice; the 2026-11-06 native-shim
+slice extended it with album and `art_path` (see the note below). MPRIS publishes
+`mpris:artUrl` from the pinned artwork as specified. `RemoteCommand.SetRate` is logged
+and dropped until the shared controller grows 06's non-persisting external-speed seam;
+published `Rate` is clamped to the advertised 0.5–3.0 window on every OS.
+
+**Implementation note (2026-11-06, MD2 native-shim slice).** `nd_power_keep_awake` ships:
+Windows calls `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` on one
+dedicated shim thread (the call is per-thread, so a release from another thread would
+leave the acquire set), macOS takes `IOPMAssertionCreateWithName
+(kIOPMAssertionTypeNoIdleSleep)` and releases it; both are idempotent and the native
+`tests/power_test.c` checks create/release/idempotent on the two OS builds. Linux keeps
+the portal path and has no native symbol. `MacIdleSleepInhibitor` and
+`WindowsIdleSleepInhibitor` replace `PendingIdleSleepInhibitor` when the library loads;
+a missing library still falls back to the documented pending inhibitor.
+
+The same slice extended `nd_session_publish` to the 11 sketch's `nd_media_info` struct,
+adding `album` and `art_path`. The native sessions publish the pinned `ArtworkStore`
+file (SMTC's `Thumbnail` through `RandomAccessStreamReference::CreateFromFile`, Now
+Playing's `MPMediaItemArtwork`); the Kotlin side resolves `NowPlaying.artwork.key`
+through `ArtworkStore.pinnedPath` on the publish path. The Windows thumbnail stays
+Unverified for unpackaged apps: a failure leaves the thumbnail unset, never the
+publish. The ABI change is handled as the ndmedia interface section describes: the
+Kotlin binding and the native build ship together, and a library without the symbol is
+a load failure, not a silent mismatch.
 
 ### Audio-route monitoring
 
@@ -762,7 +789,7 @@ takes.
 
 ### ndmedia interface
 
-`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. PCM writes and the audio callback never wait; device and session lifecycle calls may wait and run away from the audio and UI threads. In the production sketch only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
+`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. The ABI is not runtime-versioned: the Kotlin binding and the native build ship together, and a library without a symbol is a load failure, not a silent mismatch (the 2026-11-06 slice moved `nd_session_publish` to the `nd_media_info` struct below, adding `album` and `art_path`). PCM writes and the audio callback never wait; device and session lifecycle calls may wait and run away from the audio and UI threads. In the production sketch only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
 
 ```c
 /* ndmedia.h (sketch) — UTF-8 strings, int return codes (0 = ok, < 0 = ND_E_*), opaque handles */
@@ -1238,6 +1265,15 @@ Serves R8.8, R4.2, R4.3, R8.11, N6. Delivered in M6a (default folder, desktop la
 
 ### Download folders
 
+**Implementation note (2026-10-19, M6b).** W4 stores `desktop.downloads_dir`
+as device-local text, with empty text representing the default folder. The
+registry retains roots with outstanding journal deletions as well as live rows
+and the current root, so a deferred playing source remains reachable. Validation
+uses a unique `.neutrodyne-probe-*` file to avoid overwriting a user file with the
+fixed probe name. Root paths retain `toRealPath()`'s filesystem spelling, including
+decomposed Unicode: normalising an existing path to NFC can point at a different
+or absent directory on Linux. Media component naming still uses NFC.
+
 | Folder | Path | Setting |
 |---|---|---|
 | Default | `<data>/Downloads/` — `%LOCALAPPDATA%\Neutrodyne\Downloads\`, `~/Library/Application Support/ch.lkmc.neutrodyne/Downloads/`, `$XDG_DATA_HOME/neutrodyne/Downloads/` | `desktop.downloads_dir` = null |
@@ -1258,6 +1294,16 @@ Validation before the folder is accepted: it exists or can be created; a probe f
 **Implementation note (2026-11-05, M6b review).** Re-pointing a registered folder to its new mount path writes the folder registry first and `desktop.downloads_dir` second; the settings store has no multi-key write. A crash between the two leaves `desktop.downloads_dir` naming a path the registry no longer holds. `DesktopStorageRoots.current()` then logs a warning and answers the default folder: new downloads go there until a folder is chosen again, and every registered root, including the re-pointed one, keeps resolving.
 
 ### Change folder
+
+**Implementation note (2026-10-19, M6b).** The integrated settings flow uses
+`registerFolderRoot` then `changeRoot` with `RootChangeMode.MOVE_EXISTING` or
+`NEW_DOWNLOADS_ONLY`; "Use default folder" uses the same confirmation. Rejection
+keeps the old root, and dismissing the dialog changes nothing. New requests use
+the selected root immediately. A same-store playing file stays on its old root
+with the move pending until the session changes; a cross-store copy can publish
+the target while source deletion is deferred. Host tests cover both paths and
+quit/restart intent, not native pickers or real removable volumes. The existing
+W4 registry/path note above remains applicable.
 
 "Change folder…" (Settings › Desktop, R8.8) asks "Move {n} downloads ({size}) to {folder}?" with **Move** (default) and **Leave them where they are**, and calls 07's `changeRoot(rootId, moveExisting)`. New downloads use the new folder at once; queued and paused rows follow it at their next prepare.
 
@@ -2142,9 +2188,9 @@ S13 ([S13 desktop packaging and performance](#s13-desktop-packaging-and-performa
 | Lane name `import-backup` (class `DesktopImportBackupLane`, owned by 05) *(2026-10-05)* | lane | `:core:data` `desktopMain` |
 | Lane names `refresh`, `downloads-manual`, `downloads-auto`, `downloads-move`, `artwork`, `app-update-check`, `engine-update`, `sync`, `maintenance` | strings | [Lanes](#lanes) |
 | `AudioEngine`, `FfAudioEngine`, `EngineItem`, `EngineWindowDiff`, `EngineState`, `EngineEvent`, `EngineError`, `TransitionReason`, `DiscontinuityReason`, `Gapless`, `DesktopSourceResolver`, `ResolvedSource`, `ByteSource`, `FileByteSource`, `HttpByteSource`, `SpanCache`, `LookAheadLoader`, `AvioBridge`, `DemuxerFactory`, `Demuxer`, `FfDemuxer`, `DecoderFactory`, `Decoder`, `FfDecoder`, `FfmpegLibrary`, `SilenceSkipper`, `Sonic`, `GainStage`, `TimelineClock`, `MpvAudioEngine` (fallback only) | classes | `:playback:engine` |
-| `ndmedia` (`nd_out_*`, `nd_events_init`, `nd_session_publish`, `nd_power_keep_awake`, `nd_notify_post`, `nd_win_*`, `nd_mac_login_item`), `NdmediaLibrary`, `NdOutput`, `ffoffsets.c`, `ffmpeg-layout.json`, `ffmpeg-license.txt` | native library, classes, files | `:playback:native` |
+| `ndmedia` (`nd_out_*`, `nd_events_init`, `nd_session_publish`, `nd_power_keep_awake`, `nd_notify_post`, `nd_win_*`, `nd_mac_login_item`), `NdmediaLibrary`, `NdOutput`, `NativePower`, `NativeLoginItem`, `ffoffsets.c`, `ffmpeg-layout.json`, `ffmpeg-license.txt` | native library, classes, files | `:playback:native` |
 | `DesktopPlaybackController`, `DesktopQueueProjector`, `DesktopEpisodeSourceResolver`, `DesktopPlaybackModule`, `DesktopChapterExtractor` | classes | `:playback:desktop` |
-| `SystemMediaSession`, `RemoteCommand`, `WindowsSmtcSession`, `MacNowPlayingSession`, `LinuxMprisSession`, `IdleSleepInhibitor`, `AudioRouteMonitor`, `RouteEvent`, `TrayController`, `TrayAction`, `LoginItemRegistrar` (`WindowsRunKeyRegistrar`, `MacLoginItemRegistrar`, `XdgAutostartRegistrar`), `LoginItemState`, `LinuxDesktopEntryWriter` (2026-10-06), `LinuxMenuEntryInstaller`, `OsPowerMonitor`, `OsDesktopNotifier`, `DbusDesktopPortal` | classes | `:desktop:system` |
+| `SystemMediaSession`, `RemoteCommand`, `WindowsSmtcSession`, `MacNowPlayingSession`, `LinuxMprisSession`, `IdleSleepInhibitor`, `MacIdleSleepInhibitor`, `WindowsIdleSleepInhibitor`, `NdmediaDirectory`, `AudioRouteMonitor`, `RouteEvent`, `TrayController`, `TrayAction`, `LoginItemRegistrar` (`WindowsRunKeyRegistrar`, `MacLoginItemRegistrar`, `XdgAutostartRegistrar`), `LoginItemState`, `LinuxDesktopEntryWriter` (2026-10-06), `LinuxMenuEntryInstaller`, `OsPowerMonitor`, `OsDesktopNotifier`, `DbusDesktopPortal` | classes | `:desktop:system` |
 | `JobLanePoker`, `PowerMonitor`, `PowerEvent`, `DesktopNotifier`, `DesktopNotification`, `NotificationKind`, `LinuxDesktopPortal` *(ports, 2026-10-05)* | ports | `:core:common` `desktopMain` |
 | `YtxProcess`, `YtxChild`, `StdioYtxTransport`, `PythonRuntimeLocator`, `DesktopEngineStorePaths`, `DesktopEngineUpdateLane`, `QuickJsBridge`, `host_stdio.py`, `bootstrap.py` | classes, Python files | `:youtube:ytdlp-desktop`, `youtube/engine/python/neutrodyne_ytx/` |
 | Stdio message types `hello`, `call`, `ok`, `err`, `cancel`, `jsc`, `jsc_ok`, `jsc_err`, `status` | protocol | [Stdio protocol](#stdio-protocol) |

@@ -56,6 +56,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_approval
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_disabled_os
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_open_settings
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.desktop_login_translocated
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_section_links
 import ch.lkmc.neutrodyne.feature.settings.resources.desktop_section_window
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_desktop
@@ -285,6 +286,9 @@ private fun loginSummary(state: LoginItemState) =
         LoginItemState.DISABLED_BY_OS -> Res.string.desktop_login_disabled_os
 
         LoginItemState.REQUIRES_APPROVAL -> Res.string.desktop_login_approval
+
+        // A translocated first start cannot register the bundle; the row says what to do.
+        LoginItemState.TRANSLOCATED -> Res.string.desktop_login_translocated
 
         else -> Res.string.desktop_login_summary
     }

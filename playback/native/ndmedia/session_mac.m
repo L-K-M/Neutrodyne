@@ -2,7 +2,9 @@
 #include "session.h"
 #import <AppKit/AppKit.h>
 #import <CoreAudio/CoreAudio.h>
+#import <IOKit/pwr_mgt/IOPMLib.h>
 #import <MediaPlayer/MediaPlayer.h>
+#import <ServiceManagement/ServiceManagement.h>
 #import <os/lock.h>
 
 /* AppKit is bootstrapped by the test-only JVM harness before these calls.
@@ -17,6 +19,8 @@ static size_t head, count;
 static int failure;
 static NSArray *commandTargets;
 static id sleepObserver, wakeObserver;
+static IOPMAssertionID powerAssertion = 0;
+static os_unfair_lock powerLock = OS_UNFAIR_LOCK_INIT;
 static AudioDeviceID device;
 static UInt32 previousSource;
 static AudioObjectPropertyListenerBlock aliveListener, sourceListener, defaultListener;
@@ -151,8 +155,7 @@ int nd_session_open(void) {
     });
     return result;
 }
-int nd_session_publish(const char *title, const char *artist, int64_t duration, int64_t position, float rate,
-                       int playing) {
+int nd_session_publish(const nd_media_info *m) {
     __block int result = 0;
     main_queue(^{
       @try {
@@ -161,25 +164,41 @@ int nd_session_publish(const char *title, const char *artist, int64_t duration, 
               return;
           }
           MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
-          if (!title) {
+          if (!m || !m->title) {
               center.nowPlayingInfo = nil;
               center.playbackState = MPNowPlayingPlaybackStateStopped;
               return;
           }
-          NSString *t = [NSString stringWithUTF8String:title];
-          NSString *a = artist ? [NSString stringWithUTF8String:artist] : @"";
-          if (!t || !a) {
+          NSString *t = [NSString stringWithUTF8String:m->title];
+          NSString *a = m->artist ? [NSString stringWithUTF8String:m->artist] : @"";
+          NSString *al = m->album ? [NSString stringWithUTF8String:m->album] : a;
+          NSString *art = m->art_path ? [NSString stringWithUTF8String:m->art_path] : nil;
+          if (!t || !a || !al) {
               result = ND_E_ARG;
               return;
           }
-          center.nowPlayingInfo = @{
+          NSMutableDictionary *info = [@{
               MPMediaItemPropertyTitle : t,
               MPMediaItemPropertyArtist : a,
-              MPMediaItemPropertyPlaybackDuration : @(duration / 1000.0),
-              MPNowPlayingInfoPropertyElapsedPlaybackTime : @(position / 1000.0),
-              MPNowPlayingInfoPropertyPlaybackRate : @(playing ? rate : 0)
-          };
-          center.playbackState = playing ? MPNowPlayingPlaybackStatePlaying : MPNowPlayingPlaybackStatePaused;
+              MPMediaItemPropertyAlbumTitle : al,
+              MPMediaItemPropertyPlaybackDuration : @(m->duration_ms / 1000.0),
+              MPNowPlayingInfoPropertyElapsedPlaybackTime : @(m->position_ms / 1000.0),
+              MPNowPlayingInfoPropertyPlaybackRate : @(m->playing ? m->rate : 0),
+              MPNowPlayingInfoPropertyDefaultPlaybackRate : @1.0,
+              MPNowPlayingInfoPropertyMediaType : @(MPNowPlayingInfoMediaTypeAudio)
+          } mutableCopy];
+          if (art) {
+              /* The handler runs later, so it captures the path instead of the
+               * caller's borrowed buffer. */
+              info[MPMediaItemPropertyArtwork] =
+                  [[MPMediaItemArtwork alloc] initWithBoundsSize:CGSizeMake(512, 512)
+                                                  requestHandler:^NSImage *(CGSize size) {
+                                                    (void)size;
+                                                    return [[NSImage alloc] initWithContentsOfFile:art];
+                                                  }];
+          }
+          center.nowPlayingInfo = info;
+          center.playbackState = m->playing ? MPNowPlayingPlaybackStatePlaying : MPNowPlayingPlaybackStatePaused;
       } @catch (NSException *exception) {
           (void)exception;
           result = ND_E_DEVICE;
@@ -223,4 +242,60 @@ void nd_session_close(void) {
       [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo = nil;
       [MPNowPlayingInfoCenter defaultCenter].playbackState = MPNowPlayingPlaybackStateStopped;
     });
+}
+int nd_power_keep_awake(int on) {
+    if (on != 0 && on != 1)
+        return ND_E_ARG;
+    os_unfair_lock_lock(&powerLock);
+    if (on) {
+        if (powerAssertion != 0) {
+            os_unfair_lock_unlock(&powerLock);
+            return 0;
+        }
+        CFStringRef reason = CFSTR("Neutrodyne playback");
+        IOReturn status =
+            IOPMAssertionCreateWithName(kIOPMAssertionTypeNoIdleSleep, kIOPMAssertionLevelOn, reason, &powerAssertion);
+        os_unfair_lock_unlock(&powerLock);
+        return status == kIOReturnSuccess ? 0 : ND_E_DEVICE;
+    }
+    if (powerAssertion == 0) {
+        os_unfair_lock_unlock(&powerLock);
+        return 0;
+    }
+    IOReturn status = IOPMAssertionRelease(powerAssertion);
+    powerAssertion = 0;
+    os_unfair_lock_unlock(&powerLock);
+    return status == kIOReturnSuccess ? 0 : ND_E_DEVICE;
+}
+int nd_mac_login_item(int op) {
+    __block int result = 0;
+    main_queue(^{
+      @try {
+          SMAppService *service = [SMAppService mainAppService];
+          switch (op) {
+          case 0:
+              result = (int)service.status;
+              break;
+          case 1: {
+              NSError *error = nil;
+              if (![service registerAndReturnError:&error] && error.code != kSMErrorAlreadyRegistered)
+                  result = ND_E_DEVICE;
+              break;
+          }
+          case 2: {
+              NSError *error = nil;
+              if (![service unregisterAndReturnError:&error] && error.code != kSMErrorJobNotFound)
+                  result = ND_E_DEVICE;
+              break;
+          }
+          default:
+              result = ND_E_ARG;
+              break;
+          }
+      } @catch (NSException *exception) {
+          (void)exception;
+          result = ND_E_DEVICE;
+      }
+    });
+    return result;
 }

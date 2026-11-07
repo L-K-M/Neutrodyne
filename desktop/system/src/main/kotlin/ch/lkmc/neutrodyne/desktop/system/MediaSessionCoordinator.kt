@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.desktop.system
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class MediaSessionCoordinator(
     private val speedPresets: Flow<List<Float>>,
     private val hardwareButtons: StateFlow<HardwareButtons>,
     private val setExternalRate: (suspend (Float) -> Unit)? = null,
+    private val artworkPath: (NowPlaying) -> String? = { null },
     private val nanos: () -> Long = System::nanoTime,
 ) {
     fun start() {
@@ -47,7 +49,7 @@ class MediaSessionCoordinator(
             skipForwardMs,
             speedPresets,
         ) { nowPlaying, back, forward, presets ->
-            session.publish(nowPlaying, back, forward, presets)
+            session.publish(nowPlaying, back, forward, presets, nowPlaying?.let(artworkPath))
         }.launchIn(scope)
 
         session.commands

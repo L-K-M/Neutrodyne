@@ -20,8 +20,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.BrandMark
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
@@ -45,6 +47,8 @@ public fun EmptyState(
     onSecondary: (() -> Unit)? = null,
     tertiaryLabel: String? = null,
     onTertiary: (() -> Unit)? = null,
+    showBrandMark: Boolean = false,
+    footer: @Composable () -> Unit = {},
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         // Lazy-list callers already own scrolling; short bounded windows need their own viewport.
@@ -60,7 +64,7 @@ public fun EmptyState(
                 Modifier
             }
         Column(
-            modifier = Modifier.fillMaxSize().then(scrolling).padding(horizontal = 32.dp),
+            modifier = Modifier.fillMaxSize().then(scrolling).padding(horizontal = 32.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -70,6 +74,10 @@ public fun EmptyState(
                 modifier = Modifier.widthIn(max = 400.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                if (showBrandMark) {
+                    BrandMark(Modifier.size(EMPTY_ICON_SIZE).testTag("onboarding-brand-mark"))
+                    Spacer(Modifier.height(ICON_TITLE_GAP))
+                }
                 Icon(
                     icon,
                     contentDescription = null,
@@ -78,13 +86,15 @@ public fun EmptyState(
                 )
                 Spacer(Modifier.height(ICON_TITLE_GAP))
                 Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-                Spacer(Modifier.height(TITLE_BODY_GAP))
-                Text(
-                    body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+                if (body.isNotEmpty()) {
+                    Spacer(Modifier.height(TITLE_BODY_GAP))
+                    Text(
+                        body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 if (actionLabel != null && onAction != null) {
                     Spacer(Modifier.height(BODY_ACTION_GAP))
                     NdButton(label = actionLabel, onClick = onAction)
@@ -95,6 +105,7 @@ public fun EmptyState(
                 if (tertiaryLabel != null && onTertiary != null) {
                     NdTextButton(label = tertiaryLabel, onClick = onTertiary)
                 }
+                footer()
             }
         }
     }

@@ -39,6 +39,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
@@ -52,8 +53,13 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
+import ch.lkmc.neutrodyne.core.ui.resources.action_open
+import ch.lkmc.neutrodyne.core.ui.resources.action_select
 import ch.lkmc.neutrodyne.core.ui.resources.tile_gone
 import ch.lkmc.neutrodyne.core.ui.resources.tile_moved
 import ch.lkmc.neutrodyne.core.ui.resources.tile_needs_password
@@ -94,6 +100,14 @@ public fun CoverTile(
     var focused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
+    val openLabel = stringResource(Res.string.action_open)
+    val selectLabel = stringResource(Res.string.action_select)
+    val accessibilityActions =
+        (
+            listOf(TileMenuAction(openLabel, onClick), TileMenuAction(selectLabel, onLongClick)) +
+                menuActions
+        ).distinctBy { it.label }
+
     val description =
         if (showTitle) {
             null
@@ -129,7 +143,7 @@ public fun CoverTile(
                 ) {
                     if (description != null) contentDescription = description
                     customActions =
-                        menuActions.map { action ->
+                        accessibilityActions.map { action ->
                             CustomAccessibilityAction(action.label) {
                                 action.onClick()
                                 true
@@ -143,6 +157,7 @@ public fun CoverTile(
                         onClick()
                     },
                     onLongClick = onLongClick,
+                    role = Role.Button,
                 ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -161,7 +176,15 @@ public fun CoverTile(
                 modifier =
                     Modifier
                         .fillMaxSize()
-                        .let { m -> if (selected == true) m.scale(SELECTED_SCALE) else m },
+                        .let {
+                            if (selected ==
+                                null
+                            ) {
+                                it.sharedArt(SharedKeys.cover(LocalNavTab.current, tile.podcastId))
+                            } else {
+                                it
+                            }
+                        }.let { m -> if (selected == true) m.scale(SELECTED_SCALE) else m },
             )
 
             if (selected != null) {

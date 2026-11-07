@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,7 +28,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,12 +44,17 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalSystemUiState
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.art.ArtColors
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_add_group
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_episode_count
@@ -55,12 +64,13 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_more
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_private
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_updated
+import coil3.compose.AsyncImage
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
  * 08 "Podcast header" — the first item of the podcast screen's `LazyColumn` (it scrolls away; the
- * pinned transparent top bar is the screen's). The header has no artwork-scheme tint (M10). Cover
+ * pinned transparent top bar is the screen's). Its caller supplies the artwork-scoped scheme. Cover
  * 160 dp at 24 dp corners, the title `headlineSmall` (2 lines), author, the "Subscribed" chip,
  * three lines of plain description with a "More"/"Less" toggle, and the meta line
  * "{n} episodes · Updated {relative} · Private". M2 adds the membership chips below the
@@ -75,21 +85,61 @@ public fun PodcastHeader(
     onRemoveGroup: (Group) -> Unit,
     onAddToGroups: () -> Unit,
     modifier: Modifier = Modifier,
+    colors: ArtworkColors? = null,
 ) {
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = HEADER_PADDING),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .background(
+                    MaterialTheme.colorScheme.surface,
+                ).padding(horizontal = HEADER_PADDING),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(HEADER_TOP_GAP))
-        CoverArt(
-            ref = detail.artwork,
-            monogram = rememberMonogram(detail.displayTitle),
-            title = detail.displayTitle,
-            tier = CoverTier.HERO,
-            shape = NeutrodyneShapes.PlayerArt,
-            avgArgb = null,
-            modifier = Modifier.size(HERO_SIZE),
-        )
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        0f to MaterialTheme.colorScheme.primaryContainer,
+                        0.7f to MaterialTheme.colorScheme.surface,
+                    ),
+                ).padding(top = HEADER_TOP_GAP),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            if (detail.sourceType == SourceType.YOUTUBE_CHANNEL && detail.bannerUrl != null) {
+                Box(Modifier.fillMaxWidth().aspectRatio(6f).align(Alignment.TopCenter)) {
+                    AsyncImage(
+                        detail.bannerUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Box(
+                        Modifier.matchParentSize().background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)),
+                            ),
+                        ),
+                    )
+                }
+            }
+            CoverArt(
+                ref = detail.artwork,
+                monogram = rememberMonogram(detail.displayTitle),
+                title = detail.displayTitle,
+                tier = CoverTier.HERO,
+                shape = NeutrodyneShapes.PlayerArt,
+                avgArgb = colors?.avgArgb,
+                modifier =
+                    Modifier.size(HERO_SIZE).sharedArt(SharedKeys.cover(LocalNavTab.current, detail.id)).shadow(
+                        12.dp,
+                        NeutrodyneShapes.PlayerArt,
+                        ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                    ),
+            )
+        }
         Spacer(Modifier.height(COVER_TITLE_GAP))
         Text(
             detail.displayTitle,

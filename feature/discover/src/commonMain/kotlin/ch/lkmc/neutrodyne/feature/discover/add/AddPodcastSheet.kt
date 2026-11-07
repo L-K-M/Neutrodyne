@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -236,10 +237,13 @@ internal fun AddPodcastSheet(
                 KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { if (submitEnabled) submit() }),
             singleLine = true,
+            // 08's test tags: the modal sheet composes over Discover's search field, so the
+            // out-of-process journeys must address this field by tag, never by class.
             modifier =
                 Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
+                    .testTag("add_url_field")
                     .ndTextFieldFocus(),
         )
 
@@ -370,12 +374,16 @@ internal fun AddPodcastSheet(
                 NdButton(
                     label = stringResource(Res.string.add_open),
                     onClick = { onOpenPodcast(alreadyId) },
+                    // 08's test tags: the label changes with the step, so the journeys address
+                    // the sheet's confirm action by tag.
+                    modifier = Modifier.testTag("add_confirm"),
                 )
             } else {
                 NdButton(
                     label = stringResource(Res.string.add_subscribe),
                     enabled = submitEnabled,
                     onClick = ::submit,
+                    modifier = Modifier.testTag("add_confirm"),
                 )
             }
         }
