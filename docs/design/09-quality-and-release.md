@@ -922,6 +922,15 @@ metadata (API 28, framework-owned transport) is collected only as image evidence
 
 The workflows also call 04's `scripts/engine/*.sh` and `scripts/youtube/record-responses.sh`, 11's `scripts/desktop/mac-zip.sh` and `playback/native/ffmpeg/build.sh` (through `buildFfmpeg`), and `scripts/engine/trim-python.sh` (through `trimPythonStandalone`).
 
+**Implementation note (2026-11-04, M11b).** `network-capture.sh` and its checker
+(`network-capture.py hosts|check`, with `network-capture-proxy.py` for the desktop CONNECT
+log) implement the `--android`, `--desktop` and `--server` modes and write a host list mapped
+to the `PRIVACY.md` inventory. The captures themselves stay manual and open: the Android
+emulator capture on the API 36 image, the desktop capture on each reference OS and the
+24-hour compose capture have not been run, so v1.0 gate row 8 is not yet proven. The checker
+is covered by `scripts/ci/tests/network-capture.test.py` against a recorded host list and a
+fake `tshark`; no live capture runs in tests.
+
 ### Hardening
 
 - Every `uses:` is pinned by commit SHA; Renovate's `helpers:pinGitHubActionDigests` keeps the pins current.
