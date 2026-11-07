@@ -205,6 +205,34 @@ class DiagExportScrubTest {
         }
 
     @Test
+    fun scrubMasksIpv6Hosts() =
+        runTest {
+            val db = TestDb.file(dbDir.toPath())
+            try {
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedUrl = "http://[2001:db8::1]:8080/feed", title = "V6"),
+                )
+                copyFile.delete()
+                db.useWriterConnection { conn ->
+                    conn.usePrepared("VACUUM INTO '${copyFile.absolutePath}'") { it.step() }
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    DiagExportScrub.scrub(connection)
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    connection.prepare("SELECT feedUrl FROM podcast").use { stmt ->
+                        stmt.step()
+                        assertEquals("http://[2001:db8::1]/…#1", stmt.getText(0))
+                    }
+                }
+            } finally {
+                db.close()
+                dbDir.deleteRecursively()
+                copyFile.delete()
+            }
+        }
+
+    @Test
     fun scrubKeepsUniqueIndicesValid() =
         runTest {
             val db = TestDb.file(dbDir.toPath())
