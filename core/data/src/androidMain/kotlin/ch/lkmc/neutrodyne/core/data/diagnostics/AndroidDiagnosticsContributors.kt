@@ -15,12 +15,9 @@ import ch.lkmc.neutrodyne.core.domain.DiagnosticsContributor
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsLine
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSeverity
-import com.google.common.util.concurrent.ListenableFuture
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.guava.await
 
 /**
  * The Android BACKGROUND card (08): app-standby bucket and battery-optimisation state.
@@ -85,7 +82,7 @@ internal class AndroidJobsContributor
                 workManager
                     .getWorkInfos(
                         WorkQuery.Builder.fromStates(WorkInfo.State.entries.toList()).build(),
-                    ).awaitResult()
+                    ).await()
             if (infos.isEmpty()) return listOf(DiagnosticsLine("jobs", "none"))
             return infos.map { info ->
                 DiagnosticsLine(
@@ -115,21 +112,5 @@ internal class AndroidJobsContributor
                 WorkInfo.STOP_REASON_SYSTEM_PROCESSING -> "system_processing"
                 WorkInfo.STOP_REASON_ESTIMATED_APP_LAUNCH_TIME_CHANGED -> "launch_time_changed"
                 else -> "reason_$reason"
-            }
-
-        /** `WorkManager` futures carry no coroutine adapter; the listener fires post-completion. */
-        private suspend fun <T> ListenableFuture<T>.awaitResult(): T =
-            suspendCancellableCoroutine { continuation ->
-                addListener(
-                    {
-                        try {
-                            continuation.resume(get())
-                        } catch (throwable: Throwable) {
-                            continuation.resumeWithException(throwable)
-                        }
-                    },
-                    { it.run() },
-                )
-                continuation.invokeOnCancellation { cancel(true) }
             }
     }
