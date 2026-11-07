@@ -10,7 +10,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
@@ -23,6 +26,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_debug_build
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_desktop
+import ch.lkmc.neutrodyne.feature.settings.resources.about_screen_readers
 import ch.lkmc.neutrodyne.feature.settings.resources.about_source
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_abi
@@ -47,7 +51,16 @@ internal fun AboutPage(buildInfo: BuildInfo) {
             title = stringResource(Res.string.settings_about),
             navigation = { SettingsBackButton() },
         )
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // 08 Scrollbars: the desktop draws an overlay thumb at the page's end edge.
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             Text(
                 stringResource(Res.string.app_name),
                 style = MaterialTheme.typography.titleMedium,
@@ -65,6 +78,11 @@ internal fun AboutPage(buildInfo: BuildInfo) {
             }
             Text(
                 stringResource(licenceStatementFor(buildInfo.platform)),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            // 11's Linux screen-reader gap statement (MD4 AC4), shared with the README and help.
+            Text(
+                stringResource(Res.string.about_screen_readers),
                 style = MaterialTheme.typography.bodyMedium,
             )
             SettingsRow(

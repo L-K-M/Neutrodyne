@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -42,11 +43,14 @@ import ch.lkmc.neutrodyne.core.common.DateFormatter
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverAspect
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -136,7 +140,16 @@ internal fun EpisodeScreen(
             }
 
             else -> {
-                LazyColumn(Modifier.fillMaxSize()) {
+                // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+                val listState = rememberLazyListState()
+                val scrollbars = LocalScrollbars.current
+                val scrollbarColor = ndScrollbarColor(scrollbars)
+                LazyColumn(
+                    Modifier
+                        .fillMaxSize()
+                        .ndScrollbar(listState, scrollbars, scrollbarColor),
+                    state = listState,
+                ) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
                         EpisodeHeader(episode, state, onAction)

@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -91,7 +92,12 @@ class SyncCaptureTest {
                                 "lastPlayedAt=43|lastPlayedAt",
                                 "measuredDurationMs=99|measuredDurationMs",
                             ),
-                        "episode_position" to listOf("positionMs=10|pos"),
+                        "episode_position" to
+                            listOf(
+                                "positionMs=10|pos",
+                                "durationMs=200|pos",
+                                "positionSource='DOWNLOAD'|pos",
+                            ),
                         "queue_entry" to listOf("orderKey='b'|ok"),
                         "play_session" to
                             listOf(
@@ -128,6 +134,29 @@ class SyncCaptureTest {
                                 assertEquals(rows, outbox.rows(), "$table identical write")
                             }
                         }
+                    }
+                }
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun positionMetadataAtZeroDoesNotCaptureAReset() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                for (assignment in listOf("durationMs=200", "positionSource='DOWNLOAD'")) {
+                    db.withWriteTransaction {
+                        db.useWriterConnection { connection ->
+                            connection.exec("DELETE FROM sync_outbox")
+                            connection.exec("UPDATE episode_position SET $assignment WHERE episodeId=1")
+                        }
+                        assertNull(
+                            db.syncOutboxDao().get("episode", episodeRid, "pos"),
+                            "Metadata at zero must not reset another device's playback: $assignment",
+                        )
                     }
                 }
             } finally {
@@ -293,6 +322,36 @@ class SyncCaptureTest {
                 val row = outbox.get("podcast", podcastSyncId, "customTitle")!!
                 assertEquals(replayClock, row.hlc)
                 assertEquals(replayNode, row.nodeId)
+                assertEquals(SyncCaptureKind.REPLAY, row.captureKind)
+                assertEquals("\"replay\"", row.value)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aLocalCaptureKeepsANewerReplayRow() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                val outbox = db.syncOutboxDao()
+                db.withWriteTransaction {
+                    db.useWriterConnection { it.exec("DELETE FROM sync_outbox") }
+                    // Packed clocks are wallMs shl 16; a far-future stamp stays newer than now.
+                    val replayClock = Long.MAX_VALUE / 2
+                    outbox.captureStored(
+                        "podcast",
+                        podcastSyncId,
+                        "customTitle",
+                        replayClock,
+                        "0000000000000009",
+                        "\"replay\"",
+                    )
+                    outbox.captureLiteral("podcast", podcastSyncId, "customTitle", "\"local\"")
+                }
+                val row = outbox.get("podcast", podcastSyncId, "customTitle")!!
+                assertEquals("0000000000000009", row.nodeId)
                 assertEquals(SyncCaptureKind.REPLAY, row.captureKind)
                 assertEquals("\"replay\"", row.value)
             } finally {

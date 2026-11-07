@@ -21,6 +21,9 @@ import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 
+/** The host of a server URL, for the token origin (`sync:<host>`). */
+fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
+
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
 
@@ -39,8 +42,8 @@ class SyncEngine(
     private val syncIngestHook: SyncIngestHook,
     private val channelSync: GroupChannelSync,
     private val sharePasswords: () -> Boolean,
-    private val serverUrl: () -> String?,
-    private val token: () -> String?,
+    private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress,
+    private val tokens: SyncTokenStore,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
@@ -49,7 +52,9 @@ class SyncEngine(
 
     suspend fun round(reason: SyncRoundReason): SyncReport {
         val started = clock.now()
-        if (serverUrl() == null || token() == null) {
+        val serverUrl = address.serverUrl()
+        val token = serverUrl?.let { tokens.load(hostOf(it)) }
+        if (serverUrl == null || token == null) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
         var pushed = 0
@@ -80,16 +85,18 @@ class SyncEngine(
             pulled += response.records.size
             raiseHlc(response.records)
             storeCursor(response.cursor)
+            var cursor = response.cursor
             var hasMore = response.hasMore
             var guard = 0
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
-                val next = client.changes(response.cursor, ProtocolLimits.MAX_RECORDS)
+                val next = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
                 applied += next.records.size
                 pulled += next.records.size
                 applier.applyPage(next.records, roundId)
                 raiseHlc(next.records)
                 storeCursor(next.cursor)
+                cursor = next.cursor
                 hasMore = next.hasMore
             }
             if (db.syncOutboxDao().count() == 0) break
@@ -138,7 +145,7 @@ class SyncEngine(
             records.maxOfOrNull { record ->
                 record.fields.values
                     .mapNotNull { it.c }
-                    .maxOfOrNull { Hlc.parse(it).packed } ?: 0L
+                    .maxOfOrNull { runCatching { Hlc.parse(it) }.getOrNull()?.packed ?: 0L } ?: 0L
             } ?: 0L
         if (max > 0) db.syncStateDao().raiseHlc(max)
     }

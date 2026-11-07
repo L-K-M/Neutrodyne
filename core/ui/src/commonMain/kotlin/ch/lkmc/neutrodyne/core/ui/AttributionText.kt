@@ -15,7 +15,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.setting_app_default
@@ -72,7 +75,14 @@ public fun SettingAttribution(
     }
     if (showGroups && source is SettingSource.Groups) {
         NdDialog(onDismissRequest = { showGroups = false }, title = stringResource(Res.string.setting_groups_title)) {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            val scroll = rememberScrollState()
+            val bars = LocalScrollbars.current
+            val barColor = ndScrollbarColor(bars)
+            Column(
+                Modifier
+                    .verticalScroll(scroll)
+                    .ndScrollbar(scroll, bars, barColor),
+            ) {
                 source.groups.forEach { Text(it.name, modifier = Modifier.padding(GROUP_PADDING)) }
             }
         }

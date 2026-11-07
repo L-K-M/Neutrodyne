@@ -27,7 +27,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
@@ -66,10 +69,15 @@ internal fun SleepTimerSheet(
     var custom by rememberSaveable { mutableStateOf(lastMinutes !in SLEEP_PRESETS) }
     var input by rememberSaveable { mutableStateOf(lastMinutes.toString()) }
     val minutes = input.toIntOrNull()?.takeIf(SleepTimerMode::isValidMinutes)
+    // 08 Scrollbars: the desktop draws an overlay thumb at the sheet's end edge.
+    val scroll = rememberScrollState()
+    val bars = LocalScrollbars.current
+    val barColor = ndScrollbarColor(bars)
     Column(
         modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scroll)
+            .ndScrollbar(scroll, bars, barColor)
             .padding(SHEET_PADDING),
         verticalArrangement = Arrangement.spacedBy(SHEET_GAP),
     ) {

@@ -28,7 +28,10 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
@@ -184,8 +187,14 @@ internal fun InstallHelpPage(
     }
     Column(Modifier.fillMaxSize().testTag("install-help-page")) {
         NdTopAppBar(title = stringResource(Res.string.install_help_title), navigation = { SettingsBackButton() })
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
         Column(
-            Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp),
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor)
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SelectionContainer { Text(updateVersionLine(build)) }

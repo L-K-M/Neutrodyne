@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,6 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.showNotes
@@ -61,7 +65,17 @@ internal fun PlayerNotes(
             }
 
             else -> {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+                // 08 Scrollbars: the desktop draws an overlay thumb at the notes' end edge.
+                val listState = rememberLazyListState()
+                val scrollbars = LocalScrollbars.current
+                val scrollbarColor = ndScrollbarColor(scrollbars)
+                LazyColumn(
+                    Modifier
+                        .fillMaxSize()
+                        .ndScrollbar(listState, scrollbars, scrollbarColor),
+                    contentPadding = PaddingValues(16.dp),
+                    state = listState,
+                ) {
                     val notes = state.notes
                     if (notes == null || notes.blocks.isEmpty()) {
                         item { Text(stringResource(Res.string.player_notes_empty)) }
