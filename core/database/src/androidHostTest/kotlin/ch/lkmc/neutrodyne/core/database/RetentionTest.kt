@@ -110,7 +110,12 @@ class RetentionTest {
                     episodeStateEntity(playedRecently) { copy(playedAt = playedSince + 1) },
                 )
 
-                val positioned = seed("pos")
+                // Seeded older than its siblings so the newest-episode watermark cannot
+                // protect it — only its position can.
+                val positioned =
+                    db.episodeDao().insertStub(
+                        gone(pid, "pos", sortDate = now - 110L * 86_400_000),
+                    )
                 db.positionDao().upsert(
                     EpisodePositionEntity(
                         episodeId = positioned,
