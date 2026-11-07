@@ -82,14 +82,17 @@ class FirstLinkMerger(
     private val applier: SyncApplier,
     private val engine: SyncEngine,
     private val clock: Clock,
+    private val activity: SyncActivityState,
 ) {
     suspend fun merge(
         choice: FirstLinkChoice,
         onProgress: (LinkPhase, Int, Int) -> Unit = { _, _, _ -> },
     ): FirstLinkResult {
         val roundId = clock.now()
-        return try {
-            when (choice) {
+        // The whole merge holds the shared activity flag; nested push rounds share the counter.
+        activity.begin()
+        try {
+            return when (choice) {
                 FirstLinkChoice.MERGE -> mergeBoth(roundId, onProgress)
                 FirstLinkChoice.USE_SERVER -> useServer(roundId, onProgress)
                 FirstLinkChoice.USE_DEVICE -> useDeviceEverywhere(roundId, onProgress)
@@ -97,7 +100,9 @@ class FirstLinkMerger(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {
-            FirstLinkResult.Failed(failure.message ?: "merge failed")
+            return FirstLinkResult.Failed(failure.message ?: "merge failed")
+        } finally {
+            activity.end()
         }
     }
 
@@ -109,14 +114,18 @@ class FirstLinkMerger(
      */
     suspend fun resync(): FirstLinkResult {
         val roundId = clock.now()
-        return try {
+        // Seeding, the pull and the re-assert all hold the shared activity flag.
+        activity.begin()
+        try {
             val applied = pullAndApply(roundId, { _, _, _ -> })
             reassert()
-            FirstLinkResult.Completed(applied)
+            return FirstLinkResult.Completed(applied)
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {
-            FirstLinkResult.Failed(failure.message ?: "resync failed")
+            return FirstLinkResult.Failed(failure.message ?: "resync failed")
+        } finally {
+            activity.end()
         }
     }
 

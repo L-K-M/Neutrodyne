@@ -951,6 +951,7 @@ private class Harness(
                 },
             sharePasswords = { flags.sharePasswords },
         )
+    val activity = SyncActivityState()
     val engine =
         SyncEngine(
             db = db,
@@ -961,8 +962,9 @@ private class Harness(
             sharePasswords = { flags.sharePasswords },
             address = address,
             tokens = tokens,
+            activity = activity,
         )
-    val merger = FirstLinkMerger(db, client, applier, engine, clock)
+    val merger = FirstLinkMerger(db, client, applier, engine, clock, activity)
     val build =
         BuildInfo(
             versionName = "1.0.0",

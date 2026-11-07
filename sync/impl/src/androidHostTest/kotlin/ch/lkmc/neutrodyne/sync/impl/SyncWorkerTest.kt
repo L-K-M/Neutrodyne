@@ -103,6 +103,7 @@ class SyncWorkerTest {
                         sharePasswords = { false },
                         address = FakeSyncServerAddress(serverUrl = "https://sync.example"),
                         tokens = SyncTokenStore(secrets),
+                        activity = SyncActivityState(),
                     )
                 val worker =
                     TestListenableWorkerBuilder<SyncWorker>(app)

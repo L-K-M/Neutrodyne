@@ -36,7 +36,11 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -44,6 +48,7 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -95,13 +100,15 @@ class FirstLinkMergerTest {
                             ),
                         ),
                     )
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = server,
                         applier = applier(db),
-                        engine = engine(db, server),
+                        engine = engine(db, server, activity),
                         clock = TestClock(now),
+                        activity = activity,
                     )
                 val result = merger.merge(FirstLinkChoice.MERGE)
                 assertTrue(result is FirstLinkResult.Completed)
@@ -140,13 +147,15 @@ class FirstLinkMergerTest {
                             ),
                         )
                 }
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = ScriptedClient(emptyList()),
                         applier = applier(db),
-                        engine = engine(db, ScriptedClient(emptyList())),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
                         clock = TestClock(now),
+                        activity = activity,
                     )
                 val result = merger.merge(FirstLinkChoice.MERGE)
                 assertTrue(result is FirstLinkResult.Completed)
@@ -185,13 +194,15 @@ class FirstLinkMergerTest {
                             upNextRecord("g:wire", orderKey = "a3", enc = "https://cdn.example.com/alias.mp3"),
                         ),
                     )
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = server,
                         applier = applier(db),
-                        engine = engine(db, server),
+                        engine = engine(db, server, activity),
                         clock = TestClock(now),
+                        activity = activity,
                     )
                 val result = merger.merge(FirstLinkChoice.USE_SERVER)
                 assertTrue(result is FirstLinkResult.Completed)
@@ -233,13 +244,15 @@ class FirstLinkMergerTest {
                         firstPageHasMore = true,
                         failAtPage = 1,
                     )
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = server,
                         applier = applier(db),
-                        engine = engine(db, server),
+                        engine = engine(db, server, activity),
                         clock = TestClock(now),
+                        activity = activity,
                     )
                 val result = merger.merge(FirstLinkChoice.USE_SERVER)
                 assertTrue(result is FirstLinkResult.Failed)
@@ -269,13 +282,15 @@ class FirstLinkMergerTest {
                         failAtPage = 0,
                         failure = { CancellationException("link cancelled") },
                     )
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = server,
                         applier = applier(db),
-                        engine = engine(db, server),
+                        engine = engine(db, server, activity),
                         clock = TestClock(now),
+                        activity = activity,
                     )
                 assertFailsWith<CancellationException> { merger.merge(FirstLinkChoice.USE_SERVER) }
                 assertEquals(listOf("g:local", "g:srv1", "g:alias", "g:lone"), queuedIdentityKeys(db))
@@ -335,13 +350,15 @@ class FirstLinkMergerTest {
                         ),
                     )
 
+                val activity = SyncActivityState()
                 val merger =
                     FirstLinkMerger(
                         db = db,
                         client = ScriptedClient(emptyList()),
                         applier = applier(db),
-                        engine = engine(db, ScriptedClient(emptyList())),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
                         clock = TestClock(now),
+                        activity = activity,
                     )
                 val resyncResult = merger.resync()
                 assertTrue(resyncResult is FirstLinkResult.Completed)
@@ -361,10 +378,261 @@ class FirstLinkMergerTest {
             }
         }
 
+    /**
+     * The merge marks the shared [SyncActivityState] for its whole duration (seeding, the
+     * pull, the replace and the push) and clears it again when it returns. The pull is held
+     * at a client gate, so the observation runs against the real database and a real merge.
+     */
+    @Test
+    fun mergeMarksSyncActivityUntilItReturns() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val gate = CompletableDeferred<Unit>()
+                val client =
+                    object : SyncClient by ScriptedClient(listOf(podcastRecord())) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            gate.await()
+                            return ChangesPage(emptyList(), "c:00000001:1", false, "")
+                        }
+                    }
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = client,
+                        applier = applier(db),
+                        engine = engine(db, client, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val job = launch { merger.merge(FirstLinkChoice.MERGE) }
+                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
+                assertTrue(activity.active, "the merge must mark sync active while it runs")
+                gate.complete(Unit)
+                job.join()
+                assertEquals(0, activity.count.value, "a completed merge clears the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The merge's push rounds run through [SyncEngine.round], which marks the same counter:
+     * while a round is in flight the count is 2, and it reaches 0 only after both the round
+     * and the merge have ended.
+     */
+    @Test
+    fun mergeKeepsSyncActivityAcrossItsNestedRounds() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val gate = CompletableDeferred<Unit>()
+                val counts = mutableListOf<Int>()
+                val activity = SyncActivityState()
+                val client =
+                    object : SyncClient by ScriptedClient(listOf(podcastRecord())) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            gate.await()
+                            return ChangesPage(listOf(podcastRecord()), "c:00000001:1", false, "")
+                        }
+
+                        override suspend fun sync(
+                            since: String?,
+                            changes: List<ChangeDto>,
+                        ): SyncResponse {
+                            counts += activity.count.value
+                            return SyncResponse(emptyList(), emptyList(), "c:00000001:1", false, "")
+                        }
+                    }
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = client,
+                        applier = applier(db),
+                        engine = engine(db, client, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val job = launch { merger.merge(FirstLinkChoice.MERGE) }
+                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
+                assertTrue(activity.active, "the merge must mark sync active while it runs")
+                gate.complete(Unit)
+                job.join()
+                assertTrue(counts.isNotEmpty(), "the merge's push rounds must run through the engine")
+                assertTrue(
+                    counts.all { it == 2 },
+                    "the merge and its nested round share the counter: counts=$counts",
+                )
+                assertEquals(0, activity.count.value, "a completed merge clears the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aFailedMergeClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = ScriptedClient(emptyList(), failAtPage = 0),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val result = merger.merge(FirstLinkChoice.MERGE)
+                assertTrue(result is FirstLinkResult.Failed)
+                assertEquals(0, activity.count.value, "a failed merge must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aCancelledMergeClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client =
+                            ScriptedClient(
+                                emptyList(),
+                                failAtPage = 0,
+                                failure = { CancellationException("link cancelled") },
+                            ),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                assertFailsWith<CancellationException> { merger.merge(FirstLinkChoice.MERGE) }
+                assertEquals(0, activity.count.value, "a cancelled merge must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    /** The resync holds the same flag for its whole pull-and-reassert duration. */
+    @Test
+    fun resyncMarksSyncActivityUntilItReturns() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val gate = CompletableDeferred<Unit>()
+                val client =
+                    object : SyncClient by ScriptedClient(emptyList()) {
+                        override suspend fun changes(
+                            since: String?,
+                            limit: Int,
+                        ): ChangesPage {
+                            gate.await()
+                            return ChangesPage(emptyList(), "c:00000001:1", false, "")
+                        }
+                    }
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = client,
+                        applier = applier(db),
+                        engine = engine(db, client, activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val job = launch { merger.resync() }
+                withTimeoutOrNull(1_000) { activity.count.first { it > 0 } }
+                assertTrue(activity.active, "the resync must mark sync active while it runs")
+                gate.complete(Unit)
+                job.join()
+                assertEquals(0, activity.count.value, "a completed resync clears the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aFailedResyncClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client = ScriptedClient(emptyList(), failAtPage = 0),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                val result = merger.resync()
+                assertTrue(result is FirstLinkResult.Failed)
+                assertEquals(0, activity.count.value, "a failed resync must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aCancelledResyncClearsSyncActivity() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val activity = SyncActivityState()
+                val merger =
+                    FirstLinkMerger(
+                        db = db,
+                        client =
+                            ScriptedClient(
+                                emptyList(),
+                                failAtPage = 0,
+                                failure = { CancellationException("link cancelled") },
+                            ),
+                        applier = applier(db),
+                        engine = engine(db, ScriptedClient(emptyList()), activity),
+                        clock = TestClock(now),
+                        activity = activity,
+                    )
+                assertFailsWith<CancellationException> { merger.resync() }
+                assertEquals(0, activity.count.value, "a cancelled resync must clear the activity flag")
+                assertFalse(activity.active)
+            } finally {
+                db.close()
+            }
+        }
+
     /** The engine the merge's push rounds run through, over the same scripted client. */
     private fun engine(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
         client: SyncClient,
+        activity: SyncActivityState,
     ): SyncEngine {
         val secrets = FakeSecretStore()
         return SyncEngine(
@@ -398,6 +666,7 @@ class FirstLinkMergerTest {
                 SyncTokenStore(secrets).apply {
                     kotlinx.coroutines.runBlocking { save("sync.example", "token") }
                 },
+            activity = activity,
         )
     }
 

@@ -112,5 +112,6 @@ object SyncBindings {
         applier: SyncApplier,
         engine: SyncEngine,
         clock: Clock,
-    ): FirstLinkMerger = FirstLinkMerger(db, client, applier, engine, clock)
+        activity: SyncActivityState,
+    ): FirstLinkMerger = FirstLinkMerger(db, client, applier, engine, clock, activity)
 }
