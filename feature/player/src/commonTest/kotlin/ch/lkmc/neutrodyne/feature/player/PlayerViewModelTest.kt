@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
@@ -19,6 +21,7 @@ import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlayerTimeDisplay
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.testing.FakeArtworkRepository
 import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakePlatformInfo
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
@@ -54,6 +57,7 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlayerViewModelTest : MainDispatcherTest() {
+    private val artwork = FakeArtworkRepository()
     private val controller = FakePlaybackController()
     private val settings = FakeSettingsRepository()
     private val queue = FakeQueueRepository()
@@ -74,6 +78,7 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 FakePlatformInfo(PlatformKind.ANDROID),
                 queueRepository,
                 chapterRepository,
+                artwork = { artwork },
             )
         store.put("player", vm)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.uiState.collect() }
@@ -82,6 +87,42 @@ class PlayerViewModelTest : MainDispatcherTest() {
     }
 
     @AfterTest fun close() = store.clear()
+
+    @Test fun tintFollowsCurrentArtworkAndClearsOnSwitchOrDismiss() =
+        runTest {
+            val first =
+                sampleNow().copy(
+                    artwork =
+                        ArtworkRef("first", null, 1),
+                )
+            val second =
+                first.copy(
+                    episodeId = first.episodeId + 1,
+                    artwork =
+                        ArtworkRef("second", null, 2),
+                )
+            val red =
+                ArtworkColors("first", 1, 0xFFDD4400.toInt(), 0xFFAA4400.toInt())
+            artwork.colors.value = mapOf("first" to red)
+            controller.state.nowPlaying.value = first
+            val vm = model()
+            runCurrent()
+            assertEquals(red, vm.uiState.value.colors)
+            controller.state.nowPlaying.value = second
+            runCurrent()
+            assertNull(vm.uiState.value.colors)
+            artwork.colors.value = mapOf("first" to red.copy(version = 2))
+            runCurrent()
+            assertNull(vm.uiState.value.colors)
+            val mono =
+                ArtworkColors("second", 2, null, 0xFF888888.toInt())
+            artwork.colors.value = mapOf("first" to red, "second" to mono)
+            runCurrent()
+            assertEquals(mono, vm.uiState.value.colors)
+            controller.state.nowPlaying.value = null
+            runCurrent()
+            assertNull(vm.uiState.value.colors)
+        }
 
     @Test fun creationDoesNotStartOrInheritAnotherScreensConsent() =
         runTest {
