@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.window
 
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -35,6 +36,16 @@ internal data class WindowBounds(
         const val SCREEN_FRACTION = 0.9f
     }
 }
+
+/**
+ * The PO-19 minimum as an AWT size at [density] (11 Window sizing: "Minimum 600 × 480 dp,
+ * converted with the window's density"). Pure, so the conversion is testable without a display.
+ */
+internal fun minimumWindowDimension(density: Density): java.awt.Dimension =
+    java.awt.Dimension(
+        with(density) { WindowBounds.MIN_WIDTH.roundToPx() },
+        with(density) { WindowBounds.MIN_HEIGHT.roundToPx() },
+    )
 
 /**
  * The first-start bounds (11 Window state): 1200 × 800 dp clamped to 90 % of the primary screen

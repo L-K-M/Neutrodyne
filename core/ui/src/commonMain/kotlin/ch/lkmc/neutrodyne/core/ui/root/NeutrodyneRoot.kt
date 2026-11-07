@@ -84,15 +84,18 @@ import ch.lkmc.neutrodyne.core.model.WindowHinge
 import ch.lkmc.neutrodyne.core.model.WindowPosture
 import ch.lkmc.neutrodyne.core.model.WindowRectDp
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
+import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
@@ -379,14 +382,35 @@ private fun ReadyRoot(
         if (eventDispatcher != null) eventDispatcher.addInput(backInput)
         onDispose { if (eventDispatcher != null) eventDispatcher.removeInput(backInput) }
     }
+    val desktopBack: () -> Boolean = {
+        if (eventDispatcher != null && backInput.hasEnabledHandlers) {
+            backInput.triggerBack()
+        } else {
+            navigation.pop()
+        }
+    }
 
     val importContentFocus = remember { FocusRequester() }
     val discoverSearchFocus = remember { DiscoverSearchFocus() }
+    // The root's global shortcuts stand down while a tracked text field is focused (08 Keyboard
+    // and mouse); text fields report through `Modifier.ndTextFieldFocus()`. The shell learns
+    // about every transition so it can clear the window menu's accelerators, which AWT
+    // processes before Compose's key input.
+    val textFieldFocus =
+        remember(actions.onTextFieldFocusChange) {
+            TextFieldFocusState(actions.onTextFieldFocusChange)
+        }
+    // 11's Find: the current destination's search field. Only Discover has one today (the
+    // Library's group filter is chips, not a text field), so the action is Discover-only.
+    val find: () -> Boolean = {
+        navigation.selectedTab == DiscoverKey && discoverSearchFocus.request()
+    }
     val miniInset = if (!layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
         LocalDiscoverSearchFocus provides discoverSearchFocus,
         LocalPaneLayout provides layout,
         LocalMiniPlayerInset provides miniInset,
+        LocalTextFieldFocusState provides textFieldFocus,
     ) {
         Box(
             modifier =
@@ -395,11 +419,18 @@ private fun ReadyRoot(
                     .testTagsAsResourceId()
                     .onGloballyPositioned { viewportBottomPx = it.boundsInRoot().bottom }
                     .onKeyEvent { event ->
-                        if (platform == BuildInfo.Platform.DESKTOP && navigation.selectedTab == DiscoverKey &&
+                        // A focused text field owns the keyboard: the root's shortcuts stand
+                        // down. The shell also clears the window menu's accelerators for this
+                        // duration, because AWT processes them before Compose's key input.
+                        if (textFieldFocus.active && event.type == KeyEventType.KeyDown &&
+                            isRootShortcut(event)
+                        ) {
+                            true
+                        } else if (platform == BuildInfo.Platform.DESKTOP &&
                             event.type == KeyEventType.KeyDown && event.key == Key.F &&
                             (event.isCtrlPressed || event.isMetaPressed) &&
                             !event.isAltPressed && !event.isShiftPressed &&
-                            discoverSearchFocus.request()
+                            find()
                         ) {
                             true
                         } else {
@@ -407,14 +438,9 @@ private fun ReadyRoot(
                                 event = event,
                                 platform = platform,
                                 navigation = navigation,
-                                desktopBack = {
-                                    if (eventDispatcher != null && backInput.hasEnabledHandlers) {
-                                        backInput.triggerBack()
-                                    } else {
-                                        navigation.pop()
-                                    }
-                                },
+                                desktopBack = desktopBack,
                                 dispatch = actions.playbackKey,
+                                refresh = actions.refresh,
                             )
                         }
                     },
@@ -481,6 +507,8 @@ private fun ReadyRoot(
                                             expandRequest = expandRequest,
                                             collapseRequest = collapseRequest + playerNavigationRequests,
                                             onExpandedSettled = { expandedSettled = it },
+                                            back = desktopBack,
+                                            find = find,
                                         ),
                                     )
                                 }
@@ -507,6 +535,8 @@ private fun ReadyRoot(
                                         windowWidthDp >= PLAYER_PANEL_MIN_WINDOW_DP
                                 },
                             onExpandedSettled = { expandedSettled = it },
+                            back = desktopBack,
+                            find = find,
                         ),
                     )
                 }
@@ -611,6 +641,7 @@ private fun dispatchRootKey(
     navigation: NavigationState,
     desktopBack: () -> Boolean,
     dispatch: (PlaybackKey) -> Boolean,
+    refresh: () -> Unit,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown || event.isAltPressed) return false
     val ctrl = event.isCtrlPressed || event.isMetaPressed
@@ -618,6 +649,67 @@ private fun dispatchRootKey(
     val desktop = platform == BuildInfo.Platform.DESKTOP
 
     if (event.key == Key.Escape && desktop && !ctrl && !shift) return desktopBack()
+
+    // 11's menu accelerators. In the window the menu item's own accelerator fires first (AWT
+    // processes it before Compose's key input), so these chords are the fallback for menu-less
+    // compositions — the AC1 `runComposeUiTest` checklist — and the path a focused text field
+    // reaches once the shell has cleared the accelerators.
+    if (desktop && ctrl && !shift) {
+        when (event.key) {
+            Key.N -> {
+                navigation.push(AddPodcastKey(null))
+                return true
+            }
+
+            Key.O -> {
+                navigation.push(ImportFileKey)
+                return true
+            }
+
+            Key.R -> {
+                refresh()
+                return true
+            }
+
+            Key.Comma -> {
+                navigation.push(SettingsHomeKey)
+                return true
+            }
+
+            Key.One -> {
+                navigation.selectTab(FeedsKey)
+                return true
+            }
+
+            Key.Two -> {
+                navigation.selectTab(LibraryKey)
+                return true
+            }
+
+            Key.Three -> {
+                navigation.selectTab(UpNextKey)
+                return true
+            }
+
+            Key.Four -> {
+                navigation.selectTab(DownloadsKey)
+                return true
+            }
+
+            Key.Five -> {
+                navigation.selectTab(DiscoverKey)
+                return true
+            }
+
+            else -> {
+                Unit
+            }
+        }
+    }
+    if (desktop && event.key == Key.F5) {
+        refresh()
+        return true
+    }
 
     val key: PlaybackKey =
         when {
@@ -678,6 +770,27 @@ private fun dispatchRootKey(
             }
         }
     return dispatch(key)
+}
+
+/**
+ * Whether [event] is one of the root's shortcuts, so a focused text field can consume it (08
+ * Keyboard and mouse). Mirrors [dispatchRootKey]'s chord set; the window's Ctrl/Cmd+W and Q stay
+ * out because the window's close/quit handler owns them.
+ */
+private fun isRootShortcut(event: KeyEvent): Boolean {
+    val ctrl = event.isCtrlPressed || event.isMetaPressed
+    val shift = event.isShiftPressed
+    return when (event.key) {
+        Key.Spacebar -> !ctrl && !shift
+        Key.DirectionLeft, Key.DirectionRight -> true
+        Key.DirectionUp, Key.DirectionDown -> ctrl
+        Key.Escape -> !ctrl && !shift
+        Key.Tab -> ctrl
+        Key.F, Key.N, Key.O, Key.R, Key.Comma -> ctrl
+        Key.F5 -> true
+        Key.One, Key.Two, Key.Three, Key.Four, Key.Five -> ctrl
+        else -> false
+    }
 }
 
 /**

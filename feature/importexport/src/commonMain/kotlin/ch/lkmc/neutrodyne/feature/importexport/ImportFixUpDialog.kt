@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.import_edit_url
 import ch.lkmc.neutrodyne.core.ui.resources.import_enter_password
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
@@ -87,7 +88,7 @@ internal fun ImportFixUpDialog(
                     isError = error != null,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.testTag("import-url-input"),
+                    modifier = Modifier.testTag("import-url-input").ndTextFieldFocus(),
                 )
             } else {
                 CredentialFields(

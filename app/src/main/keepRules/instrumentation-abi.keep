@@ -1425,7 +1425,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter {
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory {
   ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher$MetroFactory$Companion Companion;
@@ -1761,6 +1761,32 @@
 -keep class ch.lkmc.neutrodyne.core.data.update.WorkUpdateCheckRunnerContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.core.data.update.WorkUpdateCheckRunnerContributions {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.FeedYouTubeMetadataReaderContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.FeedYouTubeMetadataReaderContributions {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck$MetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeControlCheck {
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$HealthMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory {
+  ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings$MonitorMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.core.data.youtube.YouTubeHealthBindings {
 }
 -keep interface ch.lkmc.neutrodyne.core.database.ArtworkDao {
   public java.lang.Object upsert(ch.lkmc.neutrodyne.core.database.ArtworkEntity, kotlin.coroutines.Continuation);
@@ -2276,7 +2302,7 @@
 -keep class ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState {
 }
 -keep class ch.lkmc.neutrodyne.core.ui.root.RootActions {
-  public <init>(kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function2, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public <init>(kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function2, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
   int $stable;
 }
 -keep enum ch.lkmc.neutrodyne.core.ui.root.RootNotice {
@@ -4498,6 +4524,12 @@
 -keep class kotlin.uuid.Uuid {
   public java.lang.String toString();
   kotlin.uuid.Uuid$Companion Companion;
+}
+-keep class kotlinx.collections.immutable.ExtensionsKt {
+  public static kotlinx.collections.immutable.PersistentList persistentListOf();
+}
+-keep interface kotlinx.collections.immutable.PersistentList {
+  public kotlinx.collections.immutable.PersistentList add(java.lang.Object);
 }
 -keep class kotlinx.coroutines.AbstractCoroutine {
   public <init>(kotlin.coroutines.CoroutineContext, boolean, boolean);

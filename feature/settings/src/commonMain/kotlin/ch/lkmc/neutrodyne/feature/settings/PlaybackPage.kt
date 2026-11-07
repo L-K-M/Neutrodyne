@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_not_on_desktop
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_cache_mb
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_cache_used
@@ -298,7 +299,7 @@ internal fun PlaybackPage(
                         Text(
                             stringResource(Res.string.playback_presets_label),
                         )
-                    }, isError = !valid, singleLine = true)
+                    }, isError = !valid, singleLine = true, modifier = Modifier.ndTextFieldFocus())
                     if (!valid) {
                         Text(
                             stringResource(Res.string.playback_presets_invalid),
