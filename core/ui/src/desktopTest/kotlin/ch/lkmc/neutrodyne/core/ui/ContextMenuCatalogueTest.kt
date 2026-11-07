@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -20,7 +21,6 @@ import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.runComposeUiTest
-import androidx.compose.ui.input.key.Key
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -218,14 +218,35 @@ class ContextMenuCatalogueTest {
                 "Play last",
             )
         when (state) {
-            null -> labels += "Download"
-            DownloadState.COMPLETED -> labels += "Delete download"
-            DownloadState.FAILED, DownloadState.MISSING -> labels += "Retry download"
-            DownloadState.QUEUED -> labels += "Download actions"
-            DownloadState.RESOLVING -> labels += "Cancel download"
+            null -> {
+                labels += "Download"
+            }
+
+            DownloadState.COMPLETED -> {
+                labels += "Delete download"
+            }
+
+            DownloadState.FAILED, DownloadState.MISSING -> {
+                labels += "Retry download"
+            }
+
+            DownloadState.QUEUED -> {
+                labels += "Download actions"
+            }
+
+            DownloadState.RESOLVING -> {
+                labels += "Cancel download"
+            }
+
             DownloadState.VERIFYING -> {}
-            DownloadState.DOWNLOADING -> labels += "Pause download"
-            DownloadState.PAUSED -> labels += "Resume download"
+
+            DownloadState.DOWNLOADING -> {
+                labels += "Pause download"
+            }
+
+            DownloadState.PAUSED -> {
+                labels += "Resume download"
+            }
         }
         labels += "Go to podcast"
         return labels
@@ -234,12 +255,12 @@ class ContextMenuCatalogueTest {
     /** Asserts the open menu shows exactly [expected] and nothing else. */
     private fun ComposeUiTest.assertMenuLabels(expected: List<String>) {
         expected.forEach { label -> onNodeWithText(label).assertIsDisplayed() }
-        CATALOGUE_LABELS.filter { it !in expected }.forEach { label ->
+        catalogueLabels.filter { it !in expected }.forEach { label ->
             onNodeWithText(label).assertDoesNotExist()
         }
     }
 
-    private val CATALOGUE_LABELS =
+    private val catalogueLabels =
         listOf(
             "Play",
             "Pause",
