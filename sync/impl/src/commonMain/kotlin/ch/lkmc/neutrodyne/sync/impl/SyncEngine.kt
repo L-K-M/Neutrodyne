@@ -80,16 +80,18 @@ class SyncEngine(
             pulled += response.records.size
             raiseHlc(response.records)
             storeCursor(response.cursor)
+            var cursor = response.cursor
             var hasMore = response.hasMore
             var guard = 0
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
-                val next = client.changes(response.cursor, ProtocolLimits.MAX_RECORDS)
+                val next = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
                 applied += next.records.size
                 pulled += next.records.size
                 applier.applyPage(next.records, roundId)
                 raiseHlc(next.records)
                 storeCursor(next.cursor)
+                cursor = next.cursor
                 hasMore = next.hasMore
             }
             if (db.syncOutboxDao().count() == 0) break

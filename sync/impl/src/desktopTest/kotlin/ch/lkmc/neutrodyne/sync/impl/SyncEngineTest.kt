@@ -154,9 +154,54 @@ class SyncEngineTest {
             }
         }
 
+    @Test
+    fun theHasMoreDrainAdvancesTheCursor() =
+        runTest {
+            val calls = mutableListOf<String>()
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse =
+                        SyncResponse(
+                            results = emptyList(),
+                            records = emptyList(),
+                            cursor = "c:00000001:5",
+                            hasMore = true,
+                            serverTime = "",
+                        )
+
+                    override suspend fun changes(
+                        since: String?,
+                        limit: Int,
+                    ): ChangesPage {
+                        calls += since.orEmpty()
+                        return ChangesPage(
+                            records = emptyList(),
+                            cursor = "c:00000001:9",
+                            hasMore = since != "c:00000001:9",
+                            serverTime = "",
+                        )
+                    }
+                }
+            val db = TestDb.inMemory()
+            try {
+                db.withWriteTransaction {
+                    db
+                        .syncStateDao()
+                        .upsert(SyncStateEntity(enabled = true, nodeId = "a".padStart(16, '0'), hlc = 1L shl 16))
+                }
+                Device(db, client).round()
+                assertEquals(listOf("c:00000001:5", "c:00000001:9"), calls)
+            } finally {
+                db.close()
+            }
+        }
+
     private class Device(
         val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
-        val client: InMemorySyncClient,
+        val client: SyncClient,
     ) {
         val clock = TestClock(NOW)
         val engine =
