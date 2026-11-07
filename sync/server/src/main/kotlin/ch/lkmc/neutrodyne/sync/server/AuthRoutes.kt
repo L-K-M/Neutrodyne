@@ -105,7 +105,7 @@ internal fun ApplicationCall.principal(): AccountPrincipal = attributes[RateLimi
 internal fun ApplicationCall.clientIp(config: ServerConfig): String =
     ClientAddress(config.trustedProxies)
         .resolve(
-            request.local.remoteHost,
+            request.local.remoteAddress,
             request.headers.getAll(HttpHeaders.XForwardedFor).orEmpty(),
             request.headers.getAll(HttpHeaders.XForwardedProto).orEmpty(),
         ).address
