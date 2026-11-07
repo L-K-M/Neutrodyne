@@ -97,26 +97,9 @@ abstract class SyncStateDao(
     )
     protected abstract suspend fun resetState()
 
-    /**
-     * 02's applying protocol: sets `applying = 1` for [block]'s duration and always clears it
-     * afterwards (the crash case is covered by the open callback's reset). MS0's capture
-     * triggers skip writes made under the flag; nothing is captured while they do not exist
-     * yet, so [block] must itself guarantee "no outbox rows" — as retention does.
-     */
-    suspend fun <T> withApplying(block: suspend () -> T): T {
-        setApplying(true)
-        try {
-            return block()
-        } finally {
-            setApplying(false)
-        }
-    }
-
     /** True while [withApplying] runs — tests' "capture suppressed" probe. */
     suspend fun isApplying(): Boolean = get()?.applying == true
 
-    @Query("UPDATE sync_state SET applying = :value WHERE id = 0")
-    protected abstract suspend fun setApplying(value: Boolean)
 }
 
 /**
