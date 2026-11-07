@@ -186,7 +186,11 @@ internal object DiagExportScrub {
         buildList {
             connection.prepare("PRAGMA table_info(\"${table.escaped()}\")").use { stmt ->
                 while (stmt.step()) {
-                    if (stmt.getText(2).uppercase().contains("TEXT")) add(stmt.getText(1))
+                    // SQLite's TEXT affinity: declared types containing CHAR, CLOB or TEXT.
+                    val type = stmt.getText(2).uppercase()
+                    if (type.contains("TEXT") || type.contains("CHAR") || type.contains("CLOB")) {
+                        add(stmt.getText(1))
+                    }
                 }
             }
         }
