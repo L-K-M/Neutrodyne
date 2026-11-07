@@ -43,6 +43,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -169,6 +170,7 @@ class KtorSyncClient(
             val error = SyncJson.decodeFromString(OAuthErrorDto.serializer(), response.bodyAsText())
             throw SyncProblemException(error.error)
         }
+        if (!response.status.isSuccess()) throw problem(response)
         return SyncJson.decodeFromString(TokenResponse.serializer(), response.bodyAsText())
     }
 
@@ -218,8 +220,8 @@ class KtorSyncClient(
         since: String?,
         limit: Int,
     ): ChangesPage {
-        val base = baseUrlProvider()
-        return getJson("$base/api/v1/changes?since=${since ?: ""}&limit=$limit")
+        val base = baseUrlProvider().trimEnd('/')
+        return getJson("$base/api/v1/changes?since=${since?.encodeURLParameter() ?: ""}&limit=$limit")
     }
 
     override suspend fun reset(
