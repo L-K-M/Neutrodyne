@@ -7,8 +7,10 @@ import java.net.InetAddress
 
 /**
  * Parses IP address literals without ever hitting DNS (unknown names yield `null`, and callers
- * treat an unparseable peer as untrusted). Ktor reports peers as literals; `localhost` is the one
- * name handled separately.
+ * treat an unparseable peer as untrusted). Callers must pass `request.local.remoteAddress`, the
+ * socket literal: `remoteHost` may be a reverse-DNS name (Docker's embedded resolver answers PTR
+ * queries for container IPs, returning names like `name.network`) and is not a literal.
+ * `localhost` is the one name handled separately.
  */
 internal object IpLiterals {
     private const val IPV4_OCTETS = 4

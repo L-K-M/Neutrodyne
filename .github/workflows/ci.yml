@@ -137,6 +137,7 @@ jobs:
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
+          python3 scripts/ci/tests/assert-server-tests.test.py
           python3 scripts/ci/test-server-image.py
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-discovery-tests.test.py
@@ -563,13 +564,18 @@ jobs:
           java -jar "$jar" serve &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
+          ready=false
           for _ in $(seq 1 60); do
             sleep 1
-            curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
+            if curl --max-time 5 -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1; then ready=true; break; fi
           done
-          curl -fsS http://127.0.0.1:8787/healthz | grep -q ok
-          curl -fsS http://127.0.0.1:8787/readyz
-          curl -fsS http://127.0.0.1:8787/.well-known/neutrodyne-sync
+          if [[ "$ready" != true ]]; then
+            echo "::error::server did not answer /healthz within 60s"
+            exit 1
+          fi
+          curl --max-time 5 -fsS http://127.0.0.1:8787/healthz | grep -q ok
+          curl --max-time 5 -fsS http://127.0.0.1:8787/readyz
+          curl --max-time 5 -fsS http://127.0.0.1:8787/.well-known/neutrodyne-sync
           kill $pid 2>/dev/null || true
       - name: A non-loopback listen is refused (PLAN M0 AC16)
         run: |

@@ -121,7 +121,23 @@ internal class BackupJob(
                 val directory = config.dataDir.resolve("backups")
                 privateDirectory(directory)
                 store.backup(directory.resolve("neutrodyne-server-${localDate(now)}.db"))
-                store.readAuth { accounts().map { it.id } }.forEach { accounts.export(it) }
+                // Every account exports even when an earlier one fails; one poisoned
+                // account must not starve the others' nightly copy.
+                val failed = mutableMapOf<Long, Exception>()
+                store.readAuth { accounts().map { it.id } }.forEach { id ->
+                    try {
+                        accounts.export(id)
+                    } catch (failure: Exception) {
+                        if (failure is CancellationException) throw failure
+                        failed[id] = failure
+                    }
+                }
+                if (failed.isNotEmpty()) {
+                    throw IllegalStateException(
+                        "nightly export failed for accounts ${failed.keys.joinToString()}",
+                        failed.values.first(),
+                    )
+                }
                 retain(directory, Regex("neutrodyne-server-\\d{4}-\\d{2}-\\d{2}\\.db"), config.backupsKeep)
                 // Pre-upgrade evidence survives until a complete successful nightly run seven days later.
                 Files.list(directory).use { paths ->

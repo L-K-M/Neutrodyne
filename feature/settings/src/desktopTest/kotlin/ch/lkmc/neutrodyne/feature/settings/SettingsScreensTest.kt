@@ -460,6 +460,10 @@ class SettingsScreensTest {
             waitUntil("the state re-reads", TIMEOUT_MS) {
                 onAllNodesWithText("In the applications menu").fetchSemanticsNodes().isNotEmpty()
             }
+            // Done is done: a successful setup takes its Set up button away (11).
+            waitUntil("Set up is gone", TIMEOUT_MS) {
+                onAllNodesWithText("Set up").fetchSemanticsNodes().isEmpty()
+            }
         }
 
     @Test
