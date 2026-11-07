@@ -413,7 +413,9 @@ internal fun PodcastScreen(
                         val pendingChannel =
                             detail.sourceType == SourceType.YOUTUBE_CHANNEL &&
                                 detail.status == PodcastStatus.PENDING_FIRST_FETCH
-                        if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading && !pendingChannel) {
+                        if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading &&
+                            !pendingChannel
+                        ) {
                             item(key = "empty", contentType = "empty") {
                                 EmptyState(
                                     icon = NdIcons.FilterList,
