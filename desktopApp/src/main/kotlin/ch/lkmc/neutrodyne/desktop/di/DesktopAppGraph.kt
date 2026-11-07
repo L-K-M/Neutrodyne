@@ -116,6 +116,9 @@ interface DesktopAppGraph {
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
 
+    /** The portable settings store; journey tests toggle engine availability through it. */
+    val settingsStore: ch.lkmc.neutrodyne.core.datastore.SettingsStore
+
     val appUpdateChecker: AppUpdateChecker
     val updateNotices: UpdateNotices
 

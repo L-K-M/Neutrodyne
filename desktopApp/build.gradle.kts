@@ -117,7 +117,11 @@ dependencies {
     )) {
         implementation(project(module))
     }
-    if (youtubeEngine) implementation(project(":youtube:ytdlp-desktop"))
+    if (youtubeEngine) {
+        implementation(project(":youtube:ytdlp-desktop"))
+        // The bindings module names the shared engine classes directly (YtDlpEngine, store).
+        implementation(project(":youtube:engine"))
+    }
 
     implementation(compose.desktop.currentOs)
     // The generated Res class of the shell's own Compose resources (see below)
@@ -239,6 +243,12 @@ sourceSets.named("main") {
     )
     // The AboutLibraries export lands beside it; processResources depends on the export task.
     resources.srcDir(layout.buildDirectory.dir("generated/aboutLibraries"))
+    // Engine-backed vs external YouTube bindings, like the Android variant switch (11).
+    kotlin.srcDir(
+        layout.projectDirectory.dir(
+            if (youtubeEngine) "src/youtubeEngine/kotlin" else "src/noYouTubeEngine/kotlin",
+        ),
+    )
 }
 
 tasks.named("processResources") { dependsOn("exportLibraryDefinitions") }
