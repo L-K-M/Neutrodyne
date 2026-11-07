@@ -315,6 +315,44 @@ class SyncApplierTest {
             }
         }
 
+    @Test
+    fun aPodcastOnAnExistingFeedKeyIsInvalidNotAConstraintError() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val feedUrl = "https://example.com/feed/duplicate"
+                db
+                    .podcastDao()
+                    .insertPodcast(
+                        podcastEntity(
+                            syncId = "00000000-0000-4000-8000-0000000000aa",
+                            feedUrl = feedUrl,
+                            feedKey =
+                                ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+                                    .forIdentity(feedUrl)!!,
+                        ),
+                    )
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            podcastRecord(
+                                podcastSyncId,
+                                "subscribed" to bool(true),
+                                "feedUrl" to text(feedUrl),
+                                "title" to text("Duplicate feed"),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                assertEquals(1, result.invalid)
+                assertNull(db.podcastDao().bySyncId(podcastSyncId))
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(db: NeutrodyneDatabase): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
