@@ -22,7 +22,12 @@ data class PythonRuntime(
         private val MINOR = Regex("""\d+\.\d+""")
 
         /** Runs `<executable> -I -c` once; null when it cannot run or answer (11's non-executable row). */
-        fun probe(executable: File): PythonRuntime? =
+        fun probe(executable: File): PythonRuntime? = probe(executable, PROBE_TIMEOUT_MS)
+
+        internal fun probe(
+            executable: File,
+            timeoutMs: Long,
+        ): PythonRuntime? =
             try {
                 val process =
                     ProcessBuilder(
@@ -32,15 +37,16 @@ data class PythonRuntime(
                         "import sys;print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
                     ).redirectErrorStream(true)
                         .start()
-                val answered =
-                    process.inputStream.bufferedReader().use { it.readText().trim() }
-                if (!process.waitFor(PROBE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                // The version line is tiny; reading it before the timed wait would let
+                // a silent, hung interpreter keep the pipe open past the deadline.
+                if (!process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()
                     null
-                } else if (process.exitValue() != 0 || !MINOR.matches(answered)) {
+                } else if (process.exitValue() != 0) {
                     null
                 } else {
-                    PythonRuntime(executable, answered)
+                    val answered = process.inputStream.bufferedReader().use { it.readText().trim() }
+                    answered.takeIf(MINOR::matches)?.let { PythonRuntime(executable, it) }
                 }
             } catch (_: Exception) {
                 null
@@ -99,6 +105,7 @@ class DesktopPythonRuntimeLocator(
         fun standard(
             engineResources: () -> File?,
             rootDir: () -> File?,
+            probe: (File) -> PythonRuntime? = PythonRuntime.Companion::probe,
         ): DesktopPythonRuntimeLocator =
             DesktopPythonRuntimeLocator(
                 explicit = {
@@ -110,20 +117,21 @@ class DesktopPythonRuntimeLocator(
                         ?.resolve("youtube/ytdlp-desktop/build/python-standalone")
                         ?.resolve(currentTarget())
                         ?.resolve("trimmed")
-                        ?.resolve("python")
                         ?.takeIf(File::isDirectory)
                 },
+                probe = probe,
             )
 
-        /** `<os>-<arch>` PBS target id; linux-aarch64 is not a shipped target (11 Build matrix). */
+        /** PBS target IDs match the fetcher's directory names (11 Build matrix). */
         private fun currentTarget(): String {
+            val osName = System.getProperty("os.name").lowercase()
             val os =
                 when {
                     isWindows() -> "windows"
-                    System.getProperty("os.name").let { it.contains("mac") || it.contains("darwin") } -> "macos"
+                    (osName.contains("mac") || osName.contains("darwin")) -> "macos"
                     else -> "linux"
                 }
-            val arch = if (System.getProperty("os.arch").let { it == "aarch64" || it == "arm64" }) "aarch64" else "x64"
+            val arch = if (System.getProperty("os.arch").let { it == "aarch64" || it == "arm64" }) "arm64" else "x64"
             return "$os-$arch"
         }
     }

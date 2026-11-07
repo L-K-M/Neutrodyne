@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.testing.testFeedHealth
 import ch.lkmc.neutrodyne.core.testing.testMonogramArtwork
 import java.util.Locale
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -95,10 +96,9 @@ class CustomActionsChecklistTest {
                     )
                     // 08's YouTube rows: Play next / Play last are shown with the engine (in-app
                     // playback) and hidden in external mode, like the download actions below.
-                    if (state.row.sourceType == SourceType.RSS || state.caps.inAppPlayback) {
-                        assertTrue("Play next" in actions, state.name)
-                        assertTrue("Play last" in actions, state.name)
-                    }
+                    val canQueue = state.row.sourceType == SourceType.RSS || state.caps.inAppPlayback
+                    assertEquals(canQueue, "Play next" in actions, state.name)
+                    assertEquals(canQueue, "Play last" in actions, state.name)
                     assertTrue("Go to podcast" in actions, state.name)
                     val download =
                         when (state.live?.downloadState ?: state.row.downloadState) {
