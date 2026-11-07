@@ -88,25 +88,31 @@ internal class DiagnosticsViewModel(
         if (mutableState.value.exporting) return
         mutableState.value = mutableState.value.copy(exporting = true)
         viewModelScope.launch {
-            val outcome = diagnostics.exportDatabaseCopy(destination)
-            mutableState.value = mutableState.value.copy(exporting = false)
-            when (outcome) {
-                is Outcome.Success -> {
-                    onShared(outcome.value)
-                    userMessages.post(UiText.Res(Res.string.diagnostics_export_done))
-                }
+            // The busy flag must come down even when the repository throws: reset it in
+            // finally and report an unexpected throw as FAILED rather than crashing.
+            val outcome = suspendRunCatching { diagnostics.exportDatabaseCopy(destination) }
+                .getOrElse { Outcome.Failure(DiagnosticsError.FAILED) }
+            try {
+                when (outcome) {
+                    is Outcome.Success -> {
+                        onShared(outcome.value)
+                        userMessages.post(UiText.Res(Res.string.diagnostics_export_done))
+                    }
 
-                is Outcome.Failure -> {
-                    userMessages.post(
-                        UiText.Res(
-                            if (outcome.error == DiagnosticsError.CANCELLED) {
-                                Res.string.diagnostics_export_cancelled
-                            } else {
-                                Res.string.diagnostics_export_failed
-                            },
-                        ),
-                    )
+                    is Outcome.Failure -> {
+                        userMessages.post(
+                            UiText.Res(
+                                if (outcome.error == DiagnosticsError.CANCELLED) {
+                                    Res.string.diagnostics_export_cancelled
+                                } else {
+                                    Res.string.diagnostics_export_failed
+                                },
+                            ),
+                        )
+                    }
                 }
+            } finally {
+                mutableState.value = mutableState.value.copy(exporting = false)
             }
         }
     }
