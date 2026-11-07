@@ -26,7 +26,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
 import ch.lkmc.neutrodyne.core.model.ProviderFailure
@@ -103,8 +106,15 @@ internal fun DiscoverSettingsScreen(
     val appleLinks = LocalPlatformActions.current.appleLinks
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(title = stringResource(Res.string.discover_title), navigation = { SettingsBackButton() })
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier
+                .weight(1f)
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor)
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(stringResource(Res.string.privacy_intro))

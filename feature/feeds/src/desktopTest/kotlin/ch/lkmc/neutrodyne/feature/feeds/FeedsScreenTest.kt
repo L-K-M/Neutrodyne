@@ -38,11 +38,13 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performMultiModalInput
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -474,6 +476,23 @@ class FeedsScreenTest {
                 items.itemSnapshotList.items.count { it is FeedItem.Episode } >= 100
             }
             assertTrue(items.loadState.append !is LoadState.Error)
+        }
+
+    /** 08 Context menus: a group tab's menu offers the catalogue's Play, Refresh and Edit. */
+    @Test
+    fun groupTabMenuOffersPlayRefreshAndEdit() =
+        runComposeUiTest {
+            val fixture = PagerFixture()
+            fixture.select(2)
+            setContent { fixture.Content() }
+            fixture.awaitSelected(this, 2)
+            onNodeWithTag("feed-tab:${fixture.ref(2).encode()}").performMouseInput { rightClick(center) }
+            // Play and Refresh share their labels with the page header, so scope the assertions
+            // to the menu's own subtree.
+            onNode(hasText("Play") and hasAnyAncestor(hasTestTag("groupTabMenu"))).assertIsDisplayed()
+            onNode(hasText("Refresh") and hasAnyAncestor(hasTestTag("groupTabMenu"))).assertIsDisplayed()
+            onNode(hasText("Edit group") and hasAnyAncestor(hasTestTag("groupTabMenu"))).assertIsDisplayed()
+            fixture.close()
         }
 
     @Test

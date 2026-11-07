@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,7 +38,10 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.asString
@@ -115,9 +119,19 @@ internal fun AllGroupsSheet(
             }
 
             else -> {
+                // 08 Scrollbars: the desktop draws an overlay thumb at the grid's end edge.
+                val gridState = rememberLazyGridState()
+                val scrollbars = LocalScrollbars.current
+                val scrollbarColor = ndScrollbarColor(scrollbars)
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(GRID_COLUMNS),
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false).testTag("all-groups-grid"),
+                    state = gridState,
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .testTag("all-groups-grid")
+                            .ndScrollbar(gridState, scrollbars, scrollbarColor),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(16.dp),

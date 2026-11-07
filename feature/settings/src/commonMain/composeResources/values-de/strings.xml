@@ -22,6 +22,7 @@
     <string name="about_version_desktop">Version %1$s · %2$s %3$s · %4$s</string>
     <string name="about_licence_android">Neutrodynes Quelltext ist gemeinfrei unter der Unlicense veröffentlicht. Die App enthält zudem Komponenten Dritter unter freizügigen Lizenzen, aufgelistet unter Lizenzen.</string>
     <string name="about_licence_desktop">Neutrodynes Quelltext ist gemeinfrei unter der Unlicense veröffentlicht. Diese App enthält zudem Komponenten Dritter unter freizügigen Lizenzen, FFmpeg unter der GNU LGPL 2.1 und eine unveränderte OpenJDK-Laufzeit unter der GNU GPL 2.0 mit der Classpath-Ausnahme; der Quelltext beider liegt jedem Release bei. Alle Komponenten sind unter Lizenzen aufgelistet.</string>
+    <string name="about_screen_readers">Screenreader werden unter Linux nicht unterstützt: Das UI-Toolkit, das Neutrodyne nutzt, hat noch keine Linux-Barrierefreiheit. Tastaturnavigation, Skalierung und die kontrastreichen Themes funktionieren. Unter macOS (VoiceOver) und Windows (NVDA, mit Java Access Bridge, das Neutrodyne für sich selbst aktiviert) werden Screenreader unterstützt.</string>
     <string name="about_source">Quelltext und Releases</string>
     <string name="about_link_no_handler">Diesen Link kann keine App öffnen</string>
     <string name="about_link_copy">Link kopieren</string>

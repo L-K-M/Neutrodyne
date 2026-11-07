@@ -56,7 +56,10 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ContextType
@@ -181,17 +184,22 @@ public fun UpNextList(
         onIds = onVisibleIds,
     )
 
+    // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
+    val scrollbars = LocalScrollbars.current
+    val scrollbarColor = ndScrollbarColor(scrollbars)
     LazyColumn(
         state = listState,
         modifier =
-            modifier.testTag("upNextList").onPreviewKeyEvent {
-                if (it.key == Key.Escape && dragging != null) {
-                    if (it.type == KeyEventType.KeyDown) cancelDrag()
-                    true
-                } else {
-                    false
-                }
-            },
+            modifier
+                .testTag("upNextList")
+                .onPreviewKeyEvent {
+                    if (it.key == Key.Escape && dragging != null) {
+                        if (it.type == KeyEventType.KeyDown) cancelDrag()
+                        true
+                    } else {
+                        false
+                    }
+                }.ndScrollbar(listState, scrollbars, scrollbarColor),
         contentPadding = contentPadding,
     ) {
         if (current != null) {

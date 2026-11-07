@@ -17,7 +17,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_interval_hour
@@ -51,7 +54,14 @@ public fun <T> SettingsChoiceDialog(
         title = title,
     ) {
         // The chooser's rows must stay reachable in a landscape-height window (08's dialog rule).
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             for (option in options) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

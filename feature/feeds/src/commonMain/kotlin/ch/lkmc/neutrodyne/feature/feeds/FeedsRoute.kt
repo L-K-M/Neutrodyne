@@ -13,6 +13,9 @@ import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
+import ch.lkmc.neutrodyne.core.navigation.ExportKey
+import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
+import ch.lkmc.neutrodyne.core.navigation.GroupSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -72,6 +75,9 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onVisitStart = viewModel::onVisitStart,
         onVisitEnd = viewModel::onVisitEnd,
         onAllGroups = { navigator.push(AllGroupsKey) },
+        onEditGroup = { navigator.push(GroupEditKey(it)) },
+        onGroupSettings = { navigator.push(GroupSettingsKey(it)) },
+        onExportGroup = { navigator.push(ExportKey(it)) },
         live = live,
         onVisibleIds = { ref, ids -> viewModel.onVisibleIds(ref, ids) },
         onRefresh = viewModel::onRefresh,

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -20,6 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -41,7 +45,14 @@ public fun ChapterList(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(modifier) {
+    // 08 Scrollbars: the desktop draws an overlay thumb at the chapter list's end edge.
+    val listState = rememberLazyListState()
+    val bars = LocalScrollbars.current
+    val barColor = ndScrollbarColor(bars)
+    LazyColumn(
+        modifier.ndScrollbar(listState, bars, barColor),
+        state = listState,
+    ) {
         itemsIndexed(chapters, key = { _, chapter -> chapter.startMs }) { index, chapter ->
             val title =
                 chapter.title?.takeIf { it.isNotBlank() }

@@ -27,6 +27,7 @@
     <string name="about_version_desktop">Version %1$s · %2$s %3$s · %4$s</string>
     <string name="about_licence_android">Neutrodyne's source code is dedicated to the public domain under the Unlicense. The app also includes third-party components under permissive licences, listed under Licences.</string>
     <string name="about_licence_desktop">Neutrodyne's source code is dedicated to the public domain under the Unlicense. This app also includes third-party components under permissive licences, FFmpeg under the GNU LGPL 2.1, and an unmodified OpenJDK runtime under the GNU GPL 2.0 with the Classpath Exception; the source code of both is attached to every release. All components are listed under Licences.</string>
+    <string name="about_screen_readers">Screen readers are not supported on Linux: the user-interface toolkit Neutrodyne uses has no Linux accessibility support yet. Keyboard navigation, scaling and the high-contrast themes work. On macOS (VoiceOver) and Windows (NVDA, with Java Access Bridge, which Neutrodyne turns on for itself) screen readers are supported.</string>
     <string name="about_source">Source code and releases</string>
     <string name="about_link_no_handler">No app can open this link</string>
     <string name="about_link_copy">Copy link</string>

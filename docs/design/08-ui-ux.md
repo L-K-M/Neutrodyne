@@ -2797,6 +2797,23 @@ as the fallback for menu-less compositions (the AC1 `runComposeUiTest` checklist
 
 **Scrollbars.** Every vertically scrolling list, grid, settings page, show-notes column and sheet taller than its window draws an `NdScrollbar` at its end edge on the desktop (horizontal ones under the Discover rows); the thumb reflects paged lists with placeholders by item count, so it does not jump while pages load. The mouse wheel scrolls lists; Shift+wheel scrolls horizontal rows and the Feeds tab row; trackpads scroll in both directions.
 
+**Implementation note (2026-11-06, MD4 context menus and scrollbars).** The row menus are
+the shared rows' own `DropdownMenu`s (episode row, Up next row, downloads row, cover tile,
+Manage groups row), opened by the secondary click, the Menu key, Shift+F10 and the hover/focus
+overflow; the menu labels are the same `customActions` labels the rows publish, so a menu and
+its screen-reader actions cannot disagree. The Feeds group tab carries the catalogue's
+Play/Refresh/Edit plus the Feeds screen's Mark all as played…, Download all unplayed…, Group
+settings and Export as OPML…; the Library group tile keeps its M2 menu (Edit, Manage groups,
+Export) and its Play/Refresh remain open, as do the catalogue extras that no surface wires yet
+(Episode row Copy link and Show in folder, the mini player's Copy link and Stop and close, the
+show-notes link menu). The MS2/MS3 rows (Devices row, Continue on this device card) are
+classified as owned by their milestones in `KeyboardReachabilityChecklistTest`, because their
+screens are not in this codebase yet. The scrollbars hang `Modifier.ndScrollbar` off the list,
+grid, settings page, show-notes and sheet scroll states; the thumb overlays each surface's
+existing end padding rather than adding the 12 dp the wrapper note describes. The desktop
+screenshot matrix (MD4 AC2) captures the episode-row states in light and dark at 600, 900 and
+1,400 dp in the PR tier, so CI verifies the acceptance evidence on every change.
+
 **Drags.** In-list drags use the mouse exactly like touch: Up next and Manage groups reorder by their drag handles, the scrubber and sliders drag, the player sheet drags between its anchors. Nothing drags out of the app in v1.0; dropping files and links on the window is 11's ([11 Drag and drop](11-desktop.md#drag-and-drop)).
 
 ### Insets and edge-to-edge

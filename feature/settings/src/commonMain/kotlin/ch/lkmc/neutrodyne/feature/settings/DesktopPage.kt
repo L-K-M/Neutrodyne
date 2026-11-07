@@ -22,7 +22,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
+import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.domain.DesktopIntegration
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.DesktopOs
@@ -120,7 +123,16 @@ internal fun DesktopPage(
             title = stringResource(Res.string.settings_desktop),
             navigation = { SettingsBackButton() },
         )
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // 08 Scrollbars: the desktop draws an overlay thumb at the page's end edge.
+        val scroll = rememberScrollState()
+        val bars = LocalScrollbars.current
+        val barColor = ndScrollbarColor(bars)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .ndScrollbar(scroll, bars, barColor),
+        ) {
             Text(
                 stringResource(Res.string.desktop_section_window),
                 Modifier.padding(SECTION_PADDING),
