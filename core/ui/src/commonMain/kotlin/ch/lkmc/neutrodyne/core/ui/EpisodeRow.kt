@@ -473,9 +473,11 @@ private fun LeadingSlot(
         CoverArt(
             ref = if (video) row.artwork else row.podcastArtwork,
             monogram = rememberMonogram(if (video) row.title else row.podcastTitle),
-            modifier = Modifier.size(width = if (video) VIDEO_THUMB_WIDTH else COVER_SIZE, height = COVER_SIZE)
-                .alpha(artworkAlpha)
-                .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
+            modifier =
+                Modifier
+                    .size(width = if (video) VIDEO_THUMB_WIDTH else COVER_SIZE, height = COVER_SIZE)
+                    .alpha(artworkAlpha)
+                    .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
             aspect = if (video) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
             avgArgb = if (video) row.artworkAvgArgb else row.podcastArtworkAvgArgb,
         )
@@ -487,9 +489,11 @@ private fun LeadingSlot(
             CoverArt(
                 ref = row.artwork,
                 monogram = rememberMonogram(row.podcastTitle),
-                modifier = Modifier.size(COVER_SIZE)
-                    .alpha(artworkAlpha)
-                    .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
+                modifier =
+                    Modifier
+                        .size(COVER_SIZE)
+                        .alpha(artworkAlpha)
+                        .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
                 avgArgb = row.artworkAvgArgb,
             )
         }
