@@ -10,6 +10,7 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
@@ -90,6 +91,8 @@ class SyncWorkerTest {
                     sharePasswords = { false },
                     address = address,
                     tokens = SyncTokenStore(secrets),
+                    effects = SyncApplyEffects(db, settings, secrets, FakeCredentialCommitCoordinator()),
+                    notices = SyncNoticeBus(),
                 )
             val scheduler =
                 SyncScheduler(
