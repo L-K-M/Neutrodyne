@@ -214,6 +214,9 @@ internal fun newRefresher(
     moves: FeedMoveCommitter = newFeedMoves(db, clock, coordinator),
     effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
     notifier: NewEpisodeNotifier = NewEpisodeNotifier(db, effectiveSettings, FakeNewEpisodePoster()),
+    youTubeMonitor: ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeFeedOutageMonitor(),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -233,6 +236,7 @@ internal fun newRefresher(
         secrets,
         coordinator,
         notifier,
+        youTubeMonitor,
     )
 
 internal fun fetchMeta(
