@@ -9,24 +9,20 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
 import ch.lkmc.neutrodyne.core.common.AppScope
-import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.NetworkStatus
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.stateIn
 
 /**
  * `NetworkMonitor` on top of `ConnectivityManager` (01 NetworkMonitor): one
- * `registerDefaultNetworkCallback` mapping `NetworkCapabilities` onto `NetworkStatus`. The flow
- * shares `Eagerly` and seeds synchronously from `activeNetwork` — consumers read `status.value`
- * without ever collecting, so the initial value must already be right.
+ * `registerDefaultNetworkCallback` mapping `NetworkCapabilities` onto `NetworkStatus`. The
+ * callback registers synchronously at injection and `status` seeds synchronously from
+ * `activeNetwork` — consumers read `status.value` without ever collecting, so both must
+ * already be right without waiting on a dispatcher.
  *
  * After the seed the delivered callback arguments are authoritative: re-reading
  * `getNetworkCapabilities(activeNetwork)` inside a callback races the default-network swap —
@@ -41,85 +37,100 @@ internal class ConnectivityNetworkMonitor
     @Inject
     constructor(
         app: Application,
-        @ApplicationScope scope: CoroutineScope,
     ) : NetworkMonitor {
         private val manager = checkNotNull(app.getSystemService(ConnectivityManager::class.java))
 
-        override val status: StateFlow<NetworkStatus> =
-            callbackFlow {
-                val callback =
-                    object : NetworkCallback() {
-                        private var caps: NetworkCapabilities? =
-                            manager.getNetworkCapabilities(manager.activeNetwork)
-                        private var blocked = false
+        private val mutableStatus =
+            MutableStateFlow(manager.getNetworkCapabilities(manager.activeNetwork).toStatus())
+        override val status: StateFlow<NetworkStatus> = mutableStatus
 
-                        private fun emit() {
-                            trySend(if (blocked) DISCONNECTED else caps.toStatus())
-                        }
+        private var network: Network? = null
+        private var caps: NetworkCapabilities? = null
+        private var blocked = false
 
-                        override fun onAvailable(network: Network) {
-                            caps = manager.getNetworkCapabilities(network)
-                            emit()
-                        }
+        private val callback =
+            object : NetworkCallback() {
+                private fun emit() {
+                    mutableStatus.value = if (blocked) DISCONNECTED else caps.toStatus()
+                }
 
-                        override fun onLost(network: Network) {
-                            caps = null
-                            emit()
-                        }
+                private fun update(
+                    network: Network,
+                    delivered: NetworkCapabilities?,
+                ) {
+                    this@ConnectivityNetworkMonitor.network = network
+                    caps = delivered
+                    emit()
+                }
 
-                        override fun onUnavailable() {
-                            caps = null
-                            emit()
-                        }
+                // 2026-11-04, CI runs 42113975704/42145320791: on API 26 a synchronous
+                // getNetworkCapabilities read inside onAvailable can return the previous
+                // network's (or no) capabilities while the callback itself already carries
+                // the new network's state. Delivered capabilities are authoritative.
+                override fun onAvailable(network: Network) = update(network, manager.getNetworkCapabilities(network))
 
-                        override fun onCapabilitiesChanged(
-                            network: Network,
-                            caps: NetworkCapabilities,
-                        ) {
-                            this.caps = caps
-                            emit()
-                        }
+                // onCapabilitiesChanged fires for every capability update on the tracked
+                // network; the delivered value replaces the synchronous-read result.
+                override fun onCapabilitiesChanged(
+                    network: Network,
+                    caps: NetworkCapabilities,
+                ) = update(network, caps)
 
-                        override fun onBlockedStatusChanged(
-                            network: Network,
-                            blocked: Boolean,
-                        ) {
-                            this.blocked = blocked
-                            emit()
-                        }
-                    }
-                manager.registerDefaultNetworkCallback(callback)
-                awaitClose { manager.unregisterNetworkCallback(callback) }
-            }.stateIn(
-                scope,
-                SharingStarted.Eagerly,
-                manager.getNetworkCapabilities(manager.activeNetwork).toStatus(),
-            )
+                // A retired default's LOST can arrive after the new default's events;
+                // only the tracked network's loss clears the status.
+                override fun onLost(network: Network) {
+                    if (this@ConnectivityNetworkMonitor.network != network) return
+                    this@ConnectivityNetworkMonitor.network = null
+                    caps = null
+                    emit()
+                }
 
-        private fun NetworkCapabilities?.toStatus(): NetworkStatus {
-            val caps = this ?: return DISCONNECTED
-            val unmetered =
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ||
-                    (
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED)
-                    )
-            return NetworkStatus(
-                isConnected = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
-                isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
-                // NOT_METERED wins; on API 30+ a TEMPORARILY_NOT_METERED network is unmetered too.
-                isMetered = !unmetered,
-                isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
-            )
+                override fun onUnavailable() {
+                    network = null
+                    caps = null
+                    emit()
+                }
+
+                override fun onBlockedStatusChanged(
+                    network: Network,
+                    blocked: Boolean,
+                ) {
+                    this@ConnectivityNetworkMonitor.blocked = blocked
+                    emit()
+                }
+            }
+
+        init {
+            // Register synchronously: inside a callbackFlow produce, the request only
+            // reaches ConnectivityService once the collecting coroutine dispatches. On
+            // the loaded API 26 managed-device image that dispatch queued long enough
+            // to miss the whole Wi-Fi to cellular transition, freezing status at its
+            // construction seed for the test's whole 30 s await (CI run 42328682766).
+            manager.registerDefaultNetworkCallback(callback)
         }
 
-        private companion object {
-            val DISCONNECTED =
+        private fun NetworkCapabilities?.toStatus(): NetworkStatus =
+            if (this == null || !hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                DISCONNECTED
+            } else {
                 NetworkStatus(
-                    isConnected = false,
-                    isValidated = false,
-                    isMetered = false,
-                    isVpn = false,
+                    isConnected = true,
+                    isValidated = hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                    isMetered = isMetered(),
+                    isVpn = hasTransport(NetworkCapabilities.TRANSPORT_VPN),
                 )
+            }
+
+        // NET_CAPABILITY_NOT_METERED is absent when the network is metered;
+        // API 30+ adds a second signal used while a metered override applies.
+        private fun NetworkCapabilities.isMetered(): Boolean =
+            !hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
+                (
+                    Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                        !hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED)
+                )
+
+        private companion object {
+            val DISCONNECTED = NetworkStatus(isConnected = false, isValidated = false, isMetered = false, isVpn = false)
         }
     }
