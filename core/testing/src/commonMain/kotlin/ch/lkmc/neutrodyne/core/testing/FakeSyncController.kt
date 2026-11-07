@@ -77,7 +77,8 @@ class FakeSyncController(
         username: String,
         password: CharArray,
     ) {
-        passwords += username to password
+        // Copy: callers scrub their array after submit, and the fake must hold the submitted value.
+        passwords += username to password.copyOf()
     }
 
     override fun chooseFirstLink(choice: FirstLinkChoice) {
