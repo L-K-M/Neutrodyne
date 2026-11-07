@@ -27,6 +27,13 @@ import kotlinx.coroutines.flow.stateIn
  * `registerDefaultNetworkCallback` mapping `NetworkCapabilities` onto `NetworkStatus`. The flow
  * shares `Eagerly` and seeds synchronously from `activeNetwork` — consumers read `status.value`
  * without ever collecting, so the initial value must already be right.
+ *
+ * After the seed the delivered callback arguments are authoritative: re-reading
+ * `getNetworkCapabilities(activeNetwork)` inside a callback races the default-network swap —
+ * and on the API 26 managed-device image that synchronous read stayed stale for tens of
+ * seconds while the callback stream already carried the metered cellular caps (CI runs
+ * 42113975704, 42145320791). A reported `blocked` maps to DISCONNECTED because the uid-level
+ * filter makes `activeNetwork`/`NetworkInfo` report the same.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -42,38 +49,55 @@ internal class ConnectivityNetworkMonitor
             callbackFlow {
                 val callback =
                     object : NetworkCallback() {
+                        private var caps: NetworkCapabilities? =
+                            manager.getNetworkCapabilities(manager.activeNetwork)
+                        private var blocked = false
+
+                        private fun emit() {
+                            trySend(if (blocked) DISCONNECTED else caps.toStatus())
+                        }
+
                         override fun onAvailable(network: Network) {
-                            trySend(current())
+                            caps = manager.getNetworkCapabilities(network)
+                            emit()
                         }
 
                         override fun onLost(network: Network) {
-                            trySend(current())
+                            caps = null
+                            emit()
                         }
 
                         override fun onUnavailable() {
-                            trySend(current())
+                            caps = null
+                            emit()
                         }
 
                         override fun onCapabilitiesChanged(
                             network: Network,
                             caps: NetworkCapabilities,
                         ) {
-                            trySend(current())
+                            this.caps = caps
+                            emit()
                         }
 
                         override fun onBlockedStatusChanged(
                             network: Network,
                             blocked: Boolean,
                         ) {
-                            trySend(current())
+                            this.blocked = blocked
+                            emit()
                         }
                     }
                 manager.registerDefaultNetworkCallback(callback)
                 awaitClose { manager.unregisterNetworkCallback(callback) }
-            }.stateIn(scope, SharingStarted.Eagerly, current())
+            }.stateIn(
+                scope,
+                SharingStarted.Eagerly,
+                manager.getNetworkCapabilities(manager.activeNetwork).toStatus(),
+            )
 
-        private fun current(): NetworkStatus {
-            val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return DISCONNECTED
+        private fun NetworkCapabilities?.toStatus(): NetworkStatus {
+            val caps = this ?: return DISCONNECTED
             val unmetered =
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ||
                     (

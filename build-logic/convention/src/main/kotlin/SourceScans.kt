@@ -236,7 +236,8 @@ abstract class CheckBannedApisTask : DefaultTask() {
                 problems += "$relative sets android:process outside :youtube:ytdlp (:ytx owns the only extra process)"
             }
         }
-        if (!relative.startsWith("youtube/ytdlp-desktop/")) {
+        // Server JVM tests need real child processes for OS leases and SIGKILL recovery (MS1 W2).
+        if (!relative.startsWith("youtube/ytdlp-desktop/") && !relative.startsWith("sync/server/src/test/")) {
             if (PROCESS_BUILDER.containsMatchIn(text)) {
                 problems += "$relative starts a process outside :youtube:ytdlp-desktop (rule 17)"
             }

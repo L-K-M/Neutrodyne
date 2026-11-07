@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.os
 
+import ch.lkmc.neutrodyne.core.artwork.ArtworkStore
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Log
@@ -13,9 +14,11 @@ import ch.lkmc.neutrodyne.desktop.system.MediaSessionCoordinator
 import ch.lkmc.neutrodyne.desktop.system.OsPowerMonitor
 import ch.lkmc.neutrodyne.desktop.system.PowerPolicy
 import ch.lkmc.neutrodyne.desktop.system.SystemMediaSession
+import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,6 +44,9 @@ class DesktopOsSurfaces(
     private val session: SystemMediaSession,
     private val power: PowerMonitor,
     private val inhibitor: IdleSleepInhibitor,
+    // Deferred: the store opens the database, which the start-up gate may not have
+    // opened yet; publishing happens after the gate (08 Startup).
+    private val artwork: Provider<ArtworkStore>,
     settings: SettingsRepository,
 ) {
     private val started = AtomicBoolean(false)
@@ -62,6 +68,7 @@ class DesktopOsSurfaces(
                     .observe(PlaybackSettingKeys.SPEED_PRESETS)
                     .map { PlaybackSettingKeys.parseSpeedPresets(it) ?: DEFAULT_SPEED_PRESETS },
             hardwareButtons = hardwareButtons,
+            artworkPath = { nowPlaying -> nowPlaying?.let { artwork().pinnedPath(it.artwork.key)?.toString() } },
         )
 
     private val powerPolicy = PowerPolicy(scope, power, controller, state, inhibitor)

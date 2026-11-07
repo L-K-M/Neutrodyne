@@ -132,15 +132,17 @@ source is the `python-build-standalone-<tag>-src.tar.gz` asset attached to the r
 ## Native components
 
 - **FFmpeg 9.0.2**: LGPL-2.1-or-later, built from the verified upstream
-  archive as four separate, replaceable shared libraries. MD0 publishes only
-  spike evidence, paired with `ffmpeg-9.0.2-neutrodyne-src.tar.xz` and its
-  LGPL text; no native library is added to the production app. AAC and HE-AAC
-  may be covered by patents in your jurisdiction. The build enables no GPL,
-  version3 or nonfree components and no network protocol.
+  archive as four separate, replaceable shared libraries loaded by the
+  desktop app. Every release carries `ffmpeg-9.0.2-neutrodyne-src.tar.xz`
+  with the pristine tarball, its signature, the configure line and the build
+  scripts, and the desktop Licences screen shows FFmpeg's own
+  `COPYING.LGPLv2.1`. AAC and HE-AAC may be covered by patents in your
+  jurisdiction. The build enables no GPL, version3 or nonfree components and
+  no network protocol.
 - **miniaudio 0.11.22**: MIT-0 elected from its dual licence. Copyright 2025
   David Reid. Its unchanged header is checksum-verified at build time and
-  compiled into the spike's `ndmedia`, never into FFmpeg. The desktop
-  AboutLibraries root carries the upstream licence text.
+  compiled into `ndmedia`, never into FFmpeg. The desktop Licences screen
+  carries the upstream licence text.
 
 ## Bundled runtimes
 

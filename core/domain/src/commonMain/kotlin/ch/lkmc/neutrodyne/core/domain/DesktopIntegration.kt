@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
  * settings): bound only in `DesktopAppGraph`, so `:feature:settings` takes it as a nullable
  * parameter defaulting to `null` and shows the page without it elsewhere.
  *
- * This slice carries start at login; link-handler and applications-menu registration and the
- * access-bridge status join it in their own milestone slices (08's frozen sketch).
+ * This slice carries start at login (MD2 part 2) and the links and applications-menu rows
+ * of MD2's links slice; the access-bridge status joins with MD4 (08's frozen sketch).
  */
 interface DesktopIntegration {
     /**
@@ -26,6 +26,29 @@ interface DesktopIntegration {
      * so a refusal leaves the switch showing the true state.
      */
     suspend fun setStartAtLogin(enabled: Boolean): Outcome<Unit, StartAtLoginError>
+
+    /**
+     * Whether Neutrodyne handles `feed:`, `podcast:`, `pcast:` and `itpc:` links (11 Links
+     * and files from the OS). `null` = not applicable: install kinds that register the
+     * schemes at install time (DMG, DEB and RPM) hide the row.
+     */
+    val linkHandlers: StateFlow<Boolean?>
+
+    /**
+     * The "Open podcast links with Neutrodyne" row's "Set up": takes the podcast schemes
+     * over on request. `false` when the OS write failed; [linkHandlers] re-reads the OS
+     * state either way.
+     */
+    suspend fun registerLinkHandlers(): Boolean
+
+    /** "Add to applications menu" exists only on Linux tar.gz installs (11's tar.gz row). */
+    val canAddToApplicationsMenu: Boolean
+
+    /**
+     * Writes the per-user desktop entry and icons of 11's tar.gz row. `false` when the
+     * write failed; re-running after the archive moved refreshes the entry.
+     */
+    suspend fun addToApplicationsMenu(): Boolean
 }
 
 /** Why a "Start at login" toggle did not apply. */

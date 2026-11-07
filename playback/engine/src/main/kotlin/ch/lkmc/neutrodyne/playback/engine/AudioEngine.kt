@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.engine
 
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -60,6 +61,15 @@ interface AudioEngine : AutoCloseable {
     /** Current position in milliseconds; safe from any thread (TimelineClock). */
     fun positionMs(): Long
 
+    /**
+     * MD2's route monitor reports the output device in use disappeared (11 Device
+     * loss, sleep and session restore). The engine discards its output so the next
+     * play opens the default device; the controller pauses and saves. The default
+     * implementation does nothing, because the null and fake backends have no
+     * device to lose.
+     */
+    fun onDeviceRemoved() = Unit
+
     /** Stop the engine thread and release the pipeline; the object is then unusable. */
     override fun close()
 }
@@ -101,6 +111,14 @@ sealed interface EngineState {
 sealed interface EngineEvent {
     data class ItemTransition(
         val fromEpisodeId: Long?,
+        /**
+         * The outgoing item's audible position at the boundary, in milliseconds.
+         * The engine has already handed the ring to [toEpisodeId] when this event
+         * is emitted, so the clock no longer reports the outgoing item; the
+         * controller captures the departure from this value, mirroring Media3's
+         * `oldPosition.positionMs` at `onPositionDiscontinuity`.
+         */
+        val fromPositionMs: Long,
         val toEpisodeId: Long,
         val reason: TransitionReason,
     ) : EngineEvent
@@ -115,7 +133,7 @@ sealed interface EngineEvent {
     data class TracksKnown(
         val episodeId: Long,
         val durationMs: Long?,
-        val chapters: List<EngineChapter>,
+        val chapters: List<EpisodeChapter>,
         val gapless: Gapless,
     ) : EngineEvent
 
@@ -131,13 +149,6 @@ enum class TransitionReason { AUTO, SEEK_TO_ITEM, SKIP }
 
 /** Why the position jumped without a user-visible seek (11 Engine contracts). */
 enum class DiscontinuityReason { SEEK, SILENCE_SKIP }
-
-/** One container chapter, in milliseconds from the start of the item (06 Chapters). */
-data class EngineChapter(
-    val startMs: Long,
-    val endMs: Long,
-    val title: String?,
-)
 
 /**
  * Container trimming information the demuxer reports (11 Demux and decode). The
@@ -162,6 +173,12 @@ sealed interface EngineError {
     data object UnsupportedFormat : EngineError
 
     data object NoMedia : EngineError
+
+    /**
+     * The representation changed under a ranged read (DAI length or validator).
+     * The engine has already re-resolved once, so this is the second failure.
+     */
+    data object ContentChanged : EngineError
 
     data object Network : EngineError
 

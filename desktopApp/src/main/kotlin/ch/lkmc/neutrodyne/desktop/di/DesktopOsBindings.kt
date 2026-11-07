@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.desktop.system.IdleSleepInhibitors
 import ch.lkmc.neutrodyne.desktop.system.LinuxMprisSession
 import ch.lkmc.neutrodyne.desktop.system.MacNowPlayingSession
 import ch.lkmc.neutrodyne.desktop.system.MprisShellActions
+import ch.lkmc.neutrodyne.desktop.system.NdmediaDirectory
 import ch.lkmc.neutrodyne.desktop.system.OsPowerMonitor
 import ch.lkmc.neutrodyne.desktop.system.SystemMediaSession
 import ch.lkmc.neutrodyne.desktop.system.UnavailableSystemMediaSession
@@ -95,6 +96,16 @@ object DesktopOsBindings {
     }
 
     /**
+     * The `ndmedia` library directory (11 ndmedia interface): the same path the media
+     * session and the native idle-sleep inhibitor load, bound here so `:desktop:system`'s
+     * login-item registrar can open the SMAppService shim without knowing the shell's
+     * resource layout.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun ndmediaDirectory(): NdmediaDirectory = NdmediaDirectory(DesktopEnginePaths.current().ndmedia)
+
+    /**
      * MD2's `OsPowerMonitor` replaces M1a's interim no-events binding (its own comment made
      * this provider the reminder to delete that one). The session stays behind a
      * [Provider]: Linux's logind path never resolves the native media session.
@@ -110,7 +121,11 @@ object DesktopOsBindings {
     /** 11 Start at login's sibling: the OS pick of the idle-sleep inhibitor. */
     @Provides
     @SingleIn(AppScope::class)
-    fun idleSleepInhibitor(buildInfo: BuildInfo): IdleSleepInhibitor = IdleSleepInhibitors.create(buildInfo.desktop?.os)
+    fun idleSleepInhibitor(buildInfo: BuildInfo): IdleSleepInhibitor =
+        IdleSleepInhibitors.create(
+            os = buildInfo.desktop?.os,
+            ndmedia = DesktopEnginePaths.current().ndmedia,
+        )
 }
 
 /** The window hooks the OS surfaces call on the application scope; safe no-ops until set. */

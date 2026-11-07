@@ -1,0 +1,34 @@
+[
+  {
+    "name": "rekey-parent-move-late-position",
+    "seed": 0,
+    "operations": [
+      [0, "REKEY", 0, 0, 0],
+      [0, "PUSH", 0, 0, 0],
+      [1, "FEED_MOVE", 0, 0, 0],
+      [2, "POSITION", 0, 0, 25]
+    ]
+  },
+  {
+    "name": "raw-played-listen-reset-replay",
+    "seed": 1,
+    "operations": [
+      [4, "PLAYED", 0, 0, 9],
+      [4, "PUSH", 0, 0, 0],
+      [0, "POSITION", 0, 0, 50],
+      [3, "RESET", 0, 0, 0],
+      [1, "EXPIRE", 0, 0, 0]
+    ]
+  },
+  {
+    "name": "rename-membership-tied-order-replay",
+    "seed": 2,
+    "operations": [
+      [0, "MEMBER_ADD", 1, 0, 0],
+      [1, "GROUP_RENAME", 0, 0, 1],
+      [2, "MEMBER_MOVE", 1, 0, 0],
+      [3, "QUEUE_ADD", 1, 0, 0],
+      [4, "EXPIRE", 0, 0, 0]
+    ]
+  }
+]

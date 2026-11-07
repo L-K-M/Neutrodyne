@@ -167,4 +167,36 @@ class ConnectivityNetworkMonitorTest {
 
             assertThat(monitor.status.value.isMetered).isTrue()
         }
+
+    @Test
+    fun `delivered caps win over a stale synchronous read`() =
+        runTest {
+            connect(
+                NetworkCapabilities.TRANSPORT_WIFI,
+                NetworkCapabilities.NET_CAPABILITY_INTERNET,
+                NetworkCapabilities.NET_CAPABILITY_VALIDATED,
+                NetworkCapabilities.NET_CAPABILITY_NOT_METERED,
+            )
+            val monitor = ConnectivityNetworkMonitor(app, backgroundScope)
+            runCurrent()
+            assertThat(monitor.status.value.isMetered).isFalse()
+
+            // API 26 GMD flake: getActiveNetwork/getNetworkCapabilities stayed stale for 30s
+            // while the callback stream already delivered the metered cellular caps (CI runs
+            // 42113975704 and 42145320791). The status must follow the delivered caps.
+            shadow.setActiveNetworkInfo(null)
+            val cellular = ShadowNetwork.newInstance(ConnectivityManager.TYPE_MOBILE)
+            val metered = ShadowNetworkCapabilities.newInstance()
+            shadowOf(metered).addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+            shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            shadowOf(metered).addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            shadow.networkCallbacks.first().onCapabilitiesChanged(cellular, metered)
+            runCurrent()
+
+            with(monitor.status.value) {
+                assertThat(isConnected).isTrue()
+                assertThat(isValidated).isTrue()
+                assertThat(isMetered).isTrue()
+            }
+        }
 }

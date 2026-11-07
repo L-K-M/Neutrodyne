@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Unlicense
+# Reference unit. Copy to neutrodyne-server.service, set
+# NEUTRODYNE_SERVER_PUBLIC_URL to your public HTTPS URL and adjust the JAR
+# path if needed, then enable it. Do not enable this file unedited: the
+# example.org URL is a placeholder and the server refuses non-loopback
+# listeners without an https:// public URL.
+[Unit]
+Description=Neutrodyne Sync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/java -Xmx96m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k -jar /opt/neutrodyne-server/neutrodyne-server.jar serve
+Environment=NEUTRODYNE_SERVER_DATA=/var/lib/neutrodyne-server
+Environment=NEUTRODYNE_SERVER_LISTEN=127.0.0.1:8787
+# Set to your public HTTPS URL before enabling the unit.
+Environment=NEUTRODYNE_SERVER_PUBLIC_URL=https://sync.example.org
+DynamicUser=yes
+User=neutrodyne-server
+# StateDirectory stays writable under ProtectSystem=strict, so no
+# ReadWritePaths entry is needed for the data directory.
+StateDirectory=neutrodyne-server
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+LockPersonality=yes
+SystemCallArchitectures=native
+# MemoryDenyWriteExecute stays off: the JVM's JIT needs writable executable
+# memory.
+MemoryMax=320M
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

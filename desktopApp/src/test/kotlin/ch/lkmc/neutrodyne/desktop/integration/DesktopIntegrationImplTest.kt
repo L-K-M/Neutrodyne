@@ -19,13 +19,14 @@ import org.junit.Test
 class DesktopIntegrationImplTest {
     private val registrar = FakeLoginItemRegistrar()
     private val settings = FakeSettingsRepository()
-    private val integration = DesktopIntegrationImpl(registrar, settings)
+    private val integration = DesktopIntegrationImpl(registrar, NotApplicableLinks, settings)
 
     @Test
     fun `the flow starts at the registrar's state`() {
         val unsupported =
             DesktopIntegrationImpl(
                 FakeLoginItemRegistrar(LoginItemState.UNSUPPORTED),
+                NotApplicableLinks,
                 settings,
             )
         assertThat(integration.loginItem.value).isEqualTo(LoginItemState.NOT_REGISTERED)
@@ -75,6 +76,7 @@ class DesktopIntegrationImplTest {
             val unsupported =
                 DesktopIntegrationImpl(
                     FakeLoginItemRegistrar(LoginItemState.UNSUPPORTED),
+                    NotApplicableLinks,
                     settings,
                 )
             val outcome = unsupported.setStartAtLogin(true)
@@ -89,7 +91,7 @@ class DesktopIntegrationImplTest {
         val registrar = FakeLoginItemRegistrar()
         registrar.statusError = IllegalStateException("registry read failed")
 
-        val integration = DesktopIntegrationImpl(registrar, settings)
+        val integration = DesktopIntegrationImpl(registrar, NotApplicableLinks, settings)
 
         assertThat(integration.loginItem.value).isEqualTo(LoginItemState.UNSUPPORTED)
     }
@@ -124,4 +126,16 @@ class DesktopIntegrationImplTest {
             assertThat(outcome).isInstanceOf(Outcome.Failure::class.java)
             assertThat((outcome as Outcome.Failure).error).isInstanceOf(StartAtLoginError.Failed::class.java)
         }
+}
+
+/** The links seam does not participate in the login-item tests. */
+private object NotApplicableLinks : DesktopLinkRegistration {
+    override val applicable: Boolean = false
+    override val canAddToApplicationsMenu: Boolean = false
+
+    override fun handled(): Boolean = false
+
+    override fun register(): Boolean = false
+
+    override fun addToMenu(): Boolean = false
 }

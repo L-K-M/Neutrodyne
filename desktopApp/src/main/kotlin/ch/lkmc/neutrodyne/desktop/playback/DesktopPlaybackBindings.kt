@@ -6,12 +6,19 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
+import ch.lkmc.neutrodyne.desktop.system.AudioRouteMonitor
+import ch.lkmc.neutrodyne.desktop.system.NoOpAudioRouteMonitor
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
@@ -20,6 +27,7 @@ import ch.lkmc.neutrodyne.playback.core.EffectivePlaybackSettings
 import ch.lkmc.neutrodyne.playback.core.PlayStarter
 import ch.lkmc.neutrodyne.playback.core.PositionSaver
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
 import ch.lkmc.neutrodyne.playback.desktop.DesktopEpisodeSourceResolver
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController
 import ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackRuntime
@@ -35,6 +43,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import java.nio.file.Path
 
@@ -47,8 +56,16 @@ object DesktopPlaybackBindings {
     fun desktopController(
         @ApplicationScope scope: CoroutineScope,
         clock: Clock,
+        network: NetworkMonitor,
+        routeMonitor: AudioRouteMonitor,
         runtime: Provider<DesktopPlaybackRuntime>,
-    ): DesktopPlaybackController = DesktopPlaybackController(scope, clock, { runtime() })
+    ): DesktopPlaybackController =
+        DesktopPlaybackController(scope, clock, {
+            runtime()
+        }, network, routeMonitor = routeMonitor)
+
+    /** MD2 binds the per-OS monitor; until then there is no route event. */
+    @Provides fun routeMonitor(): AudioRouteMonitor = NoOpAudioRouteMonitor
 
     @Provides fun controller(value: DesktopPlaybackController): PlaybackController = value
 
@@ -67,6 +84,7 @@ object DesktopPlaybackBindings {
         media: PlaybackMediaLookup,
         positions: PositionStore,
         capabilities: YouTubeCapabilitiesSource,
+        chapterRepository: ChapterRepository,
         resolver: DesktopEpisodeSourceResolver,
         cache: SpanCache,
         engine: AudioEngine,
@@ -81,6 +99,7 @@ object DesktopPlaybackBindings {
             media,
             positions,
             capabilities,
+            chapterRepository,
             resolver,
             cache,
             engine,
@@ -108,6 +127,19 @@ object DesktopPlaybackBindings {
         val paths = DesktopEnginePaths.current()
         return FfAudioEngine(paths.ffmpeg, paths.ndmedia, resolver, clients, cache)
     }
+
+    /**
+     * Download-time embedded chapters (06 Chapters, 11 Chapters and metadata): the desktop
+     * container reader over the same FFmpeg build the engine loads. The nullable key is what
+     * `ChapterRepositoryImpl` asks for; without it, `ensureLocalLoaded` would report Unavailable.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun embeddedChapterReader(
+        @Dispatcher(NeutrodyneDispatchers.IO) io: CoroutineDispatcher,
+    ): EmbeddedChapterReader = DesktopChapterExtractor(DesktopEnginePaths.current().ffmpeg, io)
+
+    @Provides internal fun optionalEmbeddedChapters(value: EmbeddedChapterReader): EmbeddedChapterReader? = value
 }
 
 /** Band 300 restores the mini player after database open without opening an audio device. */

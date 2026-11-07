@@ -34,6 +34,25 @@ class DesktopLicencesSourceTest {
             assertThat(licence.licenseContent).contains("GCC RUNTIME LIBRARY EXCEPTION")
         }
 
+    /** The desktop native components carry their own notices (PLAN MD1b AC7): FFmpeg's LGPL text
+     *  is its own `COPYING.LGPLv2.1`, not the JNA variant, and miniaudio keeps its copyright line. */
+    @Test
+    fun `ffmpeg and miniaudio carry their own notices`() =
+        runBlocking {
+            val libs = DesktopLicencesSource().load()!!
+
+            val ffmpeg = libs.libraries.single { it.uniqueId == "neutrodyne:ffmpeg" }
+            val ffmpegLicence = ffmpeg.licenses.single()
+            assertThat(ffmpegLicence.name).contains("FFmpeg")
+            assertThat(ffmpegLicence.licenseContent).contains("GNU LESSER GENERAL PUBLIC LICENSE")
+            assertThat(ffmpegLicence.licenseContent).contains("51 Franklin Street")
+
+            val miniaudio = libs.libraries.single { it.uniqueId == "neutrodyne:miniaudio" }
+            val miniaudioLicence = miniaudio.licenses.single()
+            assertThat(miniaudioLicence.name).contains("miniaudio")
+            assertThat(miniaudioLicence.licenseContent).contains("Copyright 2025 David Reid")
+        }
+
     /**
      * Every desktop entry resolves to licence text, MIT/BSD-style families carry the component's
      * own text with its copyright line instead of only the SPDX template, and bundled entries (the

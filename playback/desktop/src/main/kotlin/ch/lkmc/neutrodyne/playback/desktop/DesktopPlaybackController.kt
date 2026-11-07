@@ -3,8 +3,10 @@ package ch.lkmc.neutrodyne.playback.desktop
 
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.domain.SessionRevision
 import ch.lkmc.neutrodyne.core.model.AddResult
+import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
@@ -12,11 +14,15 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.PlayContextInfo
+import ch.lkmc.neutrodyne.core.model.PlaySessionInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
+import ch.lkmc.neutrodyne.desktop.system.AudioRouteMonitor
+import ch.lkmc.neutrodyne.desktop.system.NoOpAudioRouteMonitor
+import ch.lkmc.neutrodyne.desktop.system.RouteEvent
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
@@ -28,6 +34,8 @@ import ch.lkmc.neutrodyne.playback.api.PlayerPhase
 import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.api.StreamKind
+import ch.lkmc.neutrodyne.playback.api.UnplayableReason
+import ch.lkmc.neutrodyne.playback.core.ChapterIndex
 import ch.lkmc.neutrodyne.playback.core.CurrentAction
 import ch.lkmc.neutrodyne.playback.core.PlaybackExit
 import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
@@ -35,7 +43,9 @@ import ch.lkmc.neutrodyne.playback.core.PlayerWindow
 import ch.lkmc.neutrodyne.playback.core.PositionSaveResult
 import ch.lkmc.neutrodyne.playback.core.PreviousAction
 import ch.lkmc.neutrodyne.playback.core.QueueWindowPlanner
+import ch.lkmc.neutrodyne.playback.core.RecoveryBudget
 import ch.lkmc.neutrodyne.playback.core.SeekOrigin
+import ch.lkmc.neutrodyne.playback.core.SleepTimerCore
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.StartRequest
@@ -66,6 +76,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.ceil
 
 /**
  * In-process desktop adapter. A mutex spans suspending repository calls, since a single dispatcher
@@ -77,8 +88,10 @@ class DesktopPlaybackController(
     appScope: CoroutineScope,
     private val clock: Clock,
     private val runtimeFactory: () -> DesktopPlaybackRuntime,
+    private val network: NetworkMonitor,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val routeMonitor: AudioRouteMonitor = NoOpAudioRouteMonitor,
 ) : PlaybackController,
     PlaybackStateSource,
     PlaybackMaintenance {
@@ -94,12 +107,65 @@ class DesktopPlaybackController(
     private var context: PlayContextInfo? = null
     private var since = 0L
     private var durationMs: Long? = null
+
+    /**
+     * The engine's loaded item. It advances on the engine's own automatic
+     * transition before the projected window catches up, so the projector and
+     * the planner diff against the engine's real current, not `entries.first()`.
+     */
+    private var engineCurrentId: Long? = null
     private var prepared = false
     private var wantPlaying = false
     private var closed = false
     private var skipBackMs = DEFAULT_SKIP_BACK_MS
     private var skipForwardMs = DEFAULT_SKIP_FORWARD_MS
     private val history = PlaybackHistory()
+    private val budget = RecoveryBudget(clock)
+
+    /**
+     * A network error waiting for a validated connection, or null. The 06
+     * foreground window bounds how long an automatic re-prepare may wait.
+     */
+    private var networkRetry: NetworkRetry? = null
+
+    /** True once an output device failure paused playback; cleared on the next start. */
+    private var outputDeviceLost = false
+
+    /**
+     * The terminal [EngineState.Ended] was already handled. The 1-s tick
+     * reconciles a coalesced Ended, but a second pass must not end the session
+     * after an end-of-episode sleep already completed the item.
+     */
+    private var engineEndedHandled = false
+
+    /**
+     * The item the end-of-episode timer completed in place. It stays loaded, so a user
+     * seek or Play on it starts a replay occurrence (06's M5 note, Android's
+     * `replayCompletedBoundary`); cleared once the item stops being current or is armed.
+     */
+    private var completedBoundary: Long? = null
+
+    /**
+     * An issue the engine's own state no longer carries: a missing local file is
+     * re-resolved at once, so the error state is replaced by Buffering before the
+     * UI can show it. Held until playback resumes (06 Error recovery).
+     */
+    private var pendingIssue: PlaybackIssue? = null
+
+    private val sleepTimerCore = SleepTimerCore()
+    private var sleepSampledAt = 0L
+    private var chapterIndex = ChapterIndex(emptyList())
+    private var chapterFollowing: Job? = null
+    private var chapterBoundary: Job? = null
+    private val writtenChapterSources = mutableSetOf<ChapterSource>()
+
+    /**
+     * TracksKnown of a prepared successor can reach the controller before the
+     * engine's ItemTransition event, while [engineCurrentId] is still the outgoing
+     * item. The event is kept until that episode becomes current, so its chapters
+     * and measured duration are applied exactly when the item loads.
+     */
+    private val pendingTracksKnown = mutableMapOf<Long, EngineEvent.TracksKnown>()
     private val current = MutableStateFlow<NowPlaying?>(null)
     private val ticks = MutableSharedFlow<PositionSnapshot>(replay = 1)
     private val effective = MutableStateFlow<EffectivePlayback?>(null)
@@ -110,9 +176,10 @@ class DesktopPlaybackController(
     override val pendingMeteredConsent = MutableStateFlow<PlayResult.NeedsMeteredConsent?>(null).asStateFlow()
     override val events = notifications.asSharedFlow()
 
-    // Completion of these features, including end-of-item arbitration and chapter enrichment, is MD1b.
-    override val sleepTimer = MutableStateFlow<SleepTimerState>(SleepTimerState.Off).asStateFlow()
-    override val currentChapter = MutableStateFlow<CurrentChapter?>(null).asStateFlow()
+    private val mutableSleepTimer = MutableStateFlow<SleepTimerState>(SleepTimerState.Off)
+    private val mutableCurrentChapter = MutableStateFlow<CurrentChapter?>(null)
+    override val sleepTimer = mutableSleepTimer.asStateFlow()
+    override val currentChapter = mutableCurrentChapter.asStateFlow()
 
     suspend fun initialize() {
         serial { ensureRuntime() }
@@ -123,43 +190,51 @@ class DesktopPlaybackController(
         runtime?.let { return it }
         val value = withContext(ioDispatcher) { runtimeFactory() }
         runtime = value
+        sleepSampledAt = clock.elapsedRealtime()
         projector = DesktopQueueProjector(value.engine, value.resolver)
         scope.launch {
             combine(
                 value.planner.snapshots(),
                 value.queue.observeSession(),
                 value.capabilities.capabilities,
-            ) { queue, session, _ ->
-                queue to session?.context
-            }.flatMapLatest { (queue, info) ->
-                val ids = (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
-                value.media.observe(ids).map { Triple(queue, info, it) }
-            }.collect { (queue, info, media) ->
-                guarded {
-                    val projection = requireNotNull(projector)
-                    val plan = value.planner.plan(queue, media, playerWindow()) ?: return@guarded
-                    context = info
-                    val oldId = current.value?.episodeId
-                    if (plan.playback == WindowPlayback.LOAD_PAUSED) {
-                        value.engine.pause()
-                        wantPlaying = false
+            ) { queue, _, _ -> queue }
+                .flatMapLatest { queue ->
+                    val ids =
+                        (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
+                    value.media.observe(ids).map { queue to it }
+                }.collect { (queue, media) ->
+                    guarded {
+                        val projection = requireNotNull(projector)
+                        val plan =
+                            value.planner.plan(queue, media, playerWindow(), frozen = ::frozenForPlanner)
+                                ?: return@guarded
+                        // Read the session with the queue: the session and queue flows invalidate
+                        // independently, so a cached context could be cleared by a stale pairing.
+                        context = coherentContext(queue, value.queue.observeSession().first(), context)
+                        val oldId = current.value?.episodeId
+                        if (plan.playback == WindowPlayback.LOAD_PAUSED) {
+                            value.engine.pause()
+                            wantPlaying = false
+                        }
+                        val replacement = plan.operations.filterIsInstance<WindowOp.SetAll>().singleOrNull()
+                        // Restore metadata without preparing output. The first play uses PlayStarter.
+                        if (!prepared) {
+                            restore(queue, media)
+                            return@guarded
+                        }
+                        if (replacement != null && oldId != queue.current?.episodeId) flushPause()
+                        if (replacement != null) prepareSettings(plan.entries)
+                        projection.apply(queue, plan.entries, plan.operations, engineCurrentId)
+                        pendingTracksKnown.keys.retainAll { id ->
+                            projection.entries.any { it.item.episodeId == id }
+                        }
+                        if (replacement != null || plan.operations.any { it == WindowOp.Clear }) {
+                            loaded(replacement?.startPositionMs ?: 0)
+                        }
+                        publish()
+                        if (plan.currentAction != CurrentAction.KEEP) advance(PlaybackExit.MARKED_PLAYED)
                     }
-                    val replacement = plan.operations.filterIsInstance<WindowOp.SetAll>().singleOrNull()
-                    // Restore metadata without preparing output. The first play uses PlayStarter.
-                    if (!prepared) {
-                        restore(queue, media)
-                        return@guarded
-                    }
-                    if (replacement != null && oldId != queue.current?.episodeId) flushPause()
-                    if (replacement != null) prepareSettings(plan.entries)
-                    projection.apply(queue, plan.entries, plan.operations)
-                    if (replacement != null || plan.operations.any { it == WindowOp.Clear }) {
-                        loaded(replacement?.startPositionMs ?: 0)
-                    }
-                    publish()
-                    if (plan.currentAction != CurrentAction.KEEP) advance(PlaybackExit.MARKED_PLAYED)
                 }
-            }
         }
         scope.launch { value.engine.state.collect { state -> guarded { engineState(state) } } }
         // SharedFlow has no replay. Subscribe before setWindow can emit preparation metadata.
@@ -172,6 +247,36 @@ class DesktopPlaybackController(
                     skipBackMs = preferences.skipBackMs
                     skipForwardMs = preferences.skipForwardMs
                     withContext(ioDispatcher) { value.cache.setMaxBytes(preferences.streamCacheMb * BYTES_PER_MB) }
+                }
+            }
+        }
+        // 06 Error recovery: a network error keeps the item and re-prepares once
+        // a validated connection returns within the foreground window.
+        scope.launch {
+            network.status.collect { status ->
+                guarded {
+                    if (status.isConnected && status.isValidated) networkRecovered()
+                }
+            }
+        }
+        // 11 Audio-route monitoring: a removed device pauses and saves; a default
+        // change alone keeps playing on the new default.
+        scope.launch {
+            routeMonitor.events.collect { event ->
+                guarded {
+                    when (event) {
+                        is RouteEvent.DeviceRemoved -> deviceRemoved()
+                        RouteEvent.DefaultChanged -> Unit
+                    }
+                }
+            }
+        }
+        // The shared core's 500-ms step keeps the 20 fade steps over 10 s.
+        scope.launch {
+            while (true) {
+                delay(SleepTimerCore.STEP_MS)
+                guarded {
+                    applySleep(sleepTimerCore.tick(sleepElapsed()))
                 }
             }
         }
@@ -198,9 +303,12 @@ class DesktopPlaybackController(
     ) {
         val row = queue.current?.episodeId?.let(media::get)
         if (row == null) {
+            engineCurrentId = null
+            mutableCurrentChapter.value = null
             current.value = null
             return
         }
+        engineCurrentId = row.episodeId
         val saved = requireNotNull(runtime).positions.observe(row.episodeId).first()
         val snapshot =
             PositionSnapshot(
@@ -283,14 +391,30 @@ class DesktopPlaybackController(
                 requireIntent(ticket)
                 outcome.seekPositionMs?.let { seek(it) }
                 requireIntent(ticket)
-                wantPlaying = true
-                value.engine.play()
+                val currentId = engineCurrentId
+                if (currentId != null && value.engine.state.value is EngineState.Error) {
+                    // A recovered failure (device loss, network, a rejected file)
+                    // re-opens the current item at its saved position. This is the
+                    // user's explicit retry, so it does not spend the automatic
+                    // re-prepare budget.
+                    reprepare(currentId)
+                } else if (currentId != null && completedBoundary == currentId) {
+                    // The end-of-episode timer completed this item in place; a Play
+                    // replays it from the start (06's M5 note).
+                    replayFromStart(currentId)
+                } else {
+                    wantPlaying = true
+                    value.engine.play()
+                }
                 publish()
                 PlayResult.Started
             }
 
             is StartOutcome.Committed -> {
                 val old = projector?.entries?.firstOrNull()?.item
+                // Publish the generation before projectStart's suspending reads, so the
+                // collector cannot mistake this own write for a foreign session and load it paused.
+                value.planner.appliedOwnGeneration(outcome.queue.generation)
                 if (!projectStart(outcome.queue, outcome.startPositionMs, ticket)) return PlayResult.ServiceUnavailable
                 requireIntent(ticket)
                 if (old != null && old.episodeId != outcome.queue.current?.episodeId) history.record(old)
@@ -323,7 +447,15 @@ class DesktopPlaybackController(
         // Repository/settings reads suspend. A restore may have replaced the accepted session.
         if (!sessionMatches(queue)) return false
         ticket?.let(::requireIntent)
-        requireNotNull(projector).apply(queue, entries, listOf(WindowOp.SetAll(entries.map { it.item }, startMs)))
+        // The engine emits TracksKnown during setWindow; the current id must already be
+        // visible to the event collector, which can run before loaded().
+        engineCurrentId = queue.current?.episodeId
+        requireNotNull(projector).apply(
+            queue,
+            entries,
+            listOf(WindowOp.SetAll(entries.map { it.item }, startMs)),
+            queue.current?.episodeId,
+        )
         value.planner.appliedOwnGeneration(queue.generation)
         loaded(startMs)
         return sessionMatches(queue)
@@ -351,14 +483,21 @@ class DesktopPlaybackController(
 
     private suspend fun loaded(startMs: Long) {
         val value = requireNotNull(runtime)
+        // A new item is current, so a later terminal Ended is a new event.
+        engineEndedHandled = false
+        completedBoundary = null
         val row = projector?.entries?.firstOrNull()?.media
         following?.cancelAndJoin()
         following = null
         value.saver.clear()
         prepared = row != null
+        engineCurrentId = row?.episodeId
         durationMs = row?.let { it.measuredDurationMs ?: it.durationMs }
         since = clock.now()
         if (row == null) {
+            pendingTracksKnown.clear()
+            followChapters(null)
+            applySleep(sleepTimerCore.currentChanged(null))
             value.settings.followCurrent(null, null)
             effective.value = null
             current.value = null
@@ -379,6 +518,24 @@ class DesktopPlaybackController(
             }
         value.saver.load(row.episodeId, since, source, replay = row.playedAt != null)
         value.saver.startPositionApplied()
+        followSettings(row, group)
+        followChapters(row.episodeId)
+        pendingTracksKnown.remove(row.episodeId)?.let { applyTracksKnown(it) }
+        applySleep(sleepTimerCore.currentChanged(row.episodeId))
+        publish(startMs)
+    }
+
+    /**
+     * Follows the current item's effective settings, replacing the previous
+     * item's follow. An automatic transition changes the current item, so it
+     * must re-follow or a different podcast's settings would reach the engine.
+     */
+    private suspend fun followSettings(
+        row: ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo,
+        group: Long?,
+    ) {
+        val value = requireNotNull(runtime)
+        following?.cancelAndJoin()
         following =
             scope.launch(start = CoroutineStart.UNDISPATCHED) {
                 value.settings.followCurrent(row.podcastId, group)
@@ -398,17 +555,21 @@ class DesktopPlaybackController(
             }.also { settingsObserver ->
                 following?.invokeOnCompletion { settingsObserver.cancel() }
             }
-        publish(startMs)
     }
 
     override fun pause() {
         intent.incrementAndGet()
-        command {
-            wantPlaying = false
-            runtime?.engine?.pause()
-            flushPause()
-            publish()
-        }
+        command { userPause() }
+    }
+
+    /** An explicit pause restores normal volume; the timer keeps its remaining time. */
+    private suspend fun userPause() {
+        wantPlaying = false
+        runtime?.engine?.pause()
+        sampleSleep()
+        applySleep(sleepTimerCore.paused())
+        flushPause()
+        publish()
     }
 
     override fun togglePlayPause() {
@@ -416,10 +577,7 @@ class DesktopPlaybackController(
         command {
             requireIntent(ticket)
             if (wantPlaying) {
-                wantPlaying = false
-                runtime?.engine?.pause()
-                flushPause()
-                publish()
+                userPause()
             } else {
                 reportStart(startLocked(StartRequest.Resume, ticket))
             }
@@ -435,10 +593,56 @@ class DesktopPlaybackController(
     private suspend fun seek(requestedMs: Long) {
         if (!prepared) return
         val value = requireNotNull(runtime)
+        if (completedBoundary != null && completedBoundary == engineCurrentId) armReplay()
         val target = requestedMs.coerceAtLeast(0).let { durationMs?.let(it::coerceAtMost) ?: it }
         value.engine.seekTo(target)
         checkSave(value.saver.onSeek(target, durationMs, SeekOrigin.USER))
         publish(target)
+    }
+
+    /**
+     * The completed boundary item stays current: the planner must not apply its
+     * "current marked played" advance/end rule to it (Android passes the same freeze through
+     * `QueueProjector`). A replay trigger clears the marker, so the rule resumes.
+     */
+    private fun frozenForPlanner(episodeId: Long): Boolean = completedBoundary == episodeId
+
+    /**
+     * Arms a replay of the completed boundary item. A fresh `since` lets its saves through the
+     * played-after-start guard again, and `replay = true` clears the played mark at the first
+     * actual playback (06's M5 note, Android's `replayCompletedBoundary`).
+     */
+    private fun armReplay() {
+        val value = runtime ?: return
+        val id = engineCurrentId ?: return
+        val projection = projector ?: return
+        val source =
+            if (projection.entries.firstOrNull()?.localUri != null) {
+                PositionSource.DOWNLOAD
+            } else {
+                PositionSource.STREAM
+            }
+        since = clock.now()
+        value.saver.load(id, since, source, replay = true)
+        value.saver.startPositionApplied()
+        completedBoundary = null
+    }
+
+    /**
+     * A Play on the completed boundary item replays it from the start: the mark-played chain reset
+     * its position, so the engine re-prepares at 0 and the armed saver clears the played mark at the
+     * first actual playback.
+     */
+    private suspend fun replayFromStart(episodeId: Long) {
+        val value = requireNotNull(runtime)
+        val projection = projector ?: return
+        val index = projection.entries.indexOfFirst { it.item.episodeId == episodeId }
+        if (index < 0) return
+        armReplay()
+        value.engine.setWindow(projection.engineWindow, index, 0)
+        wantPlaying = true
+        value.engine.play()
+        publish()
     }
 
     override fun skipToNext() = command { advance(PlaybackExit.SEEK) }
@@ -469,7 +673,8 @@ class DesktopPlaybackController(
         if (!prepared) return
         val value = requireNotNull(runtime)
         val projection = requireNotNull(projector)
-        val current = projection.entries.firstOrNull()?.item ?: return
+        val currentId = engineCurrentId ?: return
+        val current = projection.entries.firstOrNull { it.item.episodeId == currentId }?.item ?: return
         val revision = SessionRevision(current.episodeId, projection.generation)
         // Re-read the live tail before deciding, including edits not yet collected by the projector.
         val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
@@ -485,12 +690,14 @@ class DesktopPlaybackController(
             } else {
                 value.sessions.onTransition(departure, next.episodeId, next.origin, revision, clock.now())
             } ?: return
+        // Publish the generation before the suspending reads below, so the collector cannot
+        // mistake this own write for a foreign session and load it paused.
+        value.planner.appliedOwnGeneration(generation)
         val committed = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
         if (committed.generation != generation || committed.current?.episodeId != next?.episodeId) return
         if (next == null) {
             value.engine.pause()
-            projection.apply(committed, emptyList(), listOf(WindowOp.Clear))
-            value.planner.appliedOwnGeneration(generation)
+            projection.apply(committed, emptyList(), listOf(WindowOp.Clear), currentId)
             wantPlaying = false
             loaded(0)
             return
@@ -515,11 +722,15 @@ class DesktopPlaybackController(
     private suspend fun engineState(state: EngineState) {
         val value = runtime ?: return
         if (!prepared || state != value.engine.state.value) return
-        val id = current.value?.episodeId
+        val id = engineCurrentId
         when (state) {
             is EngineState.Ready -> {
                 if (state.episodeId != id) return
-                if (state.playing) checkSave(value.saver.onPlaying())
+                if (state.playing) {
+                    outputDeviceLost = false
+                    pendingIssue = null
+                    checkSave(value.saver.onPlaying())
+                }
             }
 
             is EngineState.Buffering -> {
@@ -527,12 +738,18 @@ class DesktopPlaybackController(
             }
 
             is EngineState.Error -> {
-                if (state.episodeId != id) return
-                wantPlaying = false
+                recoverEngineError(state)
+                return
             }
 
             EngineState.Ended -> {
-                advance(PlaybackExit.END)
+                if (engineEndedHandled) return
+                engineEndedHandled = true
+                if (sleepTimerCore.state is SleepTimerState.EndOfEpisode) {
+                    endOfEpisode()
+                } else {
+                    advance(PlaybackExit.END)
+                }
                 return
             }
 
@@ -541,18 +758,314 @@ class DesktopPlaybackController(
             }
         }
         val advancing = state is EngineState.Ready && state.playing
+        // Buffering stops the countdown but holds the fade factor; an explicit pause
+        // restores the volume through userPause.
+        applySleep(
+            sleepTimerCore.advancing(
+                if (advancing) SleepTimerCore.Advancement.PLAYING else SleepTimerCore.Advancement.STOPPED,
+            ),
+        )
         if (!advancing && (current.value?.isPlaying == true || state is EngineState.Error)) flushPause()
         publish()
     }
 
+    /**
+     * Applies 06's recovery rules and 11's error table to an engine error. A
+     * skip-type failure skips the item; a network failure keeps it and waits for
+     * a validated connection; a missing local file re-resolves to the stream; a
+     * device failure pauses and saves. A successor's prepare failure skips that
+     * successor and tries the following item.
+     */
+    private suspend fun recoverEngineError(state: EngineState.Error) {
+        val value = runtime ?: return
+        if (!prepared || state != value.engine.state.value) return
+        pendingIssue = null
+        val failedId = state.episodeId
+        if (failedId != engineCurrentId) {
+            successorPrepareFailed(failedId, state.error)
+            return
+        }
+        when (state.error) {
+            is EngineError.Output -> deviceLost()
+            EngineError.Network -> networkLost(failedId)
+            EngineError.LocalFileMissing -> localFileMissing(failedId)
+            is EngineError.Engine -> pauseWithPlayerError()
+            else -> skipUnplayable(failedId, requireNotNull(unplayableReason(state.error)))
+        }
+    }
+
+    /** The 06 reason for an engine error, or null when the error is not a skip. */
+    private fun unplayableReason(error: EngineError): UnplayableReason? =
+        when (error) {
+            is EngineError.Http -> httpReason(error.status)
+            EngineError.AuthRequired -> UnplayableReason.AuthRequired
+            EngineError.UnsupportedFormat -> UnplayableReason.UnsupportedFormat
+            EngineError.NoMedia -> UnplayableReason.NoMedia
+            is EngineError.ContentChanged -> UnplayableReason.Http(HTTP_RANGE_NOT_SATISFIABLE)
+            is EngineError.YouTube -> UnplayableReason.YouTubeExtraction
+            EngineError.Network, EngineError.LocalFileMissing, is EngineError.Output, is EngineError.Engine -> null
+        }
+
+    private fun httpReason(status: Int): UnplayableReason =
+        if (status == HTTP_UNAUTHORIZED) UnplayableReason.AuthRequired else UnplayableReason.Http(status)
+
+    /**
+     * Skips an unplayable item with 06's rules: a Skipped event, then the next
+     * queue item; after five consecutive skips the player pauses with
+     * PLAYER_ERROR instead of spinning through the queue.
+     */
+    private suspend fun skipUnplayable(
+        episodeId: Long,
+        reason: UnplayableReason,
+    ) {
+        if (!budget.trySkip() || (projector?.entries?.size ?: 0) <= 1) {
+            pauseWithPlayerError()
+            return
+        }
+        notifications.emit(PlaybackEvent.Skipped(episodeId, titleOf(episodeId), reason))
+        advance(PlaybackExit.ERROR_SKIP)
+    }
+
+    /**
+     * A successor's preparation failed at the boundary (11 Transitions point 4).
+     * The outgoing item has ended, so it is committed as a natural departure; the
+     * failed successor is skipped with 06's rules and the following item is tried.
+     */
+    private suspend fun successorPrepareFailed(
+        failedId: Long,
+        error: EngineError,
+    ) {
+        val value = requireNotNull(runtime)
+        val projection = projector ?: return
+        val outgoingId = engineCurrentId ?: return
+        val outgoing = projection.entries.firstOrNull { it.item.episodeId == outgoingId } ?: return
+        // A failure for an item the projection already dropped is stale: no
+        // skip to record and no budget to spend for it.
+        val failedIndex = projection.entries.indexOfFirst { it.item.episodeId == failedId }
+        if (failedIndex < 0) return
+        val reason = unplayableReason(error)
+        if (reason == null || !budget.trySkip()) {
+            // A network or device failure preparing the successor is not a skip.
+            pauseWithPlayerError()
+            return
+        }
+        notifications.emit(PlaybackEvent.Skipped(failedId, titleOf(failedId), reason))
+        val departure = value.saver.capture(position(), durationMs, PlaybackExit.END)?.departure
+        val next = projection.entries.getOrNull(failedIndex + 1)
+        val revision = SessionRevision(outgoingId, projection.generation)
+        val generation =
+            if (next == null) {
+                value.sessions.endSession(departure, revision, clock.now())
+            } else {
+                value.sessions.onTransition(departure, next.item.episodeId, next.item.origin, revision, clock.now())
+            } ?: return
+        // Publish the generation before the suspending reads below, so the collector cannot
+        // mistake this own write for a foreign session and load it paused.
+        value.planner.appliedOwnGeneration(generation)
+        val committed = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+        if (committed.generation != generation || committed.current?.episodeId != next?.item?.episodeId) return
+        if (next == null) {
+            value.engine.pause()
+            projection.apply(committed, emptyList(), listOf(WindowOp.Clear), outgoingId)
+            wantPlaying = false
+            loaded(0)
+            return
+        }
+        val row = next.media ?: return
+        val saved = value.positions.observe(next.item.episodeId).first()
+        val startMs =
+            StartPositionRule().startPositionMs(
+                saved?.positionMs,
+                saved?.updatedAt,
+                row.measuredDurationMs ?: row.durationMs,
+                row.playedAt != null || saved?.playedAt != null,
+                clock.now(),
+            )
+        if (!projectStart(committed, startMs)) return
+        history.record(outgoing.item)
+        wantPlaying = true
+        value.engine.play()
+        publish()
+    }
+
+    /** 11 Device loss: pause and save; the next play opens the default device. */
+    private suspend fun deviceLost() {
+        if (outputDeviceLost) return
+        outputDeviceLost = true
+        wantPlaying = false
+        runtime?.engine?.pause()
+        flushPause()
+        applySleep(sleepTimerCore.paused())
+        publish()
+    }
+
+    /** MD2's route monitor: the device in use disappeared. */
+    private suspend fun deviceRemoved() {
+        runtime?.engine?.onDeviceRemoved()
+        deviceLost()
+    }
+
+    /** 06: a network failure keeps the item and waits for a validated connection. */
+    private suspend fun networkLost(episodeId: Long) {
+        networkRetry = NetworkRetry(episodeId, clock.elapsedRealtime())
+        wantPlaying = false
+        runtime?.engine?.pause()
+        flushPause()
+        applySleep(sleepTimerCore.paused())
+        publish()
+    }
+
+    private suspend fun networkRecovered() {
+        val retry = networkRetry ?: return
+        if (engineCurrentId != retry.episodeId ||
+            clock.elapsedRealtime() - retry.failedAtMs >= FOREGROUND_WINDOW_MS
+        ) {
+            networkRetry = null
+            return
+        }
+        networkRetry = null
+        if (!budget.tryReprepare(retry.episodeId)) {
+            pauseWithPlayerError()
+            return
+        }
+        reprepare(retry.episodeId)
+    }
+
+    /** 06: a missing download re-resolves to the stream at the same position. */
+    private suspend fun localFileMissing(episodeId: Long) {
+        pendingIssue = PlaybackIssue.LOCAL_FILE_MISSING
+        if (!budget.tryReprepare(episodeId)) {
+            pauseWithPlayerError()
+            return
+        }
+        reprepare(episodeId)
+    }
+
+    private suspend fun pauseWithPlayerError() {
+        wantPlaying = false
+        runtime?.engine?.pause()
+        flushPause()
+        applySleep(sleepTimerCore.paused())
+        publish()
+    }
+
+    /**
+     * Re-opens the current item at its last position (06's re-prepare). The engine
+     * re-resolves the source and, after an output failure, opens a fresh device.
+     */
+    private suspend fun reprepare(episodeId: Long) {
+        val value = requireNotNull(runtime)
+        val projection = projector ?: return
+        val index = projection.entries.indexOfFirst { it.item.episodeId == episodeId }
+        if (index < 0) return
+        val position = position().coerceAtLeast(0)
+        value.engine.setWindow(projection.engineWindow, index, position)
+        wantPlaying = true
+        value.engine.play()
+        publish()
+    }
+
+    private fun titleOf(episodeId: Long): String =
+        projector
+            ?.entries
+            ?.firstOrNull { it.item.episodeId == episodeId }
+            ?.media
+            ?.title
+            .orEmpty()
+
     private suspend fun engineEvent(event: EngineEvent) {
         if (!prepared) return
-        if (event is EngineEvent.TracksKnown && event.episodeId == current.value?.episodeId) {
-            event.durationMs?.takeIf { it > 0 }?.let {
-                durationMs = it
-                requireNotNull(runtime).positions.setMeasuredDuration(event.episodeId, it)
+        when (event) {
+            is EngineEvent.TracksKnown -> {
+                if (event.episodeId == engineCurrentId) {
+                    applyTracksKnown(event)
+                } else if (projector?.entries?.any { it.item.episodeId == event.episodeId } == true) {
+                    pendingTracksKnown[event.episodeId] = event
+                }
+            }
+
+            is EngineEvent.ItemTransition -> {
+                engineItemTransition(event)
+                return
+            }
+
+            EngineEvent.DeviceLost -> {
+                deviceLost()
+                return
+            }
+
+            else -> {
+                Unit
             }
         }
+        publish()
+    }
+
+    /**
+     * The engine has already handed the ring to the next window item. Commit the
+     * shared departure/arrival through the core stores, then apply the arrival's
+     * start position and effective settings; the projected window follows the
+     * commit. The engine keeps the outgoing item in its window, so the planner
+     * diff removes it as a prefix and the arrival is never re-prepared.
+     */
+    private suspend fun engineItemTransition(event: EngineEvent.ItemTransition) {
+        val value = requireNotNull(runtime)
+        val projection = projector ?: return
+        val toId = event.toEpisodeId
+        val fromId = event.fromEpisodeId ?: return
+        if (engineCurrentId == toId) {
+            publish()
+            return
+        }
+        val outgoing = projection.entries.firstOrNull { it.item.episodeId == fromId } ?: return
+        val arrival = projection.entries.firstOrNull { it.item.episodeId == toId } ?: return
+        val row = arrival.media ?: return
+        val revision = SessionRevision(fromId, projection.generation)
+        val departure = value.saver.capture(event.fromPositionMs, durationMs, PlaybackExit.AUTO)?.departure ?: return
+        val generation =
+            value.sessions.onTransition(departure, toId, arrival.item.origin, revision, clock.now()) ?: return
+        value.planner.appliedOwnGeneration(generation)
+        engineCurrentId = toId
+        history.record(outgoing.item)
+        followChapters(toId)
+        pendingTracksKnown.remove(toId)?.let { applyTracksKnown(it) }
+        applySleep(sleepTimerCore.currentChanged(toId))
+        val group = context?.takeIf { it.type == ContextType.GROUP }?.id
+        val settings = requireNotNull(value.settings.cached(row.podcastId, group))
+        effective.value = settings
+        value.engine.setSpeed(settings.speed.value)
+        value.engine.setSkipSilence(settings.skipSilence.value)
+        durationMs = row.measuredDurationMs ?: row.durationMs
+        since = clock.now()
+        val source = if (arrival.localUri != null) PositionSource.DOWNLOAD else PositionSource.STREAM
+        value.saver.load(toId, since, source, replay = row.playedAt != null)
+        value.saver.startPositionApplied()
+        checkSave(value.saver.onPlaying())
+        followSettings(row, group)
+        val saved = value.positions.observe(toId).first()
+        val startMs =
+            StartPositionRule().startPositionMs(
+                saved?.positionMs,
+                saved?.updatedAt,
+                durationMs,
+                row.playedAt != null || saved?.playedAt != null,
+                clock.now(),
+            )
+        if (startMs > 0) {
+            value.engine.seekTo(startMs)
+            checkSave(value.saver.onSeek(startMs, durationMs, SeekOrigin.CORE))
+        }
+        publish(startMs)
+        // The committed queue emission re-projects the tail; apply it now so the
+        // engine's window and the planner agree even when the emission coalesced.
+        val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
+        if (queue.generation != generation || queue.current?.episodeId != toId) return
+        val ids = (listOfNotNull(queue.current) + queue.upNext + queue.contextTail).map { it.episodeId }.toSet()
+        val media = value.media.observe(ids).first()
+        val plan =
+            value.planner.plan(queue, media, playerWindow(), frozen = ::frozenForPlanner)
+                ?: return
+        projection.apply(queue, plan.entries, plan.operations, toId)
         publish()
     }
 
@@ -564,19 +1077,28 @@ class DesktopPlaybackController(
                 ?: 0
         }
 
-    private fun playerWindow(): PlayerWindow =
-        PlayerWindow(
-            if (prepared) projector?.entries.orEmpty() else emptyList(),
+    private fun playerWindow(): PlayerWindow {
+        val entries = if (prepared) projector?.entries.orEmpty() else emptyList()
+        val index = engineCurrentId?.let { id -> entries.indexOfFirst { it.item.episodeId == id } } ?: -1
+        return PlayerWindow(
+            entries,
+            currentIndex = if (entries.isEmpty()) 0 else index.coerceIn(0, entries.size - 1),
             currentSinceMs = since,
             positionMs = position(),
             isPlaying = current.value?.isPlaying == true,
             playWhenReady = wantPlaying,
         )
+    }
 
     private suspend fun publish(positionMs: Long = position()) {
         if (!prepared) return
         val value = requireNotNull(runtime)
-        val row = projector?.entries?.firstOrNull()?.media ?: return
+        val projection = projector ?: return
+        val row =
+            engineCurrentId
+                ?.let { id -> projection.entries.firstOrNull { it.item.episodeId == id }?.media }
+                ?: projection.entries.firstOrNull()?.media
+                ?: return
         val state = value.engine.state.value
         val phase =
             when (state) {
@@ -599,13 +1121,18 @@ class DesktopPlaybackController(
                 clock.elapsedRealtime(),
             )
         val issue =
-            (state as? EngineState.Error)?.error?.let {
-                when (it) {
-                    EngineError.Network -> PlaybackIssue.NETWORK_LOST
-                    EngineError.LocalFileMissing -> PlaybackIssue.LOCAL_FILE_MISSING
-                    else -> PlaybackIssue.PLAYER_ERROR
+            pendingIssue
+                ?: (state as? EngineState.Error)?.error?.let { error ->
+                    when (error) {
+                        // A missing local file is re-resolved at once, so pendingIssue holds the
+                        // UI issue until the re-resolve; the raw error must not leak it early.
+                        EngineError.LocalFileMissing -> null
+
+                        EngineError.Network -> PlaybackIssue.NETWORK_LOST
+
+                        else -> PlaybackIssue.PLAYER_ERROR
+                    }
                 }
-            }
         current.value =
             NowPlaying(
                 row.episodeId,
@@ -619,9 +1146,9 @@ class DesktopPlaybackController(
                 playing,
                 wantPlaying,
                 snapshot,
-                requireNotNull(projector).entries.size > 1,
+                projection.entries.size > 1,
                 value.resolver.streamKind(row.episodeId)
-                    ?: if (projector?.entries?.firstOrNull()?.localUri !=
+                    ?: if (projection.entries.firstOrNull { it.item.episodeId == row.episodeId }?.localUri !=
                         null
                     ) {
                         StreamKind.LOCAL
@@ -632,10 +1159,164 @@ class DesktopPlaybackController(
                 context,
             )
         ticks.emit(snapshot)
+        evaluateChapter()
     }
 
     private suspend fun flushPause() {
         if (prepared) checkSave(requireNotNull(runtime).saver.onPause(position(), durationMs))
+    }
+
+    private fun sleepElapsed(): Long {
+        val now = clock.elapsedRealtime()
+        val elapsed = (now - sleepSampledAt).coerceAtLeast(0)
+        sleepSampledAt = now
+        return elapsed
+    }
+
+    private suspend fun sampleSleep() {
+        applySleep(sleepTimerCore.tick(sleepElapsed()))
+    }
+
+    /**
+     * Applies the shared core's commands. The desktop has no EndOfItemPauseArbiter:
+     * the end-of-episode pause is driven by the core state at [EngineState.Ended],
+     * so [SleepTimerCore.Effect.ArmEndOfItem] only records what that handler reads.
+     */
+    private suspend fun applySleep(effects: List<SleepTimerCore.Effect>) {
+        val value = runtime ?: return
+        effects.forEach { effect ->
+            when (effect) {
+                is SleepTimerCore.Effect.Fade -> {
+                    value.engine.setFade(effect.factor)
+                }
+
+                is SleepTimerCore.Effect.ArmEndOfItem -> {
+                    Unit
+                }
+
+                SleepTimerCore.Effect.Pause -> {
+                    wantPlaying = false
+                    value.engine.pause()
+                    flushPause()
+                    publish()
+                }
+
+                SleepTimerCore.Effect.Fired -> {
+                    notifications.emit(PlaybackEvent.SleepTimerFired)
+                }
+            }
+        }
+        mutableSleepTimer.value = sleepTimerCore.state
+    }
+
+    /**
+     * The end-of-episode timer completes the item in place: the shared boundary write
+     * marks it played, the session stays on it and the timer clears (06 Sleep timer).
+     */
+    private suspend fun endOfEpisode() {
+        val value = requireNotNull(runtime)
+        val id = engineCurrentId ?: return
+        val projection = projector ?: return
+        val capture = value.saver.capture(position(), durationMs, PlaybackExit.END)
+        if (capture != null && capture.departure.writePosition && capture.departure.markPlayed) {
+            if (value.sessions.markBoundaryPlayed(id, SessionRevision(id, projection.generation), clock.now())) {
+                completedBoundary = id
+            }
+        }
+        applySleep(sleepTimerCore.endOfItem())
+        publish()
+    }
+
+    private suspend fun applyTracksKnown(event: EngineEvent.TracksKnown) {
+        if (event.episodeId != engineCurrentId) return
+        event.durationMs?.takeIf { it > 0 }?.let {
+            durationMs = it
+            requireNotNull(runtime).positions.setMeasuredDuration(event.episodeId, it)
+        }
+        persistEmbeddedChapters(event)
+    }
+
+    private suspend fun persistEmbeddedChapters(event: EngineEvent.TracksKnown) {
+        val value = runtime ?: return
+        event.chapters
+            .groupBy { it.source }
+            .forEach { (source, rows) ->
+                if (rows.isEmpty() || source in writtenChapterSources) return@forEach
+                try {
+                    value.chapterRepository.replace(event.episodeId, source, rows)
+                    writtenChapterSources += source
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    Log.w(TAG, failure) { "Could not persist embedded chapters" }
+                }
+            }
+    }
+
+    /**
+     * Observes the winning rows of the current episode and asks for Podcasting 2.0 JSON
+     * enrichment, as Android's Chapters does. The observation already publishes the
+     * winning source, so container rows and JSON rows need no second merge.
+     */
+    private suspend fun followChapters(episodeId: Long?) {
+        chapterFollowing?.cancelAndJoin()
+        chapterFollowing = null
+        chapterBoundary?.cancel()
+        chapterBoundary = null
+        chapterIndex = ChapterIndex(emptyList())
+        writtenChapterSources.clear()
+        mutableCurrentChapter.value = null
+        val value = runtime ?: return
+        if (episodeId == null) return
+        chapterFollowing =
+            scope.launch {
+                value.chapterRepository.observe(episodeId).collect { rows ->
+                    guarded {
+                        if (episodeId != engineCurrentId) return@guarded
+                        chapterIndex = ChapterIndex(rows)
+                        evaluateChapter()
+                    }
+                }
+            }
+        // Best-effort enrichment; a failure leaves stored and lower sources in place.
+        scope.launch {
+            try {
+                value.chapterRepository.ensureLoaded(episodeId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.w(TAG, failure) { "Could not load chapters" }
+            }
+        }
+    }
+
+    /**
+     * Publishes the containing chapter and schedules the next boundary, as Android's
+     * Chapters does; a gap or an explicit end clears the state without waiting for the
+     * next start.
+     */
+    private fun evaluateChapter() {
+        chapterBoundary?.cancel()
+        chapterBoundary = null
+        val id = engineCurrentId
+        val index = id?.let { chapterIndex.current(position()) }
+        mutableCurrentChapter.value =
+            id?.let { episode ->
+                index?.let { CurrentChapter(episode, it, chapterIndex.chapters.size, chapterIndex.chapters[it]) }
+            }
+        if (current.value?.isPlaying != true) return
+        val next = chapterIndex.nextBoundary(position()) ?: return
+        val speed =
+            effective.value
+                ?.speed
+                ?.value
+                ?.takeIf { it > 0f } ?: return
+        val waitMs = ceil((next - position()).coerceAtLeast(0).toDouble() / speed).toLong().coerceAtLeast(1)
+        chapterBoundary =
+            scope.launch {
+                delay(waitMs)
+                guarded { evaluateChapter() }
+            }
     }
 
     private fun checkSave(result: PositionSaveResult) {
@@ -669,16 +1350,19 @@ class DesktopPlaybackController(
         serial {
             requireIntent(ticket)
             val value = runtime ?: return@serial
-            value.sessions.clearCurrent(
-                value.saver.capture(position(), durationMs, PlaybackExit.DISMISS)?.departure,
-                clock.now(),
-                allowed = { ticket == intent.get() },
-            )
+            val generation =
+                value.sessions.clearCurrent(
+                    value.saver.capture(position(), durationMs, PlaybackExit.DISMISS)?.departure,
+                    clock.now(),
+                    allowed = { ticket == intent.get() },
+                )
+            // Publish the generation before the suspending reads below, so the collector cannot
+            // mistake this own write for a foreign session and load it paused.
+            value.planner.appliedOwnGeneration(generation)
             requireIntent(ticket)
             value.engine.pause()
             val queue = value.sessions.virtualQueue(QueueWindowPlanner.CONTEXT_SIZE)
-            requireNotNull(projector).apply(queue, emptyList(), listOf(WindowOp.Clear))
-            value.planner.appliedOwnGeneration(queue.generation)
+            requireNotNull(projector).apply(queue, emptyList(), listOf(WindowOp.Clear), engineCurrentId)
             wantPlaying = false
             loaded(0)
             history.clear()
@@ -695,6 +1379,8 @@ class DesktopPlaybackController(
                 val value = runtime ?: return@serial
                 value.engine.pause()
                 wantPlaying = false
+                sampleSleep()
+                applySleep(sleepTimerCore.set(SleepTimerMode.Off, null))
                 try {
                     flushPause()
                 } finally {
@@ -718,15 +1404,45 @@ class DesktopPlaybackController(
             Unit
         }
 
-    override fun setSleepTimer(mode: SleepTimerMode) = Unit
+    override fun setSleepTimer(mode: SleepTimerMode) {
+        if (mode is SleepTimerMode.Minutes && !SleepTimerMode.isValidMinutes(mode.minutes)) return
+        command {
+            sampleSleep()
+            applySleep(sleepTimerCore.set(mode, engineCurrentId))
+        }
+    }
 
-    override fun extendSleepTimer(minutes: Int) = Unit
+    override fun extendSleepTimer(minutes: Int) {
+        if (!SleepTimerMode.isValidMinutes(minutes)) return
+        command {
+            sampleSleep()
+            applySleep(sleepTimerCore.extend(minutes))
+        }
+    }
 
-    override fun nextChapter() = Unit
+    override fun nextChapter() = command { chapterSeek(ChapterDirection.NEXT) }
 
-    override fun previousChapter() = Unit
+    override fun previousChapter() = command { chapterSeek(ChapterDirection.PREVIOUS) }
 
     override fun grantMeteredStreaming() = Unit
+
+    private suspend fun chapterSeek(direction: ChapterDirection) {
+        if (!prepared) return
+        val target =
+            when (direction) {
+                ChapterDirection.NEXT -> chapterIndex.next(position())
+                ChapterDirection.PREVIOUS -> chapterIndex.previous(position())
+            } ?: return
+        seek(target)
+    }
+
+    private enum class ChapterDirection { NEXT, PREVIOUS }
+
+    /** A network failure kept for an automatic re-prepare (06 Error recovery). */
+    private data class NetworkRetry(
+        val episodeId: Long,
+        val failedAtMs: Long,
+    )
 
     private fun command(block: suspend () -> Unit) {
         scope.launch { guarded(block) }
@@ -756,5 +1472,27 @@ class DesktopPlaybackController(
         const val BYTES_PER_MB = 1_000_000L
         const val DEFAULT_SKIP_BACK_MS = 10_000L
         const val DEFAULT_SKIP_FORWARD_MS = 30_000L
+        const val HTTP_UNAUTHORIZED = 401
+        const val HTTP_RANGE_NOT_SATISFIABLE = 416
+
+        /** 06 Error recovery: the automatic network re-prepare window. */
+        const val FOREGROUND_WINDOW_MS = 10 * 60_000L
     }
 }
+
+/**
+ * The queue and session flows invalidate independently, so a fresh queue emission can meet a
+ * stale session emission. Only a session that carries the queue's generation is the context of
+ * that queue; any other pairing keeps the last coherent context, or a transition landing in the
+ * gap would resolve the arrival's settings with a null group.
+ */
+internal fun coherentContext(
+    queue: VirtualQueue,
+    session: PlaySessionInfo?,
+    previous: PlayContextInfo?,
+): PlayContextInfo? =
+    when {
+        session != null && session.generation == queue.generation -> session.context
+        previous != null -> previous
+        else -> null
+    }

@@ -44,6 +44,7 @@ import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import coil3.PlatformContext
@@ -90,6 +91,19 @@ class DesktopAppGraphTest {
                 graph.databaseOpener.requireDatabase().close()
             }
         }
+
+    @Test
+    fun theDesktopNotifierBindsTheOsNotifierOverTheBanners() {
+        try {
+            // The bound DesktopNotifier is MD2's OS notifier; the banner stays reachable as
+            // its fallback (11 Notifications' fallback column).
+            assertThat(graph.desktopNotifier).isSameInstanceAs(graph.osNotifier)
+            assertThat(graph.osNotifier.description).isNotEmpty()
+            graph.osNotifier.close()
+        } finally {
+            graph.appScope.cancel()
+        }
+    }
 
     @Test
     fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
@@ -146,6 +160,13 @@ class DesktopAppGraphTest {
             graph.desktopPlaybackController.shutdown()
             graph.databaseOpener.requireDatabase().close()
         }
+
+    /** Download-time chapters (06 Chapters): the graph binds the desktop container reader, so
+     *  `ChapterRepository.ensureLocalLoaded` can extract a downloaded episode's chapters. */
+    @Test
+    fun theDownloadTimeChapterReaderIsTheDesktopContainerExtractor() {
+        assertThat(graph.embeddedChapterReader()).isInstanceOf(DesktopChapterExtractor::class.java)
+    }
 
     @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
@@ -253,7 +274,12 @@ class DesktopAppGraphTest {
         }
         assertThat(
             graph.idleSleepInhibitor::class.simpleName,
-        ).isAnyOf("LinuxIdleSleepInhibitor", "PendingIdleSleepInhibitor")
+        ).isAnyOf(
+            "LinuxIdleSleepInhibitor",
+            "MacIdleSleepInhibitor",
+            "WindowsIdleSleepInhibitor",
+            "PendingIdleSleepInhibitor",
+        )
         assertThat(graph.osSurfaces).isSameInstanceAs(graph.osSurfaces)
 
         val orders =
@@ -371,6 +397,7 @@ class DesktopAppGraphTest {
         assertThat(orders.getValue("DesktopDownloadIndexInitializer")).isEqualTo(130)
         assertThat(orders.getValue("DesktopDeferredDeletesInitializer")).isEqualTo(310)
         assertThat(orders.getValue("DesktopDownloadAlerts")).isEqualTo(310)
+        assertThat(orders.getValue("DesktopDownloadObservers")).isEqualTo(310)
         assertThat(orders.getValue("CredentialLoadInitializer"))
             .isLessThan(orders.getValue("DesktopDownloadIndexInitializer"))
         assertThat(orders.getValue("DesktopDownloadIndexInitializer"))
@@ -419,6 +446,36 @@ class DesktopAppGraphTest {
         assertThat(graph.bannerNotifier::class.simpleName).isEqualTo("DesktopBannerNotifier")
         assertThat(graph.jobRunner.status.value.keys).contains("import-backup")
     }
+
+    @Test
+    fun collectingInitializersBeforeDatabaseOpenIsSafeOnTheEventThread() {
+        java.awt.EventQueue.invokeAndWait {
+            assertThat(graph.initializers).isNotEmpty()
+        }
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
+    fun desktopAutomaticDownloadsAndMoveLanesResolveWithSharedOwners() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                assertThat(graph.autoDownloadPlanner()::class.simpleName).isEqualTo("AutoDownloadPlannerImpl")
+                assertThat(graph.cleanupPlanner()::class.simpleName).isEqualTo("CleanupPlannerImpl")
+                assertThat(graph.downloadMover()::class.simpleName).isEqualTo("DownloadMoverImpl")
+                assertThat(graph.autoDownloadPlanner()).isSameInstanceAs(graph.autoDownloadPlanner())
+                assertThat(graph.cleanupPlanner()).isSameInstanceAs(graph.cleanupPlanner())
+                assertThat(graph.downloadMover()).isSameInstanceAs(graph.downloadMover())
+                assertThat(graph.jobRunner.status.value.keys).containsAtLeast(
+                    "downloads-manual",
+                    "downloads-auto",
+                    "downloads-move",
+                )
+                assertThat(graph.initializers.count { it::class.simpleName == "DesktopDownloadObservers" }).isEqualTo(1)
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
 
     private companion object {
         const val FIRST_BAND = 0
