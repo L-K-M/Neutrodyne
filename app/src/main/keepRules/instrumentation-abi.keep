@@ -1141,7 +1141,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.diagnostics.AppDiagnosticsContributorContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.diagnostics.DatabaseCopyExporter$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.diagnostics.DatabaseCopyExporter$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public static ch.lkmc.neutrodyne.core.data.diagnostics.DatabaseCopyExporter$MetroFactory create$default(ch.lkmc.neutrodyne.core.data.diagnostics.DatabaseCopyExporter$MetroFactory$Companion, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, int, java.lang.Object);
 }
 -keep class ch.lkmc.neutrodyne.core.data.diagnostics.DatabaseCopyExporter$MetroFactory {
   ch.lkmc.neutrodyne.core.data.diagnostics.DatabaseCopyExporter$MetroFactory$Companion Companion;
