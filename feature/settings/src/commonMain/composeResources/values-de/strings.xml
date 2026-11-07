@@ -118,6 +118,8 @@
     <string name="diagnostics_copy_report">Diagnosebericht kopieren</string>
     <string name="diagnostics_copy_done">Diagnose kopiert</string>
     <string name="diagnostics_export_db">Datenbankkopie exportieren</string>
+    <string name="diagnostics_export_confirm_body">Die Kopie enthält deine Abonnements, Episodentitel und deinen Hörverlauf. Adressen, Shownotes und Beschreibungen werden unkenntlich gemacht.</string>
+    <string name="diagnostics_export_confirm">Exportieren</string>
     <string name="diagnostics_export_done">Datenbankkopie exportiert</string>
     <string name="diagnostics_export_failed">Datenbankexport fehlgeschlagen</string>
     <string name="diagnostics_export_cancelled">Export abgebrochen</string>

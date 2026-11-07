@@ -125,6 +125,8 @@
     <string name="diagnostics_copy_report">Copy diagnostics report</string>
     <string name="diagnostics_copy_done">Diagnostics copied</string>
     <string name="diagnostics_export_db">Export database copy</string>
+    <string name="diagnostics_export_confirm_body">The copy includes your subscriptions, episode titles and listening history. Addresses, show notes and descriptions are masked.</string>
+    <string name="diagnostics_export_confirm">Export</string>
     <string name="diagnostics_export_done">Database copy exported</string>
     <string name="diagnostics_export_failed">Database export failed</string>
     <string name="diagnostics_export_cancelled">Export cancelled</string>
