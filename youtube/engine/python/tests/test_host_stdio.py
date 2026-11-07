@@ -57,8 +57,11 @@ class FakeBridge:
 
     def call(self, method, payload, deadline, call_id, cancel):
         self.calls.append((method, json.loads(payload), call_id, cancel))
+        # Unbounded: the duplicate-id test depends on the call staying in flight until
+        # released; a timeout under a loaded runner would free the id and hide the
+        # rejection. close()'s join deadline is the wedge guard.
         if self.hold is not None:
-            self.hold.wait(5)
+            self.hold.wait()
         if cancel.is_set():
             raise ShimError(Code.CANCELLED)
         if self.error is not None:
