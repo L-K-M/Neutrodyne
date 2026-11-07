@@ -50,6 +50,7 @@ internal class DatabaseCopyExporter
         private val fileSystem: FileSystem,
         private val clock: Clock,
         @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
+        private val writerWaitMs: Long = WRITER_WAIT_MS,
     ) {
         private val exportDir: Path get() = exportDirOf(storagePaths)
 
@@ -74,15 +75,18 @@ internal class DatabaseCopyExporter
                 val target = exportDir / fileName(clock.now())
                 fileSystem.delete(target)
 
-                // VACUUM INTO cannot run inside a transaction; the writer wait beyond 30 s is
-                // the busy failure (09). The path is ours, but the literal is escaped anyway.
-                val vacuum =
-                    withTimeoutOrNull(WRITER_WAIT_MS) {
-                        db.useWriterConnection { conn ->
-                            conn.usePrepared("VACUUM INTO '${target.toString().replace("'", "''")}'") { it.step() }
-                        }
+                // VACUUM INTO cannot run inside a transaction. The 30 s bound is for waiting
+                // on the writer (09): the step itself is a blocking SQLite call coroutine
+                // cancellation cannot interrupt, so a vacuum that outlives the deadline
+                // still completes — its copy is valid and must not be deleted as "busy".
+                var vacuumFinished = false
+                withTimeoutOrNull(writerWaitMs) {
+                    db.useWriterConnection { conn ->
+                        conn.usePrepared("VACUUM INTO '${target.toString().replace("'", "''")}'") { it.step() }
+                        vacuumFinished = true
                     }
-                if (vacuum == null) {
+                }
+                if (!vacuumFinished) {
                     fileSystem.delete(target)
                     return@withContext Outcome.Failure(DiagnosticsError.DATABASE_BUSY)
                 }
