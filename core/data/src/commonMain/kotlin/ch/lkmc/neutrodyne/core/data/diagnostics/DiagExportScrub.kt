@@ -116,23 +116,32 @@ internal object DiagExportScrub {
     private val SKIPPED_TABLES = setOf("room_master_table", "android_metadata")
 
     fun scrub(connection: SQLiteConnection) {
-        // The rewrites must not fire capture triggers: MS0's SyncTriggers.dropAll is this
-        // until it lands — every trigger is dropped on the copy.
-        val triggers = names(connection, "SELECT name FROM sqlite_master WHERE type = 'trigger'")
-        for (trigger in triggers) {
-            exec(connection, "DROP TRIGGER IF EXISTS \"${trigger.escaped()}\"")
-        }
-        exec(connection, "UPDATE sync_state SET enabled = 0")
-        for (table in EMPTIED) {
-            exec(connection, "DELETE FROM \"$table\"")
-        }
+        // One transaction for the whole scrub: per-row autocommit is an fsync per row, and
+        // a mid-scrub failure must not leave a half-scrubbed copy behind.
+        exec(connection, "BEGIN IMMEDIATE")
+        try {
+            // The rewrites must not fire capture triggers: MS0's SyncTriggers.dropAll is this
+            // until it lands — every trigger is dropped on the copy.
+            val triggers = names(connection, "SELECT name FROM sqlite_master WHERE type = 'trigger'")
+            for (trigger in triggers) {
+                exec(connection, "DROP TRIGGER IF EXISTS \"${trigger.escaped()}\"")
+            }
+            exec(connection, "UPDATE sync_state SET enabled = 0")
+            for (table in EMPTIED) {
+                exec(connection, "DELETE FROM \"$table\"")
+            }
 
-        val tables =
-            names(connection, "SELECT name FROM sqlite_master WHERE type = 'table'")
-                .filter { it !in SKIPPED_TABLES && !it.startsWith("sqlite_") && it !in EMPTIED }
-        for (table in tables) {
-            scrubTable(connection, table)
+            val tables =
+                names(connection, "SELECT name FROM sqlite_master WHERE type = 'table'")
+                    .filter { it !in SKIPPED_TABLES && !it.startsWith("sqlite_") && it !in EMPTIED }
+            for (table in tables) {
+                scrubTable(connection, table)
+            }
+        } catch (t: Throwable) {
+            runCatching { exec(connection, "ROLLBACK") }
+            throw t
         }
+        exec(connection, "COMMIT")
     }
 
     private fun scrubTable(
