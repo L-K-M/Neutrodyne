@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
@@ -22,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeBackupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadController
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakeLinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
@@ -47,6 +49,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
     private val backups = FakeBackupRepository().apply { inspectOutcome = Outcome.Success(restorePreview()) }
     private val imports = FakeImportRepository()
     private val playback = FakePlaybackController()
+    private val linkedSync = FakeLinkedRestoreCoordinator()
 
     @Test fun acceptedRestoreOfferUsesManualConsentAndNotificationPrompt() =
         runTest {
@@ -108,6 +111,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                     backups,
                     imports,
                     playback,
+                    linkedSync,
                     backgroundScope,
                     RestoreDownloadRequests(downloads, media),
                 )
@@ -133,8 +137,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun mergeDefaultsAndReplaceSelectionFollowThePreviewContract() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             assertEquals(listOf("inspect(7)"), backups.calls)
             assertEquals(restorePreview(), vm.uiState.value.preview)
@@ -149,8 +152,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun reselectingCurrentModePreservesCategoryChoices() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.setCategory(RestoreCategory.HISTORY, false)
             vm.selectMode(RestoreMode.MERGE)
@@ -172,8 +174,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                         return backups.restore(sessionId, request)
                     }
                 }
-            val vm =
-                RestoreViewModel(7, ordered, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, ordered, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.selectMode(RestoreMode.REPLACE)
             vm.requestRestore()
@@ -195,8 +196,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun mergeRestoresOnlySelectedCategoriesWithoutPausing() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.setCategory(RestoreCategory.HISTORY, false)
             vm.requestRestore()
@@ -223,7 +223,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
             for (error in errors) {
                 backups.inspectOutcome = Outcome.Failure(error)
                 val vm =
-                    RestoreViewModel(7, backups, imports, playback, backgroundScope, restoreDownloads())
+                    RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
                 runCurrent()
                 assertEquals(error, vm.uiState.value.error)
                 vm.requestRestore()
@@ -231,8 +231,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
             }
             backups.inspectOutcome = Outcome.Success(restorePreview())
             backups.restoreOutcome = Outcome.Failure(BackupError.RestoreRunning)
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.requestRestore()
             assertEquals(BackupError.RestoreRunning, vm.uiState.value.error)
@@ -242,8 +241,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun progressAndReportFollowTheRepositoryAndIgnoreOtherFinishedSessions() =
         runTest {
-            val vm =
-                RestoreViewModel(7, backups, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.requestRestore()
             runCurrent()
@@ -278,11 +276,67 @@ class RestoreViewModelTest : MainDispatcherTest() {
                     )
             )
             backups.restoreProgress.value = RestoreProgress.Failed(id, BackupError.Storage)
-            val vm =
-                RestoreViewModel(id, backups, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(id, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             assertEquals(BackupError.Storage, vm.uiState.value.error, "A resumed restore must expose its failure")
             assertTrue(vm.uiState.value.requested)
+        }
+
+    @Test fun aLinkedReplaceAsksTheReachAndConfirmsAllDevices() =
+        runTest {
+            backups.inspectOutcome =
+                Outcome.Success(restorePreview().copy(linkedServerHost = "sync.example.com"))
+            linkedSync.previewResult =
+                Outcome.Success(
+                    ch.lkmc.neutrodyne.core.domain
+                        .AllDevicesReachEffect(37, 2),
+                )
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            runCurrent()
+            vm.selectMode(RestoreMode.REPLACE)
+
+            // THIS_DEVICE is the default: the plain Replace confirmation, no server call.
+            assertTrue(vm.uiState.value.asksReach)
+            vm.requestRestore()
+            assertTrue(vm.uiState.value.confirmingReplace)
+            assertTrue(linkedSync.previews.isEmpty())
+            vm.cancelReplace()
+
+            // ALL_DEVICES stages the server library first, then asks the second confirmation.
+            vm.selectReach(LinkedRestoreReach.ALL_DEVICES)
+            vm.requestRestore()
+            assertEquals(1, linkedSync.previews.size)
+            assertEquals(
+                37,
+                vm.uiState.value.allDevicesEffect
+                    ?.podcastsToRemove,
+            )
+            vm.confirmAllDevices()
+            runCurrent()
+
+            assertEquals(1, backups.restoreRequests.size)
+            assertEquals(
+                LinkedRestoreReach.ALL_DEVICES,
+                backups.restoreRequests
+                    .single()
+                    .second.linkedReach,
+            )
+        }
+
+    @Test fun anOfflineServerLibraryKeepsTheAllDevicesChoiceRetryable() =
+        runTest {
+            backups.inspectOutcome =
+                Outcome.Success(restorePreview().copy(linkedServerHost = "sync.example.com"))
+            linkedSync.previewResult = Outcome.Failure(BackupError.Io)
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, backgroundScope, restoreDownloads())
+            runCurrent()
+            vm.selectMode(RestoreMode.REPLACE)
+            vm.selectReach(LinkedRestoreReach.ALL_DEVICES)
+            vm.requestRestore()
+
+            assertTrue(vm.uiState.value.serverLibraryUnavailable)
+            assertTrue(vm.uiState.value.allDevicesEffect == null)
+            assertTrue(backups.restoreRequests.isEmpty(), "nothing is written before the confirm")
         }
 
     @Test fun anOlderGlobalFailureDoesNotPoisonANewRestore() =
@@ -295,8 +349,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                         request: RestoreRequest,
                     ): Outcome<Unit, BackupError> = Outcome.Success(Unit)
                 }
-            val vm =
-                RestoreViewModel(7, accepted, imports, playback, backgroundScope, restoreDownloads())
+            val vm = RestoreViewModel(7, accepted, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.requestRestore()
             assertEquals(null, vm.uiState.value.error)
@@ -317,7 +370,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                     }
                 }
             val vm =
-                RestoreViewModel(7, earlyFailure, imports, playback, backgroundScope, restoreDownloads())
+                RestoreViewModel(7, earlyFailure, imports, playback, linkedSync, backgroundScope, restoreDownloads())
             runCurrent()
             vm.requestRestore()
             runCurrent()
@@ -344,7 +397,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                         return backups.restore(sessionId, request)
                     }
                 }
-            val vm = RestoreViewModel(7, delayed, imports, playback, scope, restoreDownloads())
+            val vm = RestoreViewModel(7, delayed, imports, playback, linkedSync, scope, restoreDownloads())
             runCurrent()
             val caller = launch { vm.requestRestore() }
             entered.await()
@@ -360,7 +413,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
     @Test fun busyClearsWhenCancellationPreventsTheRestoreBodyFromStarting() =
         runTest {
             val scope = CoroutineScope(coroutineContext + SupervisorJob())
-            val vm = RestoreViewModel(7, backups, imports, playback, scope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, scope, restoreDownloads())
             runCurrent()
             val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.requestRestore() }
             assertTrue(vm.uiState.value.busy)
@@ -374,13 +427,13 @@ class RestoreViewModelTest : MainDispatcherTest() {
     @Test fun cancelledInspectionAndInactiveScopeDoNotStrandTheScreen() =
         runTest {
             val scope = CoroutineScope(coroutineContext + SupervisorJob())
-            val vm = RestoreViewModel(7, backups, imports, playback, scope, restoreDownloads())
+            val vm = RestoreViewModel(7, backups, imports, playback, linkedSync, scope, restoreDownloads())
             scope.cancel()
             advanceUntilIdle()
             assertFalse(vm.uiState.value.loading)
             assertTrue(backups.calls.isEmpty())
             val active = CoroutineScope(coroutineContext + SupervisorJob())
-            val ready = RestoreViewModel(7, backups, imports, playback, active, restoreDownloads())
+            val ready = RestoreViewModel(7, backups, imports, playback, linkedSync, active, restoreDownloads())
             runCurrent()
             active.cancel()
             ready.requestRestore()

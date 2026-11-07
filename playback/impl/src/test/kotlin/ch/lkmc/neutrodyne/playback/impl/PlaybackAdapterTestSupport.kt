@@ -47,6 +47,7 @@ import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import ch.lkmc.neutrodyne.playback.core.StartPositionRule
 import ch.lkmc.neutrodyne.playback.core.WindowDiff
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -137,6 +138,10 @@ internal class AdapterFixture(
     val resolver = EpisodeResolver(index, local, cache)
     val failures = mutableListOf<Exception>()
     val events = mutableListOf<PlaybackEvent>()
+    val remoteGuard =
+        ch.lkmc.neutrodyne.playback.core
+            .RemotePlayedGuard()
+    val sync = PlaybackSyncBridge(remoteGuard, Provider { positions }, scope.backgroundScope)
     val tracker =
         PositionTracker(
             PositionSaver(positions, clock, PlayedRule()),
@@ -153,6 +158,8 @@ internal class AdapterFixture(
                 }
             },
             failures::add,
+            remoteGuard::currentChanged,
+            sync::paused,
         )
     val settingsResolver = FakeEffectiveSettingsResolver()
     val settings = EffectivePlaybackSettings(settingsResolver, FakeScopeSettingsRepository(), FakeSettingsRepository())
@@ -175,6 +182,7 @@ internal class AdapterFixture(
             tracker,
             applier,
             PlaybackHistory(),
+            remoteGuard,
             clock,
             playerScope,
             Dispatchers.Unconfined,
@@ -182,6 +190,8 @@ internal class AdapterFixture(
             reportFailure = failures::add,
             boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
             resumePolicy = { resumePolicy },
+            afterTransition = sync::transitioned,
+            afterSessionEnd = sync::stopped,
             localChanges = local,
         )
 
@@ -189,6 +199,36 @@ internal class AdapterFixture(
         tracker.attach(player)
         projector.attach(player)
         applier.attach(exo)
+        sync.attach(notifyPlayer = projector::requestReproject)
+        // Mirrors AndroidServiceBridge.publish's active computation (NOT_LOADED = nothing loaded).
+        publishingActive = true
+        player.addListener(activePublisher)
+        publishActive()
+    }
+
+    private val activePublisher =
+        object : androidx.media3.common.Player.Listener {
+            override fun onEvents(
+                player: androidx.media3.common.Player,
+                events: androidx.media3.common.Player.Events,
+            ) {
+                publishActive()
+            }
+        }
+
+    /** Mirrors AndroidServiceBridge.publish's detached guard: teardown stops the publication. */
+    private var publishingActive = false
+
+    fun publishActive() {
+        if (!publishingActive) return
+        val id = player.episodeIdOrNull()
+        val loaded = id != null && player.playbackState != androidx.media3.common.Player.STATE_IDLE
+        sync.updateActive(id?.takeIf { loaded }, player.isPlaying, tracker.currentSinceMs)
+    }
+
+    fun stopActivePublisher() {
+        publishingActive = false
+        player.removeListener(activePublisher)
     }
 
     suspend fun seed(count: Int): List<Long> {
@@ -223,8 +263,10 @@ internal class AdapterFixture(
     }
 
     suspend fun close() {
+        stopActivePublisher()
         projector.detach()
         val saved = tracker.detach(tracker.flush(PositionFlushReason.DESTROY))
+        sync.detachAfter(saved)
         applier.detach().join()
         scope.runCurrent()
         exo.release()

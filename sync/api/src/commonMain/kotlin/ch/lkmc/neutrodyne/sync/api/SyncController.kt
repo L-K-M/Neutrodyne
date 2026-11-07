@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.sync.api
 
+import ch.lkmc.neutrodyne.core.common.Outcome
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -63,16 +64,28 @@ interface SyncController {
 
     fun syncNow()
 
-    fun unlink()
+    /** Approves nothing yet; returns the device the code names (10 Link methods). */
+    suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem>
 
-    fun deleteServerData(confirm: String)
+    /** Confirms or declines the pending link; the code alone never links anything. */
+    suspend fun confirmLink(
+        userCode: String,
+        approve: Boolean,
+    ): Outcome<Unit, SyncProblem>
 
-    fun renameDevice(
+    /** The account's devices, for the Devices screen and rename/revoke (10 Authentication). */
+    suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem>
+
+    suspend fun unlink(): Outcome<Unit, SyncProblem>
+
+    suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem>
+
+    suspend fun renameDevice(
         deviceId: String,
         name: String,
-    )
+    ): Outcome<Unit, SyncProblem>
 
-    fun revokeDevice(deviceId: String)
+    suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem>
 
     fun resolveHeld(
         id: Long,
@@ -81,7 +94,11 @@ interface SyncController {
 
     fun dismissRemoteSession()
 
-    fun setSyncPlaybackSettings(enabled: Boolean)
+    /** 10 Settings: persist the device-local switches (Settings › Sync). */
+    suspend fun setSyncPlaybackSettings(enabled: Boolean)
 
-    fun setShareFeedPasswords(enabled: Boolean)
+    /** This device's "Share feed passwords" switch, for the settings row's state. */
+    val shareFeedPasswords: StateFlow<Boolean>
+
+    suspend fun setShareFeedPasswords(enabled: Boolean)
 }

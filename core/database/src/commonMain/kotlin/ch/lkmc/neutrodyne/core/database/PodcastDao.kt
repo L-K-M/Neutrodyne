@@ -260,6 +260,20 @@ abstract class PodcastDao(
         title: String?,
     )
 
+    /**
+     * First-link ID adoption (10 Merge step 3): a local podcast matched by feed key or alias
+     * takes the record's `syncId`. The guard refuses an ID another live row already holds, so
+     * a duplicated record can never steal it; the caller keeps the row unchanged on refusal.
+     */
+    @Query(
+        "UPDATE podcast SET syncId = :syncId WHERE id = :podcastId" +
+            " AND NOT EXISTS (SELECT 1 FROM podcast WHERE syncId = :syncId AND id <> :podcastId)",
+    )
+    abstract suspend fun adoptSyncId(
+        podcastId: Long,
+        syncId: String,
+    )
+
     /** The podcast screen's order chip (05 `FeedRepository.setFeedOrder`, `FeedSource.Podcast`). */
     @Query("UPDATE podcast SET episodeOrder = :order WHERE id = :podcastId")
     abstract suspend fun setEpisodeOrder(
@@ -292,6 +306,17 @@ abstract class PodcastDao(
      */
     @Query("UPDATE podcast SET needsCredentials = 0 WHERE id = :podcastId")
     abstract suspend fun clearNeedsCredentials(podcastId: Long)
+
+    /**
+     * The remote projection of the synced flag (10 Feed passwords): this feed requires a password
+     * this device has no credential for. Always written under `applying = 1` on the sync path.
+     */
+    @Query("UPDATE podcast SET needsCredentials = 1 WHERE id = :podcastId")
+    abstract suspend fun markNeedsCredentials(podcastId: Long)
+
+    /** 10 Feed passwords: every podcast a "Share feed passwords" switch-on re-captures. */
+    @Query("SELECT syncId FROM podcast WHERE syncId IS NOT NULL AND credentialId IS NOT NULL")
+    abstract suspend fun syncIdsWithCredentials(): List<String>
 
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 

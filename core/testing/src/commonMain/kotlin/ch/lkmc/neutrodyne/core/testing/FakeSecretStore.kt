@@ -25,6 +25,12 @@ class FakeSecretStore(
      * A test proving a caller waits passes a fresh deferred.
      */
     private val loadBarrier: CompletableDeferred<Unit> = CompletableDeferred(Unit),
+    /**
+     * Optional `credential`-row writer: when set, [put] returns the row ID the writer created
+     * (the Android shape), so tests linking `podcast.credentialId` stay FK-consistent with a
+     * real database. `null` keeps the synthetic-ID behaviour.
+     */
+    private val rowWriter: (suspend (origin: String, username: String) -> Long?)? = null,
 ) : SecretStore {
     private class Row(
         val id: Long,
@@ -60,7 +66,7 @@ class FakeSecretStore(
         attributes: Map<String, String>,
     ): Long? =
         mutex.withLock {
-            val id = rows.value[origin]?.id ?: nextId++
+            val id = rowWriter?.invoke(origin, username) ?: rows.value[origin]?.id ?: nextId++
             rows.value =
                 rows.value + (origin to Row(id, StoredSecret(username, secret.copyOf(), attributes)))
             id
@@ -73,6 +79,9 @@ class FakeSecretStore(
             rows.value = rows.value - origin
         }
     }
+
+    override suspend fun originsWithPrefix(prefix: String): List<String> =
+        rows.value.keys.filter { it.startsWith(prefix) }
 
     override suspend fun forPodcast(podcastId: Long): BasicCredentials? {
         val id = podcastCredentialIds.value[podcastId] ?: return null

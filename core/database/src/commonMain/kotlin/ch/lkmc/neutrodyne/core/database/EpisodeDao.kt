@@ -76,6 +76,10 @@ interface EpisodeDao : DownloadSourceQueries {
     @Query("SELECT * FROM episode WHERE id = :id")
     suspend fun byId(id: Long): EpisodeEntity?
 
+    /** 10's first-link seeding: every episode row with its state and position. */
+    @Query("SELECT * FROM episode")
+    abstract suspend fun all(): List<EpisodeEntity>
+
     @Query("SELECT * FROM episode WHERE podcastId = :podcastId AND identityKey = :identityKey")
     suspend fun byIdentityKey(
         podcastId: Long,

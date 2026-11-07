@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.LinkTokenRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LoginRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -115,6 +116,85 @@ class SyncEngineTest {
             }
         }
 
+    /**
+     * 10 Outbox and coalescing: the acknowledgement merges the exact sent fields into
+     * `sync_clock` raw state with their sent clocks, so the accepted values survive without a
+     * redelivery and a resync replay compares against them.
+     */
+    @Test
+    fun anAcknowledgedPushMergesItsSentFieldsIntoRawState() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                val podcast = a.db.podcastDao().bySyncId(syncId("0a"))!!
+                val episode =
+                    a.addEpisode(
+                        podcast.id,
+                        "g:one",
+                        enclosureUrl = "https://cdn.example.com/one.mp3",
+                    )
+                a.markPlayed(episode)
+
+                a.round()
+
+                val raw = a.db.syncClockDao().get("episode", syncId("0a") + "g:one")
+                assertTrue(raw != null, "the ack seeded the raw state")
+                val state =
+                    ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                        .decodeFromString<RawSyncRecord>(raw!!.clocks)
+                        .state
+                val played = state.fields["played"]
+                assertTrue(played != null, "fields=${state.fields.keys}")
+                assertEquals(true, (played!!.v as? kotlinx.serialization.json.JsonPrimitive)?.content == "true")
+                assertEquals("000000000000000a", played.c?.nodeId?.value, "the sent clock's origin rides along")
+            } finally {
+                a.close()
+            }
+        }
+
+    /**
+     * A pushed `auth` keeps only its protected representation when acknowledged: the raw state
+     * carries the `sync:pending:` marker — the same representation the receive path stores, so
+     * an equal-clock echo of the push compares equal — and never the plaintext that left the
+     * device (10 Durable apply effects).
+     */
+    @Test
+    fun anAcknowledgedAuthKeepsOnlyItsProtectedMarker() =
+        runTest {
+            val server = InMemorySyncServer { NOW }
+            val a = device("a", server, sharePasswords = true)
+            try {
+                a.addPodcast(syncId("0a"), "https://a.example/feed", "A")
+                val podcast = a.db.podcastDao().bySyncId(syncId("0a"))!!
+                val credentialId =
+                    a.secrets.put("https://a.example", "anna", "hunter2".toCharArray()) ?: 0L
+                a.secrets.podcastCredentialIds.value = mapOf(podcast.id to credentialId)
+                a.db.withWriteTransaction {
+                    a.db.syncOutboxDao().captureIntent("podcast", syncId("0a"), "auth", "null")
+                }
+
+                a.round()
+
+                val raw = a.db.syncClockDao().get("podcast", syncId("0a"))
+                assertTrue(raw != null, "the ack seeded the raw state")
+                assertTrue(!raw!!.clocks.contains("hunter2"), "no plaintext password in Room: ${raw.clocks}")
+                val state =
+                    ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                        .decodeFromString<RawSyncRecord>(raw.clocks)
+                        .state
+                val auth = state.fields["auth"]!!
+                val ref =
+                    (auth.v as? kotlinx.serialization.json.JsonObject)
+                        ?.get("ref")
+                        ?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                assertTrue(ref != null && ref.startsWith("sync:pending:"), "the marker names the store: ${auth.v}")
+            } finally {
+                a.close()
+            }
+        }
+
     @Test
     fun aGroupAndMembershipConverge() =
         runTest {
@@ -154,34 +234,162 @@ class SyncEngineTest {
             }
         }
 
+    @Test
+    fun theHasMoreDrainAdvancesTheCursor() =
+        runTest {
+            val calls = mutableListOf<String>()
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse =
+                        SyncResponse(
+                            results = emptyList(),
+                            records = emptyList(),
+                            cursor = "c:00000001:5",
+                            hasMore = true,
+                            serverTime = "",
+                        )
+
+                    override suspend fun changes(
+                        since: String?,
+                        limit: Int,
+                    ): ChangesPage {
+                        calls += since.orEmpty()
+                        return ChangesPage(
+                            records = emptyList(),
+                            cursor = "c:00000001:9",
+                            hasMore = since != "c:00000001:9",
+                            serverTime = "",
+                        )
+                    }
+                }
+            val db = TestDb.inMemory()
+            try {
+                db.withWriteTransaction {
+                    db
+                        .syncStateDao()
+                        .upsert(SyncStateEntity(enabled = true, nodeId = "a".padStart(16, '0'), hlc = 1L shl 16))
+                }
+                Device(db, client).round()
+                assertEquals(listOf("c:00000001:5", "c:00000001:9"), calls)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aMalformedRecordClockDoesNotFailTheRound() =
+        runTest {
+            val badRecord =
+                ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto(
+                    coll = "setting",
+                    id = kotlinx.serialization.json.JsonPrimitive("theme"),
+                    seq = 1,
+                    by = null,
+                    fields =
+                        mapOf(
+                            "v" to
+                                ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue(
+                                    v = kotlinx.serialization.json.JsonPrimitive("dark"),
+                                    c = "not-an-hlc",
+                                ),
+                        ),
+                )
+            val client =
+                object : SyncClient by InMemorySyncClient(InMemorySyncServer { NOW }) {
+                    override suspend fun sync(
+                        since: String?,
+                        changes: List<ChangeDto>,
+                    ): SyncResponse =
+                        SyncResponse(
+                            results = emptyList(),
+                            records = listOf(badRecord),
+                            cursor = "c:00000001:5",
+                            hasMore = false,
+                            serverTime = "",
+                        )
+                }
+            val db = TestDb.inMemory()
+            try {
+                db.withWriteTransaction {
+                    db
+                        .syncStateDao()
+                        .upsert(SyncStateEntity(enabled = true, nodeId = "a".padStart(16, '0'), hlc = 1L shl 16))
+                }
+                Device(db, client).round()
+            } finally {
+                db.close()
+            }
+        }
+
     private class Device(
         val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
-        val client: InMemorySyncClient,
+        val client: SyncClient,
+        sharePasswords: Boolean = false,
     ) {
         val clock = TestClock(NOW)
+        val secrets = FakeSecretStore()
         val engine =
             SyncEngine(
                 db = db,
                 client = client,
+                applier =
+                    SyncApplier(
+                        db = db,
+                        clock = clock,
+                        secrets = secrets,
+                        settings = FakeSettingsSyncPort(),
+                        playback = NoPlaybackSync,
+                        syncIngestHook = SyncIngestHook.None,
+                        channelSync =
+                            object : GroupChannelSync {
+                                override suspend fun sync() = Unit
+
+                                override suspend fun onUuidChanged(
+                                    oldUuid: String,
+                                    newUuid: String,
+                                ) = Unit
+
+                                override suspend fun onDeleted(uuid: String) = Unit
+                            },
+                        sharePasswords = { false },
+                    ),
                 clock = clock,
-                secrets = FakeSecretStore(),
-                settings = FakeSettingsSyncPort(),
-                playback = NoPlaybackSync,
-                syncIngestHook = SyncIngestHook.None,
-                channelSync =
-                    object : GroupChannelSync {
-                        override suspend fun sync() = Unit
+                secrets = secrets,
+                sharePasswords = { sharePasswords },
+                address =
+                    object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
+                        override suspend fun serverUrl(): String = "https://sync.example"
 
-                        override suspend fun onUuidChanged(
-                            oldUuid: String,
-                            newUuid: String,
-                        ) = Unit
+                        override suspend fun username(): String? = null
 
-                        override suspend fun onDeleted(uuid: String) = Unit
+                        override suspend fun deviceName(): String? = null
+
+                        override suspend fun shareFeedPasswords(): Boolean = false
+
+                        override suspend fun syncPlaybackSettings(): Boolean = true
+
+                        override suspend fun setServerUrl(url: String?) = Unit
+
+                        override suspend fun setUsername(username: String?) = Unit
+
+                        override suspend fun setShareFeedPasswords(enabled: Boolean) = Unit
+
+                        override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
                     },
-                sharePasswords = { false },
-                serverUrl = { "https://sync.example" },
-                token = { "token" },
+                tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
+                effects =
+                    SyncApplyEffects(
+                        db = db,
+                        settings = FakeSettingsSyncPort(),
+                        secrets = secrets,
+                        coordinator =
+                            ch.lkmc.neutrodyne.core.testing
+                                .FakeCredentialCommitCoordinator(),
+                    ),
+                notices = SyncNoticeBus(),
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)
@@ -269,6 +477,7 @@ class SyncEngineTest {
     private suspend fun device(
         name: String,
         server: InMemorySyncServer,
+        sharePasswords: Boolean = false,
     ): Device {
         val db = TestDb.inMemory()
         db.withWriteTransaction {
@@ -276,7 +485,7 @@ class SyncEngineTest {
                 .syncStateDao()
                 .upsert(SyncStateEntity(enabled = true, nodeId = name.padStart(16, '0'), hlc = 1L shl 16))
         }
-        return Device(db, InMemorySyncClient(server))
+        return Device(db, InMemorySyncClient(server), sharePasswords)
     }
 
     private fun syncId(name: String): String = "00000000-0000-4000-8000-${name.padStart(12, '0')}"

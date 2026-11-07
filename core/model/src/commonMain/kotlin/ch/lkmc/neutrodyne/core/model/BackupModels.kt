@@ -59,6 +59,9 @@ data class BackupPreview(
     val linkedServerHost: String?,
     /** `AppInfoV1.platform`, for "made on Android" in the preview. */
     val writtenOn: String?,
+    /** The backup's identity sets, for the ALL_DEVICES reach question's server comparison. */
+    val podcastKeys: Set<String> = emptySet(),
+    val groupNames: List<String> = emptyList(),
 )
 
 data class BackupSummary(
@@ -119,19 +122,18 @@ interface PreparedBackup {
 }
 
 /**
- * The policies `RestoreMerger` merges a staged library with (05 RestoreMerger):
- * `RESTORE_*` are the Merge and Replace columns of the rules table and are implemented in
- * M3; `LINK_*` is the First-link column, representable here but unsupported until MS2.
+ * The policies `RestoreMerger` merges a staged library with (05 RestoreMerger): each value
+ * is one column of the Merge and Replace rules table — the restore columns and the
+ * First-link column (MS2), which 10's `FirstLinkMerger` reaches through `LibraryMerger`.
+ * `LINK_HISTORY` is 10's "Use this device's library everywhere" step 2: ID adoption and the
+ * timestamp episode-history merge only, no other server record applied.
  */
 enum class MergePolicy {
     RESTORE_MERGE,
     RESTORE_REPLACE,
-
-    /** MS2 (10's FirstLinkMerger); not implemented in M3. */
     LINK_MERGE,
-
-    /** MS2 ("Use the server's library on this device"); not implemented in M3. */
     LINK_REPLACE,
+    LINK_HISTORY,
 }
 
 /** Counts only — 10's durable effects travel through the `onApplied` callback. */

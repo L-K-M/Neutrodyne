@@ -248,6 +248,15 @@ internal fun LibraryRoute(
         onDismissMarkAll = { pendingMarkAll = null },
         onAddPodcast = { navigator.push(AddPodcastKey(null)) },
         onSearchPodcasts = { navigator.selectTab(DiscoverKey) },
+        onReconnect = {
+            state.reconnect?.let {
+                navigator.push(
+                    ch.lkmc.neutrodyne.core.navigation
+                        .SyncSetupKey(it.serverUrl),
+                )
+            }
+        },
+        onDismissReconnect = viewModel::dismissReconnect,
     )
 
     ShowUserMessages(state.messages, viewModel::onMessageShown)

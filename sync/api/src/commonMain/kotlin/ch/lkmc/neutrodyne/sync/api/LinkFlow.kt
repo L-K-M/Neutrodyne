@@ -72,11 +72,31 @@ sealed interface LinkState {
 
     data object Authorising : LinkState
 
+    /**
+     * The account has no library yet, so this device would upload: the step names the account, so
+     * a mistyped or guessed code never uploads silently (10 First-link choices).
+     */
+    data class ConfirmUpload(
+        val accountName: String,
+        val host: String,
+    ) : LinkState
+
     data class ChooseFirstLink(
         val localPodcasts: Int,
         val localGroups: Int,
         val serverPodcasts: Int,
         val serverGroups: Int,
+    ) : LinkState
+
+    /**
+     * 10 "Use this device's library everywhere": the second confirmation, shown after that
+     * choice's staging pull — how many podcasts and groups the other devices will remove when
+     * they next sync (each asks first when this exceeds its mass-change thresholds). Continuing
+     * re-enters the choice and runs the merge from the staged snapshot.
+     */
+    data class ConfirmReplaceEverywhere(
+        val removedPodcasts: Int,
+        val removedGroups: Int,
     ) : LinkState
 
     data class Merging(

@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.sync.protocol.EpisodeProgress
 import ch.lkmc.neutrodyne.sync.protocol.EpisodeStateRules
 import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
@@ -54,6 +55,8 @@ data class SyncApplyResult(
     val parked: Int,
     val held: Int,
     val invalid: Int,
+    /** Podcasts that need a password no received `auth` covers (10 Feed passwords). */
+    val passwordNeeded: List<Long> = emptyList(),
 )
 
 /**
@@ -83,11 +86,25 @@ class SyncApplier(
         var parked = 0
         var held = 0
         var invalid = 0
+        val passwordNeeded = LinkedHashSet<Long>()
+        // 10 Durable apply effects: stage every candidate secret before the page transaction; the
+        // transaction then references only protected keys, and losing candidates leave again.
+        val stage =
+            AuthStage(
+                secrets,
+                db
+                    .syncStateDao()
+                    .get()
+                    ?.accountId
+                    .orEmpty(),
+            )
+        val marked = stage.admit(records)
+        val referenced = HashSet<String>()
         db.withWriteTransaction {
             db.syncStateDao().withApplying {
-                val ordered = records.sortedBy { it.coll }
+                val ordered = marked.sortedBy { it.coll }
                 for (dto in ordered) {
-                    val result = applyRecord(dto, roundId)
+                    val result = applyRecord(dto, roundId, stage, referenced, passwordNeeded)
                     when (result) {
                         is RecordOutcome.Applied -> applied++
                         is RecordOutcome.Stale -> stale++
@@ -98,12 +115,16 @@ class SyncApplier(
                 }
             }
         }
-        return SyncApplyResult(applied, stale, parked, held, invalid)
+        stage.removeUnreferenced(referenced)
+        return SyncApplyResult(applied, stale, parked, held, invalid, passwordNeeded.toList())
     }
 
     private suspend fun applyRecord(
         dto: RecordDto,
         roundId: Long,
+        stage: AuthStage,
+        referenced: MutableSet<String>,
+        passwordNeeded: MutableCollection<Long>,
     ): RecordOutcome {
         val coll =
             runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: return RecordOutcome.Invalid
@@ -116,27 +137,39 @@ class SyncApplier(
         val pending = pendingState(coll, resolved.rid)
         val merge = SyncRecordMerger.merge(stored?.state, pending, incoming)
         if (merge.advanced.isEmpty() && merge.lost.isEmpty() && merge.record == stored?.state) {
+            // An equal-clock redelivery: its staged candidate IS the stored reference, so the
+            // cleanup pass must not treat it as a losing candidate.
+            val staged = stage.stagedKey(resolved.rid, incoming.fields["auth"]?.c?.toString())
+            if (staged != null && stored?.authReference?.storeKey == staged) referenced += staged
             return RecordOutcome.Stale
         }
         val outcome =
             when (coll) {
-                SyncCollection.PODCAST -> applyPodcast(resolved, merge, roundId)
+                SyncCollection.PODCAST -> applyPodcast(resolved, merge, roundId, passwordNeeded)
                 SyncCollection.GROUP -> applyGroup(resolved, merge, roundId)
                 SyncCollection.MEMBER -> applyMember(resolved, merge)
-                SyncCollection.EPISODE -> applyEpisode(resolved, merge)
+                SyncCollection.EPISODE -> applyEpisode(resolved, merge, dto.by)
                 SyncCollection.UPNEXT -> applyUpNext(resolved, merge)
                 SyncCollection.SESSION -> applySession(resolved, merge)
                 SyncCollection.SETTING -> applySetting(resolved, merge)
             }
         if (outcome is RecordOutcome.Applied || outcome is RecordOutcome.Held) {
+            val pendingSetting =
+                if (coll == SyncCollection.SETTING) {
+                    settingPendingMarker(stored, merge.record)
+                } else {
+                    null
+                }
+            val protected = protectAuth(resolved.rid, merge, stored, referenced)
             clockStore.put(
                 coll.wire,
                 resolved.rid,
                 RawSyncRecord(
-                    state = merge.record,
+                    state = protected.state,
                     by = dto.by ?: stored?.by,
-                    pendingSetting = stored?.pendingSetting,
-                    pendingAuth = stored?.pendingAuth,
+                    pendingSetting = pendingSetting ?: stored?.pendingSetting,
+                    authReference = protected.authReference ?: stored?.authReference,
+                    pendingAuth = protected.pendingAuth,
                 ),
             )
             deleteLostPending(coll.wire, resolved.rid, merge.advanced)
@@ -144,10 +177,33 @@ class SyncApplier(
         return outcome
     }
 
+    /**
+     * 10 Durable apply effects, passwords: no plaintext `auth` enters raw state ([protectAuthRecord]
+     * owns the rules). This wrapper keeps the page's referenced staging keys alive.
+     */
+    private suspend fun protectAuth(
+        rid: String,
+        merge: RecordMerge,
+        stored: RawSyncRecord?,
+        referenced: MutableSet<String>,
+    ): ProtectedAuth {
+        val protection = protectAuthRecord(db, rid, merge.record, merge.advanced, stored)
+        val key = protection.authReference?.storeKey
+        if (key != null && key.startsWith(PENDING_ORIGIN_PREFIX)) referenced += key
+        return ProtectedAuth(protection.state, protection.pendingAuth, protection.authReference)
+    }
+
+    private data class ProtectedAuth(
+        val state: RecordState,
+        val pendingAuth: PendingAuth?,
+        val authReference: AuthReference?,
+    )
+
     private suspend fun applyPodcast(
         id: RecordId,
         merge: RecordMerge,
         roundId: Long,
+        passwordNeeded: MutableCollection<Long>,
     ): RecordOutcome {
         val rid = (id as RecordId.Podcast).id.value
         val existing = db.podcastDao().bySyncId(rid)
@@ -158,7 +214,14 @@ class SyncApplier(
                 return RecordOutcome.Applied
             }
             return if (merge.advanced.contains("subscribed")) {
-                MassChangeGuard.stagePodcast(db, roundId, rid, merge.record.fieldClock("subscribed"))
+                // 10 Mass-change guard rule 4: a removal of the podcast loaded in a playing
+                // player never interrupts playback — it defers into its own held row until the
+                // player stops or the item changes.
+                if (isPlayingPodcast(rid)) {
+                    MassChangeGuard.stageDeferred(db, roundId, rid, merge.record.fieldClock("subscribed"))
+                } else {
+                    MassChangeGuard.stagePodcast(db, roundId, rid, merge.record.fieldClock("subscribed"))
+                }
                 RecordOutcome.Held
             } else {
                 RecordOutcome.Stale
@@ -167,14 +230,15 @@ class SyncApplier(
         if (existing == null) {
             val feedUrl = merge.record.stringField("feedUrl") ?: return RecordOutcome.Invalid
             val feedKey = UrlNormalizer.forIdentity(feedUrl) ?: return RecordOutcome.Invalid
+            // Another podcast already holds this feed: the merge belongs to it, not to a second row.
+            if (db.podcastDao().byFeedKey(feedKey) != null) return RecordOutcome.Invalid
             val now = clock.now()
-            val syncId =
-                if (db.podcastDao().bySyncId(rid) == null && !db.backupDao().syncIdInUse(rid)) rid else rid
+            val syncId = rid
             val title = merge.record.stringField("title") ?: feedUrl
             val idInserted =
                 db
                     .podcastDao()
-                    .insertPodcast(
+                    .insertPodcastOrIgnore(
                         PodcastEntity(
                             syncId = syncId,
                             sourceType =
@@ -197,6 +261,7 @@ class SyncApplier(
                             artworkKey = "u-$syncId",
                         ),
                     )
+            if (idInserted == -1L) return RecordOutcome.Invalid
             // A `*` row's aliases and the overrides land with the projection.
             merge.record.growSets["feedKeys"]?.forEach { key ->
                 if (key != feedKey) {
@@ -213,17 +278,59 @@ class SyncApplier(
                 }
             }
             applyOverrides(idInserted, isGroup = false, merge.record)
+            if (needsPasswordWithoutAuth(merge.record, credentialId = null)) passwordNeeded += idInserted
             return RecordOutcome.Applied
         }
-        applyPodcastFields(existing, merge.record)
+        applyPodcastFields(existing, merge.record, passwordNeeded)
         return RecordOutcome.Applied
+    }
+
+    /**
+     * 10 Feed passwords: a podcast the record says needs a password, with no winning `auth` and no
+     * local credential for it, keeps `needsCredentials = 1` and joins the pull's
+     * `FeedPasswordNeeded` notice. The wire flag means "this feed requires a password", never this
+     * device's error state, so a held credential answers it.
+     */
+    private fun needsPasswordWithoutAuth(
+        record: RecordState,
+        credentialId: Long?,
+    ): Boolean =
+        credentialId == null &&
+            record.fields["auth"] == null &&
+            (record.booleanField("needsCredentials") == true || record.stringField("credentialOrigin") != null)
+
+    /**
+     * 10 Mass-change guard rule 4: the podcast of the loaded, playing item. A paused player is
+     * not deferred — only a playing one is interrupted by nothing (R7.5).
+     */
+    private suspend fun isPlayingPodcast(podcastRid: String): Boolean {
+        val active = playback.active.value ?: return false
+        if (!active.isPlaying) return false
+        val episode = db.episodeDao().byId(active.episodeId) ?: return false
+        return db.podcastDao().byId(episode.podcastId)?.syncId == podcastRid
     }
 
     private suspend fun applyPodcastFields(
         existing: PodcastEntity,
         record: RecordState,
+        passwordNeeded: MutableCollection<Long>,
     ) {
         val now = clock.now()
+        record.booleanField("needsCredentials")?.let { needs ->
+            when {
+                // A local credential already answers the flag; never re-flag this device.
+                needs && existing.credentialId == null -> {
+                    db.podcastDao().markNeedsCredentials(existing.id)
+                }
+
+                !needs -> {
+                    db.podcastDao().clearNeedsCredentials(existing.id)
+                }
+
+                else -> {}
+            }
+        }
+        if (needsPasswordWithoutAuth(record, existing.credentialId)) passwordNeeded += existing.id
         record.stringField("feedUrl")?.let { feedUrl ->
             val feedKey = UrlNormalizer.forIdentity(feedUrl)
             if (feedKey != null && feedKey != existing.feedKey) {
@@ -437,6 +544,7 @@ class SyncApplier(
     private suspend fun applyEpisode(
         id: RecordId,
         merge: RecordMerge,
+        by: String?,
     ): RecordOutcome {
         val episodeId = id as RecordId.Episode
         val podcast =
@@ -462,14 +570,34 @@ class SyncApplier(
                     .byIdentityKey(
                         podcast.id,
                         episodeId.key.value,
-                    )?.let { applyEpisodeState(it.id, merge.record) }
+                    )?.let {
+                        reportRemotePlayedIfLoaded(it.id, merge, by)
+                        applyEpisodeState(it.id, merge.record)
+                    }
             } else {
+                reportRemotePlayedIfLoaded(idInserted, merge, by)
                 applyEpisodeState(idInserted, merge.record)
             }
             return RecordOutcome.Applied
         }
+        reportRemotePlayedIfLoaded(matched, merge, by)
         applyEpisodeState(matched, merge.record)
         return RecordOutcome.Applied
+    }
+
+    /**
+     * 10 Episode-state rules rule 2: only a winning `played = true` that makes the merged episode
+     * effectively played freezes the loaded player, and only before that state is projected — an
+     * older mark hidden by a newer listening position derives to in-progress and calls nothing.
+     */
+    private suspend fun reportRemotePlayedIfLoaded(
+        episodeId: Long,
+        merge: RecordMerge,
+        by: String?,
+    ) {
+        if (EpisodeStateRules.derive(merge.record.fields).state != EpisodeProgress.PLAYED) return
+        if (playback.active.value?.episodeId != episodeId) return
+        playback.onRemoteMarkedPlayed(episodeId, by ?: "")
     }
 
     private suspend fun applyEpisodeState(
@@ -481,7 +609,7 @@ class SyncApplier(
         db
             .episodeStateDao()
             .ensure(EpisodeStateEntity(episodeId = episodeId, updatedAt = clock.now()))
-        val playedAt = record.longField("playedAt")
+        val playedAt = record.nullableLongField("playedAt", current?.playedAt)
         val favourite = record.booleanField("fav") ?: (current?.isFavorite ?: false)
         val playCount =
             maxOf(record.longField("playCount") ?: 0L, current?.playCount?.toLong() ?: 0L)
@@ -504,7 +632,7 @@ class SyncApplier(
                     isFavorite = favourite,
                     downloadDismissedAt = current?.downloadDismissedAt,
                     measuredDurationMs =
-                        record.longField("measuredDurationMs") ?: current?.measuredDurationMs,
+                        record.nullableLongField("measuredDurationMs", current?.measuredDurationMs),
                     updatedAt = clock.now(),
                 ),
             )
@@ -586,7 +714,8 @@ class SyncApplier(
             merge.record.fields["v"]
                 ?.v
                 ?.toString() ?: return RecordOutcome.Stale
-        val pending = storedPending(settingKey.name) ?: PendingSetting(value, merge.record.maxClock?.toString() ?: "")
+        val incomingClock = merge.record.maxClock?.toString() ?: ""
+        val pending = storedPending(settingKey.name, incomingClock) ?: PendingSetting(value, incomingClock)
         db.syncClockDao().upsert(
             ch.lkmc.neutrodyne.core.database.SyncClockEntity(
                 SyncCollection.SETTING.wire,
@@ -603,7 +732,40 @@ class SyncApplier(
         return RecordOutcome.Applied
     }
 
-    private suspend fun storedPending(key: String): PendingSetting? = null
+    /**
+     * 10 Durable apply effects: the marker this record's page journals. An undrained stored
+     * marker at least as new as the record keeps its identity — a replay cannot reset the
+     * effect's completion comparison (clock equality); anything older is re-created from the
+     * merged winner.
+     */
+    private fun settingPendingMarker(
+        stored: RawSyncRecord?,
+        record: RecordState,
+    ): PendingSetting? {
+        val value = record.fields["v"]?.v
+        val text = (value as? JsonPrimitive)?.content ?: value?.toString() ?: return stored?.pendingSetting
+        val fresh = PendingSetting(text, record.maxClock?.toString() ?: "")
+        val storedPending = stored?.pendingSetting ?: return fresh
+        val storedClock = runCatching { Hlc.parse(storedPending.clock) }.getOrNull() ?: return fresh
+        val freshClock = runCatching { Hlc.parse(fresh.clock) }.getOrNull() ?: return storedPending
+        return if (storedClock >= freshClock) storedPending else fresh
+    }
+
+    /**
+     * The stored pending marker of [key] when it names work at least as new as [incomingClock]
+     * — the receive-side half of [settingPendingMarker]'s rule.
+     */
+    private suspend fun storedPending(
+        key: String,
+        incomingClock: String?,
+    ): PendingSetting? {
+        val raw = clockStore.get(SyncCollection.SETTING.wire, key) ?: return null
+        val pending = raw.pendingSetting ?: return null
+        val storedClock = runCatching { Hlc.parse(pending.clock) }.getOrNull() ?: return null
+        val incoming =
+            incomingClock?.let { runCatching { Hlc.parse(it) }.getOrNull() } ?: return pending
+        return if (storedClock >= incoming) pending else null
+    }
 
     private suspend fun deleteLostPending(
         coll: String,
@@ -737,6 +899,18 @@ private fun RecordState.stringField(name: String): String? =
     (fields[name]?.v as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
 private fun RecordState.longField(name: String): Long? = (fields[name]?.v as? JsonPrimitive)?.longOrNull
+
+/** Three states: an absent field keeps [fallback], `JsonNull` clears, a number wins. */
+private fun RecordState.nullableLongField(
+    name: String,
+    fallback: Long?,
+): Long? =
+    when (val value = fields[name]?.v) {
+        null -> fallback
+        JsonNull -> null
+        is JsonPrimitive -> value.longOrNull
+        else -> null
+    }
 
 private fun RecordState.intField(name: String): Int? = (fields[name]?.v as? JsonPrimitive)?.intOrNull
 

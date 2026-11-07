@@ -133,6 +133,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     viewModelFactory: MetroViewModelFactory,
     playbackController: PlaybackController,
     playbackState: PlaybackStateSource,
+    syncFocusPoke: () -> Unit,
     busySignal: AppBusySignal,
     clock: Clock,
     onQuitRequest: () -> Unit,
@@ -247,7 +248,16 @@ internal fun ApplicationScope.NeutrodyneWindow(
             window.background = java.awt.Color(argb, true)
             onDispose { }
         }
-        WindowEffects(activator = activator, background = background, onFocusGain = onWindowFocusGain)
+        // 10 Scheduling on the desktop: a refocus after > 60 s away pokes the `sync` lane; the
+        // callback itself is cheap — the trigger owns the cooldown and the lane poke.
+        WindowEffects(
+            activator = activator,
+            background = background,
+            onFocusGain = {
+                onWindowFocusGain()
+                syncFocusPoke()
+            },
+        )
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {

@@ -30,6 +30,7 @@ import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
@@ -71,8 +72,23 @@ import kotlinx.coroutines.CoroutineScope
  * `stop(grace = 3 s)` (11 Shutdown step 2). The media/OS bindings of `:desktop:system` join with
  * their milestones.
  */
-@DependencyGraph(AppScope::class, bindingContainers = [DesktopYouTubeBindingsModule::class])
+@DependencyGraph(
+    AppScope::class,
+    bindingContainers = [DesktopYouTubeBindingsModule::class, ch.lkmc.neutrodyne.sync.impl.SyncBindings::class],
+)
 interface DesktopAppGraph {
+    /** 10's sync application service (Settings › Sync, the shell banners). */
+    val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
+
+    /** The link state machine; `null` while no link runs. */
+    val linkFlow: ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl
+
+    /**
+     * 10 Scheduling on the desktop's window-refocus trigger: the window's focus listener calls
+     * it; the binding resolves the lane lazily so an early focus never blocks on the open.
+     */
+    val syncFocusPoke: ch.lkmc.neutrodyne.sync.impl.SyncFocusPoke
+
     val dirs: AppDirs
 
     val buildInfo: BuildInfo
@@ -112,6 +128,12 @@ interface DesktopAppGraph {
 
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository
+
+    /**
+     * 10 Settings capture: the production port the recorder drives. Graph tests resolve it to
+     * prove a remote apply changes DataStore without echoing a local outbox intent.
+     */
+    val settingsSyncPort: SettingsSyncPort
 
     val appUpdateChecker: AppUpdateChecker
     val updateNotices: UpdateNotices

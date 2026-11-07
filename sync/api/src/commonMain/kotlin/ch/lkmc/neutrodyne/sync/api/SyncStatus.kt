@@ -21,7 +21,19 @@ sealed interface SyncStatus {
         val serverUrl: String,
     ) : SyncStatus
 
-    /** Linked; [problem] replaces the first status line while set. */
+    /**
+     * An all-synced-devices Replace restore is pending (05 Restore while linked): the restore
+     * session, not the first-link choices, is the resume point, and Settings › Sync says so
+     * instead of offering the choices (08).
+     */
+    data class FinishingRestore(
+        val serverUrl: String,
+    ) : SyncStatus
+
+    /**
+     * Linked; [problem] replaces the first status line while set. [activity] is what the status
+     * card shows next to "Up to date" (08 Settings › Sync).
+     */
     data class Linked(
         val serverUrl: String,
         val accountId: String,
@@ -29,6 +41,7 @@ sealed interface SyncStatus {
         val username: String?,
         val nodeId: String,
         val lastSyncAtMs: Long?,
+        val activity: SyncActivity,
         val problem: SyncProblem?,
     ) : SyncStatus
 
@@ -36,4 +49,16 @@ sealed interface SyncStatus {
     data class Revoked(
         val serverUrl: String,
     ) : SyncStatus
+}
+
+/** What the sync machinery is doing right now (10 Live updates, 08 Settings › Sync). */
+enum class SyncActivity {
+    /** Linked and quiet. */
+    IDLE,
+
+    /** A sync round is in flight. */
+    SYNCING,
+
+    /** The server-sent events stream is connected. */
+    LIVE,
 }

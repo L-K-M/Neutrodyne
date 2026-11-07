@@ -233,4 +233,37 @@ class PositionSaverTest {
             saver.clear()
             assertNull(saver.capture(1000, null))
         }
+
+    // --- 06 Sync interplay rule 4: the paused-item pickup ---------------------------------------
+
+    @Test fun pickupTakesAStoredPositionOnlyBeyondOneSecond() =
+        runTest {
+            saver.load(1, 1000, PositionSource.STREAM)
+            assertNull(saver.pickupPositionMs(500_000), "nothing applied yet: no reference to compare")
+            saver.startPositionApplied(appliedPositionMs = 600_000)
+            assertNull(saver.pickupPositionMs(600_000))
+            assertNull(saver.pickupPositionMs(600_500), "a divergence of at most one second is ignored")
+            assertEquals(601_001L, saver.pickupPositionMs(601_001))
+            assertEquals(0L, saver.pickupPositionMs(0), "a written reset to 0 is taken up too")
+            assertNull(
+                saver.pickupPositionMs(null),
+                "an absent row is nothing written, never a reset to pick up",
+            )
+            saver.pickupApplied(601_001)
+            assertNull(saver.pickupPositionMs(601_001), "the picked-up position is the new reference")
+        }
+
+    @Test fun pickupFollowsTheLastWrittenOrAppliedPosition() =
+        runTest {
+            load()
+            saver.startPositionApplied(appliedPositionMs = 600_000)
+            clock.elapsedMs = 5000
+            assertEquals(PositionSaveResult.Saved, saver.onPause(604_000, null))
+            assertNull(saver.pickupPositionMs(604_500))
+            assertEquals(610_000L, saver.pickupPositionMs(610_000))
+            saver.onSeek(0, null, SeekOrigin.USER)
+            assertNull(saver.pickupPositionMs(1_000), "after the explicit reset the reference is 0")
+            assertEquals(1_500L, saver.pickupPositionMs(1_500))
+            assertEquals(500_000L, saver.pickupPositionMs(500_000))
+        }
 }

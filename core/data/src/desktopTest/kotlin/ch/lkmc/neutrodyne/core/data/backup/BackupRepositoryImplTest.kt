@@ -47,6 +47,7 @@ import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.PreparedBackup
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
@@ -63,6 +64,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -117,6 +119,54 @@ import kotlin.test.assertTrue
  * and the Android snapshot lane's adoption, controls and progress wiring.
  */
 class BackupRepositoryImplTest {
+    /** 05 Restore while linked: the ALL_DEVICES claim clears `linkedAt` in the same write. */
+    @Test
+    fun anAllDevicesReplaceClaimClearsLinkedAtWithTheIntent() =
+        runTest {
+            suspend fun link() {
+                db
+                    .syncStateDao()
+                    .upsert(
+                        ch.lkmc.neutrodyne.core.database.SyncStateEntity(
+                            serverUrl = "https://sync.example.com",
+                            enabled = true,
+                            nodeId = "0000000000000001",
+                            hlc = 1L shl 16,
+                            linkedAt = 1L,
+                        ),
+                    )
+            }
+            link()
+            val sessionId = backupSession()
+
+            val claimed =
+                repository.restore(
+                    sessionId,
+                    RestoreRequest(RestoreMode.REPLACE, emptySet(), LinkedRestoreReach.ALL_DEVICES),
+                )
+            check(claimed is Outcome.Success<*>) { "claim failed: $claimed" }
+
+            assertNull(db.syncStateDao().get()?.linkedAt)
+            val options =
+                ImportOptionsJson.decode(checkNotNull(db.importDao().sessionById(sessionId)?.optionsJson))
+            assertEquals(LinkedRestoreReach.ALL_DEVICES, options.linkedReach)
+
+            // A THIS_DEVICE claim keeps the link: only its own reach is stored. The first
+            // session's intent is spent, so the shared one-restore rule does not refuse.
+            db.importDao().setState(sessionId, ImportState.CANCELLED)
+            workScheduler.restoreWork = false
+            link()
+            val other = backupSession()
+            assertIs<Outcome.Success<*>>(
+                repository.restore(other, RestoreRequest(RestoreMode.REPLACE, emptySet())),
+            )
+            assertEquals(1L, db.syncStateDao().get()?.linkedAt)
+            assertEquals(
+                LinkedRestoreReach.THIS_DEVICE,
+                ImportOptionsJson.decode(checkNotNull(db.importDao().sessionById(other)?.optionsJson)).linkedReach,
+            )
+        }
+
     @Test
     fun retainedFailureKeepsItsSessionWhileAnotherRestoreIsQueued() =
         runTest {
@@ -221,7 +271,7 @@ class BackupRepositoryImplTest {
             stager = stager,
             merger = merger,
             episodes = episodeMerger,
-            settingsMerge = RestoreSettingsMerge(settings),
+            settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort()),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,
@@ -229,6 +279,7 @@ class BackupRepositoryImplTest {
             refresh = refresh,
             channels = channels,
             snapshots = snapshots,
+            linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
             clock = clock,
             io = Dispatchers.IO,
         )
@@ -1197,6 +1248,8 @@ class BackupRepositoryImplTest {
         override suspend fun get(origin: String): StoredSecret? = inner.get(origin)
 
         override suspend fun remove(origin: String) = inner.remove(origin)
+
+        override suspend fun originsWithPrefix(prefix: String): List<String> = inner.originsWithPrefix(prefix)
 
         override suspend fun forPodcast(podcastId: Long): BasicCredentials? {
             forPodcastCalls++

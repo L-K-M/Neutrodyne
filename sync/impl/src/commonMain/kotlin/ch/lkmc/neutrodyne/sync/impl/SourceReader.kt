@@ -177,6 +177,12 @@ class SourceReader(
                         podcast.episodeOrder?.let { put("episodeOrder", JsonPrimitive(it.name)) }
                         put("youtubeVariants", JsonPrimitive(podcast.youtubeVariants))
                         put("needsCredentials", JsonPrimitive(podcast.needsCredentials || podcast.credentialId != null))
+                        // The origin always travels with a credential; the secret itself only
+                        // while the device shares passwords (10 Feed passwords).
+                        podcast.credentialId?.let { id ->
+                            originOf(id)?.let { put("credentialOrigin", it) }
+                        }
+                        if (sharePasswords()) authOf(podcast)?.let { put("auth", it) }
                         overrides(rid, isGroup = false).forEach { (name, value) -> put(name, value) }
                     },
                     mapOf("feedKeys" to feedKeys(rid).toSet()),
@@ -226,8 +232,11 @@ class SourceReader(
                         put("playedAt", episode.state?.playedAt?.let(::JsonPrimitive) ?: JsonNull)
                         put("fav", JsonPrimitive(episode.state?.isFavorite == true))
                         put("playCount", JsonPrimitive(episode.state?.playCount ?: 0))
-                        episode.state?.lastPlayedAt?.let { put("lastPlayedAt", JsonPrimitive(it)) }
-                        episode.state?.measuredDurationMs?.let { put("measuredDurationMs", JsonPrimitive(it)) }
+                        put("lastPlayedAt", episode.state?.lastPlayedAt?.let(::JsonPrimitive) ?: JsonNull)
+                        put(
+                            "measuredDurationMs",
+                            episode.state?.measuredDurationMs?.let(::JsonPrimitive) ?: JsonNull,
+                        )
                         put(
                             "pos",
                             JsonObject(

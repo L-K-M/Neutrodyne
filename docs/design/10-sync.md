@@ -769,6 +769,30 @@ stateDiagram-v2
 5. A library reset by another device ("Use this device's library everywhere") reaches other devices as the removals of everything the resetting device lacks, and is held there when those exceed the thresholds — the second confirmation on the resetting device says so ([Use this device's library everywhere](#use-this-devices-library-everywhere)).
 6. The guard sees what one round pulls. Removals made one by one while both devices are online arrive in separate rounds and pass individually, which matches deliberate clean-ups; a device that was offline sees them together and asks.
 
+**Implementation note (2026-11-05, MS2 final slice).** Rules 2 and 4 run
+as specified: the round's verdict skips DEFERRED rows, the below-threshold
+branch applies the staged removals (clock re-check included) instead of
+dropping them, and a removal of the playing podcast stages its own
+DEFERRED row that `SyncEngine` releases on a `Stopped`/`Transition`
+boundary, at the start of every round, and never for the podcast still
+playing. `PlaybackSyncActive` gained the loaded item's `episodeId` so the
+applier and the release can name the playing podcast (the same slice
+renamed it `ActivePlayback` with `sinceMs` and made `active` null while
+nothing is loaded, per 06). Since 2026-11-05 the Android graph binds 06's
+`PlaybackSyncBridge`, so the deferral is live on Android; the desktop
+graph keeps `NoPlaybackSync` until `DesktopPlaybackController` lands with
+MD1a.2 (06's implementation note), where the deferral stays dormant and
+removals apply directly.
+
+**Update (2026-11-06, MS2 rest).** The desktop graph binds the real port
+too (`DesktopPlaybackController.syncPort`, 06's 2026-11-06 update), so
+the while-playing deferral is live on both platforms; the desktop
+end-to-end proof is `DesktopPlaybackSyncDeferralTest` (the real
+controller, scheduler, engine and applier over Room and the in-memory
+server, mirroring the Android `PlaybackSyncDeferralTest`). The Android
+bridge clears `active` before its `Stopped` boundary (06's 2026-11-06
+capture update), so the release at that boundary sees nothing playing.
+
 ### Now playing and handoff
 
 - `session/current` holds the current episode reference and the play context of the device that last wrote it (`by`). The writing device pushes it with the position cadence; the current item is never in Up next, so without the session record the episode playing on the phone would vanish from the desktop's queue view.
@@ -893,6 +917,45 @@ Room, DataStore and `SecretStore` cannot commit atomically. `SyncApplyEffects` t
 - Protected snapshots stay outside credential sweeps while raw state or pending work references them. Failed-page or losing candidates are removed; orphan staging entries are swept at startup after checking both raw and pending references. Unlink cancels the drain and removes the account's protected snapshots before clearing sync bookkeeping.
 - Removals retain their existing `sync_held` journal until the repository operation succeeds. Notification channels reconcile from the current groups on startup and after pulls; first fetches rediscover `PENDING_FIRST_FETCH` rows with `nextRefreshAt` due. These self-healing jobs need no payload journal. One-shot UI notices remain best effort.
 
+**Implementation note (2026-11-05, MS2, credentials).** The password
+rules above are implemented end to end (the switch of [Feed passwords
+and private feed URLs](#feed-passwords-and-private-feed-urls), staging,
+`pendingAuth` and the drain). Concrete shapes, refinements of this
+section rather than changes to it:
+
+- The protected reference stored in raw state — and in the replayed
+  literal of a full resync — is the marker object
+  `{"u":"","p":"","ref":"<storeKey>"}`: an `u`/`p`-empty AUTH value
+  that still passes protocol validation and merges canonically, so an
+  equal-clock redelivery compares equal instead of tripping the
+  write-identity conflict. A pending local value that wins is marked
+  with the feed origin it already lives at; push-time replay hydrates
+  a marker from its store entry only while sharing is on, and omits
+  the field when the snapshot is gone.
+- `SecretStore` gains `originsWithPrefix` for the orphan sweep and the
+  unlink cleanup; Android scans its rows' origins, the desktop unions
+  rows with its file-only entries.
+- A staging entry that no longer resolves after the store has loaded
+  (key loss, a lost secrets file) is unrecoverable: the effect is
+  abandoned and the feed flagged `needsCredentials` instead of
+  retrying forever. An effect whose podcast has not arrived stays
+  parked; the drain that follows the arriving page installs it.
+- Rounds drain at their start and after every applied page (the "at
+  each start" rule), and `FeedPasswordNeeded` posts once per round,
+  not once per page, through a notice bus the controller relays.
+- The first link stages every pulled candidate before its records
+  reach the cache-dir staging file, which therefore carries markers
+  only; a whole-library upload (first link or restore-everywhere)
+  captures one `auth` row per credentialed podcast while sharing is
+  on, exactly as a switch-on does.
+- Turning the switch off deletes the pending podcast `auth` outbox
+  rows: they can never be pushed while off, and a later switch-on
+  re-captures fresh ones.
+- The `podcast` `*` expansion carries `credentialOrigin` always and
+  `auth` while sharing is on (the Push table's "+ `credential`
+  … when `auth` is due"), so a whole-record push covers credentials
+  without a separate field row.
+
 ### Outbox and coalescing
 
 - One row per `(coll, rid, field)`: repeated changes coalesce, so 5-s position saves for one episode keep one row whatever the push cadence.
@@ -1009,6 +1072,22 @@ R7.4's background sync is "requested every 60 min" (amended 2026-10-05, [PO-47](
 
 On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the outbox is not empty ([11 Desktop shell](11-desktop.md#desktop-shell)); whatever is left stays in the outbox for the next start. Nothing runs while the app is quit. Only the instance holding the single-instance lock syncs (risk T26). When the window is hidden, a held batch of the [Mass-change guard](#mass-change-guard) also posts a desktop notification (`NotificationKind.SYNC_HELD`, [11 OS integration](11-desktop.md#os-integration)); on Android it posts one notification on the channel 08 assigns.
 
+**Implementation note (2026-11-04, MS2, scheduling).** The shared
+`SyncScheduler` (`commonMain`) owns the outbox debounce, the playback
+boundary and while-playing ticks, the group-deletion undo-window poke and
+the network-regain re-check; each platform contributes a
+`SyncScheduleHooks` that decides where the deferred push goes
+(`sync-push` work on Android, a reasoned `JobLanePoker.poke("sync")` on
+the desktop). Two readings differ from the tables above: "Sync now" runs
+an in-process round through `SyncController` — the `sync-now` work name
+serves the foreground trigger — because the controller needs the round's
+result for the status card, and a desktop `pos`/`session` flush is
+condition-checked (`hasPlaybackRows`), so a paused device pushes pending
+playback rows at the next lane tick rather than stranding them when a
+boundary poke was lost. A 401 inside `SyncEngine.round` records the
+revocation for every caller; the worker then fails the work and cancels
+every sync work name.
+
 ### Live updates
 
 `SyncEventsClient` keeps one SSE connection through Ktor's client SSE support (in `ktor-client-core`, with reconnection, [Ktor client SSE](https://ktor.io/docs/client-server-sent-events.html)) over the `SYNC` OkHttp client:
@@ -1018,6 +1097,30 @@ On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the 
 - **Watchdog:** the stream uses 01's derived `SYNC` client without read and call timeouts ([01 Networking baseline](01-foundation.md#networking-baseline); the base client's 30-s read timeout would cut a 60–90-s heartbeat), so the watchdog bounds it instead: no byte for `2 × hb + 15 s` → reconnect. Reconnects wait the server's `retry` (10 s), then back off exponentially to 5 min with ±20 % jitter after repeated failures; a `401` stops it (`Revoked`); a `429` waits `Retry-After`.
 - **Events:** `changed` with `by ≠` this device → a round within 500 ms (coalesced); `by` = this device → ignored.
 - If the server lacks `sse` or a proxy breaks streaming, polling covers it: rounds on foreground, pause and the timers above.
+
+**Implementation note (2026-11-06, MS3).** The stream is a named
+client kind, `HttpClientKind.SYNC_STREAM`, derived from `SYNC` with
+`readTimeout(0)`/`callTimeout(0)` rather than an ad-hoc derivation —
+same dispatcher, pool, DNS and LAN-gate island. Ktor's own session
+reconnection stays off (`maxReconnectionAttempts = 0`): the
+supervisor's `while` loop owns the documented cadence (server `retry`,
+`Retry-After` on `429`, exponential backoff to 5 min with ±20 %
+jitter, the `2 × hb + 15 s` watchdog), because the plugin's internal
+reconnect has no place for the gate, the `sse` capability check or the
+`401 → Revoked` funnel. Each (re)connect also pokes a round: the bus
+does not replay, so pushes missed while this device was disconnected
+surface only through a pull — the `changed`-event path is the same
+`SyncScheduler.onRemoteChanged` funnel (500 ms coalescing, reason
+`SSE`), which on a `401` rides `onUnlinked` instead of scheduling dead
+credentials. `SyncTransportException` gained `retryAfterSeconds` for
+the `429` wait. A linked row missing URL, token or device ID idles on
+the 5-min recheck cadence instead of reconnect-looping. The gate is a
+`combine` of platform `allowed`, live-link and `NetworkMonitor`; link
+changes reach it through `SyncScheduler`'s `linkStateChanged` funnel
+(`events.reevaluate()`), so unlink/revoke close the stream at once
+instead of waiting out a read. `SyncStatus.Linked` gained
+`activity: SyncActivity` (`IDLE`/`SYNCING`/`LIVE`; `SYNCING` wins over
+`LIVE`) for 08's presentation.
 
 ### Token storage
 
@@ -1036,6 +1139,13 @@ On an explicit Quit, `ShutdownCoordinator` gives one push a 2-s budget when the 
 3. The `SYNC` OkHttp client bypasses the LAN guard only while the gate has set 01's `LocalNetworkAccess.syncAllowed` (true below API 37, or while the permission is granted). Every other client keeps the guard, so LAN feeds still show `LocalNetworkUnsupported` (MS2 acceptance 5).
 4. The gate re-classifies at each round and on every network change, because split-horizon DNS gives the same name a LAN address at home and a public one outside, and the same address is local on Wi-Fi but not through a VPN: a missing or revoked permission blocks only rounds whose server classifies as local (`LocalNetworkPermissionDenied`), and the help offers the permission again. A server reached through a VPN (Tailscale's `100.64.0.0/10` on its VPN interface) is therefore not local and needs no permission.
 5. **Safety net** for a classification that misses (an unusual route set, a definition change in a later Android release): on API 37+ without the grant, when two consecutive rounds end in a connect timeout to the sync server while the active network is Wi-Fi or Ethernet without VPN, Settings › Sync and the problem banner offer "Your server may be on this network — allow local network access" instead of only `Unreachable`; granting it sets `syncAllowed` for this server. The NDK's `android_getnetworkblockedreason(sockFd)` (returns `ANDROID_NETWORK_BLOCKED_REASON_LNP`, [local network permission](https://developer.android.com/privacy-and-security/local-network-permission)) would identify the cause exactly but needs the socket descriptor beneath OkHttp and a JNI shim; not used in v1.0.
+
+**Implementation note (2026-11-04, MS2).** `LocalNetworkPermissionGate`
+classifies `.local` names and the IPv4/IPv6 private, link-local, CGNAT,
+multicast and broadcast ranges; the active-network route check (a global
+IPv6 address on a directly-connected route) and the connect-timeout safety
+net are not implemented yet. The `SYNC` client bypasses the LAN guard only
+while the gate has set `LocalNetworkAccess.syncAllowed`.
 
 **Desktop.** No platform rule on Windows and Linux. macOS may show its Local Network privacy prompt for a LAN server ([TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)); the bundle declares `NSLocalNetworkUsageDescription` (11 owns the `Info.plist`), and because the ad-hoc identity changes with every update the prompt may return after an update (Unverified with ad-hoc identity, S17). A denied prompt shows as connection failures; the help names the System Settings switch.
 
@@ -1168,9 +1278,152 @@ stateDiagram-v2
 5. Capture only fields the server lacks or the local side won, using the frozen `onApplied` inputs and their pre-merge timestamps: podcast presence from `subscribedAt`, user fields/overrides from their local change time, groups from `updatedAt`, members/Up next from `addedAt`, episodes from state/position timestamps and the session from `play_session.updatedAt`. `captureAt` takes the literal value too. Server-won fields are never re-stamped. Server-only Up next items appended in step 3 get fresh order keys/clocks for the deliberately merged order; settings the account lacked use literal `v` captures at now. Write `linkedAt` in the completing transaction.
 6. Push in rounds of 1,000; the server's field merge keeps whichever side is newer.
 
+**Implementation note (2026-11-04, MS2).** The base branch has no
+`LibraryMerger` implementation (05's `RestoreMerger` refuses the `LINK_*`
+policies), so `FirstLinkMerger` seeds this device's rows into `sync_clock`
+with their own row timestamps (counter 0, this node) and reuses the
+engine's field merge instead of `mergeStaged`. The rules are the same
+timestamp-LWW comparison (a local June `playedAt` loses to a server
+October "unplayed"); the staging-file resume of step 1 is not implemented
+yet and a crash mid-merge restarts the pull.
+
+**Implementation note (2026-11-05, MS2, first link through 05's port).**
+The shortcut above is gone: Merge and "Use the server's library" run
+`LibraryMerger.mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) over a staging
+directory the pull mapped under the archive's entry names, and the
+staging file (`sync-link-<deviceId>.jsonl` in the cache directory, one
+record per line plus an end marker carrying the cursor) is reused by a
+re-run that finds it complete — the staging-file resume of step 1; a
+completed link deletes it. Deviations the current code forces:
+
+- The staging directory carries a one-line `link-meta.json` with the pull
+  time — 05's "no manifest" bars a *validation* manifest, not metadata.
+- Step 4/5 seeding does not consume `onApplied`: `FirstLinkMerger` seeds
+  the local rows at their own timestamps first, folds every received
+  record in through the shared `SyncRecordMerger`, and captures exactly
+  the fields whose clock carries this node (the local winners and every
+  field the server lacks) at their own timestamps — the same set 05's
+  frozen-input rule produces. `onApplied` still reports podcast, group,
+  episode and setting winners; the settings journaling
+  (`pendingSetting`) runs after `mergeStaged` returns rather than inside
+  each chunk transaction, which keeps the same crash-recovery property
+  (the marker lives in `sync_clock`; `SyncApplyEffects.drainSettings`
+  applies it at the latest start).
+- The local seed now covers groups, members and Up next too, so an empty
+  account's upload includes them (the 2026-11-04 shortcut uploaded only
+  podcasts and episodes).
+- A linked Merge restore's session write is not captured (the `session`
+  record is MS3's); "Use this device's library everywhere" step 2 (ID
+  adoption and episode-history merge through `LibraryMerger`) remains
+  unimplemented, as recorded in the link-flow note below.
+
 Step 5's `captureAt` receives the frozen value as well as its pre-merge timestamp for played/position/session fields. Field winners come from 05's `onApplied(MergedRecord)` callback; `MergeSummary` carries counts only. Settings the server lacked use literal `v` captures. It never reads a post-merge projection at push time; an interrupted first link resumes from the saved raw inputs without turning an applied server value into a new local action.
 
 AntennaPod's first sync uploads every played episode stamped with the current time ([SyncService at 9c7ffa1](https://github.com/AntennaPod/AntennaPod/blob/9c7ffa16736c020045571d274aef4cdcf0878100/net/sync/service/src/main/java/de/danoeh/antennapod/net/sync/service/SyncService.java#L228-L248)), which flips later "unplayed" marks on other devices; stamping with row timestamps avoids that (risk SR2).
+
+**Implementation note (2026-11-04, MS2, link flow).** The client link
+flow (`SyncControllerImpl`/`LinkFlowImpl` in `:sync:impl`) drives the link
+code, invite and password methods, the approve/confirm sheet's calls, the
+three first-link choices through `FirstLinkMerger`, unlink/
+"Delete my data on the server", and device rename/revoke, all on the existing
+`SyncClient`, `SyncTokenStore` and protocol DTOs; the Settings › Sync setup
+screen follows `LinkState` (`:feature:sync`, strings EN/DE). The empty-account
+upload is confirmed with a named step (`LinkState.ConfirmUpload`), so a wrong
+account never uploads silently. Deviations forced by the current code:
+
+- "Use the server's library on this device" replaces local-only podcasts,
+  groups, Up next and the session context through the shared removal paths;
+  it does not run 05's Replace port (05's `RestoreMerger` refuses the
+  `LINK_*` policies), and synced settings keep following the field merge.
+- "Use this device's library everywhere" stages the server snapshot without
+  applying it, captures this device's whole library, pushes until the outbox
+  drains and prunes with `account/reset {mode: "library"}` bound to the staged
+  cursor. Step 2's ID adoption and episode-history merge through
+  `LibraryMerger` are not implemented, so server episode records are not
+  merged into local history during that choice.
+- The second confirmation naming the effect on the other devices is not
+  shown; the choice screen offers the three options directly (the effect
+  counts need the staged pull, which the merger runs only after the choice).
+- A plain `http://` address to a public host is refused before the discovery
+  request rather than after it, so no cleartext request leaves the device;
+  loopback and local addresses still ask once.
+- Unlink's 5-s push budget runs on the injected IO dispatcher (a coroutine
+  timeout there is wall-clock, independent of test virtual time).
+- The bootstrap capture writes run with capture already enabled and the
+  pulled cursor adopted, so the upload of a Merge or an empty account keeps
+  the rows' own timestamps; a played literal travels as one wire pair with
+  a single clock, as 05's archive requires.
+
+**Update (2026-11-05, MS2 restore slice).** The first two deviations are
+resolved: Merge and "Use the server's library" now run 05's
+`mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) as the note above records,
+and the staging-file resume exists. Restore-while-linked (05's rules)
+is implemented: a linked Merge runs `applying = 1` with `captureAt` at
+the backup's timestamps (presence fields take a fresh literal tick), a
+THIS_DEVICE Replace unlinks first through the `LinkedRestoreCoordinator`
+port (`:core:domain`, bound by `:sync:impl` to the controller's unlink),
+and an ALL_DEVICES Replace keeps the claim-time `linkedAt` clear and
+runs the upload/push/prune steps in the restore's finish before the
+session commits — a failure there leaves the durable request, and a
+re-run replays the idempotent restore and this step.
+
+**Update (2026-11-05, MS2 final slice).** "Use this device's library
+everywhere" step 2 is implemented: the staging pull seeds this device's
+rows into `sync_clock` at their own timestamps (freezing the pre-merge
+values), the same staging directory runs through `mergeStaged` under a
+new `LINK_HISTORY` policy (05's mergers: a matched podcast adopts the
+record's `syncId`, a `nameKey`-matched group the record's `uuid`, the
+episode lines of podcasts this device has merge by the First-link
+timestamp rules — unmatched lines of known podcasts park; nothing else
+is applied, no podcast, group, member, Up next, session or settings
+record), the received records fold into `sync_clock`, and the capture
+pass re-sends exactly the episode fields the local side won at their
+frozen timestamps beside the fresh `captureAll` rows of the rest of the
+library. The remaining bullets above stand (the second confirmation,
+`http://` refusal and the unlink budget are unchanged). Two adjacent
+gaps from earlier slices close with it: the acknowledgement path now
+merges the exact sent fields into `sync_clock` raw state (a sent `auth`
+as its feed-origin marker only), and the mass-change guard's
+below-threshold branch applies staged removals (re-checking their
+clocks) instead of dropping them. The step 3 synced-settings captures
+(each synced key's literal `v` with clocks ≥ `t0`) remain open — the
+settings port offers no bulk read; a local edit after the link captures
+and converges them anyway.
+
+**Update (2026-11-06, MS2 rest).** The step 3 synced-settings captures
+are implemented: `SettingsSyncPort.syncedLiteralValues()` is the bulk
+read (every synced key's current value as its wire JSON, defaults
+included, implemented beside `SettingsRepository` over the portable
+store), and `useDeviceEverywhere` — and the restore variant
+`restoreEverywhere`, whose Replace made the backup's settings this
+device's — captures each returned key as a literal `v` outbox intent
+with a fresh clock at or above the step's `t0` (the tick after
+`enabled = 1` and the cursor adoption), gated by the "Sync playback
+settings" switch exactly as a local edit's recorder is. The second
+confirmation is implemented too: `chooseFirstLink(USE_DEVICE)` runs
+`FirstLinkMerger.stageResetEffect()` — the staging pull plus the effect
+count of [Use this device's library everywhere](#use-this-devices-library-everywhere) step 1 —
+and shows `LinkState.ConfirmReplaceEverywhere` (08's wording and
+counts); "Replace everywhere" re-enters the choice and the merge resumes
+the staged snapshot, Cancel aborts the link with nothing merged or
+pruned. One adjacent gap surfaced while wiring this: `SettingsCapture`
+(the local synced-key recorder) was installed by tests only, so the
+sentence above about a local edit converging "anyway" did not hold in
+production. The 2026-11-06 capture update below closes it; the
+whole-library captures above do not depend on it.
+
+**Update (2026-11-06, MS2 capture).** `SettingsCapture` is installed by
+both production graphs. `SyncControllerImpl` installs the recorder from
+`refreshStatus` while the link is committed (`enabled`, `linkedAt`, not
+revoked) and "Sync playback settings" is on, clears it on unlink,
+revoke and the switch off, and re-installs it when the switch turns back
+on; the persisted switch is read at every status refresh. The recorder is
+the same literal-`v` intent path the whole-library captures use, so a
+local synced-key edit after the link now records its outbox intent in
+production. The Android and desktop graph tests prove a linked local
+edit through the production `SettingsRepository` records the `setting`
+row, an unlinked or switch-off edit records nothing, and a remote
+`applyRemote` changes DataStore without echoing an outbox row.
 
 ### Use the server's library on this device
 

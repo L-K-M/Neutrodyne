@@ -381,6 +381,36 @@ Serves R7.4, R7.5, R8.5 (cross-device resume), N1, N2. Delivered in MS2 (port, r
 
 **Up next from sync.** `SyncApplier` adds, moves and removes `queue_entry` rows — never the current item and never an effectively played episode ([10 Episode-state rules](10-sync.md#episode-state-rules) rule 1). Like UI edits they do not bump the generation, so the projector diffs them without touching index 0.
 
+**Implementation note (2026-11-05, MS2).** Android's `PlaybackSyncBridge` (`:playback:impl`) implements the port as specified above: `active` is published from the player (`null` while no service runs or the phase is `NOT_LOADED`), the `PAUSED`/`STOPPED`/`TRANSITIONED` boundaries are emitted after the matching pause save, transition or session transaction commits (the teardown flush's `STOPPED` follows the save and the `active` clear; the 2026-11-06 capture update corrected the earlier order), `onRemoteMarkedPlayed` freezes synchronously through `RemotePlayedGuard` with the lift on the item change or the stored row becoming unplayed again, and the paused-item pickup runs on both resume paths (the UI `play()`'s already-current start and `beforePlay` for media keys, the notification, Bluetooth and Auto). The desktop graph keeps `NoPlaybackSync` until `DesktopPlaybackController` lands with MD1a.2 after it merges.
+
+**Update (2026-11-06, MS2 rest).** The desktop graph binds the real port too:
+`DesktopPlaybackController` (`:playback:desktop`) publishes `active` from its
+published current (`null` until the first Play prepares output, per the rule above),
+emits `Paused` after a pause flush commits (the user pause paths and an
+engine-stopped advancement, the error/stall counterpart of `onIsPlayingChanged(false)`),
+`Stopped` after the dismissal, end-of-session or quit save or transaction, and
+`Transitioned` after an own start's, transition's or goBack's committed current
+change. `onRemoteMarkedPlayed` freezes through the shared `RemotePlayedGuard`
+(the planner's `frozen` seam and the saver's in-transaction `allowed` gate are
+wired, the unfreeze watch mirrors the bridge's), and the paused-item pickup runs
+on the already-current resume path. Two deviations the desktop shape forces: the
+port is a member forwarder (`DesktopPlaybackController.syncPort`), not an
+interface of the controller, because `PlaybackStateSource`'s own `events`
+property would clash with the port's `events` in the JVM; and a `STOPPED`
+boundary is emitted after `active` has turned `null` (the Android bridge
+now does the same; see the 2026-11-06 capture update below), because a release
+reading `active` at the boundary must see that nothing plays any more — the
+final save still precedes the boundary. `NoPlaybackSync` is gone from both
+graphs.
+
+**Update (2026-11-06, MS2 capture).** The Android `PlaybackSyncBridge`
+clears `active` (and lifts the remote-played freeze) before emitting
+`STOPPED`, so a release reading the port at the boundary sees nothing
+playing — the desktop order of the note above, now on both platforms.
+The final save still precedes the boundary. `PlaybackSyncDeferralTest`
+stops as production does (it no longer clears `active` by hand first), so
+the while-playing deferral applying pins the order.
+
 Core tests run in `commonTest` on the desktop JVM with `TestClock` and the `:core:testing` fakes; both adapters' suites pass M4 AC1, AC2 and AC6 through the core (PLAN M4 AC17, M5 AC8, MD1 AC1 and AC3, MS3 AC2 and AC3; [Testing](#testing)).
 
 ---
@@ -949,7 +979,7 @@ sequenceDiagram
 
 **Implementation note (2026-10-18, M4).** `WindowDiff` retains non-LCS identities for moves, resolving the original remove/non-LCS wording in favour of preserving the next item's prebuffer. `WindowEntry` carries metadata and the local-file hint for diffing; changed current source fields are deferred until its next load. A foreign generation loads paused, including a restored position on the same paused current item; MS3 will refine that case to a paused seek. A context-only generation change preserves the same current item's play intent, including buffering; an explicitly paused item stays paused. `WindowPlan` carries the pause directive and current advance/end decision separately from the M4 edit operations. Adapters bracket own writes, pass only committed generations to `endOwnWrite`, apply each returned plan before requesting another, and retain an outgoing `PositionCapture` for transaction retry. Failed position writes return `PositionSaveResult.Failed` for reporting and retry. `PlaybackMediaInfo.sortDate` is additive and defaults to null for existing callers; the durable media lookup populates it for keyset anchors. `StartOutcome.AlreadyCurrent` carries an optional explicit seek, avoiding an implicit start-position seek or commit when resuming the loaded item. The adapter passes its loaded episode ID; cold resumption loads the stored current without a new commit. `SessionStart.departure` is additive with a null default: `PlayStarter` invokes the adapter's departure capture only after gates pass, and `SessionWriter` saves/marks it inside the start transaction before arrival. This closes the contract's missing interrupted-start persistence input; the projector must avoid marking it again on the resulting playlist-change callback. No sync implementation, smart-resume setting wiring or measured-duration writeback lands in the shared M4 playback rules.
 
-**Implementation note (2026-10-18, M4).** The Media3 bridge exposes player-thread `attach` / `detach` adapters for the service to construct after the database opens on IO. The tracker attaches first and captures outgoing positions before the projector or session listeners see a discontinuity. A restored or foreign current loads paused without `prepare()`; an explicit committed start prepares after source indexing, the durable start seek and effective speed/silence application. External set and add handlers keep the own-write bracket open until the expected complete timeline arrives, with the 2 s timeout as recovery. Teardown passes an immutable main-thread position capture to the application scope with `NonCancellable`, so release never races a later player read. The Media3 adapter host tests use Media3 test players and clocks with the real Room stores; a test-only Java bridge reaches the internal store constructors without widening their production visibility.
+**Implementation note (2026-10-18, M4).** The Media3 bridge exposes player-thread `attach` / `detach` adapters for the service to construct after the database opens on IO. The tracker attaches first and captures outgoing positions before the projector or session listeners see a discontinuity. A restored or foreign current loads paused without `prepare()`; an explicit committed start prepares after source indexing, the durable start seek and effective speed/silence application. External set and add handlers keep the own-write bracket open until the expected complete timeline arrives, with the 2 s timeout as recovery. Teardown passes an immutable main-thread position capture to the application scope with `NonCancellable`, so release never races a later player read. The Media3 adapter host tests use Media3 test players and clocks with the real Room stores; a test-only Java bridge reaches the internal store constructors without widening their production visibility. The projector ignores an item-change discontinuity that arrives after its own start already made the arrival the durable current — Media3 can deliver that echo once the own-write bracket closed (observed on device while a long seek was still buffering), and committing it again bumped the generation twice and re-seeked the arrival to its start rule, overriding an explicit start position (2026-11-05, MS2).
 
 **External controllers.** `onSetMediaItems` (Auto, Assistant, Bluetooth browse) and `onAddMediaItems` write the database **first**, then return items, so the next database emission never reverts the user's choice in the car ([System surfaces](#android-auto-and-assistant)). Because Media3 applies the returned items asynchronously (after the future completes), the callback brackets the write with `projector.beginOwnWrite()` and registers `expectExternalApply(generation, mediaIds)`; the own write ends when the player's media IDs equal `mediaIds` (checked in `onTimelineChanged`, reason `PLAYLIST_CHANGED`) or after 2 s, so the projector never issues a second `setMediaItems` for the same start. `onSetMediaItems` also fills `EpisodeSourceIndex` and applies effective settings before returning. Player-level playlist edits that bypass these callbacks (a trusted controller calling `moveMediaItem`/`removeMediaItems`) are not persisted; the next projector diff restores the database order.
 

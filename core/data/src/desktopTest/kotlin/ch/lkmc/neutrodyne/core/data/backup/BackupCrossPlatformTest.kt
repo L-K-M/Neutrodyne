@@ -44,6 +44,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -175,7 +176,7 @@ class BackupCrossPlatformTest {
                         orderKeys = ProtocolOrderKeys,
                         clock = clock,
                     ),
-                settingsMerge = RestoreSettingsMerge(settings),
+                settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort()),
                 payloads =
                     PayloadStore(
                         storagePaths = storagePaths,
@@ -191,6 +192,7 @@ class BackupCrossPlatformTest {
                 refresh = FakeRefreshController(),
                 channels = channels,
                 snapshots = FakeSnapshotScheduler(),
+                linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
                 clock = clock,
                 io = Dispatchers.IO,
             )

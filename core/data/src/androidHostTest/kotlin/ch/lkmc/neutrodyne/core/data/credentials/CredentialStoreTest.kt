@@ -132,6 +132,19 @@ class CredentialStoreTest {
         }
 
     @Test
+    fun `originsWithPrefix lists protected snapshot rows`() =
+        runTest {
+            store.put("sync:pending:acc:rid:1-0000000000000001", "u", "p".toCharArray())
+            store.put("sync:sync.test", "sync", "tok".toCharArray())
+            store.put("https://a.test", "u", "p".toCharArray())
+
+            assertEquals(
+                listOf("sync:pending:acc:rid:1-0000000000000001"),
+                store.originsWithPrefix("sync:pending:"),
+            )
+        }
+
+    @Test
     fun `tampered ciphertext is marked lost and deleted`() =
         runTest {
             val id = store.put("https://a.test", "u", "p".toCharArray())!!

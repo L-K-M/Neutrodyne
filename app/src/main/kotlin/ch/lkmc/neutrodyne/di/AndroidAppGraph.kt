@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -54,8 +55,16 @@ import kotlinx.coroutines.CoroutineScope
  * The Android main process's graph (01 Dependency injection, D82). It exists only in the main process
  * (D73): `:ytx` builds [YtxGraph], `:acra` builds nothing.
  */
-@DependencyGraph(AppScope::class, bindingContainers = [YouTubeBindingsModule::class])
+@DependencyGraph(
+    AppScope::class,
+    bindingContainers = [YouTubeBindingsModule::class, ch.lkmc.neutrodyne.sync.impl.SyncBindings::class],
+)
 interface AndroidAppGraph : DownloadComponentsInjector {
+    /** 10's sync application service (Settings › Sync, the shell banners). */
+    val syncController: ch.lkmc.neutrodyne.sync.api.SyncController
+
+    /** The link state machine; `null` while no link runs. */
+    val linkFlow: ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl
     val application: Application
 
     @ApplicationScope
@@ -88,6 +97,12 @@ interface AndroidAppGraph : DownloadComponentsInjector {
 
     /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
     val settingsRepository: SettingsRepository
+
+    /**
+     * 10 Settings capture: the production port the recorder drives. Graph tests resolve it to
+     * prove a remote apply changes DataStore without echoing a local outbox intent.
+     */
+    val settingsSyncPort: SettingsSyncPort
 
     val appUpdateChecker: AppUpdateChecker
     val updateNotices: UpdateNotices

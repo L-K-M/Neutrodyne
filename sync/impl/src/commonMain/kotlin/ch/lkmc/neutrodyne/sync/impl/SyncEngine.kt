@@ -7,19 +7,27 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.sync.api.SyncReport
 import ch.lkmc.neutrodyne.sync.api.SyncRoundReason
+import ch.lkmc.neutrodyne.sync.protocol.FieldState
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
+import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+/** The host of a server URL, for the token origin (`sync:<host>`). */
+fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
 
 /** The maximum number of push rounds in one `round()` (10 Sync round). */
 private const val MAX_ROUNDS = 50
@@ -32,26 +40,41 @@ private const val MAX_ROUNDS = 50
 class SyncEngine(
     private val db: NeutrodyneDatabase,
     private val client: SyncClient,
+    private val applier: SyncApplier,
     private val clock: Clock,
     private val secrets: SecretStore,
-    private val settings: SettingsSyncPort,
-    private val playback: PlaybackSyncPort,
-    private val syncIngestHook: SyncIngestHook,
-    private val channelSync: GroupChannelSync,
     private val sharePasswords: () -> Boolean,
-    private val serverUrl: () -> String?,
-    private val token: () -> String?,
+    private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress,
+    private val tokens: SyncTokenStore,
+    private val effects: SyncApplyEffects,
+    private val notices: SyncNoticeBus,
+    private val playback: PlaybackSyncPort = NoPlaybackSync,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
-    private val applier =
-        SyncApplier(db, clock, secrets, settings, playback, syncIngestHook, channelSync, sharePasswords)
+    private val clockStore = SyncClockStore(db)
 
-    suspend fun round(reason: SyncRoundReason): SyncReport {
+    /**
+     * Rounds serialize: an in-process round, a `SyncWorker` round and the controller's "Sync now"
+     * may race; interleaved pushes would confuse the outbox ACK arithmetic.
+     */
+    private val roundMutex = Mutex()
+
+    suspend fun round(reason: SyncRoundReason): SyncReport = roundMutex.withLock { roundLocked(reason) }
+
+    private suspend fun roundLocked(reason: SyncRoundReason): SyncReport {
         val started = clock.now()
-        if (serverUrl() == null || token() == null) {
+        val serverUrl = address.serverUrl()
+        val token = serverUrl?.let { tokens.load(hostOf(it)) }
+        if (serverUrl == null || token == null) {
             return SyncReport(0, 0, 0, 0, 0, 0, clock.now() - started)
         }
+        // 10 Durable apply effects: recover journaled settings and credentials at each start,
+        // before pushing or reconciling — a committed cursor must never strand their effects.
+        effects.drain()
+        // A deferred removal whose playback ended releases here too, so a restart or any round
+        // applies it even when no boundary event was observed (10 Mass-change guard rule 4).
+        releaseDeferred()
         var pushed = 0
         var applied = 0
         var stale = 0
@@ -59,6 +82,7 @@ class SyncEngine(
         var pulled = 0
         var held = 0
         val roundId = clock.now()
+        val passwordNeeded = LinkedHashSet<Long>()
 
         // Reasons that never pull on their own: a round with nothing to push is a no-op.
         val noPullReasons = setOf(SyncRoundReason.OUTBOX, SyncRoundReason.PLAYBACK)
@@ -70,40 +94,80 @@ class SyncEngine(
             if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
             val state = db.syncStateDao().get()
             val response =
-                client.sync(state?.cursor, changes)
+                try {
+                    client.sync(state?.cursor, changes)
+                } catch (failure: SyncTransportException) {
+                    // 10 Errors: a rejected token revokes the link on every caller, not just
+                    // the controller's "Sync now", so worker and scheduler rounds stop too.
+                    if (failure.status == STATUS_REVOKED) markRevoked()
+                    throw failure
+                }
             pushed += changes.size
             db.withWriteTransaction { handleResults(changes, response.results) }
             applied += response.records.size
-            val page = applier.applyPage(response.records, roundId)
-            stale += page.stale
-            held += page.held
-            pulled += response.records.size
+            pulled += drainPage(response.records, roundId, passwordNeeded)
             raiseHlc(response.records)
             storeCursor(response.cursor)
+            var cursor = response.cursor
             var hasMore = response.hasMore
             var guard = 0
             while (hasMore && guard < MAX_ROUNDS) {
                 guard++
-                val next = client.changes(response.cursor, ProtocolLimits.MAX_RECORDS)
+                val next = client.changes(cursor, ProtocolLimits.MAX_RECORDS)
                 applied += next.records.size
-                pulled += next.records.size
-                applier.applyPage(next.records, roundId)
+                pulled += drainPage(next.records, roundId, passwordNeeded)
                 raiseHlc(next.records)
                 storeCursor(next.cursor)
+                cursor = next.cursor
                 hasMore = next.hasMore
             }
             if (db.syncOutboxDao().count() == 0) break
         }
 
-        val batch = MassChangeGuard.evaluate(db, roundId, localPodcastCount())
+        if (passwordNeeded.isNotEmpty()) {
+            // Once per pull, not once per page (10 Feed passwords).
+            notices.post(
+                ch.lkmc.neutrodyne.sync.api.SyncNotice
+                    .FeedPasswordNeeded(passwordNeeded.toList()),
+            )
+        }
+
+        val batch = MassChangeGuard.evaluate(db, roundId, localPodcastCount(), clock.now())
         if (batch != null) {
             held += batch.podcasts.size + batch.groups.size
-        } else {
-            // Below the thresholds the guard deleted its provisional row; the removals were staged
-            // in `sync_held` only when held, so nothing else to apply here.
         }
+        // A null batch means the guard applied a below-threshold batch itself or had nothing.
         db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastSyncAt = clock.now())) }
         return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
+    }
+
+    /** Applies one pulled page and drains its durable effects; returns the record count. */
+    private suspend fun drainPage(
+        records: List<RecordDto>,
+        roundId: Long,
+        passwordNeeded: MutableSet<Long>,
+    ): Int {
+        val page = applier.applyPage(records, roundId)
+        passwordNeeded += page.passwordNeeded
+        effects.drain()
+        return records.size
+    }
+
+    /**
+     * 10 Mass-change guard rule 4: apply the deferred removals whose podcast is no longer the
+     * loaded, playing item — a boundary event or any round reaches this.
+     */
+    suspend fun releaseDeferred() {
+        val active = playback.active.value
+        val playingRid =
+            if (active?.isPlaying == true) {
+                db.episodeDao().byId(active.episodeId)?.let { episode ->
+                    db.podcastDao().byId(episode.podcastId)?.syncId
+                }
+            } else {
+                null
+            }
+        MassChangeGuard.releaseDeferred(db, playingRid, clock.now())
     }
 
     private suspend fun handleResults(
@@ -130,7 +194,81 @@ class SyncEngine(
                 .mapNotNull { runCatching { Hlc.parse(it) }.getOrNull() }
                 .minOrNull()
                 ?.let { db.syncOutboxDao().deleteAcked(coll, rid, "*", it.packed, it.nodeId.value) }
+            mergeAckedSnapshot(coll, rid, change)
         }
+    }
+
+    /**
+     * 10 Outbox and coalescing: the acknowledgement merges the exact sent fields into
+     * `sync_clock` raw state by the normal field rules, never lowering a known field clock —
+     * the cursor alone must not strand the accepted values (a resync replay compares against
+     * them). A sent `auth` is staged in the protected store and travels onward only as its
+     * marker — the same representation the receive path stores, so an equal-clock echo of the
+     * push compares equal instead of tripping the write-identity conflict, and the plaintext
+     * that left this device never enters Room.
+     */
+    private suspend fun mergeAckedSnapshot(
+        collWire: String,
+        rid: String,
+        change: ChangeDto,
+    ) {
+        val coll = runCatching { SyncCollection.fromWire(collWire) }.getOrNull() ?: return
+        val fields = HashMap<String, FieldState>()
+        val growSets = HashMap<String, Set<String>>()
+        for ((name, value) in change.fields) {
+            val clock = value.c ?: continue
+            val parsed = runCatching { Hlc.parse(clock) }.getOrNull() ?: continue
+            val sent = value.v
+            val added = value.add
+            when {
+                sent != null -> fields[name] = FieldState(sent, parsed, value.reset == true)
+                !added.isNullOrEmpty() -> growSets[name] = added.toSet()
+            }
+        }
+        if (fields.isNotEmpty() || growSets.isNotEmpty()) {
+            if (coll == SyncCollection.PODCAST) stageAckedAuth(rid, fields)
+            val incoming = RecordState(coll, fields, growSets, change.match)
+            val stored = clockStore.get(collWire, rid)
+            val merged = SyncRecordMerger.merge(stored?.state, null, incoming)
+            val protection = protectAuthRecord(db, rid, merged.record, merged.advanced, stored)
+            clockStore.put(
+                collWire,
+                rid,
+                RawSyncRecord(
+                    state = protection.state,
+                    by = stored?.by,
+                    authReference = protection.authReference ?: stored?.authReference,
+                    pendingAuth = protection.pendingAuth ?: stored?.pendingAuth,
+                    redirect = stored?.redirect,
+                    alias = stored?.alias,
+                    settingHash = stored?.settingHash,
+                    pendingSetting = stored?.pendingSetting,
+                ),
+            )
+        }
+    }
+
+    /**
+     * The ack's protected auth staging: a sent plaintext pair is put under its deterministic
+     * `sync:pending:` key and the field value becomes the marker, mirroring the receive path's
+     * [AuthStage] so both paths store one representation.
+     */
+    private suspend fun stageAckedAuth(
+        rid: String,
+        fields: MutableMap<String, FieldState>,
+    ) {
+        val auth = fields["auth"] ?: return
+        val clock = auth.c ?: return
+        val candidate = authCandidate(auth.v) ?: return
+        val account =
+            db
+                .syncStateDao()
+                .get()
+                ?.accountId
+                .orEmpty()
+        val key = pendingAuthOrigin(account, rid, clock.toString())
+        secrets.put(key, candidate.username, candidate.password.toCharArray())
+        fields["auth"] = FieldState(authMarker(key), clock)
     }
 
     private suspend fun raiseHlc(records: List<RecordDto>) {
@@ -138,7 +276,7 @@ class SyncEngine(
             records.maxOfOrNull { record ->
                 record.fields.values
                     .mapNotNull { it.c }
-                    .maxOfOrNull { Hlc.parse(it).packed } ?: 0L
+                    .maxOfOrNull { runCatching { Hlc.parse(it) }.getOrNull()?.packed ?: 0L } ?: 0L
             } ?: 0L
         if (max > 0) db.syncStateDao().raiseHlc(max)
     }
@@ -149,4 +287,13 @@ class SyncEngine(
     }
 
     private suspend fun localPodcastCount(): Int = db.podcastDao().allForExport().size
+
+    private suspend fun markRevoked() {
+        val state = db.syncStateDao().get() ?: return
+        db.syncStateDao().upsert(state.copy(lastError = SYNC_ERROR_REVOKED))
+    }
+
+    private companion object {
+        const val STATUS_REVOKED = 401
+    }
 }

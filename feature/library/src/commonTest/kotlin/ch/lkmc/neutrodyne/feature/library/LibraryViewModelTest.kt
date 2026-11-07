@@ -78,6 +78,8 @@ class LibraryViewModelTest : MainDispatcherTest() {
             groups,
             feeds,
             clock,
+            ch.lkmc.neutrodyne.core.testing
+                .FakeSyncController(),
         )
 
     private fun TestScope.collect(viewModel: LibraryViewModel) {

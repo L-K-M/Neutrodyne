@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -16,6 +17,7 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
+import ch.lkmc.neutrodyne.sync.protocol.SyncJson
 import ch.lkmc.neutrodyne.sync.protocol.dto.FieldValue
 import ch.lkmc.neutrodyne.sync.protocol.dto.MatchHints
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
@@ -135,9 +137,126 @@ class SyncApplierTest {
                         roundId = now,
                     )
                 assertEquals(1, result.held)
-                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1)
+                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1, now = now)
                 assertNull(held, "one removal of one is below the thresholds")
+                assertNull(
+                    db.podcastDao().bySyncId(podcastSyncId),
+                    "below the thresholds the staged removal is applied",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Mass-change guard rule 4: a removal of the podcast loaded in a playing player defers
+     * into its own held row — playback is never interrupted (R7.5), the guard's threshold
+     * verdict ignores it, and it applies once the player stops.
+     */
+    @Test
+    fun aRemovalOfThePlayingPodcastDefersUntilPlaybackEnds() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+
+                val result =
+                    applier.applyPage(
+                        listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                        roundId = now,
+                    )
+                assertEquals(1, result.held)
+                assertNotNull(db.podcastDao().bySyncId(podcastSyncId), "the playing podcast stays")
+                assertNull(
+                    MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1, now = now),
+                    "a deferred removal never joins the round's verdict",
+                )
                 assertNotNull(db.podcastDao().bySyncId(podcastSyncId))
+
+                playback.setPlaying(false)
+                MassChangeGuard.releaseDeferred(db, playingPodcastRid = null, now = now)
+                assertNull(db.podcastDao().bySyncId(podcastSyncId), "the removal applies after playback")
+                assertEquals(0, db.syncHeldDao().count())
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A paused player holds no deferral: only a playing one is never interrupted. */
+    @Test
+    fun aPausedPlayerDoesNotDeferTheRemoval() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val applier = applier(db, playback = FakePlaybackSyncPort(playing = false, episodeId = episodeId))
+
+                applier.applyPage(
+                    listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                    roundId = now,
+                )
+
+                assertNull(
+                    MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 1, now = now),
+                )
+                assertNull(db.podcastDao().bySyncId(podcastSyncId), "a paused player applies at once")
+            } finally {
+                db.close()
+            }
+        }
+
+    /** A deferred removal a newer remote value overturned is dropped, not applied. */
+    @Test
+    fun aDeferredRemovalDropsWhenANewerValueOverturnsIt() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")),
+                        ).single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+                applier.applyPage(
+                    listOf(podcastRecord(podcastSyncId, "subscribed" to bool(false))),
+                    roundId = now,
+                )
+
+                // A newer revival wins the stored clocks while the removal is still deferred.
+                applier.applyPage(
+                    listOf(
+                        podcastRecord(
+                            podcastSyncId,
+                            "subscribed" to FieldValue(JsonPrimitive(true), clock(99).toString()),
+                        ),
+                    ),
+                    roundId = now + 1,
+                )
+
+                playback.setPlaying(false)
+                MassChangeGuard.releaseDeferred(db, playingPodcastRid = null, now = now)
+                assertNotNull(db.podcastDao().bySyncId(podcastSyncId), "the revival survives")
+                assertEquals(0, db.syncHeldDao().count())
             } finally {
                 db.close()
             }
@@ -158,7 +277,7 @@ class SyncApplierTest {
                     }
                 assertEquals(11, applier.applyPage(removals, roundId = now).held)
 
-                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 50)
+                val held = MassChangeGuard.evaluate(db, roundId = now, localPodcasts = 50, now = now)
                 assertNotNull(held)
                 assertEquals(11, held.podcasts.size)
                 assertEquals(50, db.podcastDao().allForExport().size)
@@ -240,14 +359,458 @@ class SyncApplierTest {
             }
         }
 
-    private fun applier(db: NeutrodyneDatabase): SyncApplier {
+    /**
+     * 10 Episode-state rules rule 2: a winning played mark that makes the merged episode
+     * effectively played reports to the loaded player before it is projected; an older mark
+     * hidden by a newer listening position derives to in-progress and reports nothing.
+     */
+    @Test
+    fun aWinningPlayedMarkForTheLoadedItemReportsBeforeProjection() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                val otherId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:two")))
+                        .single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(true),
+                            "playedAt" to int(9L),
+                            "pos" to pos(0, reset = true),
+                        ),
+                        // The same winning mark for an episode no player has loaded.
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:two",
+                            MatchHints(guid = "two"),
+                            "played" to bool(true),
+                            "playedAt" to int(9L),
+                        ),
+                    ),
+                    roundId = now,
+                )
+
+                assertEquals(listOf(episodeId to deviceId), playback.remotePlayed)
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+                assertEquals(9L, db.episodeStateDao().byEpisode(otherId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anOlderMarkHiddenByANewerListeningPositionReportsNothing() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                val playback = FakePlaybackSyncPort(playing = true, episodeId = episodeId)
+                val applier = applier(db, playback = playback)
+
+                // The newer listening position first, then the older played mark.
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(podcastSyncId, "g:one", MatchHints(guid = "one"), "pos" to pos(1_200L)),
+                    ),
+                    roundId = now,
+                )
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to FieldValue(JsonPrimitive(true), clock(5).toString()),
+                            "playedAt" to int(5L),
+                        ),
+                    ),
+                    roundId = now + 1,
+                )
+
+                assertTrue(playback.remotePlayed.isEmpty(), "a hidden mark freezes no saver")
+                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt, "it derives to in-progress")
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aReceivedAuthIsStagedProtectedAndJournaledAsPendingAuth() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                link(db)
+                seedSilently(db, podcastSyncId)
+                val applier = applier(db, secrets)
+                val authClock = clock(10).toString()
+                applier.applyPage(
+                    listOf(
+                        podcastRecord(
+                            podcastSyncId,
+                            "needsCredentials" to bool(true),
+                            "credentialOrigin" to text("https://example.com"),
+                            "auth" to auth("anna", "hunter2"),
+                        ),
+                    ),
+                    roundId = now,
+                )
+
+                // The secret lives only in the protected staging entry.
+                val stagedKey = pendingAuthOrigin("acc-1", podcastSyncId, authClock)
+                assertEquals("hunter2", secrets.get(stagedKey)?.secret?.concatToString())
+
+                // Raw state carries the marker and the reference; no plaintext anywhere in Room.
+                val raw = rawRecord(db, podcastSyncId)
+                assertNotNull(raw)
+                assertEquals(
+                    stagedKey,
+                    authMarkerKey(
+                        raw.state.fields
+                            .getValue("auth")
+                            .v,
+                    ),
+                )
+                assertEquals(stagedKey, raw.pendingAuth?.reference)
+                assertEquals("https://example.com", raw.pendingAuth?.credentialOrigin)
+                assertEquals(stagedKey, raw.authReference?.storeKey)
+                assertFalse(
+                    db
+                        .syncClockDao()
+                        .get("podcast", podcastSyncId)!!
+                        .clocks
+                        .contains("hunter2"),
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anEqualClockRedeliveryKeepsThePendingEffectWithoutConflict() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                link(db)
+                seedSilently(db, podcastSyncId)
+                val applier = applier(db, secrets)
+                val page =
+                    listOf(
+                        podcastRecord(
+                            podcastSyncId,
+                            "needsCredentials" to bool(true),
+                            "auth" to auth("anna", "hunter2"),
+                        ),
+                    )
+                applier.applyPage(page, roundId = now)
+                val second = applier.applyPage(page, roundId = now + 1)
+
+                assertEquals(1, second.stale)
+                val raw = rawRecord(db, podcastSyncId)
+                assertNotNull(raw)
+                assertNotNull(raw.pendingAuth, "an equal-clock redelivery must not suppress unfinished work")
+                assertEquals("hunter2", secrets.get(raw.pendingAuth!!.reference)?.secret?.concatToString())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aPodcastNeedingAPasswordWithoutAuthIsFlaggedAndReported() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedSilently(db, podcastSyncId)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(podcastRecord(podcastSyncId, "needsCredentials" to bool(true))),
+                        roundId = now,
+                    )
+
+                assertEquals(listOf(podcastId), result.passwordNeeded)
+                assertEquals(true, db.podcastDao().byId(podcastId)?.needsCredentials)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aReceivedAuthSuppressesThePasswordNeededNotice() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedSilently(db, podcastSyncId)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            podcastRecord(
+                                podcastSyncId,
+                                "needsCredentials" to bool(true),
+                                "auth" to auth("anna", "hunter2"),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+
+                assertEquals(emptyList<Long>(), result.passwordNeeded)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aLosingAuthCandidateIsRemovedAndALocalWinnerIsMarkedWithTheFeedOrigin() =
+        runTest {
+            val db = TestDb.inMemory()
+            val secrets = FakeSecretStore()
+            try {
+                link(db)
+                val podcastId = seedSilently(db, podcastSyncId)
+                val credentialId =
+                    db
+                        .credentialDao()
+                        .putByOrigin(
+                            ch.lkmc.neutrodyne.core.database.CredentialEntity(
+                                origin = "https://example.com",
+                                username = "local",
+                                secretCipher = null,
+                                iv = null,
+                                createdAt = 1,
+                            ),
+                        )
+                val fakeRowId = secrets.put("https://example.com", "local", "local-secret".toCharArray())!!
+                secrets.podcastCredentialIds.value = mapOf(podcastId to fakeRowId)
+                db.podcastDao().setCredentialId(podcastId, credentialId)
+                // A pending local auth row newer than the incoming remote value.
+                db
+                    .syncOutboxDao()
+                    .upsert(
+                        ch.lkmc.neutrodyne.core.database.SyncOutboxEntity(
+                            coll = "podcast",
+                            rid = podcastSyncId,
+                            field = "auth",
+                            hlc = (now + 100_000L) shl 16,
+                            nodeId = node.value,
+                        ),
+                    )
+                val applier = applier(db, secrets)
+                val remoteClock = clock(10).toString()
+                applier.applyPage(
+                    listOf(podcastRecord(podcastSyncId, "auth" to auth("anna", "remote-secret"))),
+                    roundId = now,
+                )
+
+                val raw = rawRecord(db, podcastSyncId)
+                assertNotNull(raw)
+                assertNull(raw.pendingAuth, "the local credential is already installed; nothing to drain")
+                assertEquals(
+                    "https://example.com",
+                    authMarkerKey(
+                        raw.state.fields
+                            .getValue("auth")
+                            .v,
+                    ),
+                )
+                assertEquals("https://example.com", raw.authReference?.storeKey)
+                assertNull(
+                    secrets.get(pendingAuthOrigin("acc-1", podcastSyncId, remoteClock)),
+                    "the losing candidate left the staging store",
+                )
+                assertFalse(
+                    db
+                        .syncClockDao()
+                        .get("podcast", podcastSyncId)!!
+                        .clocks
+                        .contains("remote-secret"),
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anAbsentPlayedAtKeepsTheLocalValue() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        ch.lkmc.neutrodyne.core.database
+                            .EpisodeStateEntity(episodeId, playedAt = 9L, updatedAt = 1),
+                    )
+
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "fav" to bool(true),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                assertEquals(9L, db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun anExplicitNullPlayedAtClearsTheLocalValue() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val podcastId = seedPodcast(db, podcastSyncId)
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(listOf(episodeEntity(podcastId = podcastId, identityKey = "g:one")))
+                        .single()
+                db
+                    .episodeStateDao()
+                    .ensure(
+                        ch.lkmc.neutrodyne.core.database
+                            .EpisodeStateEntity(episodeId, playedAt = 9L, updatedAt = 1),
+                    )
+
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(
+                        episodeRecord(
+                            podcastSyncId,
+                            "g:one",
+                            MatchHints(guid = "one"),
+                            "played" to bool(false),
+                            "playedAt" to FieldValue(kotlinx.serialization.json.JsonNull, clock(10).toString()),
+                        ),
+                    ),
+                    roundId = now,
+                )
+                assertNull(db.episodeStateDao().byEpisode(episodeId)?.playedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aPodcastOnAnExistingFeedKeyIsInvalidNotAConstraintError() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val feedUrl = "https://example.com/feed/duplicate"
+                db
+                    .podcastDao()
+                    .insertPodcast(
+                        podcastEntity(
+                            syncId = "00000000-0000-4000-8000-0000000000aa",
+                            feedUrl = feedUrl,
+                            feedKey =
+                                ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+                                    .forIdentity(feedUrl)!!,
+                        ),
+                    )
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            podcastRecord(
+                                podcastSyncId,
+                                "subscribed" to bool(true),
+                                "feedUrl" to text(feedUrl),
+                                "title" to text("Duplicate feed"),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                assertEquals(1, result.invalid)
+                assertNull(db.podcastDao().bySyncId(podcastSyncId))
+            } finally {
+                db.close()
+            }
+        }
+
+    /** [seedPodcast] with the capture triggers silenced, so the seed stays out of the merge. */
+    private suspend fun seedSilently(
+        db: NeutrodyneDatabase,
+        syncId: String,
+    ): Long =
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying { seedPodcast(db, syncId) }
+        }
+
+    private fun auth(
+        username: String,
+        password: String,
+    ): FieldValue =
+        FieldValue(
+            JsonObject(
+                buildMap {
+                    put("u", JsonPrimitive(username))
+                    put("p", JsonPrimitive(password))
+                },
+            ),
+            clock(10).toString(),
+        )
+
+    private suspend fun rawRecord(
+        db: NeutrodyneDatabase,
+        rid: String,
+    ): RawSyncRecord? =
+        db.syncClockDao().get("podcast", rid)?.let {
+            runCatching { SyncJson.decodeFromString<RawSyncRecord>(it.clocks) }.getOrNull()
+        }
+
+    private fun applier(
+        db: NeutrodyneDatabase,
+        secrets: FakeSecretStore = FakeSecretStore(),
+        playback: ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort = NoPlaybackSync,
+    ): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
             db = db,
             clock = TestClock(now),
-            secrets = FakeSecretStore(),
+            secrets = secrets,
             settings = settings,
-            playback = NoPlaybackSync,
+            playback = playback,
             syncIngestHook = SyncIngestHook.None,
             channelSync =
                 object : GroupChannelSync {
@@ -268,7 +831,7 @@ class SyncApplierTest {
         db.withWriteTransaction {
             db
                 .syncStateDao()
-                .upsert(SyncStateEntity(enabled = true, nodeId = node.value, hlc = 1L shl 16))
+                .upsert(SyncStateEntity(enabled = true, nodeId = node.value, hlc = 1L shl 16, accountId = "acc-1"))
         }
     }
 

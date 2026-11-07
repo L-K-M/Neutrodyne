@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /**
@@ -38,11 +39,12 @@ class ChangeBuilder(
                 val id = runCatching { RecordId.fromRid(collection, rid) }.getOrNull() ?: return@mapNotNull null
                 val rekey = recordRows.firstOrNull { it.field == REKEY_FIELD }
                 if (rekey != null) {
-                    return@mapNotNull rekeyChange(collection, id, rekey)
+                    rekeyChange(collection, id, rekey)?.let { return@mapNotNull it }
                 }
                 val fields = mutableMapOf<String, FieldValue>()
                 var hints: MatchHints? = null
                 for (row in recordRows.sortedBy { it.field }) {
+                    if (row.field == REKEY_FIELD) continue
                     val clock = outboxClock(row) ?: continue
                     if (row.field == "*") {
                         addAllFields(source, collection, rid, clock, fields)
@@ -68,11 +70,17 @@ class ChangeBuilder(
     ) {
         when (row.field) {
             "played" -> {
-                val literal = row.value?.let(::parseJsonObject)
-                val played = (literal?.get("played") as? JsonPrimitive)?.booleanOrNull ?: return
-                val playedAt = (literal?.get("playedAt") as? JsonPrimitive)?.longOrNull
-                fields["played"] = FieldValue(JsonPrimitive(played), clock.toString())
-                fields["playedAt"] = FieldValue(playedAt?.let(::JsonPrimitive) ?: JsonNull, clock.toString())
+                val element = row.value?.let(::parsed)
+                val objectLiteral = element as? JsonObject
+                if (objectLiteral != null) {
+                    val played = (objectLiteral.get("played") as? JsonPrimitive)?.booleanOrNull ?: return
+                    val playedAt = (objectLiteral.get("playedAt") as? JsonPrimitive)?.longOrNull
+                    fields["played"] = FieldValue(JsonPrimitive(played), clock.toString())
+                    fields["playedAt"] = FieldValue(playedAt?.let(::JsonPrimitive) ?: JsonNull, clock.toString())
+                } else if (element is JsonPrimitive) {
+                    // A replay row carries the boolean alone; `playedAt` is a separate row.
+                    fields["played"] = FieldValue(element, clock.toString())
+                }
             }
 
             "pos" -> {
@@ -84,13 +92,29 @@ class ChangeBuilder(
             }
 
             "feedKeys" -> {
-                val keys = source.feedKeys(rid)
-                if (keys.isNotEmpty()) fields["feedKeys"] = FieldValue(add = keys)
+                // A replay row carries the known set as its literal; a local row reads the source.
+                val replay =
+                    row.captureKind == ch.lkmc.neutrodyne.core.database.SyncCaptureKind.REPLAY &&
+                        row.value != null
+                if (replay) {
+                    val parsed =
+                        runCatching {
+                            ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                                .parseToJsonElement(row.value!!)
+                                as? kotlinx.serialization.json.JsonArray
+                        }.getOrNull()
+                    val keys = parsed?.map { it.jsonPrimitive.content } ?: emptyList()
+                    if (keys.isNotEmpty()) fields["feedKeys"] = FieldValue(add = keys)
+                } else {
+                    val keys = source.feedKeys(rid)
+                    if (keys.isNotEmpty()) fields["feedKeys"] = FieldValue(add = keys)
+                }
             }
 
             "auth" -> {
+                // Pushed only while the switch is on; never sent as null (10 Feed passwords).
                 if (sharePasswords()) {
-                    source.authField(rid)?.let { fields["auth"] = it.withClock(clock) }
+                    authValue(source, rid, row)?.let { fields["auth"] = it.withClock(clock) }
                 }
             }
 
@@ -137,6 +161,32 @@ class ChangeBuilder(
                 as? RecordId.Episode
                 ?: return null
         return ChangeDto(coll = collection.wire, id = from.toWire(), op = "rekey", to = to.toWire())
+    }
+
+    /**
+     * The wire `auth` of one row: a replay row may carry the protected marker — hydrate it from
+     * its store entry (full resync obeys the sharing switch here too) and omit the field when the
+     * snapshot is gone; every other row reads the live credential.
+     */
+    private suspend fun authValue(
+        source: SourceReader,
+        rid: String,
+        row: SyncOutboxEntity,
+    ): FieldValue? {
+        val literal = row.value?.let(::parsed)
+        val storeKey = literal?.let(::authMarkerKey)
+        if (storeKey != null) {
+            val stored = secrets.get(storeKey) ?: return null
+            return FieldValue(
+                JsonObject(
+                    buildMap {
+                        put("u", JsonPrimitive(stored.username))
+                        put("p", JsonPrimitive(stored.secret.concatToString()))
+                    },
+                ),
+            )
+        }
+        return source.authField(rid)
     }
 
     private fun parseJsonObject(text: String): JsonObject? =

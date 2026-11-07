@@ -102,6 +102,9 @@ internal class KeystoreCredentialStore(
         }
     }
 
+    override suspend fun originsWithPrefix(prefix: String): List<String> =
+        dao.origins().filter { it.startsWith(prefix) }
+
     /** `credential` row → plaintext via AES-256-GCM; anything unrecoverable is a `SecretLostException`. */
     private inner class AndroidSeam : SecretStoreSeam {
         override suspend fun resolve(row: CredentialEntity): StoredSecret? {

@@ -262,6 +262,32 @@ class DesktopSecretStoreTest {
         }
 
     @Test
+    fun `originsWithPrefix lists row and file-only entries without secrets`() =
+        runTest {
+            val f = newFixture()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                val store = newStore(f, scope)
+                store.put("https://feed.test", "u", "p".toCharArray())
+                store.put("sync:pending:acc:rid:1-0000000000000001", "u", "p".toCharArray())
+                store.put("sync:pending:other:rid:1-0000000000000002", "u", "p".toCharArray())
+                awaitLoaded(store)
+
+                assertEquals(
+                    listOf(
+                        "sync:pending:acc:rid:1-0000000000000001",
+                        "sync:pending:other:rid:1-0000000000000002",
+                    ),
+                    store.originsWithPrefix("sync:pending:"),
+                )
+                assertEquals(listOf("https://feed.test"), store.originsWithPrefix("https://"))
+            } finally {
+                scope.cancel()
+                f.close()
+            }
+        }
+
+    @Test
     fun `podcastindex keeps a metadata row like a feed`() =
         runTest {
             val f = newFixture()

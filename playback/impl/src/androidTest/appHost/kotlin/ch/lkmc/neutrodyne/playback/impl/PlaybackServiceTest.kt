@@ -384,12 +384,14 @@ class PlaybackServiceTest {
             phase("chapters/timestamp")
             withContext(Dispatchers.Main) { connect().play() }
             awaitAudio()
+            phase("chapters/timestamp-seek")
             withContext(Dispatchers.Main) { graph.playbackController.seekTo(TIMESTAMP_SEEK_MS) }
             await {
                 snapshotPosition() in
                     TIMESTAMP_SEEK_MS..TIMESTAMP_SEEK_MS + SEEK_TOLERANCE_MS
             }
             assertTrue(withContext(Dispatchers.Main) { connect().playWhenReady })
+            phase("chapters/timestamp-next")
             assertEquals(
                 PlayResult.Started,
                 graph.playbackController.playEpisodeAt(ids[1], TIMESTAMP_SEEK_MS),
@@ -902,7 +904,8 @@ class PlaybackServiceTest {
         ActivityManager.getMyMemoryState(process)
         val current = graph.playbackStateSource.nowPlaying.value
         return "phase=$phase uid=${Process.myUid()} pid=${Process.myPid()} importance=${process.importance} " +
-            "playWhenReady=${current?.playWhenReady} isPlaying=${current?.isPlaying} issue=${current?.issue}"
+            "playWhenReady=${current?.playWhenReady} isPlaying=${current?.isPlaying} issue=${current?.issue} " +
+            "episode=${current?.episodeId} position=${current?.position?.positionMs}"
     }
 
     private fun captureFailure() {

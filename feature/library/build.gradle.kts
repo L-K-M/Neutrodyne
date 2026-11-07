@@ -15,6 +15,7 @@ kotlin {
             implementation(project(":playback:api"))
             implementation(project(":download:api"))
             implementation(project(":youtube:api"))
+            implementation(project(":sync:api"))
         }
         desktopTest.dependencies {
             implementation(libs.cmp.ui.test)

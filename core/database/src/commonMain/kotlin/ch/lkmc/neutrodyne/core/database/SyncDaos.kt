@@ -129,6 +129,21 @@ abstract class SyncOutboxDao(
         rids: List<String>,
     ): List<SyncOutboxEntity>
 
+    /**
+     * 10 Scheduling: rows that push on the 2-s debounce — every change except the coalesced
+     * `pos` saves and `session` records, which wait for a playback boundary or a playing tick.
+     */
+    @Query("SELECT EXISTS(SELECT 1 FROM sync_outbox WHERE field <> 'pos' AND coll <> 'session')")
+    abstract suspend fun hasImmediateRows(): Boolean
+
+    /** 10 Scheduling: pending playback rows the boundary and playing-tick triggers flush. */
+    @Query("SELECT EXISTS(SELECT 1 FROM sync_outbox WHERE field = 'pos' OR coll = 'session')")
+    abstract suspend fun hasPlaybackRows(): Boolean
+
+    /** 10 Outbox and coalescing: the group deletions the scheduler times for the undo window. */
+    @Query("SELECT * FROM sync_outbox WHERE coll = 'group' AND field = 'deleted' AND value = 'true'")
+    abstract suspend fun groupDeletions(): List<SyncOutboxEntity>
+
     /** A literal capture (local merges, "Keep mine"): always captured, even while applying. */
     suspend fun captureLiteral(
         coll: String,
@@ -152,7 +167,12 @@ abstract class SyncOutboxDao(
         capture(coll, rid, field, json, guarded = true)
     }
 
-    /** A `*` row: every field of the record with this clock. */
+    /**
+     * A `*` row: every field of the record with this clock.
+     *
+     * All `capture*` methods on this DAO (and `captureAt`/`captureStored`/`restampAbove`) must run
+     * inside a writer transaction; `syncWriter` enforces it so a tick cannot interleave a capture.
+     */
     suspend fun captureAll(
         coll: String,
         rid: String,
@@ -170,13 +190,21 @@ abstract class SyncOutboxDao(
         db.syncWriter { connection ->
             val predicate = if (guarded) "enabled = 1 AND applying = 0" else "enabled = 1"
             connection.execute(SyncTriggers.SYNC_TICK + " AND $predicate")
+            // A pending row with a strictly newer complete clock (a restore's replay stamp) wins;
+            // an equal-or-older row is coalesced into this tick like the triggers do.
             connection.execute(
                 "INSERT OR REPLACE INTO sync_outbox(coll, rid, field, hlc, nodeId, captureKind, value)" +
-                    " SELECT ?, ?, ?, hlc, nodeId, 'LOCAL', ? FROM sync_state WHERE id = 0 AND $predicate",
+                    " SELECT ?, ?, ?, hlc, nodeId, 'LOCAL', ? FROM sync_state WHERE id = 0 AND $predicate" +
+                    " AND NOT EXISTS (SELECT 1 FROM sync_outbox o WHERE o.coll = ? AND o.rid = ?" +
+                    " AND o.field = ? AND (o.hlc > sync_state.hlc OR" +
+                    " (o.hlc = sync_state.hlc AND o.nodeId > sync_state.nodeId)))",
                 coll,
                 rid,
                 field,
                 literal,
+                coll,
+                rid,
+                field,
             )
         }
     }
@@ -251,6 +279,16 @@ abstract class SyncOutboxDao(
             connection.execute("DELETE FROM sync_outbox WHERE coll = ? AND rid = ? AND field = ?", coll, rid, field)
         }
     }
+
+    /**
+     * 10 Feed passwords: turning the switch off drops the pending `auth` rows of a collection —
+     * they can never be pushed while sharing is off, and turning it on re-captures fresh ones.
+     */
+    @Query("DELETE FROM sync_outbox WHERE coll = :coll AND field = :field")
+    abstract suspend fun deleteFieldOf(
+        coll: String,
+        field: String,
+    )
 
     suspend fun deleteIfUnchanged(
         coll: String,
@@ -370,6 +408,9 @@ abstract class SyncClockDao(
         coll: String,
         rid: String,
     ): SyncClockEntity?
+
+    @Query("SELECT * FROM sync_clock")
+    abstract suspend fun all(): List<SyncClockEntity>
 
     @Query("SELECT COUNT(*) FROM sync_clock")
     abstract suspend fun count(): Int

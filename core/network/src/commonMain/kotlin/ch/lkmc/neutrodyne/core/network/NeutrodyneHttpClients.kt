@@ -12,6 +12,6 @@ import io.ktor.client.HttpClient
  * island's, shared with the raw-OkHttp consumers (Media3, Coil, `PyHttp`).
  */
 interface NeutrodyneHttpClients {
-    /** The Ktor client for [kind]; seven clients exist, one per enum value. */
+    /** The Ktor client for [kind]; one client exists per enum value. */
     fun client(kind: HttpClientKind): HttpClient
 }

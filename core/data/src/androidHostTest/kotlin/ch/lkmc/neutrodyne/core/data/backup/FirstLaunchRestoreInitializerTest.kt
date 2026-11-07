@@ -51,9 +51,11 @@ import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.backup.BackupKind
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
@@ -413,7 +415,7 @@ class FirstLaunchRestoreInitializerTest {
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
             ),
-        settingsMerge = RestoreSettingsMerge(settings),
+        settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(app), FakeSettingsSyncPort()),
         payloads = payloads,
         storagePaths = storagePaths,
         fileSystem = fileSystem,
@@ -421,6 +423,7 @@ class FirstLaunchRestoreInitializerTest {
         refresh = FakeRefreshController(),
         channels = FakeGroupChannelSync(),
         snapshots = FakeSnapshotScheduler(),
+        linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
         clock = clock,
         io = Dispatchers.IO,
     )

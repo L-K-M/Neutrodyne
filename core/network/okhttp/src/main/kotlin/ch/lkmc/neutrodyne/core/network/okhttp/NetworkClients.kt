@@ -10,7 +10,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 /**
- * The seven purpose clients (01 Networking baseline), every one a `newBuilder()` derivative so it
+ * The purpose clients (01 Networking baseline), every one a `newBuilder()` derivative so it
  * shares the dispatcher, pool, DNS chain and interceptor set with the family. [base] adds
  * `AuthInterceptor` as a **network** interceptor — re-evaluated on every redirect hop, so
  * credentials never ride a cross-origin hop.
@@ -79,6 +79,7 @@ class NetworkClients(
             HttpClientKind.DOWNLOAD -> download
             HttpClientKind.YOUTUBE -> coreClients.youtube
             HttpClientKind.SYNC -> coreClients.sync
+            HttpClientKind.SYNC_STREAM -> coreClients.syncStream
         }
 
     private companion object {
