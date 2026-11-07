@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +45,7 @@ internal fun AdaptivePlayerBody(
     controls: @Composable () -> Unit,
     tabs: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    safeInsets: WindowInsets = WindowInsets.safeDrawing,
 ) {
     val latestHeader by rememberUpdatedState(header)
     val latestArtwork by rememberUpdatedState(artwork)
@@ -54,7 +58,10 @@ internal fun AdaptivePlayerBody(
     val density = LocalDensity.current
     var top by remember { mutableFloatStateOf(0f) }
     Surface(
-        modifier.onGloballyPositioned { top = it.positionInWindow().y / density.density },
+        modifier
+            .windowInsetsPadding(
+                safeInsets,
+            ).onGloballyPositioned { top = it.positionInWindow().y / density.density },
         color = MaterialTheme.colorScheme.surface,
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {

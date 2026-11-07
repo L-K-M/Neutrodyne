@@ -258,6 +258,19 @@ class PlayerSheetTest {
             onNodeWithTag("mini_player").assertIsDisplayed()
         }
 
+    @Test fun wideWindowDragReopensTheHiddenPanel() =
+        runComposeUiTest {
+            val fixture = SheetFixture().apply { contentBottomPx = 600f }
+            setContent { fixture.Content(windowWidthDp = 900) }
+            onNodeWithTag("mini_player").performTouchInput {
+                swipe(center, center + Offset(0f, -500f), durationMillis = 400)
+            }
+            runOnIdle {
+                assertEquals(listOf("panelHidden:false"), fixture.calls)
+                assertFalse(fixture.state.settledExpanded)
+            }
+        }
+
     @Test fun downwardDragDismissesOnlyWhilePaused() =
         runComposeUiTest {
             val fixture = SheetFixture().apply { contentBottomPx = 600f }
@@ -769,6 +782,7 @@ private class SheetFixture(
         notes: @androidx.compose.runtime.Composable () -> Unit = {},
         nextEpisode: () -> Unit = { calls += "next" },
         previousEpisode: () -> Unit = { calls += "previous" },
+        windowWidthDp: Int = 360,
     ) {
         NeutrodyneTheme(AppearancePrefs(), systemUi) {
             BoxWithConstraints {
@@ -796,6 +810,7 @@ private class SheetFixture(
                             expandRequest = expandToken,
                             collapseRequest = collapseToken,
                             onExpandedSettled = { expanded = it },
+                            windowWidthDp = windowWidthDp,
                         ),
                     state = sheetState,
                     upNext = upNext,
@@ -815,6 +830,7 @@ private class SheetFixture(
                     markPlayed = { calls += "markPlayed" },
                     consent = { calls += "consent" },
                     declineConsent = { calls += "decline" },
+                    setPanelHidden = { calls += "panelHidden:$it" },
                 )
             }
         }

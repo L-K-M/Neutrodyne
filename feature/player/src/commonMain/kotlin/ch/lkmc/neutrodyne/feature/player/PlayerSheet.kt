@@ -258,10 +258,25 @@ internal fun PlayerSheet(
     LaunchedEffect(expanded) {
         if (!expanded) panelState.collapse(motion)
     }
-    LaunchedEffect(state.drag.settledValue) {
-        if (state.drag.settledValue == PlayerSheetValue.Dismissed) {
-            dismissPaused()
-            state.resetDismissed()
+    LaunchedEffect(state.drag.settledValue, slot.windowWidthDp) {
+        when (state.drag.settledValue) {
+            PlayerSheetValue.Dismissed -> {
+                dismissPaused()
+                state.resetDismissed()
+            }
+
+            PlayerSheetValue.Expanded -> {
+                if (slot.windowWidthDp >= SIDE_PANEL_MIN_WINDOW_DP && !slot.layout.playerPanel) {
+                    // Dragging uses the anchors directly, so it must make the same
+                    // panel choice as the mini player's Expand action.
+                    updatePanelHidden(false)
+                    state.collapse(SheetMotion.IMMEDIATE)
+                }
+            }
+
+            PlayerSheetValue.Collapsed -> {
+                Unit
+            }
         }
     }
     var miniMenuOpen by remember { mutableStateOf(false) }
