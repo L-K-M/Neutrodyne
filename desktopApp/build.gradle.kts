@@ -283,6 +283,13 @@ extensions
         if (smokeRun.get()) jvmArgs("-Dneutrodyne.smoke=true")
     }
 
+// The test-only pseudo resource tree must never enter an installer.
+if (providers.gradleProperty("neutrodyne.pseudoLocales").orNull == "true") {
+    tasks.matching { it.name.startsWith("package") || it.name.contains("Distributable") }.configureEach {
+        doFirst { error("Pseudo-locale resources are for verification builds only") }
+    }
+}
+
 // Test-only MD0 instrument; no entry point or fixture enters the app image.
 tasks.register<JavaExec>("md0Probe") {
     group = "verification"

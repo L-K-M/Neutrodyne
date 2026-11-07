@@ -435,6 +435,10 @@ class SettingsScreensTest {
             waitUntil("the state re-reads", TIMEOUT_MS) {
                 onAllNodesWithText("In the applications menu").fetchSemanticsNodes().isNotEmpty()
             }
+            // Done is done: a successful setup takes its Set up button away (11).
+            waitUntil("Set up is gone", TIMEOUT_MS) {
+                onAllNodesWithText("Set up").fetchSemanticsNodes().isEmpty()
+            }
         }
 
     @Test
@@ -504,6 +508,18 @@ class SettingsScreensTest {
                 "Allow Neutrodyne in System Settings › General › Login Items",
             ).assertIsDisplayed()
             onNodeWithText("Open System Settings").assertIsDisplayed()
+        }
+
+    @Test
+    fun startAtLoginTranslocatedShowsTheMoveHint() =
+        runComposeUiTest {
+            setSettingsRoot(
+                desktopIntegration = FakeDesktopIntegration(LoginItemState.TRANSLOCATED),
+            )
+            openSettings()
+            onNodeWithText("Desktop").performScrollTo().performClick()
+            waitForIdle()
+            onNodeWithText("Move Neutrodyne to Applications first").assertIsDisplayed()
         }
 
     @Test

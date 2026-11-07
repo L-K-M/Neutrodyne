@@ -743,6 +743,25 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 
 ### `nightly.yml`
 
+**Implementation note (2026-11-01, MS1).** Real-server convergence uses sixteen
+disjoint 6,250-seed SQLite shards, with combined failure reporting and retained
+XML/seed traces, alongside the existing 100,000-seed fake run. Required server
+suites reject missing, skipped and zero-case results. The reference read-only
+compose smoke holds Caddy and nginx SSE streams for five minutes with test CA
+verification, exercises auth/sync/export and backup/restore after revocation,
+and captures the server namespace separately from Caddy's certificate traffic.
+The two-hour proxy and physical client-network gates remain MS3/S17.
+
+**Implementation note (2026-11-01, MS1).** Supersedes the stub-URL instruction
+below: UPDATE_CHECK stays boolean. Inject a test fetcher; capture zero packaged-
+server egress with checking disabled and separately prove enabled destination
+policy. Separate proxy certificate traffic. MS1 owns five-minute server SSE smoke;
+MS3/S17 adds two-hour streams, keepalive races and real clients. Before AC7,
+reconcile active products with actual build/source jobs, without adding desktop
+packaging to MS1. Serialize image promotion and recheck current minor/latest
+ordering at tag movement using publish's decision, never verify-tag's preview;
+enable only assets of products actually shipped.
+
 `schedule: cron "17 2 * * *"` plus `workflow_dispatch` with input `scope`:
 
 - `full` is the default.
@@ -793,6 +812,19 @@ without changing main's issues.
 Removed 2026-10-05 (scope revision): `dev-tools-build` (developer tooling lives in `debug`, which `assemble` builds on every PR) and the `instrumented-full` leg against the `benchmark` build type (the published `release` build is tested directly). The former `mirror` job was removed with [PO-34](../PLAN.md#48-further-product-owner-decisions) ([GitHub takedown](#github-takedown)).
 
 ### `release.yml`
+
+**Implementation note (2026-11-01, MS1).** The implemented release graph selects
+`android,server,server-sources`. Desktop packaging and the future `sources`
+group remain inactive until their build jobs exist. Server sources include only
+the pinned base packages, matching runtime archive and `RUNTIME-SOURCES.md`.
+The runtime filename comes from the server source lock; a differing future
+runtime requires its own verified source asset. Native amd64/arm64 manifests
+are combined with buildx dry-run and pushed directly by digest using ORAS,
+then attested. No release image tag exists before immutable GitHub publication.
+Image promotion shares publish's concurrency group, verifies the source OCI
+artifact first, and re-reads published release ordering for minor/latest tags.
+PR checks do not waive source checks at publication. GHCR visibility, actual
+release approval and an unauthenticated public pull remain owner gates.
 
 Trigger: `push: tags: ['v*']`. Top-level `permissions: contents: read`. The build jobs read no secret and need no approval, so they run while the maintainer approves the `release` environment, which only `publish` uses (required reviewer = a maintainer; the environment holds no signing secret — the APK key is committed, [Committed keystore](#committed-keystore), and the desktop builds carry no publisher signature — and only `PODCASTINDEX_*` once Podcast Index grants written permission, after which the `android` and `desktop` jobs join the environment to read it, [D26](../PLAN.md#3-key-decisions)). Every job uses `setup-gradle` with `cache-disabled: true` (no cache-poisoning surface for published builds). Job permissions are the minimum: `packages: write` only in `server-image`, `server-image-manifest` and `image-tags`; `id-token: write`, `attestations: write` and `artifact-metadata: write` only in `server-image-manifest` and `publish` (for `actions/attest`); `contents: write` only in `publish`.
 
@@ -1377,7 +1409,8 @@ With Docker (Linux x86-64 or arm64): copy `compose.yaml` and `Caddyfile` from `s
 release's tag, put your domain into both files and run `docker compose up -d`. The image is
 `ghcr.io/{owner}/neutrodyne-server:{v}`; Caddy obtains the TLS certificate.
 Without Docker: install Java 21 or later, download `neutrodyne-server-{v}.jar` from the release, check it
-against `SHA256SUMS`, and install `neutrodyne-server.service` (systemd) from the same folder; put Caddy or
+against `SHA256SUMS`, and install `neutrodyne-server.service` (systemd) from the same folder's
+`neutrodyne-server.service.example` after setting its public URL; put Caddy or
 nginx in front for TLS (`nginx.conf.example` keeps live updates working). The server listens only on loopback
 unless its public URL is `https://` (behind the proxy) or it is started with `--insecure-lan` for a trusted home network.
 

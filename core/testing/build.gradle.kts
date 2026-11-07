@@ -23,6 +23,8 @@ kotlin {
             implementation(project(":youtube:api"))
             implementation(project(":sync:api"))
             implementation(project(":sync:protocol"))
+            // The sync convergence harness (sync/) parses wire JSON payloads.
+            implementation(libs.kotlinx.serialization.json)
             api(libs.kotlin.test)
             api(libs.kotlinx.coroutines.test)
             api(libs.turbine)

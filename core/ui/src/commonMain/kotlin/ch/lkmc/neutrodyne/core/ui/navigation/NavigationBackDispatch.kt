@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.navigation
 
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -27,7 +28,11 @@ private enum class BackLayer { DISABLED, CONTENT, OVERLAY }
 /** Native handlers drive preview only; one real handler owns each completed Back event. */
 @Composable
 @Suppress("FunctionNaming") // Compose functions use PascalCase.
-internal fun NavigationBackDispatch(panes: PaneSceneStrategy, content: @Composable () -> Unit) {
+internal fun NavigationBackDispatch(
+    panes: PaneSceneStrategy,
+    sharedScope: SharedTransitionScope?,
+    content: @Composable () -> Unit,
+) {
     val parent = LocalNavigationEventDispatcherOwner.current ?: rememberNavigationEventDispatcherOwner()
 
     val events = remember(parent, panes) { BackEventOwner(panes) }
@@ -51,6 +56,7 @@ internal fun NavigationBackDispatch(panes: PaneSceneStrategy, content: @Composab
     CompositionLocalProvider(
         LocalNavigationEventDispatcherOwner provides events,
         LocalEntryBackDispatch provides entries,
+        LocalSharedTransitionScope provides sharedScope,
     ) { content() }
 }
 

@@ -25,6 +25,48 @@ class AwtTrayNotificationsTest {
             channel.close()
         }
 
+    @Test
+    fun aFailedMessageRemovesTheIconItAdded() =
+        runTest {
+            val tray = RecordingTray()
+            val channel = AwtTrayNotifications(icon = { iconImage() }, tray = tray)
+
+            val delivered = channel.post(notification())
+
+            assertThat(delivered).isFalse()
+            assertThat(tray.added).isEqualTo(1)
+            assertThat(tray.removed).isEqualTo(1)
+            channel.close()
+        }
+
+    private fun iconImage() = java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+
+    /** The tray always shows its icon but its balloon throws. */
+    private class RecordingTray : TrayBridge {
+        var added = 0
+            private set
+
+        var removed = 0
+            private set
+
+        override fun supported(): Boolean = true
+
+        override fun add(image: java.awt.Image): TrayIconRef {
+            added++
+            return object : TrayIconRef {}
+        }
+
+        override fun message(
+            icon: TrayIconRef,
+            title: String,
+            body: String,
+        ): Unit = throw IllegalStateException("balloon failed")
+
+        override fun remove(icon: TrayIconRef) {
+            removed++
+        }
+    }
+
     private fun notification() =
         DesktopNotification(
             id = "download-failed",

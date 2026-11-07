@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
@@ -85,6 +86,47 @@ class LibraryViewModelTest : MainDispatcherTest() {
     private fun TestScope.collect(viewModel: LibraryViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun densityIsLiveAndRecreationRetainsFilterAndSort() =
+        runTest {
+            val groupId = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("tech"))).value
+            val uuid =
+                groups.groups.value
+                    .single()
+                    .uuid
+            settings.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, uuid)
+            settings.set(AppearanceSettingKeys.LIBRARY_SORT, LibrarySort.RECENTLY_ADDED)
+            podcasts.tilesByGroup.value = mapOf(groupId to listOf(testLibraryTile(1, "A")))
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals(LibraryDensity.MEDIUM, vm.uiState.value.density)
+            for (density in LibraryDensity.entries) {
+                vm.setDensity(density)
+                advanceUntilIdle()
+                assertEquals(density, vm.uiState.value.density)
+                assertEquals(uuid, vm.uiState.value.groupFilter)
+                assertEquals(
+                    listOf(1L),
+                    vm.uiState.value.tiles
+                        .map { it.podcastId },
+                )
+                val recreated = viewModel()
+                collect(recreated)
+                advanceUntilIdle()
+                assertEquals(density, recreated.uiState.value.density)
+                assertEquals(uuid, recreated.uiState.value.groupFilter)
+                assertEquals(LibrarySort.RECENTLY_ADDED, recreated.uiState.value.sort)
+            }
+            settings.failNextSet = SettingsError.WriteFailed
+            vm.setDensity(LibraryDensity.SMALL)
+            advanceUntilIdle()
+            assertEquals(LibraryDensity.LARGE, vm.uiState.value.density)
+            assertTrue(
+                vm.uiState.value.messages
+                    .isNotEmpty(),
+            )
+        }
 
     @Test
     fun initialStateBeforeSubscription() =

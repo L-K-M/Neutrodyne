@@ -52,6 +52,35 @@ class DbusDesktopPortalTest {
     }
 
     @Test(timeout = TEST_TIMEOUT_MS)
+    fun aCompletedPickRemovesTheResponseMatch() {
+        val address = busAddress()
+        runBlocking {
+            // The portal's own connection is held by the test, so the match rules it
+            // installs are inspectable through AbstractConnectionBase.handledSignals
+            // (dbus-java keeps no public match count).
+            val bus = DBusConnectionBuilder.forAddress(address).build()
+            try {
+                FakePortal(address).use { portal ->
+                    DbusDesktopPortal({ bus }).use { underTest ->
+                        val pending = async(Dispatchers.IO) { underTest.chooseDirectory(TITLE, null) }
+                        await("OpenFile call") { portal.openCalls.size == 1 }
+                        assertThat(bus.responseMatches()).isEqualTo(1)
+
+                        portal.respond(portal.openCalls.single().handleToken, RESPONSE_OK, listOf(folderUri))
+                        assertThat(withTimeout(AWAIT_MS) { pending.await() })
+                            .isEqualTo(DirectoryChoice.Chosen(folderPath))
+
+                        // A pick that answered is finished: its match must not linger.
+                        assertThat(bus.responseMatches()).isEqualTo(0)
+                    }
+                }
+            } finally {
+                runCatching { bus.close() }
+            }
+        }
+    }
+
+    @Test(timeout = TEST_TIMEOUT_MS)
     fun aDismissedDialogIsCancelledNotAFallback() {
         val address = busAddress()
         runBlocking {
@@ -130,6 +159,16 @@ class DbusDesktopPortalTest {
 
     private val folderPath = Path.of(System.getProperty("java.io.tmpdir")).toString()
     private val folderUri = Path.of(folderPath).toUri().toASCIIString()
+
+    /** The `member='Response'` match rules still installed on this connection. */
+    private fun DBusConnection.responseMatches(): Int {
+        val field =
+            org.freedesktop.dbus.connections.base.AbstractConnectionBase::class.java
+                .getDeclaredField("handledSignals")
+        field.isAccessible = true
+        val rules = (field.get(this) as Map<*, *>).keys
+        return rules.count { "member='Response'" in it.toString() }
+    }
 
     private fun busAddress(): String {
         val address = System.getenv("DBUS_SESSION_BUS_ADDRESS")

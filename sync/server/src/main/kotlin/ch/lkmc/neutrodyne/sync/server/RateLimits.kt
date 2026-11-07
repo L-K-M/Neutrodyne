@@ -68,7 +68,7 @@ internal class RateLimits(
     private fun address(call: ApplicationCall): String =
         ClientAddress(config.trustedProxies)
             .resolve(
-                call.request.local.remoteHost,
+                call.request.local.remoteAddress,
                 call.request.headers
                     .getAll(HttpHeaders.XForwardedFor)
                     .orEmpty(),

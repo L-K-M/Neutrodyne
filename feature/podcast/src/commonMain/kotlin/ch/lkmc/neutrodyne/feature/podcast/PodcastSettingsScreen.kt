@@ -95,6 +95,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.yt_include_live
 import ch.lkmc.neutrodyne.core.ui.resources.yt_include_shorts
 import ch.lkmc.neutrodyne.core.ui.resources.yt_live_future_note
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
@@ -491,6 +492,7 @@ private fun CustomTitleDialog(
             onValueChange = { text = it },
             label = { Text(stringResource(Res.string.ps_custom_title)) },
             singleLine = true,
+            modifier = Modifier.ndTextFieldFocus(),
         )
     }
 }
@@ -577,6 +579,7 @@ private fun EditUrlDialog(
                 error?.let { Text(it.asString(), color = MaterialTheme.colorScheme.error) }
             },
             singleLine = true,
+            modifier = Modifier.ndTextFieldFocus(),
         )
     }
 }

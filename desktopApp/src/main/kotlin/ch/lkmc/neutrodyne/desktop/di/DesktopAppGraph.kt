@@ -119,6 +119,9 @@ interface DesktopAppGraph {
     /** The portable settings store; journey tests toggle engine availability through it. */
     val settingsStore: ch.lkmc.neutrodyne.core.datastore.SettingsStore
 
+    /** The user-facing refresh port (11 Menus' File › Refresh, Ctrl/Cmd+R / F5). */
+    val refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController
+
     val appUpdateChecker: AppUpdateChecker
     val updateNotices: UpdateNotices
 

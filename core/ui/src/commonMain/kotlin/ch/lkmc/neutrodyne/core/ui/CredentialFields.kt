@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_auth_hide
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_password
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_show
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_username
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -50,14 +51,14 @@ public fun CredentialFields(
             onValueChange = onUsernameChange,
             label = { Text(stringResource(Res.string.add_auth_username)) },
             singleLine = true,
-            modifier = Modifier.contentType(ContentType.Username),
+            modifier = Modifier.contentType(ContentType.Username).ndTextFieldFocus(),
         )
         OutlinedTextField(
             value = password,
             onValueChange = onPasswordChange,
             label = { Text(stringResource(Res.string.add_auth_password)) },
             singleLine = true,
-            modifier = Modifier.contentType(ContentType.Password),
+            modifier = Modifier.contentType(ContentType.Password).ndTextFieldFocus(),
             visualTransformation =
                 if (showPassword) {
                     VisualTransformation.None

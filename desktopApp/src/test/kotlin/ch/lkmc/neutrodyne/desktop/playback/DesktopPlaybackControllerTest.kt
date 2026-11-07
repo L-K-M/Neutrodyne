@@ -325,12 +325,20 @@ class DesktopPlaybackControllerTest {
                         .filter { it?.speed?.value == 1.75f }
                         .first()
                 }
+                // The controller's settings collector applies the value to the engine after
+                // publishing it, so wait for the engine rather than the flow.
+                withTimeout(TIMEOUT_MS) {
+                    while (fixture.engine.speed != 1.75f) delay(5)
+                }
                 assertEquals(1.75f, fixture.engine.speed)
                 assertEquals(ScopeWriteResult.APPLIED, fixture.controller.setSkipSilence(true, SettingScope.GLOBAL))
                 withTimeout(TIMEOUT_MS) {
                     fixture.controller.effectivePlayback
                         .filter { it?.skipSilence?.value == true }
                         .first()
+                }
+                withTimeout(TIMEOUT_MS) {
+                    while (!fixture.engine.skipSilence) delay(5)
                 }
                 assertTrue(fixture.engine.skipSilence)
                 assertEquals(count, fixture.engine.windows.size)
@@ -644,6 +652,10 @@ class DesktopPlaybackControllerTest {
                     fixture.engine.position = 42_000
                     fixture.engine.state.value = EngineState.Error(3, EngineError.Http(404))
                     fixture.awaitEpisode(2)
+                    // The collector receives the Skipped event asynchronously; wait for it.
+                    withTimeout(TIMEOUT_MS) {
+                        while (skipped.isEmpty()) delay(5)
+                    }
                     assertEquals(
                         listOf(PlaybackEvent.Skipped(3, "Episode 3", UnplayableReason.Http(404))),
                         skipped,
@@ -793,6 +805,10 @@ class DesktopPlaybackControllerTest {
                     fixture.awaitPlaying()
                     fixture.engine.state.value = EngineState.Error(3, EngineError.ContentChanged)
                     fixture.awaitEpisode(2)
+                    // The collector receives the Skipped event asynchronously; wait for it.
+                    withTimeout(TIMEOUT_MS) {
+                        while (skipped.isEmpty()) delay(5)
+                    }
                     assertEquals(
                         listOf(PlaybackEvent.Skipped(3, "Episode 3", UnplayableReason.Http(416))),
                         skipped,
@@ -834,6 +850,11 @@ class DesktopPlaybackControllerTest {
                     // The engine reports a failure preparing item 2 at the boundary.
                     fixture.engine.state.value = EngineState.Error(2, EngineError.Http(404))
                     fixture.awaitEpisode(1)
+                    // The Skipped event is emitted before the session advances, but the
+                    // collector receives it asynchronously; wait for the event itself.
+                    withTimeout(TIMEOUT_MS) {
+                        while (skipped.isEmpty()) delay(5)
+                    }
                     assertEquals(
                         listOf(PlaybackEvent.Skipped(2, "Episode 2", UnplayableReason.Http(404))),
                         skipped,

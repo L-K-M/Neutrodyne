@@ -108,6 +108,7 @@
     <string name="desktop_login_summary">Starts Neutrodyne in the background when you sign in</string>
     <string name="desktop_login_disabled_os">Disabled in Task Manager</string>
     <string name="desktop_login_approval">Allow Neutrodyne in System Settings › General › Login Items</string>
+    <string name="desktop_login_translocated">Move Neutrodyne to Applications first</string>
     <string name="desktop_section_links">Links</string>
     <string name="desktop_links_open">Open podcast links with Neutrodyne</string>
     <string name="desktop_links_open_on">Neutrodyne opens feed:, podcast:, pcast: and itpc: links</string>

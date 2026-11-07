@@ -7,6 +7,9 @@ plugins {
 
 kotlin {
     sourceSets {
+        commonTest.dependencies {
+            implementation(libs.kotlinx.serialization.json)
+        }
         commonMain.dependencies {
             implementation(project(":sync:api"))
             implementation(project(":sync:protocol"))
@@ -17,6 +20,7 @@ kotlin {
             implementation(project(":core:datastore"))
             implementation(project(":core:network"))
             implementation(project(":feeds"))
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

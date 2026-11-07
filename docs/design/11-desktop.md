@@ -431,6 +431,10 @@ stateDiagram-v2
 | macOS conventions | Cmd+Q quits; clicking the Dock icon while hidden shows the window (`AppReopenedListener`, [java.awt.Desktop](https://docs.oracle.com/en/java/javase/25/docs/api/java.desktop/java/awt/Desktop.html)); the Dock icon stays while the app runs |
 | Window state | `desktop.window_bounds` = `{"screen":"<GraphicsDevice id>","x":…,"y":…,"width":…,"height":…,"maximised":false}` in AWT user-space pixels, written 1 s after the last move or resize and at quit. Restore on the same screen when it exists and the rectangle overlaps its usable bounds by ≥ 50 %; otherwise 1200 × 800 dp clamped to 90 % of the primary screen, centred |
 | Minimum size | 600 × 480 dp ([PO-19](../PLAN.md#48-further-product-owner-decisions)), converted with the window's density; width classes follow [08 Adaptive layouts](08-ui-ux.md#adaptive-layouts) |
+
+**Implementation note (2026-11-06, MD4).** The minimum is converted through
+`minimumWindowDimension(density)` (`WindowBounds.MIN_WIDTH/HEIGHT` in dp at the window's
+density), unit-tested at 100 % and 200 % scale.
 | Title | "Neutrodyne"; while playing "{episode title} — Neutrodyne" (the taskbar and window switchers show it) |
 
 #### Start at login
@@ -445,7 +449,9 @@ stateDiagram-v2
 
 `<launcher>` is the path of the running jpackage launcher, read from the system property `jpackage.app-path`, which the jpackage 25 launcher always passes to the JVM ([`JvmLauncher.cpp`](https://raw.githubusercontent.com/openjdk/jdk25u/master/src/jdk.jpackage/share/native/applauncher/JvmLauncher.cpp)); without it (`InstallKind.DEV`) registration is skipped. On macOS the registered item is the bundle, so a translocated first start ([First install and every update](#first-install-and-every-update)) must not register: `MacLoginItemRegistrar` refuses while the bundle runs from a path containing `/AppTranslocation/` and Settings says "Move Neutrodyne to Applications first" (the same check adds a hint to the first-run card).
 
-**Implementation notes (2026-11-05, MD2 — close, tray and start at login).** `MacLoginItemRegistrar` is pending in a later MD2 slice — this slice writes no native code, so the factory binds an `UnsupportedLoginItemRegistrar` on macOS and Settings › Desktop hides the row there; `SMAppService.mainApp` through the Objective-C shim and the translocation refusal above still apply when it lands. The `REQUIRES_APPROVAL` rendering is already built and tested (the System Settings guidance with the `x-apple.systempreferences:` opener), so the deferred registrar only has to report its status. The Windows registrar implements the `StartupApproved` byte rule as the table documents, but that value stays Unverified until it is exercised on a real Windows install (MD2 AC5). A registrar reports `UNSUPPORTED` when `jpackage.app-path` is absent — dev runs — which is this paragraph's "registration is skipped" surfaced as a state, so the row is hidden rather than half-present. The tray follows the row above as Compose `Tray` on AWT `SystemTray`; its glue lives in `:desktopApp` (`NeutrodyneWindow`) over the pure, tested `TrayMenu` model and tooltip functions, so the `TrayController` of the module table is not a separate class in this slice. The one-time no-tray hint is a banner after an iconified busy close, persisted by `desktop.tray_hint_shown`.
+**Implementation notes (2026-11-05, MD2 — close, tray and start at login).** `MacLoginItemRegistrar` was pending in a later MD2 slice — that slice wrote no native code, so the factory bound an `UnsupportedLoginItemRegistrar` on macOS and Settings › Desktop hid the row there; `SMAppService.mainApp` through the Objective-C shim and the translocation refusal above still apply. The `REQUIRES_APPROVAL` rendering is already built and tested (the System Settings guidance with the `x-apple.systempreferences:` opener), so the deferred registrar only has to report its status. The Windows registrar implements the `StartupApproved` byte rule as the table documents, but that value stays Unverified until it is exercised on a real Windows install (MD2 AC5). A registrar reports `UNSUPPORTED` when `jpackage.app-path` is absent — dev runs — which is this paragraph's "registration is skipped" surfaced as a state, so the row is hidden rather than half-present. The tray follows the row above as Compose `Tray` on AWT `SystemTray`; its glue lives in `:desktopApp` (`NeutrodyneWindow`) over the pure, tested `TrayMenu` model and tooltip functions, so the `TrayController` of the module table is not a separate class in this slice. The one-time no-tray hint is a banner after an iconified busy close, persisted by `desktop.tray_hint_shown`.
+
+**Implementation note (2026-11-06, MD2 native-shim slice).** `MacLoginItemRegistrar` now ships: `SMAppService.mainApp` through `nd_mac_login_item` (status mapping incl. `requiresApproval`), the `/AppTranslocation/` refusal with the new `LoginItemState.TRANSLOCATED` row summary "Move Neutrodyne to Applications first", and the factory binds it on macOS when the native library is present (a dev run without `buildNdmedia` still falls back to `UnsupportedLoginItemRegistrar`). The real `SMAppService` behaviour of an ad-hoc-signed app across updates stays a manual check (Open questions 5); the Kotlin status mapping and the refusal are unit-tested behind the native seam. The first-run card hint named in the paragraph above is a separate surface and is not part of this slice; the Settings row hint is.
 
 ### Shell failure modes
 
@@ -497,7 +503,7 @@ data class DesktopNotification(val id: String, val kind: NotificationKind, val t
 enum class NotificationKind { NEW_EPISODES, DOWNLOAD_FAILED, STORAGE_FULL, APP_UPDATE, ENGINE_ALERT, SYNC_HELD }
 interface LinuxDesktopPortal {                           // :desktop:system (dbus-java); null binding off Linux
     suspend fun showItems(file: String): Boolean         // org.freedesktop.FileManager1.ShowItems
-    suspend fun chooseDirectory(title: String, start: String?): String?   // portal FileChooser; null = no portal
+    suspend fun chooseDirectory(title: String, start: String?): DirectoryChoice   // portal FileChooser; note below
 }
 // Implementation note (2026-11-05, MD2's links slice): chooseDirectory returns a
 // DirectoryChoice (Chosen | Cancelled | Unavailable), not String?. A dismissal must end
@@ -692,9 +698,7 @@ transports report no descriptor passing (`DefaultSocketProvider` returns false f
 `isFileDescriptorPassingSupported`, verified), the same limitation the notices row
 already records for delay inhibitors. `LinuxIdleSleepInhibitor` holds the portal's
 `Request` handle and closes it on release; a bus without the portal logs and plays
-without inhibition. macOS and Windows ship `PendingIdleSleepInhibitor` until
-`ndmedia` grows `nd_power_keep_awake` — no new native code was written in this slice,
-and the first `acquire` logs what is missing.
+without inhibition. macOS and Windows shipped `PendingIdleSleepInhibitor` in this slice; the 2026-11-06 native-shim slice replaced them (see the note below).
 
 The Windows/macOS notices cell ships through the hooks the shim already exposes:
 `nd_session_poll` delivers `SUSPEND`/`RESUME` session events (the `PBT_APMSUSPEND` and
@@ -712,14 +716,33 @@ Two residuals from the MD0 review's unknown-event finding: `NativeSystemMediaSes
 classifies polled events through an exhaustive `when`, so a kind added to the native
 enum without a decision there is a compile error rather than a silently dropped event,
 but the *raw* code-to-kind parse — where an unknown native code really surfaces —
-still lives in `NativeMediaSession.poll` (`:playback:native`, under concurrent MD1b
-edit in this slice); naming the code there is left to the engine lane. And the shim's
-current `nd_session_publish` ABI carries title, artist, duration, position, rate and
-play state only, so SMTC and Now Playing publish without artwork (Thumbnail and
-`MPMediaItemArtwork` need native work); MPRIS publishes `mpris:artUrl` from the pinned
-artwork as specified. `RemoteCommand.SetRate` is logged and dropped until the shared
-controller grows 06's non-persisting external-speed seam; published `Rate` is clamped
-to the advertised 0.5–3.0 window on every OS.
+still lives in `NativeMediaSession.poll` (`:playback:native`); naming the code there is
+left to the engine lane. And the shim's `nd_session_publish` ABI carried title, artist,
+duration, position, rate and play state only in this slice; the 2026-11-06 native-shim
+slice extended it with album and `art_path` (see the note below). MPRIS publishes
+`mpris:artUrl` from the pinned artwork as specified. `RemoteCommand.SetRate` is logged
+and dropped until the shared controller grows 06's non-persisting external-speed seam;
+published `Rate` is clamped to the advertised 0.5–3.0 window on every OS.
+
+**Implementation note (2026-11-06, MD2 native-shim slice).** `nd_power_keep_awake` ships:
+Windows calls `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` on one
+dedicated shim thread (the call is per-thread, so a release from another thread would
+leave the acquire set), macOS takes `IOPMAssertionCreateWithName
+(kIOPMAssertionTypeNoIdleSleep)` and releases it; both are idempotent and the native
+`tests/power_test.c` checks create/release/idempotent on the two OS builds. Linux keeps
+the portal path and has no native symbol. `MacIdleSleepInhibitor` and
+`WindowsIdleSleepInhibitor` replace `PendingIdleSleepInhibitor` when the library loads;
+a missing library still falls back to the documented pending inhibitor.
+
+The same slice extended `nd_session_publish` to the 11 sketch's `nd_media_info` struct,
+adding `album` and `art_path`. The native sessions publish the pinned `ArtworkStore`
+file (SMTC's `Thumbnail` through `RandomAccessStreamReference::CreateFromFile`, Now
+Playing's `MPMediaItemArtwork`); the Kotlin side resolves `NowPlaying.artwork.key`
+through `ArtworkStore.pinnedPath` on the publish path. The Windows thumbnail stays
+Unverified for unpackaged apps: a failure leaves the thumbnail unset, never the
+publish. The ABI change is handled as the ndmedia interface section describes: the
+Kotlin binding and the native build ship together, and a library without the symbol is
+a load failure, not a silent mismatch.
 
 ### Audio-route monitoring
 
@@ -766,7 +789,7 @@ takes.
 
 ### ndmedia interface
 
-`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. PCM writes and the audio callback never wait; device and session lifecycle calls may wait and run away from the audio and UI threads. In the production sketch only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
+`ndmedia` exposes a flat C ABI with opaque handles; Kotlin binds it with hand-written FFM downcalls in `NdmediaLibrary` and `NdOutput`. The ABI is not runtime-versioned: the Kotlin binding and the native build ship together, and a library without a symbol is a load failure, not a silent mismatch (the 2026-11-06 slice moved `nd_session_publish` to the `nd_media_info` struct below, adding `album` and `art_path`). PCM writes and the audio callback never wait; device and session lifecycle calls may wait and run away from the audio and UI threads. In the production sketch only `nd_events_init`'s callback is an upcall, and its Java body catches everything and only enqueues (an exception escaping an upcall crashes the JVM, [JEP 454](https://openjdk.org/jeps/454)).
 
 ```c
 /* ndmedia.h (sketch) — UTF-8 strings, int return codes (0 = ok, < 0 = ND_E_*), opaque handles */
@@ -1874,6 +1897,18 @@ Serves R8.9, R5.7 (desktop), N4. Delivered in M0b (window, five destinations, ma
 | Window (macOS) | Minimise, Zoom, Bring all to front (standard) |
 | Help | Install & updates help · Keyboard shortcuts · Licences · Diagnostics · Report a problem (opens the repository's issue page) |
 
+**Implementation note (2026-11-06, MD4).** The items carry the accelerators; the root's
+dispatch of the same chords remains as a fallback for menu-less compositions (the AC1
+`runComposeUiTest` checklist). The Edit menu's Undo/Cut/Copy/Paste/Select all stay disabled:
+08 assigns them to Compose's built-in text menu, whose actions the menu bar cannot reach.
+File › Refresh calls `RefreshController.refreshNow(RefreshScope.All)` (all podcasts; the
+current feed page's scope is not a window-level fact). Playback › Skip silence reads and
+writes the global `playback.skip_silence` (the Speed sheet still shows the effective
+per-podcast value). Volume up/down and Ctrl/Cmd+↑/↓ drive the new device-local
+`desktop.volume` setting (0..1, ±10 %), applied by `DesktopPlaybackController` to the engine's
+user gain. The macOS Window menu's Minimise/Zoom/Bring all to front are Compose items over the
+AWT frame; the application menu's Hide stays system-provided (AWT has no hide handler).
+
 ### Keyboard shortcuts
 
 Global shortcuts (R8.9); "Ctrl/Cmd" means Ctrl on Windows and Linux, Cmd on macOS. Space and the arrow keys act only when the focused element did not consume them (08's bubbling rule, `Modifier.onKeyEvent` in `NeutrodyneRoot`).
@@ -1896,6 +1931,12 @@ Global shortcuts (R8.9); "Ctrl/Cmd" means Ctrl on Windows and Linux, Cmd on macO
 | Ctrl/Cmd+W | Close the window (close behaviour applies) |
 | Ctrl+Q (Windows, Linux), Cmd+Q (macOS) | Quit |
 
+**Implementation note (2026-11-06, MD4).** Ctrl/Cmd+1…5 map to the radio home's five tabs —
+Feeds, Library, Up next, Downloads, Discover — which replaced the bottom bar 08's table was
+written against; Settings stays on Ctrl/Cmd+,, and the Go menu lists the same five. Ctrl/Cmd+F
+focuses the Discover search, the only destination with a search field today (the Library's
+group filter is chips, not a text field).
+
 Media keys are not UI shortcuts: they reach the player through the OS media sessions ([Remote commands](#remote-commands)).
 
 ### Tray menu
@@ -1905,6 +1946,11 @@ Show Neutrodyne · Play / Pause · Next · Quit, shown only while the window is 
 ### Drag and drop
 
 The whole window is a drop target (Compose desktop drag-and-drop): files ending in `.opml`, `.xml` or `.zip` and URL text (a link dragged from a browser) are accepted and routed exactly like OS hand-offs ([Links and files from the OS](#links-and-files-from-the-os)); an overlay "Drop to import" or "Drop to add podcast" shows while dragging; at most 20 items per drop; anything else shows "Neutrodyne can't open this file". Dragging out of the app (episodes, files) is not supported in v1.0.
+
+**Implementation note (2026-11-06, MD4).** The overlay shows "Drop to import" for any file
+drag because the dragged files' extensions can only be read on drop; the open handler then
+rejects unsupported types with the existing "Neutrodyne can't open this file" snackbar.
+Non-file, non-text transfers show that message in the overlay.
 
 ### Window sizing
 
@@ -2134,9 +2180,9 @@ S13 ([S13 desktop packaging and performance](#s13-desktop-packaging-and-performa
 | Lane name `import-backup` (class `DesktopImportBackupLane`, owned by 05) *(2026-10-05)* | lane | `:core:data` `desktopMain` |
 | Lane names `refresh`, `downloads-manual`, `downloads-auto`, `downloads-move`, `artwork`, `app-update-check`, `engine-update`, `sync`, `maintenance` | strings | [Lanes](#lanes) |
 | `AudioEngine`, `FfAudioEngine`, `EngineItem`, `EngineWindowDiff`, `EngineState`, `EngineEvent`, `EngineError`, `TransitionReason`, `DiscontinuityReason`, `Gapless`, `DesktopSourceResolver`, `ResolvedSource`, `ByteSource`, `FileByteSource`, `HttpByteSource`, `SpanCache`, `LookAheadLoader`, `AvioBridge`, `DemuxerFactory`, `Demuxer`, `FfDemuxer`, `DecoderFactory`, `Decoder`, `FfDecoder`, `FfmpegLibrary`, `SilenceSkipper`, `Sonic`, `GainStage`, `TimelineClock`, `MpvAudioEngine` (fallback only) | classes | `:playback:engine` |
-| `ndmedia` (`nd_out_*`, `nd_events_init`, `nd_session_publish`, `nd_power_keep_awake`, `nd_notify_post`, `nd_win_*`, `nd_mac_login_item`), `NdmediaLibrary`, `NdOutput`, `ffoffsets.c`, `ffmpeg-layout.json`, `ffmpeg-license.txt` | native library, classes, files | `:playback:native` |
+| `ndmedia` (`nd_out_*`, `nd_events_init`, `nd_session_publish`, `nd_power_keep_awake`, `nd_notify_post`, `nd_win_*`, `nd_mac_login_item`), `NdmediaLibrary`, `NdOutput`, `NativePower`, `NativeLoginItem`, `ffoffsets.c`, `ffmpeg-layout.json`, `ffmpeg-license.txt` | native library, classes, files | `:playback:native` |
 | `DesktopPlaybackController`, `DesktopQueueProjector`, `DesktopEpisodeSourceResolver`, `DesktopPlaybackModule`, `DesktopChapterExtractor` | classes | `:playback:desktop` |
-| `SystemMediaSession`, `RemoteCommand`, `WindowsSmtcSession`, `MacNowPlayingSession`, `LinuxMprisSession`, `IdleSleepInhibitor`, `AudioRouteMonitor`, `RouteEvent`, `TrayController`, `TrayAction`, `LoginItemRegistrar` (`WindowsRunKeyRegistrar`, `MacLoginItemRegistrar`, `XdgAutostartRegistrar`), `LoginItemState`, `LinuxDesktopEntryWriter` (2026-10-06), `LinuxMenuEntryInstaller`, `OsPowerMonitor`, `OsDesktopNotifier`, `DbusDesktopPortal` | classes | `:desktop:system` |
+| `SystemMediaSession`, `RemoteCommand`, `WindowsSmtcSession`, `MacNowPlayingSession`, `LinuxMprisSession`, `IdleSleepInhibitor`, `MacIdleSleepInhibitor`, `WindowsIdleSleepInhibitor`, `NdmediaDirectory`, `AudioRouteMonitor`, `RouteEvent`, `TrayController`, `TrayAction`, `LoginItemRegistrar` (`WindowsRunKeyRegistrar`, `MacLoginItemRegistrar`, `XdgAutostartRegistrar`), `LoginItemState`, `LinuxDesktopEntryWriter` (2026-10-06), `LinuxMenuEntryInstaller`, `OsPowerMonitor`, `OsDesktopNotifier`, `DbusDesktopPortal` | classes | `:desktop:system` |
 | `JobLanePoker`, `PowerMonitor`, `PowerEvent`, `DesktopNotifier`, `DesktopNotification`, `NotificationKind`, `LinuxDesktopPortal` *(ports, 2026-10-05)* | ports | `:core:common` `desktopMain` |
 | `YtxProcess`, `YtxChild`, `StdioYtxTransport`, `PythonRuntimeLocator`, `DesktopEngineStorePaths`, `DesktopEngineUpdateLane`, `QuickJsBridge`, `host_stdio.py`, `bootstrap.py` | classes, Python files | `:youtube:ytdlp-desktop`, `youtube/engine/python/neutrodyne_ytx/` |
 | Stdio message types `hello`, `call`, `ok`, `err`, `cancel`, `jsc`, `jsc_ok`, `jsc_err`, `status` | protocol | [Stdio protocol](#stdio-protocol) |

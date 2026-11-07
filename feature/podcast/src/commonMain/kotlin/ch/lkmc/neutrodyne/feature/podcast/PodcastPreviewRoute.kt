@@ -78,6 +78,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.preview_confirm
 import ch.lkmc.neutrodyne.core.ui.resources.preview_subscribe_play
 import ch.lkmc.neutrodyne.core.ui.resources.preview_title
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.core.ui.root.ndTextFieldFocus
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
@@ -243,6 +244,7 @@ internal fun PodcastPreviewScreen(
                                 isError = errorText != null,
                                 supportingText = errorText?.let { { Text(it) } },
                                 enabled = !state.creatingGroup && !state.subscribing,
+                                modifier = Modifier.ndTextFieldFocus(),
                             )
                             NdTextButton(
                                 stringResource(Res.string.membership_create),
