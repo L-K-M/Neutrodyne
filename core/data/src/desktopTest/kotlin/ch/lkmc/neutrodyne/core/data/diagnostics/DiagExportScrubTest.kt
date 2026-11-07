@@ -172,6 +172,39 @@ class DiagExportScrubTest {
         }
 
     @Test
+    fun scrubMasksUrlFragments() =
+        runTest {
+            val db = TestDb.file(dbDir.toPath())
+            try {
+                // A fragment before any slash is part of the authority cut — the 02 rule
+                // "only scheme://host survives" must cut it at `#` too.
+                db.podcastDao().insertPodcast(
+                    podcastEntity(
+                        feedUrl = "https://tokens.example.invalid#access_token=SECRETFRAG",
+                        title = "Frag",
+                    ),
+                )
+                copyFile.delete()
+                db.useWriterConnection { conn ->
+                    conn.usePrepared("VACUUM INTO '${copyFile.absolutePath}'") { it.step() }
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    DiagExportScrub.scrub(connection)
+                }
+                driver.open(copyFile.absolutePath).use { connection ->
+                    connection.prepare("SELECT feedUrl FROM podcast").use { stmt ->
+                        stmt.step()
+                        assertEquals("https://tokens.example.invalid/…#1", stmt.getText(0))
+                    }
+                }
+            } finally {
+                db.close()
+                dbDir.deleteRecursively()
+                copyFile.delete()
+            }
+        }
+
+    @Test
     fun scrubKeepsUniqueIndicesValid() =
         runTest {
             val db = TestDb.file(dbDir.toPath())

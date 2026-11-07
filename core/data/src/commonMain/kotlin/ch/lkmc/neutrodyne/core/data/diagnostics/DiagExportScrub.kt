@@ -217,7 +217,8 @@ internal object DiagExportScrub {
         if (schemeEnd <= 0 || !value.substring(0, schemeEnd).all { it.isSchemeChar() }) {
             return masked(rowid)
         }
-        val authority = value.substring(schemeEnd + 3).substringBefore('/').substringBefore('?')
+        val authority =
+            value.substring(schemeEnd + 3).substringBefore('/').substringBefore('?').substringBefore('#')
         val host = authority.substringAfter('@').substringBefore(':')
         if (host.isEmpty()) return masked(rowid)
         return "${value.substring(0, schemeEnd)}://$host/$MASK#$rowid"
