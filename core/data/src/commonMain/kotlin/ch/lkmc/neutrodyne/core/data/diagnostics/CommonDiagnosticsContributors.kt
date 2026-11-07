@@ -210,7 +210,10 @@ internal class ParseWarningsContributor
             return all.entries.flatMap { (podcastId, warnings) ->
                 warnings.map { warning ->
                     val where = warning.itemIndex?.let { " item $it" } ?: ""
-                    val detail = warning.detail.ifEmpty { "" }.let { " ${it.take(80)}" }
+                    // Parser details quote feed text and URLs: redact at the source too, on
+                    // top of the repository's own Redactor pass (01's belt-and-braces rule).
+                    val detail = warning.detail.takeIf { it.isNotEmpty() }
+                        ?.let { " ${Redactor.text(it).take(80)}" } ?: ""
                     DiagnosticsLine(
                         "podcast $podcastId$where",
                         "${warning.code}$detail",
