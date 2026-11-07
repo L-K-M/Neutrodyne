@@ -83,6 +83,39 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
             assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableText, "x"))
         }
 
+    @Test
+    fun aRecorderFailureReportsWriteFailed() =
+        runTest {
+            val port =
+                object : ch.lkmc.neutrodyne.core.domain.SettingsSyncPort by
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeSettingsSyncPort() {
+                    override suspend fun recordLocal(
+                        key: ch.lkmc.neutrodyne.core.model.settings.SettingKey<*>,
+                        value: Any?,
+                    ): Unit = throw java.io.IOException("recorder down")
+                }
+            val dir = root.resolve("repo-recorder")
+            if (!::scope.isInitialized) {
+                scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+            }
+            val factory =
+                SettingsDataStoreFactory(storagePathsFor(dir), scope, UnconfinedTestDispatcher(testScheduler))
+            val repository =
+                DataStoreSettingsRepository(
+                    settingsStore = DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory)),
+                    deviceSettingsStore =
+                        DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+                    syncPort = port,
+                    clock =
+                        ch.lkmc.neutrodyne.core.testing
+                            .TestClock(),
+                )
+
+            assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableSyncedLong, 30_000L))
+            assertEquals(10_000L, repository.get(portableSyncedLong))
+        }
+
     @Test fun appearanceValuesPersistAndStayOutOfSync() =
         runTest {
             val repository = repositoryOver(root.resolve("appearance"))
