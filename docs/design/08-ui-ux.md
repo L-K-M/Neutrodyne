@@ -1433,7 +1433,7 @@ Accessibility: the code's content description spells it ("W D J B, M J H T") and
 > **{device} removed {n} podcasts and {g} groups** (no device: "Another device removed…"; the groups part only when `g > 0`)
 > Apply this on this device too? {first 10 podcast titles and group names, then "and {k} more"}
 
-Buttons, stacked: **Apply** (`resolveHeld(id, APPLY)`), **Keep mine** with "Keeps them here and adds them back on your other devices" (`KEEP_MINE`), **Decide later** (`DECIDE_LATER`; the banner stays). The list is a scrollable column (max 50 % of the window height).
+Buttons, stacked: **Apply** (`resolveHeld(id, APPLY)`), **Keep mine** with "Keeps them here and adds them back on your other devices" (`KEEP_MINE`), **Decide later** (`DECIDE_LATER`; the banner stays). The list is a scrollable column (max 50 % of the window height). MS2 deviation: a failed resolution adds "That didn’t work. Nothing was changed; you can try again." and keeps the choices — the dialog never closes on a failure it reports as success; a batch decided elsewhere closes it instead.
 
 #### Restore-while-linked prompts
 
