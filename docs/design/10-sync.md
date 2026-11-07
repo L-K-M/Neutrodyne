@@ -1919,7 +1919,12 @@ Caddy obtains certificates automatically ([Automatic HTTPS](https://caddyserver.
 
 `nginx.conf.example` for administrators who already run nginx:
 
-```text
+```nginx
+# Included inside the existing TLS server block.
+client_max_body_size 2m;
+# HSTS is the proxy's job; the app sends the other security headers itself.
+# add_header is inherited only by locations that set none of their own.
+add_header Strict-Transport-Security "max-age=31536000" always;
 location /api/v1/events {
     proxy_pass http://127.0.0.1:8787;
     proxy_http_version 1.1;
@@ -1933,11 +1938,11 @@ location /api/v1/events {
 }
 location / {
     proxy_pass http://127.0.0.1:8787;
-    client_max_body_size 2m;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    add_header Strict-Transport-Security "max-age=31536000" always;
 }
 ```
 
