@@ -120,6 +120,17 @@ class Podcasting20ChaptersParserTest {
 
     @Test fun slowResponseTimesOutAfterEightSeconds() =
         runBlocking<Unit> {
+            // Isolate the parser's deadline from the production API client's equal eight-second
+            // transport deadline. The assertion must prove the parser cancels the read itself.
+            val deadlineParser =
+                Podcasting20ChaptersParser(
+                    object : NeutrodyneHttpClients {
+                        override fun client(kind: HttpClientKind): HttpClient {
+                            assertEquals(HttpClientKind.API, kind)
+                            return clients.client(HttpClientKind.FEED)
+                        }
+                    },
+                )
             val response =
                 MockResponse
                     .Builder()
@@ -128,7 +139,7 @@ class Podcasting20ChaptersParserTest {
                     .build()
             serverRule.server.enqueue(response)
             assertFailsWith<kotlinx.coroutines.TimeoutCancellationException> {
-                parser.fetch(serverRule.server.url("/slow").toString())
+                deadlineParser.fetch(serverRule.server.url("/slow").toString())
             }
         }
 
