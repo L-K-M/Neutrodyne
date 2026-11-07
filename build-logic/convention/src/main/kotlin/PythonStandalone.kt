@@ -71,7 +71,6 @@ internal fun Project.registerPythonStandalone() {
             "Trims the fetched python-build-standalone archive with scripts/engine/trim-python.sh " +
             "(11 Trim list and checks)."
         dependsOn(fetch)
-        this.lockFile.set(lockFile)
         archive.set(fetch.flatMap { it.archive })
         this.trimScript.set(trimScript)
         // A subdirectory, so trimming never deletes the fetch task's archive output.
@@ -91,9 +90,6 @@ abstract class FetchPythonStandalone : DefaultTask() {
     /** The verified archive, kept without an extension (every target ships gzip'd tar). */
     @get:OutputFile
     abstract val archive: RegularFileProperty
-
-    @get:Inject
-    protected abstract val fileSystemOperations: FileSystemOperations
 
     @TaskAction
     fun fetch() {
@@ -167,10 +163,6 @@ abstract class FetchPythonStandalone : DefaultTask() {
 
 /** Runs `scripts/engine/trim-python.sh` over the fetched archive (11 Trim list and checks). */
 abstract class TrimPythonStandalone : DefaultTask() {
-    @get:InputFile
-    @get:PathSensitive(PathSensitivity.NONE)
-    abstract val lockFile: RegularFileProperty
-
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val archive: RegularFileProperty
