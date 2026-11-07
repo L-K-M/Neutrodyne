@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
+import ch.lkmc.neutrodyne.sync.api.HeldResolveResult
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.PendingDevice
@@ -1143,7 +1144,10 @@ class SyncControllerImplTest {
                 await(h) { h.controller.heldChanges.value.size == 2 }
                 h.seedLinked()
 
-                h.controller.resolveHeld(first, HeldResolution.APPLY)
+                assertEquals(
+                    HeldResolveResult.Resolved,
+                    h.controller.resolveHeld(first, HeldResolution.APPLY),
+                )
                 await(h) { h.controller.heldChanges.value.size == 1 }
                 assertEquals(
                     second,
@@ -1156,7 +1160,10 @@ class SyncControllerImplTest {
                 assertNotNull(h.db.podcastDao().bySyncId(otherPodcast))
                 assertNotNull(h.db.groupDao().groupByUuid(otherGroup))
 
-                h.controller.resolveHeld(second, HeldResolution.KEEP_MINE)
+                assertEquals(
+                    HeldResolveResult.Resolved,
+                    h.controller.resolveHeld(second, HeldResolution.KEEP_MINE),
+                )
                 await(h) {
                     h.controller.heldChanges.value
                         .isEmpty()
@@ -1164,6 +1171,120 @@ class SyncControllerImplTest {
                 val outbox = h.db.syncOutboxDao().rows()
                 assertTrue(outbox.any { it.coll == "podcast" && it.rid == otherPodcast && it.field == "*" })
                 assertTrue(outbox.any { it.coll == "group" && it.rid == otherGroup && it.field == "*" })
+            } finally {
+                h.close()
+            }
+        }
+
+    /** Decide later is a keep, not a write: the row and the library stay untouched. */
+    @Test
+    fun decideLaterKeepsTheBatchAndReportsResolved() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                val id =
+                    h.seedHeld(
+                        heldAt = 1,
+                        podcasts = listOf(SyncControllerImplTest.PODCAST_SYNC_ID),
+                        summaryPodcasts = listOf("Example"),
+                    )
+                h.seedLinked()
+
+                assertEquals(
+                    HeldResolveResult.Resolved,
+                    h.controller.resolveHeld(id, HeldResolution.DECIDE_LATER),
+                )
+                assertNotNull(h.db.syncHeldDao().byId(id))
+                assertNotNull(h.db.podcastDao().bySyncId(SyncControllerImplTest.PODCAST_SYNC_ID))
+            } finally {
+                h.close()
+            }
+        }
+
+    /** A row another resolution already deleted reports Gone rather than failing. */
+    @Test
+    fun resolveHeldReportsGoneForAnUnknownId() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                assertEquals(
+                    HeldResolveResult.Gone,
+                    h.controller.resolveHeld(404, HeldResolution.APPLY),
+                )
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * Only HELD rows are reviewable: a STAGED row fails without a write, and the same id succeeds
+     * once the round promotes the batch to HELD (10 step 3).
+     */
+    @Test
+    fun resolveHeldFailsOnANonHeldRowAndRetriesOnceHeld() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.addLocalPodcast()
+                val id =
+                    h.seedHeld(
+                        heldAt = 1,
+                        podcasts = listOf(SyncControllerImplTest.PODCAST_SYNC_ID),
+                        summaryPodcasts = listOf("Example"),
+                        state = "STAGED",
+                    )
+                h.seedLinked()
+
+                assertEquals(
+                    HeldResolveResult.Failed,
+                    h.controller.resolveHeld(id, HeldResolution.APPLY),
+                )
+                assertNotNull(h.db.syncHeldDao().byId(id))
+                assertNotNull(h.db.podcastDao().bySyncId(SyncControllerImplTest.PODCAST_SYNC_ID))
+
+                // The round's promote write flips the same row to HELD; the retry then applies.
+                val row = h.db.syncHeldDao().byId(id)!!
+                h.db.withWriteTransaction {
+                    h.db.syncHeldDao().upsert(row.copy(batch = row.batch.replace("STAGED", "HELD")))
+                }
+                assertEquals(
+                    HeldResolveResult.Resolved,
+                    h.controller.resolveHeld(id, HeldResolution.APPLY),
+                )
+                assertNull(h.db.syncHeldDao().byId(id))
+                assertNull(h.db.podcastDao().bySyncId(SyncControllerImplTest.PODCAST_SYNC_ID))
+            } finally {
+                h.close()
+            }
+        }
+
+    /**
+     * A batch JSON that decodes far enough to read `state` but not the removals reports Failed
+     * through the catch-all, and the write transaction leaves the row held for a retry.
+     */
+    @Test
+    fun resolveHeldReportsFailedForAnUndecodableHeldBatch() =
+        runTest {
+            val h = harness(this)
+            try {
+                val id =
+                    h.db.syncHeldDao().insert(
+                        ch.lkmc.neutrodyne.core.database
+                            .SyncHeldEntity(
+                                batch = """{"state":"HELD","podcasts":"oops"}""",
+                                summary = "{}",
+                                heldAt = 1,
+                            ),
+                    )
+                h.seedLinked()
+
+                assertEquals(
+                    HeldResolveResult.Failed,
+                    h.controller.resolveHeld(id, HeldResolution.APPLY),
+                )
+                assertNotNull(h.db.syncHeldDao().byId(id))
             } finally {
                 h.close()
             }

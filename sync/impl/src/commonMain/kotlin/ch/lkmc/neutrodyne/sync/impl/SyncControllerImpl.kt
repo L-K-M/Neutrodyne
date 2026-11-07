@@ -6,6 +6,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -20,6 +21,7 @@ import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
 import ch.lkmc.neutrodyne.sync.api.DiscoveredServer
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
+import ch.lkmc.neutrodyne.sync.api.HeldResolveResult
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
@@ -74,6 +76,7 @@ private const val ACCESS_DENIED = "access_denied"
 private const val MIN_LINK_INTERVAL_SECONDS = 5
 private const val SLOW_DOWN_INCREMENT_SECONDS = 5
 private const val UNLINK_PUSH_BUDGET_MS = 5_000L
+private const val TAG = "SyncController"
 private const val DELETE_CONFIRMATION = "DELETE"
 private const val RESET_MODE_PURGE = "purge"
 
@@ -504,35 +507,34 @@ class SyncControllerImpl(
         }
     }
 
-    override fun resolveHeld(
+    override suspend fun resolveHeld(
         id: Long,
         resolution: HeldResolution,
-    ) {
-        scope.launch {
-            val row = db.syncHeldDao().byId(id) ?: return@launch
-            val batch = runCatching { SyncJson.decodeFromString<HeldBatch>(row.batch) }.getOrNull() ?: return@launch
-            when (resolution) {
-                HeldResolution.APPLY -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.apply(db, batch, clock.now())
-                        }
+    ): HeldResolveResult {
+        // Decide later is a keep, not a write: the batch stays offered (10 Mass-change guard step 3).
+        if (resolution == HeldResolution.DECIDE_LATER) return HeldResolveResult.Resolved
+        return try {
+            db.withWriteTransaction {
+                val row = db.syncHeldDao().byId(id) ?: return@withWriteTransaction HeldResolveResult.Gone
+                if (!MassChangeGuard.isHeld(row.batch)) return@withWriteTransaction HeldResolveResult.Failed
+                val batch = SyncJson.decodeFromString<HeldBatch>(row.batch)
+                db.syncStateDao().withApplying {
+                    when (resolution) {
+                        HeldResolution.APPLY -> MassChangeGuard.apply(db, batch, clock.now())
+                        HeldResolution.KEEP_MINE -> MassChangeGuard.keepMine(db, batch, clock)
+                        HeldResolution.DECIDE_LATER -> Unit // returned above
                     }
                 }
-
-                HeldResolution.KEEP_MINE -> {
-                    db.withWriteTransaction<Unit> {
-                        db.syncStateDao().withApplying<Unit> {
-                            MassChangeGuard.keepMine(db, batch, clock)
-                        }
-                    }
-                }
-
-                HeldResolution.DECIDE_LATER -> {
-                    return@launch
-                }
+                // The row's delete rides the same transaction, so a failure can never leave an
+                // applied batch still offered for review.
+                db.syncHeldDao().delete(id)
+                HeldResolveResult.Resolved
             }
-            db.syncHeldDao().delete(id)
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Throwable) {
+            Log.w(TAG) { "resolveHeld($id, $resolution) failed (${failure::class.simpleName})" }
+            HeldResolveResult.Failed
         }
     }
 

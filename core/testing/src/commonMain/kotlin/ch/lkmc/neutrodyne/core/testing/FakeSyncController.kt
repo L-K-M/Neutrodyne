@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.testing
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.sync.api.FirstLinkChoice
 import ch.lkmc.neutrodyne.sync.api.HeldResolution
+import ch.lkmc.neutrodyne.sync.api.HeldResolveResult
 import ch.lkmc.neutrodyne.sync.api.LinkFlow
 import ch.lkmc.neutrodyne.sync.api.LinkMethod
 import ch.lkmc.neutrodyne.sync.api.MassChangePrompt
@@ -67,6 +68,7 @@ class FakeSyncController(
     var deleteServerDataResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var renameResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
     var revokeResult: Outcome<Unit, SyncProblem> = Outcome.Success(Unit)
+    var resolveHeldResult: HeldResolveResult = HeldResolveResult.Resolved
 
     override fun startLink(
         serverUrl: String,
@@ -148,11 +150,16 @@ class FakeSyncController(
         return revokeResult
     }
 
-    override fun resolveHeld(
+    override suspend fun resolveHeld(
         id: Long,
         resolution: HeldResolution,
-    ) {
+    ): HeldResolveResult {
         heldResolutions += id to resolution
+        if (resolveHeldResult != HeldResolveResult.Failed && resolution != HeldResolution.DECIDE_LATER) {
+            // The real service deletes the row, so the prompt leaves the flow (DECIDE_LATER keeps it).
+            heldChanges.value = heldChanges.value.filterNot { it.id == id }
+        }
+        return resolveHeldResult
     }
 
     override fun dismissRemoteSession() {

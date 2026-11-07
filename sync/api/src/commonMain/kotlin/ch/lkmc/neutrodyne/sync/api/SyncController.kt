@@ -87,10 +87,16 @@ interface SyncController {
 
     suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem>
 
-    fun resolveHeld(
+    /**
+     * Decides one held batch (10 Mass-change guard step 3). `DECIDE_LATER` keeps the batch; `APPLY`
+     * and `KEEP_MINE` run and delete the row in one transaction, so a failure can never leave an
+     * applied batch still offered for review. [HeldResolveResult.Gone] means another resolution
+     * decided the batch first; [HeldResolveResult.Failed] leaves it held for a retry.
+     */
+    suspend fun resolveHeld(
         id: Long,
         resolution: HeldResolution,
-    )
+    ): HeldResolveResult
 
     fun dismissRemoteSession()
 
