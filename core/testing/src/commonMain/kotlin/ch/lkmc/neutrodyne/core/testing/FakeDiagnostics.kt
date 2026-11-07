@@ -16,6 +16,9 @@ class FakeDiagnosticsRepository(
     var report: DiagnosticsReport = DiagnosticsReport(generatedAt = 0, sections = emptyList()),
 ) : DiagnosticsRepository {
     var exportResult: Outcome<String, DiagnosticsError> = Outcome.Success("file:///tmp/export.db")
+
+    /** When set, [exportDatabaseCopy] throws this instead of answering. */
+    var exportThrows: Throwable? = null
     val exportCalls = mutableListOf<String?>()
 
     private val _logLines = MutableStateFlow<List<String>>(emptyList())
@@ -39,6 +42,7 @@ class FakeDiagnosticsRepository(
 
     override suspend fun exportDatabaseCopy(destination: String?): Outcome<String, DiagnosticsError> {
         exportCalls += destination
+        exportThrows?.let { throw it }
         return exportResult
     }
 
