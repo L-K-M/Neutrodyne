@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.click
@@ -148,6 +149,7 @@ class Md4DesktopMatrixScreenshotTest {
                     }
                     waitForIdle()
                     onNodeWithTag("matrixRow").performMouseInput { click(center) }
+                    onNodeWithTag("matrixRow").performMouseInput { moveTo(center + Offset(0f, 200f)) }
                     waitForIdle()
                     onRoot().captureRoboImage("screenshots/desktop/md4-row-focus-$theme-w900.png")
                 }
