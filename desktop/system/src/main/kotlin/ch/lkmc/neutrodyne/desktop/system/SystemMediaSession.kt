@@ -15,13 +15,16 @@ interface SystemMediaSession : AutoCloseable {
      * Publishes the current item; null clears the session. [skipBackMs] and
      * [skipForwardMs] label the skip buttons where the OS exposes them and
      * [speedPresets] the rate picker; neither is an MPRIS concept, so a Linux
-     * session may ignore all three.
+     * session may ignore all three. [artworkPath] is the pinned artwork file of
+     * the item (11 Metadata); the native sessions hand it to SMTC's thumbnail
+     * and Now Playing's `MPMediaItemArtwork`.
      */
     fun publish(
         nowPlaying: NowPlaying?,
         skipBackMs: Long,
         skipForwardMs: Long,
         speedPresets: List<Float>,
+        artworkPath: String? = null,
     )
 
     /** Commands the OS session sent; the player consumes these. */

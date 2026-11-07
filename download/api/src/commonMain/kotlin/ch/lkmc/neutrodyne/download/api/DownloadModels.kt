@@ -129,8 +129,6 @@ enum class RootChangeMode { NEW_DOWNLOADS_ONLY, MOVE_EXISTING }
 sealed interface RootChangeResult {
     data object Applied : RootChangeResult
 
-    data object Unsupported : RootChangeResult
-
     data object Unavailable : RootChangeResult
 }
 

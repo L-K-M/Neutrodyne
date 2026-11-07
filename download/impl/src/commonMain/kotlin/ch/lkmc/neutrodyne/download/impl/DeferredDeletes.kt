@@ -69,11 +69,19 @@ internal class DeferredDeletes(
             if (entry.episodeId == currentEpisodeId || roots.resolve(entry.rootId) == null) continue
             try {
                 files.delete(entry.rootId, entry.path)
+                val parent = entry.path.substringBeforeLast('/', "")
+                if (PODCAST_FOLDER.matches(parent) && files.list(entry.rootId, parent).isEmpty()) {
+                    files.delete(entry.rootId, parent)
+                }
                 done += entry.encoded()
             } catch (_: IOException) {
                 // Keep the durable intent across unmounts, sharing violations and process death.
             }
         }
         if (done.isNotEmpty()) settings.update(DownloadSettingKeys.DEFERRED_DELETES) { (it - done).toPersistentSet() }
+    }
+
+    private companion object {
+        val PODCAST_FOLDER = Regex(".+ \\[p[0-9]+\\]")
     }
 }

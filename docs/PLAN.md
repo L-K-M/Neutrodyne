@@ -553,6 +553,7 @@ Context: Media3 Cast pulls `play-services-cast-framework`, which is proprietary;
 | PO-48 | Licence classes the final review found beyond S13 (added 2026-10-05) | (a) WiX: every jpackage MSI embeds WiX Util's `RemoveFolderEx` custom action and, with a licence file, the WixUI dialog library — MS-RL, file-level reciprocal ([LICENSE.TXT](https://github.com/wixtoolset/wix/blob/main/LICENSE.TXT) §3(A)); admit the unmodified components with the pinned WiX source attached, or ship Windows as ZIP only; (b) python-build-standalone's MPL-2.0 patches compiled into its CPython and its VC++ DLLs ([PBS LICENSE](https://github.com/astral-sh/python-build-standalone/blob/main/LICENSE)); admit with the PBS source attached, or build CPython ourselves without them; (c) Skiko's statically embedded FreeType (FTL or GPL-2.0), libpng and libjpeg-turbo (IJG) and OkHttp's compiled Public Suffix List (MPL-2.0 data) | Admit all three as amended in [D3](#3-key-decisions): (a) and (b) as named cases with their sources attached to each release (`wix-{wix}-src.tar.gz`, `python-build-standalone-{pbsTag}-src.tar.gz`), (c) by adding FTL (elected), libpng-2.0 and IJG to the permissive list and widening MPL-2.0 data to mechanically converted data; none of them affects our code's licence (not legal advice) | M0b (MSI, Skiko), MD3 (PBS) |
 | PO-49 | Episode-identity repair across GUID changes (added 2026-10-10; answered same day) | Two stored rows can be indistinguishable by every ordinary field while the correct owner of an incoming item differs — the stored projection cannot arbitrate. Options: a one-case enclosure guard (overbroad: it also blocks a genuine GUID+enclosure edit from claiming its row), in-memory GUID history (lost on restart), or a persisted feed-scoped record | Persistent GUID provenance per [D98](#3-key-decisions): `episode_guid_provenance` keyed `(podcastId, guid)` with `KNOWN_AMBIGUOUS` / `KNOWN_INDEPENDENT` / `OBSERVED`, absence = `UNKNOWN`, the `guidCoverageSince` coverage marker, sticky ambiguity, conservative insert-or-drop for contested unknown claims, a real V1→V2 migration, and the matcher authority of [03's diff](design/03-feeds-and-discovery.md#diff-algorithm) | M1a |
 | PO-50 | Which API matrix proves the M3 local-transport `bmgr` check (added 2026-10-20; answered same day) | Keep API 29 + 36 as two positive legs, or split legacy and positive coverage. The actual API 29 diagnostic run measured stock LocalTransport: both control phases produced the exact 4608-byte backup with the allowed payload only, while every `clientSideEncryption`/`deviceToDeviceTransfer` flagged package was refused at preflight (`BACKUP_MANAGER_POLICY`/`ERROR_PREFLIGHT`, overall success, no payload) | **Revise matrix (owner choice, 2026-10-20):** legacy API 28/29 become negative capability checks — a green diagnostic may only record a controlled preflight rejection with a verified same-phase control, never a successful encrypted backup and never application acceptance; the positive uninstall/reinstall/first-launch-restore check moves to API 31 + 36; API 26 keeps its manual empty-backup run (PO-15). Published backup encryption/D2D/include-only rules, release signing/shrinking, application IDs and supported platforms are unchanged. Reason: the stock legacy transport's refusal is its limitation, not a defect of the app's rules. API 28 runtime proof and the positive API 31/36 runs remain pending | M3 |
+| PO-51 | Print the setup token in the start banner instead? (2026-11-01, MS1) | Retain the file default or authorize a narrow N13 exception | Implemented default superseding PO-38's banner: one-time token only in `<data>/setup-token` (`0600`), print only its path; N13 unchanged ([10](design/10-sync.md#first-administrator)) | MS1 |
 
 
 ### Radio home owner decisions (2026-11-04)
@@ -1287,7 +1288,23 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
 
 #### M6: Downloads
 
+**Implementation note (2026-11-02, M6b).** The M6b port lands on
+`impl/m6b-current` over the current M6a code, preserving its review fixes.
+The [AC-by-AC ledger](evidence/m6b-acceptance.md) names host tests and the
+unexecuted device/nightly/owner checks. AC2's E10 half and AC4/5/11/13/15
+remain open for that evidence. AC5 means eligibility at 24 h, followed by the
+next cleanup opportunity, not an exact OS wake time. AC11 retains the
+pending-job inference and its OEM Recents limitation. AC15 permits same-store
+atomic rename instead of copy/verify and keeps the playing source pending.
+W10 uses the adopted `benchmarkRelease` fallback, including its opt-in fixture
+driver; neither assembly nor that variant proves published-release APK
+acceptance. No device run or milestone completion is claimed by this work.
 
+**Implementation note (2026-11-02, M6b).** All eleven resolutions in the
+M6b plan's ambiguity table are adopted; the owning sections in 05, 07, 08 and 09
+record the individual decisions. Settings resolution, settings keys, DAO query
+contracts and planner/cleanup/mover/root/exit ports are frozen for the port.
+PO-12 defaults and PO-37 device-local sync classification apply.
 
 **Implementation note (2026-10-19, M6a).** Adopted resolutions 2, 3, 5 and 7:
 AC14's audible offline half requires MD1; transfer mechanics are independent and

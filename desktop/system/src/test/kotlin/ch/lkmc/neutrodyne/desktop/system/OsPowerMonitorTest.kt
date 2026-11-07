@@ -151,6 +151,7 @@ class OsPowerMonitorTest {
             skipBackMs: Long,
             skipForwardMs: Long,
             speedPresets: List<Float>,
+            artworkPath: String?,
         ) = Unit
 
         override val commands = emptyFlow<RemoteCommand>()

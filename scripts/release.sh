@@ -110,6 +110,8 @@ if [ -n "$nightly_id" ]; then
     # A run whose gating jobs were all skipped (or that listed no jobs) proves nothing.
     ok_jobs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name != "repro" and .conclusion == "success")] | length' \
         2>/dev/null || echo 0)"
+    server_proofs="$(gh api "$jobs_url" --jq '[.jobs[] | select((.name == "server-image-smoke" or .name == "server-convergence-report") and .conclusion == "success")] | length' 2>/dev/null || echo 0)"
+    if [ "$server_proofs" -ne 2 ]; then failed_jobs="missing MS1 image/convergence proof"; fi
     if [ -z "$failed_jobs" ] && [ "$ok_jobs" -gt 0 ]; then
         nightly="success"
     else
