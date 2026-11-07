@@ -39,6 +39,7 @@ import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * `DbMaintenanceImpl`'s step composition (02 db-maintenance worker) against a real database:
@@ -217,6 +218,49 @@ class DbMaintenanceTest {
                     ?.content
                     ?.startsWith("skipped") == true,
             )
+        }
+
+    @Test
+    fun vacuumRunsWhenTheGuardsPass() =
+        runTest {
+            inflateFreelist()
+            // The seeded play_session row counts as activity for VACUUM_IDLE_MS after open.
+            clock.advanceBy(11.minutes)
+
+            maintenance(usableSpace = Long.MAX_VALUE).run(clock.now())
+
+            val stats = Json.parseToJsonElement(settings.get(DiagnosticsSettingKeys.MAINTENANCE_STATS))
+            assertEquals("done", stats.jsonObject["vacuum"]?.jsonPrimitive?.content)
+        }
+
+    @Test
+    fun aFailedVacuumAttemptRecordsFailedNotSkipped() =
+        runTest {
+            inflateFreelist()
+            clock.advanceBy(11.minutes)
+
+            maintenance(usableSpace = Long.MAX_VALUE)
+                .run(clock.now(), vacuumBlocker = { error("probe down") })
+
+            val stats = Json.parseToJsonElement(settings.get(DiagnosticsSettingKeys.MAINTENANCE_STATS))
+            assertEquals(
+                "failed",
+                stats.jsonObject["vacuum"]?.jsonPrimitive?.content,
+                "a vacuum attempt that throws must not read as skipped",
+            )
+        }
+
+    /** Drops ~14 MB of padding so the freelist clears both vacuum size guards. */
+    private suspend fun inflateFreelist() =
+        db.useWriterConnection { conn ->
+            conn.usePrepared("CREATE TABLE pad(x)") { it.step() }
+            conn.usePrepared(
+                "WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 700)" +
+                    " INSERT INTO pad SELECT randomblob(20000) FROM c",
+            ) {
+                it.step()
+            }
+            conn.usePrepared("DROP TABLE pad") { it.step() }
         }
 
     private suspend fun expiredSessionCount(): Int =

@@ -195,6 +195,9 @@ internal class DbMaintenanceImpl(
         vacuumBlocker: (suspend () -> String?)?,
         stats: Stats,
     ) {
+        // Any throw inside the step means "failed" — the guards overwrite it with their
+        // "skipped:" reason as they pass, so a crash never reads as a deliberate skip.
+        stats.vacuum = "failed"
         val pages = db.useWriterConnection { conn -> pageStats(conn) }
         val dbBytes = pages.pageCount * pages.pageSize
         val freeBytes = pages.freelistCount * pages.pageSize
@@ -224,17 +227,13 @@ internal class DbMaintenanceImpl(
                         stats.vacuum = "skipped:space"
                     }
 
-                    vacuumBlocker != null -> {
-                        val reason = vacuumBlocker()
+                    else -> {
+                        val reason = vacuumBlocker?.invoke()
                         if (reason != null) {
                             stats.vacuum = "skipped:$reason"
                         } else {
                             runVacuum(stats)
                         }
-                    }
-
-                    else -> {
-                        runVacuum(stats)
                     }
                 }
             }
