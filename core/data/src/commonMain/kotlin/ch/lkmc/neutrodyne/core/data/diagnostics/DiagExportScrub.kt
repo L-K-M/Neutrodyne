@@ -231,12 +231,19 @@ internal object DiagExportScrub {
             return masked(rowid)
         }
         val authority =
-            value.substring(schemeEnd + 3).substringBefore('/').substringBefore('?').substringBefore('#')
+            value
+                .substring(schemeEnd + 3)
+                .substringBefore('/')
+                .substringBefore('?')
+                .substringBefore('#')
         val hostPort = authority.substringAfter('@')
         // IPv6 literals bracket the host so its colons are not the port separator.
         val host =
-            if (hostPort.startsWith("[")) hostPort.substringBefore(']') + "]"
-            else hostPort.substringBefore(':')
+            if (hostPort.startsWith("[")) {
+                hostPort.substringBefore(']') + "]"
+            } else {
+                hostPort.substringBefore(':')
+            }
         if (host.isEmpty()) return masked(rowid)
         return "${value.substring(0, schemeEnd)}://$host/$MASK#$rowid"
     }

@@ -90,8 +90,9 @@ internal class DiagnosticsViewModel(
         viewModelScope.launch {
             // The busy flag must come down even when the repository throws: reset it in
             // finally and report an unexpected throw as FAILED rather than crashing.
-            val outcome = suspendRunCatching { diagnostics.exportDatabaseCopy(destination) }
-                .getOrElse { Outcome.Failure(DiagnosticsError.FAILED) }
+            val outcome =
+                suspendRunCatching { diagnostics.exportDatabaseCopy(destination) }
+                    .getOrElse { Outcome.Failure(DiagnosticsError.FAILED) }
             try {
                 when (outcome) {
                     is Outcome.Success -> {
