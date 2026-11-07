@@ -99,6 +99,7 @@ class DesktopPythonRuntimeLocator(
         fun standard(
             engineResources: () -> File?,
             rootDir: () -> File?,
+            probe: (File) -> PythonRuntime? = PythonRuntime.Companion::probe,
         ): DesktopPythonRuntimeLocator =
             DesktopPythonRuntimeLocator(
                 explicit = {
@@ -110,20 +111,21 @@ class DesktopPythonRuntimeLocator(
                         ?.resolve("youtube/ytdlp-desktop/build/python-standalone")
                         ?.resolve(currentTarget())
                         ?.resolve("trimmed")
-                        ?.resolve("python")
                         ?.takeIf(File::isDirectory)
                 },
+                probe = probe,
             )
 
-        /** `<os>-<arch>` PBS target id; linux-aarch64 is not a shipped target (11 Build matrix). */
+        /** PBS target IDs match the fetcher's directory names (11 Build matrix). */
         private fun currentTarget(): String {
+            val osName = System.getProperty("os.name").lowercase()
             val os =
                 when {
                     isWindows() -> "windows"
-                    System.getProperty("os.name").let { it.contains("mac") || it.contains("darwin") } -> "macos"
+                    (osName.contains("mac") || osName.contains("darwin")) -> "macos"
                     else -> "linux"
                 }
-            val arch = if (System.getProperty("os.arch").let { it == "aarch64" || it == "arm64" }) "aarch64" else "x64"
+            val arch = if (System.getProperty("os.arch").let { it == "aarch64" || it == "arm64" }) "arm64" else "x64"
             return "$os-$arch"
         }
     }

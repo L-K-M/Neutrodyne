@@ -71,6 +71,39 @@ class PythonRuntimeLocatorTest {
         assertEquals(devExe, locator.locate()?.executable)
     }
 
+    @Test fun standardLocatorFindsTheFetcherTreeOnEveryTarget() {
+        val properties = listOf("os.name", "os.arch", "neutrodyne.ytx.python")
+        val original = properties.associateWith(System::getProperty)
+        try {
+            System.clearProperty("neutrodyne.ytx.python")
+            val targets =
+                listOf(
+                    Triple("Windows 11", "amd64", "windows-x64"),
+                    Triple("Mac OS X", "aarch64", "macos-arm64"),
+                    Triple("Linux", "amd64", "linux-x64"),
+                    Triple("Linux", "aarch64", "linux-arm64"),
+                )
+            for ((os, arch, target) in targets) {
+                System.setProperty("os.name", os)
+                System.setProperty("os.arch", arch)
+                val root = tempRoot(target)
+                val engine = root.resolve("youtube/ytdlp-desktop/build/python-standalone/$target/trimmed")
+                val exe = interpreterIn(engine).apply { writeBytes(byteArrayOf()) }
+                val locator =
+                    DesktopPythonRuntimeLocator.standard(
+                        engineResources = { null },
+                        rootDir = { root },
+                        probe = { PythonRuntime(it, "3.14") },
+                    )
+                assertEquals(exe, locator.locate()?.executable, "$os / $arch must use the fetcher's directory")
+            }
+        } finally {
+            for ((key, value) in original) {
+                if (value == null) System.clearProperty(key) else System.setProperty(key, value)
+            }
+        }
+    }
+
     @Test fun missingInterpreterYieldsNullNotAnException() {
         val locator =
             DesktopPythonRuntimeLocator(
