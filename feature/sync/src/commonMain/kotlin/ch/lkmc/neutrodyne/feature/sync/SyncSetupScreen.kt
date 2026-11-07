@@ -157,9 +157,21 @@ internal fun SyncSetupScreen(
             }
 
             is LinkState.NeedsLocalNetworkPermission -> {
+                // Android 17 asks the OS and only its result answers the flow; the desktop and
+                // older Android have no prompt, so the tap itself is the answer there (10
+                // Local-network gate).
+                val permissionPrompt = rememberLocalNetworkPermissionPrompt()
                 LocalNetworkDialog(
                     host = (state as LinkState.NeedsLocalNetworkPermission).host,
-                    onAnswer = controller::grantLocalNetwork,
+                    onAllow = {
+                        if (permissionPrompt == null) {
+                            controller.grantLocalNetwork(true)
+                        } else {
+                            permissionPrompt.request { granted ->
+                                controller.grantLocalNetwork(granted)
+                            }
+                        }
+                    },
                     onDismiss = { controller.grantLocalNetwork(false) },
                 )
             }
@@ -271,7 +283,7 @@ private fun AddressStep(
 @Composable
 private fun LocalNetworkDialog(
     host: String,
-    onAnswer: (Boolean) -> Unit,
+    onAllow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -279,7 +291,7 @@ private fun LocalNetworkDialog(
         title = { Text(stringResource(Res.string.sync_setup_local_network_title)) },
         text = { Text(stringResource(Res.string.sync_setup_local_network_body, host)) },
         confirmButton = {
-            TextButton(onClick = { onAnswer(true) }) { Text(stringResource(Res.string.sync_continue)) }
+            TextButton(onClick = onAllow) { Text(stringResource(Res.string.sync_continue)) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(Res.string.sync_setup_cancel)) }
