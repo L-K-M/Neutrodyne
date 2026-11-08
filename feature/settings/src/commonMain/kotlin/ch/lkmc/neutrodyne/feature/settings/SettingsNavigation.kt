@@ -15,8 +15,8 @@ import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.SourceType
-import ch.lkmc.neutrodyne.core.navigation.DiagnosticsKey
 import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
+import ch.lkmc.neutrodyne.core.navigation.DiagnosticsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey

@@ -62,6 +62,7 @@ import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -245,6 +246,13 @@ class AndroidAppGraphTest {
             graph.youtubeEngine.prewarm(PrewarmReason.SCREEN)
             graph.youtubeEngine.retryStart()
             val bundled = graph.buildInfo.youTubeEngineBundled
+            if (bundled) {
+                // Persisted consent loads asynchronously; construction stays unavailable
+                // until that boundary completes, without opening the database.
+                withTimeout(5_000L) {
+                    graph.youtubeCapabilities.capabilities.first { it.externalReason != ExternalReason.NOT_YET_AVAILABLE }
+                }
+            }
             assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
                 if (bundled) {
                     EngineAvailability.PREPARING
