@@ -1642,6 +1642,13 @@ Our libraries (`ndmedia`, FFmpeg) load from `<resources>/native/` by absolute pa
 
 ### AOT cache
 
+**Implementation note (2026-11-08, training-task precursor).**
+`DesktopAotTraining` implements the image-training task and its bounded process,
+configuration restoration, timestamp and cache checks. Its 25 task-level tests
+run in static CI. Packaging activation follows separately, with the launcher-flag
+regression and all 17 real-JDK/installer integration cases preserved in that
+slice. The packaging graph gains the training task with that activation.
+
 *Implementation note (2026-11-08, training entry point):* the training and smoke modes share an isolated temporary app graph. The training journey visits all five destinations and exercises the native null backend. A missing display or native backend fails the training with a named step. Unit coverage uses injected window and PCM seams; the real packaged journey is verified with the cache producer and installer checks.
 
 [PO-42](../PLAN.md#48-further-product-owner-decisions): ship the JDK 25 AOT cache ([JEP 483](https://openjdk.org/jeps/483), [JEP 514](https://openjdk.org/jeps/514), [JEP 515](https://openjdk.org/jeps/515)); measured in the research build: first frame 0.58–0.63 s instead of 1.70–2.09 s, idle RSS ≈ 199 MB instead of ≈ 238 MB, cache 55.6 MB (14.1 MB compressed), under software rendering.

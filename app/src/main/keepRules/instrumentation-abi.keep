@@ -377,6 +377,7 @@
   public long getPositionInWindow-F1C5BW0();
   public androidx.compose.ui.node.RootForTest getRoot();
   public long getSize-YbymL2g();
+  public androidx.compose.ui.geometry.Rect getTouchBoundsInRoot();
   public boolean isRoot();
 }
 -keep class androidx.compose.ui.semantics.SemanticsOwner {
@@ -439,6 +440,7 @@
 -keep class androidx.compose.ui.unit.IntSize {
   public static androidx.compose.ui.unit.IntSize box-impl(long);
   public static long constructor-impl(long);
+  public static java.lang.String toString-impl(long);
   public long unbox-impl();
 }
 -keep class androidx.compose.ui.unit.IntSizeKt {
