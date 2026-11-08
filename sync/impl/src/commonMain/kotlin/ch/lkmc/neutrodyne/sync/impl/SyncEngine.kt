@@ -21,6 +21,8 @@ import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.RecordDto
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** The host of a server URL, for the token origin (`sync:<host>`). */
 fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").substringBefore('/')
@@ -82,21 +84,27 @@ class SyncEngine(
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
 
+    /**
+     * Rounds serialize: an in-process round, a `SyncWorker` round and the controller's "Sync now"
+     * may race; interleaved pushes would confuse the outbox ACK arithmetic.
+     */
+    private val roundMutex = Mutex()
+
     /** Marks the shared [SyncActivity] flag for the round's whole duration, including failures. */
     suspend fun round(reason: SyncRoundReason): SyncReport {
-        // The gate owns the SYNC bypass: apply its live verdict before the round's first request,
-        // so a permission granted before the process started works after a restart and a
-        // revocation blocks the round (10 Local-network gate 3-4). No prompt is shown here.
-        gate.onPermissionResult(gate.hasPermission())
         activity.begin()
         try {
-            return roundInternal(reason)
+            return roundMutex.withLock { roundLocked(reason) }
         } finally {
             activity.end()
         }
     }
 
-    private suspend fun roundInternal(reason: SyncRoundReason): SyncReport {
+    private suspend fun roundLocked(reason: SyncRoundReason): SyncReport {
+        // The gate owns the SYNC bypass: apply its live verdict before the round's first request,
+        // so a permission granted before the process started works after a restart and a
+        // revocation blocks the round (10 Local-network gate 3-4). No prompt is shown here.
+        gate.onPermissionResult(gate.hasPermission())
         val started = clock.now()
         val serverUrl = address.serverUrl()
         val token = serverUrl?.let { tokens.load(hostOf(it)) }
@@ -125,8 +133,7 @@ class SyncEngine(
             val changes = builder.build(rows)
             if (changes.isEmpty() && (rounds > 1 || reason in noPullReasons)) break
             val state = db.syncStateDao().get()
-            val response =
-                markingRevocation { client.sync(state?.cursor, changes) }
+            val response = markingRevocation { client.sync(state?.cursor, changes) }
             pushed += changes.size
             db.withWriteTransaction { handleResults(changes, response.results) }
             applied += response.records.size
