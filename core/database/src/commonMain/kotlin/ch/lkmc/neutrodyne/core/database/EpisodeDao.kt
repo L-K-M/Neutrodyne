@@ -56,7 +56,7 @@ interface EpisodeDao : DownloadSourceQueries {
     @Transaction
     @Query(
         "SELECT e.id AS episodeId, e.podcastId, e.title, e.sortDate, e.isVideo, e.availability," +
-            " COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, p.sourceType," +
+            " COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, p.sourceType, p.youtubeChannelId," +
             " COALESCE(p.customTitle, p.title) AS podcastTitle, e.enclosureUrl, e.enclosureType," +
             " e.enclosureLength, e.externalMediaId FROM episode e JOIN podcast p ON p.id = e.podcastId" +
             " LEFT JOIN episode_state s ON s.episodeId = e.id WHERE e.id IN (:ids)",
