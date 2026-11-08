@@ -13,6 +13,7 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.NoPayloadSource
@@ -49,9 +50,11 @@ import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.backup.BackupKind
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
@@ -351,7 +354,13 @@ class RestoreWorkerTest {
                     orderKeys = ProtocolOrderKeys,
                     clock = clock,
                 ),
-            settingsMerge = RestoreSettingsMerge(settings),
+            settingsMerge =
+                RestoreSettingsMerge(
+                    settings,
+                    TestDb.inMemory(app),
+                    FakeSettingsSyncPort(),
+                    DataStoreSettingsWriteCoordinator(),
+                ),
             payloads =
                 PayloadStore(
                     storagePaths = storagePaths,
@@ -367,6 +376,7 @@ class RestoreWorkerTest {
             refresh = refresh,
             channels = channels,
             snapshots = snapshots,
+            linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
             clock = clock,
             io = Dispatchers.IO,
         )

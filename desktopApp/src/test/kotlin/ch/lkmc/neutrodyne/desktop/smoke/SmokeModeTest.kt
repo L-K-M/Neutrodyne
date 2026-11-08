@@ -121,6 +121,30 @@ class SmokeModeTest {
         assertThat(SmokeMode.isEnabled(null)).isFalse()
     }
 
+    /**
+     * The state machine behind the `aotCache` field. The real JDK 25 behavior that makes
+     * these honest is pinned by the build-logic `DesktopAotTrainingRealTest`: an auto launch
+     * falls back silently, so an existing archive is only `unverified`; a strict launch
+     * (`-XX:AOTMode=on`) fails before main, so reaching the report under it is proof.
+     */
+    @Test
+    fun `aotCacheState reports unverified on auto and in-use only under strict mode`() {
+        assertThat(SmokeMode.aotCacheStateOf(emptyList()) { true })
+            .isEqualTo(SmokeMode.AOT_CACHE_NOT_CONFIGURED)
+        assertThat(SmokeMode.aotCacheStateOf(listOf("-XX:AOTCache=/x")) { false })
+            .isEqualTo(SmokeMode.AOT_CACHE_MISSING)
+        assertThat(SmokeMode.aotCacheStateOf(listOf("-XX:AOTCache=/x")) { true })
+            .isEqualTo(SmokeMode.AOT_CACHE_UNVERIFIED)
+        assertThat(
+            SmokeMode.aotCacheStateOf(listOf("-XX:AOTCache=/x", "-XX:AOTMode=on")) { true },
+        ).isEqualTo(SmokeMode.AOT_CACHE_IN_USE)
+        // A strict launch with a missing archive never reaches this report — the JVM
+        // fails before main — but the state function still reports the missing file.
+        assertThat(
+            SmokeMode.aotCacheStateOf(listOf("-XX:AOTCache=/x", "-XX:AOTMode=on")) { false },
+        ).isEqualTo(SmokeMode.AOT_CACHE_MISSING)
+    }
+
     private companion object {
         const val FIRST_FRAME_MS = 42L
     }

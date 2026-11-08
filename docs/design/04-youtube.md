@@ -863,9 +863,10 @@ settings before binding, retains hang watchdogs after caller cancellation and
 stops the isolated process after three idle minutes. The inherited 15-second
 start limit and 120-second compile cap remain provisional pending the spike.
 
-The current shell activates the implementation for this task while device
-acceptance remains pending. The earlier portable-only activation notes in
-PLAN have been superseded by its dated current-code note. `YtxTestHooks` arms
+The current shell activates the implementation. The five recorded device
+cases pass on both API 34 and API 36 in CI run `42481700877`; residential
+captures and physical-device acceptance remain open. The earlier portable-only
+activation notes in PLAN have been superseded by its dated current-code note. `YtxTestHooks` arms
 strict replay and process-failure injection through an explicit same-UID bind
 and a token file under `noBackupFilesDir/ytx-test/`. Instrumented smoke tests
 exercise the production graph and a localhost ranged-media stand-in. The
