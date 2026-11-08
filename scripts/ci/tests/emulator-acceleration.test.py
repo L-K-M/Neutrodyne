@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
-EXPECTED_BLOCK_COUNTS = {"ci.yml": 1, "nightly.yml": 10}
+EXPECTED_BLOCK_COUNTS = {"ci.yml": 1, "nightly.yml": 11}
 BASH = shutil.which("bash") or "bash"
 STEP_TIMEOUT_SECONDS = 30
 

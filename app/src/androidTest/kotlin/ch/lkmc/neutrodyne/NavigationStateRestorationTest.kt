@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne
 
+import android.os.Build
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
@@ -11,6 +14,7 @@ import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
 import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
 import com.google.common.truth.Truth.assertThat
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,6 +29,12 @@ import org.junit.runner.RunWith
 class NavigationStateRestorationTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Before
+    fun enableFrameworkAccessibilityChecks() {
+        if (Build.VERSION.SDK_INT >= 34) compose.enableAccessibilityChecks()
+    }
 
     @Test
     fun navigationStateRestoresEveryDeclaredKey() {
