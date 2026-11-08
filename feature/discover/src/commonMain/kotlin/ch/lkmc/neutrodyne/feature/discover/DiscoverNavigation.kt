@@ -8,7 +8,9 @@ import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
+import ch.lkmc.neutrodyne.core.navigation.YouTubeSearchKey
 import ch.lkmc.neutrodyne.feature.discover.add.AddPodcastRoute
+import ch.lkmc.neutrodyne.feature.discover.youtube.YouTubeSearchRoute
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoSet
@@ -30,6 +32,9 @@ public object DiscoverNavigation {
             entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) { DiscoverRoute() }
             entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { key ->
                 AddPodcastRoute(key)
+            }
+            entry<YouTubeSearchKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
+                YouTubeSearchRoute(key)
             }
         }
 }

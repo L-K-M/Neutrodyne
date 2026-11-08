@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.membership_name_taken
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name_too_long
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import ch.lkmc.neutrodyne.youtube.api.YtRef
@@ -65,6 +66,8 @@ public data class AddPodcastUiState(
      * stays disabled until then so a tap can never outrun the disclosure (03 note 2026-11-02).
      */
     val providers: List<ProviderInfo>? = null,
+    /** Gates the explicit YouTube channel-search affordance on the Input step (W10 D2). */
+    val channelSearch: Boolean = false,
     /**
      * The identity of the newest resolve/subscribe attempt (UI review round 2). Completions
      * tagged with an older generation are dropped; the route closes only while [done]'s
@@ -144,6 +147,7 @@ public class AddPodcastViewModel(
     search: SearchRepository,
     private val channelResolver: YouTubeChannelResolver,
     private val channels: YouTubeChannelRepository,
+    private val capabilities: YouTubeCapabilitiesSource,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AddPodcastUiState())
     public val uiState: StateFlow<AddPodcastUiState> = mutableState.asStateFlow()
@@ -156,6 +160,11 @@ public class AddPodcastViewModel(
         // every effective provider, so the recipient list must already be on screen.
         viewModelScope.launch {
             search.observeProviders().collect { list -> mutableState.update { it.copy(providers = list) } }
+        }
+        viewModelScope.launch {
+            capabilities.capabilities.collect { caps ->
+                mutableState.update { it.copy(channelSearch = caps.channelSearch) }
+            }
         }
     }
 

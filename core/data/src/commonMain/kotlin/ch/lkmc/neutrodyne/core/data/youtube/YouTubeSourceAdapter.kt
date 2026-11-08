@@ -28,8 +28,10 @@ import ch.lkmc.neutrodyne.core.model.TlsKind
 import ch.lkmc.neutrodyne.feeds.model.ArtworkCandidate
 import ch.lkmc.neutrodyne.feeds.model.ArtworkSource
 import ch.lkmc.neutrodyne.feeds.model.FeedFormat
+import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
+import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
@@ -145,6 +147,7 @@ internal class YouTubeSourceAdapter(
                 }.toMap()
         val urls = YouTubeFeedUrls.pollUrls(channelId, feed.youtubeVariants)
         val results = mutableListOf<VariantResult>()
+        val truncatedEntries = mutableListOf<YouTubeEntry>()
         var maxAgeSec: Long? = null
         var primaryServerDateMs: Long? = null
         val now = clock.now()
@@ -159,9 +162,19 @@ internal class YouTubeSourceAdapter(
                 is Poll.Ok -> {
                     maxAgeSec = maxOf(maxAgeSec ?: 0, polled.maxAgeSec ?: 0)
                     if (index == 0) primaryServerDateMs = polled.serverDateMs
+                    val truncatedItems =
+                        polled.feed.warnings
+                            .filter { it.code == WarningCode.TEXT_TRUNCATED }
+                            .mapTo(mutableSetOf()) { it.itemIndex }
                     val entries =
-                        polled.feed.items.mapNotNull { entry ->
-                            toEntry(entry, known, now, primaryServerDateMs)
+                        polled.feed.items.mapNotNull { item ->
+                            toEntry(item, known, now, primaryServerDateMs)?.also { entry ->
+                                if (null in truncatedItems ||
+                                    item.feedOrder in truncatedItems
+                                ) {
+                                    truncatedEntries += entry
+                                }
+                            }
                         }
                     // A malformed/non-video document must not masquerade as a complete empty channel.
                     if (entries.size != polled.feed.items.size) return failure(FeedErrorKind.PARSE_ERROR)
@@ -222,6 +235,12 @@ internal class YouTubeSourceAdapter(
                     title = merged.authorName,
                     author = merged.authorName,
                     items = merged.entries.map(::toParsed),
+                    // Merge retains the winning entry object while reordering/ORing Shorts.
+                    // Equal retained text from another variant is not provenance for that winner.
+                    warnings =
+                        merged.entries
+                            .filter { selected -> truncatedEntries.any { it === selected.entry } }
+                            .map { ParseWarning(WarningCode.TEXT_TRUNCATED, it.feedOrder) },
                 ),
             partial = true,
             meta = meta,
