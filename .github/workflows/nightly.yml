@@ -1105,16 +1105,6 @@ jobs:
           retention-days: 5
           if-no-files-found: warn
 
-  # 11 Start-up step 4's native boundary on the real Windows shell:
-  # ndmedia/build.sh's windows-x64 leg compiles the library and runs its
-  # boundary programs — identity_test.c exercises the process AUMID bounds,
-  # the SMTC worker's release-ID re-assert and the .lnk stamp against real
-  # IShellLinkW + IPropertyStore + IPersistFile objects. Dispatch-only and
-  # deliberately narrow: the desktop-packages legs pay for FFmpeg, four
-  # packages and smoke starts before this boundary runs, so iterating the
-  # Windows identity path gets its own scope. --rerun-tasks defeats the
-  # read-only build cache — a restored output would skip build.sh and the
-  # boundary tests it runs entirely.
   repro:
     runs-on: ubuntu-24.04
     timeout-minutes: 90

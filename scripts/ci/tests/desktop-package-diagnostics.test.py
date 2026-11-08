@@ -44,6 +44,8 @@ class DesktopPackageDiagnosticsTest(unittest.TestCase):
         self.assertEqual(["windows-x64"], [row["target"] for row in rows])
         self.assertEqual("windows-2025", rows[0]["runs-on"])
         self.assertEqual(210, rows[0]["timeout-minutes"])
+        default_windows = next(row for row in self.package_rows("desktop-packages") if row["target"] == "windows-x64")
+        self.assertEqual(rows[0], default_windows)
 
     def test_packages_matrix_still_lists_all_four_targets(self):
         rows = self.package_rows("desktop-packages")
