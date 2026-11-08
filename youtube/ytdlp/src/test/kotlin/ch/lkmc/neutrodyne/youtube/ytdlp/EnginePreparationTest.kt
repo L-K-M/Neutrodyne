@@ -99,7 +99,12 @@ class EnginePreparationTest {
             status.run()
             assertEquals(1, store.loads)
             assertEquals(0, store.preparations)
-            val config = Configuration.Builder().setExecutor(SynchronousExecutor()).build()
+            val config =
+                Configuration
+                    .Builder()
+                    .setExecutor(SynchronousExecutor())
+                    .setTaskExecutor(SynchronousExecutor())
+                    .build()
             WorkManagerTestInitHelper.initializeTestWorkManager(context, config)
             val manager = WorkManagerImpl.getInstance(context)
             val initializer = EnginePrepareInitializer(store, manager)

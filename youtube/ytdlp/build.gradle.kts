@@ -3,6 +3,8 @@ import org.gradle.api.tasks.testing.Test
 
 plugins {
     alias(libs.plugins.neutrodyne.android.library)
+    alias(libs.plugins.neutrodyne.metro)
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.chaquo.python")
 }
 
@@ -73,11 +75,13 @@ dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:datastore"))
     implementation(project(":core:network:okhttp"))
+    implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.okio)
     testImplementation(libs.kotlin.test)
+    testImplementation(libs.okhttp.mockwebserver3)
     testImplementation(libs.androidx.work.testing)
     testImplementation(libs.androidx.room.runtime)
     testImplementation(libs.kotlinx.coroutines.test)
