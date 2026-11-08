@@ -162,7 +162,7 @@ class SyncSchedulerTest {
         runTest {
             val deps = deps()
             deps.link()
-            deps.roundFails = true
+            deps.roundFailsWith = RuntimeException("round failed")
             deps.writeOutbox(coll = "podcast", rid = "p1", field = "subscribed")
 
             deps.scheduler.onOutboxChanged()
@@ -171,6 +171,26 @@ class SyncSchedulerTest {
             deps.await { deps.pushes.isNotEmpty() }
 
             assertEquals(listOf(SyncRoundReason.OUTBOX), deps.pushes)
+        }
+
+    @Test
+    fun `a revoked round cancels the platform work instead of deferring`() =
+        runTest {
+            val deps = deps()
+            deps.link()
+            // The engine records the revocation, then the 401 escapes the round.
+            deps.roundFailsWith = SyncTransportException(401, null, "nope")
+            deps.writeOutbox(coll = "podcast", rid = "p1", field = "subscribed")
+
+            deps.scheduler.onOutboxChanged()
+            testScheduler.advanceTimeBy(OUTBOX_DEBOUNCE_MS)
+            runCurrent()
+            deps.await { deps.unlinks.isNotEmpty() }
+
+            // A dead token defers nothing: the unlink path cancels the work names, and no
+            // push is scheduled for credentials that can never land.
+            assertTrue(deps.pushes.isEmpty())
+            assertEquals(listOf("unlinked"), deps.unlinks)
         }
 
     @Test
@@ -318,7 +338,8 @@ class SyncSchedulerTest {
         val pushes: MutableList<SyncRoundReason>,
     ) {
         var interactive: Boolean = true
-        var roundFails: Boolean = false
+        var roundFailsWith: Throwable? = null
+        val unlinks = mutableListOf<String>()
 
         private val clock = scope.clock
 
@@ -326,7 +347,7 @@ class SyncSchedulerTest {
             SyncScheduler(
                 db = db,
                 round = { reason ->
-                    if (roundFails) throw RuntimeException("round failed")
+                    roundFailsWith?.let { throw it }
                     rounds += reason
                 },
                 playback = playback,
@@ -343,7 +364,12 @@ class SyncSchedulerTest {
 
                         override suspend fun onLinked() = Unit
 
-                        override suspend fun onUnlinked() = Unit
+                        override suspend fun onUnlinked() {
+                            // Suspend like the real platform cancel does: if `onUnlinked`
+                            // killed the calling job first, this never lands.
+                            kotlinx.coroutines.yield()
+                            unlinks += "unlinked"
+                        }
                     },
             )
 

@@ -13,9 +13,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.coroutineContext
 
 /** 10 Scheduling on Android: the outbox path runs an in-process round this long after the last change. */
 internal const val OUTBOX_DEBOUNCE_MS = 2_000L
@@ -121,9 +123,12 @@ class SyncScheduler(
 
     /** Unlink or revoke: drop the in-memory undo bookkeeping and cancel the platform's work. */
     suspend fun onUnlinked() {
-        groupDeletes.clear()
-        maturityJob?.cancel()
-        debounceJob?.cancel()
+        bookkeeping.withLock { groupDeletes.clear() }
+        // The caller can be the debounce or maturity job itself (a revoked in-process
+        // round): cancelling the running job would kill the platform's cancel call.
+        val self = coroutineContext.job
+        debounceJob?.takeIf { it != self }?.cancel()
+        maturityJob?.takeIf { it != self }?.cancel()
         hooks.onUnlinked()
     }
 
@@ -182,6 +187,10 @@ class SyncScheduler(
             roundMutex.withLock { round(reason) }
         } catch (failure: CancellationException) {
             throw failure
+        } catch (failure: SyncTransportException) {
+            // A rejected token revoked the link in the engine: cancel the platform's work
+            // names like `SyncWorker` does — a deferred push can never land either.
+            if (failure.status == STATUS_REVOKED) onUnlinked() else hooks.schedulePush(reason)
         } catch (failure: Throwable) {
             hooks.schedulePush(reason)
         }
@@ -233,6 +242,7 @@ class SyncScheduler(
 
     private companion object {
         const val OUTBOX_TABLE = "sync_outbox"
+        const val STATUS_REVOKED = 401
     }
 }
 
