@@ -1724,6 +1724,24 @@ rejected before any write — the session goes `CANCELLED`, progress reports
 `BackupError.Unsupported` — because linked execution (unlink first, `withApplying`
 capture, the ALL_DEVICES steps) lands with MS2. The linked branches below describe MS2.
 
+**Implementation note (2026-11-08, MS2, restore-policies precursor).** `RestoreRunner`
+no longer rejects a linked restore: a linked Merge runs with `applying = 1` and
+`captureWithBackupTimes` at the backup's own timestamps; a Replace THIS_DEVICE calls
+`LinkedRestoreCoordinator.unlinkForRestore()` before any write; a Replace ALL_DEVICES
+relies on the claim-time `linkedAt` clear in `BackupRepositoryImpl` and calls
+`completeAllDevicesRestore()` before the session commits, so a failure keeps the durable
+request. `RestoreMerger`/`RestoreEpisodeMerger` implement `LINK_MERGE`/`LINK_REPLACE`
+(state clocks, ID adoption, the stub rule), and `LibraryMergerImpl` binds the
+`LibraryMerger` port over a staging directory. This precursor is not the activated MS2
+feature: `:sync:impl`'s `LinkedRestoreCoordinator` implementation arrives with the next
+slice, so `LinkedRestoreCoordinatorBindings` (`:core:domain`) temporarily binds the
+fail-closed `NoLinkedRestoreCoordinator`. A Replace on a linked device therefore fails
+closed with `BackupError.Unsupported` through `RestoreRunResult.Retry` and leaves the
+durable request intact, while a linked Merge runs locally. 10's `FirstLinkMerger` still
+uses the engine field merge and does not call `mergeStaged`, so the new `LINK_*` policies
+and `LibraryMergerImpl` are implemented and tested but not reached by the client; the
+reach prompts remain 08's later slice, and the UI still sends the default THIS_DEVICE.
+
 **Implementation note (2026-10-18, B12b):** a replay still queues a matched podcast awaiting its first fetch, including one inserted by an interrupted attempt. Auto-snapshot retirement finishes before a terminal session marker; a failed rename or cancellation-marker write leaves durable work for retry. Settings restore requires the declared JSON primitive type rather than coercing strings into booleans or numbers.
 
 *Implementation note (2026-10-18, M3 B12c):* `BackupRepositoryImpl` (`:core:data`

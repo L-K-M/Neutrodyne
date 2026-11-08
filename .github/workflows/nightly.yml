@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | benchmark-dryrun (M10 journeys; timings are diagnostic) | benchmark (cold-start and cover-grid Macrobenchmarks; report-only, emulator timings are diagnostic) | baseline-profile (generate the baseline and startup profiles into an artifact) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36)"
+        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | benchmark-dryrun (M10 journeys; timings are diagnostic) | benchmark (cold-start and cover-grid Macrobenchmarks; report-only, emulator timings are diagnostic) | baseline-profile (generate the baseline and startup profiles into an artifact) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36)"
         default: full
 
 permissions:
@@ -967,6 +967,145 @@ jobs:
             playback/native/build/test-results/
             desktop/system/build/test-results/
           retention-days: 14
+
+  desktop-packages:
+    if: inputs.scope == 'desktop-packages'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runs-on: windows-2025
+            timeout-minutes: 210
+          - target: macos-arm64
+            runs-on: macos-15
+          - target: linux-x64
+            runs-on: ubuntu-24.04
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: ${{ matrix.timeout-minutes || 90 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Android SDK
+        shell: bash
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          sdk_dir="$HOME/android-sdk"
+          command -v cygpath >/dev/null 2>&1 && sdk_dir="$(cygpath -w "$sdk_dir")"
+          echo "ANDROID_HOME=$sdk_dir" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_dir" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: true
+      - name: Host tools on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils fakeroot rpm cpio xvfb dbus-x11 dbus-daemon libegl1
+      - name: MSYS2 tools for Windows native builds
+        if: runner.os == 'Windows'
+        shell: bash
+        run: /c/msys64/usr/bin/bash.exe -lc "pacman -S --noconfirm --needed make nasm gnupg tar xz coreutils"
+      - name: Read the checked-out version
+        id: version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          values = dict(line.split('=', 1) for line in Path('gradle.properties').read_text().splitlines()
+                        if '=' in line and not line.lstrip().startswith('#'))
+          version = values['neutrodyne.versionName']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+              raise SystemExit('Expected a numeric three-part version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\nmac_kind={"mac-zip" if version.startswith("0.") else "dmg"}\n')
+          PY
+      - name: Build native libraries and the corresponding FFmpeg source
+        shell: bash
+        run: ./gradlew :playback:native:buildFfmpeg :playback:native:buildNdmedia :playback:native:checkNativeLicences :playback:native:assembleFfmpegSource
+      - name: Build and check the installed and extracted packages
+        shell: bash
+        env:
+          PACKAGE_TARGET: ${{ matrix.target }}
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+          MAC_PACKAGE_KIND: ${{ steps.version.outputs.mac_kind }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a dbus-run-session -- scripts/ci/build-desktop-release.sh "$PACKAGE_TARGET" "$PACKAGE_VERSION" "$MAC_PACKAGE_KIND" 2>&1 | tee packaging.log
+          else
+            scripts/ci/build-desktop-release.sh "$PACKAGE_TARGET" "$PACKAGE_VERSION" "$MAC_PACKAGE_KIND" 2>&1 | tee packaging.log
+          fi
+      - name: Attach and verify the exact runtime sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          import tomllib
+          from urllib.request import urlopen
+          def properties(path):
+              return dict(line.split('=', 1) for line in Path(path).read_text().splitlines()
+                          if '=' in line and not line.lstrip().startswith('#'))
+          def download(url, sha, name):
+              target = Path('dist') / name
+              digest = hashlib.sha256()
+              with urlopen(url, timeout=60) as source, target.open('wb') as output:
+                  while chunk := source.read(1024 * 1024):
+                      digest.update(chunk)
+                      output.write(chunk)
+              if digest.hexdigest() != sha:
+                  target.unlink()
+                  raise SystemExit(f'Source hash mismatch: {name}')
+          runtime = properties('desktopApp/runtime.lock')
+          download(runtime['sourceTarball.url'], runtime['sourceTarball.sha256'],
+                   f'openjdk-{runtime["version"]}-temurin-sources.tar.gz')
+          wix = properties('desktopApp/wix.lock')
+          download(wix['source.url'], wix['source.sha256'], f'wix-{wix["version"]}-src.tar.gz')
+          python_lock = Path('youtube/ytdlp-desktop/python-components.lock')
+          if python_lock.is_file():
+              components = tomllib.loads(python_lock.read_text())
+              pbs = components.get('pbsSource')
+              if pbs is not None:
+                  download(pbs['url'], pbs['sha256'], f'python-build-standalone-{pbs["tag"]}-src.tar.gz')
+              elif components.get('component'):
+                  raise SystemExit('Python components require their pinned pbsSource record')
+          PY
+          cp playback/native/build/ffmpeg-source/ffmpeg-*-neutrodyne-src.tar.xz dist/
+          image=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          [ "$RUNNER_OS" != macOS ] || image="$image.app"
+          scripts/ci/make-runtime-sources-md.sh --image "$image" --out dist/RUNTIME-SOURCES.md
+          scripts/ci/check-runtime-sources.sh --release dist/
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: desktop-packages-${{ matrix.target }}
+          path: |
+            dist/
+            packaging.log
+            smoke.txt
+            desktopApp/build/desktop-packaging/runtime-classpath*.txt
+            playback/native/build/ffmpeg-cache/build-${{ matrix.target }}/*.log
+            playback/native/build/ndmedia/${{ matrix.target }}/ndmedia-build.txt
+          retention-days: 5
+          if-no-files-found: warn
 
   repro:
     runs-on: ubuntu-24.04

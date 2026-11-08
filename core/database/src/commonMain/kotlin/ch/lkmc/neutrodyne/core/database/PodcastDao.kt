@@ -283,6 +283,20 @@ abstract class PodcastDao(
         title: String?,
     )
 
+    /**
+     * First-link ID adoption (10 Merge step 3): a local podcast matched by feed key or alias
+     * takes the record's `syncId`. The guard refuses an ID another live row already holds, so
+     * a duplicated record can never steal it; the caller keeps the row unchanged on refusal.
+     */
+    @Query(
+        "UPDATE podcast SET syncId = :syncId WHERE id = :podcastId" +
+            " AND NOT EXISTS (SELECT 1 FROM podcast WHERE syncId = :syncId AND id <> :podcastId)",
+    )
+    abstract suspend fun adoptSyncId(
+        podcastId: Long,
+        syncId: String,
+    )
+
     /** The podcast screen's order chip (05 `FeedRepository.setFeedOrder`, `FeedSource.Podcast`). */
     @Query("UPDATE podcast SET episodeOrder = :order WHERE id = :podcastId")
     abstract suspend fun setEpisodeOrder(

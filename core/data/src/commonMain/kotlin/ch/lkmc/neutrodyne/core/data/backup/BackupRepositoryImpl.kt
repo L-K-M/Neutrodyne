@@ -31,8 +31,10 @@ import ch.lkmc.neutrodyne.core.model.BackupSummary
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.PreparedBackup
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
+import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
 import ch.lkmc.neutrodyne.core.model.SnapshotWrite
@@ -345,6 +347,16 @@ internal class BackupRepositoryImpl(
             return Outcome.Failure(BackupError.RestoreRunning)
         }
         val stamp = clock.now()
+        // 05 Restore while linked, Replace ALL_DEVICES: the claim clears `linkedAt` in the
+        // same transaction — the durable marker that makes the device `LinkUnfinished`, so
+        // no normal round runs on the half-replaced library and the runner owns the finish.
+        val clearLinkedAt =
+            request.mode == RestoreMode.REPLACE &&
+                request.linkedReach == LinkedRestoreReach.ALL_DEVICES &&
+                db.syncStateDao().get()?.linkedAt != null
+        if (clearLinkedAt) {
+            db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(linkedAt = null)) }
+        }
         dao.setOptionsJson(
             sessionId,
             ImportOptionsJson.encode(
