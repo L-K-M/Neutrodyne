@@ -4,6 +4,7 @@ import org.gradle.testfixtures.ProjectBuilder
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -127,6 +128,44 @@ class DesktopAotTrainingRealTest {
             "the bin directory the provisioning created must be removed",
         )
         assertEquals(original.toList(), cfg.readBytes().toList(), "the .cfg is restored byte-exact")
+    }
+
+    /** Hosted tool-cache hints may be aliases; resolve the trusted fixture home first. */
+    @Test
+    fun `a trusted fixture JDK alias is resolved before training`() {
+        org.junit.Assume.assumeFalse("the hosted Linux JDK alias fixture", osWire == "windows")
+        val directory = Files.createTempDirectory("aot-real-jdk-alias")
+        val alias = directory.resolve("jdk25")
+        val ownedHome = directory.resolve("real-jdk")
+        try {
+            // The link targets only a test-owned copy, never the installed toolchain.
+            Files.walk(jdk25.toPath()).use { paths ->
+                paths.forEach { source ->
+                    val target = ownedHome.resolve(jdk25.toPath().relativize(source))
+                    if (Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
+                        Files.createDirectories(target)
+                    } else {
+                        Files.copy(source, target, LinkOption.NOFOLLOW_LINKS, StandardCopyOption.COPY_ATTRIBUTES)
+                    }
+                }
+            }
+            Files.createSymbolicLink(alias, ownedHome)
+            val fixtureJdk = requireNotNull(jdk25Home(listOf(alias.toFile())))
+            val image = tinyImage(MAIN_BODY)
+
+            trainTask(image, fixtureJdk).train()
+
+            assertEquals(ownedHome.toFile().canonicalFile, fixtureJdk)
+            assertTrue(File(image, "$appDirRelative/neutrodyne.aot").isFile)
+            assertFalse(File(image, runtimeJavaRelative).exists())
+        } finally {
+            Files.deleteIfExists(alias)
+            // Files.walk does not follow links, so cleanup stays inside the owned directory.
+            Files.walk(directory).use { paths ->
+                paths.sorted(Comparator.reverseOrder()).forEach(Files::delete)
+            }
+        }
+        assertTrue(File(jdk25, "bin/" + toolName("java")).isFile, "the source JDK must remain intact")
     }
 
     /** The temporary launcher comes out again when the training launch fails. */
@@ -805,7 +844,10 @@ class DesktopAotTrainingRealTest {
         return image
     }
 
-    private fun trainTask(image: File): TrainAotCacheTask {
+    private fun trainTask(
+        image: File,
+        fixtureJdk: File = jdk25,
+    ): TrainAotCacheTask {
         val projectDir = Files.createTempDirectory("aot-real-project").toFile()
         val project = ProjectBuilder.builder().withProjectDir(projectDir).build()
         val task =
@@ -817,8 +859,8 @@ class DesktopAotTrainingRealTest {
         task.launcherCfg.set(File(image, cfgRelative))
         task.runtimeRelease.set(File(image, runtimeReleaseRelative))
         task.aotArchive.set(File(image, "$appDirRelative/neutrodyne.aot"))
-        task.runtimeHome.set(jdk25)
-        task.runtimeJavaSource.set(File(jdk25, "bin/" + toolName("java")))
+        task.runtimeHome.set(fixtureJdk)
+        task.runtimeJavaSource.set(File(fixtureJdk, "bin/" + toolName("java")))
         // The manifest and native inputs are declared for Gradle's up-to-date checking; the
         // direct task call does not read them, but the properties must be bound.
         task.runtimeClasspathManifest.set(File(projectDir, "manifest.txt").apply { writeText("x") })
@@ -872,10 +914,10 @@ class DesktopAotTrainingRealTest {
         }
     }
 
-    private fun jdk25Home(): File? {
+    private fun jdk25Home(explicitCandidates: List<File>? = null): File? {
         val home = System.getProperty("user.home")
         val candidates =
-            listOfNotNull(
+            explicitCandidates ?: listOfNotNull(
                 System.getenv("JAVA_HOME_25_ARM64")?.let { File(it) },
                 System.getenv("JAVA_HOME_25_X64")?.let { File(it) },
                 File(File(home, ".local/jdks/jdk25"), "Contents/Home"),
@@ -888,7 +930,7 @@ class DesktopAotTrainingRealTest {
                 toolPath(candidate, "jpackage").isFile &&
                     toolPath(candidate, "javac").isFile &&
                     runsJdk25(candidate)
-            }
+            }?.canonicalFile
     }
 
     private fun runsJdk25(home: File): Boolean {
