@@ -1269,5 +1269,25 @@ esac
                 self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
                 self.assertIn("entry-point", r.stderr)
 
+    def test_windows_python_layout_matches_the_locked_version(self):
+        for name, dlls, expected in (
+            ("valid", ("python3.dll", "python314.dll"), 0),
+            ("stable-only", ("python3.dll",), 1),
+            ("wrong-minor", ("python313.dll",), 1),
+        ):
+            with self.subTest(case=name):
+                img = self.windows_image(name=f"Engine-{name}")
+                engine = f"{img}/app/resources/engine"
+                self.fx.write(f"{engine}/python/python.exe", b"EXE")
+                os.chmod(self.root / f"{engine}/python/python.exe", 0o755)
+                self.fx.write(f"{engine}/python/Lib/os.py", b"# stdlib\n")
+                self.fx.write(f"{engine}/cacert.pem", b"CA")
+                for dll in dlls:
+                    self.fx.write(f"{engine}/python/{dll}", b"DLL")
+                self.fx.write_engine_lock(targets=("windows-x64",))
+                self.fx.write_manifest()
+                r = self.fx.image_check(img)
+                self.assertEqual(expected, r.returncode, r.stdout + r.stderr)
+
 if __name__ == "__main__":
     unittest.main()
