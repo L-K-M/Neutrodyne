@@ -145,6 +145,50 @@ class Fixture:
             stubs, encoding="utf-8"
         )
 
+    def write_engine_lock(self, python="3.14.8", targets=("macos-arm64",)):
+        """Overwrite the precursor's pre-MD3 stub lock with the actual MD3
+        schema: logical component names (not filenames), the CPython version,
+        the PBS source and the per-target archives."""
+        rows = [
+            "# fixture python-components.lock (actual MD3 schema)",
+            "schema = 1",
+            f'python = "{python}"',
+            'pbs = "20261003"',
+            "",
+            "[pbsSource]",
+            'tag = "20261003"',
+            'name = "python-build-standalone-20261003-src.tar.gz"',
+            'url = "https://example.invalid/python-build-standalone-20261003-src.tar.gz"',
+            'sha256 = "' + "0" * 64 + '"',
+            "",
+        ]
+        for target in targets:
+            rows += [
+                "[[target]]",
+                f'id = "{target}"',
+                f'archive = "cpython-{python}+20261003-{target}-install_only_stripped.tar.gz"',
+                'sha256 = "' + "0" * 64 + '"',
+                "",
+            ]
+        for name, version, kind in (
+            ("CPython", python, "runtime"),
+            ("OpenSSL", "3.5.9", "native"),
+            ("CA certificate bundle (certifi cacert.pem)", "2026.06.17", "data"),
+            ("yt-dlp", "2026.08.19", "python"),
+            ("neutrodyne_ytx shim", "SHIM_API_VERSION 1", "python"),
+        ):
+            rows += [
+                "[[component]]",
+                f'name = "{name}"',
+                f'version = "{version}"',
+                'origin = "https://example.invalid/component"',
+                'licence = "Python-2.0"',
+                f'kind = "{kind}"',
+                'aboutLibrariesId = "fixture"',
+                "",
+            ]
+        self.write("youtube/ytdlp-desktop/python-components.lock", "\n".join(rows).encode())
+
     def write(self, rel: str, data: bytes):
         path = self.root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -365,6 +409,58 @@ class DesktopImageGatesTest(unittest.TestCase):
         ):
             fx.write(f"{rel}/Contents/Home/{rel_path}", data)
         return rel
+
+    def engine_app(self, root_dir="imgs/EngineApp", minor="3.14", interpreter=True,
+                   cacert=True, stdlib=True, ytdlp=True, extra=()):
+        """A macOS .app carrying the representative real trimmed engine tree:
+        the interpreter, cacert.pem, lib/python<minor> with threading.py,
+        concurrent/futures/thread.py, asyncio/threads.py and _pyrepl/readline.py,
+        the yt-dlp archive, the shim and the keys."""
+        fx = self.fx
+        app = root_dir
+        engine = f"{app}/Contents/app/resources/engine"
+        fx.write(f"{app}/Contents/MacOS/Neutrodyne", b"MACHO-LAUNCHER")
+        fx.write(f"{app}/Contents/runtime/Contents/Home/release", release_file())
+        fx.write(f"{app}/Contents/runtime/Contents/Home/legal/LICENSE", b"GPL-2.0\n")
+        fx.write(f"{app}/Contents/runtime/Contents/Home/lib/jrt-fs.jar", b"JRT")
+        data = b"APP"
+        fx.write(f"{app}/Contents/app/{fx.manifest('app', data)}", data)
+        if interpreter:
+            fx.write(f"{engine}/python/bin/python3", b"#!/bin/sh\n")
+            os.chmod(fx.root / f"{engine}/python/bin/python3", 0o755)
+        if cacert:
+            fx.write(f"{engine}/cacert.pem", b"FIXTURE-CA-BUNDLE")
+        if stdlib:
+            for rel in ("threading.py", "concurrent/futures/thread.py",
+                        "asyncio/threads.py", "_pyrepl/readline.py", "os.py"):
+                fx.write(f"{engine}/python/lib/python{minor}/{rel}", b"# stdlib fixture\n")
+        if ytdlp:
+            fx.write(
+                f"{engine}/ytdlp/yt-dlp",
+                zip_bytes([("__main__.py", b""), ("yt_dlp/__init__.py", b"")]),
+            )
+        fx.write(f"{engine}/shim/neutrodyne_ytx/__init__.py", b"")
+        fx.write(f"{engine}/keys/engine-manifest-ed25519.pub", b"")
+        for rel, content in extra:
+            fx.write(f"{engine}/{rel}", content)
+        return app
+
+    def windows_image(self, name="Neutrodyne", extra_root=(), launcher=True):
+        """A Windows-layout image: Neutrodyne.exe at the root, app/, runtime/
+        (recognised by runtime/bin/java.exe) and non-entry DLL/data files."""
+        fx = self.fx
+        img = f"imgs/{name}"
+        if launcher:
+            fx.write(f"{img}/Neutrodyne.exe", b"EXE")
+        fx.write(f"{img}/runtime/bin/java.exe", b"JAVA")
+        fx.write(f"{img}/runtime/release", release_file())
+        fx.write(f"{img}/runtime/legal/LICENSE", b"GPL-2.0\n")
+        fx.write(f"{img}/runtime/lib/jrt-fs.jar", b"JRT")
+        data = b"APP"
+        fx.write(f"{img}/app/{fx.manifest('app', data)}", data)
+        for rel, content in extra_root:
+            fx.write(f"{img}/{rel}", content)
+        return img
 
     def fake(self, name: str, body: str):
         path = self.root / "fakebin" / name
@@ -1024,6 +1120,154 @@ esac
         self.fx.write_manifest()
         r = self.fx.image_check(img)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    # ----- engine tree: real trimmed paths bind to the lock's logical names ----
+
+    def test_engine_tree_with_real_trimmed_paths_and_lock_schema_passes(self):
+        """The representative real trimmed PBS paths (threading.py,
+        concurrent/futures/thread.py, asyncio/threads.py, _pyrepl/readline.py)
+        are legitimate stdlib, and the lock's logical component names (CPython,
+        OpenSSL, ...) bind by layout, not by filename."""
+        self.fx.write_engine_lock()
+        app = self.engine_app()
+        self.fx.write_manifest()
+        r = self.fx.image_check(app)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("python tree matches python-components.lock", r.stdout)
+
+    def test_native_thread_itcl_and_readline_modules_still_fail(self):
+        """Narrowing the globs must not admit the native modules trim-python.sh
+        removes: lib/thread*, lib/itcl*, _readline* and a readline module outside
+        _pyrepl."""
+        self.fx.write_engine_lock()
+        app = self.engine_app(extra=[
+            ("python/lib/thread2.9.3/pkgIndex.tcl", b""),
+            ("python/lib/itcl4.2.3/pkgIndex.tcl", b""),
+            ("python/lib/_readline.so", b""),
+            ("python/lib/readline.py", b""),
+        ])
+        self.fx.write_manifest()
+        r = self.fx.image_check(app)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        for want in ("thread2.9.3", "itcl4.2.3", "_readline.so", "lib/readline.py"):
+            self.assertIn(want, r.stderr)
+
+    def test_engine_layout_violations_fail(self):
+        """The lock binds the trimmed layout: interpreter, CA bundle and stdlib
+        are each required."""
+        self.fx.write_engine_lock()
+        cases = (
+            ("missing-interpreter", dict(interpreter=False), "no Python interpreter"),
+            ("missing-cacert", dict(cacert=False), "CA bundle is missing"),
+            ("missing-stdlib", dict(stdlib=False), "no Python standard library"),
+        )
+        for name, kwargs, want in cases:
+            with self.subTest(case=name):
+                app = self.engine_app(root_dir=f"imgs/Engine-{name}", **kwargs)
+                self.fx.write_manifest()
+                r = self.fx.image_check(app)
+                self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+                self.assertIn(want, r.stderr)
+
+    def test_engine_lock_version_and_target_mismatch_fail(self):
+        """The stdlib minor must equal the lock's CPython version and the image's
+        target must be one of the lock's targets."""
+        self.fx.write_engine_lock(python="3.13.1")
+        app = self.engine_app(root_dir="imgs/Engine-minor")
+        self.fx.write_manifest()
+        r = self.fx.image_check(app)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("stdlib minor", r.stderr)
+
+        self.fx.write_engine_lock(targets=("linux-x64",))
+        app = self.engine_app(root_dir="imgs/Engine-target")
+        self.fx.write_manifest()
+        r = self.fx.image_check(app)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("image target", r.stderr)
+
+    def test_engine_forbidden_component_in_tree_or_archive_fails(self):
+        """The tree and the yt-dlp archive must not carry a forbidden component."""
+        self.fx.write_engine_lock()
+        app = self.engine_app(
+            root_dir="imgs/Engine-forbidden-tree",
+            extra=[("python/lib/python3.14/mutagen/__init__.py", b"")],
+        )
+        self.fx.write_manifest()
+        r = self.fx.image_check(app)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("forbidden file or directory", r.stderr)
+
+        app = self.engine_app(root_dir="imgs/Engine-forbidden-zip")
+        self.fx.write(
+            f"{app}/Contents/app/resources/engine/ytdlp/yt-dlp",
+            zip_bytes([("__main__.py", b""), ("mutagen/__init__.py", b"")]),
+        )
+        self.fx.write_manifest()
+        r = self.fx.image_check(app)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("forbidden entry in the bundled yt-dlp archive", r.stderr)
+
+    def test_lock_components_without_tree_fail(self):
+        """A lock with components and no engine tree is a violation."""
+        self.fx.write_engine_lock()
+        img = self.flat_image(name="NoEngine")
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("lists components but no engine/python tree", r.stderr)
+
+    # ----- rule 4/7: only the resolved runtime root is exempt ----------------
+
+    def test_jar_under_app_runtime_is_not_exempt(self):
+        """A /runtime/ directory that is not the resolved runtime root is an
+        ordinary image directory: its JARs must bind the classpath and carry no
+        test entries, however valid their name looks."""
+        for name, data, jar, want in (
+            ("unlisted", b"EVIL", None, "not on the Licensee-checked runtime classpath"),
+            ("test-containing", zip_bytes([("test/Foo.class", b"")]), None,
+             "test entries inside JAR"),
+            ("runtime-named", b"JRT-EVIL", "jrt-fs.jar",
+             "not on the Licensee-checked runtime classpath"),
+        ):
+            with self.subTest(case=name):
+                img = self.flat_image(name=f"RuntimeProbe-{name}")
+                jar_name = jar or mangled("evil", data)
+                self.fx.write(f"{img}/lib/app/runtime/{jar_name}", data)
+                self.fx.write_manifest()
+                r = self.fx.image_check(img)
+                self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+                self.assertIn(want, r.stderr)
+
+    def test_legitimate_runtime_jrtfs_still_exempt(self):
+        """The JDK's own jrt-fs.jar under the resolved runtime root stays exempt."""
+        img = self.flat_image(name="RuntimeClean")
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    # ----- rule 7: the Windows entry point is enforced ------------------------
+
+    def test_windows_layout_entry_point_enforced(self):
+        """A Windows image's entry point is Neutrodyne.exe at the root; non-entry
+        DLL/data files are allowed, a second executable is not."""
+        img = self.windows_image(extra_root=[("vcruntime140.dll", b"DLL"),
+                                             ("icudtl.dat", b"DATA")])
+        self.fx.write_manifest()
+        r = self.fx.image_check(img)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+        for name, extra, launcher in (
+            ("extra", [("evil.exe", b"EVIL")], True),
+            ("none", [], False),
+        ):
+            with self.subTest(case=name):
+                img = self.windows_image(name=f"Neutrodyne-{name}", extra_root=extra,
+                                         launcher=launcher)
+                self.fx.write_manifest()
+                r = self.fx.image_check(img)
+                self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
+                self.assertIn("entry-point", r.stderr)
 
 if __name__ == "__main__":
     unittest.main()
