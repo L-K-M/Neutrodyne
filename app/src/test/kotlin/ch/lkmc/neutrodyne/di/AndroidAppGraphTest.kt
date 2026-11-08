@@ -250,7 +250,9 @@ class AndroidAppGraphTest {
                 // Persisted consent loads asynchronously; construction stays unavailable
                 // until that boundary completes, without opening the database.
                 withTimeout(5_000L) {
-                    graph.youtubeCapabilities.capabilities.first { it.externalReason != ExternalReason.NOT_YET_AVAILABLE }
+                    graph.youtubeCapabilities.capabilities.first {
+                        it.externalReason != ExternalReason.NOT_YET_AVAILABLE
+                    }
                 }
             }
             assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
