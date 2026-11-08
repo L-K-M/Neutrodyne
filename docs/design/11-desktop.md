@@ -1640,6 +1640,8 @@ Our libraries (`ndmedia`, FFmpeg) load from `<resources>/native/` by absolute pa
 
 ### AOT cache
 
+*Implementation note (2026-11-08, training entry point):* the training and smoke modes share an isolated temporary app graph. The training journey visits all five destinations and exercises the native null backend. A missing display or native backend fails the training with a named step. Unit coverage uses injected window and PCM seams; the real packaged journey is verified with the cache producer and installer checks.
+
 [PO-42](../PLAN.md#48-further-product-owner-decisions): ship the JDK 25 AOT cache ([JEP 483](https://openjdk.org/jeps/483), [JEP 514](https://openjdk.org/jeps/514), [JEP 515](https://openjdk.org/jeps/515)); measured in the research build: first frame 0.58–0.63 s instead of 1.70–2.09 s, idle RSS ≈ 199 MB instead of ≈ 238 MB, cache 55.6 MB (14.1 MB compressed), under software rendering.
 
 1. `trainAotCache` (`:desktopApp`) runs on each runner after `createDistributable`, with the image's own runtime and exactly the launcher's options plus `-XX:AOTCacheOutput=<image>/app/neutrodyne.aot -Dcompose.aot.training-run=true`. The image has no `bin/java` ([jlink modules](#jlink-modules)), so the task starts the image's own launcher and adds the two options through `JAVA_TOOL_OPTIONS`, which the JVM reads at creation also under the jpackage launcher (Unverified that the AOT consistency check accepts this; S13). The run uses a scripted training journey in a temporary `AppDirs`: start, open the five destinations, open a podcast and an episode built from the build's test fixtures (passed by path, never shipped), play 2 s of generated PCM through the null back-end, quit.
