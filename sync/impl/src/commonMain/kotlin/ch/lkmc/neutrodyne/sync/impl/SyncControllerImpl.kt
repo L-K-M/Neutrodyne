@@ -53,6 +53,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
@@ -147,11 +149,26 @@ class SyncControllerImpl(
 
     private val discovery = ServerDiscovery(client)
 
+    /**
+     * Publications are serialized so a refresh that read an older `sync_state` can never
+     * publish over a newer status: the reads cross a real dispatcher boundary, and a parked
+     * reader resuming after the revocation would otherwise leave the stale status on
+     * screen — nothing re-triggers the refresh. Declared before `init`: the refresh `init`
+     * launches runs on the injected dispatcher and can start before the constructor returns.
+     */
+    private val statusMutex = Mutex()
+
     init {
         scope.launch { refreshStatus() }
     }
 
     suspend fun refreshStatus() {
+        statusMutex.withLock {
+            refreshStatusLocked()
+        }
+    }
+
+    private suspend fun refreshStatusLocked() {
         val url = address.serverUrl()
         val state = db.syncStateDao().get()
         val token = url?.let { tokenStore.load(hostOf(it)) }
@@ -673,9 +690,7 @@ class SyncControllerImpl(
 
     /** Nothing to combine: the link completes without a merge (both libraries are empty). */
     private suspend fun completeEmptyLink() {
-        db.withWriteTransaction {
-            db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(enabled = true, linkedAt = clock.now())) }
-        }
+        db.syncStateDao().enableLinked(clock.now())
         linkFlow.linked(accountName.orEmpty(), deviceName())
         refreshStatus()
     }
@@ -797,17 +812,12 @@ class SyncControllerImpl(
     }
 
     private suspend fun markRevoked() {
-        db.syncStateDao().get()?.let {
-            db.syncStateDao().upsert(it.copy(enabled = false, lastError = SYNC_ERROR_REVOKED))
-        }
+        db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
         refreshStatus()
     }
 
     private suspend fun clearTransientError() {
-        val state = db.syncStateDao().get() ?: return
-        if (state.lastError != null && state.lastError != SYNC_ERROR_REVOKED) {
-            db.syncStateDao().upsert(state.copy(lastError = null))
-        }
+        db.syncStateDao().clearTransientError(SYNC_ERROR_REVOKED)
     }
 
     /** Transport failure → [SyncProblem]; expected failures never throw (10 Errors). */
