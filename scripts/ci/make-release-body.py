@@ -125,6 +125,7 @@ def main() -> int:
         "v": version,
         "tag": args.tag,
         "owner": owner,
+        "registry_owner": owner.lower(),
         "repoUrl": repo_url,
         "mac_ext": mac_ext,
         "jdk": ph["{jdk}"] or "",

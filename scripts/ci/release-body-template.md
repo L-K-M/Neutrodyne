@@ -23,7 +23,7 @@ downloaded here: {{repoUrl}}/releases/download/{{tag}}/ffmpeg-{{ffmpeg}}-neutrod
 python-build-standalone-{{pbsTag}}-src.tar.gz).
 {% endif %}{% if wix %}The MSI embeds unmodified WiX components (MS-RL; source: wix-{{wix}}-src.tar.gz).
 {% endif %}{% endif %}{% if server %}Sync server (optional, self-hosted): neutrodyne-server-{{v}}.jar for Java 21 or later, or the image
-ghcr.io/{{owner}}/neutrodyne-server:{{v}} (digest {{digest}}). Run it with
+ghcr.io/{{registry_owner}}/neutrodyne-server:{{v}} (digest {{digest}}). Run it with
 `java -jar neutrodyne-server-{{v}}.jar serve` or with docker compose; the guide below has the
 configuration. The image bundles an unmodified OpenJDK runtime and Debian base packages; sources:
 neutrodyne-server-image-sources-{{v}}.tar.xz.
@@ -32,7 +32,7 @@ Download only from this page and check the file:
   sha256sum --check --ignore-missing SHA256SUMS        (macOS: shasum -a 256 <file>; Windows: Get-FileHash -Algorithm SHA256 <file>)
   gh release verify-asset {{tag}} <file> -R {{owner}}/Neutrodyne
   gh attestation verify <file> -R {{owner}}/Neutrodyne
-{% if server %}  gh attestation verify oci://ghcr.io/{{owner}}/neutrodyne-server@{{digest}} -R {{owner}}/Neutrodyne
+{% if server %}  gh attestation verify oci://ghcr.io/{{registry_owner}}/neutrodyne-server@{{digest}} -R {{owner}}/Neutrodyne
 {% endif %}
 {% if android %}Obtainium (Android): add https://github.com/{{owner}}/Neutrodyne with the APK filter
 `neutrodyne-.*-arm64-v8a\.apk$` (or Obtainium's architecture filter) to update through Obtainium
