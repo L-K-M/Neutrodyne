@@ -1724,6 +1724,13 @@ rejected before any write — the session goes `CANCELLED`, progress reports
 `BackupError.Unsupported` — because linked execution (unlink first, `withApplying`
 capture, the ALL_DEVICES steps) lands with MS2. The linked branches below describe MS2.
 
+**Implementation note (2026-11-08, first-link shared-library precursor).** The
+shared merger now preserves pending episode, Up-next and membership rows when
+adopting a server podcast identity, and the staging DTOs carry the first-link
+session and field metadata. These changes are tested through the merger port.
+The first-link flow and linked-restore coordinator remain the next slice; the
+fail-closed coordinator binding below remains active.
+
 **Implementation note (2026-11-08, MS2, restore-policies precursor).** `RestoreRunner`
 no longer rejects a linked restore: a linked Merge runs with `applying = 1` and
 `captureWithBackupTimes` at the backup's own timestamps; a Replace THIS_DEVICE calls

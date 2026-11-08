@@ -32,7 +32,8 @@ import kotlin.time.TimeSource
 /**
  * Smoke mode (11 Smoke mode): `-Dneutrodyne.smoke=true` is the only test entry point in a
  * packaged image. It never touches the user's directories, the network or an OS registration: a
- * fresh temporary `AppDirs` root, the graph, the initializers, the window and its first frame,
+ * fresh temporary `AppDirs` root, the graph, the initializers except the host's OS
+ * registrations (`ShellJourney` skips those), the window and its first frame,
  * one `SMOKE {json}` line, exit 0 — or exit 1 naming the failed step; a watchdog exits 1 after
  * 60 s. Under `java.awt.headless=true` the window step is skipped and the JSON says so.
  *

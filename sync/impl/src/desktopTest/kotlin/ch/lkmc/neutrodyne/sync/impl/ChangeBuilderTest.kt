@@ -212,6 +212,24 @@ class ChangeBuilderTest {
         }
 
     @Test
+    fun anEpisodeRowBuildsTheCanonicalRecordId() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seed(db)
+                db.syncOutboxDao().upsert(row("episode", episodeRid, "fav", "true", 1L))
+                val change = ChangeBuilder(db, FakeSecretStore()) { false }.build(db.syncOutboxDao().rows()).single()
+
+                assertEquals("episode", change.coll)
+                val id = change.id.jsonObject()
+                assertEquals(podcastSyncId, id["p"]!!.content())
+                assertEquals("g:one", id["k"]!!.content())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun groupMemberAndUpNextFieldsReadTheirSources() =
         runTest {
             val db = TestDb.inMemory()

@@ -106,6 +106,12 @@ public data class PodcastV1(
     val syncId: String? = null,
     /** Optional (D98, 2026-10-10): the feed's KNOWN_AMBIGUOUS GUIDs, canonical. */
     val guidAmbiguous: List<String>? = null,
+    /**
+     * Staging only (10 Merge step 2): the server's `subscribed = false` tombstone clock in
+     * millis, or null for a live record. Never written into an archive ([BackupCodec]'s
+     * ARCHIVE mode strips it); the First-link column applies it under LINK_MERGE.
+     */
+    val removedAt: Long? = null,
 )
 
 @Serializable
@@ -129,6 +135,12 @@ public data class GroupV1(
     val createdAt: Long? = null,
     val settings: OverridesV1? = null,
     val members: List<MemberV1> = emptyList(),
+    /**
+     * Staging only (10 Merge step 2): the server's `deleted = true` tombstone clock in millis,
+     * or null for a live record. Never written into an archive ([BackupCodec]'s ARCHIVE mode
+     * strips it); the First-link column applies it under LINK_MERGE.
+     */
+    val removedAt: Long? = null,
 )
 
 @Serializable
@@ -137,6 +149,12 @@ public data class MemberV1(
     val addedAt: Long? = null,
     /** Optional (2026-10-05): the membership's OrderKey. */
     val orderKey: String? = null,
+    /**
+     * Staging only (10 Merge step 2): the server's `in = false` tombstone clock in millis, or
+     * null for a live record. Never written into an archive ([BackupCodec]'s ARCHIVE mode
+     * strips it); the First-link column applies it under LINK_MERGE.
+     */
+    val removedAt: Long? = null,
 )
 
 /** Plaintext credentials, only in opted-in manual backups (05 Writing, D33). */
@@ -214,6 +232,12 @@ public data class UpNextRefV1(
     val k: String,
     val kv: Int = 1,
     val ok: String? = null,
+    /**
+     * Staging only (10 Merge step 2): the server's `in = false` tombstone clock in millis, or
+     * null for a live record. Never written into an archive ([BackupCodec]'s ARCHIVE mode
+     * strips it); the First-link column applies it under LINK_MERGE.
+     */
+    val removedAt: Long? = null,
 )
 
 /** `queue.json`: Up next refs and the play session. */
