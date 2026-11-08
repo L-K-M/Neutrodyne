@@ -607,11 +607,10 @@ internal object CanonicalJarHash {
     private fun hexToBytes(bytes: ByteArray): ByteArray = hexToString(bytes).toByteArray(Charsets.US_ASCII)
 
     private fun validateName(name: String) {
-        require(
-            name.isNotEmpty() && !name.startsWith("/") && !name.contains('\\') && !name.contains('\u0000'),
-        ) {
-            "malformed ZIP entry name: $name"
-        }
+        require(name.isNotEmpty()) { "empty ZIP entry name" }
+        require(!name.startsWith("/")) { "absolute ZIP entry name: $name" }
+        require(!name.contains('\\')) { "backslash in ZIP entry name: $name" }
+        require(!name.contains('\u0000')) { "NUL in ZIP entry name" }
         require(name.split('/').none { it == ".." }) { "parent-directory ZIP entry name: $name" }
         require(name.all { it.code < 128 }) { "non-ASCII ZIP entry name: $name" }
     }

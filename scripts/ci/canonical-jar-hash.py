@@ -7,7 +7,8 @@ name. Packaging recompresses image JARs and re-signs their Mach-O natives, so th
 raw file hash would report every JAR as differing; Mach-O entries are normalized
 (signature slots zeroed, __LINKEDIT extent bound). A non-ZIP file falls back to
 its raw byte hash. Malformed or ambiguous names and duplicate entries fail closed.
-This is the checker's half of `CanonicalJarHash` in DesktopPackaging.kt.
+This is the checker's half of `CanonicalJarHash` in DesktopPackaging.kt; the two
+implementations must stay byte-for-byte identical.
 """
 
 import hashlib
@@ -196,17 +197,9 @@ def normalize_macho(data):
 
 
 def normalized(data, name):
-    return normalize_macho(data) if name.rsplit(".", 1)[-1] in MACHO_EXTS else data
-
-
-def content_sha256(path):
-    """SHA-256 over a standalone file's normalized content: the same Mach-O
-    normalization `canonical_sha256` applies to a JAR entry's bytes. Used to bind
-    the native libraries Compose extracts from a skiko runtime jar, which the
-    packager re-signs (so their raw bytes differ from the source artifact)."""
-    with open(path, "rb") as handle:
-        data = handle.read()
-    return sha256_hex(normalized(data, os.path.basename(path)))
+    if name.rsplit(".", 1)[-1] not in MACHO_EXTS:
+        return data
+    return normalize_macho(data)
 
 
 def content_sha256(path):
@@ -220,8 +213,14 @@ def content_sha256(path):
 
 
 def validate_name(name):
-    if not name or name.startswith("/") or "\\" in name or "\0" in name:
-        fail(f"malformed ZIP entry name: {name!r}")
+    if not name:
+        fail("empty ZIP entry name")
+    if name.startswith("/"):
+        fail(f"absolute ZIP entry name: {name!r}")
+    if "\\" in name:
+        fail(f"backslash in ZIP entry name: {name!r}")
+    if "\0" in name:
+        fail("NUL in ZIP entry name")
     if any(segment == ".." for segment in name.split("/")):
         fail(f"parent-directory ZIP entry name: {name!r}")
     if any(ord(ch) > 127 for ch in name):

@@ -138,8 +138,9 @@ the pinned archive's copy — verified by scripts/ci/check-runtime-sources.sh on
 every target (on Linux after applying the same objcopy -g jlink applies; Temurin's
 files are already stripped). Exception by construction: on macOS jpackage replaces
 Adoptium's signatures on the runtime's Mach-O files with the bundle's ad-hoc
-signature when it seals the .app — the code is unchanged; the check compares both
-files with signatures removed (PO note, 11 Open questions).
+signature when it seals the .app — the code is unchanged; the check binds both
+files by canonical Mach-O content, normalizing validated signature metadata and
+blobs (PO note, 11 Open questions).
 
 The runtime's licence texts ship inside every image at runtime/legal/ (LICENSE,
 ASSEMBLY_EXCEPTION, ADDITIONAL_LICENSE_INFO and the module licence files) and are

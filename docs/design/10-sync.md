@@ -1188,9 +1188,52 @@ Step 5's `captureAt` receives the frozen value as well as its pre-merge timestam
 
 AntennaPod's first sync uploads every played episode stamped with the current time ([SyncService at 9c7ffa1](https://github.com/AntennaPod/AntennaPod/blob/9c7ffa16736c020045571d274aef4cdcf0878100/net/sync/service/src/main/java/de/danoeh/antennapod/net/sync/service/SyncService.java#L228-L248)), which flips later "unplayed" marks on other devices; stamping with row timestamps avoids that (risk SR2).
 
+**Implementation note (2026-11-04, MS2, link flow).** The client link
+flow (`SyncControllerImpl`/`LinkFlowImpl` in `:sync:impl`) drives the link
+code, invite and password methods, the approve/confirm sheet's calls, the
+three first-link choices through `FirstLinkMerger`, unlink/
+"Delete my data on the server", and device rename/revoke, all on the existing
+`SyncClient`, `SyncTokenStore` and protocol DTOs. The Settings › Sync setup
+screen now follows the link state, with localized EN/DE text and the native
+Android local-network permission prompt. The empty-account
+upload is confirmed with a named step (`LinkState.ConfirmUpload`), so a wrong
+account never uploads silently. Deviations forced by the current code:
+
+- "Use the server's library on this device" replaces local-only podcasts,
+  groups, Up next and the session context through the shared removal paths;
+  it does not run 05's Replace port (05's `RestoreMerger` refuses the
+  `LINK_*` policies), and synced settings keep following the field merge.
+- "Use this device's library everywhere" stages the server snapshot without
+  applying it, captures this device's whole library, pushes until the outbox
+  drains and prunes with `account/reset {mode: "library"}` bound to the staged
+  cursor. Step 2's ID adoption and episode-history merge through
+  `LibraryMerger` are not implemented, so server episode records are not
+  merged into local history during that choice.
+- The choice screen now asks before both replacing choices. "Use the
+  server's library on this device" shows 08's confirmation with Save a
+  backup first / Replace / Cancel: the backup runs 05's manual flow
+  (`prepareBackup`, the R1.9 warning, `savePreparedBackup` through
+  `PlatformActions.saver`) and stops there, so a cancelled or failed backup
+  never merges and only the explicit Replace calls
+  `chooseFirstLink(USE_SERVER)`. "Use this device's library everywhere"
+  shows a local warning confirmation (Replace everywhere / Cancel) because
+  this branch's link service cannot stage the pull and compute the effect
+  counts; the exact two-stage gate arrives with the service's
+  `LinkState.ConfirmReplaceEverywhere` precursor, which this local gate
+  leaves room for.
+- A plain `http://` address to a public host is refused before the discovery
+  request rather than after it, so no cleartext request leaves the device;
+  loopback and local addresses still ask once.
+- Unlink's 5-s push budget runs on the injected IO dispatcher (a coroutine
+  timeout there is wall-clock, independent of test virtual time).
+- The bootstrap capture writes run with capture already enabled and the
+  pulled cursor adopted, so the upload of a Merge or an empty account keeps
+  the rows' own timestamps; a played literal travels as one wire pair with a
+  single clock, as 05's archive requires.
+
 ### Use the server's library on this device
 
-05's **Replace** with the server's records as the backup: local podcasts the server lacks are unsubscribed (D24), local-only groups deleted, state replaced, Up next and session replaced, settings replaced. The dialog first offers "Save a backup first" (05's backup flow). All local writes run with `applying = 1`; each applied record seeds its exact received raw fields, clocks and session `by` in `sync_clock` with the projection transaction. `hlc` is raised past every clock seen, then `enabled = 1` and `linkedAt` with the pulled cursor. Nothing is pushed except later local changes, which therefore order after the adopted state.
+05's **Replace** with the server's records as the backup: local podcasts the server lacks are unsubscribed (D24), local-only groups deleted, state replaced, Up next and session replaced, settings replaced. The dialog first offers "Save a backup first" (05's backup flow). The setup screen implements this at the current UI boundary: the backup is prepared and saved through `BackupRepository` and `PlatformActions.saver` (with 05's R1.9 warning when the prepared artifact carries private links or passwords) and the flow stops there; only the explicit Replace then calls `chooseFirstLink(USE_SERVER)`. A cancelled or failed backup leaves the choice unconfirmed. All local writes run with `applying = 1`; each applied record seeds its exact received raw fields, clocks and session `by` in `sync_clock` with the projection transaction. `hlc` is raised past every clock seen, then `enabled = 1` and `linkedAt` with the pulled cursor. Nothing is pushed except later local changes, which therefore order after the adopted state.
 
 ### Use this device's library everywhere
 
