@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.downloads
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
@@ -20,6 +21,7 @@ import ch.lkmc.neutrodyne.core.ui.PlaybackActions
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_file_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
@@ -27,19 +29,23 @@ import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.download.api.DownloadsOverview
+import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
 import ch.lkmc.neutrodyne.download.api.ShareableFile
 import ch.lkmc.neutrodyne.download.api.StorageUsage
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -65,7 +71,8 @@ public class DownloadsViewModel(
     private val settings: SettingsRepository,
     platform: PlatformInfo,
     network: NetworkMonitor,
-    private val localMedia: ch.lkmc.neutrodyne.download.api.LocalMediaIndex,
+    private val localMedia: LocalMediaIndex,
+    val youtubeHealth: YouTubeHealth? = null,
 ) : ViewModel() {
     private val messages = UserMessages()
     private val overview = MutableStateFlow<DownloadsOverview?>(null)
@@ -75,10 +82,10 @@ public class DownloadsViewModel(
     private val selected = MutableStateFlow<Set<Long>>(emptySet())
     private val orphanState = MutableStateFlow<Long?>(null)
     private val orphanWorkingState = MutableStateFlow(false)
-    public val orphanWorking: kotlinx.coroutines.flow.StateFlow<Boolean> = orphanWorkingState
+    public val orphanWorking: StateFlow<Boolean> = orphanWorkingState
     private val orphanErrorState = MutableStateFlow<UiText?>(null)
-    public val orphanError: kotlinx.coroutines.flow.StateFlow<UiText?> = orphanErrorState
-    public val orphanConfirmation: kotlinx.coroutines.flow.StateFlow<Long?> = orphanState
+    public val orphanError: StateFlow<UiText?> = orphanErrorState
+    public val orphanConfirmation: StateFlow<Long?> = orphanState
     public val downloads =
         DownloadRequestHandler(
             viewModelScope,
@@ -116,8 +123,8 @@ public class DownloadsViewModel(
     @OptIn(ExperimentalCoroutinesApi::class)
     public val live = visible.flatMapLatest(progress::observe).stateIn(viewModelScope, SHARING, emptyMap())
 
-    private var overviewJob: kotlinx.coroutines.Job? = null
-    private var storageJob: kotlinx.coroutines.Job? = null
+    private var overviewJob: Job? = null
+    private var storageJob: Job? = null
 
     init {
         reload()
@@ -233,7 +240,7 @@ public class DownloadsViewModel(
 
     public fun revealFile(
         id: Long,
-        reveal: ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder,
+        reveal: RevealInFolder,
     ) {
         val uri = localMedia.localUriOrNull(id)
         if (uri == null || !reveal.reveal(uri)) {
@@ -278,7 +285,7 @@ public class DownloadsViewModel(
         }
 
     private fun reportFailure(error: Throwable) {
-        ch.lkmc.neutrodyne.core.common.Log
+        Log
             .w("DownloadsViewModel", error) { "download action failed" }
         failed.value = overview.value == null
         messages.post(UiText.Res(Res.string.write_failed))

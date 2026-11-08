@@ -11,19 +11,26 @@ import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.DownloadCommand
 import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
+import ch.lkmc.neutrodyne.core.ui.OrphanFilesDialog
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
+import ch.lkmc.neutrodyne.core.ui.YouTubeHealthBanner
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.SystemSettingsTarget
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.download.api.DownloadNotice
+import ch.lkmc.neutrodyne.youtube.api.BreakerState
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
+    val engineHealth by
+        (viewModel.youtubeHealth?.state ?: androidx.compose.runtime.remember { kotlinx.coroutines.flow.flowOf(null) })
+            .collectAsStateWithLifecycle(null)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val live by viewModel.live.collectAsStateWithLifecycle()
     val orphans by viewModel.orphanConfirmation.collectAsStateWithLifecycle()
@@ -42,6 +49,12 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
         ch.lkmc.neutrodyne.core.ui
             .rememberDownloadStorageAction(viewModel.downloads)
     DownloadsScreen(
+        engineNotice = {
+            YouTubeHealthBanner(
+                engineHealth?.breaker == BreakerState.OPEN,
+                retry = { viewModel.youtubeHealth?.retryNow() },
+            )
+        },
         state = state,
         live = live,
         onVisibleIds = viewModel::onVisibleIds,
@@ -49,7 +62,7 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
         onToggle = viewModel.downloads::toggle,
         onCommand = { id, command ->
             if (command ==
-                ch.lkmc.neutrodyne.core.ui.DownloadCommand.STORAGE
+                DownloadCommand.STORAGE
             ) {
                 manageStorage()
             } else {
@@ -129,7 +142,7 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
         )
     }
     orphans?.let { bytes ->
-        ch.lkmc.neutrodyne.core.ui.OrphanFilesDialog(
+        OrphanFilesDialog(
             bytes,
             orphanWorking,
             viewModel::deleteOrphans,

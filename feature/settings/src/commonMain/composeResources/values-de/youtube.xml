@@ -2,4 +2,23 @@
     <string name="youtube_title">YouTube</string>
     <string name="youtube_suggest_rss">RSS-Feed des Podcasts vorschlagen</string>
     <string name="youtube_mark_played">Beim Öffnen auf YouTube als gespielt markieren</string>
+    <string name="youtube_engine_enabled">YouTube in der App abspielen</string>
+    <string name="youtube_volume_levelling">Lautstärke angleichen</string>
+    <string name="youtube_auto_download">YouTube-Audio automatisch herunterladen</string>
+    <string name="youtube_engine_version">Engine %1$s (mitgeliefert)</string>
+    <string name="youtube_engine_retry">Jetzt versuchen</string>
+    <string name="youtube_breaker_open">Die YouTube-Wiedergabe funktioniert vorübergehend nicht. Neutrodyne versucht es automatisch erneut.</string>
+    <string name="youtube_engine_preparing">YouTube-Engine wird vorbereitet</string>
+    <string name="youtube_engine_starting">YouTube-Engine wird gestartet</string>
+    <string name="youtube_engine_ready">YouTube-Engine bereit</string>
+    <string name="youtube_engine_failed">Die YouTube-Engine konnte nicht gestartet werden</string>
+    <string name="youtube_engine_disabled">YouTube-Engine ausgeschaltet</string>
+    <string name="youtube_engine_absent">Keine YouTube-Engine in dieser APK</string>
+    <string name="youtube_engine_stopped">YouTube-Engine im Ruhezustand</string>
+    <string name="youtube_audio_quality">Audioqualität</string>
+    <string name="youtube_quality_standard">Standard (AAC)</string>
+    <string name="youtube_quality_saver">Datensparmodus</string>
+    <string name="youtube_quality_opus">Opus</string>
+    <string name="youtube_keep_latest">Aufzubewahrende YouTube-Folgen</string>
+    <string name="youtube_rate_limited">YouTube begrenzt Anfragen aus deinem Netzwerk. Versuche es später erneut.</string>
 </resources>

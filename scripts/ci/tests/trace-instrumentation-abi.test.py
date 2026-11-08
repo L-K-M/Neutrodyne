@@ -69,6 +69,7 @@ ANALYSIS_ROOT_ENTRIES = {
     name.replace(".", "/") + ".class": b"fixture:" + name.encode()
     for name in (
         "ch.lkmc.neutrodyne.NeutrodyneTestRunner",
+        "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest",
         "ch.lkmc.neutrodyne.playback.impl.PlaybackServiceTest",
         "ch.lkmc.neutrodyne.playback.impl.VideoAsAudioTest",
         "ch.lkmc.neutrodyne.playback.impl.CarLibraryDeviceTest",
@@ -180,10 +181,15 @@ def arg_value(argv, flag):
 
 
 class MergeClassesTest(unittest.TestCase):
+    def test_recorded_youtube_smoke_is_an_analysis_root(self):
+        roots = (CI_DIR / "instrumentation-abi-roots.pro").read_text(encoding="utf-8")
+        self.assertIn("-keep class ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest { *; }", roots)
+        self.assertIn("-keep @ch.lkmc.neutrodyne.core.testing.ReleaseSmoke class * { *; }", roots)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
 
     def jar(self, name, entries, stamp=(2030, 5, 5, 5, 5, 4)):
         path = self.root / name
@@ -259,7 +265,7 @@ class CliTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name)
+        self.root = Path(self.directory.name).resolve()
         self.target = self.root / "target.jar"
         write_jar(self.target, TARGET_ENTRIES)
         self.source = self.root / "instrumentation-classes"

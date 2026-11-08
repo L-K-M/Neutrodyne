@@ -73,4 +73,65 @@ class YouTubeSettingsScreenTest {
             Locale.setDefault(previous)
         }
     }
+
+    @Test fun engineControlsPersistAndBreakerRetryUsesHealth() {
+        val previous = Locale.getDefault()
+        Locale.setDefault(Locale.ENGLISH)
+        try {
+            runComposeUiTest {
+                val settings = FakeSettingsRepository()
+                val caps =
+                    FakeYouTubeCapabilitiesSource().apply {
+                        capabilities.value = YouTubeCapabilities(true, true, true, true, true, null)
+                    }
+                val engine =
+                    ch.lkmc.neutrodyne.core.testing.FakeYouTubeEngine().apply {
+                        status.value =
+                            ch.lkmc.neutrodyne.youtube.api.EngineStatus(
+                                ch.lkmc.neutrodyne.youtube.api.EngineAvailability.READY,
+                                "2026.08.19",
+                            )
+                    }
+                val health =
+                    ch.lkmc.neutrodyne.core.testing.FakeYouTubeHealth().apply {
+                        state.value =
+                            ch.lkmc.neutrodyne.youtube.api.YouTubeHealthState(
+                                breaker = ch.lkmc.neutrodyne.youtube.api.BreakerState.OPEN,
+                                breakerOpenUntil = Long.MAX_VALUE,
+                            )
+                    }
+                val owner =
+                    object : LifecycleOwner {
+                        override val lifecycle =
+                            LifecycleRegistry.createUnsafe(this).apply {
+                                handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+                            }
+                    }
+                setContent {
+                    CompositionLocalProvider(
+                        LocalLifecycleOwner provides owner,
+                        LocalAppNavigator provides RecordingAppNavigator(),
+                        LocalSnackbarHost provides SnackbarHostState(),
+                    ) { YouTubePage(settings, caps, PlatformKind.ANDROID, engine, health) }
+                }
+                onNodeWithText("Engine 2026.08.19 (bundled)").assertExists()
+                onNodeWithText("YouTube engine ready").assertExists()
+                onNodeWithText("Audio quality").performClick()
+                onNodeWithText("Data saver").performClick()
+                waitForIdle()
+                kotlin.test.assertEquals(
+                    ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality.DATA_SAVER,
+                    runBlocking { settings.get(YouTubeSettingKeys.AUDIO_QUALITY) },
+                )
+                onNodeWithText("Try now").performClick()
+                kotlin.test.assertEquals(1, health.retries)
+                onNodeWithText("Play YouTube in the app").performClick()
+                waitForIdle()
+                assertFalse(runBlocking { settings.get(YouTubeSettingKeys.ENGINE_ENABLED) })
+                onNodeWithText("Check for engine update").assertDoesNotExist()
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
 }

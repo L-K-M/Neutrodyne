@@ -101,6 +101,7 @@ def verify_external(root, devices, variant="debug"):
         for folder, cases in EXTERNAL_HOST.items():
             require_cases((root / folder).rglob("*.xml"), cases, folder, exact=True)
         return
+    require_no_initialization_errors(root)
     for device in devices:
         reports = []
         for report in root.rglob("*.xml"):

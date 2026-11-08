@@ -2,4 +2,23 @@
     <string name="youtube_title">YouTube</string>
     <string name="youtube_suggest_rss">Suggest the podcast’s RSS feed</string>
     <string name="youtube_mark_played">Mark played when opened on YouTube</string>
+    <string name="youtube_engine_enabled">Play YouTube in the app</string>
+    <string name="youtube_volume_levelling">Volume levelling</string>
+    <string name="youtube_auto_download">Automatically download YouTube audio</string>
+    <string name="youtube_engine_version">Engine %1$s (bundled)</string>
+    <string name="youtube_engine_retry">Try now</string>
+    <string name="youtube_breaker_open">YouTube playback is temporarily broken. Neutrodyne retries automatically.</string>
+    <string name="youtube_engine_preparing">Preparing the YouTube engine</string>
+    <string name="youtube_engine_starting">Starting the YouTube engine</string>
+    <string name="youtube_engine_ready">YouTube engine ready</string>
+    <string name="youtube_engine_failed">The YouTube engine could not start</string>
+    <string name="youtube_engine_disabled">YouTube engine turned off</string>
+    <string name="youtube_engine_absent">No YouTube engine in this APK</string>
+    <string name="youtube_engine_stopped">YouTube engine idle</string>
+    <string name="youtube_audio_quality">Audio quality</string>
+    <string name="youtube_quality_standard">Standard (AAC)</string>
+    <string name="youtube_quality_saver">Data saver</string>
+    <string name="youtube_quality_opus">Opus</string>
+    <string name="youtube_keep_latest">YouTube episodes to keep</string>
+    <string name="youtube_rate_limited">YouTube is limiting requests from your network. Try again later.</string>
 </resources>
