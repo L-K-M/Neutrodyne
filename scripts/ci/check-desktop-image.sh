@@ -450,12 +450,18 @@ check_python_tree() {
         fail "the bundled CA bundle is missing: $engine/cacert.pem (11 Networking and TLS)"
     fi
 
-    # The standard library: lib/python<major>.<minor> off Windows, Lib/ on Windows.
-    # `lib` is checked before `Lib`: macOS's default volume is case-insensitive,
-    # so $python/Lib would otherwise resolve to lib and report the wrong layout.
+    lock_python="$(grep -E '^python *=' "$PY_LOCK" | tail -1 | sed -E 's/^[^=]*= *"([^"]*)".*/\1/')"
+
+    # The interpreter selects the layout: Lib and lib alias on case-insensitive
+    # filesystems. Bind Windows to the versioned DLL, not the stable python3.dll.
     tree_minor=""
-    local stdlib
-    if [ -d "$python/lib" ]; then
+    local stdlib lock_minor
+    if [ -f "$python/python.exe" ]; then
+        lock_minor="${lock_python%.*}"
+        if [ -n "$lock_minor" ] && [ -d "$python/Lib" ] && [ -f "$python/python${lock_minor//./}.dll" ]; then
+            tree_minor="$lock_minor"
+        fi
+    elif [ -d "$python/lib" ]; then
         for stdlib in "$python"/lib/python*; do
             if [ -d "$stdlib" ]; then
                 tree_minor="$(basename "$stdlib")"
@@ -463,15 +469,6 @@ check_python_tree() {
                 break
             fi
         done
-    elif [ -d "$python/Lib" ]; then
-        # Windows: the minor is not part of the path; the DLL name carries it.
-        local dll
-        dll="$(find "$python" -maxdepth 1 -name 'python3*.dll' -print -quit 2>/dev/null)"
-        if [ -n "$dll" ]; then
-            tree_minor="$(basename "$dll")"
-            tree_minor="${tree_minor#python}"
-            tree_minor="${tree_minor%.dll}"
-        fi
     fi
     if [ -z "$tree_minor" ]; then
         fail "no Python standard library in image (expected $python/lib/python<major>.<minor> or $python/Lib)"
@@ -479,7 +476,6 @@ check_python_tree() {
     fi
 
     # The lock's CPython version and the tree's minor must agree.
-    lock_python="$(grep -E '^python *=' "$PY_LOCK" | tail -1 | sed -E 's/^[^=]*= *"([^"]*)".*/\1/')"
     if [ -z "$lock_python" ]; then
         fail "python-components.lock carries no python version"
     elif [ "${lock_python%.*}" != "$tree_minor" ]; then
