@@ -33,6 +33,7 @@ internal object AndroidBuildInfo {
                     .split(',')
                     .filter { it.isNotBlank() }
                     .toImmutableList(),
+            acraMailto = BuildConfig.ACRA_MAILTO,
             podcastIndexKey = BuildConfig.PODCASTINDEX_KEY,
             podcastIndexSecret = BuildConfig.PODCASTINDEX_SECRET,
         )

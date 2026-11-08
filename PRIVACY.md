@@ -125,6 +125,30 @@ backup encryption (PO-15). Manual backup files contain passwords only on
 opt-in (R1.9). The sync token never travels in a backup. The sync server's own
 nightly backups and per-account ZIPs stay on the server's disk.
 
+## Network inventory (v1.0)
+The following stable IDs match Settings › Privacy:
+- `feeds` — subscribed feeds, previews, redirects; Basic credentials only for matching origins.
+- `add-input` / `chosen directory` context — page/feed candidates; loopback/private-network blocked except a URL you submit yourself.
+- `enclosure` / `media` — audio enclosures and measurement redirects; range requests and matching-origin credentials when needed.
+- `artwork` — feed/directory/artwork hosts; directory switches do not block images already returned.
+- `chapters` — chapter hosts when chapters load.
+- `notes-images` — show-notes images when allowed or requested.
+- `apple`, `fyyd`, `podcastindex` — directory/search providers with their specific data sent (see table above).
+- `youtube-subscriptions`, `youtube-streams` — YouTube channel/stream requests when used.
+- `youtube-engine` — approved engine manifest and engine downloads from GitHub Pages/github.com when updates enabled.
+- `app-updates` — update manifest from github.com/release-assets.githubusercontent.com when checks enabled; links open in browser, no app packages downloaded by the app.
+- `sync-server` — your self-hosted sync server when linked (see Sync section).
+- `links`, `issue-tracker` — links you open.
+
+## Desktop traffic
+The desktop app uses the same network destinations and switches as Android. It follows OS light/dark by default, has no Auto Backup, uses `AppDirs` for data, and routes links/mail through the OS. No analytics or tracking.
+
+## Sync server details
+The optional self-hosted Neutrodyne Sync server stores subscriptions (including private/tokenised feed URLs if shared), groups/memberships, podcast user fields, per-episode played/position/favourite, Up next and synced settings. It never stores audio files, downloads, feed contents, artwork, crash data or device-local settings. Feed passwords are shared only if the pushing device opts in. The server makes no outbound request except its optional update check (can be turned off by the operator). TLS comes from the reverse proxy; there is no end-to-end encryption — the server operator can read stored data. Devices can be unlinked/revoked and data deleted from the server.
+
+## Diagnostics export redaction
+Diagnostics exports are redacted: tokens, passwords, private feed URLs, sync tokens and paths under the user's home are redacted; only allow-listed fields are included. Crash reports follow the same redaction rules.
+
 ## Crash reports and diagnostics
 
 Reports carry only allow-listed fields (versions, states, redacted log lines)
@@ -163,3 +187,7 @@ APK YouTube always opens in the YouTube app (external mode).
 ## Contact and change history
 
 Questions through the issue tracker. This file's history is its git log.
+
+## Crash reporting (updated 2026-11-06)
+- Android: ACRA with mail sender and per-crash consent dialog. Nothing sent without the user's action in their mail app.
+- Desktop: crash files are written locally with redacted allow-listed fields (version, OS, architecture, install kind, runtime, redacted stack/hs_err summary, last 200 redacted log lines, context). At next start, if `neutrodyne.acraMailto` is configured and not a DEV build, a dialog offers per unsent crash file (newest first, up to 10 files within 30 days) to send by email via `mailto:` (body truncated with note to attach the full file) or to show the file in the file manager; handled files are renamed `*.sent` or `*.dismissed`. No automatic transmission.
