@@ -802,6 +802,26 @@ check_rpm() {
     fi
 }
 
+# 11 AOT cache: every packaged file and directory must carry the fixed epoch
+# trainAotCache wrote and the post-image hook restored (318211200000 ms,
+# 1980-02-01T00:00:00Z) — a drifted classpath-JAR timestamp fails the strict
+# -XX:AOTMode=on check after install. Symlinks are skipped like the hook's.
+check_epoch_timestamps() {
+    local root="$1" bad
+    bad="$(python3 - "$root" <<'PY'
+import os, sys
+bad = []
+for base, dirs, files in os.walk(sys.argv[1]):
+    for name in dirs + files:
+        p = os.path.join(base, name)
+        if not os.path.islink(p) and os.lstat(p).st_mtime_ns != 318211200000000000:
+            bad.append(p)
+print("\n".join(bad[:3]))
+PY
+)"
+    [ -z "$bad" ] || fail "payload entries off the fixed 1980-02-01 UTC epoch: $(echo "$bad" | tr '\n' ' ')"
+}
+
 # --- dispatch ----------------------------------------------------------------------
 scan_dir() {
     local img="$1"
@@ -859,10 +879,15 @@ extract_and_scan() {
     for d in "${roots[@]}"; do
         # DEB/RPM extracts land under <install-dir>/<pkg>; scan the app dir itself.
         if [ -d "$d/opt/neutrodyne" ]; then
-            scan_dir "$d/opt/neutrodyne"
-        else
-            scan_dir "$d"
+            d="$d/opt/neutrodyne"
         fi
+        scan_dir "$d"
+        case "$fmt" in
+            # tar preserves the trained epoch and the post-image hook restores it
+            # for DEB/RPM payloads; the DMG/MSI staging-copy drift is still open
+            # (11 AOT cache).
+            deb|rpm|tar.gz) check_epoch_timestamps "$d" ;;
+        esac
     done
     if [ -n "$mnt" ]; then
         # The mount leaves on the normal path too; the EXIT trap covers aborts.

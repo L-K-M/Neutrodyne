@@ -40,6 +40,7 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -986,6 +987,45 @@ esac
         )
         self.assertNotEqual(0, r.returncode)
         self.assertIn("attach", r.stderr)
+
+    # ----- 11 AOT cache: the payload's fixed epoch ------------------------------
+
+    AOT_EPOCH_S = 318211200  # 1980-02-01T00:00:00Z — AOT_IMAGE_TIMESTAMP_MS
+
+    def tarball(self, image_rel, name="dist/neutrodyne.tar.gz", epoch=AOT_EPOCH_S):
+        """A .tar.gz package holding <image_rel>/…; every entry records the given
+        mtime, the way the timestamp-preserving Gradle archives ship them."""
+        src = self.root / image_rel
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(path, "w:gz") as tar:
+            for p in sorted(src.rglob("*")):
+                info = tar.gettarinfo(str(p), arcname=str(p.relative_to(src)))
+                info.mtime = epoch
+                if p.is_file():
+                    with open(p, "rb") as fh:
+                        tar.addfile(info, fh)
+                else:
+                    tar.addfile(info)
+        return name
+
+    def test_targz_payload_epoch_passes(self):
+        """A payload whose entries all carry the trained image's fixed epoch."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img))
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    def test_targz_payload_drifted_epoch_fails(self):
+        """A one-second drift — what jpackage's attribute-losing staging copy
+        produces without the post-image hook — is a violation."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.fx.write_manifest()
+        r = self.fx.image_check(self.tarball(img, epoch=self.AOT_EPOCH_S + 1))
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("off the fixed 1980-02-01 UTC epoch", r.stderr)
 
     # ----- rule 9: MSI checks through a faked Windows boundary -----------------
     # Fake cygpath records the MSYS -> native conversion; fake powershell.exe

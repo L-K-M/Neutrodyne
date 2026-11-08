@@ -3,6 +3,7 @@ import org.gradle.api.GradleException
 import org.gradle.testfixtures.ProjectBuilder
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -257,6 +258,77 @@ class DesktopAotTrainingRealTest {
         }
     }
 
+    /**
+     * RED→GREEN for jpackage's own installers (11 AOT cache, DEB/RPM staging): JDK 25's
+     * `PackagingPipeline.copyAppImage` copies the trained image into jpackage's private
+     * staging tree through `PathGroup.copy` — `Files.copy` with `NOFOLLOW_LINKS` and no
+     * `COPY_ATTRIBUTES` — so the staged classpath JARs pick up the packaging time and a
+     * strict `-XX:AOTMode=on` launch fails before main (the defect the real DMG probe
+     * showed). The shipped `Neutrodyne-post-image.sh` hook — the supported
+     * `RUN_POST_IMAGE_USER_SCRIPT` point — restores the fixed epoch on the staged tree,
+     * and the strict load proves the archive usable again. The staging tree is
+     * fabricated in the Linux install layout (`opt/neutrodyne/…`) that this host's
+     * trained image maps to; the strict JVM check on the staged JARs is the mechanism an
+     * installed package relies on. The hook writes inside `$JpAppImageDir` only, so the
+     * trained image keeps its content and timestamps.
+     */
+    @Test
+    fun `the staging copy loses the strict cache and the post-image hook restores it`() {
+        val image = tinyImage(MAIN_BODY)
+        trainTask(image).train(System.getenv())
+        val archive = File(image, "$appDirRelative/neutrodyne.aot")
+        assertTrue(archive.isFile && archive.length() > 0L, "the training launch must leave the archive")
+        val originalState = image.stateByPath()
+        val originalArchiveBytes = archive.readBytes()
+
+        // Emulate copyAppImage: the app image is remapped into the package layout's
+        // install tree (opt/neutrodyne) through the attribute-losing copy.
+        val staging = Files.createTempDirectory("aot-staging").toFile()
+        val stagedApp = File(staging, "opt/neutrodyne")
+        copyAppImageForStaging(image, stagedApp)
+
+        val stagedCfg = File(stagedApp, "lib/app/Neutrodyne.cfg")
+        val stagedJars = aotClasspathJars(stagedCfg.readText(), stagedApp, "linux")
+        assertTrue(stagedJars.isNotEmpty(), "the staging layout must carry the classpath JARs")
+        assertTrue(
+            stagedJars.any { it.lastModified() != AOT_IMAGE_TIMESTAMP_MS },
+            "the attribute-losing copy must reset the JAR timestamps (the defect)",
+        )
+
+        // RED: the staged copy fails the strict load — what an installed DEB or RPM
+        // would do without the hook. The probe runs the staged image's own runtime
+        // (the pinned java provisioned the way trainAotCache provisions it): the
+        // cache records java.home's modules too, so a foreign JDK's java is not a
+        // substitute.
+        val stagedJava = provisionStagedJava(stagedApp)
+        val before = strictCacheProbe(stagedJava, stagedApp, stagedJars)
+        assertNotEquals(0, before.exit, before.output)
+        assertTrue(before.output.contains("timestamp has changed"), before.output)
+
+        // The shipped hook runs the way jpackage's ScriptRunner runs it: `sh` on
+        // the file. A cleared environment plus a non-UTC TZ proves the hook
+        // carries the epoch itself instead of inheriting a PATH or timezone.
+        runPostImageHook(staging)
+        stagedApp.walkTopDown().forEach { entry ->
+            if (!Files.isSymbolicLink(entry.toPath())) {
+                assertEquals(
+                    AOT_IMAGE_TIMESTAMP_MS,
+                    entry.lastModified(),
+                    "the hook left a staged entry off the fixed epoch: $entry",
+                )
+            }
+        }
+
+        // GREEN: the strict load proves the archive usable on the staged copy again.
+        val after = strictCacheProbe(stagedJava, stagedApp, stagedJars)
+        assertEquals(0, after.exit, after.output)
+        assertTrue(after.output.contains("\"aotCache\":\"in-use\""), after.output)
+
+        // The hook wrote only inside $JpAppImageDir: the trained image is untouched.
+        assertEquals(originalArchiveBytes.toList(), archive.readBytes().toList())
+        assertEquals(originalState, image.stateByPath(), "the post-image hook touched the trained image")
+    }
+
     /** The timestamp-drift negative: a one-second drift on a classpath JAR breaks the cache. */
     @Test
     fun `a drifted classpath timestamp breaks the strict cache`() {
@@ -323,6 +395,109 @@ class DesktopAotTrainingRealTest {
         // and the launcher needs its executable bit to start.
         File(root, launcherRelative).setExecutable(true, false)
         return root
+    }
+
+    /**
+     * Maps this host's image into the Linux package staging layout (`opt/neutrodyne/…`)
+     * the post-image hook expects: the app dir becomes `lib/app`, the launcher's
+     * directory `bin`, the bundled runtime home `lib/runtime` — the same remap
+     * `copyAppImage` performs with `Package::packageLayout` on a Linux runner.
+     */
+    private fun copyAppImageForStaging(
+        image: File,
+        stagedApp: File,
+    ) {
+        copyEntryNoAttributes(File(image, appDirRelative), File(stagedApp, "lib/app"))
+        val launcher = File(image, launcherRelative)
+        copyEntryNoAttributes(launcher, File(stagedApp, "bin/Neutrodyne"))
+        copyEntryNoAttributes(
+            File(image, runtimeReleaseRelative).parentFile,
+            File(stagedApp, "lib/runtime"),
+        )
+    }
+
+    /**
+     * `PathGroup.copy`'s `TransformHandler.Copy`: `Files.copy` with `NOFOLLOW_LINKS`
+     * only, so a staged file's modification time is the copy time — the defect.
+     */
+    private fun copyEntryNoAttributes(
+        source: File,
+        destination: File,
+    ) {
+        if (source.isDirectory && !Files.isSymbolicLink(source.toPath())) {
+            destination.mkdirs()
+            source.listFiles()?.forEach { copyEntryNoAttributes(it, File(destination, it.name)) }
+        } else {
+            destination.parentFile?.mkdirs()
+            Files.copy(source.toPath(), destination.toPath(), LinkOption.NOFOLLOW_LINKS)
+        }
+    }
+
+    /**
+     * The strict-mode proof on the staged copy's own artifacts: the staged runtime's
+     * `bin/java` runs `-XX:AOTMode=on` with the staged archive and the staged
+     * classpath JARs the .cfg names — the same size-and-mtime check an installed
+     * package's launcher hits.
+     */
+    private fun strictCacheProbe(
+        java: File,
+        stagedApp: File,
+        stagedJars: List<File>,
+    ): ProbeResult =
+        runJava(
+            java,
+            listOf(
+                AOT_MODE_STRICT_OPTION,
+                "-XX:AOTCache=${File(stagedApp, "lib/app/neutrodyne.aot").absolutePath}",
+                "-cp",
+                stagedJars.joinToString(File.pathSeparator) { it.absolutePath },
+                SMOKE_PROPERTY_OPTION,
+                "TinyAotProbeMain",
+            ),
+        )
+
+    /**
+     * The pinned runtime's java launcher dropped into the staged runtime's `bin`
+     * for the probe — `trainAotCache`'s own provisioning for the training launch;
+     * the real package ships no `bin/java`, so the fixture adds and ignores it.
+     */
+    private fun provisionStagedJava(stagedApp: File): File {
+        val java = File(stagedApp, "lib/runtime/bin/" + toolName("java"))
+        java.parentFile.mkdirs()
+        Files.copy(toolPath(jdk25, "java").toPath(), java.toPath())
+        java.setExecutable(true, false)
+        return java
+    }
+
+    /** Runs a shipped post-image hook under `sh` with the ScriptRunner-style env. */
+    private fun runPostImageHook(staging: File) {
+        val hook =
+            File(repoRoot(), "desktopApp/packaging/deb/Neutrodyne-post-image.sh")
+        assertTrue(hook.isFile, "the shipped post-image hook is missing: $hook")
+        val builder =
+            ProcessBuilder("sh", hook.absolutePath)
+                .directory(staging)
+                .redirectErrorStream(true)
+        builder.environment().clear()
+        builder.environment()["JpAppImageDir"] = staging.absolutePath
+        builder.environment()["TZ"] = "Pacific/Kiritimati"
+        val process = builder.start()
+        val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
+        assertEquals(0, process.waitFor(), "the post-image hook failed:\n$output")
+    }
+
+    /** Each entry's modification time keyed by its path — the image's timestamp state. */
+    private fun File.stateByPath(): Map<String, Long> =
+        walkTopDown()
+            .associate { it.relativeTo(this).path to it.lastModified() }
+
+    private fun repoRoot(): File {
+        var dir: File? = File(System.getProperty("user.dir")).absoluteFile
+        while (dir != null) {
+            if (File(dir, "desktopApp/packaging/deb/Neutrodyne-post-image.sh").isFile) return dir
+            dir = dir.parentFile
+        }
+        throw AssertionError("repository root not found from ${System.getProperty("user.dir")}")
     }
 
     /**
@@ -395,9 +570,14 @@ class DesktopAotTrainingRealTest {
             writeBytes(byteArrayOf(1, 2, 3, 4))
         }
 
-    private fun runJava(arguments: List<String>): ProbeResult {
+    private fun runJava(arguments: List<String>): ProbeResult = runJava(toolPath(jdk25, "java"), arguments)
+
+    private fun runJava(
+        java: File,
+        arguments: List<String>,
+    ): ProbeResult {
         val process =
-            ProcessBuilder(listOf(toolPath(jdk25, "java").absolutePath) + arguments)
+            ProcessBuilder(listOf(java.absolutePath) + arguments)
                 .redirectErrorStream(true)
                 .start()
         val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
