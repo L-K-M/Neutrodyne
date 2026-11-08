@@ -111,12 +111,26 @@ public class BackupCodec(
         }
     }
 
-    public fun encodeLibrary(library: LibraryV1): String = json.encodeToString(library)
+    /**
+     * Encodes `library.json`. In [Mode.ARCHIVE] the staging-only tombstone clocks are stripped
+     * here rather than trusted to every producer — the same invariant as [encodeEpisodeLine]'s
+     * `fc`: a removal marker never reaches an archive.
+     */
+    public fun encodeLibrary(library: LibraryV1): String =
+        json.encodeToString(if (mode == Mode.ARCHIVE) library.withoutTombstones() else library)
 
     public fun decodeLibrary(source: Source): LibraryV1 =
         decodeStreaming(BoundedSource(source, LIBRARY_MAX_BYTES).buffer())
 
-    public fun encodeQueue(queue: QueueV1): String = json.encodeToString(queue)
+    /** Encodes `queue.json`; [Mode.ARCHIVE] strips the staging-only tombstone clocks. */
+    public fun encodeQueue(queue: QueueV1): String =
+        json.encodeToString(
+            if (mode == Mode.ARCHIVE) {
+                queue.copy(upNext = queue.upNext.map { it.copy(removedAt = null) })
+            } else {
+                queue
+            },
+        )
 
     public fun decodeQueue(source: Source): QueueV1 = decodeStreaming(source.buffer())
 
@@ -230,6 +244,19 @@ public class BackupCodec(
             return count
         }
     }
+
+    /** The staging-only `removedAt` clocks, removed for an archive write. */
+    private fun LibraryV1.withoutTombstones(): LibraryV1 =
+        copy(
+            podcasts = podcasts.map { it.copy(removedAt = null) },
+            groups =
+                groups.map { group ->
+                    group.copy(
+                        removedAt = null,
+                        members = group.members.map { it.copy(removedAt = null) },
+                    )
+                },
+        )
 
     /** The [decodeManifest] gate probes: the two members read before the v1 decode. */
     @Serializable
