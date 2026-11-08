@@ -1210,6 +1210,7 @@ jobs:
           ./gradlew :benchmark:bench34BenchmarkReleaseAndroidTest
           --max-workers=1
           -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1
+          -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.benchmark.Journeys
           -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.dryRunMode.enable=true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
