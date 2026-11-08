@@ -23,6 +23,7 @@ internal class DownloadReconciler(
     private val liveTokens: () -> Set<String>,
     private val clock: Clock,
     private val beforeRunnerReset: suspend (Set<String>) -> Unit = {},
+    private val youtubeRules: YouTubeEngineRules? = null,
 ) {
     private val dao = db.downloadDao()
     private var reset = false
@@ -58,6 +59,7 @@ internal class DownloadReconciler(
     /** Daily steps 3–5: check files and roots, drain the journal and sweep without resetting runners. */
     suspend fun reconcileFiles() =
         claimMutex.withLock {
+            youtubeRules?.syncLocked()
             for (batch in dao.allRows().chunked(RECONCILE_BATCH)) {
                 for (row in batch) if (row.state in FINAL_STATES) checkCompleted(row)
             }

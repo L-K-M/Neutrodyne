@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Unlicense
+import groovy.json.JsonSlurper
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.Project
@@ -12,6 +13,7 @@ import org.gradle.api.file.RelativePath
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
@@ -67,12 +69,13 @@ internal enum class DesktopPackagingTarget(
  * The package-level licence metadata (DEB/RPM `--license-file`, MSI/DMG licence page, RPM
  * `License:`): the package bundles the OpenJDK runtime and third-party libraries besides our
  * Unlicense code, so the file lists them and the SPDX expression covers them. Extend both when
- * FFmpeg (LGPL-2.1-or-later) or the python-build-standalone stack joins the image.
+ * the python-build-standalone stack joins the image.
  */
 internal const val DESKTOP_PACKAGE_LICENSE_FILE = "packaging/LICENSE-PACKAGE.txt"
 internal const val DESKTOP_PACKAGE_LICENSE =
-    "Unlicense AND Apache-2.0 AND MIT AND MIT-Modern-Variant AND BSD-3-Clause AND FTL AND libpng-2.0 AND IJG " +
-        "AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND GPL-2.0-only WITH Classpath-exception-2.0"
+    "Unlicense AND Apache-2.0 AND MIT AND MIT-0 AND MIT-Modern-Variant AND BSD-3-Clause AND FTL AND libpng-2.0 " +
+        "AND IJG AND Zlib AND Unicode-3.0 AND MPL-2.0 AND blessing AND LGPL-2.1-or-later " +
+        "AND GPL-2.0-only WITH Classpath-exception-2.0"
 
 /** `neutrodyne-<size>.png`, the committed hicolor source names (desktopApp/icons/png). */
 private val HICOLOR_ICON_NAME = Regex("neutrodyne-(\\d+)\\.png")
@@ -120,6 +123,165 @@ internal fun desktopPackagingTargetOf(
             else -> return null
         }
     return DesktopPackagingTarget.entries.firstOrNull { it.osName == os && it.osArch == osArch }
+}
+
+// --- the image's native/ and licenses/ payloads (11 Resources layout) ------------------------------
+
+/** The four FFmpeg libraries the lock records, in the order the engine loads them (11 FFM bindings). */
+private val FFMPEG_LIBRARIES = listOf("avutil", "swresample", "avcodec", "avformat")
+
+/** The upstream soname a shipped FFmpeg library carries on one OS (11 FFmpeg LGPL obligations). */
+private val FFMPEG_SONAME =
+    mapOf(
+        "windows" to Regex("^(avcodec|avformat|avutil|swresample)-\\d+\\.dll$"),
+        "macos" to Regex("^lib(avcodec|avformat|avutil|swresample)\\.\\d+\\.dylib$"),
+        "linux" to Regex("^lib(avcodec|avformat|avutil|swresample)\\.so\\.\\d+$"),
+    )
+
+/** The build records the engine and the image scan read beside the libraries (11 Resources layout). */
+private val FFMPEG_IMAGE_METADATA = setOf("ffmpeg-layout.json", "ffmpeg-license.txt")
+
+/** The licences payload every image carries under `common/licenses/` (11 Resources layout). */
+private val IMAGE_LICENCE_FILES = listOf("THIRD_PARTY_NOTICES.md", "COPYING.LGPLv2.1", "miniaudio.txt")
+
+/** FFmpeg installs its shared libraries under lib/, its Windows DLLs under bin/. */
+private fun ffmpegLibSubdir(osWire: String): String = if (osWire == "windows") "bin" else "lib"
+
+/** The file name one FFmpeg library carries on the target's OS, upstream naming kept. */
+private fun ffmpegFileName(
+    osWire: String,
+    library: String,
+    major: Int,
+): String =
+    when (osWire) {
+        "windows" -> "$library-$major.dll"
+        "macos" -> "lib$library.$major.dylib"
+        else -> "lib$library.so.$major"
+    }
+
+private fun ndmediaFileName(osWire: String): String =
+    when (osWire) {
+        "windows" -> "ndmedia.dll"
+        "macos" -> "libndmedia.dylib"
+        else -> "libndmedia.so"
+    }
+
+/**
+ * Whether a file under the `buildFfmpeg` output joins the image (11 Resources layout):
+ * `ffmpeg-layout.json` and `ffmpeg-license.txt` at the root, and the four shared libraries
+ * under the target's library directory — versioned sonames only, never headers, import
+ * libraries, static archives, unversioned links or the build's own records
+ * (`ffmpeg-build.txt`, `ffmpeg-components.txt`, …). [relativePath] is the path below the
+ * build output, with `/` separators.
+ */
+internal fun ffmpegImageEntryAllowed(
+    osWire: String,
+    relativePath: String,
+): Boolean {
+    val segments = relativePath.split('/')
+    if (segments.size == 1) return relativePath in FFMPEG_IMAGE_METADATA
+    if (segments.size != 2) return false
+    return segments[0] == ffmpegLibSubdir(osWire) &&
+        FFMPEG_SONAME.getValue(osWire).matches(segments[1])
+}
+
+/**
+ * The missing pieces of the staged `desktop-resources` tree, empty when complete
+ * (11 Resources layout): `ffmpeg-layout.json`, every soname it records, the licence
+ * text, the ndmedia library and the licences payload. `createDistributable` fails
+ * closed on any of them rather than ship an image the engine cannot load or whose
+ * LGPL notices are absent.
+ */
+internal fun stagedNativeProblems(
+    target: DesktopPackagingTarget,
+    destinationDir: File,
+): List<String> {
+    val problems = mutableListOf<String>()
+    val ffmpegDir = destinationDir.resolve("${target.id}/native/ffmpeg")
+    val layoutFile = ffmpegDir.resolve("ffmpeg-layout.json")
+    if (!layoutFile.isFile) {
+        problems += "ffmpeg-layout.json missing from the image (11 Resources layout)"
+    } else {
+        // The majors come from the image's own layout record: the sonames move with the
+        // pinned FFmpeg version, so the check never hardcodes a version.
+        val majors =
+            try {
+                (JsonSlurper().parse(layoutFile) as? Map<*, *>)
+                    ?.get("libraries") as? Map<*, *>
+            } catch (invalid: RuntimeException) {
+                problems += "ffmpeg-layout.json is not valid JSON (11 Resources layout)"
+                null
+            }
+        for (library in FFMPEG_LIBRARIES) {
+            val major =
+                (majors?.get(library) as? Number)?.toInt()
+                    ?: run {
+                        problems += "ffmpeg-layout.json carries no $library entry"
+                        continue
+                    }
+            val soname =
+                ffmpegDir
+                    .resolve(ffmpegLibSubdir(target.osWire))
+                    .resolve(ffmpegFileName(target.osWire, library, major))
+            if (!soname.isFile) {
+                problems += "${soname.relativeTo(destinationDir)} missing from the image (11 FFmpeg LGPL obligations)"
+            }
+        }
+        if (!ffmpegDir.resolve("ffmpeg-license.txt").isFile) {
+            problems += "ffmpeg-license.txt missing from the image (11 FFmpeg LGPL obligations)"
+        }
+    }
+    val ndmedia =
+        destinationDir.resolve("${target.id}/native/ndmedia/${ndmediaFileName(target.osWire)}")
+    if (!ndmedia.isFile) {
+        problems += "${ndmedia.relativeTo(destinationDir)} missing from the image (11 Resources layout)"
+    }
+    for (name in IMAGE_LICENCE_FILES) {
+        val licence = destinationDir.resolve("common/licenses/$name")
+        if (!licence.isFile || licence.length() == 0L) {
+            problems += "common/licenses/$name missing or empty (11 licences/ payload)"
+        }
+    }
+    return problems
+}
+
+/**
+ * Writes the image's `licenses/` payload (11 Resources layout): the AboutLibraries notices
+ * of everything the package ships, FFmpeg's own LGPL-2.1 text out of the pinned source
+ * archive's extracted cache (a separate entry from JNA's variant) and miniaudio's MIT-0.
+ */
+abstract class WriteDesktopLicencesTask : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val definitions: RegularFileProperty
+
+    /** FFmpeg's own COPYING.LGPLv2.1, extracted from the pinned source by `buildFfmpeg`. */
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val lgplText: RegularFileProperty
+
+    /** The miniaudio licence entry (desktopApp/config/licenses/MIT-0-miniaudio.json). */
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val miniaudioLicense: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun write() {
+        val out = outputDirectory.get().asFile
+        out.deleteRecursively()
+        out.mkdirs()
+        // renderThirdPartyNotices throws when a shipped component's licence text is missing.
+        out.resolve("THIRD_PARTY_NOTICES.md").writeText(renderThirdPartyNotices(definitions.get().asFile))
+        out.resolve("COPYING.LGPLv2.1").writeBytes(lgplText.get().asFile.readBytes())
+        val miniaudio = JsonSlurper().parse(miniaudioLicense.get().asFile) as Map<*, *>
+        val content =
+            miniaudio["content"]?.toString()?.trim()
+                ?: throw GradleException("${miniaudioLicense.get().asFile.name} carries no licence content")
+        out.resolve("miniaudio.txt").writeText(content + "\n")
+    }
 }
 
 /** `desktopApp/runtime.lock`, already narrowed to the current target's archive (11 Lockfiles). */
@@ -871,6 +1033,34 @@ internal fun Project.registerDesktopPackagingTasks(
     // and silently drop an added icon on reuse (and the empty-dir check would never run).
     val iconsPngDir = file("icons/png")
     val iconsTrayDir = file("icons/tray")
+
+    // The packaged image's licenses/ payload (11 Resources layout): the AboutLibraries
+    // notices of everything the package ships, FFmpeg's own LGPL-2.1 text and miniaudio's
+    // MIT-0. FFmpeg's text comes out of the pinned source archive's extracted cache, so a
+    // lock bump keeps it honest; buildFfmpeg populates that cache before the read.
+    val playbackNative = project(":playback:native")
+    val ffmpegVersion =
+        ffmpegVersionOf(
+            playbackNative.layout.projectDirectory
+                .file("native-components.lock")
+                .asFile,
+        )
+    val writeDesktopLicences =
+        tasks.register<WriteDesktopLicencesTask>("writeDesktopLicences") {
+            description = "Writes the packaged image's licenses/ payload (11 Resources layout)."
+            dependsOn("exportLibraryDefinitions", ":playback:native:buildFfmpeg")
+            definitions.set(
+                layout.buildDirectory.file("generated/aboutLibraries/aboutlibraries.json"),
+            )
+            lgplText.set(
+                playbackNative.layout.buildDirectory.file(
+                    "ffmpeg-cache/ffmpeg-$ffmpegVersion/COPYING.LGPLv2.1",
+                ),
+            )
+            miniaudioLicense.set(file("config/licenses/MIT-0-miniaudio.json"))
+            outputDirectory.set(layout.buildDirectory.dir("desktop-licences"))
+        }
+
     tasks.register<org.gradle.api.tasks.Sync>("syncDesktopIntegrationResources") {
         // Compose merges appResourcesRootDir/{common,<os>,<os>-<arch>} into the image's
         // resources dir, so the Linux payload nests under its <os> dir.
@@ -880,6 +1070,27 @@ internal fun Project.registerDesktopPackagingTasks(
         // Resources layout).
         from(iconsPngDir) { into("common/icons/png") }
         from(iconsTrayDir) { into("common/icons/tray") }
+        // FFmpeg's shared libraries (LGPL-2.1: dynamically linked, separately replaceable)
+        // plus the layout JSON and licence text, and ndmedia's one library. They land at
+        // resources/native/{ffmpeg,ndmedia}, the paths DesktopEnginePaths resolves.
+        // `sourcePath` is the path below the build output — `path` would carry this spec's
+        // `into` prefix and exclude everything. The tasks are named lazily because
+        // :playback:native may not be evaluated when this project is configured.
+        dependsOn(":playback:native:buildFfmpeg", ":playback:native:buildNdmedia")
+        val nativeTarget = nativeTargetOf()
+        from(playbackNative.layout.buildDirectory.dir("ffmpeg/$nativeTarget")) {
+            into("${target.id}/native/ffmpeg")
+            eachFile {
+                if (!ffmpegImageEntryAllowed(target.osWire, sourcePath)) exclude()
+            }
+        }
+        from(playbackNative.layout.buildDirectory.dir("ndmedia/$nativeTarget")) {
+            into("${target.id}/native/ndmedia")
+            eachFile {
+                if (name != ndmediaFileName(target.osWire)) exclude()
+            }
+        }
+        from(writeDesktopLicences) { into("common/licenses") }
         if (target.osWire == "linux") {
             from("packaging/desktop-integration") { into("linux/desktop-integration") }
             // neutrodyne-48.png -> linux/desktop-integration/hicolor/48x48/apps/neutrodyne.png
@@ -903,6 +1114,13 @@ internal fun Project.registerDesktopPackagingTasks(
             hicolorIconEntries(iconsPngDir)
             if (iconsTrayDir.listFiles().isNullOrEmpty()) {
                 throw GradleException("icons/tray carries no icons (11 Resources layout)")
+            }
+            val problems = stagedNativeProblems(target, destinationDir)
+            if (problems.isNotEmpty()) {
+                throw GradleException(
+                    "the staged image resources are incomplete:\n" +
+                        problems.joinToString("\n") { "  - $it" },
+                )
             }
         }
     }

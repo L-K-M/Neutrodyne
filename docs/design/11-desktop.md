@@ -1616,12 +1616,19 @@ desktop-resources/
     engine/shim/neutrodyne_ytx/…           (compiled shim incl. host_stdio.py, bootstrap.py)
     engine/cacert.pem                       (certifi, MPL-2.0 data, unmodified)
     licenses/THIRD_PARTY_NOTICES.md, COPYING.LGPLv2.1, miniaudio.txt, python/…
-  windows-x64/  native/ndmedia.dll, avcodec-63.dll, avformat-63.dll, avutil-61.dll, swresample-7.dll,
-                ffmpeg-layout.json, ffmpeg-license.txt;  engine/python/…
-  macos-arm64/  native/libndmedia.dylib, libavcodec.63.dylib, …;  engine/python/…
-  linux-x64/    native/libndmedia.so, libavcodec.so.63, …;  engine/python/…
+  windows-x64/
+    native/ffmpeg/bin/avcodec-63.dll, avformat-63.dll, avutil-61.dll, swresample-7.dll
+    native/ndmedia/ndmedia.dll;  engine/python/…
+  macos-arm64/
+    native/ffmpeg/lib/libavcodec.63.dylib, libavformat.63.dylib, libavutil.61.dylib, libswresample.7.dylib
+    native/ndmedia/libndmedia.dylib;  engine/python/…
+  linux-x64/
+    native/ffmpeg/lib/libavcodec.so.63, libavformat.so.63, libavutil.so.61, libswresample.so.7
+    native/ndmedia/libndmedia.so;  engine/python/…
   linux-arm64/  (as linux-x64)
 ```
+
+Each target also stages `ffmpeg-layout.json` and `ffmpeg-license.txt` directly under `native/ffmpeg/`. The loader reads that layout and resolves the shared libraries from its `bin/` or `lib/` subdirectory.
 
 The packaging pipeline adds `install-kind` (one line: `msi`, `zip`, `dmg`, `mac-zip`, `deb`, `rpm` or `tar.gz`) to the merged directory of each image copy; `BuildInfo.installKind` reads it, and its absence means `DEV`. The `-Pneutrodyne.youtubeEngine=false` build omits `engine/` entirely.
 
