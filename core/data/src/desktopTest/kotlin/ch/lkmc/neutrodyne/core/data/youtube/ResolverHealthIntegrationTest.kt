@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.testing.FakeEnginePlatformPreflight
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeYtxTransport
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
@@ -270,6 +271,8 @@ class ResolverHealthIntegrationTest {
             DataStoreSettingsRepository(
                 DataStoreBindings.settingsStore(DataStoreBindings.portableDataStore(factory)),
                 DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
+                syncPort = FakeSettingsSyncPort(),
+                clock = TestClock(),
             )
         val repository =
             object : SettingsRepository by settings {

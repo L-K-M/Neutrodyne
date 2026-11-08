@@ -184,21 +184,25 @@ class YouTubeExtractionHealthTest {
             f.open()
             f.health.reportRateLimited(f.clock.now())
             f.health.awaitLoaded()
-            val restarted = DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 42) {}
+            val restarted =
+                DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 42, invalidateUrls = {}) {}
             restarted.awaitLoaded()
             assertEquals(f.health.state.value, restarted.state.value)
             f.now += 6 * HOUR
             assertIs<ExtractionAdmission.Admitted>(restarted.reserveExtraction(f.clock.now()))
-            val third = DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 42) {}
+            val third =
+                DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 42, invalidateUrls = {}) {}
             third.awaitLoaded()
             assertIs<ExtractionAdmission.Admitted>(third.reserveExtraction(f.clock.now()))
-            val upgraded = DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 43) {}
+            val upgraded =
+                DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 43, invalidateUrls = {}) {}
             upgraded.awaitLoaded()
             assertEquals(ExtractionGate.Allow, upgraded.extractionGate(f.clock.now()))
             assertEquals(f.health.state.value.rateLimitedUntil, upgraded.state.value.rateLimitedUntil)
             assertEquals(43, f.settings.get(Keys.BREAKER_VERSION_CODE))
             assertEquals(0L, f.settings.get(Keys.BREAKER_OPEN_UNTIL))
-            val downgraded = DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 42) {}
+            val downgraded =
+                DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 42, invalidateUrls = {}) {}
             downgraded.awaitLoaded()
             assertEquals(ExtractionGate.Allow, downgraded.extractionGate(f.clock.now()))
             assertNull(downgraded.state.value.breakerOpenUntil)
@@ -232,7 +236,8 @@ class YouTubeExtractionHealthTest {
             assertEquals(ExtractionGate.Allow, f.gate())
             release.complete(Unit)
             f.health.awaitLoaded()
-            val restarted = DefaultYouTubeHealth(repository, f.clock, backgroundScope, appVersionCode = 42) {}
+            val restarted =
+                DefaultYouTubeHealth(repository, f.clock, backgroundScope, appVersionCode = 42, invalidateUrls = {}) {}
             restarted.awaitLoaded()
             restarted.reportEngineVersion("fixed")
             assertEquals(ExtractionGate.Allow, restarted.extractionGate(f.clock.now()))

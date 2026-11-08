@@ -17,6 +17,8 @@ import ch.lkmc.neutrodyne.youtube.api.PlatformLimitation
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -136,7 +138,8 @@ class YtDlpEngineTest {
                 val settings = FakeEngineSettings()
                 settings.state.value = EngineSettingsSnapshot(startFailures = 3, failureIdentity = saved)
                 val f = Fixture(this, settings, settings)
-                f.assertCapabilities(if (saved == identity) ExternalReason.ENGINE_FAILED else null)
+                // Capabilities stay conservative until the settings load completes.
+                f.assertCapabilities(ExternalReason.NOT_YET_AVAILABLE)
                 runCurrent()
                 f.assertCapabilities(if (saved == identity) ExternalReason.ENGINE_FAILED else null)
                 assertEquals(if (saved == identity) 3 else 0, f.settings.state.value.startFailures)
@@ -304,6 +307,35 @@ class YtDlpEngineTest {
             runCurrent()
             assertEquals(0, settings.state.value.startFailures)
             f.assertCapabilities(null)
+        }
+
+    @Test fun capabilitiesStayOffUntilSettingsLoadRevealsPersistedOptOut() =
+        runTest {
+            val settings = FakeEngineSettings()
+            val loaded = CompletableDeferred<Unit>()
+            // A real adapter emits the default snapshot (enabled) until the store loads.
+            val exposed = MutableStateFlow(EngineSettingsSnapshot())
+            val delayed =
+                object : EngineSettings by settings {
+                    override val state: StateFlow<EngineSettingsSnapshot> = exposed
+
+                    override suspend fun awaitLoaded() {
+                        loaded.await()
+                        exposed.value = EngineSettingsSnapshot(enabled = false)
+                    }
+                }
+            val f = Fixture(this, settings, delayed)
+            f.assertCapabilities(ExternalReason.NOT_YET_AVAILABLE)
+            assertEquals(EngineAvailability.STOPPED, f.engine.status.value.availability)
+            f.engine.prewarm(PrewarmReason.SCREEN)
+            assertTrue(f.transport.prewarms.isEmpty())
+            assertTrue(f.transport.calls.isEmpty())
+            loaded.complete(Unit)
+            runCurrent()
+            f.assertCapabilities(ExternalReason.DISABLED_BY_USER)
+            assertEquals(EngineAvailability.DISABLED, f.engine.status.value.availability)
+            assertTrue(f.transport.prewarms.isEmpty())
+            assertTrue(f.transport.calls.isEmpty())
         }
 
     @Test fun successfulStartWhileLoadingResetsPersistedFailures() =

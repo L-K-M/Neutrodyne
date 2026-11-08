@@ -46,14 +46,18 @@ class YtDlpEngine(
     private val writes = Channel<Pair<Long, Int>>(Channel.UNLIMITED)
     private val mutableStatus = MutableStateFlow(EngineStatus(EngineAvailability.STOPPED, identity.engineVersion))
     override val status = mutableStatus.asStateFlow()
-    private val mutableCapabilities = MutableStateFlow(capabilitiesFor(null))
+
+    // Settings adapters publish a default snapshot before awaitLoaded() returns; a persisted
+    // opt-out is not yet visible, so capabilities must stay off until the load completes.
+    private val mutableCapabilities = MutableStateFlow(capabilitiesFor(ExternalReason.NOT_YET_AVAILABLE))
     override val capabilities = mutableCapabilities.asStateFlow()
 
     init {
         synchronized(lock) { publish() }
         scope.launch {
+            // The consent boundary is the settings load alone: a blocked health load must not
+            // freeze capabilities, so `loaded` turns before the health barrier.
             settings.awaitLoaded()
-            health.awaitLoaded()
             synchronized(lock) {
                 enabled = settings.state.value.enabled
                 if (failureRevision == 0L) {
@@ -69,14 +73,17 @@ class YtDlpEngine(
                     }
                 }
                 loaded = true
-                health.reportEngineVersion(identity.engineVersion)
-                if (settings.state.value.failureIdentity != identity) recordFailures()
                 publish()
                 if (!enabled) transport.shutdown()
                 pendingPrewarm?.let {
                     pendingPrewarm = null
                     prewarm(it)
                 }
+            }
+            health.awaitLoaded()
+            synchronized(lock) {
+                health.reportEngineVersion(identity.engineVersion)
+                if (settings.state.value.failureIdentity != identity) recordFailures()
             }
             combine(settings.state, transport.status, store.preparation) { prefs, host, preparation ->
                 Triple(prefs.enabled, host, preparation)
@@ -210,6 +217,7 @@ class YtDlpEngine(
         val availability =
             when {
                 absent -> EngineAvailability.NOT_IN_THIS_APK
+                !loaded -> EngineAvailability.STOPPED
                 !enabled -> EngineAvailability.DISABLED
                 failed -> EngineAvailability.FAILED
                 store.preparation.value != EnginePreparation.COMPILED -> EngineAvailability.PREPARING
@@ -218,10 +226,11 @@ class YtDlpEngine(
                 else -> EngineAvailability.STOPPED
             }
         val reason =
-            when (availability) {
-                EngineAvailability.NOT_IN_THIS_APK -> ExternalReason.NOT_IN_THIS_APK
-                EngineAvailability.DISABLED -> ExternalReason.DISABLED_BY_USER
-                EngineAvailability.FAILED -> ExternalReason.ENGINE_FAILED
+            when {
+                absent -> ExternalReason.NOT_IN_THIS_APK
+                !loaded -> ExternalReason.NOT_YET_AVAILABLE
+                availability == EngineAvailability.DISABLED -> ExternalReason.DISABLED_BY_USER
+                availability == EngineAvailability.FAILED -> ExternalReason.ENGINE_FAILED
                 else -> null
             }
         mutableStatus.value =
