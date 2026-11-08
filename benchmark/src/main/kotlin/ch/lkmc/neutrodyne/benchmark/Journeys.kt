@@ -54,8 +54,17 @@ class Journeys {
         }
 
     @Test fun allFeedFling() =
-        frames("feed_list", "nav_feeds") {
-            val feed = checkNotNull(device.findObject(By.res("feed_list")))
+        frames("feed_list", "nav_feeds", prepare = {
+            // Feeds restores the selected group, including an empty age-filtered
+            // page left by another journey. This benchmark measures All.
+            checkNotNull(device.wait(Until.findObject(By.res("feed-tab:all")), WAIT_MS)).click()
+            check(device.wait(Until.hasObject(By.res("feed-tab:all").selected(true)), WAIT_MS)) {
+                "All feed was not selected"
+            }
+            val page = checkNotNull(device.wait(Until.findObject(By.res("feed-page:all")), WAIT_MS))
+            check(page.wait(Until.hasObject(By.res("feed_list")), WAIT_MS)) { "Missing All feed list" }
+        }) {
+            val feed = checkNotNull(device.findObject(By.res("feed-page:all"))?.findObject(By.res("feed_list")))
             feed.setGestureMargin(device.displayWidth / 5)
             repeat(3) {
                 feed.fling(Direction.DOWN)
@@ -86,6 +95,7 @@ class Journeys {
     private fun frames(
         tag: String,
         navTag: String,
+        prepare: MacrobenchmarkScope.() -> Unit = {},
         measure: MacrobenchmarkScope.() -> Unit,
     ) = benchmark.measureRepeated(
         packageName = PACKAGE,
@@ -98,6 +108,7 @@ class Journeys {
             startActivityAndWait()
             try {
                 checkNotNull(device.wait(Until.findObject(By.res(navTag)), WAIT_MS)).click()
+                prepare()
                 check(device.wait(Until.hasObject(By.res(tag)), WAIT_MS)) { "Missing $tag" }
             } catch (error: Exception) {
                 // Macrobenchmark kills the target after a setup failure. Capture
