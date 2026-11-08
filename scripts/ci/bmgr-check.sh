@@ -31,6 +31,9 @@ NONCE="run-$(date +%s)-$RANDOM"
 TRANSPORT_WAIT_LIMIT_S=90
 TRANSPORT_QUERY_S=5
 TRANSPORT_POLL_S=2
+ADB_ROOT_ATTEMPTS=3
+ADB_ROOT_COMMAND_S=30
+ADB_ROOT_ID_S=15
 
 # Ownership ledger. A flag arms before its mutating call so even a failed
 # mutation is reverted; unarmed flags mean the trap must not touch that state.
@@ -43,6 +46,24 @@ LOGCAT_PID=""
 
 log() { echo "[bmgr-check $(date +%H:%M:%S)] $*"; }
 fail() { echo "[bmgr-check] FAIL: $*" >&2; exit 1; }
+
+require_root_adb() {
+    local attempt uid
+    for attempt in $(seq 1 "$ADB_ROOT_ATTEMPTS"); do
+        log "waiting for rooted adbd (attempt $attempt/$ADB_ROOT_ATTEMPTS)"
+        timeout "$ADB_ROOT_COMMAND_S" "$ADB" wait-for-device || continue
+        # `root` may lose its connection while adbd restarts. Always reconnect;
+        # only a successful UID query proves that the rooted daemon is ready.
+        timeout "$ADB_ROOT_COMMAND_S" "$ADB" root || true
+        sleep 2
+        timeout "$ADB_ROOT_COMMAND_S" "$ADB" wait-for-device || continue
+        if uid="$(timeout "$ADB_ROOT_ID_S" "$ADB" shell id -u)" \
+            && [ "$(printf '%s' "$uid" | tr -d '\r')" = "0" ]; then
+            return
+        fi
+    done
+    fail "adbd is not root after $ADB_ROOT_ATTEMPTS connection attempts"
+}
 fact() { echo "$1=$2" >> "$EV/facts.txt"; }
 selector() { echo "$1=pass" >> "$EV/selectors.txt"; fact "selector.$1" pass; }
 out() {  # bounded device capture
@@ -418,8 +439,7 @@ main() {
     fact avd "$AVD"
     [ "$(timeout 60 "$ADB" shell getprop ro.kernel.qemu | tr -d '\r')" = "1" ] \
         || fail "the device is not a qemu emulator"
-    timeout 120 "$ADB" root && sleep 2 && timeout 120 "$ADB" wait-for-device
-    [ "$("$ADB" shell id -u | tr -d '\r')" = "0" ] || fail "adbd is not root"
+    require_root_adb
     SDK="$("$ADB" shell getprop ro.build.version.sdk | tr -d '\r')"
     [ "$SDK" = "$API" ] || fail "emulator runs API $SDK, not $API"
     fact abi "$("$ADB" shell getprop ro.product.cpu.abi | tr -d '\r')"
