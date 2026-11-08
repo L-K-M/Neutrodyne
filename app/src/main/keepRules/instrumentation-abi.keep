@@ -1194,7 +1194,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.exporting.ExportFilesCleanerContributions {
 }
 -keep class ch.lkmc.neutrodyne.core.data.exporting.ExportRepositoryImpl$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.exporting.ExportRepositoryImpl$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.exporting.ExportRepositoryImpl$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.exporting.ExportRepositoryImpl$MetroFactory {
   ch.lkmc.neutrodyne.core.data.exporting.ExportRepositoryImpl$MetroFactory$Companion Companion;
@@ -1262,7 +1262,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.importing.ImportClassifier {
 }
 -keep class ch.lkmc.neutrodyne.core.data.importing.ImportCommitter$MetroFactory$Companion {
-  public static ch.lkmc.neutrodyne.core.data.importing.ImportCommitter$MetroFactory create$default(ch.lkmc.neutrodyne.core.data.importing.ImportCommitter$MetroFactory$Companion, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, int, java.lang.Object);
+  public static ch.lkmc.neutrodyne.core.data.importing.ImportCommitter$MetroFactory create$default(ch.lkmc.neutrodyne.core.data.importing.ImportCommitter$MetroFactory$Companion, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, int, java.lang.Object);
 }
 -keep class ch.lkmc.neutrodyne.core.data.importing.ImportCommitter$MetroFactory {
   ch.lkmc.neutrodyne.core.data.importing.ImportCommitter$MetroFactory$Companion Companion;
@@ -1270,7 +1270,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.importing.ImportCommitter {
 }
 -keep class ch.lkmc.neutrodyne.core.data.importing.ImportFetchRunner$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.importing.ImportFetchRunner$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.importing.ImportFetchRunner$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.importing.ImportFetchRunner$MetroFactory {
   ch.lkmc.neutrodyne.core.data.importing.ImportFetchRunner$MetroFactory$Companion Companion;
@@ -2437,6 +2437,8 @@
   public static org.jetbrains.compose.resources.StringResource getNav_discover(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_downloads(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_feeds(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
+}
+-keep class ch.lkmc.neutrodyne.core.ui.resources.String6_commonMainKt {
   public static org.jetbrains.compose.resources.StringResource getNav_library(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
   public static org.jetbrains.compose.resources.StringResource getNav_up_next(ch.lkmc.neutrodyne.core.ui.resources.Res$string);
 }
