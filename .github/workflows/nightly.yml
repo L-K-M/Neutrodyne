@@ -973,20 +973,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: windows-x64
-            runs-on: windows-2025
-            timeout-minutes: 210
-          - target: macos-arm64
-            runs-on: macos-15
-          - target: linux-x64
-            runs-on: ubuntu-24.04
-          - target: linux-arm64
-            runs-on: ubuntu-24.04-arm
-        # `desktop-windows` runs the windows-x64 leg alone: a job-level `if`
-        # cannot read `matrix`, so the scope narrows the matrix itself — an
-        # exclude row matches every key it names, and `target` is unique.
-        exclude: ${{ inputs.scope == 'desktop-windows' && fromJSON('[{"target":"macos-arm64"},{"target":"linux-x64"},{"target":"linux-arm64"}]') || fromJSON('[]') }}
+        # Include-only matrices add entries after exclude, so select the final list.
+        include: ${{ inputs.scope == 'desktop-windows' && fromJSON('[{"target":"windows-x64","runs-on":"windows-2025","timeout-minutes":210}]') || fromJSON('[{"target":"windows-x64","runs-on":"windows-2025","timeout-minutes":210},{"target":"macos-arm64","runs-on":"macos-15"},{"target":"linux-x64","runs-on":"ubuntu-24.04"},{"target":"linux-arm64","runs-on":"ubuntu-24.04-arm"}]') }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: ${{ matrix.timeout-minutes || 90 }}
     steps:
