@@ -144,6 +144,7 @@ internal class RestoreMerger(
         // and adopts the record's ID; an unmatched tombstone is never inserted (no resurrection).
         val removedPodcastIds = HashSet<Long>()
         val removedGroupIds = HashSet<Long>()
+        val removedGroupUuids = ArrayList<String>()
         val removedSeedMoves = ArrayList<Pair<String, String>>()
         if (link) {
             for (podcast in stagedPodcasts) {
@@ -163,7 +164,10 @@ internal class RestoreMerger(
                 val removedAt = group.primary.removedAt ?: continue
                 val localId = group.localId ?: continue
                 val local = groupDao.groupById(localId) ?: continue
-                if (removedAt >= local.updatedAt) removedGroupIds += localId
+                if (removedAt >= local.updatedAt) {
+                    removedGroupIds += localId
+                    removedGroupUuids += local.uuid
+                }
             }
             if (removedSeedMoves.isNotEmpty() || removedPodcastIds.isNotEmpty() || removedGroupIds.isNotEmpty()) {
                 downloads().beforeLibraryReplace()
@@ -245,8 +249,9 @@ internal class RestoreMerger(
                                 adoptGroupUuid(group, localId, uuidChanges)
                                 writeGroupSettings(localId, group.primary.settings, policy)
                                 onApplied?.invoke(groupRecord(group, localId, staged.createdAtMs, policy))
-                                progress(++done, total)
                             }
+                            // A removed or unmatched tombstone still consumed a `total` slot.
+                            progress(++done, total)
                             continue
                         }
                         val localId =
@@ -309,8 +314,8 @@ internal class RestoreMerger(
                                 for (alias in podcast.aliases) podcastIdByKey.putIfAbsent(alias, localId)
                                 writePodcastSettings(localId, podcast.settings, policy)
                                 onApplied?.invoke(podcastRecord(localId, podcast, policy, matched = true))
-                                progress(++done, total)
                             }
+                            progress(++done, total)
                             continue
                         }
                         var localId = podcastMatches[podcast]
@@ -371,7 +376,7 @@ internal class RestoreMerger(
             suspendRunCatching { channelSync.onUuidChanged(change.from, change.to) }
                 .onFailure { Log.w(TAG, it) { "Group channel carry-over failed" } }
         }
-        for (uuid in deletedGroupUuids) {
+        for (uuid in deletedGroupUuids + removedGroupUuids) {
             suspendRunCatching { channelSync.onDeleted(uuid) }
                 .onFailure { Log.w(TAG, it) { "Group channel delete failed" } }
         }
