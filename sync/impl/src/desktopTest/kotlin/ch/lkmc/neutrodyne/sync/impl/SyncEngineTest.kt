@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -335,6 +336,27 @@ class SyncEngineTest {
         }
 
     @Test
+    fun aRoundAppliesTheGateVerdictToTheSyncBypass() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                seedRound(db)
+                val device = Device(db, InMemorySyncClient(InMemorySyncServer { NOW }))
+                // The engine is the one boundary every round crosses: it must apply the gate's
+                // live verdict before the first request, so an already-granted permission works
+                // after a restart and a revocation blocks the round (10 Local-network gate 3-4).
+                device.gate.setPermissionGranted(false)
+                device.round()
+                assertEquals(listOf(false), device.gate.results)
+                device.gate.setPermissionGranted(true)
+                device.round()
+                assertEquals(listOf(false, true), device.gate.results)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun overlappingRoundsKeepTheActivityFlagUntilTheLastOneEnds() {
         val activity = SyncActivityState()
         activity.begin()
@@ -359,26 +381,35 @@ class SyncEngineTest {
         private val activity: SyncActivityState = SyncActivityState(),
     ) {
         val clock = TestClock(NOW)
+        val secrets = FakeSecretStore()
+        val gate = FakeLocalNetworkGate()
         val engine =
             SyncEngine(
                 db = db,
                 client = client,
+                applier =
+                    SyncApplier(
+                        db = db,
+                        clock = clock,
+                        secrets = secrets,
+                        settings = FakeSettingsSyncPort(),
+                        playback = NoPlaybackSync,
+                        syncIngestHook = SyncIngestHook.None,
+                        channelSync =
+                            object : GroupChannelSync {
+                                override suspend fun sync() = Unit
+
+                                override suspend fun onUuidChanged(
+                                    oldUuid: String,
+                                    newUuid: String,
+                                ) = Unit
+
+                                override suspend fun onDeleted(uuid: String) = Unit
+                            },
+                        sharePasswords = { false },
+                    ),
                 clock = clock,
-                secrets = FakeSecretStore(),
-                settings = FakeSettingsSyncPort(),
-                playback = NoPlaybackSync,
-                syncIngestHook = SyncIngestHook.None,
-                channelSync =
-                    object : GroupChannelSync {
-                        override suspend fun sync() = Unit
-
-                        override suspend fun onUuidChanged(
-                            oldUuid: String,
-                            newUuid: String,
-                        ) = Unit
-
-                        override suspend fun onDeleted(uuid: String) = Unit
-                    },
+                secrets = secrets,
                 sharePasswords = { false },
                 address =
                     object : ch.lkmc.neutrodyne.core.domain.SyncServerAddress {
@@ -386,12 +417,23 @@ class SyncEngineTest {
 
                         override suspend fun username(): String? = null
 
+                        override suspend fun deviceName(): String? = null
+
                         override suspend fun shareFeedPasswords(): Boolean = false
 
                         override suspend fun syncPlaybackSettings(): Boolean = true
+
+                        override suspend fun setServerUrl(url: String?) = Unit
+
+                        override suspend fun setUsername(username: String?) = Unit
+
+                        override suspend fun setShareFeedPasswords(enabled: Boolean) = Unit
+
+                        override suspend fun setSyncPlaybackSettings(enabled: Boolean) = Unit
                     },
                 tokens = SyncTokenStore(FakeSecretStore()).apply { runBlocking { save("sync.example", "token") } },
                 activity = activity,
+                gate = gate,
             )
 
         suspend fun round() = engine.round(SyncRoundReason.SYNC_NOW)

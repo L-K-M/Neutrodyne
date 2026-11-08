@@ -32,6 +32,28 @@ abstract class SyncStateDao(
     abstract suspend fun upsert(row: SyncStateEntity)
 
     /**
+     * The one-statement writers for fields updated while a sync round can run. A
+     * read-modify-write through [upsert] could undo a concurrent writer's change — or be
+     * undone by it — so `enabled`, `lastError`, `cursor` and `lastSyncAt` land without
+     * reading the rest of the row.
+     */
+    @Query("UPDATE sync_state SET enabled = 0, lastError = :error WHERE id = 0")
+    abstract suspend fun markRevoked(error: String)
+
+    /** Clears a transient marker, never [keep] — the revocation survives a later good round. */
+    @Query("UPDATE sync_state SET lastError = NULL WHERE id = 0 AND lastError <> :keep")
+    abstract suspend fun clearTransientError(keep: String)
+
+    @Query("UPDATE sync_state SET cursor = :cursor WHERE id = 0")
+    abstract suspend fun storeCursor(cursor: String)
+
+    @Query("UPDATE sync_state SET lastSyncAt = :ms WHERE id = 0")
+    abstract suspend fun recordSyncAt(ms: Long)
+
+    @Query("UPDATE sync_state SET enabled = 1, linkedAt = :linkedAt WHERE id = 0")
+    abstract suspend fun enableLinked(linkedAt: Long)
+
+    /**
      * Runs [block] with `applying = 1`, so the capture triggers stay silent. The caller owns the
      * writer transaction, including cancellation and rollback; the flag is restored even when the
      * block is cancelled.

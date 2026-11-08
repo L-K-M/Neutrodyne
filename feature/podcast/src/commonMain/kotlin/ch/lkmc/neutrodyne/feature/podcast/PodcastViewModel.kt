@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.ArtworkRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
@@ -30,6 +31,7 @@ import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
 import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -68,6 +70,7 @@ import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
 import kotlinx.collections.immutable.toImmutableList
@@ -82,6 +85,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -109,6 +113,7 @@ public class PodcastViewModel
         network: NetworkMonitor,
         liveStateSource: EpisodeLiveStateSource,
         clock: Clock,
+        private val artwork: Provider<ArtworkRepository>,
         downloadController: DownloadController,
         externalOpenService: YouTubeExternalOpen,
         capabilities: YouTubeCapabilitiesSource,
@@ -167,6 +172,22 @@ public class PodcastViewModel
                 feedRepository.pagedFeed(FeedSource.Podcast(podcastId), f, order)
             }.cachedIn(viewModelScope)
 
+        @OptIn(ExperimentalCoroutinesApi::class)
+        private val artworkColors =
+            detail
+                .map { item -> item?.let { Triple(it.id, it.artwork.key, null) } }
+                .distinctUntilChanged()
+                .flatMapLatest { identity ->
+                    if (identity == null) {
+                        flowOf(null to null)
+                    } else {
+                        artwork()
+                            .observeColors(identity.second, identity.third)
+                            .map { identity to it }
+                            .onStart { emit(identity to null) }
+                    }
+                }
+
         public val uiState: StateFlow<PodcastUiState> =
             combine(
                 detail,
@@ -187,6 +208,14 @@ public class PodcastViewModel
                 state.copy(groups = memberships.toImmutableList())
             }.combine(userMessages.flow) { state, messages ->
                 state.copy(messages = messages)
+            }.combine(artworkColors) { state, result ->
+                state.copy(
+                    colors =
+                        result.second.takeIf {
+                            result.first ==
+                                state.detail?.let { Triple(it.id, it.artwork.key, null) }
+                        },
+                )
             }.combine(capabilities.capabilities) { state, caps ->
                 state.copy(
                     rowCaps =
