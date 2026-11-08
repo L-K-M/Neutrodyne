@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.MergePolicy
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeLibraryMerger
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
@@ -42,6 +43,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import ch.lkmc.neutrodyne.sync.protocol.dto.TokenResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -848,6 +850,176 @@ class FirstLinkMergerTest {
             }
         }
 
+    /**
+     * 10 Durable apply effects at the link + 01 Sync write ordering: the merge's settings
+     * drain takes the same per-key write lock the local repository takes, so a local set
+     * that arrives while the drain applies a remote value waits for the lock and then
+     * records the newest intent. A drain bound to a different coordinator would let the
+     * local write run inside the apply window — this test fails in that wiring.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun mergeDrainsSettingsUnderTheSharedWriteLock() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
+                db.syncStateDao()
+                    .upsert(
+                        SyncStateEntity(
+                            enabled = true,
+                            deviceId = device,
+                            nodeId = "0000000000000001",
+                            hlc = remoteClock.packed,
+                            linkedAt = 1L,
+                        ),
+                    )
+                val port = StoringSettingsSyncPort()
+                SettingsCapture(db, port).install()
+                val coordinator = TestSettingsWriteCoordinator()
+                val applyReached = CompletableDeferred<Unit>()
+                val releaseApply = CompletableDeferred<Unit>()
+                port.applyReached = applyReached
+                port.releaseApply = releaseApply
+                val client =
+                    ScriptedClient(
+                        listOf(settingRecord(key, 15_000L, remoteClock)),
+                        syncHandler = ::ackingSync,
+                    )
+                val merger =
+                    mergerOf(
+                        db,
+                        client,
+                        FakeLibraryMerger(),
+                        effects = newEffects(db, port, coordinator),
+                    )
+
+                val mergeJob = backgroundScope.launch { merger.merge(FirstLinkChoice.MERGE) }
+                // The drain holds the per-key lock while it applies the remote value.
+                applyReached.await()
+
+                // A local set mid-drain: the Room intent first, then the DataStore write,
+                // under the same per-key lock the drain holds (01's ordering).
+                val stored = CompletableDeferred<Unit>()
+                val localJob =
+                    backgroundScope.launch {
+                        coordinator.withLock(key) {
+                            db.withWriteTransaction { port.recordLocal(key, 20_000L) }
+                            port.storeLocal(key, "20000")
+                            stored.complete(Unit)
+                        }
+                    }
+                // A second `withLock` arrival proves the local write reached the shared
+                // lock; the drain holding a different coordinator would time out here.
+                val reachedLock =
+                    withTimeoutOrNull(1_000) {
+                        coordinator.secondAttempt.await()
+                        true
+                    } == true
+                assertTrue(reachedLock, "the local write must reach the shared per-key lock")
+                assertFalse(
+                    withTimeoutOrNull(500) {
+                        stored.await()
+                        true
+                    } == true,
+                    "the local set must wait on the per-key lock the drain holds",
+                )
+
+                releaseApply.complete(Unit)
+                mergeJob.join()
+                localJob.join()
+
+                // The remote value applied once before the local intent existed; the local
+                // write then recorded the newest intent and stored its value. A surviving
+                // intent row (the next round ships it when the merge's own push read the
+                // outbox first) must carry a clock newer than the remote's.
+                assertEquals(listOf(key to "15000"), port.applied)
+                assertEquals("20000", port.stored[key.name])
+                assertNull(pendingSetting(db, key.name))
+                val local = db.syncOutboxDao().get("setting", key.name, "v")
+                assertTrue(
+                    local == null || Hlc(local.hlc, NodeId(local.nodeId)) > remoteClock,
+                    "a surviving local intent must carry a clock newer than the remote's",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * The stale-pending scenario of 01's Sync write ordering through the real merge: a
+     * local set committed before the link beats the server's older value — the drain
+     * never applies it, clears the superseded marker, and the upload ack retires the
+     * intent, so a later drain cannot resurrect the remote value either.
+     */
+    @Test
+    fun mergeKeepsTheNewerLocalSettingPastTheUploadAck() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, enabled = true)
+                val key = PlaybackSettingKeys.SKIP_BACK_MS
+                val remoteClock = Hlc.of(1_577_836_800_000L, 1, remote)
+                db.syncStateDao()
+                    .upsert(
+                        SyncStateEntity(
+                            enabled = true,
+                            deviceId = device,
+                            nodeId = "0000000000000001",
+                            hlc = remoteClock.packed,
+                            linkedAt = 1L,
+                        ),
+                    )
+                val port = StoringSettingsSyncPort()
+                SettingsCapture(db, port).install()
+                val coordinator = TestSettingsWriteCoordinator()
+                // The local set precedes the merge, sequenced like the repository's
+                // local write: the Room intent first, then the DataStore write.
+                coordinator.withLock(key) {
+                    db.withWriteTransaction { port.recordLocal(key, 20_000L) }
+                    port.storeLocal(key, "20000")
+                }
+                val client =
+                    ScriptedClient(
+                        listOf(settingRecord(key, 15_000L, remoteClock)),
+                        syncHandler = ::ackingSync,
+                    )
+                val merger =
+                    mergerOf(
+                        db,
+                        client,
+                        FakeLibraryMerger(),
+                        effects = newEffects(db, port, coordinator),
+                    )
+
+                val result = merger.merge(FirstLinkChoice.MERGE)
+
+                assertTrue(result is FirstLinkResult.Completed, "$result")
+                assertTrue(
+                    port.applied.none { it.first == key },
+                    "the newer local set must win over the stale remote marker",
+                )
+                assertEquals("20000", port.stored[key.name])
+                assertNull(pendingSetting(db, key.name))
+                assertNull(
+                    db.syncOutboxDao().get("setting", key.name, "v"),
+                    "the upload ack must retire the pushed intent",
+                )
+
+                // A later drain (a later link merge, or the start drain once wired) sees
+                // no marker and must not resurrect the stale remote value.
+                newEffects(db, port, coordinator).drainSettings()
+                assertTrue(
+                    port.applied.none { it.first == key },
+                    "the stale remote value must not be re-applied after the upload ack",
+                )
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun resyncReassertsOriginalValuesAndCompleteClocks() =
         runTest {
@@ -908,7 +1080,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, ScriptedClient(emptyList()), activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -961,7 +1138,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, client, activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1032,7 +1214,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, client, activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1068,7 +1255,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, ScriptedClient(emptyList()), activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1101,7 +1293,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, ScriptedClient(emptyList()), activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1171,7 +1368,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, client, activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1202,7 +1404,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, ScriptedClient(emptyList()), activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1235,7 +1442,12 @@ class FirstLinkMergerTest {
                         engine = engine(db, ScriptedClient(emptyList()), activity),
                         libraryMerger = FakeLibraryMerger(),
                         storagePaths = paths,
-                        settings = FakeSettingsSyncPort(),
+                        effects =
+                            SyncApplyEffects(
+                                db,
+                                FakeSettingsSyncPort(),
+                                TestSettingsWriteCoordinator(),
+                            ),
                         clock = TestClock(now),
                         activity = activity,
                     )
@@ -1254,6 +1466,7 @@ class FirstLinkMergerTest {
         client: SyncClient,
         library: FakeLibraryMerger,
         activity: SyncActivityState = SyncActivityState(),
+        effects: SyncApplyEffects = newEffects(db),
     ): FirstLinkMerger =
         FirstLinkMerger(
             db = db,
@@ -1262,10 +1475,22 @@ class FirstLinkMergerTest {
             engine = engine(db, client, activity),
             libraryMerger = library,
             storagePaths = paths,
-            settings = FakeSettingsSyncPort(),
+            effects = effects,
             clock = TestClock(now),
             activity = activity,
         )
+
+    /**
+     * The fixture for 10's durable-effects drainer: [coordinator] is the same per-key write
+     * lock the test's local settings writes take, matching the one app-scoped
+     * [ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator] the graph binds.
+     */
+    private fun newEffects(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        port: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort = FakeSettingsSyncPort(),
+        coordinator: ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator =
+            TestSettingsWriteCoordinator(),
+    ): SyncApplyEffects = SyncApplyEffects(db, port, coordinator)
 
     private suspend fun link(
         db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
@@ -1307,6 +1532,46 @@ class FirstLinkMergerTest {
         ch.lkmc.neutrodyne.sync.protocol.SyncJson
             .decodeFromString<RawSyncRecord>(json)
             .state
+
+    /** The wire record a server pull serves for one synced setting's `v` field. */
+    private fun settingRecord(
+        key: ch.lkmc.neutrodyne.core.model.settings.SettingKey<*>,
+        value: Long,
+        clock: Hlc,
+    ): RecordDto =
+        RecordDto(
+            coll = "setting",
+            id = JsonPrimitive(key.name),
+            seq = 0,
+            by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            fields = mapOf("v" to FieldValue(JsonPrimitive(value), clock.toString())),
+        )
+
+    /** The scripted server's acknowledgement of every pushed change, no echo page. */
+    private fun ackingSync(
+        since: String?,
+        changes: List<ChangeDto>,
+    ): SyncResponse =
+        SyncResponse(
+            results = changes.mapIndexed { index, _ -> ChangeResultDto(index, "applied") },
+            records = emptyList(),
+            cursor = "c:00000002:1",
+            hasMore = false,
+            serverTime = "",
+        )
+
+    private suspend fun pendingSetting(
+        db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+        key: String,
+    ): String? {
+        val row = db.syncClockDao().get("setting", key) ?: return null
+        val raw =
+            runCatching {
+                ch.lkmc.neutrodyne.sync.protocol.SyncJson
+                    .decodeFromString<RawSyncRecord>(row.clocks)
+            }.getOrNull()
+        return raw?.pendingSetting?.value
+    }
 
     /** The engine the merge's push rounds run through, over the same scripted client. */
     private fun engine(
@@ -1735,6 +2000,9 @@ private class ScriptedClient(
     private val firstPageHasMore: Boolean = false,
     private val failAtPage: Int? = null,
     private val failure: () -> Throwable = { java.io.IOException("sync.example unreachable") },
+    private val syncHandler: (String?, List<ChangeDto>) -> SyncResponse = { _, _ ->
+        SyncResponse(emptyList(), records, "c:00000001:1", false, "")
+    },
 ) : SyncClient {
     private var pages = 0
 
@@ -1792,14 +2060,7 @@ private class ScriptedClient(
     override suspend fun sync(
         since: String?,
         changes: List<ChangeDto>,
-    ): SyncResponse =
-        SyncResponse(
-            results = emptyList(),
-            records = records,
-            cursor = "c:00000001:1",
-            hasMore = false,
-            serverTime = "",
-        )
+    ): SyncResponse = syncHandler(since, changes)
 
     override suspend fun changes(
         since: String?,

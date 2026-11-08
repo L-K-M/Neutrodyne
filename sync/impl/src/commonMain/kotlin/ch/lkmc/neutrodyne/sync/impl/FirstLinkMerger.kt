@@ -105,8 +105,9 @@ private data class EpisodeParkHints(
  * merged state per record, so a local June `playedAt` loses to a server October "unplayed"),
  * the cursor is adopted with capture enabled, and only fields the local side won — or the
  * server lacks — are captured at their own timestamps; server-won fields are never
- * re-stamped. Synced settings arrive as durable effects (`pendingSetting`) that
- * [SyncApplyEffects] applies after the commit.
+ * re-stamped. Synced settings arrive as durable effects (`pendingSetting`) that the bound
+ * [SyncApplyEffects] drains after the commit, under the same app-scoped per-key write lock
+ * a local set/reset and a linked restore take.
  */
 class FirstLinkMerger(
     private val db: NeutrodyneDatabase,
@@ -115,7 +116,7 @@ class FirstLinkMerger(
     private val engine: SyncEngine,
     private val libraryMerger: LibraryMerger,
     storagePaths: StoragePaths,
-    private val settings: ch.lkmc.neutrodyne.core.domain.SettingsSyncPort,
+    private val effects: SyncApplyEffects,
     private val clock: Clock,
     private val activity: SyncActivityState,
 ) {
@@ -287,7 +288,7 @@ class FirstLinkMerger(
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         captureLocalWinners()
         journalPendingSettings(pull.records)
-        SyncApplyEffects(db, settings).drainSettings()
+        effects.drainSettings()
         pushOutbox(onProgress)
         completeLink()
         discardStaging()
@@ -321,7 +322,7 @@ class FirstLinkMerger(
         }
         adoptPulledState(pull.cursor, pull.maxClockPacked)
         journalPendingSettings(pull.records)
-        SyncApplyEffects(db, settings).drainSettings()
+        effects.drainSettings()
         completeLink()
         discardStaging()
         return FirstLinkResult.Completed(pull.records.size)

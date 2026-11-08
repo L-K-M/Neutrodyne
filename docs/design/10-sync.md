@@ -1221,7 +1221,15 @@ completed link deletes it. Deviations the current code forces:
   (`pendingSetting`) runs after `mergeStaged` returns rather than inside
   each chunk transaction, which keeps the same crash-recovery property
   (the marker lives in `sync_clock`; `SyncApplyEffects.drainSettings`
-  applies it at the latest start).
+  applies it at the latest start). Boundary (2026-11-08): the merge
+  itself already drains those markers before it completes, through the
+  one app-scoped `SyncApplyEffects` bound with the shared
+  `SettingsWriteCoordinator`, so a journaled remote value serializes
+  with local sets under 01's per-key lock; the separate
+  at-each-start drain for normal rounds is still unwired —
+  `SyncEngine` does not run `drainSettings` yet, so a marker left
+  behind waits for the next link merge, resync or the later start
+  drain rather than applying on the next ordinary round.
 - The local seed now covers groups, members and Up next too, so an empty
   account's upload includes them (the 2026-11-04 shortcut uploaded only
   podcasts and episodes).

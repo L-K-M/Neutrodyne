@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.domain.SyncActivity
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
@@ -136,6 +137,19 @@ object SyncBindings {
         )
 
     /**
+     * The durable apply-effects drainer (10). Every drain takes the one app-scoped
+     * [SettingsWriteCoordinator] `:core:data` binds for local sets/resets and a linked
+     * restore, so a journaled remote setting never interleaves a local write for its key.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun syncApplyEffects(
+        db: NeutrodyneDatabase,
+        settings: SettingsSyncPort,
+        writeLocks: SettingsWriteCoordinator,
+    ): SyncApplyEffects = SyncApplyEffects(db, settings, writeLocks)
+
+    /**
      * The first-link merge; the controller drives it from the link state machine. The
      * `LibraryMerger` port is `:core:data`'s `RestoreMerger` binding (05's one routine).
      */
@@ -148,7 +162,7 @@ object SyncBindings {
         engine: SyncEngine,
         libraryMerger: ch.lkmc.neutrodyne.core.domain.LibraryMerger,
         storagePaths: ch.lkmc.neutrodyne.core.common.StoragePaths,
-        settings: SettingsSyncPort,
+        effects: SyncApplyEffects,
         clock: Clock,
         activity: SyncActivityState,
     ): FirstLinkMerger =
@@ -159,7 +173,7 @@ object SyncBindings {
             engine = engine,
             libraryMerger = libraryMerger,
             storagePaths = storagePaths,
-            settings = settings,
+            effects = effects,
             clock = clock,
             activity = activity,
         )

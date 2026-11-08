@@ -1156,7 +1156,7 @@ private class Harness(
             engine = engine,
             libraryMerger = libraryMerger,
             storagePaths = testStoragePaths(),
-            settings = FakeSettingsSyncPort(),
+            effects = SyncApplyEffects(db, settings, TestSettingsWriteCoordinator()),
             clock = clock,
             activity = activity,
         )
