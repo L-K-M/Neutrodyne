@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.domain.DiagnosticsContributor
 import ch.lkmc.neutrodyne.core.domain.YouTubeEngineDiagnostics
+import ch.lkmc.neutrodyne.core.model.diagnostics.DESKTOP_LOG_DIR_KEY
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsLine
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSeverity
@@ -28,7 +29,7 @@ internal class DesktopDiagnosticsContributor
         override val section = DiagnosticsSectionId.DESKTOP
 
         override suspend fun collect(): List<DiagnosticsLine> {
-            val lines = mutableListOf(DiagnosticsLine("logDir", dirs.logs.toString()))
+            val lines = mutableListOf(DiagnosticsLine(DESKTOP_LOG_DIR_KEY, dirs.logs.toString()))
             val wake = runner.lastWakeAt.value
             lines += DiagnosticsLine("lastWakeAt", wake?.toEpochMilliseconds()?.toString() ?: "none yet")
             lines += DiagnosticsLine("engineChild", engine.childStatus() ?: "not running")

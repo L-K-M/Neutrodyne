@@ -138,6 +138,8 @@ jobs:
           scripts/ci/tests/native-ffmpeg-build.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
           scripts/ci/tests/desktop-packaging.test.sh
+          scripts/ci/tests/build-desktop-release-windows.test.sh
+          python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
@@ -165,8 +167,8 @@ jobs:
           python3 scripts/ci/tests/check-apk-published.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
           python3 scripts/ci/tests/release-ffmpeg-source.test.py
-          python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/check-runtime-sources.test.py
+          python3 scripts/ci/tests/smoke-start.test.py
           python3 scripts/ci/tests/network-capture.test.py
       - name: Preserve a formatting repair patch
         if: failure()
@@ -487,6 +489,7 @@ jobs:
           sudo apt-get update -qq
           pkgs="binutils xvfb dbus-x11 dbus-daemon"
           [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          # shellcheck disable=SC2086 # the package list is word-split on purpose
           sudo apt-get install -y -qq $pkgs
       # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell
       # with GNU make, NASM and gpg. `buildFfmpeg` names MSYS2's bash explicitly
