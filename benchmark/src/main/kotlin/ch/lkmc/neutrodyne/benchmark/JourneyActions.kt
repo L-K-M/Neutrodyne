@@ -36,10 +36,22 @@ enum class Destination(
  * [BaselineProfileGenerator] so a journey is defined once.
  */
 object JourneyActions {
-    /** Cold start to the first Feeds page; the setup block seeds and presses Home. */
+    /**
+     * Cold start to the first Feeds page; the setup block seeds and presses Home.
+     *
+     * StartupTimingMetric's TTFD leg needs a terminated RenderThread DrawFrame after
+     * the reportFullyDrawn frame, and the Perfetto trace stops when this block
+     * returns. The pager's accessibility node exists while skeleton rows still show,
+     * so the wait ends on settled content instead: the seeded fixture guarantees a
+     * non-empty All feed and the journey never moves the Feeds selection off the
+     * default All page. Then wait for device idle so the final frames finish, as
+     * the sibling frame journeys do.
+     */
     fun MacrobenchmarkScope.coldStart() {
         startActivityAndWait()
-        check(device.wait(Until.hasObject(By.res("feeds_pager")), WAIT_MS)) { "Feeds did not load" }
+        val page = checkNotNull(device.wait(Until.findObject(By.res("feed-page:all")), WAIT_MS))
+        check(page.wait(Until.hasObject(By.res("feed_list")), WAIT_MS)) { "Feeds did not load" }
+        device.waitForIdle()
     }
 
     /** Three flings over the Library cover grid. */
