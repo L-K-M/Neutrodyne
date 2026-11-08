@@ -75,13 +75,11 @@ class NetworkCaptureCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("unmapped host: cdn.example.com", result.stderr)
 
-    def test_the_forbidden_rest_api_host_fails_even_when_declared(self):
-        hosts = self.root / "hosts.txt"
-        hosts.write_text((FIXTURES / "hosts.txt").read_text(encoding="utf-8") + "\napi.github.com\n")
-        result = self.check(hosts=hosts, declarations=self.declarations + ["api.github.com=app-updates"])
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("api.github.com", result.stderr)
-        self.assertIn("forbids", result.stderr)
+    def test_rest_api_host_maps_to_engine_updates(self):
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("api.github.com\tyoutube-engine\n", result.stdout)
+        self.assertNotIn("api.github.com\tapp-updates", result.stdout)
 
     def test_an_unknown_inventory_id_is_rejected(self):
         result = self.check(declarations=["cdn.example.com=not-an-id"])

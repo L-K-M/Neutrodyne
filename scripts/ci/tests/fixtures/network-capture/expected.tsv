@@ -1,4 +1,5 @@
 api.fyyd.de	fyyd
+api.github.com	youtube-engine
 api.podcastindex.org	podcastindex
 cdn.example.com	media
 example.com	add-input,artwork
@@ -7,7 +8,6 @@ feeds2.example.net	feeds
 github.com	app-updates,issue-tracker,links,server-updates,youtube-engine
 i.ytimg.com	youtube-subscriptions
 itunes.apple.com	apple
-l-k-m.github.io	youtube-engine
 release-assets.githubusercontent.com	app-updates,server-updates,youtube-engine
 rr3---sn-vgqsenlk.googlevideo.com	youtube-streams
 rss.marketingtools.apple.com	apple
