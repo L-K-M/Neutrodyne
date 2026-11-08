@@ -145,6 +145,10 @@ interface EngineStorePaths {
 /** W2 owns atomic active.json, bounded safe extraction and IO, and the M9b version/staging records.
  * hostPrepared is null until prepared; playback returns transient preparing, never compiles inline.
  * During a self-test trial it returns the staged candidate; every other bind serves [EngineActive.current].
+ * [preparation] always describes the tree the next bind serves — during a trial the candidate's
+ * own compile state — so a prepare worker's loadStatus/prepareBundled landing mid-trial (before,
+ * during or after the candidate's first compile) never republishes the active engine's state
+ * over it; and no bundled prepare prunes the kept staged candidate a run may still trial.
  */
 interface EngineStore {
     val preparation: StateFlow<EnginePreparation>

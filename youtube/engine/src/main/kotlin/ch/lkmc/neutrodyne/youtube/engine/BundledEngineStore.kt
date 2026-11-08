@@ -25,10 +25,11 @@ import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 
 /**
  * Main-process engine store (04 Engine updates): `active.json` names `current`/`previous`, the
- * manifest sequence and `rejected[]`; `versions/` holds bundled plus up to two downloaded trees;
- * `staging/` is scratch emptied by every update run. Atomic record + directory writes keep a
- * crash anywhere mid-flow resumable. The self-test trial is in-memory only: a process that dies
- * mid-trial leaves the candidate staged and the record untouched.
+ * manifest sequence and `rejected[]`; `versions/` holds bundled, current and previous plus at
+ * most one kept staged candidate (never pruned by a bundled prepare: its run may still be
+ * waiting to trial it); `staging/` is scratch emptied by every update run. Atomic record +
+ * directory writes keep a crash anywhere mid-flow resumable. The self-test trial is in-memory
+ * only: a process that dies mid-trial leaves the candidate staged and the record untouched.
  */
 class BundledEngineStore(
     private val paths: EngineStorePaths,
@@ -95,7 +96,6 @@ class BundledEngineStore(
                 val next = preparedFor(current, metadata, expected, bundledReady)
                 if (next != null) {
                     prepared = next
-                    mutablePreparation.value = EnginePreparation.COMPILED
                 } else {
                     // A tree extracted but not yet compiled by the host stays servable while it
                     // still names the record's current; a torn compile marker never does.
@@ -105,10 +105,14 @@ class BundledEngineStore(
                                 !EngineCompileMarkers.exists(it.libDir, it.marker.pythonMinor)
                         } ?: false
                     if (!keep) prepared = null
-                    if (prepared == null && mutablePreparation.value == EnginePreparation.COMPILED) {
-                        mutablePreparation.value = EnginePreparation.UNPREPARED
-                    }
                 }
+                publishPreparation(
+                    when {
+                        next != null -> EnginePreparation.COMPILED
+                        prepared != null -> EnginePreparation.PREPARING
+                        else -> EnginePreparation.UNPREPARED
+                    },
+                )
                 publishActive(record)
             }
         }
@@ -121,7 +125,7 @@ class BundledEngineStore(
                 val lib = library(metadata.version)
                 prepared?.takeIf { it.marker == expected && lib.isDirectory }?.let { return@withLock it }
                 prepared = null
-                mutablePreparation.value = EnginePreparation.PREPARING
+                publishPreparation(EnginePreparation.PREPARING)
                 try {
                     directory(root)
                     directory(File(root, "versions"))
@@ -144,26 +148,24 @@ class BundledEngineStore(
                     }
                     val record = repairRecord(readRecord(File(root, "active.json")), metadata, expected)
                     writeRecord(File(root, "active.json"), record)
-                    pruneVersions(setOf(record.bundled, record.current) + listOfNotNull(record.previous))
+                    pruneVersions(pruneKeep(record))
                     publishActive(record)
                     val preparedForRecord = preparedFor(record.current, metadata, expected, bundledReady)
-                    if (preparedForRecord != null) {
-                        publish(
-                            preparedForRecord.libDir.toFile(),
-                            preparedForRecord.marker,
-                            EnginePreparation.COMPILED,
-                        )
-                    } else {
-                        // Fresh bundled tree without a compile marker; the host compiles on bind.
-                        publish(lib, expected, EnginePreparation.PREPARING)
-                    }
+                    // A fresh bundled tree without a compile marker stays servable; the host
+                    // compiles it on bind.
+                    val active = preparedForRecord ?: PreparedEngine(lib.path.toPath(), expected)
+                    prepared = active
+                    publishPreparation(
+                        if (preparedForRecord != null) EnginePreparation.COMPILED else EnginePreparation.PREPARING,
+                    )
+                    active
                 } catch (cancelled: CancellationException) {
                     prepared = null
-                    mutablePreparation.value = EnginePreparation.UNPREPARED
+                    publishPreparation(EnginePreparation.UNPREPARED)
                     throw cancelled
                 } catch (failure: Exception) {
                     prepared = null
-                    mutablePreparation.value = EnginePreparation.FAILED
+                    publishPreparation(EnginePreparation.FAILED)
                     throw failure
                 }
             }
@@ -189,6 +191,12 @@ class BundledEngineStore(
         var previous = record.previous?.takeIf { versionPattern.matches(it) }
         var activation = record.activation
         if (compareVersions(metadata.version, current) >= 0) {
+            // The new bundle supersedes the downloaded trees at or below it; a staged
+            // candidate above it survives (prune keeps that one for its pending run).
+            if (current != metadata.version) removeTree(versionDir(current))
+            previous
+                ?.takeIf { it != metadata.version }
+                ?.let { removeTree(versionDir(it)) }
             current = metadata.version
             previous = null
             activation = null
@@ -270,8 +278,7 @@ class BundledEngineStore(
                 // carries its compile marker is COMPILED. Anything else must first be
                 // compiled by that host, so the bind owes the first-compile budget, not
                 // the start budget (04 host contract). Cancel/commit restore from here.
-                mutablePreparation.value =
-                    if (downloadedUsable(version)) EnginePreparation.COMPILED else EnginePreparation.PREPARING
+                mutablePreparation.value = candidatePreparation(version)
                 publishActive(mutableActive.value.copy(trial = candidate))
                 candidate
             }
@@ -491,15 +498,32 @@ class BundledEngineStore(
         }
     }
 
-    private fun publish(
-        lib: File,
-        identity: CompileMarker,
-        state: EnginePreparation,
-    ): PreparedEngine =
-        PreparedEngine(lib.path.toPath(), identity).also {
-            prepared = it
-            mutablePreparation.value = state
-        }
+    /**
+     * What prune may never delete: the record's bundled/current/previous, the one kept staged
+     * candidate (the `versions/` dir that is neither of those — the same tree `active.staged`
+     * reports; its run may still be awaiting engine idle before `beginTrial`, and a dead
+     * process leaves it resumable), and the open trial's own tree. Commit, abort or a
+     * superseding activation still bounds `versions/`; only the takeover in [repairRecord]
+     * drops a candidate the new bundle superseded.
+     */
+    private fun pruneKeep(record: ActiveRecord): Set<String> =
+        setOf(record.bundled, record.current) +
+            listOfNotNull(record.previous, stagedVersion(record), trial?.marker?.engineVersion)
+
+    /**
+     * Preparation describes the tree the next bind actually serves: while a trial is open
+     * that is the staged candidate with its own compile state, otherwise the active engine's
+     * [activeState]. A prepare worker's loadStatus/prepareBundled landing mid-trial used to
+     * republish the active's state, flipping the transport's admission gate and its start
+     * budget (15 s start vs 120 s first compile) underneath the serving trial host.
+     */
+    private fun publishPreparation(activeState: EnginePreparation) {
+        val served = trial
+        mutablePreparation.value = served?.let { candidatePreparation(it.marker.engineVersion) } ?: activeState
+    }
+
+    private fun candidatePreparation(version: String): EnginePreparation =
+        if (downloadedUsable(version)) EnginePreparation.COMPILED else EnginePreparation.PREPARING
 
     private fun identity(version: String): CompileMarker {
         require(appVersionCode > 0 && Regex("[0-9]+\\.[0-9]+").matches(paths.pythonMinor))

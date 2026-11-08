@@ -144,6 +144,30 @@ class BinderTrialCompileBudgetTest {
             )
         }
 
+    @Test fun lateWorkerLoadStatusDoesNotStealTheTrialsCompileBudget() =
+        runTest {
+            val f = Fixture(this)
+            compileBundled(f)
+            stageCandidate(f)
+            f.store.beginTrial(CANDIDATE)
+            assertEquals(EnginePreparation.PREPARING, f.store.preparation.value)
+            // The prepare worker's PING over the compiled active finished late; its
+            // loadStatus lands after beginTrial, before the trial bind below snapshots
+            // its start budget. It must leave the trial's PREPARING in place.
+            f.store.loadStatus()
+            assertEquals(EnginePreparation.PREPARING, f.store.preparation.value)
+            // The trial self-test compiles the candidate slowly (90 s): within the 120 s
+            // first-compile budget, past the 15 s start limit the active would dictate.
+            f.endpoint.pingDelayMs = 90_000
+            val call = async { f.selftest(budgetMs = 150_000) }
+            runCurrent()
+            advanceTimeBy(YtxLimits.COMPILE_MS)
+            runCurrent()
+            assertEquals("""{"ok":true,"missing":[]}""", call.await())
+            assertEquals(HostState.READY, f.transport.status.value.state)
+            assertEquals(1, f.connection.binds)
+        }
+
     private inner class Fixture(
         val scope: TestScope,
     ) {

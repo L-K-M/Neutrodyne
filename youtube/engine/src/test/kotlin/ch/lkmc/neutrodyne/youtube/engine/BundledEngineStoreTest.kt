@@ -256,6 +256,85 @@ class BundledEngineStoreTest {
             )
         }
 
+    @Test fun prepareBundledBetweenStagingAndTrialKeepsTheResumableCandidate() =
+        runTest {
+            val store = store()
+            // Fresh boot, no bundled prepare yet: the updater stages while its run waits
+            // for engine idle, and the delayed engine-prepare worker fires in between.
+            val candidate = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            store.prepareBundled()
+            assertTrue(File(candidate.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertEquals("2026.09.01", store.active.value.staged)
+            // The run reaches its trial over the kept tree, and a no-verdict cancellation
+            // keeps the candidate resumable without any rejection.
+            assertEquals(candidate, store.beginTrial("2026.09.01"))
+            store.clearTrial()
+            assertTrue(File(candidate.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertEquals("2026.09.01", store.active.value.staged)
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+        }
+
+    @Test fun prepareBundledDuringATrialKeepsTheCandidateAndTheTrialsPreparation() =
+        runTest {
+            val store = store()
+            val active = store.prepareBundled()
+            compileFixture(active)
+            store.loadStatus()
+            val first = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            store.beginTrial("2026.09.01")
+            compileFixture(first)
+            store.commitTrial(clock.now(), null, false)
+            // A second update trials a newer candidate over the downloaded active; the
+            // delayed worker's prepareBundled lands while the trial host compiles it.
+            val candidate = store.stageVersion("2026.09.15", fixtureZip(version = "2026.09.15"), "0.8.0", 5)
+            store.beginTrial("2026.09.15")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            store.prepareBundled()
+            assertTrue(File(candidate.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertEquals(candidate, store.hostPrepared())
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            // The trial still ends honestly: the candidate compiles and commits.
+            compileFixture(candidate)
+            store.commitTrial(clock.now(), null, false)
+            assertEquals("2026.09.15", store.active.value.current)
+            assertEquals("2026.09.01", store.active.value.previous)
+            assertEquals(candidate, store.hostPrepared())
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+        }
+
+    @Test fun loadStatusDuringATrialReportsTheServedCandidatesOwnState() =
+        runTest {
+            val store = store()
+            val active = store.prepareBundled()
+            compileFixture(active)
+            store.loadStatus()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            val candidate = store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 4)
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            // A prepare worker whose active PING finished late calls loadStatus after
+            // beginTrial: the compiled active must not flip the serving trial to COMPILED,
+            // or the trial bind would snapshot the 15 s start budget for an uncompiled
+            // candidate that owes the 120 s first-compile one.
+            store.loadStatus()
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            assertEquals(candidate, store.hostPrepared())
+            // Once the trial host has written the candidate's marker, the same call
+            // reports COMPILED: the state of the tree actually served.
+            compileFixture(candidate)
+            store.loadStatus()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            store.clearTrial()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(active, store.hostPrepared())
+        }
+
     @Test fun genuinePinnedZipExtractsWithShebangAndExpectedInventory() {
         val archive = File("../ytdlp/engine/yt-dlp")
         val target = File(temporary.root, "real-lib")
