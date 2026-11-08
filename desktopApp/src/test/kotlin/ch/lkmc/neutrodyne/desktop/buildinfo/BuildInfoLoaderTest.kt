@@ -11,13 +11,13 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * [BuildInfoLoader]: the generated resource matches `gradle.properties` (the resource is
- * built from it, reproducibly), a packaged resource overrides the image identity, and a missing
+ * [BuildInfoLoader]: the generated resource matches the build inputs, including the selected
+ * YouTube variant. A packaged resource overrides the image identity, and a missing
  * resource degrades to the `DEV` defaults answered by the host JVM.
  */
 class BuildInfoLoaderTest {
     @Test
-    fun `the generated resource matches gradle properties`() {
+    fun `the generated resource matches the selected build inputs`() {
         val info = BuildInfoLoader.load()
         val gradle = gradleProperties()
         val resource = resourceProperties()
@@ -26,7 +26,10 @@ class BuildInfoLoaderTest {
         assertThat(info.versionCode).isEqualTo(gradle["neutrodyne.versionCode"]!!.toInt())
         assertThat(info.repoUrl).isEqualTo(gradle["neutrodyne.repoUrl"])
         assertThat(info.engineManifestUrl).isEqualTo(gradle["neutrodyne.engineManifestUrl"])
-        assertThat(info.youTubeEngineBundled).isEqualTo(gradle["neutrodyne.youtubeEngine"]!!.toBoolean())
+        val selectedEngine =
+            System.getProperty("neutrodyne.test.youtubeEngine")
+                ?: error("the test tasks must pass the selected YouTube variant")
+        assertThat(info.youTubeEngineBundled).isEqualTo(selectedEngine.toBooleanStrict())
 
         assertThat(info.platform).isEqualTo(BuildInfo.Platform.DESKTOP)
         // The invocation decides the kind: `dev` for runs and tests, the package's kind under

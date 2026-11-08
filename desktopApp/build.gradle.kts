@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.provider.MapProperty
+import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.getByType
 import org.jetbrains.compose.ComposeExtension
 import org.jetbrains.compose.desktop.DesktopExtension
@@ -70,6 +71,11 @@ val youtubeEngine =
         .orElse("true")
         .get()
         .toBoolean()
+
+// Verify the selected variant, including command-line overrides, independently of the resource.
+tasks.withType<Test>().configureEach {
+    systemProperty("neutrodyne.test.youtubeEngine", youtubeEngine.toString())
+}
 
 dependencies {
     for (feature in listOf(
