@@ -1,7 +1,8 @@
 # Review: runtime-source-copy-fix — macOS Mach-O runtime comparison
 
-Branch `impl/runtime-source-copy-fix`, pinned HEAD `abb225b2e3d9a678a1153f69577d4718121d9764`
-(2026-11-08). Base: `5ce6e8443` (local `impl/desktop-jar-verification` tip, the
+Branch `impl/runtime-source-copy-fix`. Pinned HEAD `abb225b2e3d9a678a1153f69577d4718121d9764`
+(2026-11-08) — the last code change; every later commit adds only this review
+file. Base: `5ce6e8443` (local `impl/desktop-jar-verification` tip, the
 release-candidate tree that owns `scripts/ci/check-runtime-sources.sh`; the file
 does not exist on `origin/main` `a3f2eba`, so a main-based fix was not possible.
 The file is byte-identical on `impl/m11b-release-2` / PR #341, so both commits
