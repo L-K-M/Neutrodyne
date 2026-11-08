@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
 import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
+import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceInfoDto
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
@@ -116,6 +117,102 @@ class KtorSyncClientTest {
             assertEquals("5", request.url.queryParameter("limit"))
         }
 
+    @Test
+    fun aLinkConfirmApproveAcceptsTheEmptyNoContentReply() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(noContent())
+
+            fixture.client.linkConfirm(fixture.baseUrl, "link-tok", "ABCD-EFGH", approve = true)
+
+            val request = fixture.take()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/auth/link/confirm", request.url.encodedPath)
+            assertEquals("Bearer link-tok", request.headers["Authorization"])
+            assertEquals(PROTOCOL_VERSION.toString(), request.headers["Neutrodyne-Sync-Protocol"])
+            val body = request.body?.utf8().orEmpty()
+            assertTrue(body.contains("\"userCode\":\"ABCD-EFGH\""), "body was: $body")
+            assertTrue(body.contains("\"approve\":true"), "body was: $body")
+        }
+
+    @Test
+    fun aLinkConfirmDenyAcceptsTheEmptyNoContentReply() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(noContent())
+
+            fixture.client.linkConfirm(fixture.baseUrl, "link-tok", "ABCD-EFGH", approve = false)
+
+            val body =
+                fixture
+                    .take()
+                    .body
+                    ?.utf8()
+                    .orEmpty()
+            assertTrue(body.contains("\"approve\":false"), "body was: $body")
+        }
+
+    @Test
+    fun aLinkConfirmFailureBecomesATransportException() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(json("""{"code":"LINK_CODE_CONSUMED"}""", 409))
+
+            val failure =
+                assertFailsWith<Exception> {
+                    fixture.client.linkConfirm(fixture.baseUrl, "link-tok", "ABCD-EFGH", approve = true)
+                }
+
+            assertIs<SyncTransportException>(failure)
+            assertEquals(409, failure.status)
+        }
+
+    @Test
+    fun aLogoutCarriesTheBearerToken() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(noContent())
+
+            fixture.client.logout()
+
+            val request = fixture.take()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/auth/logout", request.url.encodedPath)
+            assertEquals("Bearer tok", request.headers["Authorization"])
+        }
+
+    @Test
+    fun aLogoutFailureBecomesATransportException() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(json("""{"code":"SERVER_ERROR"}""", 500))
+
+            val failure = assertFailsWith<Exception> { fixture.client.logout() }
+
+            assertIs<SyncTransportException>(failure)
+            assertEquals(500, failure.status)
+        }
+
+    // The no-content handling is per endpoint: endpoints that must decode a body still reject
+    // empty or malformed replies instead of silently succeeding.
+    @Test
+    fun anEmptyReplyWhereJsonIsRequiredStillFails() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(json(""))
+
+            assertFailsWith<Exception> { fixture.client.account() }
+        }
+
+    @Test
+    fun aMalformedReplyWhereJsonIsRequiredStillFails() =
+        runTest {
+            val fixture = fixture()
+            fixture.server.enqueue(json("{malformed"))
+
+            assertFailsWith<Exception> { fixture.client.login(fixture.baseUrl, "a", "s", device) }
+        }
+
     // --- fixture -----------------------------------------------------------------------------
 
     private class Fixture(
@@ -155,6 +252,8 @@ class KtorSyncClientTest {
             baseUrl = baseUrl,
         )
     }
+
+    private fun noContent(): MockResponse = MockResponse.Builder().code(204).build()
 
     private fun json(
         body: String,

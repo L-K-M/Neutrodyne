@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Unlicense
+
+package ch.lkmc.neutrodyne.feature.settings
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+
+@Composable
+internal fun M10ScreenContent(variant: Int) {
+    SettingsHomeRoute(remember { FakeSettingsRepository() })
+}
