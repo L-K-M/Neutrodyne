@@ -238,6 +238,11 @@ abstract class SyncOutboxDao(
      * A historical stamp for the first link and a backup restore: `atMs << 16` on this node, written
      * as "insert, or raise only if older", so an older restored stamp never replaces a newer pending
      * change. [literal] freezes the value for played, position, session and setting fields.
+     *
+     * Returns true when the archive's intent won or is already pending with the same clock and
+     * payload, or sync is disabled. A newer pending intent returns false. An identical intent must
+     * still reach DataStore when replaying a failed write; a linked settings restore uses this
+     * answer to preserve a newer local value (05 step 7).
      */
     suspend fun captureAt(
         coll: String,
@@ -245,9 +250,11 @@ abstract class SyncOutboxDao(
         field: String,
         atMs: Long,
         literal: String? = null,
-    ) {
+    ): Boolean =
         db.syncWriter { connection ->
-            if (connection.scalar("SELECT enabled FROM sync_state WHERE id = 0") == 0L) return@syncWriter
+            if (connection.scalar("SELECT enabled FROM sync_state WHERE id = 0") == 0L) {
+                return@syncWriter true
+            }
             val now = connection.scalar("SELECT " + SyncTriggers.SYNC_WALL_MS)
             val stamp =
                 atMs.coerceIn(SyncTriggers.MIN_CAPTURE_MS, maxOf(SyncTriggers.MIN_CAPTURE_MS, now)) shl
@@ -255,7 +262,6 @@ abstract class SyncOutboxDao(
             val node = checkNotNull(db.syncStateDao().get()?.nodeId)
             putIfNewer(SyncOutboxEntity(coll, rid, field, stamp, node, value = literal))
         }
-    }
 
     /** Full resync: an accepted value and its complete original clock, counter and origin node. */
     suspend fun captureStored(
@@ -364,15 +370,18 @@ abstract class SyncOutboxDao(
         }
     }
 
-    private suspend fun putIfNewer(row: SyncOutboxEntity) {
+    /** True when [row] wins or is already pending verbatim; false when a newer row was kept. */
+    private suspend fun putIfNewer(row: SyncOutboxEntity): Boolean {
         val old = get(row.coll, row.rid, row.field)
         if (old == null || compareClock(row, old) > 0) {
             upsert(row)
-            return
+            return true
         }
-        require(compareClock(row, old) != 0 || row.value == old.value) {
+        val comparison = compareClock(row, old)
+        require(comparison != 0 || row.value == old.value) {
             "Conflicting payloads at the same complete clock"
         }
+        return comparison == 0
     }
 }
 
