@@ -207,6 +207,23 @@ class SyncControllerImplTest {
         }
 
     @Test
+    fun anAlreadyGrantedLocalServerSetsTheBypassBeforeDiscovery() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                h.gate.setPermissionGranted(true)
+                h.controller.discover("https://192.168.1.50")
+                await(h) { h.linkFlow.state.value is LinkState.AwaitingInput }
+                // No prompt ran, so the bypass must come from the gate's real verdict.
+                assertEquals(listOf(true), h.gate.results)
+                assertEquals(listOf("discover"), h.client.calls)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
     fun aServerThatSpeaksAnOlderProtocolFails() =
         runTest {
             val h = harness(this)
@@ -963,6 +980,7 @@ private class Harness(
             address = address,
             tokens = tokens,
             activity = activity,
+            gate = gate,
         )
     val merger = FirstLinkMerger(db, client, applier, engine, clock, activity)
     val build =

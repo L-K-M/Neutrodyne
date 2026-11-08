@@ -3940,7 +3940,7 @@
   ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncClientMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory {
   ch.lkmc.neutrodyne.sync.impl.SyncBindings$SyncEngineMetroFactory$Companion Companion;

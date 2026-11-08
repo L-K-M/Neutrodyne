@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -667,6 +668,7 @@ class FirstLinkMergerTest {
                     kotlinx.coroutines.runBlocking { save("sync.example", "token") }
                 },
             activity = activity,
+            gate = FakeLocalNetworkGate(),
         )
     }
 

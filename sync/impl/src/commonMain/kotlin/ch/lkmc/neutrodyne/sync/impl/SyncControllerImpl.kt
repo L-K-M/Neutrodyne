@@ -541,6 +541,10 @@ class SyncControllerImpl(
                 linkFlow.failed(SyncProblem.LocalNetworkPermissionDenied)
                 return null
             }
+        } else {
+            // No prompt ran, so the SYNC bypass must follow the gate's real verdict; otherwise an
+            // already-granted ACCESS_LOCAL_NETWORK would leave discovery denied (10 gate 3).
+            gate.onPermissionResult(gate.hasPermission())
         }
         return when (val result = discovery.discover(normalized)) {
             is DiscoveryResult.Failure -> {
