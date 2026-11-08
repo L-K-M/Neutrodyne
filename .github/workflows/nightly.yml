@@ -7,7 +7,8 @@
 # the out-of-process smoke legs. The other jobs land with their
 # milestones (`no-engine-build` M9a, `sync-convergence` MS0,
 # `server-image-smoke` MS1, `benchmark-dryrun` M10, `screenshots-full` M10,
-# `live-canary`, `youtube-canary` and `engine-nightly-canary` M9a).
+# the dispatch-only `m10-a11y` M10 acceptance run, `live-canary`,
+# `youtube-canary` and `engine-nightly-canary` M9a).
 #
 # A failing job runs scripts/ci/report-nightly.sh, which opens or updates one
 # issue per job (label `nightly-failure`) and closes it after the next green
@@ -27,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance)"
+        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36)"
         default: full
 
 permissions:
@@ -1222,6 +1223,89 @@ jobs:
             app/build/intermediates/merged_manifest/benchmarkRelease/processBenchmarkReleaseMainManifest/AndroidManifest.xml
             app/build/outputs/logs/manifest-merger-benchmarkRelease-report.txt
           retention-days: 14
+
+  # M10's opt-in acceptance lane (never part of `full`, which already executes
+  # the four classes inside instrumented-full): the journeys PR's API 34+ ATF
+  # checks must run on a real API 36 GMD before it can claim them. The class
+  # filter keeps the evidence to the four classes, and assert-selected-tests.py
+  # requires each of them to report executed, unskipped cases — a deselected or
+  # empty run fails instead of reading as a pass.
+  m10-a11y:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh
+    if: inputs.scope == 'm10-a11y'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/.ghcup
+      - name: Enable KVM
+        run: |
+          # Apply access to the existing node; udev alone left it inaccessible.
+          sudo chmod a+rw /dev/kvm
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
+      - name: M10 journeys on the api36 GMD
+        timeout-minutes: 60
+        run: |
+          # One worker avoids queuing a device lease behind the 30-minute case.
+          readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
+          # A later emulator launch deletes unconsented Crashpad reports.
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          python3 scripts/ci/preserve-emulator-crashes.py \
+            "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
+          readonly CRASH_PRESERVER_PID=$!
+          trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
+          # A cached or stale XML must never supply the device lane's evidence.
+          rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
+          ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
+            -Pneutrodyne.testScope=nightly \
+            -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.M10AccessibilityTest,ch.lkmc.neutrodyne.NavigationStateRestorationTest,ch.lkmc.neutrodyne.PerAppLanguageTest,ch.lkmc.neutrodyne.SubscribeJourneyTest \
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe
+      - name: Require every selected class executed unskipped
+        run: |
+          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results --device api36 \
+            --require-class ch.lkmc.neutrodyne.M10AccessibilityTest \
+            --require-class ch.lkmc.neutrodyne.NavigationStateRestorationTest \
+            --require-class ch.lkmc.neutrodyne.PerAppLanguageTest \
+            --require-class ch.lkmc.neutrodyne.SubscribeJourneyTest
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh m10-a11y
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh m10-a11y --close
+      # Device XML, per-test logcat and the preserved Crashpad reports are the
+      # run's evidence on success and on failure.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: m10-a11y-results
+          path: |
+            **/build/outputs/androidTest-results/
+            **/build/reports/androidTests/
+          if-no-files-found: error
 
   bmgr-download-exclusion:
     permissions:

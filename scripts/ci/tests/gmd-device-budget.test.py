@@ -19,9 +19,10 @@ DEVICE_ARGUMENT = f"-P{DEVICE_PROPERTY}=1"
 GPU_PROPERTY = "android.testoptions.manageddevices.emulator.gpu"
 
 
-def _nightly_script():
+def _run_block(step_name):
+    """The dedented `run: |` body of the uniquely named workflow step."""
     source = WORKFLOW.read_text()
-    marker = "      - name: GMD nightly group (debug)\n"
+    marker = f"      - name: {step_name}\n"
     assert source.count(marker) == 1
     body = source.split(marker, 1)[1].split("        run: |\n", 1)[1]
     lines = []
@@ -33,7 +34,7 @@ def _nightly_script():
 
 
 class GmdDeviceBudgetTest(unittest.TestCase):
-    def _run_scope(self, scope):
+    def _run_script(self, script):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory(prefix="android-") as crashes:
             root = Path(directory)
             runner = root / "runner"
@@ -51,7 +52,7 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             )
             gradle.chmod(0o755)
             result = subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", _nightly_script().replace("${{ inputs.scope }}", scope)],
+                ["bash", "-euo", "pipefail", "-c", script],
                 cwd=root,
                 env={
                     **os.environ,
@@ -65,6 +66,10 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(record.read_text())
+
+    def _run_scope(self, scope):
+        script = _run_block("GMD nightly group (debug)").replace("${{ inputs.scope }}", scope)
+        return self._run_script(script)
 
     def _assert_device_budget(self, arguments):
         limits = [arg for arg in arguments if arg.startswith(f"-P{DEVICE_PROPERTY}=")]
@@ -93,6 +98,23 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest",
             arguments,
         )
+
+    def test_m10_a11y_selects_the_four_classes_on_one_api36_device(self):
+        arguments = self._run_script(_run_block("M10 journeys on the api36 GMD"))
+        self._assert_device_budget(arguments)
+        self.assertIn(":app:api36DebugAndroidTest", arguments)
+        self.assertIn("-Pneutrodyne.testScope=nightly", arguments)
+        self.assertEqual(
+            [arg for arg in arguments if arg.startswith("-Pandroid.testInstrumentationRunnerArguments.class=")],
+            [
+                "-Pandroid.testInstrumentationRunnerArguments.class="
+                "ch.lkmc.neutrodyne.M10AccessibilityTest,ch.lkmc.neutrodyne.NavigationStateRestorationTest,"
+                "ch.lkmc.neutrodyne.PerAppLanguageTest,ch.lkmc.neutrodyne.SubscribeJourneyTest"
+            ],
+            "The M10 lane keeps its evidence to the four acceptance classes",
+        )
+        renderers = [arg for arg in arguments if arg.startswith(f"-P{GPU_PROPERTY}=")]
+        self.assertEqual(renderers, [f"-P{GPU_PROPERTY}=lavapipe"], "Do not restore the crashing legacy renderer")
 
     def test_benchmark_dryrun_selects_only_macrobenchmark_journeys(self):
         source = WORKFLOW.read_text().split("  benchmark-dryrun:\n", 1)[1].split("\n  bmgr-download-exclusion:", 1)[0]
