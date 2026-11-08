@@ -344,7 +344,10 @@ class SubscribeJourneyTest {
         }
     }
 
-    private fun recordA11yEvidence(entry: Entry, failure: RuntimeException) {
+    private fun recordA11yEvidence(
+        entry: Entry,
+        failure: RuntimeException,
+    ) {
         Log.i(A11Y_TAG, "entry=$entry failed with ${failure.javaClass.name}: ${failure.message}")
         if (failure is AccessibilityViewCheckException) {
             failure.results.forEachIndexed { index, result ->
@@ -358,9 +361,12 @@ class SubscribeJourneyTest {
 
     private fun describeA11yResult(result: AccessibilityViewCheckResult): String =
         buildString {
-            append("check=").append(result.sourceCheckClass?.simpleName)
-                .append(" type=").append(result.type)
-                .append(" message=").append(result.message)
+            append("check=")
+                .append(result.sourceCheckClass?.simpleName)
+                .append(" type=")
+                .append(result.type)
+                .append(" message=")
+                .append(result.message)
             val element = result.element
             if (element == null) {
                 append("\n(no element recorded)")
@@ -368,9 +374,12 @@ class SubscribeJourneyTest {
             }
             val window = element.window
             if (window != null) {
-                append("\nwindow type=").append(window.type)
-                    .append(" layer=").append(window.layer)
-                    .append(" bounds=").append(window.boundsInScreen)
+                append("\nwindow type=")
+                    .append(window.type)
+                    .append(" layer=")
+                    .append(window.layer)
+                    .append(" bounds=")
+                    .append(window.boundsInScreen)
             }
             var node: ViewHierarchyElement? = element
             while (node != null) {
@@ -416,10 +425,12 @@ class SubscribeJourneyTest {
         return if (device.takeScreenshot(shot)) "wrote ${shot.absolutePath}" else "takeScreenshot returned false"
     }
 
-    private fun evidenceDir(): File =
-        File(application.getExternalFilesDir(null), "api37-subscribe").apply { mkdirs() }
+    private fun evidenceDir(): File = File(application.getExternalFilesDir(null), "api37-subscribe").apply { mkdirs() }
 
-    private fun logA11yEvidence(name: String, capture: () -> String) {
+    private fun logA11yEvidence(
+        name: String,
+        capture: () -> String,
+    ) {
         val text = runCatching(capture).getOrElse { "capture failed: $it" }
         val chunks = text.chunked(A11Y_LOG_CHUNK)
         chunks.forEachIndexed { index, chunk -> Log.i(A11Y_TAG, "$name[$index/${chunks.size}] $chunk") }
