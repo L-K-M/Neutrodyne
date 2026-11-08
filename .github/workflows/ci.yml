@@ -105,6 +105,10 @@ jobs:
           :youtube:ytdlp:verifyBundledYtDlp :youtube:ytdlp-desktop:verifyBundledYtDlp
           :desktopApp:checkEmbeddedNatives
           --continue
+      - name: Verify desktop JAR content identity
+        run: |
+          ./gradlew -p build-logic :convention:test --tests '*DesktopPackagingTest*'
+          python3 scripts/ci/tests/canonical-jar-hash.test.py
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
       # The DEB/RPM/MSI licence metadata describes the whole package, which bundles

@@ -43,9 +43,28 @@ chaquopy {
             // The shared shim package neutrodyne_ytx (04 Shared engine module), compiled to .pyc
             // with buildPython and packaged as the chaquopy app asset.
             srcDir("../engine/python")
+            exclude("tests/**", "neutrodyne_ytx/record.py")
         }
     }
 }
+
+// Package only data needed at runtime; upstream verification and its key remain build-only.
+val bundledAssetsDirectory = layout.buildDirectory.dir("generated/bundledEngineAssets")
+val bundledAssets =
+    tasks.register<Sync>("prepareBundledYtDlpAssets") {
+        dependsOn("verifyBundledYtDlp")
+        from(layout.projectDirectory.dir("engine")) {
+            include("yt-dlp", "bundled.json")
+            into("ytdlp")
+        }
+        into(bundledAssetsDirectory)
+    }
+// Chaquopy exposes legacy Kotlin DSL accessors; select AGP's actual source-set type explicitly.
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+    // AGP rejects SourceSet providers; preBuild below supplies the producer dependency explicitly.
+    sourceSets.named("main") { assets.srcDir(bundledAssetsDirectory.get().asFile) }
+}
+tasks.named("preBuild") { dependsOn(bundledAssets) }
 
 dependencies {
     implementation(project(":youtube:engine"))
@@ -55,9 +74,51 @@ dependencies {
     implementation(project(":core:datastore"))
     implementation(project(":core:network:okhttp"))
 
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.okio)
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.androidx.work.testing)
+    testImplementation(libs.androidx.room.runtime)
+    testImplementation(libs.kotlinx.coroutines.test)
+
     androidTestImplementation(libs.androidx.test.runner)
     testImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.junit4)
     androidTestImplementation(libs.truth)
+}
+
+// Host-only strict replay uses the same verified asset packaged above.
+tasks.register<Exec>("shimTest") {
+    dependsOn("verifyBundledYtDlp")
+    group = "verification"
+    description = "Run Python shim tests against hash-verified yt-dlp with strict offline replay"
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "-B", "youtube/engine/python/tests/run.py")
+    // Always run: the selected host interpreter and upstream API are part of this proof.
+}
+
+// Keep host process execution in build tooling; the Android test supplies the real store/payload.
+val preparedShimDirectory = layout.buildDirectory.dir("preparedShim")
+tasks.withType<Test>().configureEach {
+    if (name == "testDebugUnitTest") {
+        val outputDirectory = preparedShimDirectory.get().asFile
+        outputs.dir(outputDirectory)
+        doFirst { outputDirectory.deleteRecursively() }
+    }
+}
+tasks.register<Exec>("preparedShimTest") {
+    group = "verification"
+    description = "Probe the real prepared store and worker payload through the Python host adapter"
+    dependsOn("testDebugUnitTest", "verifyBundledYtDlp")
+    inputs.dir(preparedShimDirectory)
+    workingDir(rootProject.projectDir)
+    commandLine(
+        "python3",
+        "-I",
+        "-B",
+        "youtube/engine/python/tests/probe_prepared.py",
+        preparedShimDirectory.get().asFile.absolutePath,
+    )
 }
