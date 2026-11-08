@@ -119,4 +119,29 @@
     <string name="desktop_links_menu_summary">Adds Neutrodyne and its icon to your applications menu</string>
     <string name="desktop_links_menu_done">In the applications menu</string>
     <string name="desktop_login_open_settings">Open System Settings</string>
+
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_refresh">Refresh diagnostics</string>
+    <string name="diagnostics_copy_report">Copy diagnostics report</string>
+    <string name="diagnostics_copy_done">Diagnostics copied</string>
+    <string name="diagnostics_export_db">Export database copy</string>
+    <string name="diagnostics_export_confirm_body">The copy includes your subscriptions, episode titles and listening history. Addresses, show notes and descriptions are masked.</string>
+    <string name="diagnostics_export_confirm">Export</string>
+    <string name="diagnostics_export_done">Database copy exported</string>
+    <string name="diagnostics_export_failed">Database export failed</string>
+    <string name="diagnostics_export_cancelled">Export cancelled</string>
+    <string name="diagnostics_verbose_log">Detailed log for 24 hours</string>
+    <string name="diagnostics_verbose_log_summary">Keeps debug-level lines in the diagnostics log for the next 24 hours</string>
+    <string name="diagnostics_section_app">App</string>
+    <string name="diagnostics_section_refresh">Refresh</string>
+    <string name="diagnostics_section_background">Background</string>
+    <string name="diagnostics_section_jobs">Jobs</string>
+    <string name="diagnostics_section_downloads">Downloads</string>
+    <string name="diagnostics_section_youtube">YouTube</string>
+    <string name="diagnostics_section_sync">Sync</string>
+    <string name="diagnostics_section_desktop">Desktop</string>
+    <string name="diagnostics_section_database">Database</string>
+    <string name="diagnostics_section_notifications">Notifications</string>
+    <string name="diagnostics_section_parse_warnings">Parse warnings</string>
+    <string name="diagnostics_section_log">Log</string>
 </resources>

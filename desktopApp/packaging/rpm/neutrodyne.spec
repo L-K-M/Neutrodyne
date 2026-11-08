@@ -1,10 +1,16 @@
 # SPDX-License-Identifier: Unlicense
 #
 # neutrodyne.spec — the RPM spec jpackage builds for Neutrodyne (11 Linux DEB, RPM and
-# tar.gz). The file is named template.spec because jpackage's --resource-dir looks up only
-# that name; it was written from the RPM spec format and jpackage's documented
-# substitutions — jpackage's own template is GPL-2.0+CE and never copied (D3). jpackage
-# replaces the APPLICATION_* tokens and points %_sourcedir at the staged install tree.
+# tar.gz). The file must be named <linux-package-name>.spec: jpackage's --resource-dir
+# lookup resolves a resource by the name of the file it is about to write
+# (SPECS/neutrodyne.spec), so a template.spec here is silently ignored and the RPM is
+# built with jpackage's default spec — none of the Requires below (old nightly
+# 37860407043). Verified in the pinned Temurin 25.0.4.1 sources: LinuxRpmBundler.specFile()
+# writes SPECS/<packageName>.spec and OverridableResource.useResourceDir() resolves
+# resourceDir/<publicName or destination file name>. Written from the RPM spec format
+# and jpackage's documented substitutions — jpackage's own template is GPL-2.0+CE and
+# never copied (D3). jpackage replaces the APPLICATION_* tokens and points %_sourcedir
+# at the staged install tree.
 
 Summary: APPLICATION_SUMMARY
 Name: APPLICATION_PACKAGE

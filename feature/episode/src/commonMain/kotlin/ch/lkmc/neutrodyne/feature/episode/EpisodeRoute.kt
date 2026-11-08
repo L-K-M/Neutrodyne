@@ -67,7 +67,12 @@ internal fun EpisodeRoute(
                 }
 
                 EpisodeRouteResult.HANDLED -> {
-                    Unit
+                    if (action is EpisodeAction.WatchOnYouTube) {
+                        viewModel.externalOpen.opened(
+                            action.episodeId,
+                            action.mode,
+                        )
+                    }
                 }
             }
         },
@@ -98,6 +103,7 @@ internal fun EpisodeRoute(
         viewModel::onMessageShown,
         // Copy-link messages return their URL; playback actions resolve through the helper.
         onMessageAction = { id ->
+            viewModel.externalOpen.onAction(id)
             viewModel.onMessageAction(id)?.let { clipboard.setText(AnnotatedString(it)) }
             when (val action = viewModel.playback.onMessageAction(id)) {
                 is PlaybackMessageAction.RetryStart -> {
@@ -115,8 +121,12 @@ internal fun EpisodeRoute(
                 is PlaybackMessageAction.WatchOnYouTube -> {
                     scope.launch {
                         val url = viewModel.youtubeWatchUrl(action.episodeId)
-                        if (url != null && urls.open(url) == OpenResult.NO_HANDLER) {
-                            viewModel.onLinkOpenFailed(url)
+                        if (url != null) {
+                            if (urls.open(url) == OpenResult.NO_HANDLER) {
+                                viewModel.onLinkOpenFailed(url)
+                            } else {
+                                viewModel.externalOpen.opened(action.episodeId)
+                            }
                         }
                     }
                 }

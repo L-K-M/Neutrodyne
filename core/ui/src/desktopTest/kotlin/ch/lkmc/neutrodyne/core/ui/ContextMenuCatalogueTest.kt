@@ -107,8 +107,6 @@ class ContextMenuCatalogueTest {
                         "Open",
                         "Select",
                         "Mark played",
-                        "Play next",
-                        "Play last",
                         "Go to podcast",
                     ),
                 )

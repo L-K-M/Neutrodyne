@@ -35,8 +35,11 @@ interface AddPodcastResolver {
     /** Explicit one-call consent, without changing the Apple preference. */
     suspend fun lookupOnce(input: String): AddResolution
 
-    /** `PodcastPreviewKey(feedUrl)` (directory results): reuses a cached entry or fetches anew. */
-    suspend fun preview(feedUrl: String): Outcome<FeedPreview, AddPodcastError>
+    /**
+     * Directory results reuse a cached preview or fetch with the discovered-URL policy.
+     * YouTube targets return [AddResolution.YouTube] for the channel confirmation flow.
+     */
+    suspend fun preview(feedUrl: String): AddResolution
 
     /**
      * True when [input] normalises to an `http(s)` URL on the local network (03 implementation

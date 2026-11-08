@@ -1,0 +1,4 @@
+<resources>
+    <string name="youtube_feed_outage">YouTube feeds aren't responding. Your channels will update automatically when YouTube is back.</string>
+    <string name="youtube_feed_retry">Retry now</string>
+</resources>

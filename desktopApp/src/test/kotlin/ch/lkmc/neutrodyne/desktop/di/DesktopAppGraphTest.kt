@@ -198,6 +198,68 @@ class DesktopAppGraphTest {
             }
         }
 
+    @Test fun externalPlaybackRefusesRowsAndDistinguishesMixedFeeds() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            try {
+                val channel =
+                    db.podcastDao().insertPodcast(
+                        ch.lkmc.neutrodyne.core.testing.database.podcastEntity {
+                            copy(sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL)
+                        },
+                    )
+                val video =
+                    db.episodeDao().insertStub(
+                        ch.lkmc.neutrodyne.core.testing.database.episodeEntity(podcastId = channel) {
+                            copy(externalMediaId = "dQw4w9WgXcQ")
+                        },
+                    )
+                assertThat(graph.playbackController.playEpisode(video)).isEqualTo(
+                    PlayResult.NotPlayable(
+                        video,
+                        ch.lkmc.neutrodyne.playback.api.UnplayableReason
+                            .YouTubeExternal(ExternalReason.NOT_YET_AVAILABLE),
+                    ),
+                )
+                assertThat(
+                    graph.playbackController.playFeed(
+                        FeedSource.All,
+                        FeedFilters(),
+                        FeedOrder.NEWEST_FIRST,
+                    ),
+                ).isEqualTo(PlayResult.NothingToPlay(externalOnly = true))
+                val podcast =
+                    db.podcastDao().insertPodcast(
+                        ch.lkmc.neutrodyne.core.testing.database
+                            .podcastEntity(),
+                    )
+                val rss =
+                    db.episodeDao().insertStub(
+                        ch.lkmc.neutrodyne.core.testing.database
+                            .episodeEntity(podcastId = podcast),
+                    )
+                // MD1 still owns native audio. An RSS candidate must not be reported as
+                // external-only: the live desktop starter refuses it as NoMedia (fixture
+                // has no enclosure) — anything but NothingToPlay(externalOnly=true).
+                assertThat(
+                    graph.playbackController.playFeed(
+                        FeedSource.All,
+                        FeedFilters(),
+                        FeedOrder.NEWEST_FIRST,
+                    ),
+                ).isEqualTo(
+                    PlayResult.NotPlayable(
+                        rss,
+                        ch.lkmc.neutrodyne.playback.api.UnplayableReason
+                            .NoMedia,
+                    ),
+                )
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
         runBlocking {
