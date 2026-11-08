@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.BrandColors
+import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
@@ -74,6 +75,8 @@ import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.core.ui.root.dispatchPlaybackKey
 import ch.lkmc.neutrodyne.desktop.DesktopOpenHandler
+import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
+import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOfferDialog
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.no_tray_hint_body
@@ -153,6 +156,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     refreshController: ch.lkmc.neutrodyne.core.domain.RefreshController? = null,
     desktopPlaybackController: ch.lkmc.neutrodyne.playback.desktop.DesktopPlaybackController? = null,
     repoUrl: String = "",
+    crashOffer: DesktopCrashOffer? = null,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -387,6 +391,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                     userVolume?.volumeDown()
                     Unit
                 },
+                crashOffer = crashOffer,
             )
         }
         if (openHandler == null) content() else DesktopDropTarget(openHandler, content)
@@ -646,6 +651,7 @@ internal fun NeutrodyneWindowContent(
     onTextFieldFocusChange: (Boolean) -> Unit = {},
     volumeUp: () -> Unit = {},
     volumeDown: () -> Unit = {},
+    crashOffer: DesktopCrashOffer? = null,
 ) {
     val panelScope = rememberCoroutineScope()
     val setPanelVisibility: (PlayerPanelVisibility) -> Unit = { visibility ->
@@ -772,6 +778,20 @@ internal fun NeutrodyneWindowContent(
             prefs = prefs,
             platform = BuildInfo.Platform.DESKTOP,
         )
+    }
+
+    // 11 Crash files and the email dialog: the offer appears only once the database gate
+    // has opened (the states NeutrodyneRoot renders ReadyRoot for), scans off the UI
+    // thread, and never sends without the user's click. It sits outside the root's own
+    // theme provider, so it gets the same scheme in its own wrapper.
+    if (crashOffer != null && (startup == StartupGateState.Ready || startup is StartupGateState.Recovered)) {
+        NeutrodyneTheme(prefs = prefs, system = systemUi) {
+            DesktopCrashOfferDialog(
+                offer = crashOffer,
+                urls = crashOffer.urls ?: platformActions.urls,
+                reveal = crashOffer.reveal ?: platformActions.reveal,
+            )
+        }
     }
 }
 
