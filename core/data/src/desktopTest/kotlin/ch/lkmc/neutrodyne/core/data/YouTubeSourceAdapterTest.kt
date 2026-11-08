@@ -627,7 +627,14 @@ class YouTubeSourceAdapterTest {
                 .toFile()
         val monitor = FakeYouTubeFeedOutageMonitor()
         val metadata = FakeYouTubeChannelMetadata()
-        val health = DefaultYouTubeHealth(FakeSettingsRepository(), clock, scope.backgroundScope) {}
+        val health =
+            DefaultYouTubeHealth(
+                FakeSettingsRepository(),
+                clock,
+                scope.backgroundScope,
+                appVersionCode = 0,
+                invalidateUrls = {},
+            ) {}
         private val clients =
             NetworkClients(
                 CoreClients(
