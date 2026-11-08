@@ -33,6 +33,8 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.PlatformInfo
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -335,7 +337,14 @@ class DiagnosticsPageTest {
         actions: PlatformActions,
         density: Density? = null,
     ) {
-        val viewModel = DiagnosticsViewModel(diagnostics, FakeSettingsRepository(), TestClock())
+        val viewModel =
+            DiagnosticsViewModel(
+                diagnostics,
+                FakeSettingsRepository(),
+                TestClock(),
+                UpdateTestBuild,
+                DiagnosticsPageTestPlatformInfo,
+            )
         setContent {
             val snackbar = remember { SnackbarHostState() }
             val providers = @Composable {
@@ -449,4 +458,12 @@ private class GatedDiagnostics(
         release.await()
         return delegate.exportDatabaseCopy(destination)
     }
+}
+
+/** The desktop page tests' platform: no Android SDK, so `copied()` posts our own snackbar. */
+private object DiagnosticsPageTestPlatformInfo : PlatformInfo {
+    override val kind = PlatformKind.DESKTOP
+    override val userAgentPlatform = "desktop"
+    override val androidSdkInt: Int? = null
+    override val regionCode = "CH"
 }
