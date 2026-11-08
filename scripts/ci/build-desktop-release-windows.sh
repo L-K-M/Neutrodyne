@@ -42,7 +42,7 @@ case "$rc" in
     0) ;;
     3010) echo "msiexec: 3010 (success, reboot required); /norestart defers it" ;;
     '') echo "msiexec gave no exit marker (powershell exit $rc_ps)" >&2; exit 1 ;;
-    *) echo "msiexec failed: exit $rc" >&2; exit "$rc" ;;
+    *) echo "msiexec failed: exit $rc" >&2; exit 1 ;;
 esac
 
 smoke "$LOCALAPPDATA/Neutrodyne-App"

@@ -91,6 +91,9 @@ chk "msiexec 1603 fails the leg" test "$rc" -ne 0
 chk "the full 1603 reaches the log" grep -q 'exit 1603' "$repo/leg.log"
 chk "no smoke ran after msiexec 1603" test "$(smokes)" -eq 0
 
+run_leg STUB_MSIEXEC_EXIT=256; rc=$?
+chk "a child failure cannot wrap to success" test "$rc:$(smokes)" = "1:0"
+
 # --- powershell succeeds without a marker: fail closed ------------------------
 run_leg STUB_PS_NOMARKER=1; rc=$?
 chk "a marker-less powershell success fails the leg" test "$rc" -ne 0
