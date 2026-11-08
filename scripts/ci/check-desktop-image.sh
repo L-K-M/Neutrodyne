@@ -480,6 +480,26 @@ check_codesign() {
 }
 
 # --- rule 9: Windows MSI ----------------------------------------------------------
+# One Windows Installer table query through the COM API. Path and SQL travel in
+# the environment as data, never interpolated into -Command (spaces/apostrophes
+# stay data); a failure exits nonzero, so it can never pass as an empty table.
+# shellcheck disable=SC2016 # PowerShell script; $env: is its syntax, not shell expansion
+msi_query() {
+    ND_MSI="$2" ND_SQL="$3" ND_COLS="$4" "$1" -NoProfile -Command '
+        $wi = New-Object -ComObject WindowsInstaller.Installer
+        $db = $wi.GetType().InvokeMember("OpenDatabase","InvokeMethod",$null,$wi,@($env:ND_MSI,0))
+        $v = $db.GetType().InvokeMember("OpenView","InvokeMethod",$null,$db,@($env:ND_SQL))
+        $v.GetType().InvokeMember("Execute","InvokeMethod",$null,$v,@($null)) | Out-Null
+        while ($r = $v.GetType().InvokeMember("Fetch","InvokeMethod",$null,$v,@($null))) {
+            $row = @()
+            for ($i = 1; $i -le [int]$env:ND_COLS; $i++) {
+                $row += $r.GetType().InvokeMember("StringData","GetProperty",$null,$r,@($i))
+            }
+            [string]::Join("|", $row)
+        }
+    ' 2>/dev/null | tr -d '\r'
+}
+
 check_msi() {
     local msi="$1"
     local ps=""
@@ -492,62 +512,64 @@ check_msi() {
         return
     fi
 
-    # INSTALLDIR must resolve under LocalAppDataFolder\Programs (11 Windows MSI and ZIP):
-    # walk each Directory row's parent chain, prepend each DefaultDir's short name, and
-    # require one resolved path of the form LocalAppDataFolder\Programs\<dir>.
-    local dirs
-    dirs="$("$ps" -NoProfile -Command "
-        \$wi = New-Object -ComObject WindowsInstaller.Installer
-        \$db = \$wi.GetType().InvokeMember('OpenDatabase','InvokeMethod',\$null,\$wi,@('$msi',0))
-        \$v = \$db.GetType().InvokeMember('OpenView','InvokeMethod',\$null,\$db,@('SELECT Directory, Directory_Parent, DefaultDir FROM Directory'))
-        \$v.GetType().InvokeMember('Execute','InvokeMethod',\$null,\$v,@(\$null)) | Out-Null
-        while (\$r = \$v.GetType().InvokeMember('Fetch','InvokeMethod',\$null,\$v,@(\$null))) {
-            \$r.GetType().InvokeMember('StringData','GetProperty',\$null,\$r,@(1)) + '|' +
-            \$r.GetType().InvokeMember('StringData','GetProperty',\$null,\$r,@(2)) + '|' +
-            \$r.GetType().InvokeMember('StringData','GetProperty',\$null,\$r,@(3))
-        }
-    " 2>/dev/null | tr -d '\r')"
-    if ! printf '%s\n' "$dirs" | awk -F'|' '
-        { parent[$1] = $2; def[$1] = $3 }
-        END {
-            for (d in def) {
-                path = ""; cur = d; guard = 0
-                while (cur != "" && guard++ < 20) {
-                    dd = def[cur]; sub(/\|.*/, "", dd); if (dd == "") dd = cur
-                    path = (path == "" ? dd : dd "\\" path)
-                    if (parent[cur] == "" || parent[cur] == cur) break
-                    cur = parent[cur]
-                }
-                print path
-            }
-        }' | grep -qF "LocalAppDataFolder\\Programs\\"; then
-        fail "MSI INSTALLDIR does not resolve under LocalAppDataFolder\\Programs (Directory table)"
+    # The COM API needs a native path; convert the runner's MSYS form once.
+    local msi_win="$msi"
+    if command -v cygpath >/dev/null 2>&1; then
+        msi_win="$(cygpath -w "$msi")"
     fi
 
-    # Every Binary-table entry must be on wix.lock's binaryTable list (fnmatch).
+    # INSTALLDIR must resolve to LocalAppDataFolder\Neutrodyne-App (11 Windows MSI and
+    # ZIP): one directory under the per-user root, distinct from the Neutrodyne data
+    # directory. Only INSTALLDIR's own chain decides; DefaultDir sfn|lfn names it long.
+    local dirs
+    if ! dirs="$(msi_query "$ps" "$msi_win" \
+            'SELECT Directory, Directory_Parent, DefaultDir FROM Directory' 3)"; then
+        fail "MSI Directory table query failed (PowerShell/COM error)"
+    elif ! printf '%s\n' "$dirs" | awk -F'|' '
+        { parent[$1] = $2; def[$1] = $3
+          for (i = 4; i <= NF; i++) def[$1] = def[$1] "|" $i }
+        END {
+            if (!("INSTALLDIR" in def)) exit 1
+            cur = "INSTALLDIR"; path = ""; guard = 0
+            while (1) {
+                if (guard++ >= 20) exit 1
+                n = split(def[cur], seg, /\|/)
+                dd = (n >= 2 && seg[2] != "") ? seg[2] : seg[1]
+                if (dd == "" || dd == ".") dd = cur
+                p = parent[cur]
+                if (p == "" || p == cur) break
+                if (!(p in def)) exit 1
+                path = (path == "" ? dd : dd "\\" path)
+                cur = p
+            }
+            exit(path == "LocalAppDataFolder\\Neutrodyne-App" \
+                && parent["INSTALLDIR"] == "LocalAppDataFolder" ? 0 : 1)
+        }'; then
+        fail "MSI INSTALLDIR does not resolve under LocalAppDataFolder\\Neutrodyne-App (Directory table)"
+    fi
+
+    # Every Binary-table entry must be on wix.lock's binaryTable list (fnmatch);
+    # a failed or empty query never reaches the allowlist.
     local names name pat ok
-    names="$("$ps" -NoProfile -Command "
-        \$wi = New-Object -ComObject WindowsInstaller.Installer
-        \$db = \$wi.GetType().InvokeMember('OpenDatabase','InvokeMethod',\$null,\$wi,@('$msi',0))
-        \$v = \$db.GetType().InvokeMember('OpenView','InvokeMethod',\$null,\$db,@('SELECT Name FROM Binary'))
-        \$v.GetType().InvokeMember('Execute','InvokeMethod',\$null,\$v,@(\$null)) | Out-Null
-        while (\$r = \$v.GetType().InvokeMember('Fetch','InvokeMethod',\$null,\$v,@(\$null))) {
-            \$r.GetType().InvokeMember('StringData','GetProperty',\$null,\$r,@(1))
-        }
-    " 2>/dev/null | tr -d '\r')"
-    while IFS= read -r name; do
-        [ -z "$name" ] && continue
-        ok=0
-        while IFS= read -r pat; do
-            # shellcheck disable=SC2254
-            case "$name" in
-                $pat) ok=1 ;;
-            esac
-        done < <(grep -E '^binaryTable=' "$WIX_LOCK" | cut -d= -f2-)
-        if [ "$ok" = 0 ]; then
-            fail "MSI Binary table entry not in wix.lock: $name"
-        fi
-    done <<< "$names"
+    if ! names="$(msi_query "$ps" "$msi_win" 'SELECT Name FROM Binary' 1)"; then
+        fail "MSI Binary table query failed (PowerShell/COM error)"
+    elif [ -z "$names" ]; then
+        fail "MSI Binary table query returned no entries"
+    else
+        while IFS= read -r name; do
+            [ -z "$name" ] && continue
+            ok=0
+            while IFS= read -r pat; do
+                # shellcheck disable=SC2254
+                case "$name" in
+                    $pat) ok=1 ;;
+                esac
+            done < <(grep -E '^binaryTable=' "$WIX_LOCK" | cut -d= -f2-)
+            if [ "$ok" = 0 ]; then
+                fail "MSI Binary table entry not in wix.lock: $name"
+            fi
+        done <<< "$names"
+    fi
 }
 
 # --- rule 10: DEB and RPM metadata -------------------------------------------------

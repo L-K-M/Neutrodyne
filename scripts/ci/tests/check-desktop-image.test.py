@@ -29,6 +29,7 @@ the real code paths run against fixture images:
     across mixed-size signatures). The fixtures carry real LC_CODE_SIGNATURE
     slots; where the host has clang and the real codesign, a dylib compiled
     in the test runs the same pass/fail pair under real signatures.
+  * MSI — the Windows rules through a faked cygpath + powershell.exe boundary.
 """
 
 import hashlib
@@ -873,7 +874,105 @@ esac
         self.assertNotEqual(0, r.returncode)
         self.assertIn("attach", r.stderr)
 
+    # ----- rule 9: MSI checks through a faked Windows boundary -----------------
+    # Fake cygpath records the MSYS -> native conversion; fake powershell.exe
+    # serves the declared fakedb/ rows (or fails on demand) and asserts the MSI
+    # path arrives as data. The rows stand in for the real COM output.
 
+    MSI_DIR_OK = (
+        "TARGETDIR||SourceDir\n"
+        "LocalAppDataFolder|TARGETDIR|.\n"
+        "INSTALLDIR|LocalAppDataFolder|NEUTRO~1|Neutrodyne-App\n"
+    )
+    MSI_BIN_OK = "wixhelper.dll\nWixHelperCA\nbannrbmp\ndlgbmp\n"
+
+    def msi_check(self, dir_rows=MSI_DIR_OK, bin_rows=MSI_BIN_OK,
+                  msi="dist/x.msi", **fails):
+        self.fx.write(msi, b"MSI")
+        self.fx.write("fakedb/Directory", dir_rows.encode())
+        self.fx.write("fakedb/Binary", bin_rows.encode())
+        self.fake("cygpath", r"""
+log="${FAKE_CYGPATH_LOG:?}"
+echo "$*" >>"$log"
+[ "${1:-}" = "-w" ] || exit 1
+case "$2" in
+    /*) p="$2" ;;
+    *) p="$PWD/$2" ;;  # real cygpath resolves relative input against cwd
+esac
+printf 'C:%s\n' "$p" | tr '/' '\\'
+""")
+        self.fake("powershell.exe", r"""
+echo "msi=${ND_MSI:-} sql=${ND_SQL:-}" >>"${FAKE_PS_LOG:?}"
+case "$*" in */*) echo "path in argv" >&2; exit 1 ;; esac
+case "${ND_MSI:-}" in
+    ?:[\\/]*) ;;
+    *) echo "ND_MSI not native: $ND_MSI" >&2; exit 1 ;;
+esac
+case "${ND_SQL:-}" in
+    *"FROM Directory"*) [ -z "${FAKE_PS_FAIL_DIR:-}" ] || exit 1; cat fakedb/Directory ;;
+    *"FROM Binary"*) [ -z "${FAKE_PS_FAIL_BIN:-}" ] || exit 1; cat fakedb/Binary ;;
+    *) exit 1 ;;
+esac
+""")
+        ps_log, cy_log = self.root / "ps.log", self.root / "cygpath.log"
+        env = {"FAKE_PS_LOG": str(ps_log), "FAKE_CYGPATH_LOG": str(cy_log),
+               **fails}
+        return self.fx.image_check(msi, env_extra=env), ps_log, cy_log
+
+    def test_msi_valid_installdir_passes(self):
+        """Per-user policy: INSTALLDIR -> LocalAppDataFolder -> TARGETDIR."""
+        r, ps_log, cy_log = self.msi_check()
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertEqual(1, len(cy_log.read_text().splitlines()))  # converted once
+        ps = ps_log.read_text()
+        self.assertIn("msi=C:\\", ps)
+        self.assertNotIn("msi=/", ps)  # native path arrived as data, not MSYS form
+
+    def test_msi_installdir_unsafe_layouts_fail(self):
+        """Only the INSTALLDIR row's own chain counts."""
+        root = "TARGETDIR||SourceDir\nLocalAppDataFolder|TARGETDIR|.\n"
+        cases = {
+            # other rows hold the stale-Programs and even the correct path,
+            # yet neither may vouch for an INSTALLDIR naming the data dir
+            "data directory": root + (
+                "INSTALLDIR|LocalAppDataFolder|NEUTRO~1|Neutrodyne\n"
+                "dirPrograms|LocalAppDataFolder|Programs\n"
+                "dirLookalike|LocalAppDataFolder|dir|Neutrodyne-App\n"),
+            "wrong root": self.MSI_DIR_OK.replace(  # system-wide: per-user only
+                "LocalAppDataFolder", "ProgramFiles64Folder"),
+            "extra nesting": root + (  # LocalAppDataFolder\Programs\Neutrodyne-App
+                "dirPrograms|LocalAppDataFolder|Programs\n"
+                "INSTALLDIR|dirPrograms|NEUTRO~1|Neutrodyne-App\n"),
+            "missing INSTALLDIR": root,
+            "parent cycle": (
+                "INSTALLDIR|dirA|x|Neutrodyne-App\ndirA|dirB|A\ndirB|dirA|B\n"),
+        }
+        for name, rows in cases.items():
+            with self.subTest(case=name):
+                r, _, _ = self.msi_check(dir_rows=rows)
+                self.assertNotEqual(0, r.returncode)
+                self.assertIn("INSTALLDIR", r.stderr)
+
+    def test_msi_unexpected_binary_fails(self):
+        r, _, _ = self.msi_check(bin_rows=self.MSI_BIN_OK + "evil.dll\n")
+        self.assertNotEqual(0, r.returncode)
+        self.assertIn("not in wix.lock", r.stderr)
+
+    def test_msi_query_errors_fail(self):
+        """A COM/PowerShell failure is a query failure, never an empty table."""
+        for flag, want in (("FAKE_PS_FAIL_DIR", "Directory table"),
+                           ("FAKE_PS_FAIL_BIN", "Binary table")):
+            with self.subTest(flag=flag):
+                r, _, _ = self.msi_check(**{flag: "1"})
+                self.assertNotEqual(0, r.returncode)
+                self.assertIn(want, r.stderr)
+
+    def test_msi_path_with_space_and_apostrophe_passes(self):
+        """A path needing quoting arrives intact as data."""
+        msi = "dist/it's a file.msi"
+        r, ps_log, _ = self.msi_check(msi=msi)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("it's a file.msi", ps_log.read_text())
 
     # ----- canonical JAR identity (packaging recompression / re-signing) ------
 

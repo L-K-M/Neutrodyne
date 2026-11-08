@@ -50,7 +50,7 @@ case "$TARGET" in
         cp desktopApp/build/desktop-packaging/zip/*.zip "$DIST/neutrodyne-$V-windows-x64.zip"
         powershell -NoProfile -Command \
             "Start-Process msiexec -Wait -ArgumentList '/i','$(cygpath -w "$DIST/neutrodyne-$V-windows-x64.msi")','/qn','/norestart'"
-        smoke "$LOCALAPPDATA/Programs/Neutrodyne"
+        smoke "$LOCALAPPDATA/Neutrodyne-App"
         python -m zipfile -e "$DIST/neutrodyne-$V-windows-x64.zip" "$SMOKE_IMG"
         smoke "$SMOKE_IMG/Neutrodyne" ;;
     macos-arm64)
