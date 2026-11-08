@@ -131,8 +131,12 @@ class SyncApplier(
         if (outcome is RecordOutcome.Applied || outcome is RecordOutcome.Held) {
             val pendingSetting =
                 if (coll == SyncCollection.SETTING) {
-                    val value = merge.record.fields["v"]?.v
-                    val text = (value as? JsonPrimitive)?.content ?: value?.toString()
+                    // The marker carries the value's JSON text, not the bare primitive content: the
+                    // drain forwards it to SettingsSyncPort, which decodes the key's wire shape.
+                    val text =
+                        merge.record.fields["v"]
+                            ?.v
+                            ?.toString()
                     text?.let { PendingSetting(it, merge.record.maxClock?.toString() ?: "") }
                 } else {
                     null

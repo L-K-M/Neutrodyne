@@ -35,6 +35,8 @@
     android:theme="@style/Theme.Neutrodyne"
     tools:targetApi="37">
 
+    <receiver android:name=".YouTubeAlertReceiver" android:exported="false" />
+
     <activity
       android:name=".MainActivity"
       android:exported="true"

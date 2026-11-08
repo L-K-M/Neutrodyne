@@ -39,7 +39,10 @@ internal fun selectSupportedDeviceTests(
                 )
             }
             if (sdk < Build.VERSION_CODES.P && abi == "x86_64") {
-                put("ch.lkmc.neutrodyne.YtxReleaseSmokeTest", "CPython 3.14 cannot load on x86_64 Android 8.x")
+                val reason = "CPython 3.14 cannot load on x86_64 Android 8.x"
+                put("ch.lkmc.neutrodyne.YtxReleaseSmokeTest", reason)
+                put("ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest", reason)
+                put("ch.lkmc.neutrodyne.YtxIsolationTest", reason)
             }
         }
     val selectors = listOfNotNull(arguments.getString("notClass")) + excluded.keys
