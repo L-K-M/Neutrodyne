@@ -51,6 +51,7 @@ import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
+import ch.lkmc.neutrodyne.core.testing.FakeLevelMutableLogSink
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -128,7 +129,7 @@ class ExternalYouTubeModeTest {
             val graph =
                 createDynamicGraphFactory<DesktopAppGraph.Factory>(
                     RecordedJourneyBindings(db, clock, scope, replay, settings),
-                ).create(dirs, build, reporter)
+                ).create(dirs, build, reporter, FakeLevelMutableLogSink())
             val group = runBlocking { db.groupDao().insert(groupEntity(name = "Journey group", orderKey = "a0")) }
             var showing by mutableStateOf(true)
             try {
@@ -278,7 +279,7 @@ class ExternalYouTubeModeTest {
             val bindings = ExternalModeBindings(db, clock, scope)
             val graph =
                 createDynamicGraphFactory<DesktopAppGraph.Factory>(bindings)
-                    .create(dirs, build, reporter)
+                    .create(dirs, build, reporter, FakeLevelMutableLogSink())
             val actions = CapturedBrowserActions()
             val id =
                 runBlocking {
