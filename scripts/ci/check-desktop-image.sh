@@ -821,7 +821,14 @@ extract_and_scan() {
     tmp="$(mktemp -d)"
     case "$fmt" in
         tar.gz) tar -xzf "$pkg" -C "$tmp" ;;
-        zip) python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$pkg" "$tmp" ;;
+        zip)
+            if [ "$(uname -s)" = Darwin ]; then
+                # Python's extractor drops executable modes and framework symlinks and
+                # exposes AppleDouble metadata as payload. Preserve the signed app bundle.
+                ditto -x -k "$pkg" "$tmp"
+            else
+                python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$pkg" "$tmp"
+            fi ;;
         deb) dpkg-deb -x "$pkg" "$tmp" ;;
         rpm)
             if command -v rpm2cpio >/dev/null 2>&1; then
