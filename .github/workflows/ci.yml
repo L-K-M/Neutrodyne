@@ -298,7 +298,7 @@ jobs:
             -PtestBuildType=release :app:dumpReleaseR8Inputs
           python3 scripts/ci/trace-instrumentation-abi.py --check
       - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :benchmark:assembleBenchmarkRelease :sync:server:fatJar :sync:server:serverNotices -Pneutrodyne.abiSplits=true
+        run: ./gradlew assembleRelease assembleDebug :app:assembleBenchmarkRelease :benchmark:assembleBenchmarkRelease :sync:server:fatJar :sync:server:serverNotices -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
@@ -457,6 +457,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - name: Check smoke admission with the macOS system Bash
+        if: runner.os == 'macOS'
+        run: python3 scripts/ci/tests/smoke-start.test.py SmokeStartGateTest.test_macos_system_bash_runs_the_shipped_smoke_gate
       # The KMP android targets configure AGP in every module, so every host
       # needs an SDK even for a desktop-only build.
       - name: Android SDK

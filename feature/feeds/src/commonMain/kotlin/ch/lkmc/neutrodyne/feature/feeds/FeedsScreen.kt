@@ -270,7 +270,7 @@ private fun FeedList(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .testTag("feed-list")
+                    .testTag("feed_list")
                     .ndScrollbar(listState, scrollbars, scrollbarColor),
         ) {
             offlineBannerItem(state.offline)
