@@ -39,6 +39,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -251,10 +252,10 @@ class SmokeStartGateTest(unittest.TestCase):
             "_JAVA_OPTIONS": underscore_java_options,
         }
 
-    def run_script(self, img: Path, timeout: int, env: dict):
+    def run_script(self, img: Path, timeout: int, env: dict, shell="bash"):
         """Run the shipped script; on a hang, kill exactly its process group."""
         proc = subprocess.Popen(
-            ["bash", str(SMOKE_START), str(img), f"--timeout={timeout}"],
+            [shell, str(SMOKE_START), str(img), f"--timeout={timeout}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -300,6 +301,17 @@ class SmokeStartGateTest(unittest.TestCase):
         self.assertFalse(self.ran_marker.exists(), "the launcher ran despite a conflict")
 
     # --- verdict contracts ------------------------------------------------------
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS ships Bash 3.2")
+    def test_macos_system_bash_runs_the_shipped_smoke_gate(self):
+        img, cfg = self.make_image(CFG_ABSENT, 0o640)
+        self.behave(lines=[VALID_SMOKE], record_env=True, ran_marker=True)
+        rc, out, err = self.run_script(img, 60, self.env(cfg), shell="/bin/bash")
+        self.assertEqual(0, rc, err)
+        self.assertEqual(VALID_SMOKE + "\n", out)
+        self.assertTrue(self.ran_marker.exists())
+        self.assertIn("-Dneutrodyne.smoke=true", self.env_record.read_text())
+        self.assert_unchanged(cfg, CFG_ABSENT, 0o640)
 
     def test_failed_smoke_with_exit_1_fails(self):
         img, cfg = self.make_image(CFG_PREEXISTING, 0o640)

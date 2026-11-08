@@ -776,6 +776,27 @@ esac
         self.assertNotEqual(0, r.returncode)
         self.assertIn("no counterpart in the pinned Temurin archive", r.stderr)
 
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("ditto"), "needs macOS ditto")
+    def test_mac_zip_preserves_launcher_mode_and_runtime_links(self):
+        app = self.mac_app()
+        image = self.root / app
+        (image / "Contents/MacOS/Neutrodyne").chmod(0o755)
+        (image / "Contents/runtime/Contents/Home/legal/LICENSE.link").symlink_to("LICENSE")
+        self.fx.write_manifest()
+        # These are sealed-bundle properties, checked after the shipped extractor runs.
+        self.fake("codesign", '''
+for image; do :; done
+[ -x "$image/Contents/MacOS/Neutrodyne" ] &&
+    [ -L "$image/Contents/runtime/Contents/Home/legal/LICENSE.link" ]
+''')
+        direct = self.fx.image_check(app)
+        self.assertEqual(0, direct.returncode, direct.stdout + direct.stderr)
+        archive = self.root / "app.zip"
+        subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(image), str(archive)], check=True)
+        extracted = self.fx.image_check(archive)
+        self.assertEqual(0, extracted.returncode, extracted.stdout + extracted.stderr)
+
+
     def test_macos_layout_in_image_scan(self):
         """check-desktop-image's runtime layout check resolves the nested home
         (a .app dir name pulls in codesign, so this image root uses the same
@@ -1037,7 +1058,11 @@ esac
         "LocalAppDataFolder|TARGETDIR|.\n"
         "INSTALLDIR|LocalAppDataFolder|NEUTRO~1|Neutrodyne-App\n"
     )
-    MSI_BIN_OK = "wixhelper.dll\nWixHelperCA\nbannrbmp\ndlgbmp\n"
+    # Real pinned-tool MSI, Windows package run 42457761741 (2026-11-08).
+    MSI_BIN_OK = (
+        "JpCaDll\nWixCA\nWixUIWixca\nWixUI_Bmp_Banner\nWixUI_Bmp_Dialog\n"
+        "WixUI_Ico_Exclam\nWixUI_Ico_Info\nWixUI_Bmp_New\nWixUI_Bmp_Up\n"
+    )
 
     def msi_check(self, dir_rows=MSI_DIR_OK, bin_rows=MSI_BIN_OK,
                   msi="dist/x.msi", **fails):
@@ -1329,6 +1354,26 @@ esac
                 r = self.fx.image_check(img)
                 self.assertNotEqual(0, r.returncode, r.stdout + r.stderr)
                 self.assertIn("entry-point", r.stderr)
+
+    def test_windows_python_layout_matches_the_locked_version(self):
+        for name, dlls, expected in (
+            ("valid", ("python3.dll", "python314.dll"), 0),
+            ("stable-only", ("python3.dll",), 1),
+            ("wrong-minor", ("python313.dll",), 1),
+        ):
+            with self.subTest(case=name):
+                img = self.windows_image(name=f"Engine-{name}")
+                engine = f"{img}/app/resources/engine"
+                self.fx.write(f"{engine}/python/python.exe", b"EXE")
+                os.chmod(self.root / f"{engine}/python/python.exe", 0o755)
+                self.fx.write(f"{engine}/python/Lib/os.py", b"# stdlib\n")
+                self.fx.write(f"{engine}/cacert.pem", b"CA")
+                for dll in dlls:
+                    self.fx.write(f"{engine}/python/{dll}", b"DLL")
+                self.fx.write_engine_lock(targets=("windows-x64",))
+                self.fx.write_manifest()
+                r = self.fx.image_check(img)
+                self.assertEqual(expected, r.returncode, r.stdout + r.stderr)
 
 if __name__ == "__main__":
     unittest.main()

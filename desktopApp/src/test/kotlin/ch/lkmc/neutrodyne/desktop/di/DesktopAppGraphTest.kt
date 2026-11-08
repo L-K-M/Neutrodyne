@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
@@ -47,6 +48,7 @@ import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.desktop.DesktopChapterExtractor
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
+import ch.lkmc.neutrodyne.youtube.api.ExtractionOutcome
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import coil3.PlatformContext
 import coil3.map.Mapper
@@ -332,6 +334,14 @@ class DesktopAppGraphTest {
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
             assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
             assertThat(graph.localMediaChanges).isSameInstanceAs(graph.localMediaIndex)
+            assertThat(graph.youtubeEngine).isSameInstanceAs(graph.youtubeEngine)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+            graph.youtubeEngine.retryStart()
+            assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
+                ch.lkmc.neutrodyne.youtube.api.EngineAvailability.NOT_YET_AVAILABLE,
+            )
+            assertThat(graph.youtubeEngine.status.value.version).isNull()
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
             assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
             assertThat(
@@ -363,6 +373,28 @@ class DesktopAppGraphTest {
         assertThat(graph.initializers).isNotNull()
         assertThat(graph.appScope).isNotNull()
     }
+
+    /**
+     * M9a health binding: the contributed provider supplies `BuildInfo.versionCode` and the bound
+     * resolver to `DefaultYouTubeHealth`, so the persisted commit marker is the real build's code —
+     * a graph-level regression for the silently defaulted constructor arguments.
+     */
+    @Test
+    fun theBoundYouTubeHealthPersistsTheBuildVersionMarker() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                val health = graph.youTubeHealth
+                assertThat(health::class.simpleName).isEqualTo("DefaultYouTubeHealth")
+                health.awaitLoaded()
+                repeat(5) { health.reportExtraction(ExtractionOutcome.ParseFailure("video$it")) }
+                health.awaitLoaded()
+                assertThat(graph.settingsRepository.get(YouTubeSettingKeys.BREAKER_VERSION_CODE))
+                    .isEqualTo(buildInfo.versionCode)
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
 
     /** M1a: the graph binds the opener the window's start-up gate maps (01 Splash and start-up gate). */
     @Test
