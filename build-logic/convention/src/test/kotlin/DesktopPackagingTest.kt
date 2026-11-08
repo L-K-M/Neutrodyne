@@ -12,6 +12,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -659,6 +660,231 @@ class DesktopPackagingTest {
         }
     }
 
+    // ----- the image's native/ and licenses/ payloads (11 Resources layout) -----
+
+    @Test
+    fun `the ffmpeg image filter keeps versioned sonames and the two build records`() {
+        // The metadata the engine and the image scan read beside the libraries.
+        for (record in listOf("ffmpeg-layout.json", "ffmpeg-license.txt")) {
+            assertTrue(ffmpegImageEntryAllowed("macos", record), record)
+        }
+        // The versioned sonames, each under the subdir its OS installs them to.
+        for (
+        (os, path) in
+        listOf(
+            "windows" to "bin/avcodec-63.dll",
+            "macos" to "lib/libavutil.61.dylib",
+            "linux" to "lib/libswresample.so.7",
+        )
+        ) {
+            assertTrue(ffmpegImageEntryAllowed(os, path), "$os $path")
+        }
+        // Everything else stays out: unversioned links, import and static libraries,
+        // headers, the build's own records and anything nested below the soname dir.
+        for (
+        (os, path) in
+        listOf(
+            "windows" to "lib/avcodec-63.dll", // DLLs live in bin, never lib
+            "windows" to "bin/avcodec.lib",
+            "windows" to "bin/avcodec-63.lib",
+            "windows" to "bin/avcodec.dll",
+            "macos" to "lib/libavutil.dylib",
+            "macos" to "lib/libavutil.a",
+            "macos" to "bin/libavutil.61.dylib",
+            "linux" to "lib/libavutil.so",
+            "linux" to "lib/libavutil.so.61.0.100",
+            "linux" to "bin/libavutil.so.61",
+            "macos" to "ffmpeg-build.txt",
+            "macos" to "ffmpeg-config.h",
+            "macos" to "ffmpeg-protocols.txt",
+            "macos" to "ffmpeg-components.txt",
+            "macos" to "ffmpeg-sizes.txt",
+            "macos" to "include/libavutil/version.h",
+            "macos" to "lib/pkgconfig/libavutil.61.dylib",
+            "macos" to "ffmpeg-layout.json/payload",
+        )
+        ) {
+            assertFalse(ffmpegImageEntryAllowed(os, path), "$os $path")
+        }
+    }
+
+    @Test
+    fun `the staged natives check binds every layout soname per target`() {
+        for (target in DesktopPackagingTarget.entries) {
+            val root = Files.createTempDirectory("staged-natives").toFile()
+            try {
+                stageCompleteNatives(root, target)
+                assertEquals(emptyList(), stagedNativeProblems(target, root), target.id)
+
+                // A soname the layout records but the tree lacks is reported, with the
+                // upstream name a replacement build would carry.
+                val sonames = stagedSonames(target)
+                File(root, sonames.first()).delete()
+                val problems = stagedNativeProblems(target, root)
+                assertTrue(
+                    problems.any { it.contains(sonames.first()) },
+                    "${target.id}: ${problems.joinToString()}",
+                )
+            } finally {
+                root.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `the staged natives check fails closed on an empty tree`() {
+        for (target in DesktopPackagingTarget.entries) {
+            val root = Files.createTempDirectory("staged-natives").toFile()
+            try {
+                val problems = stagedNativeProblems(target, root)
+                assertTrue(
+                    problems.any { it.contains("ffmpeg-layout.json") } &&
+                        problems.any { it.contains("native/ndmedia") } &&
+                        problems.any { it.contains("licenses/THIRD_PARTY_NOTICES.md") },
+                    "${target.id}: ${problems.joinToString()}",
+                )
+            } finally {
+                root.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `the staged natives check rejects a layout without a library entry`() {
+        val target = DesktopPackagingTarget.MACOS_ARM64
+        val root = Files.createTempDirectory("staged-natives").toFile()
+        try {
+            stageCompleteNatives(root, target)
+            File(root, "${target.id}/native/ffmpeg/ffmpeg-layout.json")
+                .writeText(LAYOUT_JSON.replace("\"avutil\": 61", ""))
+            val problems = stagedNativeProblems(target, root)
+            assertTrue(
+                problems.any { it.contains("avutil") },
+                problems.joinToString(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the repository lock names the libraries the image filter ships`() {
+        // The lock is the one list of FFmpeg libraries (01 Python and native components);
+        // the filter must accept each recorded soname on every OS and nothing else.
+        val lock =
+            File("../../playback/native/native-components.lock").takeIf { it.isFile }
+                ?: error("the repository lock is missing")
+        val parsed = org.tomlj.Toml.parse(lock.readText())
+        val libraries = NativeLicencePolicy.ffmpegLibraries(parsed)
+        assertEquals(4, libraries.size)
+        for (library in libraries) {
+            assertTrue(ffmpegImageEntryAllowed("windows", "bin/$library-63.dll"), "windows $library")
+            assertTrue(ffmpegImageEntryAllowed("macos", "lib/lib$library.63.dylib"), "macos $library")
+            assertTrue(ffmpegImageEntryAllowed("linux", "lib/lib$library.so.63"), "linux $library")
+        }
+    }
+
+    @Test
+    fun `writeDesktopLicences writes the licences payload`() {
+        val root = Files.createTempDirectory("desktop-licences").toFile()
+        try {
+            val definitions =
+                File(root, "aboutlibraries.json").apply {
+                    writeText(
+                        """
+                        {
+                          "libraries": [
+                            {"uniqueId": "neutrodyne:ffmpeg", "name": "ffmpeg", "artifactVersion": "9.0.2", "licenses": ["LGPL-2.1-or-later-ffmpeg"]},
+                            {"uniqueId": "neutrodyne:miniaudio", "name": "miniaudio", "artifactVersion": "0.11.22", "licenses": ["MIT-0-miniaudio"]}
+                          ],
+                          "licenses": {
+                            "LGPL-2.1-or-later-ffmpeg": {"name": "LGPL-2.1-or-later (FFmpeg)", "spdxId": "LGPL-2.1-or-later", "content": "GNU LESSER GENERAL PUBLIC LICENSE Version 2.1"},
+                            "MIT-0-miniaudio": {"name": "MIT No Attribution (miniaudio)", "spdxId": "MIT-0", "content": "miniaudio permission"}
+                          }
+                        }
+                        """.trimIndent(),
+                    )
+                }
+            val lgpl = File(root, "COPYING.LGPLv2.1").apply { writeText("LGPL 2.1 text from source") }
+            // The committed miniaudio entry — the same JSON the task reads for the image.
+            val miniaudio = File("../../desktopApp/config/licenses/MIT-0-miniaudio.json")
+            assertTrue(miniaudio.isFile, "the committed miniaudio licence entry is missing")
+            val out = File(root, "licences")
+            val project = ProjectBuilder.builder().withProjectDir(root).build()
+            project.tasks
+                .register("writeDesktopLicences", WriteDesktopLicencesTask::class.java) {
+                    this.definitions.set(definitions.absoluteFile)
+                    this.lgplText.set(lgpl.absoluteFile)
+                    this.miniaudioLicense.set(miniaudio.absoluteFile)
+                    this.outputDirectory.set(out)
+                }.get()
+                .write()
+
+            val notices = File(out, "THIRD_PARTY_NOTICES.md").readText()
+            assertTrue("ffmpeg" in notices && "miniaudio" in notices)
+            assertEquals("LGPL 2.1 text from source", File(out, "COPYING.LGPLv2.1").readText())
+            // The MIT-0 text of the committed entry, not an SPDX template.
+            assertTrue(
+                File(out, "miniaudio.txt").readText().contains("Permission is hereby granted"),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * The four soname paths a complete staged tree carries for [target], relative to its
+     * root, in the naming the OS's loader gives them (`bin/avcodec-63.dll`,
+     * `lib/libavutil.61.dylib`, `lib/libavutil.so.61`).
+     */
+    private fun stagedSonames(target: DesktopPackagingTarget): List<String> {
+        val subdir = if (target.osWire == "windows") "bin" else "lib"
+        return LAYOUT_MAJORS.map { (library, major) ->
+            val name =
+                when (target.osWire) {
+                    "windows" -> "$library-$major.dll"
+                    "macos" -> "lib$library.$major.dylib"
+                    else -> "lib$library.so.$major"
+                }
+            "${target.id}/native/ffmpeg/$subdir/$name"
+        }
+    }
+
+    /** A complete staged `desktop-resources` tree for [target] under [root]. */
+    private fun stageCompleteNatives(
+        root: File,
+        target: DesktopPackagingTarget,
+    ) {
+        val ffmpegDir = File(root, "${target.id}/native/ffmpeg")
+        File(ffmpegDir, "ffmpeg-layout.json").apply {
+            parentFile.mkdirs()
+            writeText(LAYOUT_JSON)
+        }
+        File(ffmpegDir, "ffmpeg-license.txt").writeText("LGPL version 2.1 or later\n")
+        for (soname in stagedSonames(target)) {
+            File(root, soname).apply {
+                parentFile.mkdirs()
+                writeBytes(byteArrayOf(1))
+            }
+        }
+        val ndmediaName =
+            when (target.osWire) {
+                "windows" -> "ndmedia.dll"
+                "macos" -> "libndmedia.dylib"
+                else -> "libndmedia.so"
+            }
+        File(root, "${target.id}/native/ndmedia/$ndmediaName").apply {
+            parentFile.mkdirs()
+            writeBytes(byteArrayOf(2))
+        }
+        for (name in listOf("THIRD_PARTY_NOTICES.md", "COPYING.LGPLv2.1", "miniaudio.txt")) {
+            File(root, "common/licenses/$name").apply {
+                parentFile.mkdirs()
+                writeText("x")
+            }
+        }
+    }
+
     private fun writeJar(
         dir: File,
         name: String,
@@ -884,5 +1110,14 @@ class DesktopPackagingTest {
 
     private companion object {
         private const val TAR_BLOCK_BYTES = 512
+
+        /** The FFmpeg 9.x majors 11's resources layout records, as `ffoffsets.c` prints them. */
+        private val LAYOUT_MAJORS =
+            listOf("avutil" to 61, "swresample" to 7, "avcodec" to 63, "avformat" to 63)
+
+        private val LAYOUT_JSON =
+            """{"ffmpegVersion": "9.0.2", "libraries": {${LAYOUT_MAJORS.joinToString(
+                ", ",
+            ) { (lib, major) -> "\"$lib\": $major" }}}, "structs": {}, "codecIds": {}, "constants": {}}"""
     }
 }
