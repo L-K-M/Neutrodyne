@@ -812,6 +812,20 @@ enable only assets of products actually shipped.
   outputs as `baseline-profile-reports` (2026-11-08: the upload was
   failure-only before, so successful run 42495419362 kept the merged
   profiles but lost its four-journey XML/PB evidence).
+- `youtube-recorded` selects M9a's recorded YouTube acceptance lane ahead of
+  app engine activation, on the two supported-CPython GMDs (`api34` and
+  `api36` matrix legs, `fail-fast: false` so each leg's evidence is required):
+  serial `:app:api<N>DebugAndroidTest` invocations with `ytxReplay=true`, one
+  class filter each for `YtxIsolationTest`, `YouTubeReleaseSmokeTest` and
+  `ExternalYouTubeModeTest`, then `:youtube:ytdlp:api<N>DebugAndroidTest` for
+  `ch.lkmc.neutrodyne.youtube.ytdlp.ytx.YtxSelfTestInstrumentedTest`. App and
+  library keep separate module task/filter invocations so one module's
+  missing class cannot silently select zero in the other. No live YouTube
+  request runs — the app classes replay 04's recorded traffic and the
+  selftest binds a real `:ytx` ping. Each class retains its own XML, logcat
+  and full Gradle log on command failure; `assert-selected-tests.py` requires
+  executed, unskipped evidence per class and across each module's evidence
+  root. Device proof is pending the first real dispatch run of this job.
 
 Since 2026-10-06, the `ref` dispatch input is gone: every job checks out
 `github.sha`, the exact commit recorded by `head_sha`. Select the branch through
@@ -839,6 +853,7 @@ without changing main's issues.
 | `bmgr` | M3 | android-emulator-runner API 31 and API 36 (`data_extraction_rules.xml`), image `default`: `scripts/ci/bmgr-check.sh <api> <evidence-dir>` on the untouched published release `x86_64` APK — the black-box harness: the self-instrumenting `:tools:bmgrdriver` APK seeds through the production `ExternalImportActivity` over UiAutomator, the host triggers the shell-only `SnapshotNowReceiver`, verifies the raw LocalTransport TAR, reinstalls the identical APK and validates the pulled post-restore tree with `check-first-launch-restore-results.py --bmgr-pull`/`--bmgr` ([05 Testing with bmgr](05-groups-opml-backup.md#testing-with-bmgr), plus 07's "no `Podcasts/`" assertion). No test code or hooks in the release process; needs root uninstall/reinstall, which an in-process instrumented test cannot do. Host pulls keep each remote `find` as nonhidden `<dir>-listing.txt` sibling evidence read on fd3, and `bmgr init` keeps every attempt under `init-<label>-attempt<N>.txt` plus an `init-<label>-attempts.txt` rc ledger (bounded retry only for the observed rc0/`result: -1000` observer-race shape; explicit `result: 0` remains the only acceptance — 2026-10-25 run8 corrections, pending a new real run). The legacy `backup_rules.xml` path (API 28–30) is covered by `BackupRulesTest` and the negative API 28/29 diagnostic below, not by a positive app leg ([PO-50](../PLAN.md#48-further-product-owner-decisions)) | yes |
 | `first-launch-restore` | M3 | opt-in scope only: `./gradlew --max-workers=2 :app:api26DebugAndroidTest :app:api36DebugAndroidTest -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest -Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore` — the seeded cold-start restore gate ([05 Testing](05-groups-opml-backup.md#testing)); its XML goes to the `first-launch-restore-results` artifact on success and failure | no (not part of `full`) |
 | `m10-a11y` | M10 | opt-in scope only: four serial `:app:api36DebugAndroidTest` invocations with `--max-workers=1`, one device slot, `neutrodyne.testScope=nightly`, the Lavapipe renderer and one class filter per invocation: `M10AccessibilityTest`, `NavigationStateRestorationTest`, `PerAppLanguageTest`, `SubscribeJourneyTest`. Separate evidence snapshots and full Gradle logs survive failures; `assert-selected-tests.py --device api36 --require-class …` requires each class and the final combined evidence to contain executed, unskipped cases. | no (not part of `full`) |
+| `youtube-recorded` | M9a | opt-in scope only: matrix `api: [34, 36]` (`fail-fast: false`) on `ubuntu-24.04`, each leg running serial GMD invocations with `--max-workers=1`, one device slot, `neutrodyne.testScope=nightly` and the Lavapipe renderer: three `:app:api<N>DebugAndroidTest` invocations with `ytxReplay=true`, one class filter each for `YtxIsolationTest`, `YouTubeReleaseSmokeTest` and `ExternalYouTubeModeTest`, then one `:youtube:ytdlp:api<N>DebugAndroidTest` invocation for `ch.lkmc.neutrodyne.youtube.ytdlp.ytx.YtxSelfTestInstrumentedTest` (a real `:ytx` ping, no replay). Separate module invocations keep one module's missing class from silently selecting zero in the other; per-class evidence snapshots and full Gradle logs survive failures; `assert-selected-tests.py` requires executed, unskipped cases per class and across each module's evidence root. | no (not part of `full`) |
 | `screenshots-full` | M10 | `./gradlew allTests test --tests '*Screenshot*' -PscreenshotTier=full -Proborazzi.test.verify=true` (the Android and desktop sets; Unverified that `--tests` applies across `allTests`, fallback: the Roborazzi verify tasks per module) | yes |
 | `mutation-full` | M1a | `./gradlew mutationTest -PmutationIterations=1000` | yes |
 | `live-canary` | when 03 ships `feeds/canary/feeds.txt` (M11 at the latest) | `./gradlew :feeds:jvm:liveCanary` | no |
