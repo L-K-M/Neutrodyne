@@ -47,6 +47,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import java.nio.file.Path as NioPath
 
@@ -104,6 +105,7 @@ class LibraryMergerImplTest {
     private val playedAt = 1_790_000_000_000L
     private val june = 1_780_000_000_000L
     private val syncId = "00000000-0000-4000-8000-00000000000f"
+    private var stagingCounter = 0
 
     @AfterTest
     fun tearDown() {
@@ -155,6 +157,112 @@ class LibraryMergerImplTest {
             assertEquals(1, db.queueDao().entries().size)
         }
 
+    /**
+     * MS2 acceptance 3 through the real port: a local podcast stays and a newer remote
+     * "unplayed" clears an older local played mark. This is the database behaviour the old
+     * engine-merge shortcut owned; the first-link orchestration around it is pinned by
+     * `:sync:impl`'s `FirstLinkMergerTest`.
+     */
+    @Test
+    fun mergeKeepsLocalPodcastsAndANewerRemoteUnplayedWins() =
+        runTest {
+            val localPodcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val localEpisode =
+                db.episodeDao().insertStub(episodeEntity(podcastId = localPodcast, identityKey = "g:e"))
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = localEpisode, playedAt = june, updatedAt = june),
+            )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines =
+                        listOf(
+                            EpisodeLineV1(
+                                p = "https://s/feed",
+                                k = "g:e",
+                                u = "https://s/e.mp3",
+                                pl = null,
+                                ts = playedAt,
+                                fc = mapOf("played" to playedAt),
+                            ),
+                        ),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNotNull(db.podcastDao().bySyncId(syncId))
+            val state = db.episodeStateDao().byEpisode(localEpisode)
+            assertNull(state?.playedAt)
+            assertEquals(playedAt, state?.updatedAt)
+        }
+
+    /**
+     * 10 Use the server's library through the real port: the server's Up-next refs replace
+     * the local list in the server's order, a ref whose key differs from the local episode's
+     * key is kept through the mapper's match-hint rewrite (the `g:alias` row), and local-only
+     * podcasts and queue entries are pruned. The mapping itself is pinned by `:sync:impl`'s
+     * `useServerMapsTheServerUpNextWithOrderKeysAndMatchHints`.
+     */
+    @Test
+    fun useServerAppliesTheServerUpNextAndPrunesLocalOnlyEntries() =
+        runTest {
+            val shared =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val localOnlySyncId = "00000000-0000-4000-8000-00000000000b"
+            val localOnly =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/lone", syncId = localOnlySyncId),
+                )
+            db.episodeDao().insertStub(episodeEntity(podcastId = shared, identityKey = "g:srv1"))
+            db.episodeDao().insertStub(episodeEntity(podcastId = shared, identityKey = "g:srv2"))
+            db.episodeDao().insertStub(episodeEntity(podcastId = shared, identityKey = "g:local"))
+            db.episodeDao().insertStub(
+                episodeEntity(podcastId = shared, identityKey = "g:alias") {
+                    copy(enclosureUrl = "https://cdn.example.com/alias.mp3")
+                },
+            )
+            db.episodeDao().insertStub(episodeEntity(podcastId = localOnly, identityKey = "g:lone"))
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines = emptyList(),
+                    queue =
+                        QueueV1(
+                            upNext =
+                                listOf(
+                                    UpNextRefV1(p = "https://s/feed", k = "g:srv1", ok = "0.2"),
+                                    UpNextRefV1(p = "https://s/feed", k = "g:srv2", ok = "0.4"),
+                                    UpNextRefV1(p = "https://s/feed", k = "g:alias", ok = "0.6"),
+                                ),
+                        ),
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_REPLACE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertEquals(
+                listOf("g:srv1", "g:srv2", "g:alias"),
+                db.queueDao().entries().mapNotNull { db.episodeDao().byId(it.episodeId)?.identityKey },
+            )
+            assertEquals(
+                "0.6",
+                db
+                    .queueDao()
+                    .entryByEpisode(
+                        db
+                            .episodeDao()
+                            .all()
+                            .first { it.identityKey == "g:alias" }
+                            .id,
+                    )?.orderKey,
+            )
+            assertNull(db.podcastDao().bySyncId(localOnlySyncId))
+            assertNotNull(db.podcastDao().bySyncId(syncId))
+        }
+
     @Test
     fun mergeStagedRefusesADirectoryWithoutMetadata() =
         runTest {
@@ -177,74 +285,80 @@ class LibraryMergerImplTest {
         }
 
     /** Writes one full staging directory through the STAGING codec (10 Merge step 2). */
-    private fun stagingDir(): Path {
-        val dir = root.resolve("staging").toString().toPath()
+    private fun stagingDir(): Path =
+        writeStagingDir(
+            podcasts =
+                listOf(
+                    PodcastV1(
+                        key = "https://s/feed",
+                        feedUrl = "https://s/feed",
+                        title = "Server title",
+                        subscribedAt = pullAt,
+                        syncId = syncId,
+                    ),
+                ),
+            episodeLines =
+                listOf(
+                    EpisodeLineV1(
+                        p = "https://s/feed",
+                        k = "g:e",
+                        u = "https://s/e.mp3",
+                        pl = playedAt,
+                        ts = playedAt,
+                        fc = mapOf("played" to playedAt),
+                    ),
+                    EpisodeLineV1(
+                        p = "https://s/feed",
+                        k = "g:plain",
+                        u = "https://s/p.mp3",
+                        pl = 1L,
+                        ts = 1L,
+                        fc = mapOf("played" to 1L),
+                    ),
+                    EpisodeLineV1(p = "https://s/feed", k = "g:q", u = "https://s/q.mp3", ts = 0L),
+                ),
+            queue = QueueV1(upNext = listOf(UpNextRefV1("https://s/feed", "g:q"))),
+            settings =
+                listOf(
+                    SettingValueV1(GroupsSettingKeys.SHOW_UNGROUPED_TAB.name, "Bool", JsonPrimitive(true)),
+                ),
+        )
+
+    /** Writes a staging directory with the given entries through the STAGING codec. */
+    private fun writeStagingDir(
+        podcasts: List<PodcastV1>,
+        episodeLines: List<EpisodeLineV1>,
+        queue: QueueV1?,
+        settings: List<SettingValueV1> = emptyList(),
+    ): Path {
+        val dir = root.resolve("staging-${stagingCounter++}").toString().toPath()
         fileSystem.createDirectories(dir)
         val codec = BackupCodec(BackupCodec.Mode.STAGING)
         fileSystem.write(dir / BackupCodec.ENTRY_LIBRARY) {
-            writeUtf8(
-                codec.encodeLibrary(
-                    LibraryV1(
-                        podcasts =
-                            listOf(
-                                PodcastV1(
-                                    key = "https://s/feed",
-                                    feedUrl = "https://s/feed",
-                                    title = "Server title",
-                                    subscribedAt = pullAt,
-                                    syncId = syncId,
-                                ),
-                            ),
-                        groups = emptyList(),
-                    ),
-                ),
-            )
+            writeUtf8(codec.encodeLibrary(LibraryV1(podcasts = podcasts, groups = emptyList())))
         }
         fileSystem.write(dir / BackupCodec.ENTRY_EPISODES) {
-            codec.writeEpisodeLine(
-                this,
-                EpisodeLineV1(
-                    p = "https://s/feed",
-                    k = "g:e",
-                    u = "https://s/e.mp3",
-                    pl = playedAt,
-                    ts = playedAt,
-                    fc = mapOf("played" to playedAt),
-                ),
-            )
-            codec.writeEpisodeLine(
-                this,
-                EpisodeLineV1(
-                    p = "https://s/feed",
-                    k = "g:plain",
-                    u = "https://s/p.mp3",
-                    pl = 1L,
-                    ts = 1L,
-                    fc =
-                        mapOf("played" to 1L),
-                ),
-            )
-            codec.writeEpisodeLine(
-                this,
-                EpisodeLineV1(p = "https://s/feed", k = "g:q", u = "https://s/q.mp3", ts = 0L),
-            )
+            for (line in episodeLines) codec.writeEpisodeLine(this, line)
         }
-        fileSystem.write(dir / BackupCodec.ENTRY_QUEUE) {
-            writeUtf8(codec.encodeQueue(QueueV1(upNext = listOf(UpNextRefV1("https://s/feed", "g:q")))))
+        if (queue != null) {
+            fileSystem.write(dir / BackupCodec.ENTRY_QUEUE) { writeUtf8(codec.encodeQueue(queue)) }
         }
         fileSystem.write(dir / BackupCodec.ENTRY_SETTINGS) {
-            writeUtf8(
-                codec.encodeSettings(
-                    SettingsV1(
-                        values =
-                            listOf(
-                                SettingValueV1(GroupsSettingKeys.SHOW_UNGROUPED_TAB.name, "Bool", JsonPrimitive(true)),
-                            ),
-                    ),
-                ),
-            )
+            writeUtf8(codec.encodeSettings(SettingsV1(values = settings)))
         }
         fileSystem.write(dir / STAGING_META_ENTRY) { writeUtf8("""{"createdAt":$pullAt}""") }
         return dir
     }
+
+    private fun podcastV1(
+        key: String,
+        syncId: String,
+    ): PodcastV1 =
+        PodcastV1(
+            key = key,
+            feedUrl = key,
+            title = "Server title",
+            subscribedAt = pullAt,
+            syncId = syncId,
+        )
 }

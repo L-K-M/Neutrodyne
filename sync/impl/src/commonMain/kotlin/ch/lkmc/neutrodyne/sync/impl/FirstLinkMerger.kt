@@ -365,6 +365,7 @@ class FirstLinkMerger(
         var cursor: String? = null
         var maxClock = 0L
         var pages = 0
+        var complete = false
         fileSystem.sink(file).buffer().use { sink ->
             while (pages < MAX_PAGES) {
                 pages++
@@ -376,21 +377,33 @@ class FirstLinkMerger(
                 }
                 cursor = page.cursor
                 onProgress(LinkPhase.DOWNLOADING, records.size, records.size.coerceAtLeast(1))
-                if (!page.hasMore) break
+                if (!page.hasMore) {
+                    complete = true
+                    break
+                }
             }
-            sink
-                .writeUtf8(
-                    SyncJson.encodeToString(
-                        StagingLine(
-                            end =
-                                StagingEnd(
-                                    end = true,
-                                    cursor = cursor,
-                                    maxClock = maxClock,
-                                ),
+            // Only a snapshot that reached the server's last page carries the end marker; a
+            // truncated one is never resumable and never reaches the merger (a LINK_REPLACE
+            // would clear local state by it).
+            if (complete) {
+                sink
+                    .writeUtf8(
+                        SyncJson.encodeToString(
+                            StagingLine(
+                                end =
+                                    StagingEnd(
+                                        end = true,
+                                        cursor = cursor,
+                                        maxClock = maxClock,
+                                    ),
+                            ),
                         ),
-                    ),
-                ).writeByte('\n'.code)
+                    ).writeByte('\n'.code)
+            }
+        }
+        if (!complete) {
+            fileSystem.delete(file, mustExist = false)
+            throw IllegalStateException("the pull exceeded $MAX_PAGES pages before the server's last page")
         }
         return StagedPull(records, cursor, maxClock)
     }

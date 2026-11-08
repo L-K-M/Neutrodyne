@@ -396,9 +396,10 @@ class FirstLinkMergerTest {
                     queue.upNext.map { it.k to it.ok },
                 )
                 // The failed merge touched no local state: the queue and the local-only
-                // podcast survive for the retry.
+                // podcast survive for the retry. The pull staged the server rows but never
+                // applied them, so the queue is exactly the pre-merge local list.
                 assertEquals(
-                    listOf("g:local", "g:srv1", "g:srv2", "g:alias", "g:lone"),
+                    listOf("g:local", "g:srv1", "g:alias", "g:lone"),
                     queuedIdentityKeys(db),
                 )
                 assertNotNull(db.podcastDao().bySyncId(localOnlySyncId))
@@ -433,12 +434,41 @@ class FirstLinkMergerTest {
                 val result = merger.merge(FirstLinkChoice.USE_SERVER)
                 assertTrue(result is FirstLinkResult.Failed)
 
-                // Page one's staged server rows stay unused; nothing local was pruned.
-                assertEquals(listOf("g:local", "g:srv1", "g:srv2", "g:alias", "g:lone"), queuedIdentityKeys(db))
+                // Page one's staged server rows stay unused; nothing local was pruned. The
+                // pull stages without applying, so the queue is the pre-merge local list.
+                assertEquals(listOf("g:local", "g:srv1", "g:alias", "g:lone"), queuedIdentityKeys(db))
                 assertNotNull(db.podcastDao().bySyncId(localOnlySyncId))
                 val link = db.syncStateDao().get()
                 assertNull(link?.cursor)
                 assertNull(link?.linkedAt)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * A pull that never reaches the server's last page must fail closed: a truncated snapshot
+     * must not reach the merger (a LINK_REPLACE would clear local state by it), and the
+     * partial staging file must not carry an end marker, so a retry re-pulls.
+     */
+    @Test
+    fun aPullThatExceedsMaxPagesFailsClosedInsteadOfMergingAPartialSnapshot() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val client = CountingClient(listOf(podcastRecord()), hasMore = true)
+                val library = FakeLibraryMerger()
+                val merger = mergerOf(db, client, library)
+
+                val result = merger.merge(FirstLinkChoice.MERGE)
+
+                assertTrue(result is FirstLinkResult.Failed, "$result")
+                assertTrue(library.calls.isEmpty(), "a truncated snapshot must not reach the merger")
+                assertFalse(
+                    fileSystem.exists(cache.resolve("sync-link-$device.jsonl").toString().toPath()),
+                    "the partial staging file must not survive as a resumable snapshot",
+                )
             } finally {
                 db.close()
             }
@@ -732,6 +762,37 @@ class FirstLinkMergerTest {
             }
         }
 
+    /**
+     * A cancellation after the pull keeps the completed staging file: the retry reuses it
+     * instead of pulling again, and the local state is untouched.
+     */
+    @Test
+    fun aCancelledMergeLeavesTheCompletedStagingFileForResume() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db, deviceId = device)
+                val client = CountingClient(listOf(podcastRecord()))
+                val library = FakeLibraryMerger()
+                library.failure = { CancellationException("link cancelled") }
+                val merger = mergerOf(db, client, library)
+
+                assertFailsWith<CancellationException> { merger.merge(FirstLinkChoice.MERGE) }
+                assertEquals(1, client.changesCalls)
+
+                library.failure = null
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Success(
+                        ch.lkmc.neutrodyne.core.model
+                            .MergeSummary(0, 0, 0, 0, 0, 0, 0, 0),
+                    )
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Completed)
+                assertEquals(1, client.changesCalls, "the completed staging file was reused after cancellation")
+            } finally {
+                db.close()
+            }
+        }
+
     /** The resync holds the same flag for its whole pull-and-reassert duration. */
     @Test
     fun resyncMarksSyncActivityUntilItReturns() =
@@ -930,7 +991,9 @@ class FirstLinkMergerTest {
                     kotlinx.coroutines.runBlocking { save("sync.example", "token") }
                 },
             activity = activity,
-            gate = ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate(),
+            gate =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeLocalNetworkGate(),
         )
     }
 
@@ -1071,6 +1134,7 @@ class FirstLinkMergerTest {
 /** A [SyncClient] that serves a fixed page and counts `changes` calls. */
 private class CountingClient(
     private val records: List<RecordDto>,
+    private val hasMore: Boolean = false,
 ) : SyncClient {
     var changesCalls = 0
         private set
@@ -1145,9 +1209,9 @@ private class CountingClient(
         changesCalls++
         // A `since` cursor answers empty: the fixed page is the whole snapshot.
         return if (since == null) {
-            ChangesPage(records = records, cursor = "c:00000001:1", hasMore = false, serverTime = "")
+            ChangesPage(records = records, cursor = "c:00000001:1", hasMore = hasMore, serverTime = "")
         } else {
-            ChangesPage(records = emptyList(), cursor = "c:00000001:1", hasMore = false, serverTime = "")
+            ChangesPage(records = emptyList(), cursor = "c:00000001:1", hasMore = hasMore, serverTime = "")
         }
     }
 

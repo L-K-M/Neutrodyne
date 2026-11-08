@@ -33,6 +33,9 @@ class FakeLibraryMerger : LibraryMerger {
     /** Fed to `onApplied` when the caller passes one. */
     var appliedRecords: List<MergedRecord> = emptyList()
 
+    /** Thrown from `mergeStaged` before any callback, for cancellation/failure paths. */
+    var failure: (() -> Throwable)? = null
+
     override suspend fun mergeStaged(
         stagingDir: String,
         policy: MergePolicy,
@@ -41,6 +44,7 @@ class FakeLibraryMerger : LibraryMerger {
         onApplied: (suspend (MergedRecord) -> Unit)?,
     ): Outcome<MergeSummary, BackupError> {
         calls += Call(stagingDir, policy)
+        failure?.let { throw it() }
         for ((podcastSyncId, identityKey) in unmatched) onUnmatched(podcastSyncId, identityKey)
         if (progressTotal > 0) progress(progressTotal, progressTotal)
         for (record in appliedRecords) onApplied?.invoke(record)
