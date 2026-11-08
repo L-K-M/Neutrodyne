@@ -3705,7 +3705,7 @@
 -keep class ch.lkmc.neutrodyne.feature.settings.UpdatesSettingsViewModelContributions {
 }
 -keep class ch.lkmc.neutrodyne.feature.sync.SyncNavigation {
-  public kotlin.jvm.functions.Function1 entries(dev.zacsweers.metro.Provider);
+  public kotlin.jvm.functions.Function1 entries(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
   ch.lkmc.neutrodyne.feature.sync.SyncNavigation INSTANCE;
 }
 -keep class ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps$Companion {
