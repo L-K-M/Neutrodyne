@@ -26,8 +26,10 @@ import kotlinx.serialization.encodeToString
  * re-read: a strictly newer local intent wins and the stale remote value is skipped, while an equal
  * clock is an identical intent and still applies (a storage-failure retry). The marker is cleared
  * from a fresh row inside a Room write transaction, and only when it still matches the applied
- * value and clock, so a newer page's effect or other raw metadata is never rolled back. No Room
- * transaction spans the DataStore write.
+ * value and clock, so a newer page's effect or other raw metadata is never rolled back. A skipped
+ * marker is cleared by the same conditional ack: the upload ack deletes the outbox intent before
+ * the server's echo page can replace the marker, so leaving it would let a later drain re-apply
+ * the superseded remote value. No Room transaction spans the DataStore write.
  */
 class SyncApplyEffects(
     private val db: NeutrodyneDatabase,
@@ -48,7 +50,10 @@ class SyncApplyEffects(
             val row = db.syncClockDao().get(SyncCollection.SETTING.wire, key.name) ?: return@withLock
             val raw = decode(row.clocks) ?: return@withLock
             val pending = raw.pendingSetting ?: return@withLock
-            if (hasNewerLocalIntent(key, pending)) return@withLock
+            if (hasNewerLocalIntent(key, pending)) {
+                ack(key, pending)
+                return@withLock
+            }
             if (!settings.applyRemote(key, pending.value)) return@withLock
             ack(key, pending)
         }
@@ -70,9 +75,10 @@ class SyncApplyEffects(
     }
 
     /**
-     * Clears the marker only when the fresh row still carries exactly the applied value and clock.
+     * Clears the marker only when the fresh row still carries exactly the given value and clock.
      * The re-read and the write share one Room transaction, so a concurrent metadata update or a
-     * newer page's marker is neither overwritten nor cleared.
+     * newer page's marker is neither overwritten nor cleared. Used both after a successful apply
+     * and when a strictly newer local intent supersedes the marker.
      */
     private suspend fun ack(
         key: SettingKey<*>,
