@@ -111,7 +111,8 @@ try {
             return;
         }
         try {
-            item.ModifyDate = epoch;
+            // COM requires VT_DATE; a JScript Date object produces a type mismatch.
+            item.ModifyDate = epoch.getVarDate();
         } catch (e) {
             var failed = "cannot set the timestamp for " + path + ": " + e.message;
             if (fatal) {
