@@ -72,6 +72,18 @@ class LocalNetworkPermissionGateTest {
     }
 
     @Test
+    fun aRevokedThenRegrantedPermissionFollowsTheLiveOsState() {
+        shadowOf(context).denyPermissions(LocalNetworkPermissionGate.PERMISSION)
+        val gate = gate()
+        assertFalse(gate.hasPermission())
+        assertFalse(access.syncAllowed.value)
+        // A regrant in system settings is picked up at the next verdict, without a prompt.
+        shadowOf(context).grantPermissions(LocalNetworkPermissionGate.PERMISSION)
+        assertTrue(gate.hasPermission())
+        assertTrue(access.syncAllowed.value)
+    }
+
+    @Test
     fun belowApi37TheBypassIsAlwaysAllowed() {
         val gate = LocalNetworkPermissionGate(context, platform(sdkInt = 36), access)
         assertTrue(gate.hasPermission())

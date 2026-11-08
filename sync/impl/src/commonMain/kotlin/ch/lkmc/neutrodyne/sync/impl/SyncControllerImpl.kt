@@ -341,6 +341,7 @@ class SyncControllerImpl(
 
     override suspend fun approveLink(userCode: String): Outcome<PendingDevice, SyncProblem> {
         val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
         return try {
             val response = client.linkApprove(server, token, normaliseUserCode(userCode))
             Outcome.Success(
@@ -364,6 +365,7 @@ class SyncControllerImpl(
         approve: Boolean,
     ): Outcome<Unit, SyncProblem> {
         val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
         return try {
             client.linkConfirm(server, token, normaliseUserCode(userCode), approve)
             Outcome.Success(Unit)
@@ -376,6 +378,7 @@ class SyncControllerImpl(
 
     override suspend fun devices(): Outcome<List<SyncDevice>, SyncProblem> {
         val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
         return try {
             val current = db.syncStateDao().get()?.deviceId
             Outcome.Success(
@@ -421,6 +424,7 @@ class SyncControllerImpl(
     override suspend fun deleteServerData(confirm: String): Outcome<Unit, SyncProblem> {
         if (confirm != DELETE_CONFIRMATION) return Outcome.Failure(SyncProblem.Server(400))
         val (url, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
         return try {
             client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
             db.syncStateDao().unlink()
@@ -440,6 +444,7 @@ class SyncControllerImpl(
         name: String,
     ): Outcome<Unit, SyncProblem> {
         val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
         return try {
             client.renameDevice(deviceId, name.trim())
             Outcome.Success(Unit)
@@ -452,6 +457,7 @@ class SyncControllerImpl(
 
     override suspend fun revokeDevice(deviceId: String): Outcome<Unit, SyncProblem> {
         val (server, token) = linkedContext() ?: return Outcome.Failure(SyncProblem.Revoked)
+        refreshGateVerdict()
         return try {
             client.revokeDevice(deviceId)
             Outcome.Success(Unit)
@@ -794,6 +800,17 @@ class SyncControllerImpl(
         } finally {
             permissionDecision = null
         }
+    }
+
+    /**
+     * Applies the gate's live verdict before a direct control request. These methods have no
+     * preceding preflight/round, so after a process restart the SYNC bypass would still be `false`
+     * until one ran: an already-granted `ACCESS_LOCAL_NETWORK` would fail with
+     * `LocalNetworkPermissionDenied` (10 Local-network gate 3). No prompt is shown; the gate stays
+     * the only writer of the bypass.
+     */
+    private fun refreshGateVerdict() {
+        gate.onPermissionResult(gate.hasPermission())
     }
 
     /** The linked server's URL and device token, or `null` when this device cannot act. */
