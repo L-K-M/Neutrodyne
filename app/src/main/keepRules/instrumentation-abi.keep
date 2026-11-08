@@ -494,6 +494,18 @@
 -keep class androidx.media3.common.MediaMetadata {
   android.net.Uri artworkUri;
 }
+-keep interface androidx.media3.common.Player$Listener {
+  public void onPositionDiscontinuity(androidx.media3.common.Player$PositionInfo, androidx.media3.common.Player$PositionInfo, int);
+}
+-keep class androidx.media3.common.Player$PositionInfo {
+  long positionMs;
+}
+-keep interface androidx.media3.common.Player {
+  public void addListener(androidx.media3.common.Player$Listener);
+  public long getCurrentPosition();
+  public boolean getPlayWhenReady();
+  public int getPlaybackState();
+}
 -keep class androidx.media3.common.Tracks$Group {
   public int getType();
   public boolean isSupported();
@@ -520,13 +532,16 @@
   public com.google.common.util.concurrent.ListenableFuture buildAsync();
 }
 -keep class androidx.media3.session.MediaController {
+  public long getBufferedPosition();
   public androidx.media3.common.MediaItem getCurrentMediaItem();
+  public int getCurrentMediaItemIndex();
   public long getCurrentPosition();
   public androidx.media3.common.Tracks getCurrentTracks();
   public long getDuration();
   public int getMediaItemCount();
   public androidx.media3.common.MediaMetadata getMediaMetadata();
   public boolean getPlayWhenReady();
+  public int getPlaybackState();
   public float getVolume();
   public boolean isPlaying();
   public void pause();
@@ -5262,6 +5277,7 @@
   public static java.util.List sorted(java.lang.Iterable);
   public static java.util.List sortedWith(java.lang.Iterable, java.util.Comparator);
   public static java.util.List take(java.lang.Iterable, int);
+  public static java.util.List takeLast(java.util.List, int);
   public static java.util.List toList(java.lang.Iterable);
   public static java.util.List toMutableList(java.util.Collection);
   public static java.util.Set toSet(java.lang.Iterable);
