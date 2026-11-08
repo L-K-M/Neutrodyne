@@ -181,6 +181,10 @@ fun MacrobenchmarkRule.measureColdStart(
     setupBlock = {
         with(JourneyActions) { seed() }
         pressHome()
+        // Seeding starts the app and its background schedulers. Finish that fixture
+        // process before Macrobenchmark performs its own cold reset and live-process
+        // check; a seed-time JobService raced the first force-stop on API 34.
+        killProcess()
     },
     measureBlock = measure,
 )
