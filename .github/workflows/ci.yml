@@ -140,6 +140,7 @@ jobs:
           scripts/ci/tests/desktop-packaging.test.sh
           scripts/ci/tests/build-desktop-release-windows.test.sh
           python3 scripts/ci/tests/desktop-package-variants.test.py
+          python3 scripts/ci/tests/desktop-smoke-pipeline.test.py
           python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
@@ -487,6 +488,11 @@ jobs:
       # JAVA_TOOL_OPTIONS and keeps the pinned tmpdir. The window step needs
       # the display Xvfb provides; headless it would report skipped-headless.
       - name: Smoke-start the image and check it
+        # `shell: bash` is load-bearing: it runs the block with pipefail, so a
+        # smoke start that exits nonzero fails the step even though `tee`
+        # succeeds. The unspecified Linux default is `bash -e {0}` (no
+        # pipefail), which would let a failed launch through to the gates.
+        shell: bash
         env:
           TMPDIR: ${{ runner.temp }}/neutrodyne-smoke-tmp
         run: |
