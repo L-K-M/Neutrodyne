@@ -79,7 +79,7 @@ class ServerImageTest(unittest.TestCase):
             lock['sources'] = [{'package': 'base', 'version': '1', 'files': [
                 {'name': 'base.dsc', 'size': len(source), 'sha256': IMAGE.sha256(source)}]}]
             (root / 'runtime.tar.gz').write_bytes(runtime)
-            (root / 'RUNTIME-SOURCES.md').write_text('runtime.tar.gz')
+            (root / 'SERVER-RUNTIME-SOURCES.md').write_text('runtime.tar.gz')
             def write_bundle(payload):
                 with tarfile.open(root / 'neutrodyne-server-image-sources-0.1.0.tar.xz', 'w:xz') as tar:
                     for name, data in [('inventory.json', json.dumps(lock).encode()), ('base/base.dsc', payload)]:

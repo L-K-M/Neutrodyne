@@ -23,7 +23,13 @@ import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.PlaybackBeforeUnsubscribe
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeAvailabilityRecorder
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
+import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
@@ -82,6 +88,12 @@ internal class DownloadComponents(
     private val host: DownloadHost,
     @param:ApplicationScope scope: CoroutineScope,
     chapters: Provider<ChapterRepository>,
+    private val capabilities: YouTubeCapabilitiesSource,
+    youtubeHealth: YouTubeHealth,
+    streams: YouTubeStreamResolver,
+    control: YouTubeEngine,
+    recorder: YouTubeAvailabilityRecorder,
+    audioLanguage: DownloadAudioLanguage,
     playback: PlaybackBeforeUnsubscribe = PlaybackBeforeUnsubscribe.None,
     @Dispatcher(NeutrodyneDispatchers.IO) io: CoroutineDispatcher,
 ) {
@@ -90,6 +102,7 @@ internal class DownloadComponents(
     private val uris = PlatformLocalUris()
     val deletes = DeferredDeletes(device, fileSystem, roots, db.downloadDao()::allRows)
     private val verification = DownloadFiles(fileSystem, roots, PlatformSriHasher(roots), uris, deletes)
+    val youtubeRules = YouTubeEngineRules(db, capabilities, youtubeHealth, deletes, clock)
     val reconciler =
         DownloadReconciler(
             db,
@@ -102,6 +115,7 @@ internal class DownloadComponents(
             host.liveTokens,
             clock,
             host.beforeRunnerReset,
+            youtubeRules,
         )
     val quota = DownloadQuota(settings)
     val mover = DownloadMoverImpl(db, fileSystem, roots, device, index, deletes, claimMutex, clock, quota)
@@ -130,7 +144,7 @@ internal class DownloadComponents(
                 it.isConnected,
                 desktop || !it.isMetered,
                 desktop || host.charging.value,
-                false,
+                capabilities.capabilities.value.downloads,
                 desktop || it.isValidated,
             )
         }
@@ -139,7 +153,8 @@ internal class DownloadComponents(
         combine(
             network.status,
             host.charging,
-        ) { _, _ -> conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
+            capabilities.capabilities,
+        ) { _, _, _ -> conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
 
     // Large episode merges must not start an unbounded set of inspectors and JSON fetches.
     private val chapterReaders = Semaphore(MAX_CHAPTER_READERS)
@@ -173,6 +188,21 @@ internal class DownloadComponents(
                     clock,
                     platform.kind,
                 ),
+                YouTubeTransferSource(
+                    clients,
+                    db.episodeDao(),
+                    settings,
+                    audioLanguage::current,
+                    streams,
+                    control,
+                    capabilities,
+                    youtubeHealth,
+                    YouTubeAutoPacer(clock),
+                    roots,
+                    fileSystem,
+                    verification,
+                    clock,
+                ),
             ),
             fileSystem,
             roots,
@@ -188,6 +218,8 @@ internal class DownloadComponents(
                 completedMedia(row)
             },
             cleanup,
+            youtubeRules = youtubeRules,
+            availability = recorder,
         )
     val planner =
         AutoDownloadPlannerImpl(
@@ -204,6 +236,7 @@ internal class DownloadComponents(
             media,
             platform.kind,
             io,
+            capabilities,
         )
     val controller =
         DownloadControllerImpl(
@@ -221,7 +254,8 @@ internal class DownloadComponents(
             host.activity,
             host.hasActiveTransfers,
             host.noticeSources,
-            host.busy,
+            busy = host.busy,
+            capabilities = capabilities,
         )
     val lifecycle: DownloadLifecycle =
         DownloadLifecycleImpl(db, controller, storage, index, playback, claimMutex, io, completedMedia)
