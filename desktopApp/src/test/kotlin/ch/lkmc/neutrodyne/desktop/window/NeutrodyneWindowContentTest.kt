@@ -241,6 +241,7 @@ class NeutrodyneWindowContentTest {
             setWindowContent()
 
             onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            // Settings gained more rows; bring this action into the viewport before clicking.
             onAllNodesWithText("Licences").onFirst().performScrollTo().performClick()
 
             // The desktop source loads the generated aboutlibraries.json off the classpath. The

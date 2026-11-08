@@ -129,6 +129,24 @@ class AddDiscoveryTest {
             it.readText()
         }
 
+    @Test fun directoryPreviewHandsYouTubeToAddWithoutFetching() =
+        runBlocking {
+            assertIs<AddResolution.YouTube>(
+                bundle.resolver.preview(
+                    "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
+                ),
+            )
+            assertEquals(0, server.requestCount)
+        }
+
+    @Test fun directoryPreviewHandsRedirectedYouTubeToAdd() =
+        runBlocking {
+            server.enqueue(mockResponse(302, "", "Location" to "https://youtube.com/@some.name"))
+            assertIs<AddResolution.YouTube>(bundle.resolver.preview(url("/directory-feed")))
+            assertEquals(1, server.requestCount)
+            assertTempFilesEmpty()
+        }
+
     @Test fun alternateFeedResolvesAndNeverWritesBeforeSubscribe() =
         runBlocking {
             server.enqueue(
@@ -471,9 +489,7 @@ class AddDiscoveryTest {
             server.enqueue(mockResponse(body = rssBody(title = "After")))
             assertEquals(
                 "After",
-                assertIs<Outcome.Success<*>>(bundle.resolver.preview(first.feedUrl)).value.let {
-                    (it as ch.lkmc.neutrodyne.core.model.FeedPreview).title
-                },
+                assertIs<AddResolution.Feed>(bundle.resolver.preview(first.feedUrl)).preview.title,
             )
             server.enqueue(mockResponse(body = fixture("multiple.html")))
             assertEquals(Outcome.Failure(AddPodcastError.NotAFeed), bundle.resolver.probe(url("/page")))

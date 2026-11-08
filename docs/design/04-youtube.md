@@ -1311,6 +1311,23 @@ Completed YouTube files are local files, but external mode never projects YouTub
 
 ---
 
+**Implementation note (2026-11-04, M8 external actions).** Both shells expose
+Watch on YouTube for external episodes and hide queue/download actions.
+Request, planner and runnable/claim boundaries also reject channel rows,
+including inconsistent restored RSS-tagged channel rows. Completed files
+remain eligible for normal cleanup. Opening marks played only after a
+successful OS hand-off and only when enabled; Undo clears played state,
+without restoring position or queue entries. Feeds and Library display one
+global outage banner and retry action, suppressing per-channel outage badges.
+The existing player action handler remains responsible for metered consent,
+chapters and refused-start follow-ups. Settings shows only the external reason
+and the two M8 preferences. Controlled graph journeys on Android and desktop
+exercise Add, grouped import, INITIAL ingestion, external opening and mixed
+group exclusion using offline replay. Exact E8 methods are required by CI.
+The scheduled feed-only canary reports availability and does not gate release
+or invoke any media extractor. Real TalkBack/browser and device evidence
+remain separate acceptance checks.
+
 ## Import and export formats
 
 Serves R1.6, R3.4. Delivered in M3 (classification and "supported in a later build" reporting), M8 (everything else). Parsers live in `:feeds` and return raw strings; 05's pipeline classifies each entry with `YouTubeUrlClassifier`. Sniffing, caps for archives, preview, statuses and report: [05 Other import formats](05-groups-opml-backup.md#other-import-formats).
