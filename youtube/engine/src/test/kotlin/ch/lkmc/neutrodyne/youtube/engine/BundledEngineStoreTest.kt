@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.youtube.engine
 
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStorePaths
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.youtube.api.EngineRejectReason
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -192,6 +193,67 @@ class BundledEngineStoreTest {
             Files.createSymbolicLink(paths.root.toFile().toPath(), alternate.toPath())
             assertFails { store().prepareBundled() }
             assertTrue(alternate.list()!!.isEmpty())
+        }
+
+    @Test fun beginTrialReportsTheCandidatesOwnCompileStateAndEndingsRestoreTheSavedOne() =
+        runTest {
+            val store = store()
+            val active = store.prepareBundled()
+            compileFixture(active)
+            store.loadStatus()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            val candidateZip = fixtureZip(version = "2026.09.01")
+            val candidate = store.stageVersion("2026.09.01", candidateZip, "0.8.0", 4)
+            // A staged candidate without its compile marker must not claim COMPILED: the next
+            // bind compiles it, so the trial is PREPARING until the host proves otherwise.
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            assertEquals(candidate, store.hostPrepared())
+            assertEquals(candidate, store.active.value.trial)
+            store.clearTrial()
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(active, store.hostPrepared())
+            assertNull(store.active.value.trial)
+            assertEquals("2026.09.01", store.active.value.staged)
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+            // A candidate that already carries its marker is served without a compile budget.
+            compileFixture(candidate)
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(candidate, store.hostPrepared())
+            // Abort records the verdict, removes the tree and restores the active preparation.
+            store.abortTrial("2026.09.01", EngineRejectReason.SELFTEST_FAILED, 4, clock.now())
+            assertEquals(EnginePreparation.COMPILED, store.preparation.value)
+            assertEquals(active, store.hostPrepared())
+            assertNull(store.active.value.trial)
+            assertFalse(File(paths.root.toFile(), "versions/2026.09.01").exists())
+            assertEquals(
+                EngineRejectReason.SELFTEST_FAILED,
+                store.active.value.rejected
+                    .single()
+                    .reason,
+            )
+        }
+
+    @Test fun trialOverAnUncompiledActiveRestoresPreparingOnClear() =
+        runTest {
+            val store = store()
+            val bundled = store.prepareBundled()
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            store.stageVersion("2026.09.01", fixtureZip(version = "2026.09.01"), "0.8.0", 1)
+            store.beginTrial("2026.09.01")
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            store.clearTrial()
+            // The active bundle still has no marker: cancellation must not promote it.
+            assertEquals(EnginePreparation.PREPARING, store.preparation.value)
+            assertEquals(bundled, store.hostPrepared())
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
         }
 
     @Test fun genuinePinnedZipExtractsWithShebangAndExpectedInventory() {

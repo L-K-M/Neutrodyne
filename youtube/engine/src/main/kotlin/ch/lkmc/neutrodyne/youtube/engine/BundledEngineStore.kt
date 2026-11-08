@@ -266,7 +266,12 @@ class BundledEngineStore(
                 val candidate = PreparedEngine(dir.path.toPath(), markerFor(version))
                 trialPreparation = mutablePreparation.value
                 trial = candidate
-                mutablePreparation.value = EnginePreparation.COMPILED
+                // The trial binds a fresh host over this tree; only a tree that already
+                // carries its compile marker is COMPILED. Anything else must first be
+                // compiled by that host, so the bind owes the first-compile budget, not
+                // the start budget (04 host contract). Cancel/commit restore from here.
+                mutablePreparation.value =
+                    if (downloadedUsable(version)) EnginePreparation.COMPILED else EnginePreparation.PREPARING
                 publishActive(mutableActive.value.copy(trial = candidate))
                 candidate
             }

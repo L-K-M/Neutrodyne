@@ -93,7 +93,12 @@ class BinderYtxTransport internal constructor(
         if (!BinderPayloads.fits(json, YtxLimits.PAYLOAD_BYTES)) fail("EXTRACTION")
         val remaining = deadline.elapsedRealtimeMs - clock.elapsedRealtime()
         if (remaining <= 0) fail("TIMEOUT")
-        if (method != YtxMethod.PING && store.preparation.value != EnginePreparation.COMPILED) {
+        // PING (engine-prepare) and SELFTEST (the update trial) are the only callers that
+        // may start a host while the served tree is not yet compiled: both own the
+        // first-compile budget start() grants. Ordinary traffic must never compile inline.
+        if (method != YtxMethod.PING && method != YtxMethod.SELFTEST &&
+            store.preparation.value != EnginePreparation.COMPILED
+        ) {
             fail("ENGINE_UNAVAILABLE")
         }
         // Caller cancellation releases admission only after the host acknowledges or is killed.

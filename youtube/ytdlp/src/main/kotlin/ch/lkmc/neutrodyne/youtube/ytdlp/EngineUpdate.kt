@@ -100,11 +100,19 @@ class EngineUpdateWorker(
             }
         val outcome = hooks.runUpdate(trigger)
         val output = workDataOf(OUTCOME_KEY to EngineUpdateOutcomes.encode(outcome))
-        if (runAttemptCount >= MAX_ATTEMPTS) return Result.failure(output)
+        // The cap ends retries; the one attempt that reached a verdict reports it honestly.
         return when (outcome) {
-            is EngineUpdateOutcome.Failed -> Result.retry()
-            is EngineUpdateOutcome.Staged -> Result.retry()
-            else -> Result.success(output)
+            is EngineUpdateOutcome.Failed -> {
+                if (runAttemptCount >= MAX_ATTEMPTS) Result.failure(output) else Result.retry()
+            }
+
+            is EngineUpdateOutcome.Staged -> {
+                if (runAttemptCount >= MAX_ATTEMPTS) Result.failure(output) else Result.retry()
+            }
+
+            else -> {
+                Result.success(output)
+            }
         }
     }
 

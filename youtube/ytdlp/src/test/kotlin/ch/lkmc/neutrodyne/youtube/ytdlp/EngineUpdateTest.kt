@@ -167,6 +167,23 @@ class EngineUpdateTest {
             )
         }
 
+    @Test fun cappedRunReportingATerminalOutcomeIsNotAFailure() =
+        runTest {
+            val hooks = RecordingHooks()
+            hooks.outcome = EngineUpdateOutcome.Activated("2026.11.05")
+            val capped =
+                TestListenableWorkerBuilder<EngineUpdateWorker>(context)
+                    .setWorkerFactory(factory(hooks))
+                    .setRunAttemptCount(EngineUpdateWorker.MAX_ATTEMPTS)
+                    .build()
+            val result = capped.doWork()
+            assertTrue(result is ListenableWorker.Result.Success)
+            assertEquals(
+                "activated:2026.11.05",
+                result.outputData.getString(EngineUpdateWorker.OUTCOME_KEY),
+            )
+        }
+
     @Test fun workerPropagatesCancellationSoTheStoreContractStaysIntact() =
         runTest {
             val hooks = RecordingHooks()
