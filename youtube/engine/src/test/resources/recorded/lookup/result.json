@@ -1,0 +1,15 @@
+{
+  "channelId": "UCaaaaaaaaaaaaaaaaaaaaaA",
+  "title": "Synthetic channel",
+  "handle": "@synthetic",
+  "description": "Synthetic description",
+  "followerCount": null,
+  "avatars": [
+    {
+      "url": "https://example.invalid/avatar=s0",
+      "w": 0,
+      "h": 0
+    }
+  ],
+  "banners": []
+}

@@ -211,6 +211,27 @@ class DesktopPackagingTest {
     }
 
     @Test
+    fun `the classpath manifest survives jar repacking`() {
+        val root = Files.createTempDirectory("classpath-repacking").toFile()
+        try {
+            val entries = listOf("A.class" to "CODE-A".toByteArray())
+            val original = writeJar(root, "runtime.jar", zipBytes(entries))
+            val repacked = writeJar(root, "repacked.jar", zipBytes(entries, byteArrayOf(0x34, 0x12, 0, 0)))
+            val task = classpathManifestTask(root, original)
+
+            task.write()
+
+            assertTrue(!original.readBytes().contentEquals(repacked.readBytes()))
+            assertEquals(
+                "${CanonicalJarHash.of(repacked)}  ${imageJarName(original)}\n",
+                File(root, "manifest.txt").readText(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `signature metadata cannot hide linkedit data`() = assertSignatureMutationBound(SignatureMutation.NON_TERMINAL)
 
     @Test
@@ -414,6 +435,7 @@ class DesktopPackagingTest {
             val vectors =
                 listOf(
                     "plain.jar" to byteArrayOf(1, 2, 3, 4),
+                    "zip.jar" to zipBytes(listOf("A.class" to "CODE-A".toByteArray())),
                     "macho.jar" to zipBytes(listOf("lib.dylib" to thinMacho())),
                     "fat.jar" to zipBytes(listOf("lib.dylib" to fatMacho(listOf(thinMacho(), thinMacho())))),
                 )

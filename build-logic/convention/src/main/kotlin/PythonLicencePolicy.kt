@@ -391,30 +391,118 @@ abstract class CheckPythonLicencesTask : DefaultTask() {
     }
 }
 
-/**
- * `verifyBundledYtDlp` — the OpenPGP + SHA-256 verification of the vendored `youtube/ytdlp/engine/` release.
- * A no-op until M9a vendors yt-dlp (01 Python and native components, 04 Trust chain).
- */
+/** Offline gate for both hosts; no upstream key or signature is packaged into the application. */
 abstract class VerifyBundledYtDlpTask : DefaultTask() {
-    @get:Internal
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val engineDir: DirectoryProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val releaseKey: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val inventoryLock: RegularFileProperty
 
     init {
         group = "verification"
-        description = "Verifies the vendored yt-dlp release (signature + hash); no-op until M9a vendors it."
+        description = "Verifies the bundled yt-dlp upstream signature, hash and identity."
     }
 
     @TaskAction
     fun verify() {
-        val bundled = engineDir.orNull?.asFile?.let { File(it, "bundled.json") }
-        if (bundled == null || !bundled.isFile) {
-            logger.lifecycle("verifyBundledYtDlp: no vendored yt-dlp yet (M9a); nothing to check")
-            return
+        try {
+            BundledYtDlpCheck.verify(engineDir.get().asFile, releaseKey.get().asFile, inventoryLock.get().asFile)
+        } catch (failure: Exception) {
+            throw GradleException("Bundled yt-dlp verification failed: ${failure.message}", failure)
         }
-        throw GradleException(
-            "youtube/ytdlp/engine/ holds a vendored release but verifyBundledYtDlp is still a stub — implement the " +
-                "OpenPgpSignatureCheck + SHA-256 verification before vendoring (04 Trust chain)",
-        )
+    }
+}
+
+internal object BundledYtDlpCheck {
+    fun verify(
+        directory: File,
+        key: File,
+        inventory: File = File(directory.parentFile, "python-components.lock"),
+    ) {
+        fun read(
+            name: String,
+            limit: Long,
+        ): ByteArray {
+            val file = File(directory, name)
+            require(file.isFile && file.length() in 1..limit) { "Missing or oversized $name" }
+            return file.readBytes()
+        }
+        require(key.isFile && key.length() in 1..65536)
+        val sums = read("SHA2-256SUMS", 65536)
+        OpenPgpSignatureCheck.verify(key.readText(), read("SHA2-256SUMS.sig", 65536), sums)
+        val json = groovy.json.JsonSlurper().parseText(read("bundled.json", 4096).toString(Charsets.UTF_8)) as Map<*, *>
+        val version = json["version"] as String
+        val ejs = json["ejsVersion"] as String
+        require(Regex("[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}").matches(version) && json["tag"] == version)
+        val signedHash =
+            sums
+                .toString(Charsets.UTF_8)
+                .lineSequence()
+                .mapNotNull {
+                    Regex("([0-9a-f]{64})  yt-dlp").matchEntire(it)?.groupValues?.get(1)
+                }.single()
+        val asset = read("yt-dlp", 10L * 1024 * 1024)
+        val hash =
+            java.security.MessageDigest.getInstance("SHA-256").digest(asset).joinToString("") {
+                "%02x".format(it.toInt() and 255)
+            }
+        require(hash == signedHash && json["sha256"] == hash) { "Bundle SHA-256 mismatch" }
+        java.util.zip.ZipFile(File(directory, "yt-dlp")).use { zip ->
+            require(
+                zip.entries().asSequence().all {
+                    it.name == "__main__.py" || it.name.startsWith("yt_dlp/") ||
+                        it.name.startsWith("yt_dlp_ejs/")
+                },
+            ) { "Uninventoried bundled package" }
+            val components = PythonLicencePolicy.parse(inventory.readText()).components
+            val embedded =
+                zip.getInputStream(zip.getEntry("yt_dlp_ejs/yt/solver/lib.min.js")).use {
+                    it.readNBytes(65536).toString(Charsets.UTF_8)
+                }
+            for ((name, expected) in mapOf(
+                "yt-dlp" to version,
+                "yt-dlp-ejs" to ejs,
+                "meriyah" to "6.1.4",
+                "astring" to "1.9.0",
+            )) {
+                require(components.single { it.name == name }.version == expected) { "Stale $name inventory" }
+                if (name == "meriyah" ||
+                    name == "astring"
+                ) {
+                    require(
+                        embedded.contains("Name: $name\n * Version: $expected"),
+                    ) { "Changed embedded dependency" }
+                }
+            }
+
+            fun text(name: String): String {
+                val entry = requireNotNull(zip.getEntry(name))
+                require(entry.size in 1..65536)
+                return zip.getInputStream(entry).use {
+                    it
+                        .readNBytes(65537)
+                        .also { bytes ->
+                            require(bytes.size <= 65536)
+                        }.toString(Charsets.UTF_8)
+                }
+            }
+            val info = text("yt_dlp/version.py")
+            require(Regex("(?m)^ORIGIN = ['\"]yt-dlp/yt-dlp['\"]$").containsMatchIn(info))
+            require(Regex("(?m)^CHANNEL = ['\"]stable['\"]$").containsMatchIn(info))
+            require(info.lineSequence().any { it == "__version__ = '$version'" }) { "Wrong bundled version" }
+            require(
+                text("yt_dlp_ejs/_version.py").lineSequence().any {
+                    it == "__version__ = version = '$ejs'"
+                },
+            ) { "Wrong ejs version" }
+        }
     }
 }
 
@@ -479,7 +567,9 @@ internal fun Project.registerPythonPolicy(desktopLock: Boolean) {
 
     val bundleTask =
         tasks.register<VerifyBundledYtDlpTask>("verifyBundledYtDlp") {
-            engineDir.set(layout.projectDirectory.dir("engine"))
+            engineDir.set(rootProject.layout.projectDirectory.dir("youtube/ytdlp/engine"))
+            releaseKey.set(rootProject.layout.projectDirectory.file("youtube/ytdlp/keys/yt-dlp-release-key.asc"))
+            inventoryLock.set(rootProject.layout.projectDirectory.file("youtube/ytdlp/python-components.lock"))
         }
 
     tasks.matching { it.name == "check" }.configureEach { dependsOn(checkTask, bundleTask) }

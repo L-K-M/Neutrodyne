@@ -139,6 +139,7 @@ jobs:
           scripts/ci/tests/install-android-sdk.test.sh
           scripts/ci/tests/desktop-packaging.test.sh
           scripts/ci/tests/build-desktop-release-windows.test.sh
+          python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
@@ -153,6 +154,7 @@ jobs:
           python3 scripts/ci/tests/emulator-acceleration.test.py
           python3 scripts/ci/tests/gmd-device-budget.test.py
           python3 scripts/ci/tests/preserve-emulator-crashes.test.py
+          python3 scripts/ci/tests/preserve-desktop-test-crashes.test.py
           python3 scripts/ci/tests/apply-screenshots.test.py
           python3 scripts/ci/tests/android-notices.test.py
           python3 scripts/ci/tests/assert-download-tests.test.py
@@ -165,8 +167,8 @@ jobs:
           python3 scripts/ci/tests/check-apk-published.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
           python3 scripts/ci/tests/release-ffmpeg-source.test.py
-          python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/check-runtime-sources.test.py
+          python3 scripts/ci/tests/smoke-start.test.py
           python3 scripts/ci/tests/network-capture.test.py
       - name: Preserve a formatting repair patch
         if: failure()
@@ -216,7 +218,28 @@ jobs:
       # :youtube:ytdlp:shimTest :youtube:ytdlp-desktop:shimTestStdio
       # -Proborazzi.test.verify=true --continue
       - name: Unit tests (allTests = every KMP module's commonTest+desktopTest; test = JVM and Android host tests incl. :sync:server; mutationTest = the capped-heap robustness suites)
-        run: dbus-run-session -- ./gradlew allTests test mutationTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue
+        env:
+          # A dedicated temp root for Gradle and its test workers:
+          # tempAppDirs() puts each test's <root>/state under java.io.tmpdir,
+          # so the crash step below scans one owned root instead of the
+          # platform's default.
+          TMPDIR: ${{ runner.temp }}/neutrodyne-test-tmp
+        run: |
+          mkdir -p "$TMPDIR"
+          # TMPDIR alone does not pin java.io.tmpdir — OpenJDK's Linux builds
+          # report /tmp regardless (Temurin JRE 25 container probe) and macOS
+          # keeps its per-user dir. The property itself must be set, and
+          # JAVA_TOOL_OPTIONS is inherited by every JVM this step forks:
+          # the daemon and each test worker. Existing options are kept.
+          export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR"
+          dbus-run-session -- ./gradlew allTests test mutationTest -Proborazzi.test.verify=true -Pneutrodyne.pseudoLocales=true --continue
+      # A desktop test worker that dies mid-suite leaves no test XML — the
+      # debug crash-fast path writes crash-<UTC>.txt under <root>/state and
+      # then halt(1)s, and /tmp was never inside the unit-reports glob.
+      # always() because a dead worker is the case that needs the files.
+      - name: Preserve desktop test crash reports
+        if: always()
+        run: python3 scripts/ci/preserve-desktop-test-crashes.py "${{ runner.temp }}/neutrodyne-test-tmp" desktopApp/build/test-results/crash-evidence
       - name: Preserve the independent Android DSP reference
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -466,6 +489,7 @@ jobs:
           sudo apt-get update -qq
           pkgs="binutils xvfb dbus-x11 dbus-daemon"
           [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          # shellcheck disable=SC2086 # the package list is word-split on purpose
           sudo apt-get install -y -qq $pkgs
       # FFmpeg's documented MSVC environment (doc/platform.texi): an MSYS2 shell
       # with GNU make, NASM and gpg. `buildFfmpeg` names MSYS2's bash explicitly

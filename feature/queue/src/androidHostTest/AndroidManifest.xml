@@ -1,0 +1,4 @@
+<!-- SPDX-License-Identifier: Unlicense -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application><activity android:name="androidx.activity.ComponentActivity" android:theme="@android:style/Theme.Material.Light.NoActionBar" /></application>
+</manifest>
