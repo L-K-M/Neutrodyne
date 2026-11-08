@@ -154,6 +154,21 @@ abstract class SyncOutboxDao(
         rids: List<String>,
     ): List<SyncOutboxEntity>
 
+    /**
+     * 10 Scheduling: rows that push on the 2-s debounce — every change except the coalesced
+     * `pos` saves and `session` records, which wait for a playback boundary or a playing tick.
+     */
+    @Query("SELECT EXISTS(SELECT 1 FROM sync_outbox WHERE field <> 'pos' AND coll <> 'session')")
+    abstract suspend fun hasImmediateRows(): Boolean
+
+    /** 10 Scheduling: pending playback rows the boundary and playing-tick triggers flush. */
+    @Query("SELECT EXISTS(SELECT 1 FROM sync_outbox WHERE field = 'pos' OR coll = 'session')")
+    abstract suspend fun hasPlaybackRows(): Boolean
+
+    /** 10 Outbox and coalescing: the group deletions the scheduler times for the undo window. */
+    @Query("SELECT * FROM sync_outbox WHERE coll = 'group' AND field = 'deleted' AND value = 'true'")
+    abstract suspend fun groupDeletions(): List<SyncOutboxEntity>
+
     /** A literal capture (local merges, "Keep mine"): always captured, even while applying. */
     suspend fun captureLiteral(
         coll: String,

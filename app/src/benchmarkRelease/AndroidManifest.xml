@@ -1,0 +1,9 @@
+<!-- SPDX-License-Identifier: Unlicense -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".benchmark.BenchmarkSeedReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

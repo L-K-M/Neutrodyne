@@ -94,6 +94,42 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             arguments,
         )
 
+    def test_benchmark_dryrun_selects_only_macrobenchmark_journeys(self):
+        source = WORKFLOW.read_text().split("  benchmark-dryrun:\n", 1)[1].split("\n  bmgr-download-exclusion:", 1)[0]
+        body = source.split("      - name: Exercise all Macrobenchmark journeys\n", 1)[1]
+        lines = body.split("        run: >-\n", 1)[1].splitlines()
+        command = []
+        for line in lines:
+            if line.strip() and not line.startswith("          "):
+                break
+            command.append(line.strip())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = root / "arguments.json"
+            gradle = root / "gradlew"
+            gradle.write_text(
+                f"#!{sys.executable}\n"
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['GMD_ARGUMENTS']).write_text(json.dumps(sys.argv[1:]))\n"
+            )
+            gradle.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", " ".join(command)],
+                cwd=root, env={**os.environ, "GMD_ARGUMENTS": str(record)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = json.loads(record.read_text())
+            self._assert_device_budget(arguments)
+            self.assertIn(":benchmark:bench34BenchmarkReleaseAndroidTest", arguments)
+            selections = [arg for arg in arguments if arg.startswith("-Pandroid.testInstrumentationRunnerArguments.class=")]
+            self.assertEqual(
+                selections,
+                ["-Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.benchmark.Journeys"],
+                "Dry-run mode only affects MacrobenchmarkRule; unrelated system tests require a different app build",
+            )
+
     def test_gradle_worker_limit_does_not_replace_device_limit(self):
         with self.assertRaises(AssertionError):
             self._assert_device_budget(["--max-workers=1"])
