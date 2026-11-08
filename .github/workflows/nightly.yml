@@ -1261,9 +1261,10 @@ jobs:
       # The runner image no longer ships the emulator package; GMD needs it to boot devices
       - name: Install the Android emulator
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
-      - name: M10 journeys on the api36 GMD
+      - name: M10 journeys on the api36 GMD - M10AccessibilityTest
         timeout-minutes: 60
         run: |
+          set -euo pipefail
           # One worker avoids queuing a device lease behind the 30-minute case.
           readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
           # A later emulator launch deletes unconsented Crashpad reports.
@@ -1277,11 +1278,96 @@ jobs:
           # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
           ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
             -Pneutrodyne.testScope=nightly \
-            -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.M10AccessibilityTest,ch.lkmc.neutrodyne.NavigationStateRestorationTest,ch.lkmc.neutrodyne.PerAppLanguageTest,ch.lkmc.neutrodyne.SubscribeJourneyTest \
-            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe
-      - name: Require every selected class executed unskipped
+            -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.M10AccessibilityTest \
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-M10AccessibilityTest.log"
+          # Copy evidence to distinct root with api36 path component.
+          mkdir -p app/build/outputs/androidTest-results/m10-a11y/M10AccessibilityTest/api36
+          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/M10AccessibilityTest/api36/ 2>/dev/null || true
+      - name: Require M10AccessibilityTest executed unskipped
         run: |
-          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results --device api36 \
+          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/M10AccessibilityTest --device api36 \
+            --require-class ch.lkmc.neutrodyne.M10AccessibilityTest
+      - name: M10 journeys on the api36 GMD - NavigationStateRestorationTest
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          # One worker avoids queuing a device lease behind the 30-minute case.
+          readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
+          # A later emulator launch deletes unconsented Crashpad reports.
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          python3 scripts/ci/preserve-emulator-crashes.py \
+            "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
+          readonly CRASH_PRESERVER_PID=$!
+          trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
+          # Clear only owned managedDevice/debug/api36 results for this class.
+          rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
+          ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
+            -Pneutrodyne.testScope=nightly \
+            -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.NavigationStateRestorationTest \
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-NavigationStateRestorationTest.log"
+          # Copy evidence to distinct root with api36 path component.
+          mkdir -p app/build/outputs/androidTest-results/m10-a11y/NavigationStateRestorationTest/api36
+          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/NavigationStateRestorationTest/api36/ 2>/dev/null || true
+      - name: Require NavigationStateRestorationTest executed unskipped
+        run: |
+          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/NavigationStateRestorationTest --device api36 \
+            --require-class ch.lkmc.neutrodyne.NavigationStateRestorationTest
+      - name: M10 journeys on the api36 GMD - PerAppLanguageTest
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          # One worker avoids queuing a device lease behind the 30-minute case.
+          readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
+          # A later emulator launch deletes unconsented Crashpad reports.
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          python3 scripts/ci/preserve-emulator-crashes.py \
+            "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
+          readonly CRASH_PRESERVER_PID=$!
+          trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
+          # Clear only owned managedDevice/debug/api36 results for this class.
+          rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
+          ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
+            -Pneutrodyne.testScope=nightly \
+            -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.PerAppLanguageTest \
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-PerAppLanguageTest.log"
+          # Copy evidence to distinct root with api36 path component.
+          mkdir -p app/build/outputs/androidTest-results/m10-a11y/PerAppLanguageTest/api36
+          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/PerAppLanguageTest/api36/ 2>/dev/null || true
+      - name: Require PerAppLanguageTest executed unskipped
+        run: |
+          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/PerAppLanguageTest --device api36 \
+            --require-class ch.lkmc.neutrodyne.PerAppLanguageTest
+      - name: M10 journeys on the api36 GMD - SubscribeJourneyTest
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          # One worker avoids queuing a device lease behind the 30-minute case.
+          readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
+          # A later emulator launch deletes unconsented Crashpad reports.
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          python3 scripts/ci/preserve-emulator-crashes.py \
+            "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
+          readonly CRASH_PRESERVER_PID=$!
+          trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
+          # Clear only owned managedDevice/debug/api36 results for this class.
+          rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
+          ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
+            -Pneutrodyne.testScope=nightly \
+            -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.SubscribeJourneyTest \
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-SubscribeJourneyTest.log"
+          # Copy evidence to distinct root with api36 path component.
+          mkdir -p app/build/outputs/androidTest-results/m10-a11y/SubscribeJourneyTest/api36
+          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/SubscribeJourneyTest/api36/ 2>/dev/null || true
+      - name: Require SubscribeJourneyTest executed unskipped
+        run: |
+          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/SubscribeJourneyTest --device api36 \
+            --require-class ch.lkmc.neutrodyne.SubscribeJourneyTest
+      - name: Require all four M10 classes in final evidence root
+        run: |
+          python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y --device api36 \
             --require-class ch.lkmc.neutrodyne.M10AccessibilityTest \
             --require-class ch.lkmc.neutrodyne.NavigationStateRestorationTest \
             --require-class ch.lkmc.neutrodyne.PerAppLanguageTest \

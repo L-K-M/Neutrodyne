@@ -99,22 +99,28 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             arguments,
         )
 
-    def test_m10_a11y_selects_the_four_classes_on_one_api36_device(self):
-        arguments = self._run_script(_run_block("M10 journeys on the api36 GMD"))
-        self._assert_device_budget(arguments)
-        self.assertIn(":app:api36DebugAndroidTest", arguments)
-        self.assertIn("-Pneutrodyne.testScope=nightly", arguments)
-        self.assertEqual(
-            [arg for arg in arguments if arg.startswith("-Pandroid.testInstrumentationRunnerArguments.class=")],
-            [
-                "-Pandroid.testInstrumentationRunnerArguments.class="
-                "ch.lkmc.neutrodyne.M10AccessibilityTest,ch.lkmc.neutrodyne.NavigationStateRestorationTest,"
-                "ch.lkmc.neutrodyne.PerAppLanguageTest,ch.lkmc.neutrodyne.SubscribeJourneyTest"
-            ],
-            "The M10 lane keeps its evidence to the four acceptance classes",
-        )
-        renderers = [arg for arg in arguments if arg.startswith(f"-P{GPU_PROPERTY}=")]
-        self.assertEqual(renderers, [f"-P{GPU_PROPERTY}=lavapipe"], "Do not restore the crashing legacy renderer")
+    def test_m10_a11y_runs_four_serial_invocations_one_per_class(self):
+        classes = [
+            "M10AccessibilityTest",
+            "NavigationStateRestorationTest",
+            "PerAppLanguageTest",
+            "SubscribeJourneyTest",
+        ]
+        for classname in classes:
+            step_name = f"M10 journeys on the api36 GMD - {classname}"
+            arguments = self._run_script(_run_block(step_name))
+            self._assert_device_budget(arguments)
+            self.assertIn(":app:api36DebugAndroidTest", arguments)
+            self.assertIn("-Pneutrodyne.testScope=nightly", arguments)
+            self.assertEqual(
+                [arg for arg in arguments if arg.startswith("-Pandroid.testInstrumentationRunnerArguments.class=")],
+                [
+                    f"-Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.{classname}"
+                ],
+                f"The M10 lane runs {classname} in its own isolated invocation",
+            )
+            renderers = [arg for arg in arguments if arg.startswith(f"-P{GPU_PROPERTY}=")]
+            self.assertEqual(renderers, [f"-P{GPU_PROPERTY}=lavapipe"], "Do not restore the crashing legacy renderer")
 
     def test_benchmark_dryrun_selects_only_macrobenchmark_journeys(self):
         source = WORKFLOW.read_text().split("  benchmark-dryrun:\n", 1)[1].split("\n  bmgr-download-exclusion:", 1)[0]
