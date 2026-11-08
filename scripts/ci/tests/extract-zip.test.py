@@ -129,6 +129,47 @@ class ExtractZipTest(unittest.TestCase):
         self.assertIn("escapes the destination", result.stderr)
         self.assertFalse((self.root / "evil.txt").exists())
 
+    def test_truncated_extended_timestamp_fails_closed(self):
+        """A 0x5455 field whose declared 5 bytes are cut short must not read as a
+        wrong-but-plausible timestamp: a partial slice would silently stamp the
+        entry with garbage. The extractor refuses it."""
+        archive = self.root / "truncated.zip"
+        truncated = struct.pack("<HHB", 0x5455, 5, 0x01) + struct.pack("<H", EPOCH_S & 0xFFFF)
+        make_zip(archive, [("Neutrodyne/app/tiny.jar", b"JAR", truncated, None)])
+        result = self.extract(archive)
+        self.assertNotEqual(0, result.returncode)
+        # Either zipfile's own reader or the extractor's parser refuses it; the
+        # point is that no entry is written with a silently wrong time.
+        self.assertIn("5455", result.stderr)
+        self.assertFalse((self.root / "out/Neutrodyne/app/tiny.jar").exists())
+
+    def test_trailing_garbage_extra_field_fails_closed(self):
+        """Bytes left after the last complete extra field cannot be parsed: the
+        extractor treats the malformed artifact as corrupt rather than guessing."""
+        archive = self.root / "tail.zip"
+        garbage = extended_timestamp(EPOCH_S) + b"\xab\xcd"
+        make_zip(archive, [("Neutrodyne/app/tiny.jar", b"JAR", garbage, None)])
+        result = self.extract(archive)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("truncated extra field header", result.stderr)
+        self.assertFalse((self.root / "out/Neutrodyne/app/tiny.jar").exists())
+
+    def test_symbolic_link_entry_fails_closed(self):
+        """The Windows image the release ZIP archives never carries links.
+        Materializing a link entry as a regular file holding the target path
+        would hide a producer defect; creating a real link on the smoke host is
+        neither needed nor safe. The extractor refuses the entry."""
+        archive = self.root / "link.zip"
+        with zipfile.ZipFile(archive, "w") as out:
+            info = zipfile.ZipInfo("Neutrodyne/app/link.jar", date_time=time.localtime()[:6])
+            info.external_attr = (0o120777 << 16)
+            info.extra = extended_timestamp(EPOCH_S)
+            out.writestr(info, b"../escape.jar")
+        result = self.extract(archive)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("symbolic link entry", result.stderr)
+        self.assertFalse((self.root / "out/Neutrodyne/app/link.jar").exists())
+
     def test_directory_entries_restore_their_own_times(self):
         """Creating files updates a directory's mtime; the extractor restores the
         directories' recorded times afterwards."""

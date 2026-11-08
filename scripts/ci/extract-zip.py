@@ -41,12 +41,23 @@ def entry_mtime(info: zipfile.ZipInfo) -> int:
     """The entry's modification time in seconds since the epoch (UTC)."""
     data = info.extra
     offset = 0
-    while offset + 4 <= len(data):
+    mtime: int | None = None
+    while offset < len(data):
+        if offset + 4 > len(data):
+            raise ExtractionError(
+                f"truncated extra field header in {info.filename!r}"
+            )
         header_id = int.from_bytes(data[offset : offset + 2], "little")
         size = int.from_bytes(data[offset + 2 : offset + 4], "little")
+        if offset + 4 + size > len(data):
+            raise ExtractionError(
+                f"extra field {header_id:#06x} overruns its data in {info.filename!r}"
+            )
         if header_id == EXTENDED_TIMESTAMP_ID:
             # The data is flags (1 byte) followed by the 4-byte mtime when bit 0 is
-            # set, so a size below 5 cannot carry it.
+            # set, so a size below 5 cannot carry it. The loop keeps validating
+            # the remaining fields: malformed bytes after a valid timestamp
+            # still mean a corrupt artifact.
             if size < 5:
                 raise ExtractionError(
                     f"corrupt extended timestamp extra field in {info.filename!r}"
@@ -56,8 +67,10 @@ def entry_mtime(info: zipfile.ZipInfo) -> int:
                 raise ExtractionError(
                     f"extended timestamp extra field has no mtime in {info.filename!r}"
                 )
-            return int.from_bytes(data[offset + 5 : offset + 9], "little")
+            mtime = int.from_bytes(data[offset + 5 : offset + 9], "little")
         offset += 4 + size
+    if mtime is not None:
+        return mtime
     # MS-DOS time: the local time of the host that wrote the ZIP. time.mktime
     # interprets it in this host's local timezone.
     return int(time.mktime(info.date_time + (0, 0, -1)))
@@ -79,6 +92,14 @@ def extract(zip_path: Path, destination: Path) -> None:
         for info in archive.infolist():
             target = safe_target(destination, info.filename)
             mtime = entry_mtime(info)
+            mode = stat.S_IMODE(info.external_attr >> 16)
+            if stat.S_ISLNK(info.external_attr >> 16):
+                # The Windows image the release ZIP archives never carries
+                # links. Materializing the entry as a plain file would hide a
+                # producer defect, and creating a real link is unsafe here —
+                # an escaping target is unchecked and Windows link creation
+                # needs privileges the smoke does not have.
+                raise ExtractionError(f"symbolic link entry: {info.filename!r}")
             if info.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 directories.append((target, mtime))
@@ -86,7 +107,6 @@ def extract(zip_path: Path, destination: Path) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as source, open(target, "wb") as out:
                 out.write(source.read())
-            mode = stat.S_IMODE(info.external_attr >> 16)
             if mode:
                 os.chmod(target, mode)
             os.utime(target, (mtime, mtime))

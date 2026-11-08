@@ -19,6 +19,11 @@
      JScript, not VBScript, so the path read from the environment is data:
      it travels through FileSystemObject/Shell method arguments and is never
      concatenated into executable command text. Spaces and Unicode survive.
+     Only supported COM APIs are used: the environment comes from the
+     documented WshShell.Environment property (the WScript object exposes no
+     Environment collection), file timestamps go through the writable
+     Shell FolderItem.ModifyDate (FSO's File.DateLastModified is read-only),
+     and every write is verified against that read-only property.
      The epoch is UTC — 318211200000 ms (1980-02-01T00:00:00Z), the
      AOT_IMAGE_TIMESTAMP_MS the training task wrote; new Date(ms) builds the
      Date from the UTC instant, so the local-time components the Shell applies
@@ -30,7 +35,8 @@ var epochMs = 318211200000;
 var reparsePoint = 0x400;
 
 try {
-    var dir = WScript.Environment("Process").Item("JpAppImageDir");
+    var dir = WScript.CreateObject("WScript.Shell")
+        .Environment("Process").Item("JpAppImageDir");
     if (dir === null || dir === undefined || dir === "") {
         throw new Error("JpAppImageDir is not set");
     }
@@ -80,27 +86,52 @@ try {
         throw new Error("no classpath JARs under " + app + "\\app");
     }
 
-    // Restore the fixed epoch on every staged file and directory — the same
-    // value the trained image carries — so the WiX payload records it.
-    // Symbolic links (reparse points) are skipped entirely: their targets are
-    // never followed and their own timestamps stay untouched, matching
-    // trainAotCache's normalization. File timestamps are fatal (the strict
-    // cache checks them); a directory timestamp that the Shell cannot set is
-    // reported but does not abort the packaging, because the cache binds only
-    // files and the MSI's installed directories are created at install time.
+    // Restore the fixed epoch on every staged file — the same value the
+    // trained image carries — so the WiX payload records it. Symbolic links
+    // (reparse points) are skipped entirely: their targets are never followed
+    // and their own timestamps stay untouched, matching trainAotCache's
+    // normalization. FolderItem.ModifyDate is the supported writable file
+    // timestamp; for folders it is get-only, so directory stamping stays
+    // best-effort and never aborts — the strict cache binds file timestamps
+    // and the MSI's installed directories are recreated at install time.
     var shell = new ActiveXObject("Shell.Application");
     var epoch = new Date(epochMs);
 
-    function setFolderTime(path) {
+    function setItemTime(path, fatal) {
         var parent = fso.GetParentFolderName(path);
         var name = fso.GetFileName(path);
-        var item = shell.Namespace(parent).ParseName(name);
-        if (item !== null && item !== undefined) {
-            try {
-                item.ModifyDate = epoch;
-            } catch (e) {
-                WScript.Echo("Neutrodyne-post-image: cannot set the folder timestamp for " + path + ": " + e.message);
+        var folder = shell.Namespace(parent);
+        var item = folder === null || folder === undefined
+            ? null
+            : folder.ParseName(name);
+        if (item === null || item === undefined) {
+            var missing = "cannot resolve " + path + " in the Shell namespace";
+            if (fatal) {
+                throw new Error(missing);
             }
+            WScript.Echo("Neutrodyne-post-image: " + missing);
+            return;
+        }
+        try {
+            item.ModifyDate = epoch;
+        } catch (e) {
+            var failed = "cannot set the timestamp for " + path + ": " + e.message;
+            if (fatal) {
+                throw new Error(failed);
+            }
+            WScript.Echo("Neutrodyne-post-image: " + failed);
+            return;
+        }
+        if (!fatal) {
+            return;
+        }
+        // ModifyDate does not surface every write failure as an exception, so
+        // verify against the read-only FSO timestamp: the strict cache binds
+        // these values exactly and a silently unapplied stamp would ship a
+        // broken installer.
+        var actual = fso.GetFile(path).DateLastModified;
+        if (actual.getTime() !== epochMs) {
+            throw new Error("the timestamp for " + path + " did not take: " + actual);
         }
     }
 
@@ -109,7 +140,7 @@ try {
         for (; !files.atEnd(); files.moveNext()) {
             var file = files.item();
             if ((file.Attributes & reparsePoint) === 0) {
-                file.DateLastModified = epoch;
+                setItemTime(file.Path, true);
             }
         }
         var subs = new Enumerator(folder.SubFolders);
@@ -117,13 +148,13 @@ try {
             var sub = subs.item();
             if ((sub.Attributes & reparsePoint) === 0) {
                 walk(sub);
-                setFolderTime(sub.Path);
+                setItemTime(sub.Path, false);
             }
         }
     }
 
     walk(fso.GetFolder(dir));
-    setFolderTime(dir);
+    setItemTime(dir, false);
     WScript.Quit(0);
 } catch (e) {
     WScript.Echo("Neutrodyne-post-image: " + e.message);

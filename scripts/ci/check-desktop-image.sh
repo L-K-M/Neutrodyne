@@ -802,13 +802,19 @@ check_rpm() {
 # trainAotCache wrote and the post-image hook restored (318211200000 ms,
 # 1980-02-01T00:00:00Z) — a drifted classpath-JAR timestamp fails the strict
 # -XX:AOTMode=on check after install. Symlinks are skipped like the hook's.
+# $2 = "files": the cache binds file timestamps only; directory times can be
+# lost by extraction front-ends that re-create entries after stamping their
+# parents (ditto -x bumps a symlink's ancestors), so the DMG/ZIP scans check
+# directories too only where the extractor restores them exactly.
 check_epoch_timestamps() {
-    local root="$1" bad
-    bad="$(python3 - "$root" <<'PY'
+    local root="$1" scope="${2:-all}" bad
+    bad="$(SCOPE="$scope" python3 - "$root" <<'PY'
 import os, sys
+scope = os.environ["SCOPE"]
 bad = []
 for base, dirs, files in os.walk(sys.argv[1]):
-    for name in dirs + files:
+    names = dirs + files if scope == "all" else files
+    for name in names:
         p = os.path.join(base, name)
         if not os.path.islink(p) and os.lstat(p).st_mtime_ns != 318211200000000000:
             bad.append(p)
@@ -890,10 +896,13 @@ extract_and_scan() {
         fi
         scan_dir "$d"
         case "$fmt" in
-            # tar preserves the trained epoch and the post-image hook restores it
-            # for DEB/RPM payloads; the DMG/MSI staging-copy drift is still open
-            # (11 AOT cache).
-            deb|rpm|tar.gz) check_epoch_timestamps "$d" ;;
+            # tar preserves the trained epoch and the post-image hooks restore it
+            # on the DEB/RPM/DMG staging copies; the ZIP payload carries it through
+            # the extractor's recorded times. The MSI payload's CAB timestamps stay
+            # unverified here — checking them needs a Windows install, which the
+            # native Windows smoke covers (11 AOT cache).
+            deb|rpm|tar.gz|dmg) check_epoch_timestamps "$d" ;;
+            zip) check_epoch_timestamps "$d" files ;;
         esac
     done
     if [ -n "$mnt" ]; then

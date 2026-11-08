@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.GradleException
 import org.gradle.api.file.FileCollection
-import org.gradle.api.provider.Provider
 import org.gradle.api.file.FileSystemLocation
+import org.gradle.api.provider.Provider
 import org.gradle.testfixtures.ProjectBuilder
 import org.gradle.work.FileChange
 import org.gradle.work.InputChanges
@@ -17,8 +17,9 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -889,7 +890,13 @@ class DesktopPackagingTest {
                       case "${'$'}arg" in
                         @*)
                           while IFS= read -r line; do
-                            if [ "${'$'}want_dest" = 1 ]; then dest="${'$'}line"; want_dest=0; fi
+                            if [ "${'$'}want_dest" = 1 ]; then
+                              # the argfile quotes each value
+                              dest="${'$'}line"
+                              dest="${'$'}{dest#\"}"
+                              dest="${'$'}{dest%\"}"
+                              want_dest=0
+                            fi
                             case "${'$'}line" in --dest) want_dest=1 ;; esac
                           done < "${'$'}{arg#@}"
                           ;;
@@ -918,7 +925,11 @@ class DesktopPackagingTest {
 
             task.run(EmptyInputChanges)
 
-            val resources = project.layout.buildDirectory.dir("compose/tmp/resources").get().asFile
+            val resources =
+                project.layout.buildDirectory
+                    .dir("compose/tmp/resources")
+                    .get()
+                    .asFile
             assertEquals("#!/bin/sh\n", File(resources, "Neutrodyne-post-image.sh").readText())
         } finally {
             projectDir.deleteRecursively()
@@ -945,6 +956,107 @@ class DesktopPackagingTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    /**
+     * `addUtcTimestamps` rewrites a DOS-time-only ZIP — what the commons-compress
+     * producer behind Gradle's Zip writes — so every entry also carries the
+     * Info-ZIP 0x5455 extended timestamp: UTC seconds an extractor in any
+     * timezone decodes to the one instant the DOS local time meant here.
+     */
+    @Test
+    fun `addUtcTimestamps adds the UTC extended timestamp field`() {
+        val root = Files.createTempDirectory("utc-timestamps").toFile()
+        try {
+            val zip = File(root, "plain.zip")
+            zip.writeBytes(dosOnlyZip("Neutrodyne/app/tiny.jar", byteArrayOf(7, 8, 9)))
+
+            addUtcTimestamps(zip)
+
+            java.util.zip.ZipFile(zip).use { archive ->
+                val entry = archive.getEntry("Neutrodyne/app/tiny.jar")
+                assertNotNull(entry)
+                assertEquals(byteArrayOf(7, 8, 9).toList(), archive.getInputStream(entry).readBytes().toList())
+                // The recorded instant is the DOS local time decoded on this
+                // host; the 0x5455 field must pin exactly that instant as UTC.
+                val expectedUtc =
+                    java.time.LocalDateTime
+                        .of(1980, 2, 1, 0, 0)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toEpochSecond()
+                assertEquals(expectedUtc, extendedTimestampUtc(entry.extra))
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * A minimal valid ZIP with one STORED entry whose only timestamp is the
+     * MS-DOS field (1980-02-01 00:00:00, local) — no 0x5455 extra. This is what
+     * Gradle's Zip leaves on disk; [addUtcTimestamps] has to add the UTC field.
+     */
+    private fun dosOnlyZip(
+        name: String,
+        data: ByteArray,
+    ): ByteArray {
+        val nameBytes = name.toByteArray(Charsets.US_ASCII)
+        val crc =
+            java.util.zip
+                .CRC32()
+                .also { it.update(data) }
+                .value
+                .toInt()
+        val buffer =
+            ByteBuffer
+                .allocate(30 + nameBytes.size + data.size + 46 + nameBytes.size + 22)
+                .order(ByteOrder.LITTLE_ENDIAN)
+        buffer.putInt(0x04034B50) // local header
+        buffer.putShort(20).putShort(0).putShort(0) // version, flags, STORED
+        buffer.putShort(0).putShort(0x41) // 00:00:00, 1980-02-01
+        buffer.putInt(crc).putInt(data.size).putInt(data.size)
+        buffer.putShort(nameBytes.size.toShort()).putShort(0) // name len, no extra
+        buffer.put(nameBytes).put(data)
+        buffer.putInt(0x02014B50) // central header
+        buffer
+            .putShort(20)
+            .putShort(20)
+            .putShort(0)
+            .putShort(0)
+        buffer.putShort(0).putShort(0x41)
+        buffer.putInt(crc).putInt(data.size).putInt(data.size)
+        buffer.putShort(nameBytes.size.toShort()).putShort(0).putShort(0)
+        buffer
+            .putShort(0)
+            .putShort(0)
+            .putInt(0)
+            .putInt(0)
+        buffer.put(nameBytes)
+        buffer.putInt(0x06054B50) // end of central directory
+        buffer
+            .putShort(0)
+            .putShort(0)
+            .putShort(1)
+            .putShort(1)
+        buffer.putInt(46 + nameBytes.size).putInt(30 + nameBytes.size + data.size)
+        buffer.putShort(0)
+        return buffer.array()
+    }
+
+    /** The UTC seconds the entry's 0x5455 extended timestamp records, or null. */
+    private fun extendedTimestampUtc(extra: ByteArray?): Long? {
+        val fields = ByteBuffer.wrap(extra ?: return null).order(ByteOrder.LITTLE_ENDIAN)
+        while (fields.remaining() >= 4) {
+            val id = fields.short.toInt() and 0xFFFF
+            val size = fields.short.toInt() and 0xFFFF
+            if (size > fields.remaining()) return null
+            if (id == 0x5455 && size >= 5) {
+                fields.get() // flags
+                return fields.int.toLong() and 0xFFFFFFFFL
+            }
+            fields.position(fields.position() + size)
+        }
+        return null
     }
 
     /**
@@ -1228,9 +1340,7 @@ class DesktopPackagingTest {
 
         override fun getFileChanges(property: FileCollection): Iterable<FileChange> = emptyList()
 
-        override fun getFileChanges(
-            property: Provider<out FileSystemLocation>,
-        ): Iterable<FileChange> = emptyList()
+        override fun getFileChanges(property: Provider<out FileSystemLocation>): Iterable<FileChange> = emptyList()
     }
 
     private companion object {

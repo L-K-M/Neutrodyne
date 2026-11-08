@@ -306,12 +306,19 @@ for token in (
     "Neutrodyne.cfg",
     "neutrodyne.aot",
     'java-options=-XX:AOTCache=$APPDIR/neutrodyne.aot',
-    'WScript.Environment("Process").Item("JpAppImageDir")',
+    'Environment("Process").Item("JpAppImageDir")',
+    "ModifyDate",
     "DateLastModified",
 ):
     assert token in text, token
+# Supported APIs only: the environment comes from WshShell.Environment (the
+# WScript object has no Environment collection) and file timestamps go through
+# the writable FolderItem.ModifyDate, never the read-only FSO property.
+assert 'WScript.Environment(' not in text, "WScript has no Environment property"
+assert "DateLastModified = " not in text, "FSO DateLastModified is read-only"
 # The path is data: it must not be concatenated into a command string.
-assert "WScript.Shell" not in text, "the WSF must not spawn a shell with the path"
+assert ".Exec(" not in text and ".Run(" not in text, \
+    "the WSF must not spawn a command with the path"
 PY
 then
     t_ok "the MSI hook is a well-formed JScript WSF with the layout/read-flag/epoch contract"

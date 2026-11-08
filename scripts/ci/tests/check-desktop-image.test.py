@@ -495,7 +495,7 @@ case "${1:-}" in
         [ "$ro" = 1 ] && [ "$nb" = 1 ] || { echo "attach without -readonly/-nobrowse" >&2; exit 1; }
         [ -n "${FAKE_HDIUTIL_FAIL_ATTACH:-}" ] && exit 1
         [ -n "$mnt" ] && [ -d "$dmg.payload" ] || exit 1
-        cp -R "$dmg.payload/." "$mnt/"
+        cp -Rp "$dmg.payload/." "$mnt/"
         echo "attach $mnt" >>"$log"
         ;;
     detach)
@@ -784,6 +784,7 @@ esac
         image = self.root / app
         (image / "Contents/MacOS/Neutrodyne").chmod(0o755)
         (image / "Contents/runtime/Contents/Home/legal/LICENSE.link").symlink_to("LICENSE")
+        self.stamp_epoch(image)
         self.fx.write_manifest()
         # These are sealed-bundle properties, checked after the shipped extractor runs.
         self.fake("codesign", '''
@@ -949,7 +950,15 @@ for image; do :; done
             dst = self.root / f"{name}.payload" / "Neutrodyne.app"
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(src, dst)
+            self.stamp_epoch(dst)
         return name
+
+    def stamp_epoch(self, root: Path):
+        """Set every non-symlink entry below root to the fixed 1980-02-01 UTC
+        epoch, the way a trained image's post-image-restored payload ships."""
+        for p in sorted(root.rglob("*")) + [root]:
+            if not p.is_symlink():
+                os.utime(p, (self.AOT_EPOCH_S, self.AOT_EPOCH_S), follow_symlinks=False)
 
     def test_dmg_payload_gets_the_image_scan(self):
         app = self.mac_app()
@@ -1059,11 +1068,15 @@ for image; do :; done
         self.fx.write_manifest()
         archive = self.root / "dist/neutrodyne-1.0.0-windows-x64.zip"
         archive.parent.mkdir(parents=True, exist_ok=True)
+        utc_extra = struct.pack("<HHB", 0x5455, 5, 0x01) + struct.pack("<I", self.AOT_EPOCH_S)
         with zipfile.ZipFile(archive, "w") as out:
             for path in sorted((self.root / img).rglob("*")):
                 rel = path.relative_to(self.root / img)
                 name = str(rel) + "/" if path.is_dir() else str(rel)
-                info = zipfile.ZipInfo(name, date_time=time.localtime()[:6])
+                # The producer writes the DOS local time plus the UTC 0x5455
+                # field; either decodes to the trained epoch on this host.
+                info = zipfile.ZipInfo(name, date_time=time.localtime(self.AOT_EPOCH_S)[:6])
+                info.extra = utc_extra
                 info.compress_type = zipfile.ZIP_STORED
                 out.writestr(info, path.read_bytes() if path.is_file() else b"")
         r = self.fx.image_check(archive)

@@ -24,11 +24,11 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.kotlin.dsl.register
+import org.gradle.process.CommandLineArgumentProvider
+import org.gradle.process.ExecOperations
 import org.gradle.work.InputChanges
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
-import org.gradle.process.CommandLineArgumentProvider
-import org.gradle.process.ExecOperations
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URI
@@ -39,6 +39,9 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 
 /** The four desktop packaging targets of 11's platform matrix (D88, D89). */
@@ -1052,6 +1055,92 @@ abstract class MsiAotTimestampJPackageTask : AotTimestampJPackageTask(TargetForm
 /** Compose's `packageDmg` with the macOS post-image hook. */
 abstract class DmgAotTimestampJPackageTask : AotTimestampJPackageTask(TargetFormat.Dmg)
 
+/**
+ * Rewrites [zip] so every entry carries the Info-ZIP extended timestamp field
+ * (0x5455): the entry's modification time as UTC seconds. Gradle's Zip records
+ * only the MS-DOS local-time fields — commons-compress writes no 0x5455 — so an
+ * extractor in another timezone would decode a different instant and a strict
+ * AOT launch could pass or fail depending on where the ZIP was built. The
+ * `java.util.zip` itself only emits the field for times outside the DOS range,
+ * so the rewrite sets the entry extra bytes explicitly; decoding the DOS time
+ * back happens on this host, so the recorded instant round-trips exactly.
+ * Entry order and names are preserved; unix-mode external attributes are not —
+ * java.util.zip exposes none, and the Windows image this archives carries none
+ * to lose.
+ */
+internal fun addUtcTimestamps(zip: File) {
+    val rewritten = zip.resolveSibling("${zip.name}.utc")
+    try {
+        rewriteZipWithUtcTimestamps(zip, rewritten)
+    } catch (e: Exception) {
+        rewritten.delete()
+        throw e
+    }
+    if (!zip.delete() || !rewritten.renameTo(zip)) {
+        rewritten.delete()
+        throw GradleException("could not rewrite $zip with UTC timestamps")
+    }
+}
+
+private fun rewriteZipWithUtcTimestamps(
+    zip: File,
+    rewritten: File,
+) {
+    ZipFile(zip).use { source ->
+        ZipOutputStream(rewritten.outputStream().buffered()).use { out ->
+            for (entry in source.entries().asSequence()) {
+                val copy = ZipEntry(entry.name)
+                if (entry.time >= 0) {
+                    copy.time = entry.time
+                    copy.extra = withoutUtcField(entry.extra) + utcTimestampField(entry.time / 1000)
+                } else {
+                    copy.extra = entry.extra
+                }
+                if (entry.comment != null) {
+                    copy.comment = entry.comment
+                }
+                out.putNextEntry(copy)
+                if (!entry.isDirectory) {
+                    source.getInputStream(entry).copyTo(out)
+                }
+                out.closeEntry()
+            }
+        }
+    }
+}
+
+/** The Info-ZIP 0x5455 extended timestamp field: flags=1 (mtime present) plus UTC seconds. */
+private fun utcTimestampField(utcSeconds: Long): ByteArray =
+    ByteBuffer
+        .allocate(9)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putShort(0x5455)
+        .putShort(5)
+        .put(1)
+        .putInt(utcSeconds.toInt())
+        .array()
+
+/**
+ * [extra] minus any 0x5455 fields, so the rewrite stays idempotent and a second
+ * run records one timestamp. Other producers' extra fields pass through.
+ */
+private fun withoutUtcField(extra: ByteArray?): ByteArray {
+    if (extra == null) return ByteArray(0)
+    val out = java.io.ByteArrayOutputStream(extra.size)
+    val fields = ByteBuffer.wrap(extra).order(ByteOrder.LITTLE_ENDIAN)
+    while (fields.remaining() >= 4) {
+        val start = fields.position()
+        val size = fields.getShort(start + 2).toInt() and 0xFFFF
+        val end = start + 4 + size
+        if (end > extra.size) break
+        if ((fields.getShort(start).toInt() and 0xFFFF) != 0x5455) {
+            out.write(extra, start, end - start)
+        }
+        fields.position(end)
+    }
+    return out.toByteArray()
+}
+
 /** The Windows portable ZIP: the app image archived (11 Windows MSI and ZIP). */
 abstract class WindowsZipTask : Zip()
 
@@ -1425,6 +1514,9 @@ internal fun Project.registerDesktopPackagingTasks(
         // fixed timestamp first, which keeps this archive reproducible.
         isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
+        // The DOS fields above record local time only; add the UTC 0x5455 field so the
+        // artifact's timestamps are unambiguous for any extractor's timezone.
+        doLast { addUtcTimestamps(archiveFile.get().asFile) }
     }
 
     // --- Linux tar.gz: the image as Neutrodyne/, executable bits carried from the image -------
