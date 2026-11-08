@@ -7,6 +7,7 @@
   public androidx.lifecycle.Lifecycle getLifecycle();
 }
 -keep class androidx.activity.compose.ComponentActivityKt {
+  public static void setContent$default(androidx.activity.ComponentActivity, androidx.compose.runtime.CompositionContext, kotlin.jvm.functions.Function2, int, java.lang.Object);
   public static void setContent(androidx.activity.ComponentActivity, androidx.compose.runtime.CompositionContext, kotlin.jvm.functions.Function2);
 }
 -keep @interface androidx.annotation.ChecksSdkIntAtLeast {
@@ -42,21 +43,55 @@
   public java.lang.Object remove(int);
   public void set(int, java.lang.Object);
 }
+-keep class androidx.compose.foundation.BorderStroke {
+}
+-keep interface androidx.compose.foundation.layout.Arrangement$Vertical {
+}
+-keep class androidx.compose.foundation.layout.Arrangement {
+  public androidx.compose.foundation.layout.Arrangement$Vertical getTop();
+  androidx.compose.foundation.layout.Arrangement INSTANCE;
+}
+-keep class androidx.compose.foundation.layout.ColumnKt {
+  public static androidx.compose.ui.layout.MeasurePolicy columnMeasurePolicy(androidx.compose.foundation.layout.Arrangement$Vertical, androidx.compose.ui.Alignment$Horizontal, androidx.compose.runtime.Composer, int);
+}
+-keep class androidx.compose.foundation.layout.ColumnScopeInstance {
+  androidx.compose.foundation.layout.ColumnScopeInstance INSTANCE;
+}
+-keep class androidx.compose.foundation.layout.SizeKt {
+  public static androidx.compose.ui.Modifier fillMaxSize$default(androidx.compose.ui.Modifier, float, int, java.lang.Object);
+}
+-keep class androidx.compose.material3.SurfaceKt {
+  public static void Surface-T9BRK9s(androidx.compose.ui.Modifier, androidx.compose.ui.graphics.Shape, long, long, float, float, androidx.compose.foundation.BorderStroke, kotlin.jvm.functions.Function2, androidx.compose.runtime.Composer, int, int);
+}
+-keep interface androidx.compose.runtime.Applier {
+}
 -keep @interface androidx.compose.runtime.Composable {
 }
 -keep @interface androidx.compose.runtime.ComposableTarget {
   public java.lang.String applier();
 }
+-keep class androidx.compose.runtime.ComposablesKt {
+  public static long getCurrentCompositeKeyHashCode(androidx.compose.runtime.Composer, int);
+  public static void invalidApplier();
+}
 -keep class androidx.compose.runtime.Composer$Companion {
   public java.lang.Object getEmpty();
 }
 -keep interface androidx.compose.runtime.Composer {
+  public java.lang.Object consume(androidx.compose.runtime.CompositionLocal);
+  public void createNode(kotlin.jvm.functions.Function0);
+  public void endNode();
   public void endReplaceGroup();
+  public androidx.compose.runtime.Applier getApplier();
+  public androidx.compose.runtime.CompositionLocalMap getCurrentCompositionLocalMap();
+  public boolean getInserting();
   public java.lang.Object rememberedValue();
   public boolean shouldExecute(boolean, int);
   public void skipToGroupEnd();
   public void startReplaceGroup(int);
+  public void startReusableNode();
   public void updateRememberedValue(java.lang.Object);
+  public void useNode();
   androidx.compose.runtime.Composer$Companion Companion;
 }
 -keep class androidx.compose.runtime.ComposerKt {
@@ -69,8 +104,12 @@
 }
 -keep class androidx.compose.runtime.CompositionContext {
 }
+-keep class androidx.compose.runtime.CompositionLocal {
+}
 -keep class androidx.compose.runtime.CompositionLocalKt {
   public static void CompositionLocalProvider(androidx.compose.runtime.ProvidedValue[], kotlin.jvm.functions.Function2, androidx.compose.runtime.Composer, int);
+}
+-keep interface androidx.compose.runtime.CompositionLocalMap {
 }
 -keep class androidx.compose.runtime.MonotonicFrameClock$DefaultImpls {
   public static java.lang.Object fold(androidx.compose.runtime.MonotonicFrameClock, java.lang.Object, kotlin.jvm.functions.Function2);
@@ -108,6 +147,11 @@
 -keep interface androidx.compose.runtime.State {
   public java.lang.Object getValue();
 }
+-keep class androidx.compose.runtime.Updater {
+  public static androidx.compose.runtime.Composer constructor-impl(androidx.compose.runtime.Composer);
+  public static void reconcile-impl(androidx.compose.runtime.Composer, kotlin.jvm.functions.Function1);
+  public static void set-impl(androidx.compose.runtime.Composer, java.lang.Object, kotlin.jvm.functions.Function2);
+}
 -keep interface androidx.compose.runtime.internal.ComposableLambda {
 }
 -keep class androidx.compose.runtime.internal.ComposableLambdaKt {
@@ -130,7 +174,21 @@
   public boolean hasPendingChanges();
   androidx.compose.runtime.snapshots.Snapshot$Companion Companion;
 }
+-keep class androidx.compose.ui.Alignment$Companion {
+  public androidx.compose.ui.Alignment$Horizontal getStart();
+}
+-keep interface androidx.compose.ui.Alignment$Horizontal {
+}
+-keep interface androidx.compose.ui.Alignment {
+  androidx.compose.ui.Alignment$Companion Companion;
+}
+-keep class androidx.compose.ui.ComposedModifierKt {
+  public static androidx.compose.ui.Modifier materializeModifier(androidx.compose.runtime.Composer, androidx.compose.ui.Modifier);
+}
+-keep class androidx.compose.ui.Modifier$Companion {
+}
 -keep interface androidx.compose.ui.Modifier {
+  androidx.compose.ui.Modifier$Companion Companion;
 }
 -keep class androidx.compose.ui.geometry.Offset$Companion {
   public long getZero-F1C5BW0();
@@ -157,6 +215,8 @@
 }
 -keep class androidx.compose.ui.geometry.RectKt {
   public static androidx.compose.ui.geometry.Rect Rect-tz77jQw(long, long);
+}
+-keep interface androidx.compose.ui.graphics.Shape {
 }
 -keep class androidx.compose.ui.input.indirect.AndroidIndirectPointerEvent_androidKt {
   public static androidx.compose.ui.input.indirect.IndirectPointerEvent IndirectPointerEvent-ixkH3tc(java.util.List, int, int, android.view.MotionEvent);
@@ -211,6 +271,19 @@
   public androidx.compose.ui.layout.LayoutInfo getParentInfo();
   public boolean isPlaced();
 }
+-keep interface androidx.compose.ui.layout.MeasurePolicy {
+}
+-keep class androidx.compose.ui.node.ComposeUiNode$Companion {
+  public kotlin.jvm.functions.Function1 getApplyOnDeactivatedNodeAssertion();
+  public kotlin.jvm.functions.Function0 getConstructor();
+  public kotlin.jvm.functions.Function2 getSetCompositeKeyHash();
+  public kotlin.jvm.functions.Function2 getSetMeasurePolicy();
+  public kotlin.jvm.functions.Function2 getSetModifier();
+  public kotlin.jvm.functions.Function2 getSetResolvedCompositionLocals();
+}
+-keep interface androidx.compose.ui.node.ComposeUiNode {
+  androidx.compose.ui.node.ComposeUiNode$Companion Companion;
+}
 -keep interface androidx.compose.ui.node.RootForTest$UncaughtExceptionHandler {
   public void onUncaughtException(java.lang.Throwable);
 }
@@ -219,6 +292,9 @@
   public void measureAndLayoutForTest();
   public boolean sendIndirectPointerEvent(androidx.compose.ui.input.indirect.IndirectPointerEvent);
   public void setUncaughtExceptionHandler(androidx.compose.ui.node.RootForTest$UncaughtExceptionHandler);
+}
+-keep class androidx.compose.ui.platform.CompositionLocalsKt {
+  public static androidx.compose.runtime.ProvidableCompositionLocal getLocalDensity();
 }
 -keep class androidx.compose.ui.platform.InfiniteAnimationPolicy$DefaultImpls {
   public static java.lang.Object fold(androidx.compose.ui.platform.InfiniteAnimationPolicy, java.lang.Object, kotlin.jvm.functions.Function2);
@@ -253,6 +329,10 @@
 -keep class androidx.compose.ui.semantics.AccessibilityAction {
   public kotlin.Function getAction();
 }
+-keep class androidx.compose.ui.semantics.CustomAccessibilityAction {
+  public kotlin.jvm.functions.Function0 getAction();
+  public java.lang.String getLabel();
+}
 -keep class androidx.compose.ui.semantics.Role$Companion {
   public int getCheckbox-o7Vup1c();
 }
@@ -266,6 +346,7 @@
   public kotlin.jvm.functions.Function0 getValue();
 }
 -keep class androidx.compose.ui.semantics.SemanticsActions {
+  public androidx.compose.ui.semantics.SemanticsPropertyKey getCustomActions();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getOnClick();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getScrollBy();
   public androidx.compose.ui.semantics.SemanticsPropertyKey getScrollToIndex();
@@ -341,6 +422,9 @@
   public long toSp-0xMU5do(float);
   public long toSp-kPz2Gy4(float);
   public long toSp-kPz2Gy4(int);
+}
+-keep class androidx.compose.ui.unit.DensityKt {
+  public static androidx.compose.ui.unit.Density Density(float, float);
 }
 -keep class androidx.compose.ui.unit.DpRect {
 }
@@ -2086,8 +2170,13 @@
 -keep class ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory {
 }
 -keep class ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs {
+  public <init>(ch.lkmc.neutrodyne.core.model.settings.ThemeMode, boolean, boolean, boolean, int, kotlin.jvm.internal.DefaultConstructorMarker);
+}
+-keep class ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneThemeKt {
+  public static void NeutrodyneTheme(ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs, ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState, kotlin.jvm.functions.Function2, androidx.compose.runtime.Composer, int);
 }
 -keep class ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState {
+  public <init>(boolean, double, boolean);
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.BackupRepository {
   public java.lang.Object writeSnapshotNow(kotlin.coroutines.Continuation);
@@ -2190,8 +2279,12 @@
 }
 -keep interface ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs {
 }
+-keep class ch.lkmc.neutrodyne.core.model.ArtworkRef {
+  public <init>(java.lang.String, java.lang.String, int);
+}
 -keep enum ch.lkmc.neutrodyne.core.model.Availability {
   ch.lkmc.neutrodyne.core.model.Availability AVAILABLE;
+  ch.lkmc.neutrodyne.core.model.Availability UNAVAILABLE;
 }
 -keep enum ch.lkmc.neutrodyne.core.model.BuildInfo$Platform {
 }
@@ -2211,10 +2304,13 @@
   public long getEpisodeId();
   public int getIndex();
 }
+-keep enum ch.lkmc.neutrodyne.core.model.DownloadError {
+}
 -keep enum ch.lkmc.neutrodyne.core.model.DownloadLane {
   ch.lkmc.neutrodyne.core.model.DownloadLane MANUAL;
 }
 -keep enum ch.lkmc.neutrodyne.core.model.DownloadState {
+  public static kotlin.enums.EnumEntries getEntries();
   ch.lkmc.neutrodyne.core.model.DownloadState COMPLETED;
   ch.lkmc.neutrodyne.core.model.DownloadState DOWNLOADING;
 }
@@ -2222,7 +2318,12 @@
   public ch.lkmc.neutrodyne.core.model.ChapterSource getSource();
   public java.lang.String getTitle();
 }
+-keep class ch.lkmc.neutrodyne.core.model.EpisodeRow {
+  public <init>(long, long, java.lang.String, java.lang.String, long, java.lang.Long, java.lang.Long, boolean, boolean, ch.lkmc.neutrodyne.core.model.Availability, ch.lkmc.neutrodyne.core.model.EpisodeType, java.lang.String, ch.lkmc.neutrodyne.core.model.SourceType, java.lang.String, boolean, long, ch.lkmc.neutrodyne.core.model.ArtworkRef, java.lang.Integer, ch.lkmc.neutrodyne.core.model.ArtworkRef, java.lang.Integer, java.lang.Long, java.lang.Long, boolean, ch.lkmc.neutrodyne.core.model.DownloadState);
+  public static ch.lkmc.neutrodyne.core.model.EpisodeRow copy$default(ch.lkmc.neutrodyne.core.model.EpisodeRow, long, long, java.lang.String, java.lang.String, long, java.lang.Long, java.lang.Long, boolean, boolean, ch.lkmc.neutrodyne.core.model.Availability, ch.lkmc.neutrodyne.core.model.EpisodeType, java.lang.String, ch.lkmc.neutrodyne.core.model.SourceType, java.lang.String, boolean, long, ch.lkmc.neutrodyne.core.model.ArtworkRef, java.lang.Integer, ch.lkmc.neutrodyne.core.model.ArtworkRef, java.lang.Integer, java.lang.Long, java.lang.Long, boolean, ch.lkmc.neutrodyne.core.model.DownloadState, int, java.lang.Object);
+}
 -keep enum ch.lkmc.neutrodyne.core.model.EpisodeType {
+  ch.lkmc.neutrodyne.core.model.EpisodeType FULL;
 }
 -keep enum ch.lkmc.neutrodyne.core.model.ExportLayout {
   ch.lkmc.neutrodyne.core.model.ExportLayout FLAT;
@@ -2248,6 +2349,9 @@
 }
 -keep class ch.lkmc.neutrodyne.core.model.QueueItem {
   public long getEpisodeId();
+}
+-keep class ch.lkmc.neutrodyne.core.model.RowLive {
+  public <init>(java.lang.Long, java.lang.Long, ch.lkmc.neutrodyne.core.model.DownloadState, java.lang.Long, java.lang.Long, ch.lkmc.neutrodyne.core.model.WaitReason, java.lang.Long, ch.lkmc.neutrodyne.core.model.DownloadError, boolean, boolean, int, kotlin.jvm.internal.DefaultConstructorMarker);
 }
 -keep enum ch.lkmc.neutrodyne.core.model.ShowType {
 }
@@ -2276,6 +2380,8 @@
 -keep class ch.lkmc.neutrodyne.core.model.VirtualQueue {
   public ch.lkmc.neutrodyne.core.model.QueueItem getCurrent();
   public java.util.List getUpNext();
+}
+-keep enum ch.lkmc.neutrodyne.core.model.WaitReason {
 }
 -keep class ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys {
   public boolean acceptsValue(ch.lkmc.neutrodyne.core.model.settings.SettingKey, java.lang.Object);
@@ -2319,6 +2425,8 @@
 }
 -keep enum ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered {
   ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered NEVER;
+}
+-keep enum ch.lkmc.neutrodyne.core.model.settings.ThemeMode {
 }
 -keep interface ch.lkmc.neutrodyne.core.navigation.TopLevelKey {
 }
@@ -2404,6 +2512,16 @@
 }
 -keep class ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor {
 }
+-keep class ch.lkmc.neutrodyne.core.ui.EpisodeAction$Select {
+}
+-keep interface ch.lkmc.neutrodyne.core.ui.EpisodeAction {
+}
+-keep class ch.lkmc.neutrodyne.core.ui.EpisodeRowKt {
+  public static void EpisodeRow(ch.lkmc.neutrodyne.core.model.EpisodeRow, ch.lkmc.neutrodyne.core.model.RowLive, ch.lkmc.neutrodyne.core.ui.EpisodeRowStyle, ch.lkmc.neutrodyne.core.ui.RowCaps, boolean, java.lang.Boolean, kotlin.jvm.functions.Function1, androidx.compose.ui.Modifier, java.util.List, androidx.compose.runtime.Composer, int, int);
+}
+-keep enum ch.lkmc.neutrodyne.core.ui.EpisodeRowStyle {
+  ch.lkmc.neutrodyne.core.ui.EpisodeRowStyle FEED;
+}
 -keep class ch.lkmc.neutrodyne.core.ui.NeutrodyneViewModelFactoryContributions$ToAppScope$ProvidesNeutrodyneViewModelFactoryMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.ui.NeutrodyneViewModelFactoryContributions$ToAppScope$ProvidesNeutrodyneViewModelFactoryMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -2413,6 +2531,12 @@
 -keep class ch.lkmc.neutrodyne.core.ui.NeutrodyneViewModelFactoryContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.core.ui.NeutrodyneViewModelFactoryContributions {
+}
+-keep class ch.lkmc.neutrodyne.core.ui.RowCaps$Companion {
+  public ch.lkmc.neutrodyne.core.ui.RowCaps getFULL();
+}
+-keep class ch.lkmc.neutrodyne.core.ui.RowCaps {
+  ch.lkmc.neutrodyne.core.ui.RowCaps$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.core.ui.UiLocalsKt {
   public static androidx.compose.runtime.ProvidableCompositionLocal getLocalUiClock();
@@ -4642,6 +4766,8 @@
   float element;
 }
 -keep class kotlin.jvm.internal.Ref$IntRef {
+  public <init>();
+  int element;
 }
 -keep class kotlin.jvm.internal.Ref$LongRef {
 }
@@ -4716,6 +4842,7 @@
   public static java.lang.Integer toIntOrNull(java.lang.String);
 }
 -keep class kotlin.text.StringsKt__StringsJVMKt {
+  public static byte[] encodeToByteArray(java.lang.String);
   public static boolean endsWith$default(java.lang.String, java.lang.String, boolean, int, java.lang.Object);
   public static boolean equals(java.lang.String, java.lang.String, boolean);
   public static java.lang.String repeat(java.lang.CharSequence, int);

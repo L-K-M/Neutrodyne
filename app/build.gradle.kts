@@ -85,6 +85,16 @@ tasks.withType<Test>().configureEach {
     exclude("ch/lkmc/neutrodyne/DeviceTestSelectionTest\$FailureFixture.class")
 }
 
+// The profile consumer creates this build type after the application DSL is evaluated.
+// Fixture helpers must never enter debug, release or another published runtime. Their own
+// test libraries stay out too: Licensee validates this variant's classpath, and junit
+// (EPL-1.0) and truth's URL-licensed asm transitive are not on D3's allow-list.
+configurations.matching { it.name == "benchmarkReleaseImplementation" }.configureEach {
+    exclude(group = "junit", module = "junit")
+    exclude(group = "com.google.truth", module = "truth")
+    dependencies.add(project.dependencies.project(mapOf("path" to ":core:testing")))
+}
+
 // Opt-in fixtures enter the single-variant KMP download library, so disable every
 // app variant except the disposable target. A release task with the flag must fail.
 if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
@@ -92,6 +102,7 @@ if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
 }
 
 dependencies {
+    add("baselineProfile", project(":benchmark"))
     for (feature in listOf(
         "feeds",
         "library",
