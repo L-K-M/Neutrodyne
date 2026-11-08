@@ -234,7 +234,9 @@ private class GatedPreferencesDataStore : DataStore<Preferences> {
     val preferences = MutableStateFlow(emptyPreferences())
 
     @Volatile var restoreWriteReached = false
+
     @Volatile var localWriteReached = false
+
     @Volatile var localResetReached = false
 
     val restoreGate = CompletableDeferred<Unit>()

@@ -36,8 +36,12 @@ class M7RestoreSettingsTest {
                 )
             val counts =
                 assertIs<Outcome.Success<SettingsMergeCounts>>(
-                    RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort(), DataStoreSettingsWriteCoordinator())
-                        .apply(SettingsV1(values)),
+                    RestoreSettingsMerge(
+                        settings,
+                        TestDb.inMemory(),
+                        FakeSettingsSyncPort(),
+                        DataStoreSettingsWriteCoordinator(),
+                    ).apply(SettingsV1(values)),
                 ).value
             assertEquals(4, counts.applied)
             assertEquals(7, counts.skipped)
