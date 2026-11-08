@@ -15,6 +15,7 @@ import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
@@ -23,6 +24,9 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.kotlin.dsl.register
+import org.gradle.work.InputChanges
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import org.gradle.process.CommandLineArgumentProvider
 import org.gradle.process.ExecOperations
 import java.io.ByteArrayOutputStream
@@ -987,6 +991,67 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
  */
 abstract class JPackageImageTask : Exec()
 
+/**
+ * Compose's `packageMsi`/`packageDmg` task carrying the AOT post-image hook (11 AOT cache).
+ *
+ * Compose 1.12.1 exposes no `--resource-dir` hook: its `freeArgs` are prepended while the
+ * task's own `--resource-dir` is written last (the JDK's `DeployParams.addBundleArgument`
+ * overwrites, so the last one wins), and `prepareWorkingDir` clears that directory after
+ * `doFirst`. The supported extension point is the task itself: this subclass overrides
+ * `prepareWorkingDir` to call the Compose implementation and then drop the format's
+ * `<app name>-post-image` script into Compose's own resource directory, so jpackage's
+ * `ScriptRunner` finds it after the attribute-losing `copyAppImage` and before the WiX/DMG
+ * bundler reads the staging tree. Everything else — the DSL-driven arguments, the WiX
+ * toolchain wiring, the macOS Info.plist generation, the ad-hoc seal, the output
+ * directory — is inherited unchanged; [Project.registerDesktopPackagingTasks] swaps the
+ * Compose task for this type with `TaskContainer.replace`, which keeps the registered
+ * configure actions.
+ */
+abstract class AotTimestampJPackageTask(
+    private val format: TargetFormat,
+) : AbstractJPackageTask(format) {
+    /** The shipped hook for this format, copied into Compose's resource directory. */
+    @get:Internal
+    abstract val postImageHook: RegularFileProperty
+
+    /** jpackage's `ScriptRunner` looks up `<app name>-post-image<ext>` in the resource dir. */
+    protected open val scriptExtension: String =
+        if (format == TargetFormat.Msi) ".wsf" else ".sh"
+
+    override fun prepareWorkingDir(inputChanges: InputChanges) {
+        super.prepareWorkingDir(inputChanges)
+        writePostImageHook(
+            hook = postImageHook.get().asFile,
+            packageName = packageName.get(),
+            scriptExtension = scriptExtension,
+            resourcesDir = jpackageResources.get().asFile,
+        )
+    }
+}
+
+/**
+ * Drops the hook into jpackage's resource directory under the exact name its
+ * `ScriptRunner` looks up (`<app name>-post-image<ext>`). Fails closed when the
+ * shipped hook is missing: packaging without it would ship a strict-cache failure.
+ */
+internal fun writePostImageHook(
+    hook: File,
+    packageName: String,
+    scriptExtension: String,
+    resourcesDir: File,
+) {
+    if (!hook.isFile) {
+        throw GradleException("the AOT post-image hook is missing: $hook")
+    }
+    File(resourcesDir, "$packageName-post-image$scriptExtension").writeBytes(hook.readBytes())
+}
+
+/** Compose's `packageMsi` with the Windows post-image hook. */
+abstract class MsiAotTimestampJPackageTask : AotTimestampJPackageTask(TargetFormat.Msi)
+
+/** Compose's `packageDmg` with the macOS post-image hook. */
+abstract class DmgAotTimestampJPackageTask : AotTimestampJPackageTask(TargetFormat.Dmg)
+
 /** The Windows portable ZIP: the app image archived (11 Windows MSI and ZIP). */
 abstract class WindowsZipTask : Zip()
 
@@ -1381,4 +1446,19 @@ internal fun Project.registerDesktopPackagingTasks(
         isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
     }
+
+    // --- MSI/DMG: Compose's tasks carrying the AOT post-image hook ---------------------------
+    // Compose registers packageMsi/packageDmg for the host's target formats. Swap each for
+    // the subclass that drops the format's post-image hook into Compose's own resource
+    // directory during prepareWorkingDir — after the attribute-losing copyAppImage and before
+    // WiX/hdiutil read the staging tree. TaskContainer.replace keeps the configure actions
+    // Compose registered on the provider (the DSL arguments, the WiX toolchain wiring, the
+    // macOS Info.plist generation), so the entry points, the output names and every current
+    // packaging behavior stay; only the task type changes. The `freeArgs` route cannot work:
+    // they are prepended while Compose writes its own --resource-dir last, and the JDK's
+    // last-wins option handling keeps that one.
+    val packageMsi = tasks.replace("packageMsi", MsiAotTimestampJPackageTask::class.java)
+    packageMsi.postImageHook.set(file("packaging/msi/Neutrodyne-post-image.wsf"))
+    val packageDmg = tasks.replace("packageDmg", DmgAotTimestampJPackageTask::class.java)
+    packageDmg.postImageHook.set(file("packaging/dmg/Neutrodyne-post-image.sh"))
 }

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.GradleException
+import org.gradle.api.file.FileCollection
+import org.gradle.api.provider.Provider
+import org.gradle.api.file.FileSystemLocation
 import org.gradle.testfixtures.ProjectBuilder
+import org.gradle.work.FileChange
+import org.gradle.work.InputChanges
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
@@ -13,6 +18,7 @@ import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -833,6 +839,115 @@ class DesktopPackagingTest {
     }
 
     /**
+     * The post-image hook installer names the script exactly as jpackage's `ScriptRunner`
+     * looks it up (`<app name>-post-image<ext>`) and fails closed when the shipped hook is
+     * missing — packaging without it would ship a strict-cache failure.
+     */
+    @Test
+    fun `the post-image hook installer names the script for jpackage`() {
+        val root = Files.createTempDirectory("post-image-hook").toFile()
+        try {
+            val hook = File(root, "shipped.sh").apply { writeText("#!/bin/sh\n") }
+            val resources = File(root, "resources").apply { mkdirs() }
+
+            writePostImageHook(hook, "Neutrodyne", ".sh", resources)
+            assertEquals("#!/bin/sh\n", File(resources, "Neutrodyne-post-image.sh").readText())
+
+            writePostImageHook(hook, "Neutrodyne", ".wsf", resources)
+            assertEquals("#!/bin/sh\n", File(resources, "Neutrodyne-post-image.wsf").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
+     * The replaced Compose task drives the hook installation through Compose's own
+     * `run()` → `prepareWorkingDir()`: after the base clears and repopulates the resource
+     * directory, the hook lands under the exact name jpackage's `ScriptRunner` looks up.
+     * A fake jpackage executable stands in for the JDK tool, so the task's real
+     * configuration path (initState, prepareWorkingDir, makeArgs) runs without a JDK.
+     */
+    @Test
+    fun `the AOT package task installs the hook during prepareWorkingDir`() {
+        val projectDir = Files.createTempDirectory("aot-package-task").toFile()
+        try {
+            val project = ProjectBuilder.builder().withProjectDir(projectDir).build()
+            val hook = File(projectDir, "shipped.sh").apply { writeText("#!/bin/sh\n") }
+            val runtimeProperties = File(projectDir, "runtime.properties")
+            writeRuntimeProperties(runtimeProperties)
+            val fakeJdk = File(projectDir, "fake-jdk")
+            val fakeBin = File(fakeJdk, "bin").apply { mkdirs() }
+            // The fake tool produces the package file checkResult() looks for. The
+            // Compose runner invokes it as `jpackage @<args-file>` (one arg per line).
+            File(fakeBin, "jpackage").apply {
+                writeText(
+                    """
+                    #!/bin/sh
+                    dest=""
+                    want_dest=0
+                    for arg in "${'$'}@"; do
+                      case "${'$'}arg" in
+                        @*)
+                          while IFS= read -r line; do
+                            if [ "${'$'}want_dest" = 1 ]; then dest="${'$'}line"; want_dest=0; fi
+                            case "${'$'}line" in --dest) want_dest=1 ;; esac
+                          done < "${'$'}{arg#@}"
+                          ;;
+                      esac
+                    done
+                    mkdir -p "${'$'}dest"
+                    printf 'DMG\n' > "${'$'}dest/Neutrodyne.dmg"
+                    exit 0
+                    """.trimIndent(),
+                )
+                setExecutable(true, false)
+            }
+            val task =
+                project.tasks
+                    .register("packageDmg", DmgAotTimestampJPackageTask::class.java)
+                    .get()
+            task.postImageHook.set(hook)
+            task.packageName.set("Neutrodyne")
+            task.launcherMainClass.set("ch.lkmc.neutrodyne.desktop.MainKt")
+            task.packageVersion.set("1.0.0")
+            task.appImage.set(File(projectDir, "app").apply { mkdirs() })
+            task.javaHome.set(fakeJdk.absolutePath)
+            task.javaRuntimePropertiesFile.set(runtimeProperties)
+            task.destinationDir.set(File(projectDir, "dest"))
+            task.verbose.set(false)
+
+            task.run(EmptyInputChanges)
+
+            val resources = project.layout.buildDirectory.dir("compose/tmp/resources").get().asFile
+            assertEquals("#!/bin/sh\n", File(resources, "Neutrodyne-post-image.sh").readText())
+        } finally {
+            projectDir.deleteRecursively()
+        }
+    }
+
+    /** Serializes the Compose `JvmRuntimeProperties` the task's `initState()` reads. */
+    private fun writeRuntimeProperties(target: File) {
+        val clazz =
+            Class.forName("org.jetbrains.compose.desktop.application.internal.JvmRuntimeProperties")
+        val constructor = clazz.constructors.first { it.parameterTypes.size == 2 }
+        val instance = constructor.newInstance(25, listOf("java.base"))
+        java.io.ObjectOutputStream(target.outputStream()).use { it.writeObject(instance) }
+    }
+
+    @Test
+    fun `the post-image hook installer fails closed on a missing hook`() {
+        val root = Files.createTempDirectory("post-image-hook-missing").toFile()
+        try {
+            val resources = File(root, "resources").apply { mkdirs() }
+            assertFailsWith<GradleException> {
+                writePostImageHook(File(root, "absent.sh"), "Neutrodyne", ".sh", resources)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /**
      * The four soname paths a complete staged tree carries for [target], relative to its
      * root, in the naming the OS's loader gives them (`bin/avcodec-63.dll`,
      * `lib/libavutil.61.dylib`, `lib/libavutil.so.61`).
@@ -1107,6 +1222,16 @@ class DesktopPackagingTest {
 
     private fun sha256Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private object EmptyInputChanges : InputChanges {
+        override fun isIncremental(): Boolean = false
+
+        override fun getFileChanges(property: FileCollection): Iterable<FileChange> = emptyList()
+
+        override fun getFileChanges(
+            property: Provider<out FileSystemLocation>,
+        ): Iterable<FileChange> = emptyList()
+    }
 
     private companion object {
         private const val TAR_BLOCK_BYTES = 512

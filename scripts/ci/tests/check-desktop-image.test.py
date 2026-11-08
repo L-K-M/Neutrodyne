@@ -42,6 +42,7 @@ import struct
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -78,6 +79,7 @@ class Fixture:
             "check-runtime-sources.sh",
             "make-runtime-sources-md.sh",
             "canonical-jar-hash.py",
+            "extract-zip.py",
         ):
             shutil.copy2(CI / script, root / "scripts/ci" / script)
         shutil.copy2(
@@ -1047,6 +1049,25 @@ for image; do :; done
         r = self.fx.image_check(self.tarball(img, epoch=self.AOT_EPOCH_S + 1))
         self.assertNotEqual(0, r.returncode)
         self.assertIn("off the fixed 1980-02-01 UTC epoch", r.stderr)
+
+    def test_zip_payload_gets_the_image_scan(self):
+        """The checker's ZIP extraction boundary (extract-zip.py off Darwin, ditto
+        on Darwin) feeds the same image rules and restores the artifact's entry
+        times instead of the extraction time."""
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.fx.write_manifest()
+        archive = self.root / "dist/neutrodyne-1.0.0-windows-x64.zip"
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive, "w") as out:
+            for path in sorted((self.root / img).rglob("*")):
+                rel = path.relative_to(self.root / img)
+                name = str(rel) + "/" if path.is_dir() else str(rel)
+                info = zipfile.ZipInfo(name, date_time=time.localtime()[:6])
+                info.compress_type = zipfile.ZIP_STORED
+                out.writestr(info, path.read_bytes() if path.is_file() else b"")
+        r = self.fx.image_check(archive)
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
     # ----- rule 9: MSI checks through a faked Windows boundary -----------------
     # Fake cygpath records the MSYS -> native conversion; fake powershell.exe

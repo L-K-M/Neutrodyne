@@ -329,6 +329,107 @@ class DesktopAotTrainingRealTest {
         assertEquals(originalState, image.stateByPath(), "the post-image hook touched the trained image")
     }
 
+    /**
+     * The DMG producer boundary (11 AOT cache, macOS DMG): jpackage's own DMG build
+     * stages the trained image through the attribute-losing copyAppImage, and the
+     * supported <app name>-post-image.sh hook — the same RUN_POST_IMAGE_USER_SCRIPT
+     * point the DEB/RPM packages use — restores the fixed epoch on the staged copy
+     * before hdiutil reads it. The test builds a real DMG with `jpackage --temp` (the
+     * temp build root is kept, so the staged copy can be inspected and strict-launched
+     * without mounting the DMG), first without the hook (RED) and then with it (GREEN).
+     */
+    @Test
+    fun `the DMG staging copy loses the strict cache and the post-image hook restores it`() {
+        org.junit.Assume.assumeTrue("the DMG hook needs macOS jpackage", osWire == "macos")
+        val image = tinyImage(MAIN_BODY)
+        trainTask(image).train(System.getenv())
+        val archive = File(image, "$appDirRelative/neutrodyne.aot")
+        assertTrue(archive.isFile && archive.length() > 0L, "the training launch must leave the archive")
+
+        val hook = File(repoRoot(), "desktopApp/packaging/dmg/Neutrodyne-post-image.sh")
+        assertTrue(hook.isFile, "the shipped DMG post-image hook is missing: $hook")
+        val hookDir = Files.createTempDirectory("aot-dmg-hook").toFile()
+        hook.copyTo(File(hookDir, hook.name), overwrite = true)
+        val emptyDir = Files.createTempDirectory("aot-dmg-empty").toFile()
+
+        // RED: without the hook the staged classpath JARs carry the packaging time.
+        val redTemp = Files.createTempDirectory("aot-dmg-red").toFile()
+        buildDmg(image, emptyDir, redTemp)
+        val redApp = File(redTemp, "image/Neutrodyne.app")
+        assertTrue(redApp.isDirectory, "jpackage produced no staged app at $redApp")
+        val redJars = stagedClasspathJars(redApp)
+        assertTrue(redJars.isNotEmpty(), "the staged DMG copy carries no classpath JARs")
+        assertTrue(
+            redJars.any { it.lastModified() != AOT_IMAGE_TIMESTAMP_MS },
+            "the attribute-losing copy must reset the JAR timestamps (the defect)",
+        )
+        val red = strictLaunch(redApp)
+        assertNotEquals(0, red.exit, red.output)
+        assertTrue(red.output.contains("timestamp has changed"), red.output)
+
+        // GREEN: the shipped hook restores the epoch on the staged copy.
+        val greenTemp = Files.createTempDirectory("aot-dmg-green").toFile()
+        buildDmg(image, hookDir, greenTemp)
+        val greenApp = File(greenTemp, "image/Neutrodyne.app")
+        assertTrue(greenApp.isDirectory, "jpackage produced no staged app at $greenApp")
+        greenApp.walkTopDown().forEach { entry ->
+            if (!Files.isSymbolicLink(entry.toPath())) {
+                assertEquals(
+                    AOT_IMAGE_TIMESTAMP_MS,
+                    entry.lastModified(),
+                    "the hook left a staged entry off the fixed epoch: $entry",
+                )
+            }
+        }
+        val green = strictLaunch(greenApp)
+        assertEquals(0, green.exit, green.output)
+        assertTrue(green.output.contains("\"aotCache\":\"in-use\""), green.output)
+    }
+
+    /** Builds a real DMG with jpackage, keeping the temp build root for inspection. */
+    private fun buildDmg(
+        image: File,
+        resourceDir: File,
+        tempDir: File,
+    ) {
+        val dest = Files.createTempDirectory("aot-dmg-dest").toFile()
+        runCommand(
+            listOf(
+                toolPath(jdk25, "jpackage").absolutePath,
+                "--type",
+                "dmg",
+                "--app-image",
+                image.absolutePath,
+                "--name",
+                "Neutrodyne",
+                "--app-version",
+                "1.0.0",
+                "--dest",
+                dest.absolutePath,
+                "--resource-dir",
+                resourceDir.absolutePath,
+                "--temp",
+                tempDir.absolutePath,
+            ),
+        )
+    }
+
+    /** The staged .app's classpath JARs, read from its .cfg the way the cache does. */
+    private fun stagedClasspathJars(app: File): List<File> =
+        aotClasspathJars(File(app, "Contents/app/Neutrodyne.cfg").readText(), app, "macos")
+
+    /** Launches the staged app's own launcher under the strict cache check. */
+    private fun strictLaunch(app: File): ProbeResult {
+        val builder =
+            ProcessBuilder(File(app, "Contents/MacOS/Neutrodyne").absolutePath)
+                .directory(app)
+                .redirectErrorStream(true)
+        builder.environment()["JAVA_TOOL_OPTIONS"] = "-XX:AOTMode=on -D$SMOKE_PROPERTY=true"
+        val process = builder.start()
+        val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
+        return ProbeResult(process.waitFor(), output)
+    }
+
     /** The timestamp-drift negative: a one-second drift on a classpath JAR breaks the cache. */
     @Test
     fun `a drifted classpath timestamp breaks the strict cache`() {

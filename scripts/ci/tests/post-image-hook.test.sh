@@ -196,6 +196,129 @@ else
     t_fail "the hook touched the original image"
 fi
 
+# --- 5. the DMG and MSI hooks --------------------------------------------------
+# The DMG hook is the same supported point with the macOS staging layout: on
+# macOS JpAppImageDir is the staged .app bundle itself, not the staging root.
+DMG_HOOK="$REPO_ROOT/desktopApp/packaging/dmg/Neutrodyne-post-image.sh"
+MSI_HOOK="$REPO_ROOT/desktopApp/packaging/msi/Neutrodyne-post-image.wsf"
+
+if [ -f "$DMG_HOOK" ]; then
+    t_ok "the DMG resource dir carries Neutrodyne-post-image.sh"
+else
+    t_fail "the DMG resource dir is missing Neutrodyne-post-image.sh"
+fi
+if [ -f "$MSI_HOOK" ]; then
+    t_ok "the MSI resource dir carries Neutrodyne-post-image.wsf"
+else
+    t_fail "the MSI resource dir is missing Neutrodyne-post-image.wsf"
+fi
+if sh -n "$DMG_HOOK" 2>/dev/null; then
+    t_ok "the DMG hook parses under sh"
+else
+    t_fail "the DMG hook does not parse under sh"
+fi
+
+make_dmg_staging() { # <staged .app bundle> — JpAppImageDir on macOS
+    local s="$1"
+    mkdir -p "$s/Contents/MacOS" "$s/Contents/app" "$s/Contents/runtime"
+    printf 'launcher\n' > "$s/Contents/MacOS/Neutrodyne"
+    chmod 0755 "$s/Contents/MacOS/Neutrodyne"
+    # shellcheck disable=SC2016 # the .cfg carries literal $APPDIR tokens
+    printf '[Application]\napp.classpath=$APPDIR/tiny.jar\n\n[JavaOptions]\njava-options=-XX:AOTCache=$APPDIR/neutrodyne.aot\n' \
+        > "$s/Contents/app/Neutrodyne.cfg"
+    printf 'aot\n' > "$s/Contents/app/neutrodyne.aot"
+    printf 'jar\n' > "$s/Contents/app/tiny.jar"
+    printf 'release\n' > "$s/Contents/runtime/release"
+}
+
+dmg_stage="$work/dmg stage/Neutrodyne.app"
+make_dmg_staging "$dmg_stage"
+if run_hook "$DMG_HOOK" "$dmg_stage" TZ=Pacific/Kiritimati; then
+    t_ok "the DMG hook exits 0 on a valid .app staging tree"
+else
+    t_fail "the DMG hook failed on a valid .app staging tree"
+fi
+bad="$(python3 - "$dmg_stage" <<'PY'
+import os, sys
+root = sys.argv[1]
+bad = []
+for base, dirs, files in os.walk(root):
+    for name in dirs + files:
+        p = os.path.join(base, name)
+        if not os.path.islink(p) and os.lstat(p).st_mtime_ns != 318211200000000000:
+            bad.append(p)
+print("\n".join(bad))
+PY
+)"
+if [ -z "$bad" ]; then
+    t_ok "every non-symlink DMG staged entry carries the fixed epoch under a non-UTC TZ"
+else
+    t_fail "DMG entries left off the epoch: $(echo "$bad" | head -3 | tr '\n' ' ')"
+fi
+
+# Fail-closed contexts for the DMG hook.
+dmg_expect_fail() { # <case name> <JpAppImageDir value>
+    local name="$1" dir="$2"
+    if run_hook "$DMG_HOOK" "$dir" >/dev/null 2>&1; then
+        t_fail "the DMG hook accepted an invalid context: $name"
+    else
+        t_ok "the DMG hook fails closed: $name"
+    fi
+}
+if env -i sh "$DMG_HOOK" >/dev/null 2>&1; then
+    t_fail "the DMG hook accepted an unset JpAppImageDir"
+else
+    t_ok "the DMG hook fails closed: JpAppImageDir unset"
+fi
+mkdir -p "$work/dmg-empty"
+dmg_expect_fail "no staged app bundle" "$work/dmg-empty"
+dmg_no_aot="$work/dmg-no-aot/Neutrodyne.app"
+make_dmg_staging "$dmg_no_aot"
+rm "$dmg_no_aot/Contents/app/neutrodyne.aot"
+dmg_expect_fail "no trained archive" "$dmg_no_aot"
+dmg_no_flag="$work/dmg-no-flag/Neutrodyne.app"
+make_dmg_staging "$dmg_no_flag"
+printf '[JavaOptions]\njava-options=-Djpackage.app-version=1.0\n' \
+    > "$dmg_no_flag/Contents/app/Neutrodyne.cfg"
+dmg_expect_fail ".cfg without the AOT read flag" "$dmg_no_flag"
+dmg_no_jars="$work/dmg-no-jars/Neutrodyne.app"
+make_dmg_staging "$dmg_no_jars"
+rm "$dmg_no_jars/Contents/app/tiny.jar"
+dmg_expect_fail "no classpath JARs" "$dmg_no_jars"
+
+# The MSI hook cannot run here (cscript/WSF is Windows-only); pin its contract
+# as data: well-formed JScript WSF, the Windows staging layout, the read flag,
+# the epoch, and the path read from the environment rather than interpolated
+# into executable command text.
+if python3 - "$MSI_HOOK" <<'PY'
+import sys, xml.etree.ElementTree as ET
+path = sys.argv[1]
+root = ET.parse(path).getroot()
+assert root.tag == "package", root.tag
+jobs = root.findall("job")
+assert len(jobs) == 1, len(jobs)
+script = jobs[0].find("script")
+assert script is not None and script.get("language") == "JScript"
+text = script.text or ""
+for token in (
+    "318211200000",
+    "Neutrodyne-App",
+    "Neutrodyne.cfg",
+    "neutrodyne.aot",
+    'java-options=-XX:AOTCache=$APPDIR/neutrodyne.aot',
+    'WScript.Environment("Process").Item("JpAppImageDir")',
+    "DateLastModified",
+):
+    assert token in text, token
+# The path is data: it must not be concatenated into a command string.
+assert "WScript.Shell" not in text, "the WSF must not spawn a shell with the path"
+PY
+then
+    t_ok "the MSI hook is a well-formed JScript WSF with the layout/read-flag/epoch contract"
+else
+    t_fail "the MSI hook does not carry the contract"
+fi
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "post-image-hook.test: $FAILED case(s) failing" >&2

@@ -847,7 +847,11 @@ extract_and_scan() {
                 # exposes AppleDouble metadata as payload. Preserve the signed app bundle.
                 ditto -x -k "$pkg" "$tmp"
             else
-                python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$pkg" "$tmp"
+                # Restore each entry's recorded mtime (and Unix mode) from the artifact
+                # instead of the extraction time: the AOT cache binds the trained JARs'
+                # timestamps, and a drifted producer must stay drifted for the strict
+                # check to catch it.
+                python3 "$SCRIPT_DIR/extract-zip.py" "$pkg" "$tmp"
             fi ;;
         deb) dpkg-deb -x "$pkg" "$tmp" ;;
         rpm)

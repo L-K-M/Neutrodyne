@@ -141,6 +141,7 @@ jobs:
           scripts/ci/tests/post-image-hook.test.sh
           scripts/ci/tests/build-desktop-release-windows.test.sh
           python3 scripts/ci/tests/desktop-package-variants.test.py
+          python3 scripts/ci/tests/extract-zip.test.py
           python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
