@@ -22,6 +22,7 @@ import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.kotlin.dsl.register
 import org.gradle.process.CommandLineArgumentProvider
+import org.gradle.process.ExecOperations
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URI
@@ -196,6 +197,9 @@ abstract class SetupBundledRuntime : DefaultTask() {
     @get:Inject
     protected abstract val fileSystemOperations: FileSystemOperations
 
+    @get:Inject
+    protected abstract val execOperations: ExecOperations
+
     @TaskAction
     fun setup() {
         val archiveFile = archive.get().asFile
@@ -209,22 +213,31 @@ abstract class SetupBundledRuntime : DefaultTask() {
 
         // The staged file is named "archive" (no suffix), so the unpacker is chosen by
         // magic bytes: Temurin ships ZIP for Windows ("PK") and gzip'd tar elsewhere (1f 8b).
-        val tree =
-            when (archiveFormatOf(archiveFile)) {
-                RuntimeArchiveFormat.ZIP -> {
-                    archiveOperations.zipTree(archiveFile)
-                }
-
-                RuntimeArchiveFormat.TAR_GZ -> {
-                    archiveOperations.tarTree(archiveOperations.gzip(archiveFile))
+        when (archiveFormatOf(archiveFile)) {
+            RuntimeArchiveFormat.ZIP -> {
+                fileSystemOperations.copy {
+                    from(archiveOperations.zipTree(archiveFile))
+                    into(staging)
+                    eachFile {
+                        relativePath = RelativePath(true, *relativePath.segments.drop(1).toTypedArray())
+                    }
                 }
             }
-        fileSystemOperations.copy {
-            from(tree)
-            into(staging)
-            // Temurin archives carry one top-level directory (jdk-25.0.4.1+1/); drop it.
-            eachFile {
-                relativePath = RelativePath(true, *relativePath.segments.drop(1).toTypedArray())
+
+            RuntimeArchiveFormat.TAR_GZ -> {
+                // Gradle's tarTree turns Temurin's legal-notice links into regular files.
+                // Unpack the checksum-verified archive with tar so the reference JDK keeps
+                // its real notice content, link targets and executable permissions.
+                execOperations.exec {
+                    commandLine(
+                        "tar",
+                        "-xzf",
+                        archiveFile.absolutePath,
+                        "--strip-components=1",
+                        "-C",
+                        staging.absolutePath,
+                    )
+                }
             }
         }
         // eachFile dropped the archive's single top-level directory, so staging is the JDK root.

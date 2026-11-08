@@ -2875,6 +2875,22 @@ Serves N4, R5 (all), R8.10. Delivered with every UI milestone; audit and the ful
 | Continue on this device card (MS3) | Play; Dismiss |
 | Devices row (MS2) | Rename; Remove |
 
+**Implementation note (2026-11-04, M10 current-code port):** Cover tiles
+expose Open and Select independently of menu entries. The row checklist
+covers each playback/download/wait state, and instrumented Compose suites
+enable framework checks on supported APIs. The M10 instrumented row pass
+performs real clicks as well as custom actions in light, dark and pure black
+at normal and 200 % text, including unavailable rows. A rendered-pixel
+regression found 3.16:1 metadata contrast from fading an entire unavailable
+row. Only decorative artwork is now faded; readable text keeps the theme's
+full-contrast roles. Host tests are separate evidence and do not claim ATF, TalkBack
+or Switch Access coverage. Physical-device and screen-reader checks remain
+release checklist items. The inherited desktop Settings diagnostic now checks
+measured clickable layout size: a 72 dp row can have a 16 dp fragment inside
+the scroll viewport. Licences separately must be fully visible at 48 dp and
+clickable, and a real 40 dp fixture must still fail the layout gate. Device
+ATF checks remain unchanged.
+
 ### Automated checks
 
 - Android: API 34+ instrumented Compose tests enable `ui-test-junit4-accessibility` checks for labels, contrast, touch targets and traversal. Use real actions or `tryPerformAccessibilityChecks()`; custom semantics actions alone do not establish ATF coverage. AndroidX does not support these checks under Robolectric. Host semantics/goldens remain separate evidence; do not suppress ATF checks. The instrumented suite gates N4 and M10 acceptance 2 ([Compose accessibility testing](https://developer.android.com/develop/ui/compose/accessibility/testing), [09 test configuration](09-quality-and-release.md#compose-ui-and-screenshot-tests)).
@@ -3187,6 +3203,16 @@ Two golden sets, both reviewed in PRs: the **Android set** (Roborazzi on Robolec
 | Sync screens (MS2, MS3) | Settings › Sync per `SyncStatus` (with a problem, with held changes), each link step (disclosure, code, first-link choice, merging), the approve sheet, the devices list, the held-changes dialog, the restore-while-linked prompt, the "Continue on this device" card above the mini player and in the side panel × light/dark × font 1.0/2.0 × LTR/RTL (Android); light/dark at 900 dp (desktop) |
 | Brand (M0b, M10) | the in-app mark on the startup gate and in About × light/dark/pure black; the brand scheme's surfaces, primary and containers in a fixed sample screen × light/dark × contrast 0.0/1.0 (both sets) |
 | **Desktop set** (M10, MD4) | the shared components of M10 AC8 (`EpisodeRow` states × light/dark × font 1.0/1.5 via a density override, `CoverTile`, monograms, the players with the three reference artworks); the five destinations, Podcast detail, Settings home, Settings › Desktop, Settings › Updates (desktop card with each install kind, no asset, `minOs` too high) and the Install & updates help (macOS, Windows and Linux sections open) at window widths 600, 900 and 1,400 dp × light/dark (MD4 AC2); an open context menu on a row, hover and focus states of a row, the scrollbar on a list (MD4) |
+
+**Implementation note (2026-11-08, M10 journeys):** M6b's `:benchmark` host
+gains the Macrobenchmark journeys, matched to `:app`'s `benchmarkRelease`.
+Its shell-permissioned seed receiver refuses a nonempty unmarked installation
+and creates 300 locally pinned synthetic covers, 50,000 episodes, 20 groups
+and a durable paused item without starting audio. It exists only in
+`benchmarkRelease`. Journeys cover cold start, cover-grid/feed flings, group
+swipes and player expansion; `benchmark-dryrun` runs them on CI. Emulator
+timings do not prove PB3. Reference-phone jank measurement remains open
+until that device run.
 
 ### Performance journeys
 

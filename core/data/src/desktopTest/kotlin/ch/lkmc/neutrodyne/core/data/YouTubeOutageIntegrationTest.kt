@@ -104,7 +104,14 @@ class YouTubeOutageIntegrationTest {
         runTest {
             val clock = TestClock()
             val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
-            val health = DefaultYouTubeHealth(FakeSettingsRepository(), clock, backgroundScope) {}
+            val health =
+                DefaultYouTubeHealth(
+                    FakeSettingsRepository(),
+                    clock,
+                    backgroundScope,
+                    appVersionCode = 0,
+                    invalidateUrls = {},
+                ) {}
             val monitor = YouTubeOutageMonitor(health, clock, { 1 }) { FeedOutcome.SUCCESS }
             try {
                 val id =
@@ -216,7 +223,14 @@ class YouTubeOutageIntegrationTest {
                     .createTempDirectory("nd-controls")
                     .toFile()
             val clock = TestClock()
-            val health = DefaultYouTubeHealth(FakeSettingsRepository(), clock, backgroundScope) {}
+            val health =
+                DefaultYouTubeHealth(
+                    FakeSettingsRepository(),
+                    clock,
+                    backgroundScope,
+                    appVersionCode = 0,
+                    invalidateUrls = {},
+                ) {}
             val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
             // Route production HTTPS URLs only in this test; the real FEED client/headers remain in use.
             val clients =
@@ -276,7 +290,14 @@ class YouTubeOutageIntegrationTest {
                     .createTempDirectory("nd-controls-status")
                     .toFile()
             val clock = TestClock()
-            val health = DefaultYouTubeHealth(FakeSettingsRepository(), clock, backgroundScope) {}
+            val health =
+                DefaultYouTubeHealth(
+                    FakeSettingsRepository(),
+                    clock,
+                    backgroundScope,
+                    appVersionCode = 0,
+                    invalidateUrls = {},
+                ) {}
             val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
             val clients =
                 NetworkClients(

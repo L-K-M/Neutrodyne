@@ -444,6 +444,10 @@ class AndroidAppGraphTest {
                 "CredentialLoadInitializer" to 120..199,
                 "PeriodicRefreshInitializer" to 200..299,
                 "RefreshForegroundObserverInitializer" to 200..299,
+                // 10 Scheduling on Android: `sync-periodic` arm at 200, the foreground observer
+                // at 220 beside the refresh observer.
+                "SyncSchedulingInitializer" to 200..299,
+                "SyncForegroundObserverInitializer" to 200..299,
                 // 05's work table: periodic arm, watcher and durable-work reconciliation.
                 "AutoBackupInitializer" to 200..299,
                 // M11b's maintenance arm belongs to the periodic scheduling band.
