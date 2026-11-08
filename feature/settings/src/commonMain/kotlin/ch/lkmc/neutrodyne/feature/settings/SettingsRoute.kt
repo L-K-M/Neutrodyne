@@ -11,6 +11,8 @@ import ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
@@ -33,10 +35,12 @@ internal fun SettingsRoute(
     desktopIntegration: DesktopIntegration?,
     hasChannels: Flow<Boolean> = flowOf(false),
     capabilities: YouTubeCapabilitiesSource? = null,
+    engine: YouTubeEngine? = null,
+    youtubeHealth: YouTubeHealth? = null,
 ) {
     when (key.page) {
         SettingsPage.YOUTUBE -> {
-            YouTubePage(settings, capabilities, platform)
+            YouTubePage(settings, capabilities, platform, engine, youtubeHealth)
         }
 
         SettingsPage.APPEARANCE -> {
@@ -52,7 +56,9 @@ internal fun SettingsRoute(
         }
 
         SettingsPage.DOWNLOADS -> {
-            DownloadsSettingsPage(platform)
+            DownloadsSettingsPage(platform, youtubeSettings = {
+                if (capabilities != null) YouTubeDownloadSettings(settings, capabilities)
+            })
         }
 
         SettingsPage.UPDATES -> {

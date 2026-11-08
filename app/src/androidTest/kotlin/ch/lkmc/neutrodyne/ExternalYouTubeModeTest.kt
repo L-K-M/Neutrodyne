@@ -12,18 +12,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.printToLog
 import androidx.lifecycle.SavedStateHandle
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.espresso.Espresso
@@ -60,9 +64,11 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
+import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -86,6 +92,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
+import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.createDynamicGraphFactory
@@ -122,7 +129,11 @@ class ExternalYouTubeModeTest {
         compose.runOnUiThread { compose.activity.setContent(content = content) }
     }
 
-    @Test fun recordedSharedHandleAndImportedChannelsStayExternal() =
+    // JUnit4 invalidates the whole class when any test method is not void; the device runner
+    // then reports only an initializationError that the result XML drops (2026-11-04). The
+    // explicit Unit keeps that a compile-time property: `with` would otherwise infer the last
+    // expression's type, and assertExists() returns SemanticsNodeInteraction.
+    @Test fun recordedSharedHandleAndImportedChannelsStayExternal(): Unit =
         with(compose) {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
@@ -142,7 +153,10 @@ class ExternalYouTubeModeTest {
                         .use { it.readText() }
                 }
             val settings = FakeSettingsRepository()
-            runBlocking { settings.set(DownloadSettingKeys.AUTO_DOWNLOAD, true) }
+            runBlocking {
+                settings.set(DownloadSettingKeys.AUTO_DOWNLOAD, true)
+                settings.set(YouTubeSettingKeys.ENGINE_ENABLED, false)
+            }
             val graph =
                 createDynamicGraphFactory<AndroidAppGraph.Factory>(
                     RecordedJourneyBindings(db, clock, scope, replay, settings),
@@ -189,15 +203,20 @@ class ExternalYouTubeModeTest {
                     resolved
                 }
                 assertEquals(emptyList(), runBlocking { db.podcastDao().allForExport() })
+                // The sheet auto-focuses the field; on the API 26 CI emulator the open IME then
+                // leaves the dialog's recomposition half-applied (tree dumps show the membership
+                // chips and buttons gone while the channel card stays). A user closes the
+                // keyboard to reach Subscribe; the journey does the same before clicking.
+                Espresso.closeSoftKeyboard()
                 val checkbox = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox)
                 onNode(hasText("Journey group") and checkbox).performClick()
                 onNodeWithText("Subscribe").performClick()
                 // The subscribe write goes through the same interpreter-cold stack as the
                 // preview above; it too gets the recovery window (a durable write has no
                 // retry affordance — the remedy is patience, not another click).
-                waitUntil(timeoutMillis = PREVIEW_RECOVERY_TIMEOUT_MS) {
-                    runBlocking { db.podcastDao().allForExport().isNotEmpty() }
-                }
+                awaitJourney(
+                    PREVIEW_RECOVERY_TIMEOUT_MS,
+                ) { runBlocking { db.podcastDao().allForExport().isNotEmpty() } }
                 runBlocking {
                     runJourneyWorker(
                         application,
@@ -206,7 +225,7 @@ class ExternalYouTubeModeTest {
                         workDataOf("scope" to "all", "origin" to "SUBSCRIBE"),
                     )
                 }
-                waitUntil(30_000) {
+                awaitJourney(REFRESH_TIMEOUT_MS) {
                     runBlocking {
                         db
                             .podcastDao()
@@ -238,7 +257,7 @@ class ExternalYouTubeModeTest {
                         workDataOf("sessionId" to session),
                     )
                 }
-                waitUntil(30_000) {
+                awaitJourney(REFRESH_TIMEOUT_MS) {
                     runBlocking {
                         val channels = db.podcastDao().allForExport()
                         channels.size == 2 && channels.none { it.initialFetch }
@@ -257,7 +276,7 @@ class ExternalYouTubeModeTest {
                     assertEquals(emptyList(), db.downloadDao().allRows())
                 }
                 assertEquals(
-                    ExternalReason.NOT_YET_AVAILABLE,
+                    ExternalReason.DISABLED_BY_USER,
                     graph.youtubeCapabilities.capabilities.value.externalReason,
                 )
                 // Fail both subscription variants/fallbacks and the real monitor's controls.
@@ -301,7 +320,7 @@ class ExternalYouTubeModeTest {
             }
         }
 
-    @Test fun browserFailureSuccessfulOpenUndoAndSettings() =
+    @Test fun browserFailureSuccessfulOpenUndoAndSettings(): Unit =
         with(compose) {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
@@ -395,8 +414,8 @@ class ExternalYouTubeModeTest {
                 onAllNodesWithText(outage).assertCountEquals(1)
                 onAllNodesWithContentDescription("Settings").onFirst().performClick()
                 onNodeWithText("YouTube").performClick()
-                onNodeWithText("YouTube plays in the app in a later version").assertExists()
-                onNodeWithText("Play YouTube in the app").assertDoesNotExist()
+                onNodeWithText("YouTube engine turned off").assertExists()
+                onNodeWithText("Play YouTube in the app").assertExists()
             } finally {
                 runOnIdle { showing = false }
                 waitForIdle()
@@ -408,11 +427,34 @@ class ExternalYouTubeModeTest {
 
     private companion object {
         const val PREVIEW_RECOVERY_TIMEOUT_MS = 90_000L
+        const val REFRESH_TIMEOUT_MS = 30_000L
+        const val OUTAGE_TIMEOUT_MS = 20_000L
 
         // Locale.ENGLISH is forced above, so the EN sheet copy (yt_network_error, action_retry)
         // is exact — including the typographic apostrophe.
         const val NETWORK_FAILURE_TEXT = "Couldn’t reach YouTube. Check your connection and try again."
         const val RETRY_LABEL = "Retry"
+    }
+
+    /**
+     * A timed-out wait must say which step the journey was in: the per-test logcat upload carries
+     * the whole semantics tree, so a CI-only stall is diagnosable from the artifact. MainActivity
+     * keeps its own composition under the journey's setContent, so the activity hosts two roots;
+     * each subtree is printed (SmokeTest's SettingsTouchTargets precedent).
+     */
+    private fun awaitJourney(
+        timeoutMillis: Long,
+        condition: () -> Boolean,
+    ) {
+        try {
+            compose.waitUntil(timeoutMillis = timeoutMillis, condition = condition)
+        } catch (failure: ComposeTimeoutException) {
+            runCatching {
+                val roots = compose.onAllNodes(isRoot())
+                repeat(roots.fetchSemanticsNodes().size) { index -> roots[index].printToLog("E8Journey") }
+            }
+            throw failure
+        }
     }
 }
 
@@ -435,9 +477,17 @@ private class ExternalModeBindings(
     @Provides @ApplicationScope
     fun scope(): CoroutineScope = scope
 
-    @Provides fun settings(): SettingsRepository = FakeSettingsRepository()
+    @Provides fun settings(): SettingsRepository =
+        FakeSettingsRepository().apply {
+            runBlocking { set(YouTubeSettingKeys.ENGINE_ENABLED, false) }
+        }
 
     @Provides fun refresh(): RefreshController = FakeRefreshController()
+
+    @Provides fun engineSettings(): EngineSettings =
+        FakeEngineSettings().apply {
+            state.value = state.value.copy(enabled = false)
+        }
 
     @Provides fun network(): NetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.OFFLINE)
 }
@@ -498,6 +548,11 @@ private class RecordedJourneyBindings(
     fun scope(): CoroutineScope = scope
 
     @Provides fun settings(): SettingsRepository = settings
+
+    @Provides fun engineSettings(): EngineSettings =
+        FakeEngineSettings().apply {
+            state.value = state.value.copy(enabled = false)
+        }
 
     @Provides fun network(): NetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
 

@@ -25,6 +25,7 @@ object YouTubeSettingKeys {
     val BREAKER_ENGINE_VERSION = SettingKey.Text("youtube.breaker_engine_version", "", SettingsFile.DEVICE)
     val RATE_LIMITED_UNTIL = SettingKey.Int64("youtube.rate_limited_until", 0, SettingsFile.DEVICE)
     val RATE_LIMIT_LEVEL = SettingKey.Int32("youtube.rate_limit_level", 0, SettingsFile.DEVICE)
+    val ENGINE_FAILURE_IDENTITY = SettingKey.Text("youtube.engine_failure_identity", "", SettingsFile.DEVICE)
     val ENGINE_START_FAILURES = SettingKey.Int32("youtube.engine_start_failures", 0, SettingsFile.DEVICE)
 
     fun acceptsRange(
@@ -78,6 +79,7 @@ object YouTubeSettingKeys {
             RATE_LIMITED_UNTIL,
             RATE_LIMIT_LEVEL,
             ENGINE_START_FAILURES,
+            ENGINE_FAILURE_IDENTITY,
             SUGGEST_RSS,
             MARK_PLAYED_ON_OPEN,
             FEED_OUTAGE_UNTIL,

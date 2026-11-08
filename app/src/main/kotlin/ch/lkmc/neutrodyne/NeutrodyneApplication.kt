@@ -7,6 +7,7 @@ import androidx.work.Configuration
 import ch.lkmc.neutrodyne.core.common.GraphHolder
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogLevel
+import ch.lkmc.neutrodyne.core.common.YtxGraphHolder
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.crash.installAcra
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
@@ -24,7 +25,8 @@ import kotlinx.coroutines.launch
 class NeutrodyneApplication :
     Application(),
     Configuration.Provider,
-    GraphHolder {
+    GraphHolder,
+    YtxGraphHolder {
     private lateinit var role: ProcessRole
 
     override val graph: AndroidAppGraph by lazy {
@@ -32,6 +34,8 @@ class NeutrodyneApplication :
         check(role == ProcessRole.MAIN) { "AndroidAppGraph exists only in the main process (D73)" }
         createGraphFactory<AndroidAppGraph.Factory>().create(this)
     }
+
+    override val engineGraph: Any get() = ytxGraph
 
     /** The `:ytx` process's graph; never created elsewhere. */
     lateinit var ytxGraph: YtxGraph

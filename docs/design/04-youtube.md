@@ -849,6 +849,46 @@ External-mode limitation: without enrichment, premieres, live streams and member
 
 Serves R3.1 (search), R3.5, R3.6, R8.6, N5, N8. Delivered in M0a (module stubs per S7), M9a (the Android host, process, Binder API, networking bridge, spike; the host-independent classes), M9b (JS challenge provider if viable), MD3 (the shared island and the desktop host, [11](11-desktop.md#desktop-youtube-engine-host)). Honours [D72](../PLAN.md#3-key-decisions)–[D75](../PLAN.md#3-key-decisions), [D77](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions). The engine is yt-dlp used as a Python library through its embedding API ([yt-dlp embedding](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)), behind Neutrodyne's shim `neutrodyne_ytx`. yt-dlp never downloads media (07's engine does), never sees the database and never runs in the app's own process: on Android it lives in the `:ytx` process, on the desktop in a CPython child process.
 
+**Implementation note (2026-11-08, Android app activation).** The Android shell
+now binds the shared engine to `BinderYtxTransport` and the two-worker
+`YtxService`. The verified bundle stays at 2026.08.19 with yt-dlp-ejs 0.8.0.
+`engine-prepare` extracts and compiles it before playback admission. Android's
+ZIP reader requires a local header at byte zero. Extraction validates the
+archive first, then opens a bounded temporary copy without the zipapp shebang
+prefix. The pinned official archive remains unchanged and the copy is deleted
+after extraction, including on failure. The host
+uses the credential-free `CoreClients.youtube` lane, per-call IP-family
+pinning and per-call socket cancellation. The transport checks loaded engine
+settings before binding, retains hang watchdogs after caller cancellation and
+stops the isolated process after three idle minutes. The inherited 15-second
+start limit and 120-second compile cap remain provisional pending the spike.
+
+The current shell activates the implementation for this task while device
+acceptance remains pending. The earlier portable-only activation notes in
+PLAN have been superseded by its dated current-code note. `YtxTestHooks` arms
+strict replay and process-failure injection through an explicit same-UID bind
+and a token file under `noBackupFilesDir/ytx-test/`. Instrumented smoke tests
+exercise the production graph and a localhost ranged-media stand-in. The
+fixtures are synthetic. They provide deterministic contracts, while successful
+residential captures and the physical-device spike remain open.
+
+The Android notification receiver lives in `:app` as `YouTubeAlertReceiver`.
+It calls the application health service. Its notification initializer uses
+Compose resources shared with the banners and Settings. The main-process
+health binding defers database access until a feed retry needs it. The engine
+process obtains only its isolated network graph and immutable build/platform
+information. A device-bound `youtube.engine_failure_identity` scopes persisted
+start failures to the app version, engine version and Python minor. It is
+registered alongside `youtube.engine_start_failures` and stays outside backup
+and sync.
+
+M9a uses bundled-only engine status and automatic-retry breaker wording.
+M9b owns runtime updates and the optional JS provider. MD3 owns the desktop
+host. The nightly live probe checks channel lookup, resolution and one media
+chunk using the pinned shim on host Python. This probe supplies upstream
+signals and leaves Android device acceptance to the instrumented suites and
+manual checklist.
+
 ```mermaid
 flowchart LR
   subgraph APP["app process, Android main process or desktop JVM"]
