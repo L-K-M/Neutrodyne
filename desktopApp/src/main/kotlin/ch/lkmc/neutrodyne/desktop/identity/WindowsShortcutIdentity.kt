@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.desktop.os.OsRegistrationInitializer
 import ch.lkmc.neutrodyne.desktop.system.JnaWindowsKnownFolders
 import ch.lkmc.neutrodyne.desktop.system.JnaWindowsRegistry
 import ch.lkmc.neutrodyne.desktop.system.NdmediaDirectory
@@ -16,6 +17,7 @@ import ch.lkmc.neutrodyne.playback.native.NativeWindowsIdentity
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import dev.zacsweers.metro.binding
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -118,14 +120,18 @@ internal fun interface ShortcutAumidStore {
  * The initializer of 11's band 0–99: packaged Windows builds only. A dev run
  * (`InstallKind.DEV`, no `jpackage.app-path`) skips it entirely — the debug process
  * identity needs no shortcut or registration. Runs after `UrlSchemeRegistrar` (50).
+ * Marked an [OsRegistrationInitializer], so the smoke and AOT journeys never run it
+ * either (11 Smoke mode step 1); only the production shell does. The explicit `binding`
+ * keeps the contribution in `Set<AppInitializer>` — Metro would otherwise bind the
+ * declared marker.
  */
-@ContributesIntoSet(AppScope::class)
+@ContributesIntoSet(AppScope::class, binding<AppInitializer>())
 @SingleIn(AppScope::class)
 @Inject
 class WindowsShortcutIdentityInitializer(
     private val buildInfo: BuildInfo,
     private val ndmedia: NdmediaDirectory,
-) : AppInitializer {
+) : OsRegistrationInitializer {
     override val order: Int = ORDER
 
     override suspend fun run() {

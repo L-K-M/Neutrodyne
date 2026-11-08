@@ -2,14 +2,17 @@
 /* Windows-only boundary fixture, run by build.sh's windows-x64 leg (11
    Start-up step 4, Windows MSI and ZIP): the process AppUserModelID bounds and
    the .lnk stamp against real IShellLinkW + IPropertyStore + IPersistFile
-   objects. The fixture's .lnk lives in its own temp directory — no user
-   shortcut and no registry key is touched. */
+   objects, then a real SMTC session open — the worker must re-assert the
+   configured release ID, never overwrite it. The fixture's .lnk lives in its
+   own temp directory — no user shortcut and no registry key is touched. */
 #include "../session.h"
 #include <objbase.h>
 #include <propkey.h>
 #include <propvarutil.h>
 #include <shlobj.h>
 #include <stdio.h>
+#include <string.h>
+#include <wchar.h>
 #include <windows.h>
 
 static int failures = 0;
@@ -53,6 +56,26 @@ static int create_shortcut(const wchar_t *lnk) {
     return SUCCEEDED(result) ? 0 : -1;
 }
 
+/* The .lnk's own Description — an unrelated property the AUMID stamp must keep. */
+static int read_description(const wchar_t *lnk, wchar_t *out, int capacity) {
+    IShellLinkW *link = NULL;
+    IPersistFile *file = NULL;
+    out[0] = 0;
+    HRESULT result = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW,
+                                      (void **)&link);
+    if (SUCCEEDED(result))
+        result = link->lpVtbl->QueryInterface(link, &IID_IPersistFile, (void **)&file);
+    if (SUCCEEDED(result))
+        result = file->lpVtbl->Load(file, lnk, STGM_READ);
+    if (SUCCEEDED(result))
+        result = link->lpVtbl->GetDescription(link, out, capacity);
+    if (file)
+        file->lpVtbl->Release(file);
+    if (link)
+        link->lpVtbl->Release(link);
+    return SUCCEEDED(result) ? 0 : -1;
+}
+
 /* Reads System.AppUserModel.ID back through IPropertyStore; "" when absent. */
 static int read_aumid(const wchar_t *lnk, wchar_t *out, int capacity) {
     IShellLinkW *link = NULL;
@@ -85,7 +108,10 @@ static int read_aumid(const wchar_t *lnk, wchar_t *out, int capacity) {
 }
 
 int main(void) {
-    const char *aumid = "ch.lkmc.neutrodyne.identitytest";
+    /* The packaged build's release identity — the value the SMTC worker must
+       re-assert, and the one the old hardcoded debug ID overwrote. */
+    const char *aumid = "ch.lkmc.neutrodyne";
+    const wchar_t *description = L"ndmedia identity fixture";
     wchar_t dir[MAX_PATH], lnk[MAX_PATH], read_back[256], expected[256];
     char lnk_utf8[MAX_PATH * 4];
 
@@ -111,6 +137,23 @@ int main(void) {
         }
     }
 
+    /* A real session open must leave the release ID on the process: the worker
+       re-asserts the configured value before it releases `nd_session_open`'s
+       readiness wait, and before the fix it stamped the hardcoded development
+       ID instead. Read the process identity back through the OS getter. */
+    CHECK(nd_session_open() == 0, "session open");
+    {
+        PWSTR current = NULL;
+        CHECK(GetCurrentProcessExplicitAppUserModelID(&current) == S_OK,
+              "post-session aumid read back");
+        if (current) {
+            to_wide(aumid, expected, 256);
+            CHECK(wcscmp(current, expected) == 0, "session kept the release aumid");
+            CoTaskMemFree(current);
+        }
+    }
+    nd_session_close();
+
     /* Shortcut stamp: the fixture's own .lnk inside its own temp directory. */
     CHECK(GetTempPathW(MAX_PATH, dir) > 0, "temp path");
     {
@@ -128,6 +171,10 @@ int main(void) {
         CHECK(read_aumid(lnk, read_back, 256) == 0, "shortcut read back");
         to_wide(aumid, expected, 256);
         CHECK(wcscmp(read_back, expected) == 0, "shortcut aumid matches");
+        /* An unrelated property must survive the stamp — the fix loads and
+           saves through the property store, which keeps the rest of the link. */
+        CHECK(read_description(lnk, read_back, 256) == 0, "description read back");
+        CHECK(wcscmp(read_back, description) == 0, "description preserved");
         CHECK(nd_win_shortcut_set_aumid(lnk_utf8, aumid) == 0, "stamp is idempotent");
 
         /* Bounds: relative, non-.lnk and absent paths are all refused. */
