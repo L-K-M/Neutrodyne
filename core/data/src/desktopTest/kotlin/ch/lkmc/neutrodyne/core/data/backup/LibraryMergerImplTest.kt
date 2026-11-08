@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.backup
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.TestOrderKeys
 import ch.lkmc.neutrodyne.core.data.newDb
@@ -95,7 +96,8 @@ class LibraryMergerImplTest {
                     orderKeys = TestOrderKeys,
                     clock = clock,
                 ),
-            settings = RestoreSettingsMerge(settingsRepository, db, settingsSync),
+            settings =
+                RestoreSettingsMerge(settingsRepository, db, settingsSync, DataStoreSettingsWriteCoordinator()),
             fileSystem = fileSystem,
             io = Dispatchers.Default,
         )

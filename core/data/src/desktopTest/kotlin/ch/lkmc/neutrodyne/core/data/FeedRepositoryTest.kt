@@ -309,6 +309,7 @@ class FeedRepositoryTest {
                 ch.lkmc.neutrodyne.core.testing
                     .FakeSettingsSyncPort(),
                 clock,
+                DataStoreSettingsWriteCoordinator(),
             )
         repo =
             FeedRepositoryImpl(

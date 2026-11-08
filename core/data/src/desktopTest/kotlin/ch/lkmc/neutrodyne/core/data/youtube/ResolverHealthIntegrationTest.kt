@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.youtube
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.data.DataStoreSettingsRepository
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.datastore.DataStoreBindings
 import ch.lkmc.neutrodyne.core.datastore.SettingsDataStoreFactory
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -273,6 +274,7 @@ class ResolverHealthIntegrationTest {
                 DataStoreBindings.deviceSettingsStore(DataStoreBindings.deviceDataStore(factory)),
                 syncPort = FakeSettingsSyncPort(),
                 clock = TestClock(),
+                writeLocks = DataStoreSettingsWriteCoordinator(),
             )
         val repository =
             object : SettingsRepository by settings {

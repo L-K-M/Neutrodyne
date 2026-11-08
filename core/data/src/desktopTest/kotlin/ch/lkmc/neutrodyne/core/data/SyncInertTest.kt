@@ -193,6 +193,7 @@ class SyncInertTest {
                         FakeSettingsRepository(),
                         TestDb.inMemory(),
                         FakeSettingsSyncPort(),
+                        DataStoreSettingsWriteCoordinator(),
                     ),
                 payloads = payloadStore,
                 storagePaths = storagePaths,

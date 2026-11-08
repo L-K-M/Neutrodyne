@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.common.Origin
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.CommitCancellingDriver
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
@@ -270,7 +271,13 @@ class BackupRepositoryImplTest {
             stager = stager,
             merger = merger,
             episodes = episodeMerger,
-            settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort()),
+            settingsMerge =
+                RestoreSettingsMerge(
+                    settings,
+                    TestDb.inMemory(),
+                    FakeSettingsSyncPort(),
+                    DataStoreSettingsWriteCoordinator(),
+                ),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,

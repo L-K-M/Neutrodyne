@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.model.MergeValueOrigin
 import ch.lkmc.neutrodyne.core.model.MergedField
 import ch.lkmc.neutrodyne.core.model.MergedRecord
@@ -48,6 +49,7 @@ internal class RestoreSettingsMerge(
     private val settings: SettingsRepository,
     private val db: NeutrodyneDatabase,
     private val sync: SettingsSyncPort,
+    private val writeLocks: SettingsWriteCoordinator,
 ) {
     private val keysByName = AllSettingKeys.list.associateBy { it.name }
 
@@ -140,21 +142,27 @@ internal class RestoreSettingsMerge(
         // 05 step 7: an invalid value is skipped and counted before any Room capture or DataStore
         // write — the port's rejection is not a storage failure.
         if (decodeSyncedValue(key, json) == null) return Applied.SKIPPED
-        val applied =
-            db.withWriteTransaction {
-                db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, json)
+        // 01 Sync write ordering: the accept+persist pair is mutually excluded with a local
+        // record+persist for the same key. The Room intent commits before the DataStore write,
+        // and the lock is released on cancellation or a storage failure, so a crash or a retry
+        // cannot interleave a newer local literal with the older stored value.
+        return writeLocks.withLock(key) {
+            val applied =
+                db.withWriteTransaction {
+                    db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, json)
+                }
+            if (!applied) {
+                // A newer pending local intent keeps its DataStore value (05 step 7): the archive's
+                // older value must not roll it back.
+                return@withLock Applied.SKIPPED
             }
-        if (!applied) {
-            // A newer pending local intent keeps its DataStore value (05 step 7): the archive's
-            // older value must not roll it back.
-            return Applied.SKIPPED
-        }
-        return if (sync.applyRemote(key, json)) {
-            Applied.YES
-        } else {
-            // The DataStore write failed; the captured intent keeps the value recoverable,
-            // but the restore itself reports storage failure rather than silent loss.
-            Applied.Failed(BackupError.Storage)
+            if (sync.applyRemote(key, json)) {
+                Applied.YES
+            } else {
+                // The DataStore write failed; the captured intent keeps the value recoverable,
+                // but the restore itself reports storage failure rather than silent loss.
+                Applied.Failed(BackupError.Storage)
+            }
         }
     }
 
