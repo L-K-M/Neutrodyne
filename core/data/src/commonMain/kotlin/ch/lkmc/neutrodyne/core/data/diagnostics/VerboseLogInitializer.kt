@@ -6,8 +6,8 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.LevelMutableLogSink
 import ch.lkmc.neutrodyne.core.common.LogLevel
-import ch.lkmc.neutrodyne.core.common.RingBufferLogSink
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
 import dev.zacsweers.metro.ContributesIntoSet
@@ -19,7 +19,8 @@ import kotlinx.coroutines.launch
 
 /**
  * "Detailed log for 24 hours" (09 Diagnostics): while `diagnostics.verbose_log_until` is in
- * the future the ring sink keeps DEBUG, otherwise INFO. A 60 s ticker flips the level back
+ * the future every level-mutable sink keeps DEBUG — the diagnostics ring on both platforms
+ * and the desktop's rolling file sink — otherwise INFO. A 60 s ticker flips the level back
  * on expiry — the setting write is the event, not a stored observer.
  */
 @ContributesIntoSet(AppScope::class)
@@ -27,7 +28,7 @@ internal class VerboseLogInitializer
     @Inject
     constructor(
         private val settings: SettingsRepository,
-        private val sink: RingBufferLogSink,
+        private val sinks: Set<LevelMutableLogSink>,
         private val clock: Clock,
         @param:ApplicationScope private val scope: CoroutineScope,
     ) : AppInitializer {
@@ -38,7 +39,8 @@ internal class VerboseLogInitializer
                 settings.observe(DiagnosticsSettingKeys.VERBOSE_LOG_UNTIL).collectLatest { until ->
                     while (true) {
                         val verbose = clock.now() < until
-                        sink.minLevel = if (verbose) LogLevel.DEBUG else LogLevel.INFO
+                        val level = if (verbose) LogLevel.DEBUG else LogLevel.INFO
+                        for (sink in sinks) sink.minLevel = level
                         if (!verbose) break
                         delay(TICK_MS)
                     }

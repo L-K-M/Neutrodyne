@@ -23,9 +23,9 @@ class RingBufferLogSink
     constructor(
         private val clock: Clock,
         private val capacity: Int = DEFAULT_CAPACITY,
-    ) : LogSink {
+    ) : LevelMutableLogSink {
         @Volatile
-        var minLevel: LogLevel = LogLevel.INFO
+        override var minLevel: LogLevel = LogLevel.INFO
 
         private val lock = Any()
         private val lines = ArrayDeque<String>(capacity)
