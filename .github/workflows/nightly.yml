@@ -1437,7 +1437,10 @@ jobs:
           --max-workers=1
           -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
+        # Always upload: successful runs must keep the raw XML/PB journey
+        # reports and benchmark outputs as generation evidence, not only
+        # failure diagnostics.
+        if: always()
         with:
           name: baseline-profile-reports
           path: |

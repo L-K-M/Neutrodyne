@@ -114,6 +114,10 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 }
             }
 
+            // The committed gzip captures in app/profiles/ feed release's baseline-profile
+            // source set; saveInSrc's src dir stays the producer's own regeneration output.
+            registerBaselineProfileCaptures()
+
             configureLicensee()
             registerDependencyPolicy()
             registerManifestPermissions()
