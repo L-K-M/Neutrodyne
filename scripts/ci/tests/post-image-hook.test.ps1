@@ -93,10 +93,19 @@ function Test-Epoch([string]$root) {
     return $bad
 }
 
+function Get-StagingSignature([string]$root) {
+    Get-ChildItem -Recurse -Force $root | Sort-Object FullName | ForEach-Object {
+        $relative = $_.FullName.Substring($root.Length)
+        if ($_.PSIsContainer) { $relative + '/' }
+        else { $relative + '=' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    }
+}
+
 try {
     # --- 1. the direct-root staging layout stamps every staged file ----------
     $stage = Join-Path $work 'plain\image'
     New-Staging $stage
+    $before = @(Get-StagingSignature $stage)
     $result = Invoke-Hook $stage
     if ($result.Code -eq 0) {
         t_ok 'the hook exits 0 on the direct-root app-image layout'
@@ -109,9 +118,7 @@ try {
     } else {
         t_fail ("files left off the epoch: " + ($bad | Select-Object -First 3) -join ' ')
     }
-    if ([IO.File]::ReadAllText("$stage\app\tiny.jar") -eq 'jar' -and
-        [IO.File]::ReadAllText("$stage\runtime\release") -eq 'release' -and
-        (Get-ChildItem -Recurse -Force $stage | Measure-Object).Count -eq 9) {
+    if (-not (Compare-Object -ReferenceObject $before -DifferenceObject @(Get-StagingSignature $stage))) {
         t_ok 'staged file contents and the tree listing are unchanged'
     } else {
         t_fail 'the hook changed staged file contents or the file list'

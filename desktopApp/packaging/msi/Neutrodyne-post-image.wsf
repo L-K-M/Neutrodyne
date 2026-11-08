@@ -111,7 +111,8 @@ try {
             return;
         }
         try {
-            item.ModifyDate = epoch;
+            // COM requires VT_DATE; a JScript Date object produces a type mismatch.
+            item.ModifyDate = epoch.getVarDate();
         } catch (e) {
             var failed = "cannot set the timestamp for " + path + ": " + e.message;
             if (fatal) {
@@ -127,7 +128,7 @@ try {
         // verify against the read-only FSO timestamp: the strict cache binds
         // these values exactly and a silently unapplied stamp would ship a
         // broken installer.
-        var actual = fso.GetFile(path).DateLastModified;
+        var actual = new Date(fso.GetFile(path).DateLastModified);
         if (actual.getTime() !== epochMs) {
             throw new Error("the timestamp for " + path + " did not take: " + actual);
         }
