@@ -74,6 +74,7 @@ internal class YouTubeSourceAdapter(
     private val monitor: YouTubeFeedOutageMonitor,
     private val metadata: YouTubeChannelMetadata,
     private val clock: Clock,
+    private val enrichment: YouTubeEnrichment,
     @Dispatcher(NeutrodyneDispatchers.IO) io: CoroutineDispatcher,
 ) : SourceAdapter {
     override val sourceType = SourceType.YOUTUBE_CHANNEL
@@ -365,9 +366,25 @@ internal class YouTubeSourceAdapter(
         inserted: List<Long>,
         newIds: List<Long>,
     ): List<Long> {
-        // M8 capabilities are external only. No engine/enricher is called from this path.
-        metadata.refresh(podcastId, ChannelMetadataReason.AFTER_INGEST)
-        return if (newIds.isEmpty()) emptyList() else db.episodeDao().youTubeAnnounceable(podcastId, newIds)
+        val pending =
+            db
+                .episodeDao()
+                .youTubeCandidates(podcastId, clock.now())
+                .filter { it.availability != ch.lkmc.neutrodyne.core.model.Availability.AVAILABLE }
+                .map { it.id }
+        try {
+            enrichment.refresh(podcastId)
+            metadata.refresh(podcastId, ChannelMetadataReason.AFTER_INGEST)
+        } catch (e: CancellationException) {
+            // Preserve a promotion already committed before cancellation; no further extraction.
+        } catch (e: Exception) {
+            ch.lkmc.neutrodyne.core.common.Log
+                .w("YouTubeSourceAdapter", e) { "post-ingest enrichment failed" }
+        }
+        val ids = (newIds + pending).distinct()
+        return withContext(NonCancellable) {
+            if (ids.isEmpty()) emptyList() else db.episodeDao().youTubeAnnounceable(podcastId, ids)
+        }
     }
 
     private fun failure(kind: FeedErrorKind) = AdapterResult.Failed(kind, null, null, transient = true)

@@ -118,7 +118,9 @@ data class YtxResolve(
     val ageLimit: Int? = null,
     val releaseTs: Long? = null,
     val formats: List<YtxFormat> = emptyList(),
-)
+) {
+    override fun toString(): String = "YtxResolve(redacted)"
+}
 
 /** Description is plain UTF-8 bounded before JSON encoding; truncated chapters are not complete. */
 @Serializable

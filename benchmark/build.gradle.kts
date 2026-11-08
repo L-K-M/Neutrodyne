@@ -49,6 +49,7 @@ dependencies {
     implementation(libs.androidx.test.runner)
     implementation(libs.androidx.test.ext.junit)
     implementation(libs.androidx.test.uiautomator)
+    implementation(libs.androidx.benchmark.macro.junit4)
     implementation(libs.junit4)
     implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp.mockwebserver3)
