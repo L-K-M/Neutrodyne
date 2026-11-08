@@ -9,6 +9,7 @@
 #include <roapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <stdio.h>
 #include <string.h>
 #include <systemmediatransportcontrolsinterop.h>
 #include <wchar.h>
@@ -566,6 +567,13 @@ HRESULT utf8(const char *value, wchar_t *buffer, int capacity) {
     return S_OK;
 }
 
+// A single bounded diagnostic on a failure path: which stage produced the
+// return code — never the .lnk path, which names a user profile directory.
+void stampDiag(const char *phase, int result) {
+    fprintf(stderr, "nd_win_shortcut_set_aumid: %s failed rc=%d (0x%08x)\n", phase, result,
+            (unsigned)result);
+}
+
 // MS AppUserModelIDs: at most 128 UTF-16 units, no spaces (appids doc).
 bool validAumid(const wchar_t *id) {
     const size_t length = wcslen(id);
@@ -697,32 +705,57 @@ extern "C" ND_API int nd_win_shortcut_set_aumid(const char *lnk_utf8, const char
     HRESULT result = utf8(lnk_utf8, lnk, TEXT_CAPACITY);
     if (SUCCEEDED(result))
         result = utf8(aumid_utf8, id, AUMID_CAPACITY);
-    if (FAILED(result))
+    if (FAILED(result)) {
+        stampDiag("utf8", result);
         return static_cast<int>(result);
-    if (!validAumid(id))
+    }
+    if (!validAumid(id)) {
+        stampDiag("validate", ND_E_ARG);
         return ND_E_ARG;
+    }
     // Only an absolute path to an existing .lnk is ever written; the caller
     // vets the folder. Data only — the path never reaches a command line.
     const size_t length = wcslen(lnk);
     const bool absolute = (length > 2 && iswalpha(lnk[0]) && lnk[1] == L':' && lnk[2] == L'\\') ||
                           (length > 2 && lnk[0] == L'\\' && lnk[1] == L'\\');
-    if (!absolute || length < 5 || _wcsicmp(lnk + length - 4, L".lnk") != 0)
+    if (!absolute || length < 5 || _wcsicmp(lnk + length - 4, L".lnk") != 0) {
+        stampDiag("path", ND_E_ARG);
         return ND_E_ARG;
-    if (GetFileAttributesW(lnk) == INVALID_FILE_ATTRIBUTES)
-        return static_cast<int>(HRESULT_FROM_WIN32(GetLastError()));
+    }
+    if (GetFileAttributesW(lnk) == INVALID_FILE_ATTRIBUTES) {
+        result = HRESULT_FROM_WIN32(GetLastError());
+        stampDiag("attributes", result);
+        return static_cast<int>(result);
+    }
     HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    if (FAILED(com) && com != RPC_E_CHANGED_MODE)
+    if (FAILED(com) && com != RPC_E_CHANGED_MODE) {
+        stampDiag("coinitialize", com);
         return static_cast<int>(com);
+    }
     IShellLinkW *link = nullptr;
     IPersistFile *file = nullptr;
     IPropertyStore *store = nullptr;
+    const char *phase = "link";
     result = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&link));
-    if (SUCCEEDED(result))
+    if (SUCCEEDED(result)) {
+        phase = "persist";
         result = link->QueryInterface(IID_PPV_ARGS(&file));
-    if (SUCCEEDED(result))
-        result = file->Load(lnk, STGM_READ);
-    if (SUCCEEDED(result))
+    }
+    if (SUCCEEDED(result)) {
+        phase = "load";
+        // The shell property store inherits IPersistFile::Load's access mode:
+        // a STGM_READ load makes SetValue fail with STG_E_ACCESSDENIED — the
+        // read-only store the windows-2025 boundary run hit. Chromium's
+        // shortcut-update path loads existing links STGM_READWRITE for the
+        // same reason (the dwMode is a suggestion per IPersistFile::Load).
+        // The load itself never writes, and a shortcut already carrying the
+        // ID below still skips SetValue/Commit/Save, keeping its timestamp.
+        result = file->Load(lnk, STGM_READWRITE);
+    }
+    if (SUCCEEDED(result)) {
+        phase = "store";
         result = link->QueryInterface(IID_PPV_ARGS(&store));
+    }
     bool dirty = true;
     if (SUCCEEDED(result)) {
         PROPVARIANT current;
@@ -737,17 +770,25 @@ extern "C" ND_API int nd_win_shortcut_set_aumid(const char *lnk_utf8, const char
     }
     if (SUCCEEDED(result) && dirty) {
         PROPVARIANT value;
+        phase = "value";
         result = InitPropVariantFromString(id, &value);
         if (SUCCEEDED(result)) {
+            phase = "setvalue";
             result = store->SetValue(PKEY_AppUserModel_ID, value);
             PropVariantClear(&value);
         }
-        if (SUCCEEDED(result))
+        if (SUCCEEDED(result)) {
+            phase = "commit";
             result = store->Commit();
+        }
         // pszFileName NULL saves back to the file IPersistFile::Load opened.
-        if (SUCCEEDED(result))
+        if (SUCCEEDED(result)) {
+            phase = "save";
             result = file->Save(nullptr, TRUE);
+        }
     }
+    if (FAILED(result))
+        stampDiag(phase, result);
     release(store);
     release(file);
     release(link);

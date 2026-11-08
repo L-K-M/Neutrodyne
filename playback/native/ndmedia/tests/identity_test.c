@@ -76,6 +76,15 @@ static int read_description(const wchar_t *lnk, wchar_t *out, int capacity) {
     return SUCCEEDED(result) ? 0 : -1;
 }
 
+/* The stamp under test: the DLL reports its failing phase on stderr itself;
+   the returned code is echoed so the CI log can pair the two. No path is
+   printed — it names a user profile directory. */
+static int stamp(const char *lnk_utf8, const char *aumid) {
+    int rc = nd_win_shortcut_set_aumid(lnk_utf8, aumid);
+    fprintf(stderr, "  nd_win_shortcut_set_aumid rc=%d (0x%08lx)\n", rc, (unsigned long)rc);
+    return rc;
+}
+
 /* Reads System.AppUserModel.ID back through IPropertyStore; "" when absent. */
 static int read_aumid(const wchar_t *lnk, wchar_t *out, int capacity) {
     IShellLinkW *link = NULL;
@@ -167,7 +176,7 @@ int main(void) {
         CHECK(create_shortcut(lnk) == 0, "fixture .lnk created");
 
         to_utf8(lnk, lnk_utf8, sizeof(lnk_utf8));
-        CHECK(nd_win_shortcut_set_aumid(lnk_utf8, aumid) == 0, "shortcut stamped");
+        CHECK(stamp(lnk_utf8, aumid) == 0, "shortcut stamped");
         CHECK(read_aumid(lnk, read_back, 256) == 0, "shortcut read back");
         to_wide(aumid, expected, 256);
         CHECK(wcscmp(read_back, expected) == 0, "shortcut aumid matches");
@@ -175,11 +184,11 @@ int main(void) {
            saves through the property store, which keeps the rest of the link. */
         CHECK(read_description(lnk, read_back, 256) == 0, "description read back");
         CHECK(wcscmp(read_back, description) == 0, "description preserved");
-        CHECK(nd_win_shortcut_set_aumid(lnk_utf8, aumid) == 0, "stamp is idempotent");
+        CHECK(stamp(lnk_utf8, aumid) == 0, "stamp is idempotent");
 
         /* Bounds: relative, non-.lnk and absent paths are all refused. */
-        CHECK(nd_win_shortcut_set_aumid("fixture.lnk", aumid) < 0, "relative path rejected");
-        CHECK(nd_win_shortcut_set_aumid("C:\\Windows\\fixture.txt", aumid) < 0,
+        CHECK(stamp("fixture.lnk", aumid) < 0, "relative path rejected");
+        CHECK(stamp("C:\\Windows\\fixture.txt", aumid) < 0,
               "non-.lnk rejected");
         {
             wchar_t missing[MAX_PATH];
@@ -187,10 +196,10 @@ int main(void) {
             lstrcpyW(missing, dir);
             lstrcatW(missing, L"\\absent.lnk");
             to_utf8(missing, missing_utf8, sizeof(missing_utf8));
-            CHECK(nd_win_shortcut_set_aumid(missing_utf8, aumid) < 0, "absent .lnk rejected");
+            CHECK(stamp(missing_utf8, aumid) < 0, "absent .lnk rejected");
         }
-        CHECK(nd_win_shortcut_set_aumid(NULL, aumid) < 0, "null path rejected");
-        CHECK(nd_win_shortcut_set_aumid(lnk_utf8, "bad aumid") < 0, "bad aumid rejected");
+        CHECK(stamp(NULL, aumid) < 0, "null path rejected");
+        CHECK(stamp(lnk_utf8, "bad aumid") < 0, "bad aumid rejected");
 
         DeleteFileW(lnk);
         RemoveDirectoryW(dir);

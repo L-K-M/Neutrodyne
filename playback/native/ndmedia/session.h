@@ -41,7 +41,8 @@ ND_API int nd_mac_login_item(int op);
    absent on other platforms; a missing export means unsupported. */
 ND_API int nd_win_process_set_aumid(const char *aumid_utf8);
 /* Windows only (11 Windows MSI and ZIP): stamp System.AppUserModel.ID on a
-   shortcut through IShellLinkW + IPropertyStore + IPersistFile::Save.
+   shortcut through IShellLinkW + IPropertyStore + IPersistFile::Save. The link
+   loads read-write — a read-only load makes the store deny SetValue.
    `lnk_utf8` must name an absolute, existing .lnk path; a shortcut already
    carrying `aumid_utf8` is left untouched. Same missing-export contract. */
 ND_API int nd_win_shortcut_set_aumid(const char *lnk_utf8, const char *aumid_utf8);
