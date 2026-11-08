@@ -40,6 +40,11 @@ val shippedLocales =
         .filter { it.isNotEmpty() && !it.startsWith("#") }
 
 android {
+    sourceSets["main"].kotlin.srcDir(if (youtubeEngine) "src/youtubeEngine/kotlin" else "src/noYouTubeEngine/kotlin")
+    if (youtubeEngine) {
+        sourceSets["test"].kotlin.srcDir("src/youtubeEngineTest/kotlin")
+        sourceSets["androidTest"].kotlin.srcDir("src/youtubeEngineAndroidTest/kotlin")
+    }
     defaultConfig {
         fun prop(name: String) = providers.gradleProperty(name).orElse("").get()
         buildConfigField("String", "REPO_URL", "\"${prop("neutrodyne.repoUrl")}\"")
@@ -67,6 +72,7 @@ android {
     sourceSets["androidTest"].kotlin.srcDir("../feeds/src/replay/kotlin")
     sourceSets["androidTest"].kotlin.srcDir("src/externalModeTest/kotlin")
     sourceSets["androidTest"].assets.srcDir("../youtube/impl/src/test/resources")
+    sourceSets["androidTest"].assets.srcDir("../youtube/engine/src/test/resources")
     // Exercise the device gate's decisions on the host without copying its implementation.
     sourceSets["androidTest"].kotlin.srcDir("src/restoreTest/kotlin")
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
@@ -156,7 +162,10 @@ dependencies {
     )) {
         implementation(project(module))
     }
-    if (youtubeEngine) implementation(project(":youtube:ytdlp"))
+    if (youtubeEngine) {
+        implementation(project(":youtube:ytdlp"))
+        implementation(project(":youtube:engine"))
+    }
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
@@ -214,6 +223,9 @@ dependencies {
     // needs the serialization runtime on this classpath directly.
     androidTestImplementation(project(":feeds:jvm"))
     androidTestImplementation(libs.kotlinx.serialization.json)
+    // External-mode journeys use the JVM engine fakes in both test APKs. The Android host
+    // and its Python payload stay conditional; their device tests use a separate source dir.
+    androidTestImplementation(project(":youtube:engine"))
 
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)

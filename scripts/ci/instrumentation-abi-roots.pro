@@ -8,6 +8,7 @@
 -keep class ch.lkmc.neutrodyne.NeutrodyneTestRunner { *; }
 -keep class ch.lkmc.neutrodyne.SmokeTest { *; }
 -keep class ch.lkmc.neutrodyne.YtxReleaseSmokeTest { *; }
+-keep class ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest { *; }
 # Class-marked smoke suites are selected by the same annotation as the device runner.
 -keep @ch.lkmc.neutrodyne.core.testing.ReleaseSmoke class * { *; }
 # Method-marked smoke cases are selected the same way; keep their declaring class

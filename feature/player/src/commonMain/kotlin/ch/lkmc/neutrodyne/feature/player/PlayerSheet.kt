@@ -213,6 +213,7 @@ internal fun PlayerSheet(
     share: (() -> Unit)? = null,
     retry: () -> Unit = toggle,
     setPanelHidden: (Boolean) -> Unit = {},
+    engineNotice: @Composable () -> Unit = {},
 ) {
     val now = ui.now
     val reducedMotion = LocalReducedMotion.current
@@ -400,6 +401,7 @@ internal fun PlayerSheet(
 
             val fullControls: @Composable () -> Unit = {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                    engineNotice()
                     Text(
                         now.title,
                         style = MaterialTheme.typography.titleLarge,
