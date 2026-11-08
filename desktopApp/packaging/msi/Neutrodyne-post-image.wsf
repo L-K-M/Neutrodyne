@@ -128,7 +128,7 @@ try {
         // verify against the read-only FSO timestamp: the strict cache binds
         // these values exactly and a silently unapplied stamp would ship a
         // broken installer.
-        var actual = fso.GetFile(path).DateLastModified;
+        var actual = new Date(fso.GetFile(path).DateLastModified);
         if (actual.getTime() !== epochMs) {
             throw new Error("the timestamp for " + path + " did not take: " + actual);
         }
