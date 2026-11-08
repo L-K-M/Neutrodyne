@@ -1342,7 +1342,10 @@ internal fun Project.registerDesktopPackagingTasks(
         archiveFileName.set("neutrodyne-$versionName-${target.id}.zip")
         destinationDirectory.set(layout.buildDirectory.dir("desktop-packaging/zip"))
         from(appImage.map { it.asFile.parentFile }) { include("$appImageLeaf/**") }
-        isPreserveFileTimestamps = false
+        // The AOT cache records the classpath JARs' modification times (11 AOT cache), so
+        // the archive must preserve them; trainAotCache normalized every image file to a
+        // fixed timestamp first, which keeps this archive reproducible.
+        isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
     }
 
@@ -1359,7 +1362,10 @@ internal fun Project.registerDesktopPackagingTasks(
         // Gradle 9's replacement for dirMode/fileMode: the tar keeps the modes the image files
         // already have (jpackage writes the launcher and jspawnhelper with 0755).
         useFileSystemPermissions()
-        isPreserveFileTimestamps = false
+        // The AOT cache records the classpath JARs' modification times (11 AOT cache), so
+        // the archive must preserve them; trainAotCache normalized every image file to a
+        // fixed timestamp first, which keeps this archive reproducible.
+        isPreserveFileTimestamps = true
         isReproducibleFileOrder = true
     }
 }

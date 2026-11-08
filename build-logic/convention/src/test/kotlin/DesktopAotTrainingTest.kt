@@ -271,6 +271,219 @@ class DesktopAotTrainingTest {
     }
 
     @Test
+    fun `the admission rejects a conflicting underscore option`() {
+        assertFailsWith<GradleException> {
+            checkAotModeAdmission(
+                cfg = trainingCfgWith("-D$AOT_TRAINING_PROPERTY=true"),
+                environment = mapOf("_JAVA_OPTIONS" to "-D$AOT_TRAINING_PROPERTY=false"),
+                osWire = "macos",
+                requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+            )
+        }
+    }
+
+    @Test
+    fun `the admission accepts a harmless underscore option`() {
+        checkAotModeAdmission(
+            cfg = trainingCfgWith("-D$AOT_TRAINING_PROPERTY=true"),
+            environment = mapOf("_JAVA_OPTIONS" to "-Xmx128m -Dsome.other=value"),
+            osWire = "macos",
+            requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+        )
+    }
+
+    @Test
+    fun `the admission accepts a JAVA_TOOL_OPTIONS false overridden by the cfg`() {
+        // The .cfg travels as command-line options, which outrank JAVA_TOOL_OPTIONS.
+        checkAotModeAdmission(
+            cfg = trainingCfgWith("-D$AOT_TRAINING_PROPERTY=true"),
+            environment = mapOf("JAVA_TOOL_OPTIONS" to "-D$AOT_TRAINING_PROPERTY=false"),
+            osWire = "macos",
+            requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+        )
+    }
+
+    @Test
+    fun `the admission rejects a later cfg false`() {
+        assertFailsWith<GradleException> {
+            checkAotModeAdmission(
+                cfg = trainingCfgWith("-D$AOT_TRAINING_PROPERTY=true", "-D$AOT_TRAINING_PROPERTY=false"),
+                environment = emptyMap(),
+                osWire = "macos",
+                requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+            )
+        }
+    }
+
+    @Test
+    fun `the admission ignores an ignored section`() {
+        // The real launcher reads only [JavaOptions]; a stray value in another section
+        // cannot override the active option.
+        val cfg =
+            "[Application]\napp.mainjar=\$APPDIR/tiny.jar\n\n" +
+                "[JavaOptions]\njava-options=-D$AOT_TRAINING_PROPERTY=true\n\n" +
+                "[Ignored]\njava-options=-D$AOT_TRAINING_PROPERTY=false\n"
+        checkAotModeAdmission(
+            cfg = cfg,
+            environment = emptyMap(),
+            osWire = "macos",
+            requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+        )
+    }
+
+    @Test
+    fun `the admission rejects a CRLF training option on POSIX but accepts it on Windows`() {
+        // The POSIX launcher keeps the trailing CR in the option value; the Windows
+        // launcher reads the .cfg in text mode and translates the CRLF away.
+        val cfg = trainingCfgWith("-D$AOT_TRAINING_PROPERTY=true").replace("\n", "\r\n")
+        assertFailsWith<GradleException> {
+            checkAotModeAdmission(
+                cfg = cfg,
+                environment = emptyMap(),
+                osWire = "macos",
+                requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+            )
+        }
+        checkAotModeAdmission(
+            cfg = cfg,
+            environment = emptyMap(),
+            osWire = "windows",
+            requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+        )
+    }
+
+    @Test
+    fun `the admission rejects an unbalanced quote`() {
+        assertFailsWith<GradleException> {
+            checkAotModeAdmission(
+                cfg = trainingCfgWith("-D$AOT_TRAINING_PROPERTY=true"),
+                environment = mapOf("_JAVA_OPTIONS" to "-D$AOT_TRAINING_PROPERTY=\"false"),
+                osWire = "macos",
+                requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+            )
+        }
+    }
+
+    @Test
+    fun `the admission treats a quoted env value as the unquoted token`() {
+        // The JVM removes the quotes while tokenizing the environment variable.
+        assertFailsWith<GradleException> {
+            checkAotModeAdmission(
+                cfg = trainingCfgWith("-D$AOT_TRAINING_PROPERTY=true"),
+                environment = mapOf("_JAVA_OPTIONS" to "-D$AOT_TRAINING_PROPERTY=\"false\""),
+                osWire = "macos",
+                requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+            )
+        }
+    }
+
+    @Test
+    fun `the smoke admission rejects a cfg smoke false`() {
+        val cfg =
+            "[Application]\napp.mainjar=\$APPDIR/tiny.jar\n\n" +
+                "[JavaOptions]\njava-options=-XX:AOTCache=\$APPDIR/neutrodyne.aot\n" +
+                "java-options=-D$SMOKE_PROPERTY=false\n"
+        assertFailsWith<GradleException> {
+            checkAotModeAdmission(
+                cfg = cfg,
+                environment = mapOf("JAVA_TOOL_OPTIONS" to "$AOT_MODE_STRICT_OPTION -D$SMOKE_PROPERTY=true"),
+                osWire = "macos",
+                requirement = AotModeRequirement(SMOKE_PROPERTY, "true", listOf(AOT_MODE_OPTION to "on")),
+            )
+        }
+    }
+
+    @Test
+    fun `the smoke admission rejects a non-strict AOT mode`() {
+        val cfg =
+            "[Application]\napp.mainjar=\$APPDIR/tiny.jar\n\n" +
+                "[JavaOptions]\njava-options=-XX:AOTMode=off\n"
+        assertFailsWith<GradleException> {
+            checkAotModeAdmission(
+                cfg = cfg,
+                environment = mapOf("JAVA_TOOL_OPTIONS" to "$AOT_MODE_STRICT_OPTION -D$SMOKE_PROPERTY=true"),
+                osWire = "macos",
+                requirement = AotModeRequirement(SMOKE_PROPERTY, "true", listOf(AOT_MODE_OPTION to "on")),
+            )
+        }
+    }
+
+    @Test
+    fun `the smoke admission accepts a JAVA_TOOL_OPTIONS false overridden by our appended true`() {
+        val cfg =
+            "[Application]\napp.mainjar=\$APPDIR/tiny.jar\n\n" +
+                "[JavaOptions]\njava-options=-XX:AOTCache=\$APPDIR/neutrodyne.aot\n"
+        checkAotModeAdmission(
+            cfg = cfg,
+            environment =
+                mapOf(
+                    "JAVA_TOOL_OPTIONS" to
+                        "-D$SMOKE_PROPERTY=false $AOT_MODE_STRICT_OPTION -D$SMOKE_PROPERTY=true",
+                ),
+            osWire = "macos",
+            requirement = AotModeRequirement(SMOKE_PROPERTY, "true", listOf(AOT_MODE_OPTION to "on")),
+        )
+    }
+
+    @Test
+    fun `the cfg parser reads only the JavaOptions section and keeps raw values`() {
+        val cfg =
+            "[JavaOptions]\njava-options=-Dprobe.prop=first\n\n" +
+                "[Ignored]\njava-options=-Dprobe.prop=ignored\n\n" +
+                "[JavaOptions]extra\njava-options=-Dprobe.prop=with space\n"
+        assertEquals(
+            listOf("-Dprobe.prop=first", "-Dprobe.prop=with space"),
+            jpackageCfgJavaOptions(cfg, "macos"),
+        )
+    }
+
+    @Test
+    fun `the cfg parser keeps a trailing CR on POSIX and strips it on Windows`() {
+        val cfg = "[JavaOptions]\njava-options=-Dprobe.prop=value\r\n"
+        assertEquals(listOf("-Dprobe.prop=value\r"), jpackageCfgJavaOptions(cfg, "macos"))
+        assertEquals(listOf("-Dprobe.prop=value"), jpackageCfgJavaOptions(cfg, "windows"))
+    }
+
+    @Test
+    fun `the classpath jars come from the Application section`() {
+        val root = Files.createTempDirectory("aot-cp").toFile()
+        try {
+            val jar = File(root, "Contents/app/tiny.jar")
+            jar.parentFile.mkdirs()
+            jar.writeBytes(byteArrayOf(1, 2, 3))
+            val cfg =
+                "[Application]\napp.classpath=\$APPDIR/tiny.jar\n\n[JavaOptions]\n"
+            assertEquals(listOf(jar), aotClasspathJars(cfg, root, "macos"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the timestamp normalization sets every file except the excluded ones`() {
+        val root = Files.createTempDirectory("aot-ts").toFile()
+        try {
+            val keep = File(root, "keep")
+            val change = File(root, "change")
+            keep.writeBytes(byteArrayOf(1))
+            change.writeBytes(byteArrayOf(2))
+            keep.setLastModified(123456789L)
+            change.setLastModified(123456789L)
+
+            normalizeAotImageTimestamps(root, AOT_IMAGE_TIMESTAMP_MS, exclude = setOf(keep))
+
+            assertEquals(123456789L, keep.lastModified(), "the excluded file is untouched")
+            assertEquals(AOT_IMAGE_TIMESTAMP_MS, change.lastModified())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    private fun trainingCfgWith(vararg options: String): String =
+        "[Application]\napp.mainjar=\$APPDIR/tiny.jar\n\n[JavaOptions]\n" +
+            options.joinToString("\n") { "java-options=$it" } + "\n"
+
+    @Test
     fun `the mac resign plan signs macho files inside out then the bundle`() {
         val root = Files.createTempDirectory("resign").toFile()
         try {

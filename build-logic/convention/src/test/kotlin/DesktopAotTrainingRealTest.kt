@@ -3,10 +3,14 @@ import org.gradle.api.GradleException
 import org.gradle.testfixtures.ProjectBuilder
 import java.io.File
 import java.nio.file.Files
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -94,8 +98,8 @@ class DesktopAotTrainingRealTest {
         val original = cfg.readBytes()
         cfg.writeBytes(aotTrainingCfg(String(original, Charsets.UTF_8)).toByteArray(Charsets.UTF_8))
         try {
-            val exit = launchImage(image)
-            assertEquals(0, exit, "the launcher exits 0 even though the archive cannot be written")
+            val result = launchImage(image)
+            assertEquals(0, result.exit, "the launcher exits 0 even though the archive cannot be written")
             assertFalse(archive.exists(), "no archive can be written without a runtime java launcher")
         } finally {
             cfg.writeBytes(original)
@@ -136,6 +140,189 @@ class DesktopAotTrainingRealTest {
         assertFalse(File(image, runtimeJavaRelative).exists())
         assertFalse(File(image, runtimeBinRelative).exists())
         assertEquals(original.toList(), cfg.readBytes().toList(), "the .cfg is restored on failure")
+    }
+
+    /**
+     * RED: the real launcher with a highest-precedence `_JAVA_OPTIONS` runs ordinary main
+     * even though the swapped .cfg carries the training mode. The marker proves main ran;
+     * this is the defect the prelaunch admission fixes.
+     */
+    @Test
+    fun `the hostile underscore option reached main before the admission fix`() {
+        val image = tinyImage(MARKER_MAIN)
+        val cfg = File(image, cfgRelative)
+        val original = cfg.readBytes()
+        val marker = File(image, "ordinary-main.marker")
+        cfg.writeBytes(aotTrainingCfg(String(original, Charsets.UTF_8)).toByteArray(Charsets.UTF_8))
+        try {
+            val result =
+                launchImage(
+                    image,
+                    mapOf(
+                        "_JAVA_OPTIONS" to
+                            "-D$AOT_TRAINING_PROPERTY=false -Dneutrodyne.probe.marker=${marker.absolutePath}",
+                    ),
+                )
+            assertEquals(0, result.exit, result.output)
+            assertTrue(marker.isFile, "ordinary main ran despite the hostile _JAVA_OPTIONS (the defect)")
+            assertTrue(result.output.contains("ORDINARY MAIN"), result.output)
+        } finally {
+            cfg.writeBytes(original)
+        }
+    }
+
+    /** NEW: the task refuses to launch when `_JAVA_OPTIONS` would override the training mode. */
+    @Test
+    fun `the task rejects a hostile underscore option before launching main`() {
+        val image = tinyImage(MARKER_MAIN)
+        val cfg = File(image, cfgRelative)
+        val original = cfg.readBytes()
+        val marker = File(image, "ordinary-main.marker")
+        val environment =
+            System.getenv() +
+                mapOf(
+                    "_JAVA_OPTIONS" to
+                        "-D$AOT_TRAINING_PROPERTY=false -Dneutrodyne.probe.marker=${marker.absolutePath}",
+                )
+        assertFailsWith<GradleException> { trainTask(image).train(environment) }
+        assertFalse(marker.exists(), "the launcher must not run ordinary main")
+        assertEquals(original.toList(), cfg.readBytes().toList(), "the .cfg is untouched")
+    }
+
+    /** NEW: the strict smoke launch is refused when `_JAVA_OPTIONS` would override smoke mode. */
+    @Test
+    fun `the task rejects a hostile smoke override before the strict launch`() {
+        val image = tinyImage(MARKER_MAIN)
+        val cfg = File(image, cfgRelative)
+        val original = cfg.readBytes()
+        val marker = File(image, "ordinary-main.marker")
+        val environment =
+            System.getenv() +
+                mapOf(
+                    "_JAVA_OPTIONS" to
+                        "-D$SMOKE_PROPERTY=false -Dneutrodyne.probe.marker=${marker.absolutePath}",
+                )
+        assertFailsWith<GradleException> { trainTask(image).train(environment) }
+        assertFalse(marker.exists(), "the strict launch must not run ordinary main")
+        assertEquals(original.toList(), cfg.readBytes().toList(), "the .cfg is restored")
+    }
+
+    /** GREEN: unrelated `_JAVA_OPTIONS`/`JAVA_TOOL_OPTIONS` survive and both modes run. */
+    @Test
+    fun `harmless underscore and tool options let the task train and verify`() {
+        val image = tinyImage(MARKER_MAIN)
+        val cfg = File(image, cfgRelative)
+        val original = cfg.readBytes()
+        val marker = File(image, "ordinary-main.marker")
+        val environment =
+            System.getenv() +
+                mapOf(
+                    "_JAVA_OPTIONS" to "-Xmx128m -Dneutrodyne.probe.marker=${marker.absolutePath}",
+                    "JAVA_TOOL_OPTIONS" to "-D$SMOKE_PROPERTY=false",
+                )
+        trainTask(image).train(environment)
+        assertFalse(marker.exists(), "both launches must run their required modes")
+        assertEquals(original.toList(), cfg.readBytes().toList(), "the .cfg is restored")
+    }
+
+    /**
+     * The timestamp round trip: the normalized image is packaged the way `packageZip` does
+     * after `trainAotCache` (`isPreserveFileTimestamps = true`), extracted, and the strict
+     * cache load must still prove the archive was used.
+     */
+    @Test
+    fun `the packaged and extracted image keeps the strict cache usable`() {
+        val image = tinyImage(MAIN_BODY)
+        trainTask(image).train(System.getenv())
+        val archive = File(image, "$appDirRelative/neutrodyne.aot")
+        assertTrue(archive.isFile && archive.length() > 0L, "the training launch must leave the archive")
+
+        val packaged = packageImage(image)
+        try {
+            val extracted = extractImage(packaged)
+            try {
+                val result =
+                    launchImage(
+                        extracted,
+                        mapOf("JAVA_TOOL_OPTIONS" to "-XX:AOTMode=on -D$SMOKE_PROPERTY=true"),
+                    )
+                assertEquals(0, result.exit, result.output)
+                assertTrue(result.output.contains(SMOKE_REPORT_PREFIX), result.output)
+                assertTrue(result.output.contains("\"aotCache\":\"in-use\""), result.output)
+            } finally {
+                extracted.deleteRecursively()
+            }
+        } finally {
+            packaged.delete()
+        }
+    }
+
+    /** The timestamp-drift negative: a one-second drift on a classpath JAR breaks the cache. */
+    @Test
+    fun `a drifted classpath timestamp breaks the strict cache`() {
+        val image = tinyImage(MAIN_BODY)
+        trainTask(image).train(System.getenv())
+        val packaged = packageImage(image)
+        try {
+            val extracted = extractImage(packaged)
+            try {
+                val jar = extracted.walkTopDown().first { it.isFile && it.name.endsWith(".jar") }
+                assertTrue(jar.setLastModified(jar.lastModified() + 1000L), "the drift was applied")
+                val result =
+                    launchImage(
+                        extracted,
+                        mapOf("JAVA_TOOL_OPTIONS" to "-XX:AOTMode=on -D$SMOKE_PROPERTY=true"),
+                    )
+                assertNotEquals(0, result.exit, result.output)
+                assertTrue(result.output.contains("timestamp has changed"), result.output)
+            } finally {
+                extracted.deleteRecursively()
+            }
+        } finally {
+            packaged.delete()
+        }
+    }
+
+    /** Packages the image as `packageZip` does after the normalization. */
+    private fun packageImage(image: File): File {
+        val zip = File.createTempFile("aot-packaged", ".zip")
+        ZipOutputStream(zip.outputStream().buffered()).use { out ->
+            image.walkTopDown().forEach { file ->
+                val relative = file.relativeTo(image).path.replace(File.separatorChar, '/')
+                if (relative.isEmpty()) return@forEach
+                val entry = ZipEntry(if (file.isDirectory) "$relative/" else relative)
+                entry.time = AOT_IMAGE_TIMESTAMP_MS
+                out.putNextEntry(entry)
+                if (file.isFile) {
+                    file.inputStream().use { it.copyTo(out) }
+                }
+                out.closeEntry()
+            }
+        }
+        return zip
+    }
+
+    /** Extracts a packaged image, restoring each entry's recorded modification time. */
+    private fun extractImage(zip: File): File {
+        val root = Files.createTempDirectory("aot-extracted").toFile()
+        ZipFile(zip).use { zipFile ->
+            zipFile.entries().asSequence().forEach { entry ->
+                val target = File(root, entry.name)
+                if (entry.isDirectory) {
+                    target.mkdirs()
+                } else {
+                    target.parentFile.mkdirs()
+                    zipFile.getInputStream(entry).use { input ->
+                        target.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    target.setLastModified(entry.time)
+                }
+            }
+        }
+        // java.util.zip carries no Unix mode; the real archive and installers restore it,
+        // and the launcher needs its executable bit to start.
+        File(root, launcherRelative).setExecutable(true, false)
+        return root
     }
 
     /**
@@ -228,7 +415,7 @@ class DesktopAotTrainingRealTest {
         File(work, "TinyAotProbeMain.java").writeText(
             """
             public class TinyAotProbeMain {
-                public static void main(String[] args) {
+                public static void main(String[] args) throws Exception {
                     $mainBody
                 }
             }
@@ -313,16 +500,20 @@ class DesktopAotTrainingRealTest {
         return task
     }
 
-    private fun launchImage(image: File): Int {
-        val process =
+    private fun launchImage(
+        image: File,
+        environment: Map<String, String> = emptyMap(),
+    ): ProbeResult {
+        val builder =
             ProcessBuilder(File(image, launcherRelative).absolutePath)
                 .directory(image)
                 .redirectErrorStream(true)
-                .start()
+        builder.environment().apply { environment.forEach { (key, value) -> put(key, value) } }
+        val process = builder.start()
         val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
         val exit = process.waitFor()
         loggerLifecycle(output)
-        return exit
+        return ProbeResult(exit, output)
     }
 
     private fun runCommand(argv: List<String>) {
@@ -389,6 +580,21 @@ class DesktopAotTrainingRealTest {
                 "System.out.println(\"SMOKE {\\\"aotCache\\\":\\\"in-use\\\"}\"); " +
                 "} else { " +
                 "System.out.println(\"AOT-TRAINING {\\\"steps\\\":{}}\"); " +
+                "}"
+
+        /**
+         * The marker probe: it writes the marker only when neither mode property is true,
+         * so a marker file proves ordinary main ran with the real AppDirs.
+         */
+        const val MARKER_MAIN =
+            "if (Boolean.getBoolean(\"neutrodyne.smoke\")) { " +
+                "System.out.println(\"SMOKE {\\\"aotCache\\\":\\\"in-use\\\"}\"); " +
+                "} else if (Boolean.getBoolean(\"compose.aot.training-run\")) { " +
+                "System.out.println(\"AOT-TRAINING {\\\"steps\\\":{}}\"); " +
+                "} else { " +
+                "String marker = System.getProperty(\"neutrodyne.probe.marker\"); " +
+                "if (marker != null) java.nio.file.Files.writeString(java.nio.file.Path.of(marker), \"ran\"); " +
+                "System.out.println(\"ORDINARY MAIN\"); " +
                 "}"
     }
 }

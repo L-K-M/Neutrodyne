@@ -17,6 +17,7 @@ import org.gradle.api.tasks.TaskAction
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.FileTime
 import java.util.concurrent.TimeUnit
 
 /*
@@ -36,7 +37,12 @@ internal const val AOT_CACHE_OPTION = "-XX:AOTCache=\$APPDIR/$AOT_CACHE_FILE"
 
 /** The two options that replace the read flag inside the training .cfg. */
 internal const val AOT_CACHE_OUTPUT_OPTION = "-XX:AOTCacheOutput=\$APPDIR/$AOT_CACHE_FILE"
-internal const val AOT_TRAINING_PROPERTY_OPTION = "-Dcompose.aot.training-run=true"
+
+/** The training mode's system property name (PO-42). */
+internal const val AOT_TRAINING_PROPERTY = "compose.aot.training-run"
+
+/** The training .cfg's mode option. */
+internal const val AOT_TRAINING_PROPERTY_OPTION = "-D$AOT_TRAINING_PROPERTY=true"
 
 /** The training run's one-line report (desktopApp's `AotTrainingMode`). */
 internal const val AOT_TRAINING_REPORT_PREFIX = "AOT-TRAINING "
@@ -44,11 +50,13 @@ internal const val AOT_TRAINING_REPORT_PREFIX = "AOT-TRAINING "
 /** The smoke run's one-line report (desktopApp's `SmokeMode`). */
 internal const val SMOKE_REPORT_PREFIX = "SMOKE "
 
-/** The strict-mode option that makes the JVM fail before main when the archive is unusable. */
-internal const val AOT_MODE_STRICT_OPTION = "-XX:AOTMode=on"
+/** The strict-mode option's name and its strict value. */
+internal const val AOT_MODE_OPTION = "-XX:AOTMode"
+internal const val AOT_MODE_STRICT_OPTION = "$AOT_MODE_OPTION=on"
 
-/** The smoke-mode property the strict cache-load verification launches with. */
-internal const val SMOKE_PROPERTY_OPTION = "-Dneutrodyne.smoke=true"
+/** The smoke mode's system property name and its option. */
+internal const val SMOKE_PROPERTY = "neutrodyne.smoke"
+internal const val SMOKE_PROPERTY_OPTION = "-D$SMOKE_PROPERTY=true"
 
 /** The per-OS paths of the jpackage app image the training launch needs (11 Resources layout). */
 internal data class AotImageLayout(
@@ -132,7 +140,9 @@ internal fun aotTrainingCfg(cfg: String): String {
     for (line in cfg.lines()) {
         if (line.startsWith("[")) {
             if (inJavaOptions) injectTrainingOptions()
-            inJavaOptions = line == "[JavaOptions]"
+            // The real launcher recognizes the section by the text between `[` and the
+            // last `]`; matching that keeps the swap faithful to the launcher's parser.
+            inJavaOptions = jpackageSectionName(line) == "JavaOptions"
         }
         if (line != readLine) out += line
     }
@@ -161,6 +171,270 @@ internal fun aotLauncherCommand(
         listOf("xvfb-run", "-a", "dbus-run-session", "--", launcherPath)
     } else {
         listOf("xvfb-run", "-a", launcherPath)
+    }
+}
+
+/** The mode a launch requires: the system property that must equal [requiredValue] and the
+ * JVM options that must carry the given values. */
+internal data class AotModeRequirement(
+    val property: String,
+    val requiredValue: String,
+    val options: List<Pair<String, String>> = emptyList(),
+)
+
+/** One effective option setting and the source it came from. */
+private data class AotOptionSetting(
+    val value: String,
+    val source: String,
+)
+
+/** The whitespace the JVM's environment-variable tokenizer treats as a separator. */
+private const val JVM_OPTION_WHITESPACE = " \t\r\n"
+
+/**
+ * Fails closed before a launch when the JVM's actual option precedence would keep the
+ * required mode from taking effect.
+ *
+ * The jpackage launcher creates the JVM through JNI, so the precedence is the JVM's:
+ * `_JAVA_OPTIONS` overrides the command line, the command line (the .cfg's active
+ * `java-options`, with `JDK_JAVA_OPTIONS` prepended when the java launcher is used)
+ * overrides `JAVA_TOOL_OPTIONS`. Quotes in the environment variables group and are
+ * removed by the JVM; quotes in the .cfg are passed through literally. A malformed or
+ * unbalanced quote in any of the three variables fails closed: the JVM would refuse to
+ * start, and a silent fallback to ordinary main is not acceptable.
+ *
+ * [cfg] is the exact .cfg the launcher will read (the swapped training .cfg or the
+ * restored production .cfg); [environment] is the exact environment the launcher will
+ * inherit. Nothing is modified.
+ */
+internal fun checkAotModeAdmission(
+    cfg: String,
+    environment: Map<String, String>,
+    osWire: String,
+    requirement: AotModeRequirement,
+) {
+    val underscore = jvmOptionTokens(environment["_JAVA_OPTIONS"].orEmpty(), "_JAVA_OPTIONS")
+    val jdkJava = jvmOptionTokens(environment["JDK_JAVA_OPTIONS"].orEmpty(), "JDK_JAVA_OPTIONS")
+    val toolOptions = jvmOptionTokens(environment["JAVA_TOOL_OPTIONS"].orEmpty(), "JAVA_TOOL_OPTIONS")
+    val cfgOptions = jpackageCfgJavaOptions(cfg, osWire)
+
+    val property =
+        effectiveAotSetting(
+            "-D${requirement.property}",
+            underscore,
+            cfgOptions,
+            jdkJava,
+            toolOptions,
+        )
+    if (property == null || property.value != requirement.requiredValue) {
+        throw GradleException(
+            "the required mode would not run: " +
+                "${property?.source ?: "no option"} sets " +
+                "-D${requirement.property}=${property?.value ?: "unset"}, " +
+                "not ${requirement.requiredValue} — refusing to launch ordinary main",
+        )
+    }
+    for ((name, value) in requirement.options) {
+        val option = effectiveAotSetting(name, underscore, cfgOptions, jdkJava, toolOptions)
+        if (option == null || option.value != value) {
+            throw GradleException(
+                "the required mode would not run: " +
+                    "${option?.source ?: "no option"} sets $name=${option?.value ?: "unset"}, " +
+                    "not $value — refusing to launch ordinary main",
+            )
+        }
+    }
+}
+
+/**
+ * The effective setting of [name] under the JVM's precedence: `_JAVA_OPTIONS` first
+ * (it overrides the command line), then the command line's own order (the .cfg after
+ * `JDK_JAVA_OPTIONS`, so a later .cfg option wins), then `JAVA_TOOL_OPTIONS`. The last
+ * setting in each source wins.
+ */
+private fun effectiveAotSetting(
+    name: String,
+    underscore: List<String>,
+    cfgOptions: List<String>,
+    jdkJava: List<String>,
+    toolOptions: List<String>,
+): AotOptionSetting? {
+    underscore.lastAotSetting(name, "_JAVA_OPTIONS")?.let { return it }
+    cfgOptions.lastAotSetting(name, "the .cfg")?.let { return it }
+    jdkJava.lastAotSetting(name, "JDK_JAVA_OPTIONS")?.let { return it }
+    return toolOptions.lastAotSetting(name, "JAVA_TOOL_OPTIONS")
+}
+
+/** The last token that sets [name], or null when none does. */
+private fun List<String>.lastAotSetting(
+    name: String,
+    source: String,
+): AotOptionSetting? {
+    var result: AotOptionSetting? = null
+    for (token in this) {
+        val value = token.aotSettingValue(name) ?: continue
+        result = AotOptionSetting(value, source)
+    }
+    return result
+}
+
+/** The value a `-Dproperty` / `-XX:Option` token sets, or null when it sets another name. */
+private fun String.aotSettingValue(name: String): String? {
+    if (this == name) return ""
+    if (startsWith("$name=")) return substring(name.length + 1)
+    return null
+}
+
+/**
+ * Splits a JVM environment variable into option tokens the way the JVM does: single and
+ * double quotes group text and are removed, backslash is literal, and an unmatched quote
+ * is an error. The JVM refuses to start on an unmatched quote, so failing closed here
+ * beats launching a process that cannot run the required mode.
+ */
+private fun jvmOptionTokens(
+    value: String,
+    source: String,
+): List<String> {
+    val tokens = mutableListOf<String>()
+    var index = 0
+    val length = value.length
+    while (index < length) {
+        while (index < length && value[index] in JVM_OPTION_WHITESPACE) index++
+        if (index >= length) break
+        val token = StringBuilder()
+        var quote: Char? = null
+        while (index < length) {
+            val char = value[index]
+            if (quote != null) {
+                if (char == quote) quote = null else token.append(char)
+                index++
+            } else if (char == '\'' || char == '"') {
+                quote = char
+                index++
+            } else if (char in JVM_OPTION_WHITESPACE) {
+                break
+            } else {
+                token.append(char)
+                index++
+            }
+        }
+        if (quote != null) {
+            throw GradleException("$source has an unbalanced quote: $value")
+        }
+        tokens += token.toString()
+    }
+    return tokens
+}
+
+/**
+ * The active `java-options` values of a jpackage .cfg, in file order. The launcher reads
+ * only the `[JavaOptions]` section (the section name runs from `[` to the last `]` of
+ * the line), the key must be exactly `java-options`, and the value is everything after
+ * the first `=`, whitespace and all. On POSIX a trailing CR stays part of the value,
+ * which is how a CRLF line disables an intended property; Windows reads the file in
+ * text mode and translates the CRLF away.
+ */
+internal fun jpackageCfgJavaOptions(
+    cfg: String,
+    osWire: String,
+): List<String> {
+    val options = mutableListOf<String>()
+    var inJavaOptions = false
+    for (rawLine in cfg.split('\n')) {
+        val line = if (osWire == "windows") rawLine.removeSuffix("\r") else rawLine
+        if (line.startsWith("[")) {
+            inJavaOptions = jpackageSectionName(line) == "JavaOptions"
+            continue
+        }
+        if (!inJavaOptions) continue
+        val separator = line.indexOf('=')
+        if (separator < 0) continue
+        if (line.substring(0, separator) != "java-options") continue
+        options += line.substring(separator + 1)
+    }
+    return options
+}
+
+/** The section name of a `[...]` line: the text between `[` and the last `]`. */
+private fun jpackageSectionName(line: String): String? {
+    if (!line.startsWith("[")) return null
+    val end = line.lastIndexOf(']')
+    if (end < 0) return null
+    return line.substring(1, end)
+}
+
+/** The active values of a .cfg key in [section], in file order. */
+private fun jpackageCfgValues(
+    cfg: String,
+    section: String,
+    key: String,
+    osWire: String,
+): List<String> {
+    val values = mutableListOf<String>()
+    var inSection = false
+    for (rawLine in cfg.split('\n')) {
+        val line = if (osWire == "windows") rawLine.removeSuffix("\r") else rawLine
+        if (line.startsWith("[")) {
+            inSection = jpackageSectionName(line) == section
+            continue
+        }
+        if (!inSection) continue
+        val separator = line.indexOf('=')
+        if (separator < 0) continue
+        if (line.substring(0, separator) != key) continue
+        values += line.substring(separator + 1)
+    }
+    return values
+}
+
+/**
+ * The fixed timestamp the packaged image's files carry (1980-02-01T00:00:00Z, the ZIP
+ * format's minimum). The AOT cache records the classpath JARs' modification times, and
+ * the Gradle ZIP/tar archives preserve them only when the files carry a fixed timestamp.
+ */
+internal const val AOT_IMAGE_TIMESTAMP_MS = 318211200000L
+
+/**
+ * The classpath JARs the AOT cache records: the .cfg's active `app.classpath` entries
+ * with `$APPDIR` expanded. Only these files' size and modification time are checked when
+ * the cache is loaded (probed on the real JDK 25), so only these timestamps must survive
+ * the archive round trip.
+ */
+internal fun aotClasspathJars(
+    cfg: String,
+    image: File,
+    osWire: String,
+): List<File> {
+    val appDir = File(image, aotImageLayout(osWire).appDir)
+    return jpackageCfgValues(cfg, "Application", "app.classpath", osWire)
+        .map { value -> File(value.replace("\$APPDIR", appDir.absolutePath)) }
+        .filter { it.isFile }
+        .distinct()
+}
+
+/**
+ * Sets every regular file and directory under [image] to the fixed [timestampMs], except
+ * the [exclude] files. The whole image is normalized so the archive tasks can preserve the
+ * timestamps (`isPreserveFileTimestamps = true`) while staying reproducible; the training
+ * excludes the classpath JARs because the cache recorded their pre-training timestamps.
+ * Symbolic links are skipped: the archive tasks dereference them, so the target's
+ * timestamp is what ships.
+ */
+internal fun normalizeAotImageTimestamps(
+    image: File,
+    timestampMs: Long,
+    exclude: Set<File> = emptySet(),
+) {
+    val time = FileTime.fromMillis(timestampMs)
+    val excluded = exclude.map { it.absoluteFile.normalize() }.toSet()
+    image.walkTopDown().forEach { file ->
+        if (Files.isSymbolicLink(file.toPath())) return@forEach
+        if (file.absoluteFile.normalize() in excluded) return@forEach
+        try {
+            Files.setLastModifiedTime(file.toPath(), time)
+        } catch (t: Throwable) {
+            throw GradleException("cannot normalize the image timestamp for $file: ${t.message}", t)
+        }
     }
 }
 
@@ -350,6 +624,15 @@ abstract class TrainAotCacheTask : DefaultTask() {
 
     @TaskAction
     fun train() {
+        train(System.getenv())
+    }
+
+    /**
+     * The task action with an explicit environment, so the real-probe tests can exercise
+     * the prelaunch admission and the launches without mutating the test JVM's own
+     * environment.
+     */
+    internal fun train(environment: Map<String, String>) {
         val kind = installKind.get()
         val expected = expectedInstallKinds.get()
         if (kind !in expected) {
@@ -374,6 +657,24 @@ abstract class TrainAotCacheTask : DefaultTask() {
         val archive = aotArchive.get().asFile
         archive.delete()
 
+        val originalBytes = cfgFile.readBytes()
+        val productionCfg = String(originalBytes, Charsets.UTF_8)
+        val trainingCfg = aotTrainingCfg(productionCfg)
+
+        // The training launch's prelaunch admission: a highest-precedence _JAVA_OPTIONS
+        // (or a malformed variable) must never let ordinary main run with the real
+        // AppDirs before the missing report is noticed.
+        checkAotModeAdmission(
+            cfg = trainingCfg,
+            environment = environment,
+            osWire = targetOs.get(),
+            requirement = AotModeRequirement(AOT_TRAINING_PROPERTY, "true"),
+        )
+
+        // The cache records the classpath JARs' timestamps; normalize the image before
+        // the training launch so the archive round trip can preserve them.
+        normalizeAotImageTimestamps(image, AOT_IMAGE_TIMESTAMP_MS)
+
         // The training JVM's `-XX:AOTCacheOutput` forks `java.home/bin/java` at shutdown,
         // which the jlink'd image runtime lacks; the pinned runtime's own launcher stands
         // in for the launch and comes out again on every path (success, failure, cancel).
@@ -387,12 +688,9 @@ abstract class TrainAotCacheTask : DefaultTask() {
         try {
             // The training launch needs the write flag where the read flag sits; the file's
             // original bytes go back on every path — the .cfg is a declared input of this task.
-            val originalBytes = cfgFile.readBytes()
-            val trainingBytes =
-                aotTrainingCfg(String(originalBytes, Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
-            cfgFile.writeBytes(trainingBytes)
+            cfgFile.writeBytes(trainingCfg.toByteArray(Charsets.UTF_8))
             try {
-                runTrainingLaunch(launcherFile, image)
+                runTrainingLaunch(launcherFile, image, environment)
             } finally {
                 cfgFile.writeBytes(originalBytes)
             }
@@ -406,11 +704,42 @@ abstract class TrainAotCacheTask : DefaultTask() {
 
         // The packaged acceptance: the archive is only proven once the image's own launcher
         // loads it under `-XX:AOTMode=on`, which fails before main on an unusable archive.
-        verifyStrictCacheLoad(launcherFile, image)
+        // The strict smoke launch's prelaunch admission runs before that launch, with the
+        // JAVA_TOOL_OPTIONS this launch will actually carry.
+        val smokeJavaToolOptions =
+            buildString {
+                val existing = environment["JAVA_TOOL_OPTIONS"]
+                if (!existing.isNullOrBlank()) {
+                    append(existing)
+                    append(' ')
+                }
+                append(AOT_MODE_STRICT_OPTION)
+                append(' ')
+                append(SMOKE_PROPERTY_OPTION)
+            }
+        val smokeEnvironment = environment + mapOf("JAVA_TOOL_OPTIONS" to smokeJavaToolOptions)
+        checkAotModeAdmission(
+            cfg = productionCfg,
+            environment = smokeEnvironment,
+            osWire = targetOs.get(),
+            requirement = AotModeRequirement(SMOKE_PROPERTY, "true", listOf(AOT_MODE_OPTION to "on")),
+        )
+        verifyStrictCacheLoad(launcherFile, image, smokeEnvironment)
 
         if (targetOs.get() == "macos") {
             resignAdHoc(image)
         }
+
+        // The training created the archive, touched the .cfg and the provisioned bin
+        // directory, and the reseal rewrote the Mach-O files; normalize those too, but
+        // never the classpath JARs whose timestamps the cache just recorded. Doing this
+        // last keeps every shipped file at the fixed timestamp, so the archives stay
+        // reproducible while the cache's recorded times survive the round trip.
+        normalizeAotImageTimestamps(
+            image,
+            AOT_IMAGE_TIMESTAMP_MS,
+            exclude = aotClasspathJars(productionCfg, image, targetOs.get()).toSet(),
+        )
     }
 
     /**
@@ -423,6 +752,7 @@ abstract class TrainAotCacheTask : DefaultTask() {
     private fun verifyStrictCacheLoad(
         launcherFile: File,
         image: File,
+        environment: Map<String, String>,
     ) {
         val argv =
             aotLauncherCommand(
@@ -439,17 +769,7 @@ abstract class TrainAotCacheTask : DefaultTask() {
                 .directory(image)
                 .redirectErrorStream(true)
                 .redirectOutput(logFile)
-        val existingOptions = builder.environment()["JAVA_TOOL_OPTIONS"]
-        builder.environment()["JAVA_TOOL_OPTIONS"] =
-            buildString {
-                if (!existingOptions.isNullOrBlank()) {
-                    append(existingOptions)
-                    append(' ')
-                }
-                append(AOT_MODE_STRICT_OPTION)
-                append(' ')
-                append(SMOKE_PROPERTY_OPTION)
-            }
+        builder.environment().apply { environment.forEach { (key, value) -> put(key, value) } }
         val process =
             try {
                 builder.start()
@@ -502,6 +822,7 @@ abstract class TrainAotCacheTask : DefaultTask() {
     private fun runTrainingLaunch(
         launcherFile: File,
         image: File,
+        environment: Map<String, String>,
     ) {
         val argv =
             aotLauncherCommand(
@@ -512,18 +833,21 @@ abstract class TrainAotCacheTask : DefaultTask() {
                 onPath("dbus-run-session"),
             )
         logger.lifecycle("trainAotCache: ${argv.joinToString(" ")}")
-        // ProcessBuilder inherits this process's environment, so a pre-existing
-        // JAVA_TOOL_OPTIONS reaches the training JVM unchanged; the training options
-        // travel through the swapped .cfg like every other launcher option. Output
-        // goes to a file, not a pipe: a stalled child cannot deadlock the waitFor.
+        // ProcessBuilder inherits this process's environment; the explicit environment
+        // overlays it so a pre-existing JAVA_TOOL_OPTIONS reaches the training JVM
+        // unchanged and the real-probe tests can supply one. The training options travel
+        // through the swapped .cfg like every other launcher option. Output goes to a
+        // file, not a pipe: a stalled child cannot deadlock the waitFor.
         val logFile = File.createTempFile("aot-training", ".log")
+        val builder =
+            ProcessBuilder(argv)
+                .directory(image)
+                .redirectErrorStream(true)
+                .redirectOutput(logFile)
+        builder.environment().apply { environment.forEach { (key, value) -> put(key, value) } }
         val process =
             try {
-                ProcessBuilder(argv)
-                    .directory(image)
-                    .redirectErrorStream(true)
-                    .redirectOutput(logFile)
-                    .start()
+                builder.start()
             } catch (t: Throwable) {
                 logFile.delete()
                 throw t
