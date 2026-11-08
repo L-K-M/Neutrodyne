@@ -896,7 +896,12 @@ class SnapshotPublisher:
             document = json.loads(response.body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as invalid:
             raise ApprovalReleaseError("snapshot release response is not UTF-8 JSON") from invalid
-        return parse_release(document)
+        release = parse_release(document)
+        if release.tag_name != tag:
+            raise SnapshotStateError(
+                f"release lookup returned tag {release.tag_name!r}, expected {tag!r}"
+            )
+        return release
 
     def _get_release_by_id(self, release_id: int) -> Release:
         response = self._request(
@@ -912,7 +917,12 @@ class SnapshotPublisher:
             document = json.loads(response.body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as invalid:
             raise ApprovalReleaseError("snapshot release response is not UTF-8 JSON") from invalid
-        return parse_release(document)
+        release = parse_release(document)
+        if release.id != release_id:
+            raise SnapshotStateError(
+                f"release lookup returned id {release.id}, expected {release_id}"
+            )
+        return release
 
     def _create_draft(self, tag: str, commit_sha: str) -> Release:
         payload = {

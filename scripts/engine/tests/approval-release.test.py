@@ -787,6 +787,28 @@ class PublisherTests(unittest.TestCase):
         )
         self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
 
+    def test_release_by_tag_wrong_tag_fails_closed(self):
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=False, immutable=True
+        )
+        self.fake.override_release = {"tag_name": "engine-approvals-9-9"}
+        with self.assertRaises(ar.SnapshotStateError):
+            ar.SnapshotPublisher(self.fake)._get_release_by_tag("engine-approvals-4242-3")
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_release_by_id_wrong_id_fails_closed(self):
+        def wrong_id(method, url, body):
+            if method == "PATCH" and "/releases/" in url and "/tags/" not in url:
+                self.fake.override_release = {"id": 999999}
+            return None
+
+        self.fake.failure = wrong_id
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
     def test_published_snapshot_missing_asset_fails_without_uploads(self):
         release_id = self.fake.add_release(
             "engine-approvals-4242-3", target_commitish=SHA, draft=False, immutable=True
