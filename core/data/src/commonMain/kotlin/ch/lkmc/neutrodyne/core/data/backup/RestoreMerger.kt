@@ -145,7 +145,7 @@ internal class RestoreMerger(
         val removedPodcastIds = HashSet<Long>()
         val removedGroupIds = HashSet<Long>()
         val removedGroupUuids = ArrayList<String>()
-        val removedSeedMoves = ArrayList<Pair<String, String>>()
+        val removedPodcastMoves = ArrayList<Pair<String, String>>()
         if (link) {
             for (podcast in stagedPodcasts) {
                 val removedAt = podcast.removedAt ?: continue
@@ -153,11 +153,15 @@ internal class RestoreMerger(
                 val local = podcastDao.byId(localId) ?: continue
                 if (removedAt >= local.subscribedAt) {
                     removedPodcastIds += localId
-                    // Move the seed to the record's rid: the field merge then overwrites it with
-                    // the server's tombstone, instead of the capture pass pushing the local
-                    // seed under a stray rid the server does not know.
+                    // Move the record's whole identity — the podcast's own seed and every
+                    // episode, Up next and member row under the local rid — to the record's
+                    // rid: the field merge then overwrites the seed with the server's
+                    // tombstone, and the pending local intents ride the canonical rid instead
+                    // of being pushed under a stray rid the server does not know (10 Merge
+                    // step 3). The unsubscribe cascade's clock sweep cannot see the moved
+                    // rows, so nothing is lost with the removed row.
                     val syncId = podcast.syncId
-                    if (syncId != null && local.syncId != syncId) removedSeedMoves += local.syncId to syncId
+                    if (syncId != null && local.syncId != syncId) removedPodcastMoves += local.syncId to syncId
                 }
             }
             for (group in stagedGroups) {
@@ -169,11 +173,16 @@ internal class RestoreMerger(
                     removedGroupUuids += local.uuid
                 }
             }
-            if (removedSeedMoves.isNotEmpty() || removedPodcastIds.isNotEmpty() || removedGroupIds.isNotEmpty()) {
+            if (removedPodcastMoves.isNotEmpty() || removedPodcastIds.isNotEmpty() || removedGroupIds.isNotEmpty()) {
                 downloads().beforeLibraryReplace()
                 db.withWriteTransaction {
                     db.syncStateDao().withApplying {
-                        for ((from, to) in removedSeedMoves) moveRecordRows(COLL_PODCAST, from, to)
+                        for ((from, to) in removedPodcastMoves) {
+                            moveRecordRows(COLL_PODCAST, from, to)
+                            movePrefixedRows(COLL_EPISODE, from, to)
+                            movePrefixedRows(COLL_UPNEXT, from, to)
+                            moveMemberRowsByPodcast(from, to)
+                        }
                         if (removedPodcastIds.isNotEmpty()) unsubscribe(removedPodcastIds.toList())
                         for (id in removedGroupIds) {
                             groupDao.clearGroupContext(id, now)

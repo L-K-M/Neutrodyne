@@ -192,6 +192,10 @@ class SyncApplier(
                             feedUrl = feedUrl,
                             feedKey = feedKey,
                             youtubeChannelId = merge.record.stringField("youtubeChannelId"),
+                            youtubeVariants =
+                                merge.record
+                                    .intField("youtubeVariants")
+                                    ?.takeIf(ch.lkmc.neutrodyne.core.model.YouTubeVariantBits::isValid) ?: 1,
                             title = title,
                             artworkUrl = merge.record.stringField("artworkUrl"),
                             link = merge.record.stringField("link"),
@@ -259,6 +263,12 @@ class SyncApplier(
         record.enumField<ch.lkmc.neutrodyne.core.model.FeedOrder>("episodeOrder")?.let {
             db.podcastDao().setEpisodeOrder(existing.id, it)
         }
+        // The user's Shorts/Live choice: a merged value is the field merge's winner, so a
+        // stale remote record cannot overwrite a newer local one (10 Pull and apply).
+        record
+            .intField("youtubeVariants")
+            ?.takeIf(ch.lkmc.neutrodyne.core.model.YouTubeVariantBits::isValid)
+            ?.let { db.podcastDao().setYouTubeVariants(existing.id, it) }
         applyOverrides(existing.id, isGroup = false, record)
     }
 

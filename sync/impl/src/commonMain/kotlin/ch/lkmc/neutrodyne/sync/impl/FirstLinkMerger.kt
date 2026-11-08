@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.MergedRecord
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import ch.lkmc.neutrodyne.feeds.backup.EpisodeLineV1
+import ch.lkmc.neutrodyne.feeds.backup.EpisodeRefV1
 import ch.lkmc.neutrodyne.feeds.backup.LibraryV1
 import ch.lkmc.neutrodyne.feeds.backup.MemberV1
 import ch.lkmc.neutrodyne.feeds.backup.PodcastV1
@@ -38,11 +39,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import okio.FileSystem
@@ -471,22 +474,29 @@ class FirstLinkMerger(
         val episodesSink = fileSystem.sink(dir / BackupCodec.ENTRY_EPISODES).buffer()
         try {
             val keyByPodcastSyncId = HashMap<String, String>()
+            // First pass: podcasts. The pull is in server `seq` order, so a member, episode,
+            // Up-next or session record can precede its parent podcast; the child mappers
+            // resolve the podcast through this map, and a local DB lookup cannot help on a
+            // new device (10 Merge step 2).
             for (dto in pull.records) {
                 val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: continue
+                if (coll != SyncCollection.PODCAST) continue
                 // "Use the server's library" treats a server tombstone as an item the server
                 // lacks: the Replace pre-step's local-only cleanup then removes the local row.
                 // Merge keeps the tombstone in the staging library (with its clock) so the
                 // First-link column can compare it with the local row's own stamp.
                 if (policy == MergePolicy.LINK_REPLACE && tombstoneAt(dto, coll) != null) continue
+                mapPodcast(dto)?.let {
+                    podcasts += it
+                    keyByPodcastSyncId[it.syncId.orEmpty()] = it.key
+                }
+            }
+            // Second pass: the remaining collections, now that every podcast identity is known.
+            for (dto in pull.records) {
+                val coll = runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: continue
+                if (coll == SyncCollection.PODCAST) continue
+                if (policy == MergePolicy.LINK_REPLACE && tombstoneAt(dto, coll) != null) continue
                 when (coll) {
-                    SyncCollection.PODCAST -> {
-                        mapPodcast(dto)?.let {
-                            podcasts += it
-                            keyByPodcastSyncId[it.syncId.orEmpty()] =
-                                it.key
-                        }
-                    }
-
                     SyncCollection.GROUP -> {
                         mapGroup(dto)?.let { groupsByUuid[it.uuid] = it }
                     }
@@ -510,12 +520,14 @@ class FirstLinkMerger(
                     }
 
                     SyncCollection.SESSION -> {
-                        session = mapSession(dto)
+                        session = mapSession(dto, keyByPodcastSyncId)
                     }
 
                     SyncCollection.SETTING -> {
                         mapSetting(dto)?.let { settings += it }
                     }
+
+                    SyncCollection.PODCAST -> {}
                 }
             }
         } finally {
@@ -580,6 +592,7 @@ class FirstLinkMerger(
             aliases = aliases,
             podcastGuid = record.stringField("podcastGuid"),
             youtubeChannelId = record.stringField("youtubeChannelId"),
+            youtubeVariants = record.intField("youtubeVariants"),
             title = record.stringField("title") ?: feedUrl,
             customTitle = record.stringField("customTitle"),
             artworkUrl = record.stringField("artworkUrl"),
@@ -748,14 +761,47 @@ class FirstLinkMerger(
         return field.c?.let { runCatching { Hlc.parse(it).millis }.getOrNull() }
     }
 
-    private fun mapSession(dto: RecordDto): ch.lkmc.neutrodyne.feeds.backup.SessionV1? {
+    /**
+     * The server's session record in the wire shape: an `episode` ref and a `context` object.
+     * The refs' podcast ids resolve to feed keys through [keyByPodcastSyncId]; the context's
+     * group uuid passes through for the merger's `groupIdByUuid` (05 Play session).
+     */
+    private fun mapSession(
+        dto: RecordDto,
+        keyByPodcastSyncId: Map<String, String>,
+    ): ch.lkmc.neutrodyne.feeds.backup.SessionV1? {
         val record = runCatching { ProtocolValidation.record(dto) }.getOrNull() ?: return null
+        val context = record.fields["context"]?.v as? JsonObject
+        val filters = context?.get("filters") as? JsonObject
         return ch.lkmc.neutrodyne.feeds.backup.SessionV1(
-            contextType = record.stringField("contextType"),
-            contextGroupUuid = record.stringField("contextGroupUuid"),
-            contextPodcastKey = record.stringField("contextPodcastKey"),
-            order = record.stringField("order") ?: "NEWEST_FIRST",
+            current = episodeRef(record.fields["episode"]?.v, keyByPodcastSyncId),
+            anchor = episodeRef(context?.get("anchor"), keyByPodcastSyncId),
+            contextType = context?.get("type")?.jsonPrimitive?.contentOrNull,
+            contextGroupUuid = context?.get("group")?.jsonPrimitive?.contentOrNull,
+            contextPodcastKey =
+                context
+                    ?.get("podcast")
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.let { keyByPodcastSyncId[it] },
+            order = context?.get("order")?.jsonPrimitive?.contentOrNull ?: "NEWEST_FIRST",
+            filterFlags = filters?.get("flags")?.jsonPrimitive?.intOrNull ?: 0,
+            mediaFilter = filters?.get("media")?.jsonPrimitive?.contentOrNull ?: "ALL",
+            minSortDate = context?.get("minSortDate")?.jsonPrimitive?.longOrNull,
+            anchorSortDate = context?.get("anchorSortDate")?.jsonPrimitive?.longOrNull,
         )
+    }
+
+    /** An `EPISODE_REF` wire object → a staging [EpisodeRefV1], its podcast rid resolved to a key. */
+    private fun episodeRef(
+        value: JsonElement?,
+        keyByPodcastSyncId: Map<String, String>,
+    ): EpisodeRefV1? {
+        val obj = value as? JsonObject ?: return null
+        val podcast = (obj["p"] as? JsonPrimitive)?.contentOrNull ?: return null
+        val key = (obj["k"] as? JsonPrimitive)?.contentOrNull ?: return null
+        val feedKey = keyByPodcastSyncId[podcast] ?: return null
+        return EpisodeRefV1(p = feedKey, k = key)
     }
 
     private fun mapSetting(dto: RecordDto): SettingValueV1? {

@@ -348,6 +348,127 @@ class FirstLinkMergerTest {
         }
 
     /**
+     * 10 Merge step 2: the server's `youtubeVariants` rides into the staging podcast. The
+     * default-1 insert path otherwise drops the user's Shorts/Live choice permanently, and no
+     * later pull corrects it (the pull applier had no branch either).
+     */
+    @Test
+    fun mergeStagesTheServerYoutubeVariants() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                val record =
+                    podcastRecord().copy(
+                        fields =
+                            podcastRecord().fields +
+                                ("youtubeVariants" to FieldValue(JsonPrimitive(3), clock(october))),
+                    )
+                val client = CountingClient(listOf(record))
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val staged = readStagedLibrary(library.calls.single().stagingDir)
+                assertEquals(3, staged.podcasts.single().youtubeVariants)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Merge step 2: the server's session record carries the `episode` ref and the
+     * `context` object (never the flat names the old mapper read). The staged session adopts
+     * the server's current episode, context type/group, order, filters, min-sort date and
+     * anchor, so LINK_REPLACE no longer clears a local current episode the server had.
+     */
+    @Test
+    fun mergeStagesTheServerSessionWithCurrentAndContext() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                val groupA = "11111111-1111-4111-8111-111111111111"
+                val client = CountingClient(listOf(podcastRecord(), sessionRecord(groupA)))
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val queue = readStagedQueue(library.calls.single().stagingDir)
+                val session = assertNotNull(queue.session)
+                assertEquals("example.com/feed", session.current?.p)
+                assertEquals("g:one", session.current?.k)
+                assertEquals("GROUP", session.contextType)
+                assertEquals(groupA, session.contextGroupUuid)
+                assertEquals("OLDEST_FIRST", session.order)
+                assertEquals(3, session.filterFlags)
+                assertEquals("AUDIO", session.mediaFilter)
+                assertEquals(5L, session.minSortDate)
+                assertEquals("g:one", session.anchor?.k)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * 10 Merge step 2: the pull is in server `seq` order, so a member, episode or Up-next
+     * record can precede its parent podcast. The mapper resolves podcasts first, so the
+     * children land even on a genuinely empty local DB — a later remote edit is not needed.
+     */
+    @Test
+    fun mergeMapsChildrenThatPrecedeTheirParentPodcast() =
+        runTest {
+            val db = TestDb.inMemory()
+            val library = FakeLibraryMerger()
+            try {
+                link(db, deviceId = device)
+                val groupA = "11111111-1111-4111-8111-111111111111"
+                val client =
+                    CountingClient(
+                        listOf(
+                            groupRecord(groupA, "Group A", ok = "a0"),
+                            memberRecord(groupA, podcastSyncId, ok = "a0"),
+                            episodeRecord(),
+                            upNextRecord("g:one", orderKey = "a0"),
+                            podcastRecord(),
+                        ),
+                    )
+                library.result =
+                    ch.lkmc.neutrodyne.core.common.Outcome.Failure(
+                        ch.lkmc.neutrodyne.core.domain.BackupError.Storage,
+                    )
+                val merger = mergerOf(db, client, library)
+
+                assertTrue(merger.merge(FirstLinkChoice.MERGE) is FirstLinkResult.Failed)
+
+                val staged = readStagedLibrary(library.calls.single().stagingDir)
+                assertEquals(
+                    listOf("example.com/feed"),
+                    staged.groups
+                        .single()
+                        .members
+                        .map { it.podcastKey },
+                )
+                val episode = readStagedEpisodeLine(library.calls.single().stagingDir)
+                assertEquals("example.com/feed", episode?.p)
+                val queue = readStagedQueue(library.calls.single().stagingDir)
+                assertEquals("example.com/feed", queue.upNext.single().p)
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
      * 10 Merge step 2: `ts` excludes the `pos` FIELD, not every clock sharing its millis. A
      * record whose played/fav/pos clocks coincide still carries its played/fav state, so a
      * server-only episode imports its mark instead of silently dropping it.
@@ -1418,6 +1539,50 @@ class FirstLinkMergerTest {
         )
 
     private fun clock(atMs: Long): String = Hlc.of(atMs, 1, remote).toString()
+
+    /** A session record in the wire shape: an `episode` ref and a `context` object. */
+    private fun sessionRecord(groupUuid: String): RecordDto =
+        RecordDto(
+            coll = "session",
+            id = JsonPrimitive("current"),
+            seq = 4,
+            by = "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            fields =
+                mapOf(
+                    "episode" to
+                        FieldValue(
+                            buildJsonObject {
+                                put("p", podcastSyncId)
+                                put("k", "g:one")
+                            },
+                            clock(october),
+                        ),
+                    "context" to
+                        FieldValue(
+                            buildJsonObject {
+                                put("type", "GROUP")
+                                put("group", groupUuid)
+                                put("order", "OLDEST_FIRST")
+                                put(
+                                    "filters",
+                                    buildJsonObject {
+                                        put("flags", 3)
+                                        put("media", "AUDIO")
+                                    },
+                                )
+                                put("minSortDate", 5)
+                                put(
+                                    "anchor",
+                                    buildJsonObject {
+                                        put("p", podcastSyncId)
+                                        put("k", "g:one")
+                                    },
+                                )
+                            },
+                            clock(october),
+                        ),
+                ),
+        )
 
     /**
      * The shared podcast's `g:srv1`/`g:srv2`/`g:local`/`g:alias` episodes and a local-only
