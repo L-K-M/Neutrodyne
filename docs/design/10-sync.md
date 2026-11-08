@@ -1200,7 +1200,7 @@ timestamp-LWW comparison (a local June `playedAt` loses to a server
 October "unplayed"); the staging-file resume of step 1 is not implemented
 yet and a crash mid-merge restarts the pull.
 
-**Implementation note (2026-11-05, MS2, first link through 05's port).**
+**Implementation note (2026-11-08, MS2, first link through 05's port).**
 The shortcut above is gone: Merge and "Use the server's library" run
 `LibraryMerger.mergeStaged` (`LINK_MERGE` / `LINK_REPLACE`) over a staging
 directory the pull mapped under the archive's entry names, and the
@@ -1228,8 +1228,8 @@ completed link deletes it. Deviations the current code forces:
   with local sets under 01's per-key lock; the separate
   at-each-start drain for normal rounds is still unwired —
   `SyncEngine` does not run `drainSettings` yet, so a marker left
-  behind waits for the next link merge, resync or the later start
-  drain rather than applying on the next ordinary round.
+  behind waits for the next link merge or the later start drain.
+  Ordinary rounds and the manual resync do not drain those markers yet.
 - The local seed now covers groups, members and Up next too, so an empty
   account's upload includes them (the 2026-11-04 shortcut uploaded only
   podcasts and episodes).

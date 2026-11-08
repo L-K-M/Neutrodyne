@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
@@ -77,6 +78,7 @@ class LibraryMergerImplTest {
     private val channels = FakeGroupChannelSync()
     private val settingsRepository = FakeSettingsRepository()
     private val settingsSync = FakeSettingsSyncPort()
+    private val downloads = FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
     private val root: NioPath = createTempDirectory("nd-library-merger")
     private val fileSystem = FileSystem.SYSTEM
 
@@ -86,14 +88,22 @@ class LibraryMergerImplTest {
             podcasts = PodcastMatcher(db),
             writes = RestoreWrites(db),
             groupMerger = GroupMerger(db, clock, channels),
-            unsubscribe = newUnsubscribe(db, FakeRefreshScheduler(), clock, secrets, coordinator),
+            unsubscribe =
+                newUnsubscribe(
+                    db,
+                    FakeRefreshScheduler(),
+                    clock,
+                    secrets,
+                    coordinator,
+                    downloads = downloads,
+                ),
             secrets = secrets,
             coordinator = coordinator,
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
             downloads =
-                Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+                Provider { downloads },
         )
 
     private val impl =
@@ -248,6 +258,15 @@ class LibraryMergerImplTest {
                 db.podcastDao().insertPodcast(
                     podcastEntity(feedKey = "https://s/feed", syncId = syncId, subscribedAt = june),
                 )
+            val removedEpisode = db.episodeDao().insertStub(episodeEntity(podcastId = local, identityKey = "g:removed"))
+            db.downloadDao().insert(downloadEntity(episodeId = removedEpisode))
+            val retainedPodcast = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://kept/feed"))
+            val retainedEpisode =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = retainedPodcast, identityKey = "g:kept"),
+                )
+            val retainedDownload = downloadEntity(episodeId = retainedEpisode)
+            db.downloadDao().insert(retainedDownload)
             val dir =
                 writeStagingDir(
                     podcasts = listOf(podcastV1("https://s/feed", syncId).copy(removedAt = playedAt)),
@@ -259,6 +278,21 @@ class LibraryMergerImplTest {
 
             assertIs<Outcome.Success<MergeSummary>>(outcome)
             assertNull(db.podcastDao().byId(local), "a newer server tombstone removes the local row")
+            assertEquals(
+                0,
+                downloads.replacements,
+                "a tombstone must not clear the whole download library or pause unrelated playback",
+            )
+            assertEquals(
+                listOf(listOf(removedEpisode)),
+                downloads.removals,
+                "unsubscribe cleans only the removed podcast",
+            )
+            assertEquals(
+                retainedDownload,
+                db.downloadDao().byEpisode(retainedEpisode),
+                "unrelated downloads survive a link merge",
+            )
         }
 
     /**
@@ -437,6 +471,13 @@ class LibraryMergerImplTest {
                         updatedAt = june,
                     ),
                 )
+            val retainedPodcast = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://kept/feed"))
+            val retainedEpisode =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = retainedPodcast, identityKey = "g:kept"),
+                )
+            val retainedDownload = downloadEntity(episodeId = retainedEpisode)
+            db.downloadDao().insert(retainedDownload)
             val dir =
                 writeStagingDir(
                     podcasts = emptyList(),
@@ -458,6 +499,17 @@ class LibraryMergerImplTest {
 
             assertIs<Outcome.Success<MergeSummary>>(outcome)
             assertNull(db.groupDao().groupById(local), "a newer server tombstone deletes the local group")
+            assertEquals(
+                0,
+                downloads.replacements,
+                "deleting a group must not clear downloads or pause unrelated playback",
+            )
+            assertTrue(downloads.removals.isEmpty(), "deleting a group removes no episode files")
+            assertEquals(
+                retainedDownload,
+                db.downloadDao().byEpisode(retainedEpisode),
+                "a group's tombstone retains downloaded episodes",
+            )
         }
 
     @Test

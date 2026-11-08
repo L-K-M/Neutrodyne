@@ -1724,7 +1724,8 @@ rejected before any write — the session goes `CANCELLED`, progress reports
 `BackupError.Unsupported` — because linked execution (unlink first, `withApplying`
 capture, the ALL_DEVICES steps) lands with MS2. The linked branches below describe MS2.
 
-**Implementation note (2026-11-05, MS2).** The limit is lifted: the `LINK_*`
+**Implementation note (2026-11-08, MS2 first-link flow).** This flow replaces
+the shared precursor's fail-closed coordinator binding. The limit is lifted: the `LINK_*`
 policies are implemented in `RestoreMerger`/`RestoreEpisodeMerger`
 (`LibraryMergerImpl` binds 05's `LibraryMerger` port over a staging
 directory), and a linked restore runs as this section specifies — a Merge
