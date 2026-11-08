@@ -9,15 +9,18 @@ fake index and snapshot documents.  The production HTTPS adapter is exercised
 through an injected opener, never a live endpoint.
 """
 
+import email.message
 import hashlib
 import io
 import json
 from pathlib import Path
 import sys
 import tempfile
+import traceback
 import unittest
 import urllib.error
 import urllib.parse
+import urllib.request
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = ROOT / "scripts" / "engine"
@@ -34,6 +37,7 @@ DOWNLOAD_BASE = "https://github.com/L-K-M/Neutrodyne/releases/download"
 DOWNLOAD_PATH = "/L-K-M/Neutrodyne/releases/download"
 INDEX_TAG = "engine-approvals"
 SHA = "a" * 40
+CANARY = "canary-token-0123456789"
 
 
 def make_files(
@@ -92,6 +96,12 @@ class FakeGitHub:
         self.index_document = None
         self.index_status = 200
         self.index_id = None
+        self.tag_refs = {}
+        self.tag_objects = {}
+        self.ref_overrides = {}
+        self.tag_object_overrides = {}
+        self.document_failures = {}
+        self.create_target_overrides = {}
         self._next_release_id = 100
         self._next_asset_id = 500
         if index_snapshot_tag is not None:
@@ -125,6 +135,7 @@ class FakeGitHub:
         }
         self.assets[release_id] = []
         self.index_id = release_id
+        self.tag_refs.setdefault(INDEX_TAG, {"type": "commit", "sha": "0" * 40})
         for name, content in assets:
             self.add_asset(release_id, name, content)
         return release_id
@@ -155,7 +166,18 @@ class FakeGitHub:
             "immutable": self.immutable if immutable is None else immutable,
         }
         self.assets[release_id] = []
+        self.tag_refs.setdefault(tag, {"type": "commit", "sha": target_commitish})
         return release_id
+
+    def set_tag_ref(self, tag, object_type, sha):
+        self.tag_refs[tag] = {"type": object_type, "sha": sha}
+
+    def add_tag_object(self, sha, tag_name, object_type, object_sha):
+        self.tag_objects[sha] = {
+            "tag": tag_name,
+            "type": object_type,
+            "sha": object_sha,
+        }
 
     def add_asset(self, release_id, name, content):
         asset_id = self._next_asset_id
@@ -264,6 +286,41 @@ class FakeGitHub:
         if method in ("DELETE", "PUT", "PATCH") and path.startswith(RELEASES_PATH + "/assets/"):
             self.violations.append(("asset-mutation", method, path))
             return 405, {}, b""
+        if method == "GET" and path.startswith(REPO_PATH + "/git/ref/tags/"):
+            tag = urllib.parse.unquote(path[len(REPO_PATH + "/git/ref/tags/"):])
+            if tag in self.ref_overrides:
+                return self.ref_overrides[tag]
+            ref = self.tag_refs.get(tag)
+            if ref is None:
+                return 404, {}, b""
+            return self._json(
+                200,
+                {
+                    "ref": f"refs/tags/{tag}",
+                    "node_id": f"refs/tags/{tag}",
+                    "url": f"{REPO_API}/git/ref/tags/{tag}",
+                    "object": {
+                        "type": ref["type"],
+                        "sha": ref["sha"],
+                        "url": f"{REPO_API}/git/{ref['type']}s/{ref['sha']}",
+                    },
+                },
+            )
+        if method == "GET" and path.startswith(REPO_PATH + "/git/tags/"):
+            sha = path[len(REPO_PATH + "/git/tags/"):]
+            if sha in self.tag_object_overrides:
+                return self.tag_object_overrides[sha]
+            obj = self.tag_objects.get(sha)
+            if obj is None:
+                return 404, {}, b""
+            return self._json(
+                200,
+                {
+                    "sha": sha,
+                    "tag": obj["tag"],
+                    "object": {"type": obj["type"], "sha": obj["sha"]},
+                },
+            )
         if method == "GET" and path.startswith(RELEASES_PATH + "/assets/"):
             asset_id = int(path[len(RELEASES_PATH + "/assets/"):])
             return self._get_asset(asset_id, headers)
@@ -326,6 +383,11 @@ class FakeGitHub:
         )
 
     def _download(self, path):
+        failure = self.document_failures.get(path)
+        if failure is not None:
+            if isinstance(failure, Exception):
+                raise failure
+            return failure, {}, b""
         if path in self.documents:
             content = self.documents[path]
             if content is None:
@@ -340,11 +402,14 @@ class FakeGitHub:
             return 422, {}, b""
         release_id = self._next_release_id
         self._next_release_id += 1
+        target_commitish = self.create_target_overrides.get(
+            payload["tag_name"], payload["target_commitish"]
+        )
         release = {
             "id": release_id,
             "url": f"{REPO_API}/releases/{release_id}",
             "tag_name": payload["tag_name"],
-            "target_commitish": payload["target_commitish"],
+            "target_commitish": target_commitish,
             "name": payload.get("name", ""),
             "body": payload.get("body", ""),
             "draft": payload.get("draft", False),
@@ -354,6 +419,11 @@ class FakeGitHub:
         }
         self.releases[release_id] = release
         self.assets[release_id] = []
+        # GitHub ignores target_commitish when the tag already exists.
+        self.tag_refs.setdefault(
+            release["tag_name"],
+            {"type": "commit", "sha": payload["target_commitish"]},
+        )
         if release["tag_name"] == INDEX_TAG:
             self.index_id = release_id
         return self._json(201, release)
@@ -589,21 +659,21 @@ class IndexReaderTests(unittest.TestCase):
         with self.assertRaises(ar.ResponseTooLargeError):
             ar.resolve_index(self.fake)
 
-    def test_document_size_caps_are_enforced(self):
-        self.fake.install_index("engine-approvals-4242-3")
-        index = ar.resolve_index(self.fake)
+    def test_required_document_size_caps_are_enforced(self):
         base = f"{DOWNLOAD_PATH}/engine-approvals-4242-3"
         cases = (
             (f"{base}/ytdlp-approved.json", ar.MAX_MANIFEST_BYTES + 1),
             (f"{base}/ytdlp-approved.json.sig", ar.MAX_SIGNATURE_BYTES + 1),
-            (f"{base}/ytdlp-heartbeat.json", ar.MAX_HEARTBEAT_BYTES + 1),
-            (f"{base}/ytdlp-heartbeat.json.sig", ar.MAX_SIGNATURE_BYTES + 1),
         )
         for url, size in cases:
             with self.subTest(url=url):
-                self.fake.documents[url] = b"x" * size
+                fake = FakeGitHub()
+                fake.install_index("engine-approvals-4242-3")
+                fake.serve_snapshot("engine-approvals-4242-3", self.files)
+                index = ar.resolve_index(fake)
+                fake.documents[url] = b"x" * size
                 with self.assertRaises(ar.ResponseTooLargeError):
-                    ar.read_snapshot_documents(self.fake, index)
+                    ar.read_snapshot_documents(fake, index)
 
 
 class FakeGitHubGuardTests(unittest.TestCase):
@@ -1284,16 +1354,6 @@ class HttpsTransportTests(unittest.TestCase):
                         request, None, 302, "Found", {"Location": target}, target
                     )
 
-    def test_redirect_handler_rejects_too_many_redirects(self):
-        handler = ar._AllowedRedirectHandler(ar.ALLOWED_HOSTS)
-        handler._redirects = ar.MAX_REDIRECTS
-        request = urllib.request.Request("https://github.com/x")
-        with self.assertRaises(ar.TransportError):
-            handler.redirect_request(
-                request, None, 302, "Found", {"Location": "https://github.com/y"},
-                "https://github.com/y",
-            )
-
     def test_response_headers_are_normalized_lowercase(self):
         opener = self.FakeOpener(
             response=self.FakeResponse(
@@ -1306,6 +1366,568 @@ class HttpsTransportTests(unittest.TestCase):
         )
         self.assertEqual("abc", response.header("etag"))
         self.assertTrue(opener.response.closed)
+
+
+class _FakeHTTPHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
+    """A real urllib HTTP(S) handler backed by a fake transport (no sockets)."""
+
+    def __init__(self, responder):
+        super().__init__()
+        self._responder = responder
+
+    def do_open(self, http_class, req):
+        return self._responder(req)
+
+    def http_open(self, req):
+        return self.do_open(None, req)
+
+    def https_open(self, req):
+        return self.do_open(None, req)
+
+
+class _FakeHTTPResponse:
+    def __init__(self, status, headers=None, body=b""):
+        self.status = status
+        self.code = status
+        self.msg = "reason"
+        self.headers = headers or {}
+        self._body = io.BytesIO(body)
+        self.url = ""
+
+    def read(self, size=-1):
+        return self._body.read(size)
+
+    def info(self):
+        return self.headers
+
+    def close(self):
+        pass
+
+
+def _redirect_responder(hops, redirects):
+    """Record each hop and answer from a fixed redirect map."""
+
+    def respond(req):
+        hops.append(
+            {
+                "url": req.full_url,
+                "authorization": req.get_header("Authorization"),
+                "cookie": req.get_header("Cookie"),
+            }
+        )
+        target = redirects.get(req.full_url)
+        if target is not None:
+            headers = email.message.Message()
+            headers["Location"] = target
+            return _FakeHTTPResponse(302, headers, b"")
+        return _FakeHTTPResponse(200, {}, b"body")
+
+    return respond
+
+
+def _real_opener(responder):
+    handler = ar._AllowedRedirectHandler(ar.ALLOWED_HOSTS)
+    opener = urllib.request.build_opener(handler, _FakeHTTPHandler(responder))
+    return handler, opener
+
+
+class RedirectChainTests(unittest.TestCase):
+    """F1: the redirect budget is per chain, on one reusable transport."""
+
+    def test_four_independent_redirect_chains_pass_on_one_transport(self):
+        redirects = {
+            f"https://api.github.com/releases/assets/{asset_id}": (
+                "https://github.com/L-K-M/Neutrodyne/releases/download/"
+                "engine-approvals-4242-3/ytdlp-approved.json"
+            )
+            for asset_id in range(1, 5)
+        }
+        hops = []
+        _, opener = _real_opener(_redirect_responder(hops, redirects))
+        transport = ar.HttpsGitHubTransport(opener=opener.open)
+        for asset_id in range(1, 5):
+            response = transport.request(
+                "GET",
+                f"https://api.github.com/releases/assets/{asset_id}",
+                headers={"Accept": "application/octet-stream"},
+                max_response_bytes=1024,
+            )
+            self.assertEqual(200, response.status)
+            self.assertEqual(b"body", response.body)
+        self.assertEqual(8, len(hops))
+        self.assertEqual(
+            [f"https://api.github.com/releases/assets/{i}" for i in range(1, 5)],
+            [hop["url"] for hop in hops[::2]],
+        )
+
+    def test_redirect_limit_is_bounded_and_transport_stays_usable(self):
+        redirects = {
+            "https://api.github.com/a": "https://api.github.com/b",
+            "https://api.github.com/b": "https://api.github.com/c",
+            "https://api.github.com/c": "https://api.github.com/d",
+            "https://api.github.com/d": "https://api.github.com/e",
+        }
+        hops = []
+        _, opener = _real_opener(_redirect_responder(hops, redirects))
+        with self.assertRaises(ar.TransportError) as context:
+            opener.open(
+                urllib.request.Request("https://api.github.com/a"), timeout=5
+            )
+        self.assertIn("too many redirects", str(context.exception))
+        self.assertEqual(4, len(hops))
+        # The same opener still serves a fresh chain after the rejected one.
+        response = opener.open(
+            urllib.request.Request("https://api.github.com/ok"), timeout=5
+        )
+        self.assertEqual(200, response.status)
+
+
+class RedirectAuthorizationTests(unittest.TestCase):
+    """F4: credentials stay on the API origin; redirects never carry them."""
+
+    def _make_opener(self, redirects):
+        hops = []
+        _, opener = _real_opener(_redirect_responder(hops, redirects))
+        return opener, hops
+
+    def _open(self, opener, url, headers=None):
+        return opener.open(
+            urllib.request.Request(url, headers=headers or {}), timeout=5
+        )
+
+    def test_direct_200_keeps_authorization_and_cookie(self):
+        opener, hops = self._make_opener({})
+        response = self._open(
+            opener,
+            "https://api.github.com/x",
+            {"Authorization": f"Bearer {CANARY}", "Cookie": "session=canary"},
+        )
+        self.assertEqual(200, response.status)
+        self.assertEqual(1, len(hops))
+        self.assertEqual(f"Bearer {CANARY}", hops[0]["authorization"])
+        self.assertEqual("session=canary", hops[0]["cookie"])
+
+    def test_same_origin_redirect_preserves_authorization(self):
+        opener, hops = self._make_opener(
+            {"https://api.github.com/a": "https://api.github.com/b"}
+        )
+        response = self._open(
+            opener,
+            "https://api.github.com/a",
+            {"Authorization": f"Bearer {CANARY}", "Cookie": "session=canary"},
+        )
+        self.assertEqual(200, response.status)
+        self.assertEqual(2, len(hops))
+        self.assertEqual(f"Bearer {CANARY}", hops[1]["authorization"])
+        self.assertEqual("session=canary", hops[1]["cookie"])
+
+    def test_cross_origin_redirect_strips_authorization_and_cookie(self):
+        opener, hops = self._make_opener(
+            {
+                "https://api.github.com/a": (
+                    "https://release-assets.githubusercontent.com/b"
+                )
+            }
+        )
+        response = self._open(
+            opener,
+            "https://api.github.com/a",
+            {"Authorization": f"Bearer {CANARY}", "Cookie": "session=canary"},
+        )
+        self.assertEqual(200, response.status)
+        self.assertEqual(2, len(hops))
+        self.assertIsNone(hops[1]["authorization"])
+        self.assertIsNone(hops[1]["cookie"])
+        self.assertNotIn(CANARY, repr(hops[1]))
+
+    def test_cross_origin_to_objects_host_strips_authorization(self):
+        opener, hops = self._make_opener(
+            {"https://github.com/a": "https://objects.githubusercontent.com/b"}
+        )
+        response = self._open(
+            opener,
+            "https://github.com/a",
+            {"Authorization": f"Bearer {CANARY}"},
+        )
+        self.assertEqual(200, response.status)
+        self.assertIsNone(hops[1]["authorization"])
+
+    def test_disallowed_redirect_host_fails_closed(self):
+        opener, _ = self._make_opener(
+            {"https://api.github.com/a": "https://evil.example/b"}
+        )
+        with self.assertRaises(ar.TransportError):
+            self._open(opener, "https://api.github.com/a")
+
+    def test_disallowed_redirect_scheme_and_port_fail_closed(self):
+        for target in ("http://github.com/b", "https://github.com:8443/b"):
+            with self.subTest(target=target):
+                opener, _ = self._make_opener(
+                    {"https://api.github.com/a": target}
+                )
+                with self.assertRaises(ar.TransportError):
+                    self._open(opener, "https://api.github.com/a")
+
+    def test_malformed_redirect_target_fails_closed(self):
+        opener, _ = self._make_opener(
+            {"https://api.github.com/a": "https://github.com:notaport/b"}
+        )
+        with self.assertRaises(ar.TransportError):
+            self._open(opener, "https://api.github.com/a")
+
+
+class SnapshotTagBindingTests(unittest.TestCase):
+    """F2: snapshot tags bind the exact workflow commit, index tag does not."""
+
+    def setUp(self):
+        self.files = make_files()
+        self.fake = FakeGitHub(index_snapshot_tag="engine-approvals-1-1")
+        self.publisher = ar.SnapshotPublisher(self.fake)
+
+    def index_patch(self):
+        return [
+            request
+            for request in self.fake.requests
+            if request["method"] == "PATCH"
+            and f"/releases/{self.fake.index_id}" in request["url"]
+        ]
+
+    def uploads(self):
+        return [
+            request
+            for request in self.fake.requests
+            if "uploads.github.com" in request["url"]
+        ]
+
+    def test_preexisting_wrong_tag_with_lying_target_field_fails_before_uploads(self):
+        self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        self.fake.set_tag_ref("engine-approvals-4242-3", "commit", "b" * 40)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.uploads())
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
+
+    def test_new_snapshot_tag_preexists_wrong_and_request_target_lies(self):
+        self.fake.set_tag_ref("engine-approvals-4242-3", "commit", "b" * 40)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.uploads())
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+        release = self.fake.find_by_tag("engine-approvals-4242-3")
+        self.assertIsNotNone(release)
+        self.assertTrue(release["draft"])
+
+    def test_reused_published_snapshot_wrong_tag_fails_before_index_advance(self):
+        release_id = self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=False, immutable=True
+        )
+        for name, content in self.files.by_name().items():
+            self.fake.add_asset(release_id, name, content)
+        self.fake.set_tag_ref("engine-approvals-4242-3", "commit", "b" * 40)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_annotated_tag_peels_to_the_exact_commit(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.set_tag_ref(tag, "tag", "c" * 40)
+        self.fake.add_tag_object("c" * 40, tag, "commit", SHA)
+        result = self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual(tag, result.snapshot_tag)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_annotated_tag_wrong_peel_target_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.set_tag_ref(tag, "tag", "c" * 40)
+        self.fake.add_tag_object("c" * 40, tag, "commit", "b" * 40)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_unknown_tag_object_type_fails_closed(self):
+        self.fake.set_tag_ref("engine-approvals-4242-3", "blob", SHA)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_malformed_tag_ref_sha_fails_closed(self):
+        self.fake.set_tag_ref("engine-approvals-4242-3", "commit", "not-a-sha")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_tag_object_peel_cycle_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.set_tag_ref(tag, "tag", "c" * 40)
+        self.fake.add_tag_object("c" * 40, tag, "tag", "d" * 40)
+        self.fake.add_tag_object("d" * 40, tag, "tag", "c" * 40)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_tag_peel_limit_is_bounded(self):
+        tag = "engine-approvals-4242-3"
+        shas = [f"{index}" * 40 for index in range(1, ar.MAX_TAG_PEElS + 2)]
+        self.fake.set_tag_ref(tag, "tag", shas[0])
+        for index, sha in enumerate(shas):
+            if index + 1 < len(shas):
+                self.fake.add_tag_object(sha, tag, "tag", shas[index + 1])
+            else:
+                self.fake.add_tag_object(sha, tag, "commit", SHA)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_oversize_tag_ref_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.ref_overrides[tag] = (
+            200, {}, b"x" * (ar.MAX_GIT_REF_JSON_BYTES + 1)
+        )
+        with self.assertRaises(ar.ResponseTooLargeError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_malformed_tag_ref_json_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.ref_overrides[tag] = (200, {}, b"garbage")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_missing_tag_ref_fails_closed_for_snapshot(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.ref_overrides[tag] = (404, {}, b"")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_oversize_tag_object_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.set_tag_ref(tag, "tag", "c" * 40)
+        self.fake.tag_object_overrides["c" * 40] = (
+            200, {}, b"x" * (ar.MAX_TAG_OBJECT_JSON_BYTES + 1)
+        )
+        with self.assertRaises(ar.ResponseTooLargeError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_malformed_tag_object_json_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.set_tag_ref(tag, "tag", "c" * 40)
+        self.fake.tag_object_overrides["c" * 40] = (200, {}, b"garbage")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_missing_tag_object_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.set_tag_ref(tag, "tag", "c" * 40)
+        self.fake.tag_object_overrides["c" * 40] = (404, {}, b"")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_tag_object_name_mismatch_fails_closed(self):
+        tag = "engine-approvals-4242-3"
+        self.fake.set_tag_ref(tag, "tag", "c" * 40)
+        self.fake.add_tag_object("c" * 40, "engine-approvals-9-9", "commit", SHA)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual([], self.index_patch())
+
+    def test_index_tag_is_not_required_to_match_each_new_commit(self):
+        # The stable index is legacy discovery: its tag/assets stay while the
+        # body pointer advances across workflow commits.
+        self.assertEqual(
+            {"type": "commit", "sha": "0" * 40}, self.fake.tag_refs[INDEX_TAG]
+        )
+        result = self.publisher.publish(self.files, 4242, 3, SHA)
+        self.assertEqual("engine-approvals-4242-3", result.snapshot_tag)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+        self.assertEqual(
+            {"type": "commit", "sha": "0" * 40}, self.fake.tag_refs[INDEX_TAG]
+        )
+        self.assertEqual(
+            "0" * 40, self.fake.releases[self.fake.index_id]["target_commitish"]
+        )
+        self.assertFalse(
+            any(
+                request["method"] in ("POST", "PATCH", "DELETE")
+                and f"/releases/{self.fake.index_id}" in request["url"]
+                and "/assets" in request["url"]
+                for request in self.fake.requests
+            )
+        )
+
+    def test_bootstrap_newly_created_index_tag_is_verified(self):
+        fake = FakeGitHub()
+        self.assertNotIn(INDEX_TAG, fake.tag_refs)
+        ar.SnapshotPublisher(fake).publish(self.files, 4242, 3, SHA)
+        self.assertEqual({"type": "commit", "sha": SHA}, fake.tag_refs[INDEX_TAG])
+        self.assertEqual(SHA, fake.releases[fake.index_id]["target_commitish"])
+
+    def test_bootstrap_reuses_existing_index_tag_without_requiring_new_commit(self):
+        fake = FakeGitHub()
+        fake.set_tag_ref(INDEX_TAG, "commit", "0" * 40)
+        result = ar.SnapshotPublisher(fake).publish(self.files, 4242, 3, SHA)
+        self.assertTrue(result.index_created)
+        self.assertEqual({"type": "commit", "sha": "0" * 40}, fake.tag_refs[INDEX_TAG])
+        self.assertEqual("engine-approvals-4242-3", fake.index_body_tag())
+
+    def test_bootstrap_existing_index_tag_response_target_may_be_legacy(self):
+        # GitHub can report the pre-existing tag's commit in the response even
+        # though the request named the new workflow commit.  That must not
+        # make the bootstrap impossible.
+        fake = FakeGitHub()
+        fake.set_tag_ref(INDEX_TAG, "commit", "0" * 40)
+        fake.create_target_overrides[INDEX_TAG] = "0" * 40
+        result = ar.SnapshotPublisher(fake).publish(self.files, 4242, 3, SHA)
+        self.assertTrue(result.index_created)
+        self.assertEqual({"type": "commit", "sha": "0" * 40}, fake.tag_refs[INDEX_TAG])
+        self.assertEqual("engine-approvals-4242-3", fake.index_body_tag())
+
+
+class TokenRedactionTests(unittest.TestCase):
+    """F3: a malformed token never reaches a request, log or traceback."""
+
+    def test_newline_token_is_rejected_before_any_request(self):
+        opener = HttpsTransportTests.FakeOpener()
+        with self.assertRaises(ar.ValidationError) as context:
+            ar.HttpsGitHubTransport(token=CANARY + "\nX-Evil: 1", opener=opener)
+        self.assertNotIn(CANARY, str(context.exception))
+        self.assertNotIn("X-Evil", str(context.exception))
+        self.assertNotIn(CANARY, repr(context.exception))
+        self.assertEqual([], opener.requests)
+
+    def test_carriage_return_token_is_rejected_before_any_request(self):
+        opener = HttpsTransportTests.FakeOpener()
+        with self.assertRaises(ar.ValidationError) as context:
+            ar.HttpsGitHubTransport(token=CANARY + "\rX-Evil: 1", opener=opener)
+        self.assertNotIn(CANARY, str(context.exception))
+        self.assertEqual([], opener.requests)
+
+    def test_non_latin1_token_is_rejected_before_any_request(self):
+        opener = HttpsTransportTests.FakeOpener()
+        with self.assertRaises(ar.ValidationError) as context:
+            ar.HttpsGitHubTransport(token=CANARY + "\u2603", opener=opener)
+        self.assertNotIn(CANARY, str(context.exception))
+        self.assertNotIn("\u2603", str(context.exception))
+        self.assertEqual([], opener.requests)
+
+    def test_header_value_error_is_sanitized(self):
+        opener = HttpsTransportTests.FakeOpener(
+            error=ValueError(f"Invalid header value b'Bearer {CANARY}'")
+        )
+        transport = ar.HttpsGitHubTransport(token=CANARY, opener=opener)
+        with self.assertRaises(ar.TransportError) as context:
+            transport.request(
+                "GET", "https://api.github.com/x", max_response_bytes=100
+            )
+        self.assertNotIn(CANARY, str(context.exception))
+        self.assertNotIn(CANARY, repr(context.exception))
+        self.assertIsNone(context.exception.__cause__)
+        self.assertTrue(context.exception.__suppress_context__)
+        formatted = "".join(
+            traceback.format_exception(
+                type(context.exception),
+                context.exception,
+                context.exception.__traceback__,
+            )
+        )
+        self.assertNotIn(CANARY, formatted)
+
+
+class HeartbeatToleranceTests(unittest.TestCase):
+    """F5: the reader treats heartbeat as diagnostic; the publisher does not."""
+
+    def setUp(self):
+        self.files = make_files()
+        self.fake = FakeGitHub()
+        self.fake.install_index("engine-approvals-4242-3")
+        self.fake.serve_snapshot("engine-approvals-4242-3", self.files)
+        self.index = ar.resolve_index(self.fake)
+        self.base = f"{DOWNLOAD_PATH}/engine-approvals-4242-3"
+
+    def test_heartbeat_http_500_is_tolerated(self):
+        self.fake.document_failures[f"{self.base}/ytdlp-heartbeat.json"] = 500
+        documents = ar.read_snapshot_documents(self.fake, self.index)
+        self.assertEqual(self.files.manifest, documents.manifest)
+        self.assertEqual(self.files.manifest_signature, documents.manifest_signature)
+        self.assertIsNone(documents.heartbeat)
+        self.assertIsNone(documents.heartbeat_signature)
+
+    def test_heartbeat_signature_500_yields_no_pair(self):
+        self.fake.document_failures[f"{self.base}/ytdlp-heartbeat.json.sig"] = 500
+        documents = ar.read_snapshot_documents(self.fake, self.index)
+        self.assertEqual(self.files.manifest, documents.manifest)
+        self.assertEqual(self.files.manifest_signature, documents.manifest_signature)
+        self.assertIsNone(documents.heartbeat)
+        self.assertIsNone(documents.heartbeat_signature)
+
+    def test_heartbeat_timeout_is_tolerated(self):
+        self.fake.document_failures[f"{self.base}/ytdlp-heartbeat.json"] = TimeoutError(
+            "timed out"
+        )
+        documents = ar.read_snapshot_documents(self.fake, self.index)
+        self.assertEqual(self.files.manifest, documents.manifest)
+        self.assertIsNone(documents.heartbeat)
+        self.assertIsNone(documents.heartbeat_signature)
+
+    def test_heartbeat_oversize_is_tolerated(self):
+        self.fake.documents[f"{self.base}/ytdlp-heartbeat.json"] = b"x" * (
+            ar.MAX_HEARTBEAT_BYTES + 1
+        )
+        documents = ar.read_snapshot_documents(self.fake, self.index)
+        self.assertEqual(self.files.manifest, documents.manifest)
+        self.assertEqual(self.files.manifest_signature, documents.manifest_signature)
+        self.assertIsNone(documents.heartbeat)
+        self.assertIsNone(documents.heartbeat_signature)
+
+    def test_heartbeat_transport_error_is_tolerated(self):
+        self.fake.document_failures[f"{self.base}/ytdlp-heartbeat.json"] = (
+            ar.TransportError("boom")
+        )
+        documents = ar.read_snapshot_documents(self.fake, self.index)
+        self.assertEqual(self.files.manifest, documents.manifest)
+        self.assertIsNone(documents.heartbeat)
+
+    def test_manifest_http_500_still_fails(self):
+        self.fake.document_failures[f"{self.base}/ytdlp-approved.json"] = 500
+        with self.assertRaises(ar.SnapshotReadError):
+            ar.read_snapshot_documents(self.fake, self.index)
+
+    def test_manifest_signature_http_500_still_fails(self):
+        self.fake.document_failures[f"{self.base}/ytdlp-approved.json.sig"] = 500
+        with self.assertRaises(ar.SnapshotReadError):
+            ar.read_snapshot_documents(self.fake, self.index)
+
+    def test_publisher_still_requires_all_four_assets(self):
+        release_id = self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=False, immutable=True
+        )
+        for name, content in self.files.by_name().items():
+            if name != "ytdlp-heartbeat.json":
+                self.fake.add_asset(release_id, name, content)
+        with self.assertRaises(ar.SnapshotStateError):
+            ar.SnapshotPublisher(self.fake).publish(self.files, 4242, 3, SHA)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_publisher_still_verifies_heartbeat_bytes(self):
+        release_id = self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=False, immutable=True
+        )
+        for name, content in self.files.by_name().items():
+            self.fake.add_asset(release_id, name, content)
+        self.fake.corrupt_assets.add("ytdlp-heartbeat.json")
+        with self.assertRaises(ar.SnapshotStateError):
+            ar.SnapshotPublisher(self.fake).publish(self.files, 4242, 3, SHA)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
 
 
 class CliTests(unittest.TestCase):
@@ -1391,6 +2013,88 @@ class CliTests(unittest.TestCase):
         self.assertIn("published", self.stdout.getvalue())
         self.assertIn("engine-approvals-4242-3", self.stdout.getvalue())
         self.assertEqual([], self.fake.violations)
+
+    def test_invalid_token_makes_no_requests_and_is_never_printed(self):
+        self.env["GITHUB_TOKEN"] = CANARY + "\nX-Evil: 1"
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+        )
+        self.assertEqual(1, code)
+        self.assertNotIn(CANARY, self.stdout.getvalue())
+        self.assertNotIn(CANARY, self.stderr.getvalue())
+        self.assertNotIn("X-Evil", self.stderr.getvalue())
+        self.assertEqual([], self.fake.requests)
+        self.assertIn("GITHUB_TOKEN", self.env.read)
+
+    def test_invalid_token_is_not_read_by_dry_run_or_resolve(self):
+        env = RecordingEnv()
+        env["GITHUB_TOKEN"] = CANARY + "\nX-Evil: 1"
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+            "--dry-run",
+            env=env,
+        )
+        self.assertEqual(0, code)
+        self.assertNotIn("GITHUB_TOKEN", env.read)
+        self.assertNotIn(CANARY, self.stdout.getvalue())
+        self.assertNotIn(CANARY, self.stderr.getvalue())
+        self.assertEqual([], self.fake.requests)
+
+    def test_main_sanitizes_unexpected_value_error(self):
+        canary = CANARY + "\u2603"
+
+        def factory(*, token):
+            raise ValueError(f"underlying failure: {canary}")
+
+        self.env["GITHUB_TOKEN"] = CANARY
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+            factory=factory,
+        )
+        self.assertEqual(1, code)
+        self.assertNotIn(canary, self.stderr.getvalue())
+        self.assertNotIn(CANARY, self.stderr.getvalue())
+
+    def test_success_output_never_contains_the_token(self):
+        self.env["GITHUB_TOKEN"] = CANARY
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+        )
+        self.assertEqual(0, code)
+        self.assertNotIn(CANARY, self.stdout.getvalue())
+        self.assertNotIn(CANARY, self.stderr.getvalue())
 
     def test_resolve_reads_no_secret(self):
         env = RecordingEnv()

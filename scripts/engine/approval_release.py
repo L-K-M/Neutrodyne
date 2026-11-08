@@ -81,8 +81,11 @@ MAX_ASSET_JSON_BYTES = 64 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_SIGNATURE_BYTES = 4 * 1024
 MAX_HEARTBEAT_BYTES = 4 * 1024
+MAX_GIT_REF_JSON_BYTES = 8 * 1024
+MAX_TAG_OBJECT_JSON_BYTES = 8 * 1024
 DEFAULT_TIMEOUT_SECONDS = 15.0
 MAX_REDIRECTS = 3
+MAX_TAG_PEElS = 4
 
 ASSET_NAMES = (
     "ytdlp-approved.json",
@@ -193,8 +196,42 @@ class TransportResponse:
             raise TransportError("response is not UTF-8 JSON") from invalid
 
 
+def _strip_credentials(request: urllib.request.Request) -> None:
+    """Remove Authorization and Cookie from a redirected request object."""
+    for store in (request.headers, request.unredirected_hdrs):
+        for name in list(store):
+            if name.lower() in ("authorization", "cookie"):
+                del store[name]
+
+
+def _is_cross_origin(original_url: str, redirect_url: str) -> bool:
+    """True when the redirect changes scheme, host or port."""
+    original = urllib.parse.urlsplit(original_url)
+    target = urllib.parse.urlsplit(redirect_url)
+    try:
+        original_port = original.port
+    except ValueError:
+        original_port = None
+    try:
+        target_port = target.port
+    except ValueError:
+        target_port = None
+    return (
+        original.scheme != target.scheme
+        or original.hostname != target.hostname
+        or original_port != target_port
+    )
+
+
 class _AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Follow GitHub asset redirects only, never an arbitrary host."""
+    """Follow GitHub asset redirects only, never an arbitrary host.
+
+    The redirect budget is per chain.  urllib marks the first request of a
+    chain without ``redirect_dict`` and every redirected request with the
+    chain's visited-URL map, so the counter resets on the first hop.  A
+    long-lived opener (one transport) therefore grants each independent
+    request its own MAX_REDIRECTS instead of sharing one cumulative budget.
+    """
 
     def __init__(self, allowed_hosts: frozenset[str]):
         super().__init__()
@@ -202,6 +239,8 @@ class _AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
         self._redirects = 0
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not hasattr(req, "redirect_dict"):
+            self._redirects = 0
         if self._redirects >= MAX_REDIRECTS:
             raise TransportError("too many redirects")
         target = urllib.parse.urlsplit(newurl)
@@ -216,7 +255,10 @@ class _AllowedRedirectHandler(urllib.request.HTTPRedirectHandler):
         ):
             raise TransportError("redirect target is not an allowed GitHub host")
         self._redirects += 1
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and _is_cross_origin(req.full_url, newurl):
+            _strip_credentials(new)
+        return new
 
 
 def _read_bounded(stream, max_bytes: int) -> bytes:
@@ -232,6 +274,24 @@ def _read_bounded(stream, max_bytes: int) -> bytes:
         if total > max_bytes:
             raise ResponseTooLargeError(f"response exceeds {max_bytes} bytes")
     return b"".join(chunks)
+
+
+def validate_token(token: str) -> None:
+    """Reject a token that cannot be sent as a single Latin-1 header value.
+
+    The error never includes the token.  Control characters make the header
+    library raise ``ValueError`` (whose message embeds the value) and
+    non-Latin-1 characters raise ``UnicodeEncodeError``; rejecting both here
+    keeps the secret out of tracebacks before a request is built.
+    """
+    if not isinstance(token, str):
+        raise ValidationError("GITHUB_TOKEN must be a string")
+    for character in token:
+        code = ord(character)
+        if code < 0x20 or code == 0x7F or code > 0xFF:
+            raise ValidationError(
+                "GITHUB_TOKEN contains control or non-Latin-1 characters"
+            )
 
 
 class HttpsGitHubTransport:
@@ -253,6 +313,8 @@ class HttpsGitHubTransport:
     ):
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if token is not None:
+            validate_token(token)
         self._token = token
         self._timeout = timeout_seconds
         self._user_agent = user_agent
@@ -300,7 +362,14 @@ class HttpsGitHubTransport:
             merged["Authorization"] = f"Bearer {self._token}"
         if headers:
             merged.update(headers)
-        request = urllib.request.Request(url, data=body, headers=merged, method=method)
+        try:
+            request = urllib.request.Request(
+                url, data=body, headers=merged, method=method
+            )
+        except (ValueError, UnicodeError):
+            raise TransportError(
+                f"{method} {url} failed: request headers are not encodable"
+            ) from None
         timeout = self._timeout if timeout_seconds is None else timeout_seconds
         if timeout <= 0:
             raise TransportError("timeout must be positive")
@@ -311,8 +380,18 @@ class HttpsGitHubTransport:
         except urllib.error.URLError as error:
             reason = getattr(error, "reason", error)
             raise TransportError(f"{method} {url} failed: {reason}") from error
+        except TransportError:
+            raise
         except OSError as error:
             raise TransportError(f"{method} {url} failed: {error}") from error
+        except ValueError:
+            raise TransportError(
+                f"{method} {url} failed: request headers are not encodable"
+            ) from None
+        except Exception:
+            raise TransportError(
+                f"{method} {url} failed: unexpected transport error"
+            ) from None
         try:
             status = getattr(response, "status", None) or getattr(response, "code", 0)
             response_headers = {
@@ -560,6 +639,39 @@ def _get_document(
     return response.body
 
 
+def _read_optional_pair(
+    transport: GitHubTransport,
+    base: str,
+    timeout_seconds: float | None,
+) -> tuple[bytes | None, bytes | None]:
+    """Read the diagnostic heartbeat pair; any failure yields ``(None, None)``.
+
+    The pinned client catches every heartbeat failure and never blocks a valid
+    manifest pair, so a missing, 5xx, timed-out or oversized heartbeat is
+    reported as absence rather than an error.  The manifest pair stays strict.
+    """
+    try:
+        heartbeat = _get_document(
+            transport,
+            f"{base}/ytdlp-heartbeat.json",
+            MAX_HEARTBEAT_BYTES,
+            "heartbeat",
+            timeout_seconds,
+            required=True,
+        )
+        heartbeat_signature = _get_document(
+            transport,
+            f"{base}/ytdlp-heartbeat.json.sig",
+            MAX_SIGNATURE_BYTES,
+            "heartbeat signature",
+            timeout_seconds,
+            required=True,
+        )
+    except Exception:
+        return None, None
+    return heartbeat, heartbeat_signature
+
+
 def read_snapshot_documents(
     transport: GitHubTransport,
     index: IndexRelease,
@@ -569,8 +681,8 @@ def read_snapshot_documents(
     """Read all four documents from the one snapshot the index named.
 
     The manifest pair is required.  The heartbeat pair is diagnostic liveness
-    and a 404 is tolerated, matching the pinned client; every URL still comes
-    from the same fixed snapshot base, never from the index body.
+    and any failure is tolerated as absence, matching the pinned client; every
+    URL still comes from the same fixed snapshot base, never the index body.
     """
     base = index.snapshot_base_url
     manifest = _get_document(
@@ -589,21 +701,8 @@ def read_snapshot_documents(
         timeout_seconds,
         required=True,
     )
-    heartbeat = _get_document(
-        transport,
-        f"{base}/ytdlp-heartbeat.json",
-        MAX_HEARTBEAT_BYTES,
-        "heartbeat",
-        timeout_seconds,
-        required=False,
-    )
-    heartbeat_signature = _get_document(
-        transport,
-        f"{base}/ytdlp-heartbeat.json.sig",
-        MAX_SIGNATURE_BYTES,
-        "heartbeat signature",
-        timeout_seconds,
-        required=False,
+    heartbeat, heartbeat_signature = _read_optional_pair(
+        transport, base, timeout_seconds
     )
     assert manifest is not None and manifest_signature is not None
     return SnapshotDocuments(
@@ -924,6 +1023,90 @@ class SnapshotPublisher:
             )
         return release
 
+    def _verify_snapshot_tag_commit(self, tag: str, commit_sha: str) -> None:
+        actual = self._resolve_tag_commit(tag)
+        if actual != commit_sha:
+            raise SnapshotStateError(
+                f"tag {tag} points at {actual}, expected {commit_sha}"
+            )
+
+    def _resolve_tag_commit(self, tag: str, *, missing_ok: bool = False) -> str | None:
+        """Resolve an actual Git tag ref to its commit SHA.
+
+        GitHub ignores ``target_commitish`` when a tag already exists, so a
+        release response cannot prove provenance.  The official ref endpoint
+        is authoritative; annotated tag objects are peeled to the commit.
+        Unknown object types, malformed SHAs, missing refs, oversize
+        responses and peel cycles fail closed.  ``missing_ok`` only maps a
+        ref 404 to None; it detects whether the legacy index tag pre-existed
+        before a bootstrap creation.
+        """
+        response = self._request(
+            "GET",
+            f"{REPO_API_PREFIX}/git/ref/tags/{urllib.parse.quote(tag, safe='')}",
+            max_response_bytes=MAX_GIT_REF_JSON_BYTES,
+        )
+        if response.status == 404 and missing_ok:
+            return None
+        if response.status != 200:
+            raise SnapshotStateError(
+                f"tag ref lookup failed with HTTP {response.status}"
+            )
+        try:
+            document = json.loads(response.body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as invalid:
+            raise SnapshotStateError("tag ref response is not UTF-8 JSON") from invalid
+        if not isinstance(document, dict):
+            raise SnapshotStateError("tag ref response is not a JSON object")
+        ref = document.get("ref")
+        if ref != f"refs/tags/{tag}":
+            raise SnapshotStateError(f"tag ref {ref!r} does not match {tag!r}")
+        return self._peel_tag_object(document.get("object"), tag)
+
+    def _peel_tag_object(self, obj: object, tag: str) -> str:
+        visited: set[str] = set()
+        peels = 0
+        current = obj
+        while True:
+            if not isinstance(current, dict):
+                raise SnapshotStateError("tag object is not a JSON object")
+            obj_type = current.get("type")
+            obj_sha = current.get("sha")
+            if not isinstance(obj_sha, str) or not SHA_RE.fullmatch(obj_sha):
+                raise SnapshotStateError("tag object sha is not a valid commit SHA")
+            if obj_sha in visited:
+                raise SnapshotStateError("tag object peel cycle")
+            visited.add(obj_sha)
+            if obj_type == "commit":
+                return obj_sha
+            if obj_type != "tag":
+                raise SnapshotStateError(
+                    f"tag object type {obj_type!r} is not commit or tag"
+                )
+            if peels >= MAX_TAG_PEElS:
+                raise SnapshotStateError("tag object peel limit exceeded")
+            peels += 1
+            response = self._request(
+                "GET",
+                f"{REPO_API_PREFIX}/git/tags/{obj_sha}",
+                max_response_bytes=MAX_TAG_OBJECT_JSON_BYTES,
+            )
+            if response.status != 200:
+                raise SnapshotStateError(
+                    f"tag object lookup failed with HTTP {response.status}"
+                )
+            try:
+                document = json.loads(response.body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as invalid:
+                raise SnapshotStateError(
+                    "tag object response is not UTF-8 JSON"
+                ) from invalid
+            if not isinstance(document, dict):
+                raise SnapshotStateError("tag object response is not a JSON object")
+            if document.get("tag") != tag:
+                raise SnapshotStateError(f"tag object name does not match {tag!r}")
+            current = document.get("object")
+
     def _create_draft(self, tag: str, commit_sha: str) -> Release:
         payload = {
             "tag_name": tag,
@@ -954,6 +1137,7 @@ class SnapshotPublisher:
             or release.make_latest == "true"
         ):
             raise SnapshotStateError("created snapshot release does not match the request")
+        self._verify_snapshot_tag_commit(tag, commit_sha)
         return release
 
     def _publish(self, release_id: int) -> None:
@@ -1079,6 +1263,7 @@ class SnapshotPublisher:
             raise SnapshotStateError("existing draft is not a prerelease")
         if release.make_latest == "true":
             raise SnapshotStateError("existing draft would become the latest release")
+        self._verify_snapshot_tag_commit(release.tag_name, commit_sha)
         missing = self._verify_assets(release.id, files, require_all=False)
         for name in missing:
             self._upload_asset(release.id, name, files.by_name()[name])
@@ -1097,6 +1282,7 @@ class SnapshotPublisher:
             raise SnapshotStateError("snapshot targets a different commit")
         if release.make_latest == "true":
             raise SnapshotStateError("snapshot became the latest release")
+        self._verify_snapshot_tag_commit(release.tag_name, commit_sha)
         if release.immutability_signal() is not True:
             raise SnapshotNotImmutableError(
                 "the API did not report the newly published snapshot as immutable"
@@ -1191,6 +1377,10 @@ class SnapshotPublisher:
         return index.release_id, False
 
     def _create_index(self, snapshot_tag: str, commit_sha: str) -> tuple[int, bool]:
+        # The legacy index tag may already exist without a release.  Only a
+        # genuinely new tag is held to the requested commit; an existing
+        # legacy tag is reused and never retagged, deleted or mutated.
+        tag_existed = self._resolve_tag_commit(INDEX_TAG, missing_ok=True) is not None
         payload = {
             "tag_name": INDEX_TAG,
             "target_commitish": commit_sha,
@@ -1214,11 +1404,14 @@ class SnapshotPublisher:
         release = parse_release(response.json())
         if (
             release.tag_name != INDEX_TAG
-            or release.target_commitish != commit_sha
             or release.draft
             or not release.prerelease
             or release.make_latest == "true"
             or release.body is None
+            # A pre-existing legacy index tag is reused at its old commit; its
+            # response target_commitish is not required to match the new
+            # workflow commit.  A genuinely new tag is held to the request.
+            or (not tag_existed and release.target_commitish != commit_sha)
         ):
             raise IndexAdvanceError("created index release does not match the request")
         try:
@@ -1227,6 +1420,13 @@ class SnapshotPublisher:
             raise IndexAdvanceError("created index body is not a schema-1 record") from invalid
         if visible_tag != snapshot_tag:
             raise IndexAdvanceError("created index body names the wrong snapshot")
+        if not tag_existed:
+            try:
+                self._verify_snapshot_tag_commit(INDEX_TAG, commit_sha)
+            except SnapshotStateError as invalid:
+                raise IndexAdvanceError(
+                    "created index tag does not match the requested commit"
+                ) from invalid
         return release.id, True
 
 
@@ -1345,6 +1545,9 @@ def main(
         token = environment.get("GITHUB_TOKEN", "").strip()
         if not token:
             raise MissingTokenError("GITHUB_TOKEN is required for a real publish")
+        # Validate before constructing any transport so no factory can bypass
+        # the check and send an unencodable secret.
+        validate_token(token)
         publisher = SnapshotPublisher(
             factory(token=token), timeout_seconds=args.timeout
         )
@@ -1376,6 +1579,11 @@ def main(
         return 0
     except (ApprovalReleaseError, TransportError, IndexDiscoveryError, OSError) as error:
         print(f"approval_release: {error}", file=err)
+        return 1
+    except ValueError:
+        # A ValueError from the header library can embed the request value;
+        # never print it.  The transport already sanitizes its own failures.
+        print("approval_release: request could not be completed", file=err)
         return 1
 
 
