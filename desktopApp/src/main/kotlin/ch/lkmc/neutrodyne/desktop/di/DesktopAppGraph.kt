@@ -86,6 +86,12 @@ interface DesktopAppGraph {
     /** The link state machine; `null` while no link runs. */
     val linkFlow: ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl
 
+    /**
+     * 10 Scheduling on the desktop's window-refocus trigger: the window's focus listener calls
+     * it; the binding resolves the lane lazily so an early focus never blocks on the open.
+     */
+    val syncFocusPoke: ch.lkmc.neutrodyne.sync.impl.SyncFocusPoke
+
     val dirs: AppDirs
 
     val buildInfo: BuildInfo

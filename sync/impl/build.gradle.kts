@@ -22,13 +22,19 @@ kotlin {
         }
         findByName("androidMain")?.dependencies {
             implementation(libs.androidx.work.runtime)
+            implementation(libs.androidx.lifecycle.process)
         }
         findByName("androidHostTest")?.dependencies {
             implementation(libs.androidx.work.testing)
             implementation(libs.robolectric)
             implementation(libs.junit4)
+            implementation(libs.truth)
+            implementation(libs.kotlinx.coroutines.test)
             implementation(libs.androidx.test.ext.junit)
             implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.work.testing)
+            implementation(libs.androidx.room.runtime)
+            implementation(libs.androidx.lifecycle.process)
             implementation(project(":core:testing"))
         }
         commonMain.dependencies {
