@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.backup
 
 import androidx.room3.useReaderConnection
 import androidx.room3.useWriterConnection
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.TestOrderKeys
 import ch.lkmc.neutrodyne.core.data.execSql
@@ -99,16 +100,96 @@ class RestoreMergerTest {
     // --- Policies --------------------------------------------------------------------------------
 
     @Test
-    fun linkPoliciesFailWithoutWriting() =
+    fun linkPoliciesMergeWithoutCapture() =
         runTest {
+            link()
             val staged = stagedOf(podcasts = listOf(podcastV1("k-1")))
-            for (policy in listOf(MergePolicy.LINK_MERGE, MergePolicy.LINK_REPLACE)) {
-                assertFailsWith<IllegalArgumentException> {
-                    merger.mergeLibrary(staged, policy, ALL_CATEGORIES)
-                }
-            }
-            assertTrue(db.podcastDao().allForExport().isEmpty())
-            assertTrue(db.groupDao().groupsInOrder().isEmpty())
+            // The second policy run replays over the first's rows: idempotent, matching
+            // instead of inserting, still capturing nothing.
+            assertEquals(1, merger.mergeLibrary(staged, MergePolicy.LINK_MERGE, ALL_CATEGORIES).summary.podcastsAdded)
+            assertEquals(
+                1,
+                merger.mergeLibrary(staged, MergePolicy.LINK_REPLACE, ALL_CATEGORIES).summary.podcastsMatched,
+            )
+            assertEquals(1, db.podcastDao().allForExport().size)
+            // The link policies capture nothing — not even implicitly: capture is enabled,
+            // so only the `withApplying` wrap keeps the insert trigger silent.
+            assertTrue(db.syncOutboxDao().rows().isEmpty(), "rows=${db.syncOutboxDao().rows()}")
+        }
+
+    /** A linked fixture: capture enabled, a node id, a non-zero clock. */
+    private suspend fun link() {
+        db.withWriteTransaction {
+            db
+                .syncStateDao()
+                .upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001", hlc = 1L shl 16))
+        }
+    }
+
+    // --- LINK_* (MS2 First-link column) -------------------------------------------------------------
+
+    /** First-link ID adoption: matched podcasts take the record's `syncId`. */
+    @Test
+    fun linkMergeAdoptsTheRecordSyncIdOnAMatchedPodcast() =
+        runTest {
+            val local =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://a/feed"))
+            val recordSyncId = "00000000-0000-4000-8000-0000000000cc"
+            val staged =
+                stagedOf(
+                    podcasts =
+                        listOf(
+                            podcastV1("https://a/feed").copy(syncId = recordSyncId),
+                        ),
+                )
+
+            val summary = merger.mergeLibrary(staged, MergePolicy.LINK_MERGE, ALL_CATEGORIES).summary
+
+            assertEquals(1, summary.podcastsMatched)
+            assertEquals(recordSyncId, db.podcastDao().byId(local)!!.syncId)
+        }
+
+    /**
+     * First-link ID adoption: a group matched by `nameKey` takes the record's `uuid`; a new
+     * group and a new member keep the record's order keys (05 First-link column).
+     */
+    @Test
+    fun linkMergeAdoptsGroupUuidAndKeepsRecordOrderKeys() =
+        runTest {
+            val localUuid = Uuid.random().toString()
+            val localGroup =
+                db.groupDao().insert(groupEntity(name = "News", uuid = localUuid, orderKey = "0.5"))
+            db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://a/feed"))
+            val recordUuid = "00000000-0000-4000-8000-0000000000dd"
+            val staged =
+                stagedOf(
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    groups =
+                        listOf(
+                            // A different key: the local matched group keeps its local key.
+                            groupV1(uuid = recordUuid, name = "News", orderKey = "0.7"),
+                            groupV1(
+                                uuid = "00000000-0000-4000-8000-0000000000ee",
+                                name = "New group",
+                                orderKey = "0.8",
+                                members = listOf("https://a/feed"),
+                                memberKeys = mapOf("https://a/feed" to "0.85"),
+                            ),
+                        ),
+                )
+
+            merger.mergeLibrary(staged, MergePolicy.LINK_MERGE, ALL_CATEGORIES)
+
+            assertEquals(recordUuid, db.groupDao().groupById(localGroup)!!.uuid)
+            val added = db.groupDao().groupByNameKey("new group")!!
+            assertEquals("0.8", added.orderKey)
+            // A matched group keeps its local order key (05 First-link column: as Merge).
+            assertEquals("0.5", db.groupDao().groupById(localGroup)!!.orderKey)
+            val member =
+                assertNotNull(db.groupDao().member(added.id, db.podcastDao().byFeedKey("https://a/feed")!!.id))
+            assertEquals("0.85", member.orderKey)
+            // The uuid adoption reaches the channel carry-over.
+            assertEquals("onUuidChanged($localUuid, $recordUuid)", channels.calls.single())
         }
 
     @Test fun restoreDropsInvalidAutoKeepLatestInsteadOfActivatingIt() =

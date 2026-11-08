@@ -138,6 +138,31 @@ internal class RestoreWrites(
     }
 
     /**
+     * 05 First-link column (`LINK_MERGE`): the already-decided final state row — the caller
+     * resolved the timestamp-LWW winners, so this writes exactly those values. Like the
+     * other primitives the row keeps the winning input's time ([LinkStateValues.updatedAt],
+     * never now), and the shared post rules still clear `startedAt` on a played result.
+     */
+    suspend fun linkState(
+        episodeId: Long,
+        state: LinkStateValues,
+    ) {
+        stateDao.ensure(EpisodeStateEntity(episodeId = episodeId, updatedAt = state.updatedAt))
+        backupDao.replaceState(
+            episodeId = episodeId,
+            startedAt = state.startedAt,
+            playedAt = state.playedAt,
+            playCount = state.playCount,
+            lastPlayedAt = state.lastPlayedAt,
+            isFavorite = state.isFavorite,
+            downloadDismissedAt = state.downloadDismissedAt,
+            measuredDurationMs = state.measuredDurationMs,
+            ts = state.updatedAt,
+        )
+        mergeDao.clearPlayedStart(episodeId)
+    }
+
+    /**
      * The shared post-position rules (05 Position): mark-played semantics reset a position
      * older than the merged played mark (`updatedAt` = `playedAt`), and a non-zero, unplayed
      * result derives its in-progress proxy — `ensure(id, posAt)` for a missing row,
@@ -211,6 +236,21 @@ internal data class RestorePositionValues(
     val durationMs: Long?,
     val positionSource: PositionSource,
     val posAt: Long,
+)
+
+/**
+ * The final `episode_state` row of a first-link merge (05 First-link column): every value
+ * already decided by the timestamp-LWW rules; [updatedAt] is the winning input's time.
+ */
+internal data class LinkStateValues(
+    val playedAt: Long?,
+    val playCount: Int,
+    val lastPlayedAt: Long?,
+    val isFavorite: Boolean,
+    val downloadDismissedAt: Long?,
+    val measuredDurationMs: Long?,
+    val startedAt: Long?,
+    val updatedAt: Long,
 )
 
 /** The stub's feed columns (02's stub SQL: `k`/`g`/`t`/`d`/`u`/`ty`/`dur`/`yt`/`l`). */

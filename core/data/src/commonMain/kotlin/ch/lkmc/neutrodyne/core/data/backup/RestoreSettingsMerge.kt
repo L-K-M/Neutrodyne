@@ -2,10 +2,18 @@
 
 package ch.lkmc.neutrodyne.core.data.backup
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.decodeSyncedValue
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
+import ch.lkmc.neutrodyne.core.model.MergeValueOrigin
+import ch.lkmc.neutrodyne.core.model.MergedField
+import ch.lkmc.neutrodyne.core.model.MergedRecord
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
@@ -13,6 +21,7 @@ import ch.lkmc.neutrodyne.feeds.backup.SettingValueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import dev.zacsweers.metro.Inject
 import kotlinx.collections.immutable.toPersistentSet
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -27,20 +36,33 @@ import kotlinx.serialization.json.longOrNull
  * failure ([SettingsError.WriteFailed]) is the restore's explicit [BackupError.Storage]
  * failure; the durable request survives for a re-run.
  *
- * Linked restores never reach here: `RestoreRunner` rejects them before any write (the
- * linked skip rule for `sync.server_url`/`sync.username` is MS2's to apply).
+ * A restore on a linked device (05 Restore while linked) routes every synced key through
+ * 01's Sync write ordering instead: the literal intent `captureAt("setting", key, "v",
+ * archiveCreatedAt)` commits in Room first, then [SettingsSyncPort.applyRemote] writes
+ * DataStore without an implicit capture; `sync.server_url` and `sync.username` are skipped
+ * while linked. The `LINK_*` policies (first link) write no setting at all — every valid
+ * synced value is reported through [reportLinked] as a durable effect for 10 to journal
+ * (05 First-link column).
  */
 @Inject
 internal class RestoreSettingsMerge(
     private val settings: SettingsRepository,
+    private val db: NeutrodyneDatabase,
+    private val sync: SettingsSyncPort,
+    private val writeLocks: SettingsWriteCoordinator,
 ) {
     private val keysByName = AllSettingKeys.list.associateBy { it.name }
 
     /**
      * Applies every applicable [staged] value; null [staged] (an archive without
      * `settings.json`) applies nothing. The result counts applied and skipped entries.
+     * [linkedArchiveCreatedAt] is non-null on a linked device (05): synced keys follow the
+     * Sync write ordering, the sync address keys are skipped.
      */
-    suspend fun apply(staged: SettingsV1?): Outcome<SettingsMergeCounts, BackupError> {
+    suspend fun apply(
+        staged: SettingsV1?,
+        linkedArchiveCreatedAt: Long? = null,
+    ): Outcome<SettingsMergeCounts, BackupError> {
         staged ?: return Outcome.Success(SettingsMergeCounts(applied = 0, skipped = 0))
         var applied = 0
         var skipped = 0
@@ -51,6 +73,20 @@ internal class RestoreSettingsMerge(
                 skipped++
                 continue
             }
+            if (linkedArchiveCreatedAt != null && isSyncAddressKey(key)) {
+                // A linked device never takes its server address or username from an archive.
+                skipped++
+                continue
+            }
+            if (linkedArchiveCreatedAt != null && key.synced) {
+                // 05 Restore while linked: the literal intent in Room first, then DataStore.
+                when (val outcome = linkedSyncedValue(key, entry, linkedArchiveCreatedAt)) {
+                    Applied.YES -> applied++
+                    Applied.SKIPPED -> skipped++
+                    is Applied.Failed -> return Outcome.Failure(outcome.error)
+                }
+                continue
+            }
             when (val outcome = applyOne(key, entry)) {
                 Applied.YES -> applied++
                 Applied.SKIPPED -> skipped++
@@ -59,6 +95,95 @@ internal class RestoreSettingsMerge(
         }
         return Outcome.Success(SettingsMergeCounts(applied, skipped))
     }
+
+    /**
+     * The `LINK_*` settings rule (05 First-link column): no DataStore write here — every
+     * valid synced value is reported through [onApplied] as a `setting` record for 10 to
+     * journal as a durable effect; `SyncApplyEffects` writes it after the merge's commit.
+     * [stagedAtMs] is the merge's pull time — the archive carries no per-setting clock.
+     */
+    suspend fun reportLinked(
+        staged: SettingsV1?,
+        stagedAtMs: Long,
+        onApplied: (suspend (MergedRecord) -> Unit)?,
+    ): SettingsMergeCounts {
+        staged ?: return SettingsMergeCounts(applied = 0, skipped = 0)
+        var applied = 0
+        var skipped = 0
+        for (entry in staged.values) {
+            val key = keysByName[entry.key]
+            val value = entry.value
+            if (key == null || key.file != SettingsFile.PORTABLE || !key.synced || !typeMatches(key, entry) ||
+                value == null
+            ) {
+                skipped++
+                continue
+            }
+            onApplied?.invoke(
+                MergedRecord(
+                    collection = "setting",
+                    recordId = key.name,
+                    fields = mapOf("v" to MergedField(value, stagedAtMs, MergeValueOrigin.STAGED)),
+                ),
+            )
+            applied++
+        }
+        return SettingsMergeCounts(applied, skipped)
+    }
+
+    /** A synced key's linked-restore write: validate, `captureAt` in Room, then `applyRemote`. */
+    private suspend fun linkedSyncedValue(
+        key: SettingKey<*>,
+        entry: SettingValueV1,
+        archiveCreatedAt: Long,
+    ): Applied {
+        if (!typeMatches(key, entry)) return Applied.SKIPPED
+        val json = entry.value?.toString() ?: return Applied.SKIPPED
+        // 05 step 7: an invalid value is skipped and counted before any Room capture or DataStore
+        // write — the port's rejection is not a storage failure.
+        if (decodeSyncedValue(key, json) == null) return Applied.SKIPPED
+        // 01 Sync write ordering: the accept+persist pair is mutually excluded with a local
+        // record+persist for the same key. The Room intent commits before the DataStore write,
+        // and the lock is released on cancellation or a storage failure, so a crash or a retry
+        // cannot interleave a newer local literal with the older stored value.
+        return writeLocks.withLock(key) {
+            val applied =
+                db.withWriteTransaction {
+                    db.syncOutboxDao().captureAt("setting", key.name, "v", archiveCreatedAt, json)
+                }
+            if (!applied) {
+                // A newer pending local intent keeps its DataStore value (05 step 7): the archive's
+                // older value must not roll it back.
+                return@withLock Applied.SKIPPED
+            }
+            if (sync.applyRemote(key, json)) {
+                Applied.YES
+            } else {
+                // The DataStore write failed; the captured intent keeps the value recoverable,
+                // but the restore itself reports storage failure rather than silent loss.
+                Applied.Failed(BackupError.Storage)
+            }
+        }
+    }
+
+    private fun isSyncAddressKey(key: SettingKey<*>): Boolean =
+        key.name == "sync.server_url" || key.name == "sync.username"
+
+    /** Whether [entry]'s declared type matches the key's `SettingKey` subclass (05). */
+    private fun typeMatches(
+        key: SettingKey<*>,
+        entry: SettingValueV1,
+    ): Boolean =
+        when (key) {
+            is SettingKey.Bool -> entry.type == TYPE_BOOL && entry.value?.isString == false
+            is SettingKey.Int32 -> entry.type == TYPE_INT32 && entry.value?.isString == false
+            is SettingKey.Int64 -> entry.type == TYPE_INT64 && entry.value?.isString == false
+            is SettingKey.Float32 -> entry.type == TYPE_FLOAT32 && entry.value?.isString == false
+            is SettingKey.Text -> entry.type == TYPE_TEXT && entry.value?.isString == true
+            is SettingKey.TextSet -> entry.type == TYPE_TEXT_SET
+            is SettingKey.Choice<*> -> entry.type == TYPE_CHOICE && entry.value?.isString == true
+            else -> false
+        }
 
     private suspend fun applyOne(
         key: SettingKey<*>,

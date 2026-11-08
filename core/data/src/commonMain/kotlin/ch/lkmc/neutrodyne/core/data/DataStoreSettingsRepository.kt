@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.datastore.SettingsStore
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
+import ch.lkmc.neutrodyne.core.domain.SettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
@@ -38,6 +39,7 @@ internal class DataStoreSettingsRepository(
     private val deviceSettingsStore: DeviceSettingsStore,
     private val syncPort: SettingsSyncPort,
     private val clock: Clock,
+    private val writeLocks: SettingsWriteCoordinator,
 ) : SettingsRepository {
     override fun <T : Any> observe(key: SettingKey<T>): Flow<T> = store(key).observe(key)
 
@@ -53,32 +55,42 @@ internal class DataStoreSettingsRepository(
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
         }
 
-        // 10 Settings capture: the durable Room intent lands before DataStore, so a crash
-        // between the two recovers the write and a recorder failure leaves DataStore unchanged.
-        suspendRunCatching { syncPort.recordLocal(key, value) }
-            .onFailure { failure ->
-                Log.w(LOG_TAG, failure) { "sync recorder failed for '${key.name}'" }
-                return Outcome.Failure(SettingsError.WriteFailed)
+        // 01 Sync write ordering: the record+persist pair is mutually excluded with a linked
+        // restore's historical accept+persist for the same key, so a concurrent restore can
+        // neither capture before this record nor write its older value after this one.
+        return writeLocks.withLock(key) {
+            // 10 Settings capture: the durable Room intent lands before DataStore, so a crash
+            // between the two recovers the write and a recorder failure leaves DataStore unchanged.
+            val recorded =
+                suspendRunCatching { syncPort.recordLocal(key, value) }
+                    .onFailure { failure ->
+                        Log.w(LOG_TAG, failure) { "sync recorder failed for '${key.name}'" }
+                    }
+            if (recorded.isFailure) {
+                return@withLock Outcome.Failure(SettingsError.WriteFailed)
             }
 
-        // Only non-cancellation failures land here (IOException from DataStore, 01: logged at WARN).
-        return suspendRunCatching { store(key).set(key, value) }
-            .fold(
-                onSuccess = {
-                    syncPort.emitLocal(key, value, clock.now())
-                    Outcome.Success(Unit)
-                },
-                onFailure = { failure ->
-                    Log.w(LOG_TAG, failure) { "write of '${key.name}' failed" }
-                    Outcome.Failure(SettingsError.WriteFailed)
-                },
-            )
+            // Only non-cancellation failures land here (IOException from DataStore, 01: logged at WARN).
+            suspendRunCatching { store(key).set(key, value) }
+                .fold(
+                    onSuccess = {
+                        syncPort.emitLocal(key, value, clock.now())
+                        Outcome.Success(Unit)
+                    },
+                    onFailure = { failure ->
+                        Log.w(LOG_TAG, failure) { "write of '${key.name}' failed" }
+                        Outcome.Failure(SettingsError.WriteFailed)
+                    },
+                )
+        }
     }
 
     override suspend fun reset(key: SettingKey<*>) {
-        syncPort.recordLocal(key, null)
-        store(key).reset(key)
-        syncPort.emitLocal(key, null, clock.now())
+        writeLocks.withLock(key) {
+            syncPort.recordLocal(key, null)
+            store(key).reset(key)
+            syncPort.emitLocal(key, null, clock.now())
+        }
     }
 
     override fun observePortableSnapshot(): Flow<Map<String, Any>> {

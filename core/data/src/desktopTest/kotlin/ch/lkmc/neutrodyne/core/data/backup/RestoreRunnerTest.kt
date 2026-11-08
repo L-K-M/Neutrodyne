@@ -2,8 +2,14 @@
 
 package ch.lkmc.neutrodyne.core.data.backup
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.CommitCancellingDriver
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPort
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
@@ -22,19 +28,23 @@ import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.data.testClassifier
 import ch.lkmc.neutrodyne.core.data.testUserAgent
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.datastore.DataStoreBindings
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.model.settings.SyncSettingKeys
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
@@ -42,6 +52,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -69,6 +80,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -97,6 +110,9 @@ import kotlin.test.assertTrue
  * and effects, and cancellation between phases and at the COMMITTED boundary.
  */
 class RestoreRunnerTest {
+    private val june = 1_780_000_000_000L
+    private val october = 1_790_000_000_000L
+
     private val driver = CommitCancellingDriver()
     private val clock = TestClock()
     private val db = TestDb.inMemory(driver = driver, clock = clock)
@@ -111,6 +127,7 @@ class RestoreRunnerTest {
     private val workScheduler = FakeImportWorkScheduler()
     private val refresh = FakeRefreshController()
     private val snapshots = FakeSnapshotScheduler()
+    private val linkedSync = TestLinkedRestoreCoordinator(db)
 
     @Volatile private var failSnapshotRetirement = false
     private val fileSystem =
@@ -164,14 +181,19 @@ class RestoreRunnerTest {
             orderKeys = TestOrderKeys,
             clock = clock,
         )
+    private val settingsSync = FakeSettingsSyncPort()
     private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
-    private val runner =
+    private val runner = newRunner(settingsSync)
+
+    /** A runner over [settingsSyncPort], for tests that drive a specific port. */
+    private fun newRunner(settingsSyncPort: SettingsSyncPort): RestoreRunner =
         RestoreRunner(
             db = db,
             stager = stager,
             merger = merger,
             episodes = episodeMerger,
-            settingsMerge = RestoreSettingsMerge(settings),
+            settingsMerge =
+                RestoreSettingsMerge(settings, db, settingsSyncPort, DataStoreSettingsWriteCoordinator()),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,
@@ -179,6 +201,7 @@ class RestoreRunnerTest {
             refresh = refresh,
             channels = channels,
             snapshots = snapshots,
+            linkedSync = linkedSync,
             clock = clock,
             io = Dispatchers.IO,
         )
@@ -360,19 +383,449 @@ class RestoreRunnerTest {
             assertTrue(settings.calls.none { it.startsWith("set(") })
         }
 
+    // --- Restore while linked (05, MS2 acceptance 6) ------------------------------------------------
+
+    /** A linked fixture: capture enabled, a node, a clock, `linkedAt` set. */
+    private suspend fun link() {
+        db.syncStateDao().upsert(
+            SyncStateEntity(
+                serverUrl = "https://sync.example.com",
+                enabled = true,
+                nodeId = "0000000000000001",
+                hlc = 1L shl 16,
+                linkedAt = 1L,
+            ),
+        )
+    }
+
+    /**
+     * A Merge on a linked device captures what it wrote at the backup's own timestamps —
+     * presence with a fresh tick, values with `ts`/`posAt`/`subscribedAt` and the literals
+     * 10 pushes (05 Restore while linked).
+     */
     @Test
-    fun aLinkedDeviceRejectsBeforeWrites() =
+    fun aLinkedMergeRestoreCapturesWithBackupTimes() =
         runTest {
-            seedSourcePodcast(FEED_A)
-            db.syncStateDao().upsert(SyncStateEntity(serverUrl = "https://sync.example.com", linkedAt = 1L))
+            link()
+            val sp = seedSourcePodcast(FEED_A)
+            val e1 = seedSourceEpisode(sp, "ep-played")
+            sourceDb.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = june, updatedAt = october))
+            sourceDb.positionDao().upsert(
+                ch.lkmc.neutrodyne.core.database.EpisodePositionEntity(
+                    e1,
+                    4_000,
+                    positionSource = ch.lkmc.neutrodyne.core.model.PositionSource.STREAM,
+                    updatedAt = october + 1,
+                ),
+            )
+            val queuedEpisode = seedSourceEpisode(sp, "ep-queued")
+            sourceDb.queueDao().insert(queueEntryEntity(queuedEpisode, "0.5"))
             val sessionId = session(writeArchive())
 
             val result = runner.run(sessionId)
 
-            assertEquals(RestoreRunResult.Failed(sessionId, BackupError.Unsupported), result)
+            assertIs<RestoreRunResult.Completed>(result)
+            val restored = checkNotNull(db.podcastDao().byFeedKey(feedKey(FEED_A)))
+            val rows = db.syncOutboxDao().rows()
+            val presence = rows.first { it.coll == "podcast" && it.field == "subscribed" }
+            assertEquals("true", presence.value)
+            // The fresh presence tick is a real HLC tick, not the backup's time.
+            assertTrue(presence.hlc ushr 16 > october, "rows=$rows")
+            val feedUrl = rows.first { it.coll == "podcast" && it.field == "feedUrl" }
+            assertEquals(restored.subscribedAt, feedUrl.hlc ushr 16)
+            val played = rows.first { it.coll == "episode" && it.field == "played" }
+            assertEquals(october, played.hlc ushr 16)
+            assertEquals("""{"played":true,"playedAt":$june}""", played.value)
+            val pos = rows.first { it.coll == "episode" && it.field == "pos" }
+            assertEquals(october + 1, pos.hlc ushr 16)
+            val queued = rows.first { it.coll == "upnext" }
+            assertEquals("in", queued.field)
+            assertEquals("true", queued.value)
+        }
+
+    /**
+     * A linked Merge whose merge resets the position (a played line whose `playedAt` is newer
+     * than the winning `posAt`) captures the reset form at the played stamp — never the staged
+     * positive position (05 Restore while linked).
+     */
+    @Test
+    fun aLinkedMergeResetCaptureUsesTheResetLiteralAtThePlayedStamp() =
+        runTest {
+            val sp = seedSourcePodcast(FEED_A)
+            val e1 = seedSourceEpisode(sp, "ep-played")
+            sourceDb.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = october, updatedAt = october))
+            sourceDb.positionDao().upsert(
+                ch.lkmc.neutrodyne.core.database.EpisodePositionEntity(
+                    e1,
+                    2_000,
+                    positionSource = ch.lkmc.neutrodyne.core.model.PositionSource.STREAM,
+                    updatedAt = june,
+                ),
+            )
+            val targetPodcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedUrl = FEED_A, feedKey = feedKey(FEED_A)))
+            val targetEpisode =
+                db.episodeDao().insertStub(episodeEntity(podcastId = targetPodcast, identityKey = "ep-played"))
+            db.positionDao().upsert(
+                ch.lkmc.neutrodyne.core.database.EpisodePositionEntity(
+                    targetEpisode,
+                    1_000,
+                    positionSource = ch.lkmc.neutrodyne.core.model.PositionSource.STREAM,
+                    updatedAt = june - 1,
+                ),
+            )
+            link()
+            val sessionId = session(writeArchive())
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+
+            val pos = db.syncOutboxDao().rows().first { it.coll == "episode" && it.field == "pos" }
+            assertEquals("""{"ms":0,"reset":true}""", pos.value)
+            assertEquals(october, pos.hlc ushr 16)
+        }
+
+    /**
+     * A linked Merge with a played line and no staged position over an older local position
+     * still captures the reset form at the played stamp (05 Restore while linked).
+     */
+    @Test
+    fun aLinkedMergeResetWithoutAStagedPositionCapturesTheReset() =
+        runTest {
+            val sp = seedSourcePodcast(FEED_A)
+            val e1 = seedSourceEpisode(sp, "ep-played")
+            sourceDb.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = october, updatedAt = october))
+            val targetPodcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedUrl = FEED_A, feedKey = feedKey(FEED_A)))
+            val targetEpisode =
+                db.episodeDao().insertStub(episodeEntity(podcastId = targetPodcast, identityKey = "ep-played"))
+            db.positionDao().upsert(
+                ch.lkmc.neutrodyne.core.database.EpisodePositionEntity(
+                    targetEpisode,
+                    1_000,
+                    positionSource = ch.lkmc.neutrodyne.core.model.PositionSource.STREAM,
+                    updatedAt = june,
+                ),
+            )
+            link()
+            val sessionId = session(writeArchive())
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+
+            val pos = db.syncOutboxDao().rows().first { it.coll == "episode" && it.field == "pos" }
+            assertEquals("""{"ms":0,"reset":true}""", pos.value)
+            assertEquals(october, pos.hlc ushr 16)
+        }
+
+    /**
+     * A linked Merge captures only a position it wrote: a newer local position that survives
+     * the merge keeps its row and writes no `pos` capture (05: the literal is the snapshot it
+     * wrote, never a surviving local row).
+     */
+    @Test
+    fun aLinkedMergeDoesNotCaptureASurvivingLocalPosition() =
+        runTest {
+            val sp = seedSourcePodcast(FEED_A)
+            val e1 = seedSourceEpisode(sp, "ep-played")
+            sourceDb.positionDao().upsert(
+                ch.lkmc.neutrodyne.core.database.EpisodePositionEntity(
+                    e1,
+                    4_000,
+                    positionSource = ch.lkmc.neutrodyne.core.model.PositionSource.STREAM,
+                    updatedAt = june,
+                ),
+            )
+            val targetPodcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedUrl = FEED_A, feedKey = feedKey(FEED_A)))
+            val targetEpisode =
+                db.episodeDao().insertStub(episodeEntity(podcastId = targetPodcast, identityKey = "ep-played"))
+            db.positionDao().upsert(
+                ch.lkmc.neutrodyne.core.database.EpisodePositionEntity(
+                    targetEpisode,
+                    5_000,
+                    positionSource = ch.lkmc.neutrodyne.core.model.PositionSource.STREAM,
+                    updatedAt = october,
+                ),
+            )
+            link()
+            val sessionId = session(writeArchive())
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+
+            assertTrue(
+                db.syncOutboxDao().rows().none { it.coll == "episode" && it.field == "pos" },
+                "rows=${db.syncOutboxDao().rows()}",
+            )
+            assertEquals(5_000L, db.positionDao().byEpisode(targetEpisode)?.positionMs)
+        }
+
+    /**
+     * A linked Merge routes synced settings through the Sync write ordering — the literal
+     * intent in Room first, then `applyRemote` — and never takes the sync address keys.
+     */
+    @Test
+    fun aLinkedMergeRestoreRoutesSyncedSettingsAndSkipsTheSyncAddress() =
+        runTest {
+            link()
+            val entries =
+                archivePayloads(
+                    settings =
+                        SettingsV1(
+                            listOf(
+                                SettingValueV1("playback.skip_silence", "Bool", value = JsonPrimitive(true)),
+                                SettingValueV1(
+                                    "sync.server_url",
+                                    "Text",
+                                    value = JsonPrimitive("https://other.example.com"),
+                                ),
+                            ),
+                        ),
+                )
+            val sessionId =
+                session(
+                    archiveOf(entries, manifestBytes(entries)),
+                    categories = setOf(RestoreCategory.SETTINGS),
+                )
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+
+            // The synced key: captured in Room and applied through the sync port, not `set`.
+            val captured =
+                db.syncOutboxDao().rows().first { it.coll == "setting" && it.rid == "playback.skip_silence" }
+            assertEquals("true", captured.value)
+            assertEquals(
+                listOf<ch.lkmc.neutrodyne.core.model.settings.SettingKey<*>>(
+                    PlaybackSettingKeys.SKIP_SILENCE,
+                ),
+                settingsSync.applied.map {
+                    it.first
+                },
+            )
+            assertTrue(settings.calls.none { it.startsWith("set(playback.skip_silence") })
+            // The sync address never lands while linked.
+            assertTrue(settingsSync.applied.none { it.first.name == "sync.server_url" })
+            assertTrue(db.syncOutboxDao().rows().none { it.rid == "sync.server_url" })
+        }
+
+    /**
+     * A linked Merge validates a synced setting value before the Room capture: an out-of-range
+     * value is skipped and counted, never a storage failure or a bad outbox intent (05 step 7).
+     * The real [DataStoreSettingsSyncPort] rejects the value, so a merge that failed to skip
+     * would surface as a Retry.
+     */
+    @Test
+    fun aLinkedMergeSkipsAnInvalidSyncedSettingValue() =
+        runTest {
+            link()
+            val store = DataStoreBindings.settingsStore(FakePreferencesDataStore())
+            val realRunner = newRunner(DataStoreSettingsSyncPort(store, clock))
+            val entries =
+                archivePayloads(
+                    settings =
+                        SettingsV1(
+                            listOf(SettingValueV1("playback.speed", "Float32", value = JsonPrimitive(100.0))),
+                        ),
+                )
+            val sessionId =
+                session(
+                    archiveOf(entries, manifestBytes(entries)),
+                    categories = setOf(RestoreCategory.SETTINGS),
+                )
+
+            val result = realRunner.run(sessionId)
+
+            val completed = assertIs<RestoreRunResult.Completed>(result)
+            assertEquals(0, completed.settingsApplied)
+            assertEquals(1, completed.settingsSkipped)
+            assertTrue(db.syncOutboxDao().rows().none { it.coll == "setting" })
+            assertEquals(PlaybackSettingKeys.SPEED.default, store.get(PlaybackSettingKeys.SPEED))
+        }
+
+    /**
+     * A linked Merge keeps a newer pending local setting's intent and its DataStore value (05
+     * step 7): `captureAt` keeps the newer row and `applyRemote` must not roll the value back.
+     */
+    @Test
+    fun aLinkedMergeKeepsANewerPendingSettingIntentAndValue() =
+        runTest {
+            link()
+            val store = DataStoreBindings.settingsStore(FakePreferencesDataStore())
+            store.set(PlaybackSettingKeys.SPEED, 2.0f)
+            val realRunner = newRunner(DataStoreSettingsSyncPort(store, clock))
+            val entries =
+                archivePayloads(
+                    settings =
+                        SettingsV1(
+                            listOf(SettingValueV1("playback.speed", "Float32", value = JsonPrimitive(0.5))),
+                        ),
+                )
+            val sessionId =
+                session(
+                    archiveOf(entries, manifestBytes(entries)),
+                    categories = setOf(RestoreCategory.SETTINGS),
+                )
+            db.withWriteTransaction {
+                db.syncOutboxDao().captureAt(
+                    "setting",
+                    "playback.speed",
+                    "v",
+                    1_800_000_000_000L,
+                    "2.0",
+                )
+            }
+
+            val result = realRunner.run(sessionId)
+
+            assertIs<RestoreRunResult.Completed>(result)
+            val row = db.syncOutboxDao().rows().first { it.coll == "setting" }
+            assertEquals("2.0", row.value)
+            assertEquals(2.0f, store.get(PlaybackSettingKeys.SPEED))
+        }
+
+    /**
+     * A real DataStore write failure still fails the linked restore (05: the durable request
+     * survives for a replay); only an invalid value is skipped.
+     */
+    @Test
+    fun aLinkedMergeRetriesOnARealSettingStoreFailure() =
+        runTest {
+            link()
+            val dataStore = FakePreferencesDataStore()
+            dataStore.failWrites = true
+            val store = DataStoreBindings.settingsStore(dataStore)
+            val realRunner = newRunner(DataStoreSettingsSyncPort(store, clock))
+            val entries =
+                archivePayloads(
+                    settings =
+                        SettingsV1(
+                            listOf(SettingValueV1("playback.speed", "Float32", value = JsonPrimitive(1.5))),
+                        ),
+                )
+            val sessionId =
+                session(
+                    archiveOf(entries, manifestBytes(entries)),
+                    categories = setOf(RestoreCategory.SETTINGS),
+                )
+
+            val result = realRunner.run(sessionId)
+
+            val retry = assertIs<RestoreRunResult.Retry>(result)
+            assertEquals(BackupError.Storage, retry.error)
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId)?.state)
+
+            dataStore.failWrites = false
+            assertIs<RestoreRunResult.Completed>(realRunner.run(sessionId))
+            assertEquals(1.5f, store.get(PlaybackSettingKeys.SPEED))
+        }
+
+    /** `captureAt` never lowers a newer pending clock (10 Capture rules). */
+    @Test
+    fun aLinkedMergeRestoreNeverLowersANewerPendingClock() =
+        runTest {
+            link()
+            val sp = seedSourcePodcast(FEED_A)
+            val e1 = seedSourceEpisode(sp, "ep-played")
+            sourceDb.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = 111L, updatedAt = 112L))
+            // The restore adopts the source podcast's syncId (02 Restore matching), so the
+            // rid it will capture under is known before it runs.
+            val sourceSyncId =
+                sourceDb
+                    .podcastDao()
+                    .allForExport()
+                    .single()
+                    .syncId
+            val sessionId = session(writeArchive())
+            val newer = 1_700_000_000_000L
+            db.withWriteTransaction {
+                db.syncOutboxDao().captureAt(
+                    "episode",
+                    sourceSyncId + "ep-played",
+                    "played",
+                    newer,
+                    """{"played":true,"playedAt":99}""",
+                )
+            }
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+
+            val row = db.syncOutboxDao().rows().first { it.coll == "episode" && it.field == "played" }
+            assertEquals(newer shl 16, row.hlc)
+            assertEquals("""{"played":true,"playedAt":99}""", row.value)
+        }
+
+    /**
+     * Replace THIS_DEVICE validates the payload first (05 step 1): a corrupt archive cancels
+     * the session without unlinking — no token deletion, no sync-table clear.
+     */
+    @Test
+    fun aValidationFailureCancelsWithoutUnlinkingThisDevice() =
+        runTest {
+            link()
+            val corrupt = root.absolutePath.toPath() / "corrupt-${nextArchive++}.zip"
+            fileSystem.write(corrupt) { writeUtf8("not a zip") }
+            val sessionId = session(corrupt, mode = RestoreMode.REPLACE)
+
+            val result = runner.run(sessionId)
+
+            val failed = assertIs<RestoreRunResult.Failed>(result)
+            assertTrue(
+                failed.error is BackupError.NotABackup || failed.error is BackupError.Corrupt,
+                "validation maps to a typed failure, got ${failed.error}",
+            )
             assertEquals(ImportState.CANCELLED, db.importDao().sessionById(sessionId)?.state)
-            assertNull(db.podcastDao().allForExport().singleOrNull())
-            assertEquals(RestoreProgress.Failed(sessionId, BackupError.Unsupported), runner.progress.first())
+            assertTrue(linkedSync.delegate.unlinks.isEmpty(), "a validation failure must not unlink")
+            assertEquals(1L, db.syncStateDao().get()?.linkedAt, "the device stays linked")
+        }
+
+    /** Replace THIS_DEVICE: 10's unlink runs first, then the plain local Replace pushes nothing. */
+    @Test
+    fun aLinkedReplaceThisDeviceUnlinksFirstAndPushesNothing() =
+        runTest {
+            link()
+            val sp = seedSourcePodcast(FEED_A)
+            val e1 = seedSourceEpisode(sp, "ep-played")
+            sourceDb.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = 111L, updatedAt = 112L))
+            val sessionId = session(writeArchive(), mode = RestoreMode.REPLACE)
+
+            val result = runner.run(sessionId)
+
+            assertIs<RestoreRunResult.Completed>(result)
+            assertEquals(1, linkedSync.delegate.unlinks.size, "the coordinator unlinked before the phases")
+            assertTrue(db.syncOutboxDao().rows().isEmpty(), "rows=${db.syncOutboxDao().rows()}")
+            assertEquals(0L, db.syncStateDao().get()?.hlc ?: 0L)
+        }
+
+    /**
+     * Replace ALL_DEVICES: the claim cleared `linkedAt`, the Replace runs suppressed, and
+     * the finish runs 10's upload/prune steps before the session commits; a failure there
+     * leaves the durable request for a replay.
+     */
+    @Test
+    fun aLinkedReplaceAllDevicesRunsTheUploadBeforeCommit() =
+        runTest {
+            link()
+            val sp = seedSourcePodcast(FEED_A)
+            sourceDb.episodeStateDao().upsert(
+                episodeStateEntity(seedSourceEpisode(sp, "ep"), playedAt = 111L, updatedAt = 112L),
+            )
+            val sessionId = session(writeArchive(), mode = RestoreMode.REPLACE, reach = LinkedRestoreReach.ALL_DEVICES)
+            // The claim's durable marker (BackupRepositoryImpl clears it): the device is
+            // LinkUnfinished while the restore runs.
+            db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(linkedAt = null))
+            assertNull(db.syncStateDao().get()?.linkedAt)
+
+            val result = runner.run(sessionId)
+
+            assertIs<RestoreRunResult.Completed>(result)
+            assertEquals(1, linkedSync.delegate.completions.size)
+            assertEquals(ImportState.COMMITTED, db.importDao().sessionById(sessionId)?.state)
+
+            // A failure in the completion keeps the durable request (05: a crash re-runs).
+            linkedSync.delegate.completeResult = Outcome.Failure(BackupError.Io)
+            val sp2 = seedSourcePodcast(FEED_B)
+            val sessionId2 = session(writeArchive(), mode = RestoreMode.REPLACE, reach = LinkedRestoreReach.ALL_DEVICES)
+            db.syncStateDao().upsert(checkNotNull(db.syncStateDao().get()).copy(linkedAt = null))
+            assertIs<RestoreRunResult.Retry>(runner.run(sessionId2))
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId2)?.state)
         }
 
     // --- Validation failures ---------------------------------------------------------------------
@@ -851,6 +1304,7 @@ class RestoreRunnerTest {
             setOf(RestoreCategory.HISTORY, RestoreCategory.UP_NEXT, RestoreCategory.SETTINGS),
         fromAndroidBackup: Boolean = false,
         requested: Boolean = true,
+        reach: LinkedRestoreReach? = null,
     ): Long {
         val sessionId =
             db.seedImportSession(
@@ -859,6 +1313,7 @@ class RestoreRunnerTest {
                         restoreMode = mode,
                         restoreCategories = categories,
                         fromAndroidBackup = fromAndroidBackup,
+                        linkedReach = reach,
                     ),
                 format = ImportFormat.NEUTRODYNE_BACKUP,
                 payloadPath = adopt(archive),
@@ -975,4 +1430,40 @@ class RestoreRunnerTest {
         const val FEED_B = "https://b.example.com/feed.xml"
         const val FEED_C = "https://c.example.com/feed.xml"
     }
+}
+
+/** A [DataStore] fixture: in-memory preferences, an optional write failure. */
+private class FakePreferencesDataStore : DataStore<Preferences> {
+    val preferences = MutableStateFlow(emptyPreferences())
+    var failWrites = false
+
+    override val data: Flow<Preferences> = preferences
+
+    override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences {
+        if (failWrites) throw IOException("store write failed")
+        val next = transform(preferences.value)
+        preferences.value = next
+        return next
+    }
+}
+
+/** The coordinator fixture wired to the real local unlink, like :sync:impl's binding. */
+private class TestLinkedRestoreCoordinator(
+    private val db: ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase,
+) : ch.lkmc.neutrodyne.core.domain.LinkedRestoreCoordinator {
+    val delegate =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeLinkedRestoreCoordinator()
+
+    override suspend fun unlinkForRestore(): ch.lkmc.neutrodyne.core.common.Outcome<Unit, BackupError> {
+        db.syncStateDao().unlink()
+        return delegate.unlinkForRestore()
+    }
+
+    override suspend fun completeAllDevicesRestore() = delegate.completeAllDevicesRestore()
+
+    override suspend fun previewAllDevicesReach(
+        backupPodcastKeys: Set<String>,
+        backupGroupNames: Set<String>,
+    ) = delegate.previewAllDevicesReach(backupPodcastKeys, backupGroupNames)
 }

@@ -1200,6 +1200,21 @@ timestamp-LWW comparison (a local June `playedAt` loses to a server
 October "unplayed"); the staging-file resume of step 1 is not implemented
 yet and a crash mid-merge restarts the pull.
 
+**Implementation note (2026-11-08, MS2, restore-policies precursor).**
+05's `RestoreMerger` now implements the `LINK_*` policies and
+`LibraryMergerImpl` binds the `LibraryMerger` port over a staging
+directory, but `FirstLinkMerger` is not rewired yet: it still uses the
+engine field merge, so those policies are implemented and tested but not
+activated by the client. The linked-restore path has the same precursor
+status: `RestoreRunner` owns the linked Merge captures, the THIS_DEVICE
+unlink and the ALL_DEVICES completion, but `:sync:impl`'s
+`LinkedRestoreCoordinator` lands with the next slice, so
+`LinkedRestoreCoordinatorBindings` (`:core:domain`) temporarily binds the
+fail-closed `NoLinkedRestoreCoordinator`. Linked Replace requests therefore
+fail closed with `BackupError.Unsupported` and keep their durable request
+until that binding is replaced. Scheduling, the LAN gate, revocation and
+refcount behaviour are unchanged.
+
 Step 5's `captureAt` receives the frozen value as well as its pre-merge timestamp for played/position/session fields. Field winners come from 05's `onApplied(MergedRecord)` callback; `MergeSummary` carries counts only. Settings the server lacked use literal `v` captures. It never reads a post-merge projection at push time; an interrupted first link resumes from the saved raw inputs without turning an applied server value into a new local action.
 
 AntennaPod's first sync uploads every played episode stamped with the current time ([SyncService at 9c7ffa1](https://github.com/AntennaPod/AntennaPod/blob/9c7ffa16736c020045571d274aef4cdcf0878100/net/sync/service/src/main/java/de/danoeh/antennapod/net/sync/service/SyncService.java#L228-L248)), which flips later "unplayed" marks on other devices; stamping with row timestamps avoids that (risk SR2).

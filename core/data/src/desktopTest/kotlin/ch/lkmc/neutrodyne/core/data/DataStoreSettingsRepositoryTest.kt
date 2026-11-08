@@ -110,6 +110,7 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
                     clock =
                         ch.lkmc.neutrodyne.core.testing
                             .TestClock(),
+                    writeLocks = DataStoreSettingsWriteCoordinator(),
                 )
 
             assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableSyncedLong, 30_000L))
@@ -151,6 +152,7 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
             clock =
                 ch.lkmc.neutrodyne.core.testing
                     .TestClock(),
+            writeLocks = DataStoreSettingsWriteCoordinator(),
         )
     }
 
