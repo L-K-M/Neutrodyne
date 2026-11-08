@@ -232,9 +232,11 @@ class FakeGitHub:
             raise ar.ResponseTooLargeError(
                 f"response exceeds {max_response_bytes} bytes"
             )
-        return ar.TransportResponse(
-            status=status, headers=response_headers, body=payload
-        )
+        normalized = {
+            str(name).lower(): str(value)
+            for name, value in response_headers.items()
+        }
+        return ar.TransportResponse(status=status, headers=normalized, body=payload)
 
     def _json(self, status, document, headers=None):
         return status, headers or {}, json.dumps(document).encode("utf-8")
@@ -824,6 +826,16 @@ class PublisherTests(unittest.TestCase):
         with self.assertRaises(ar.SnapshotStateError):
             self.publish()
         self.assertEqual([], self.uploads())
+        self.assertEqual([], self.index_patch())
+
+    def test_paginated_asset_listing_fails_closed(self):
+        release_id = self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=False, immutable=True
+        )
+        for index in range(101):
+            self.fake.add_asset(release_id, f"extra-{index}.bin", b"x")
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
         self.assertEqual([], self.index_patch())
 
     def test_published_snapshot_not_immutable_fails_closed(self):
