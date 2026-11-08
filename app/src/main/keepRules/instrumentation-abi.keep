@@ -4667,8 +4667,8 @@
   public dev.zacsweers.metro.internal.SetFactory build();
 }
 -keep class dev.zacsweers.metro.internal.SetFactory$Companion {
-  public dev.zacsweers.metro.internal.Factory empty();
   public dev.zacsweers.metro.internal.SetFactory$Builder builder(int, int);
+  public dev.zacsweers.metro.internal.Factory empty();
   public dev.zacsweers.metro.internal.Factory singleton(dev.zacsweers.metro.Provider);
 }
 -keep class dev.zacsweers.metro.internal.SetFactory {
