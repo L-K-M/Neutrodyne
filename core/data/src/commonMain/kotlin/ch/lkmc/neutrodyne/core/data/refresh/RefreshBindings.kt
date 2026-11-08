@@ -17,11 +17,16 @@ object RefreshBindings {
     /** The backoff jitter's entropy source; tests inject `Random(seed)` directly. */
     @Provides
     fun random(): Random = Random
+}
 
-    /**
-     * The M1a sync-hook stub (03 Diff algorithm step 11): sync is not configured, so nothing is
-     * ever parked. 10's `SyncParkedStateApplier` replaces this binding at MS2.
-     */
+/**
+ * The M1a sync-hook default (03 Diff algorithm step 11): without a sync server nothing is ever
+ * parked, so `:core:data`'s standalone graphs bind [SyncIngestHook.None]. The app composition
+ * roots replace this container with 10's `SyncParkedStateApplier` binding at MS2.
+ */
+@BindingContainer
+@ContributesTo(AppScope::class)
+object SyncIngestHookBindings {
     @Provides
     @SingleIn(AppScope::class)
     fun syncIngestHook(): SyncIngestHook = SyncIngestHook.None

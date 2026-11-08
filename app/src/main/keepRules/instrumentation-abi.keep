@@ -1796,9 +1796,6 @@
 -keep class ch.lkmc.neutrodyne.core.data.refresh.RefreshBindings$RandomMetroFactory {
   public static ch.lkmc.neutrodyne.core.data.refresh.RefreshBindings$RandomMetroFactory create();
 }
--keep class ch.lkmc.neutrodyne.core.data.refresh.RefreshBindings$SyncIngestHookMetroFactory {
-  public static ch.lkmc.neutrodyne.core.data.refresh.RefreshBindings$SyncIngestHookMetroFactory create();
-}
 -keep class ch.lkmc.neutrodyne.core.data.refresh.RefreshBindings {
 }
 -keep class ch.lkmc.neutrodyne.core.data.refresh.RefreshControllerImplContributions$ToAppScope$ProvidesRefreshControllerImplMetroFactory$Companion {
@@ -2552,6 +2549,8 @@
 -keep class ch.lkmc.neutrodyne.core.domain.StoredPosition {
   public long getPositionMs();
 }
+-keep interface ch.lkmc.neutrodyne.core.domain.SyncIngestHook {
+}
 -keep class ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase$MetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
@@ -2987,6 +2986,7 @@
   public ch.lkmc.neutrodyne.core.domain.SecretStore getSecretStore();
   public ch.lkmc.neutrodyne.core.domain.SettingsRepository getSettingsRepository();
   public ch.lkmc.neutrodyne.sync.api.SyncController getSyncController();
+  public ch.lkmc.neutrodyne.core.domain.SyncIngestHook getSyncIngestHook();
   public ch.lkmc.neutrodyne.core.domain.update.UpdateNotices getUpdateNotices();
   public androidx.work.WorkerFactory getWorkerFactory();
   public ch.lkmc.neutrodyne.youtube.api.YouTubeHealth getYouTubeHealth();
@@ -3043,6 +3043,20 @@
   ch.lkmc.neutrodyne.di.DatabaseBindings$StrictMigrationsMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.di.DatabaseBindings {
+}
+-keep class ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncIngestHookMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncIngestHookMetroFactory create(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncIngestHookMetroFactory {
+  ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncIngestHookMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncParkedStateApplierMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncParkedStateApplierMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncParkedStateApplierMetroFactory {
+  ch.lkmc.neutrodyne.di.ParkedSyncHookBindings$SyncParkedStateApplierMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.di.ParkedSyncHookBindings {
 }
 -keep enum ch.lkmc.neutrodyne.download.api.DeleteReason {
   ch.lkmc.neutrodyne.download.api.DeleteReason LIFECYCLE;
@@ -4525,6 +4539,16 @@
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncForegroundObserverInitializerContributions$ToAppScope {
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncForegroundObserverInitializerContributions {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncParkedRecoveryInitializerContributions$ToAppScope$ProvideIntoSetSyncParkedRecoveryInitializerMetroFactory$Companion {
+  public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetSyncParkedRecoveryInitializer(dev.zacsweers.metro.Provider);
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncParkedRecoveryInitializerContributions$ToAppScope$ProvideIntoSetSyncParkedRecoveryInitializerMetroFactory {
+  ch.lkmc.neutrodyne.sync.impl.SyncParkedRecoveryInitializerContributions$ToAppScope$ProvideIntoSetSyncParkedRecoveryInitializerMetroFactory$Companion Companion;
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncParkedRecoveryInitializerContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.sync.impl.SyncParkedRecoveryInitializerContributions {
 }
 -keep class ch.lkmc.neutrodyne.sync.impl.SyncSchedulingInitializerContributions$ToAppScope$ProvideIntoSetSyncSchedulingInitializerMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.common.AppInitializer provideIntoSetSyncSchedulingInitializer(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);

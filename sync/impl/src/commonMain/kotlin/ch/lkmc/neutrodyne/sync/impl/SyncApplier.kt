@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
+import ch.lkmc.neutrodyne.core.database.SyncParkedEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -32,6 +33,7 @@ import ch.lkmc.neutrodyne.sync.protocol.Hlc
 import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
+import ch.lkmc.neutrodyne.sync.protocol.RecordMerger
 import ch.lkmc.neutrodyne.sync.protocol.RecordState
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
@@ -55,6 +57,9 @@ data class SyncApplyResult(
     val held: Int,
     val invalid: Int,
 )
+
+/** The parked `identityKey` of a membership row: `@member:<groupUuid>` (10 Parked state). */
+internal const val MEMBER_KEY_PREFIX = "@member:"
 
 /**
  * The pull side of 10 Pull and apply: one write transaction per page with `applying = 1`, field
@@ -104,6 +109,17 @@ class SyncApplier(
     private suspend fun applyRecord(
         dto: RecordDto,
         roundId: Long,
+    ): RecordOutcome = applyValidated(dto, roundId, journalParked = true)
+
+    /**
+     * One record through 10 Pull and apply steps 1-3. [journalParked] parks an unresolvable
+     * record in `sync_parked` (the page path); the parked-state retry passes `false` because its
+     * rows already exist and must not be rewritten from a replay of their own merged state.
+     */
+    private suspend fun applyValidated(
+        dto: RecordDto,
+        roundId: Long,
+        journalParked: Boolean,
     ): RecordOutcome {
         val coll =
             runCatching { SyncCollection.fromWire(dto.coll) }.getOrNull() ?: return RecordOutcome.Invalid
@@ -153,6 +169,9 @@ class SyncApplier(
             )
             deleteLostPending(coll.wire, resolved.rid, merge.advanced)
         }
+        if (outcome is RecordOutcome.Parked && journalParked) {
+            park(coll, resolved, incoming, dto)
+        }
         return outcome
     }
 
@@ -166,7 +185,9 @@ class SyncApplier(
         val subscribed = merge.record.booleanField("subscribed") ?: true
         if (!subscribed) {
             if (existing == null) {
-                // Unknown and dead: record the clocks so its child records are dropped.
+                // Unknown and dead: record the clocks so its child records are dropped, and the
+                // parked rows leave with the podcast's tombstone (10 Pull and apply).
+                deleteParkedForPodcast(rid)
                 return RecordOutcome.Applied
             }
             return if (merge.advanced.contains("subscribed")) {
@@ -231,6 +252,9 @@ class SyncApplier(
                 }
             }
             applyOverrides(idInserted, isGroup = false, merge.record)
+            // 10 Parked state: the podcast's insert releases its parked members in this
+            // transaction; episode and Up-next rows keep waiting for the ingest hook.
+            releaseParkedMembersByPodcast(syncId)
             return RecordOutcome.Applied
         }
         applyPodcastFields(existing, merge.record)
@@ -365,6 +389,8 @@ class SyncApplier(
                     ),
                 )
             applyOverrides(db.groupDao().groupByUuid(uuid)?.id ?: return RecordOutcome.Applied, true, merge.record)
+            // 10 Parked state: the group's insert releases its parked members in this transaction.
+            releaseParkedMembersByGroup(uuid)
             return RecordOutcome.Applied
         }
         val orderKey = merge.record.stringField("ok")
@@ -420,7 +446,17 @@ class SyncApplier(
         val member = id as RecordId.Member
         val group = db.groupDao().groupByUuid(member.group.value)
         val podcast = db.podcastDao().bySyncId(member.podcast.value)
-        if (group == null || podcast == null) return RecordOutcome.Parked
+        if (group == null || podcast == null) {
+            // An end known dead (or the membership's own removal) drops instead of parking.
+            return if (podcastDead(member.podcast.value) ||
+                groupDead(member.group.value) ||
+                RecordMerger.isDead(merge.record)
+            ) {
+                RecordOutcome.Stale
+            } else {
+                RecordOutcome.Parked
+            }
+        }
         val inGroup = merge.record.booleanField("in") ?: true
         val existing = db.groupDao().member(group.id, podcast.id)
         if (!inGroup) {
@@ -465,7 +501,12 @@ class SyncApplier(
         val episodeId = id as RecordId.Episode
         val podcast =
             db.podcastDao().bySyncId(episodeId.podcast.value)
-                ?: return RecordOutcome.Parked
+                ?: return if (podcastDead(episodeId.podcast.value)) {
+                    // A dead podcast's records drop instead of parking (10 Pull and apply).
+                    RecordOutcome.Stale
+                } else {
+                    RecordOutcome.Parked
+                }
         val hints = merge.record.match
         val matched = matcher.match(podcast.id, episodeId.key.value, hints)
         if (matched == null) {
@@ -556,10 +597,32 @@ class SyncApplier(
         val episodeId = id as RecordId.Episode
         val podcast =
             db.podcastDao().bySyncId(episodeId.podcast.value)
-                ?: return RecordOutcome.Parked
-        val matched = matcher.match(podcast.id, episodeId.key.value, merge.record.match)
-        if (matched == null) return RecordOutcome.Parked
+                ?: return if (podcastDead(episodeId.podcast.value)) {
+                    RecordOutcome.Stale
+                } else {
+                    RecordOutcome.Parked
+                }
         val inQueue = merge.record.booleanField("in") ?: true
+        val hints = merge.record.match
+        var matched = matcher.match(podcast.id, episodeId.key.value, hints)
+        if (matched == null && inQueue && (hints?.enc != null || hints?.ytId != null)) {
+            // 10 Pull and apply: an unresolved Up-next reference with enclosure or YouTube hints
+            // becomes a stub through 02's stub insert, so the queue entry survives before the
+            // first ingest instead of parking.
+            val inserted =
+                db
+                    .episodeDao()
+                    .insertStub(episodeEntity(podcast.id, episodeId.key.value, hints, clock.now()))
+            matched =
+                if (inserted == -1L) {
+                    db.episodeDao().byIdentityKey(podcast.id, episodeId.key.value)?.id
+                } else {
+                    inserted
+                }
+        }
+        if (matched == null) {
+            return if (RecordMerger.isDead(merge.record)) RecordOutcome.Stale else RecordOutcome.Parked
+        }
         val existing = db.queueDao().entryByEpisode(matched)
         if (!inQueue) {
             if (existing == null) return RecordOutcome.Stale
@@ -628,6 +691,160 @@ class SyncApplier(
     }
 
     private suspend fun storedPending(key: String): PendingSetting? = null
+
+    // --- Parked state (10 Parked state and stubs) ---------------------------------------------------
+
+    /** One parked row's identity: the podcast end plus the episode key or `@member:<group>`. */
+    private data class ParkedIdentity(
+        val podcastSyncId: String,
+        val identityKey: String,
+    )
+
+    /**
+     * Journals a live record whose projection cannot run yet. Arrivals for the same identity and
+     * collection merge field by field with their clocks, so disjoint updates that span pages or
+     * repeated pulls accumulate losslessly and an identical replay rewrites the same row instead
+     * of growing a duplicate. The stored JSON keeps the record's complete merged raw state:
+     * values, match hints and every field clock.
+     */
+    private suspend fun park(
+        coll: SyncCollection,
+        id: RecordId,
+        incoming: RecordState,
+        dto: RecordDto,
+    ) {
+        val parked =
+            when (id) {
+                is RecordId.Member -> ParkedIdentity(id.podcast.value, MEMBER_KEY_PREFIX + id.group.value)
+                is RecordId.Episode -> ParkedIdentity(id.podcast.value, id.key.value)
+                else -> return
+            }
+        val candidates = db.syncParkedDao().forPodcast(parked.podcastSyncId)
+        var existing: SyncParkedEntity? = null
+        var existingDto: RecordDto? = null
+        for (row in candidates) {
+            if (row.identityKey != parked.identityKey) continue
+            val decoded = decodeParked(row) ?: continue
+            if (decoded.coll == coll.wire) {
+                existing = row
+                existingDto = decoded
+                break
+            }
+        }
+        val existingState =
+            existingDto?.let { runCatching { ProtocolValidation.record(it) }.getOrNull() }
+        val merged =
+            if (existingState != null) {
+                // An equal-clock value conflict is a protocol violation; the journaled row wins
+                // and the conflicting arrival is left out rather than failing the page.
+                runCatching { RecordMerger.merge(existingState, incoming).record }.getOrNull() ?: return
+            } else {
+                incoming
+            }
+        val mergedDto = merged.toDto(id, maxOf(existingDto?.seq ?: 0L, dto.seq), dto.by ?: existingDto?.by)
+        db
+            .syncParkedDao()
+            .upsert(
+                SyncParkedEntity(
+                    id = existing?.id ?: 0L,
+                    podcastSyncId = parked.podcastSyncId,
+                    identityKey = parked.identityKey,
+                    guid = merged.match?.guid,
+                    enclosureKey = merged.match?.enc?.let(UrlNormalizer::forIdentity),
+                    record = SyncJson.encodeToString(RecordDto.serializer(), mergedDto),
+                    receivedAt = clock.now(),
+                ),
+            )
+    }
+
+    /**
+     * Retries parked rows through the standard merge and apply rules. A row leaves the table only
+     * in the same transaction as a terminal outcome (applied, held, superseded or invalid); a row
+     * that still cannot resolve stays parked for the next ingest, dependency arrival or restart.
+     * The caller owns the write transaction and `applying = 1`, so the projections stay echo-free.
+     */
+    internal suspend fun applyParkedRows(rows: List<SyncParkedEntity>): SyncApplyResult {
+        var applied = 0
+        var stale = 0
+        var parked = 0
+        var held = 0
+        var invalid = 0
+        val resolved = ArrayList<Long>(rows.size)
+        for (row in rows) {
+            val dto = decodeParked(row)
+            val coll = dto?.let { runCatching { SyncCollection.fromWire(it.coll) }.getOrNull() }
+            val retryable =
+                coll == SyncCollection.MEMBER || coll == SyncCollection.EPISODE || coll == SyncCollection.UPNEXT
+            if (!retryable) {
+                // A row that no longer decodes to a parkable record can never apply.
+                resolved += row.id
+                invalid++
+                continue
+            }
+            when (applyValidated(dto!!, roundId = 0L, journalParked = false)) {
+                RecordOutcome.Applied -> {
+                    resolved += row.id
+                    applied++
+                }
+
+                RecordOutcome.Held -> {
+                    resolved += row.id
+                    held++
+                }
+
+                RecordOutcome.Stale -> {
+                    resolved += row.id
+                    stale++
+                }
+
+                RecordOutcome.Invalid -> {
+                    resolved += row.id
+                    invalid++
+                }
+
+                RecordOutcome.Parked -> {
+                    parked++
+                }
+            }
+        }
+        if (resolved.isNotEmpty()) db.syncParkedDao().delete(resolved)
+        return SyncApplyResult(applied, stale, parked, held, invalid)
+    }
+
+    /** [applyParkedRows] in its own write transaction with the capture triggers silenced. */
+    suspend fun applyParkedRecords(rows: List<SyncParkedEntity>): SyncApplyResult =
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying { applyParkedRows(rows) }
+        }
+
+    private fun decodeParked(row: SyncParkedEntity): RecordDto? =
+        runCatching { SyncJson.decodeFromString(RecordDto.serializer(), row.record) }.getOrNull()
+
+    /** A stored tombstone for a podcast this device does not have: its children drop, not park. */
+    private suspend fun podcastDead(syncId: String): Boolean =
+        db.podcastDao().bySyncId(syncId) == null &&
+            clockStore.get(SyncCollection.PODCAST.wire, syncId)?.state?.let(RecordMerger::isDead) == true
+
+    /** A stored `deleted` group with no local row (a held removal is not dead yet). */
+    private suspend fun groupDead(uuid: String): Boolean =
+        db.groupDao().groupByUuid(uuid) == null &&
+            clockStore.get(SyncCollection.GROUP.wire, uuid)?.state?.let(RecordMerger::isDead) == true
+
+    private suspend fun deleteParkedForPodcast(syncId: String) {
+        val rows = db.syncParkedDao().forPodcast(syncId)
+        if (rows.isNotEmpty()) db.syncParkedDao().delete(rows.map { it.id })
+    }
+
+    private suspend fun releaseParkedMembersByPodcast(syncId: String) {
+        val rows =
+            db.syncParkedDao().forPodcast(syncId).filter { it.identityKey.startsWith(MEMBER_KEY_PREFIX) }
+        if (rows.isNotEmpty()) applyParkedRows(rows)
+    }
+
+    private suspend fun releaseParkedMembersByGroup(uuid: String) {
+        val rows = db.syncParkedDao().all().filter { it.identityKey == MEMBER_KEY_PREFIX + uuid }
+        if (rows.isNotEmpty()) applyParkedRows(rows)
+    }
 
     private suspend fun deleteLostPending(
         coll: String,

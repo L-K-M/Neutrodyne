@@ -468,9 +468,17 @@ interface SyncParkedDao {
     @Insert
     suspend fun park(row: SyncParkedEntity): Long
 
+    /** Re-writes a parked row's accumulated record (10 Parked state: lossless across pages). */
+    @Upsert
+    suspend fun upsert(row: SyncParkedEntity)
+
     /** 10's `SyncParkedStateApplier` load after each ingest. */
     @Query("SELECT * FROM sync_parked WHERE podcastSyncId = :podcastSyncId")
     suspend fun forPodcast(podcastSyncId: String): List<SyncParkedEntity>
+
+    /** 10's start-up recovery: every row, ordered for a deterministic retry pass. */
+    @Query("SELECT * FROM sync_parked ORDER BY podcastSyncId, identityKey, id")
+    suspend fun all(): List<SyncParkedEntity>
 
     /** Applied rows leave the table (10). */
     @Query("DELETE FROM sync_parked WHERE id IN (:ids)")
