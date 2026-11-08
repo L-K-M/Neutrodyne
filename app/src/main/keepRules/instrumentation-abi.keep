@@ -4278,6 +4278,12 @@
 }
 -keep enum ch.lkmc.neutrodyne.youtube.api.BreakerState {
 }
+-keep class ch.lkmc.neutrodyne.youtube.api.ExtractionAdmission$Admitted {
+  public <init>(ch.lkmc.neutrodyne.youtube.api.ExtractionReservation);
+  public ch.lkmc.neutrodyne.youtube.api.ExtractionReservation getReservation();
+}
+-keep interface ch.lkmc.neutrodyne.youtube.api.ExtractionAdmission {
+}
 -keep class ch.lkmc.neutrodyne.youtube.api.ExtractionGate$Allow {
   ch.lkmc.neutrodyne.youtube.api.ExtractionGate$Allow INSTANCE;
 }
@@ -4285,18 +4291,18 @@
 }
 -keep interface ch.lkmc.neutrodyne.youtube.api.ExtractionOutcome {
 }
+-keep class ch.lkmc.neutrodyne.youtube.api.ExtractionReservation {
+  public <init>(long);
+}
 -keep class ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities {
   public ch.lkmc.neutrodyne.core.model.ExternalReason getExternalReason();
 }
 -keep interface ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource {
   public kotlinx.coroutines.flow.StateFlow getCapabilities();
 }
--keep class ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls {
-  public java.lang.String canonical(java.lang.String);
-  ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls INSTANCE;
-}
--keep interface ch.lkmc.neutrodyne.youtube.api.YouTubeHealth {
+-keep interface ch.lkmc.neutrodyne.youtube.api.YouTubeExtractionHealth {
   public java.lang.Object awaitLoaded(kotlin.coroutines.Continuation);
+  public void completeExtraction(ch.lkmc.neutrodyne.youtube.api.ExtractionReservation, ch.lkmc.neutrodyne.youtube.api.ExtractionOutcome);
   public ch.lkmc.neutrodyne.youtube.api.ExtractionGate extractionGate(long);
   public kotlinx.coroutines.flow.StateFlow getState();
   public void reportEngineVersion(java.lang.String);
@@ -4305,7 +4311,14 @@
   public void reportFeedRateLimited(long, java.lang.Long);
   public void reportFeedRecovered();
   public void reportRateLimited(long);
+  public ch.lkmc.neutrodyne.youtube.api.ExtractionAdmission reserveExtraction(long);
   public void retryNow();
+}
+-keep class ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls {
+  public java.lang.String canonical(java.lang.String);
+  ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls INSTANCE;
+}
+-keep interface ch.lkmc.neutrodyne.youtube.api.YouTubeHealth {
 }
 -keep class ch.lkmc.neutrodyne.youtube.api.YouTubeHealthState {
   public <init>(ch.lkmc.neutrodyne.youtube.api.BreakerState, java.lang.Long, java.lang.Long, java.lang.Long, int, java.lang.Long, int, kotlin.jvm.internal.DefaultConstructorMarker);
