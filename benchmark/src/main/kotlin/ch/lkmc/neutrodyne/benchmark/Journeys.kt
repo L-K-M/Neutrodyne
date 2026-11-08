@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.benchmark
 
+import android.util.Log
 import androidx.benchmark.macro.BaselineProfileMode
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.FrameTimingMetric
@@ -16,6 +17,7 @@ import androidx.test.uiautomator.Until
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayOutputStream
 
 private const val PACKAGE = "ch.lkmc.neutrodyne"
 private const val WAIT_MS = 30_000L
@@ -94,8 +96,24 @@ class Journeys {
             seed()
             killProcess()
             startActivityAndWait()
-            checkNotNull(device.wait(Until.findObject(By.res(navTag)), WAIT_MS)).click()
-            check(device.wait(Until.hasObject(By.res(tag)), WAIT_MS)) { "Missing $tag" }
+            try {
+                checkNotNull(device.wait(Until.findObject(By.res(navTag)), WAIT_MS)).click()
+                check(device.wait(Until.hasObject(By.res(tag)), WAIT_MS)) { "Missing $tag" }
+            } catch (error: Exception) {
+                // Macrobenchmark kills the target after a setup failure. Capture
+                // the visible state first, in the always-uploaded per-test logcat.
+                runCatching {
+                    val hierarchy =
+                        ByteArrayOutputStream().use { output ->
+                            device.dumpWindowHierarchy(output)
+                            output.toString(Charsets.UTF_8.name()).take(200_000)
+                        }
+                    hierarchy.chunked(3000).forEachIndexed { index, chunk ->
+                        Log.e("M10Journey", "$tag hierarchy[$index]: $chunk")
+                    }
+                }.onFailure { Log.e("M10Journey", "Could not capture $tag hierarchy", it) }
+                throw error
+            }
         },
         measureBlock = measure,
     )

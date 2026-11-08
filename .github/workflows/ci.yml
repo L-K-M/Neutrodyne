@@ -162,6 +162,7 @@ jobs:
           python3 scripts/ci/tests/native-msys-reexec.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
           python3 scripts/ci/tests/release-ffmpeg-source.test.py
+          python3 scripts/ci/tests/check-runtime-sources.test.py
           python3 scripts/ci/tests/network-capture.test.py
       - name: Preserve a formatting repair patch
         if: failure()
