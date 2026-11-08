@@ -28,11 +28,18 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.testing.FakeAppUpdateChecker
+import ch.lkmc.neutrodyne.core.testing.FakeCrashReporter
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeUpdateNotices
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
+import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
+import ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
+import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashOffer
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
+import ch.lkmc.neutrodyne.desktop.crash.crashDialogBuildInfo
+import ch.lkmc.neutrodyne.desktop.crash.writeCrashFile
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
@@ -45,6 +52,8 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.attribute.FileTime
 import java.util.Locale
 
 /**
@@ -298,7 +307,65 @@ class NeutrodyneWindowContentTest {
             }
         }
 
-    private fun ComposeUiTest.setWindowContent() {
+    /**
+     * 11's next-start crash offer through the real window content and graph (D62/PO-10): the
+     * dialog appears once the database gate is open, newest file first, and every button goes
+     * through the offer's injected OS seams — "Don't send" marks `.dismissed`, "Show report"
+     * reveals without marking, "Send by email" opens the bounded `mailto:` and marks `.sent`.
+     */
+    @Test
+    fun unsentCrashFilesOfferTheEmailDialogThroughTheWindow() =
+        runComposeUiTest {
+            val crashDirs = tempAppDirs("nd-window-crash").also { Files.createDirectories(it.state) }
+            val newest = crashDirs.writeCrashFile("crash-20261107-120000.txt", "newest")
+            val older = crashDirs.writeCrashFile("crash-20261106-120000.txt", "older")
+            Files.setLastModifiedTime(newest, FileTime.fromMillis(DesktopClock.now()))
+            Files.setLastModifiedTime(older, FileTime.fromMillis(DesktopClock.now() - 60_000))
+            val openedMailtos = mutableListOf<String>()
+            val revealedPaths = mutableListOf<String>()
+            setWindowContent(
+                crashOffer =
+                    DesktopCrashOffer(
+                        dirs = crashDirs,
+                        buildInfo = crashDialogBuildInfo(),
+                        clock = DesktopClock,
+                        crashReporter = FakeCrashReporter(true),
+                        urls =
+                            ExternalUrlOpener {
+                                openedMailtos += it
+                                OpenResult.OPENED
+                            },
+                        reveal =
+                            RevealInFolder {
+                                revealedPaths += it
+                                true
+                            },
+                    ),
+            )
+
+            waitUntil("the crash dialog shows", TIMEOUT_MS) {
+                onAllNodesWithText("Send by email").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Don't send").performClick()
+            waitUntil("the newer file is dismissed", TIMEOUT_MS) {
+                Files.exists(crashDirs.state.resolve("crash-20261107-120000.dismissed"))
+            }
+            onNodeWithText("Show report").performClick()
+            waitUntil("the reveal seam is called", TIMEOUT_MS) { revealedPaths.isNotEmpty() }
+            assertThat(revealedPaths.single()).isEqualTo(older.toString())
+            assertThat(Files.exists(older)).isTrue()
+            onNodeWithText("Send by email").performClick()
+            waitUntil("the mailto seam is called", TIMEOUT_MS) { openedMailtos.isNotEmpty() }
+            assertThat(openedMailtos.single()).startsWith("mailto:neutrodyne@example.com")
+            waitUntil("the older file is sent", TIMEOUT_MS) {
+                Files.exists(crashDirs.state.resolve("crash-20261106-120000.sent"))
+            }
+            waitUntil("all crashes handled closes the dialog", TIMEOUT_MS) {
+                onAllNodesWithText("Send by email").fetchSemanticsNodes().isEmpty()
+            }
+        }
+
+    private fun ComposeUiTest.setWindowContent(crashOffer: DesktopCrashOffer? = null) {
         // The default (Feeds) tab is VM-backed: its repositories come from the graph's database
         // accessor, which gates on the open — idempotent, so per-test awaits stay harmless.
         runBlocking { graph.databaseOpener.awaitOpen() }
@@ -312,6 +379,7 @@ class NeutrodyneWindowContentTest {
                 updateChecker = graph.appUpdateChecker,
                 updateNotices = graph.updateNotices,
                 settings = graph.settingsRepository,
+                crashOffer = crashOffer,
             )
         }
     }

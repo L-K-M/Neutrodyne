@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Redactor
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.InstallKind
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import java.io.IOException
 import java.lang.management.ManagementFactory
@@ -25,11 +26,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * state directory with 09's allow-listed field set — app version and code, OS and version,
  * architecture, install kind, runtime vendor and version, uptime, thread, the redacted stack
  * trace or `hs_err` summary, the last 200 redacted log lines and the [CrashKey] context. No
- * device identifiers. `InstallKind.DEV` never asks to send anything.
- *
- * M0b pending, recorded in 11: the email dialog at the next start (it needs the window) and with
- * it the mailbox wiring, so [isAvailable] is `false` until PO-10's mailbox reaches the desktop
- * build. Crash files are written regardless (privacy-off keeps them local, 09).
+ * device identifiers. `InstallKind.DEV` never asks to send anything. The email dialog at the
+ * next start uses the committed mailbox when configured.
  */
 class DesktopCrashReporter(
     private val dirs: AppDirs,
@@ -41,7 +39,12 @@ class DesktopCrashReporter(
     private val processExit: (Int) -> Unit = { code -> Runtime.getRuntime().halt(code) },
 ) : CrashReporter,
     CrashContext {
-    override val isAvailable: Boolean = false
+    override val isAvailable: Boolean
+        get() {
+            val desktop = buildInfo.desktop
+            if (desktop?.installKind == InstallKind.DEV) return false
+            return buildInfo.acraMailto.isNotBlank()
+        }
 
     private val context = LinkedHashMap<String, String>()
     private val backgroundFiles = AtomicInteger(0)
