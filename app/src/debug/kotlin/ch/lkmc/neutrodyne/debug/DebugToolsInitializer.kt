@@ -25,17 +25,9 @@ class DebugToolsInitializer : AppInitializer {
     override val order: Int = ORDER
 
     override suspend fun run() {
+        val instrumented = System.getProperty(NeutrodyneApplication.INSTRUMENTED_TEST_PROPERTY) != null
         StrictMode.setVmPolicy(
-            StrictMode.VmPolicy
-                .Builder()
-                .detectLeakedClosableObjects()
-                .detectLeakedSqlLiteObjects()
-                .detectLeakedRegistrationObjects()
-                .detectActivityLeaks()
-                .detectFileUriExposure()
-                .penaltyLog()
-                .penaltyDeath()
-                .build(),
+            debugVmPolicy(if (instrumented) DebugVmPolicyMode.INSTRUMENTED_TEST else DebugVmPolicyMode.DEVELOPMENT),
         )
         withContext(Dispatchers.Main) {
             StrictMode.setThreadPolicy(
@@ -51,7 +43,6 @@ class DebugToolsInitializer : AppInitializer {
         }
 
         // Heap dumps stall device tests; NeutrodyneTestRunner sets the property (09 Gradle Managed Devices)
-        val instrumented = System.getProperty(NeutrodyneApplication.INSTRUMENTED_TEST_PROPERTY) != null
         LeakCanary.config = LeakCanary.config.copy(dumpHeap = !instrumented)
     }
 
