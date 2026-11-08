@@ -3,11 +3,16 @@
 // implementation is embedded: the COM delegates and ownership below are ours.
 #include "session.h"
 #include <mmdeviceapi.h>
+#include <propkey.h>
+#include <propsys.h>
+#include <propvarutil.h>
 #include <roapi.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <string.h>
 #include <systemmediatransportcontrolsinterop.h>
 #include <wchar.h>
+#include <wctype.h>
 #include <windows.foundation.h>
 #include <windows.h>
 #include <windows.media.h>
@@ -65,6 +70,14 @@ HWND window = nullptr;
 wchar_t title[TEXT_CAPACITY]{}, artist[TEXT_CAPACITY]{}, album[TEXT_CAPACITY]{}, artPath[TEXT_CAPACITY]{};
 wchar_t endpoint[ENDPOINT_CAPACITY]{};
 wchar_t thumbnailArt[TEXT_CAPACITY]{};
+
+// The process AppUserModelID configured through nd_win_process_set_aumid —
+// empty until the shell sets it at start-up. The media-session worker
+// re-asserts this value, so a late session open cannot reset a packaged
+// build's release ID to the development one (11 Start-up step 4).
+SRWLOCK identityLock = SRWLOCK_INIT;
+constexpr size_t AUMID_CAPACITY = 129; // MS limit 128 + terminator.
+wchar_t processAumid[AUMID_CAPACITY]{};
 
 // SetThreadExecutionState is per-thread: a release from a different thread would
 // leave the acquire set. The power state therefore lives on one dedicated thread
@@ -413,8 +426,18 @@ DWORD WINAPI run(void *) noexcept {
     HSTRING className = nullptr;
     HRESULT result = RoInitialize(RO_INIT_MULTITHREADED);
     const bool initialized = SUCCEEDED(result);
-    if (SUCCEEDED(result))
-        result = SetCurrentProcessExplicitAppUserModelID(L"ch.lkmc.neutrodyne.debug");
+    if (SUCCEEDED(result)) {
+        // The shell owns the process AppUserModelID and sets it before any
+        // window exists (11 Start-up step 4). A session opened first still
+        // needs it on this thread, so the worker re-asserts the configured
+        // value — never a hardcoded ID that could overwrite the release one.
+        wchar_t configured[AUMID_CAPACITY]{};
+        AcquireSRWLockShared(&identityLock);
+        memcpy(configured, processAumid, sizeof(configured));
+        ReleaseSRWLockShared(&identityLock);
+        if (configured[0])
+            result = SetCurrentProcessExplicitAppUserModelID(configured);
+    }
     WNDCLASSW cls{};
     cls.lpfnWndProc = procedure;
     cls.hInstance = GetModuleHandleW(nullptr);
@@ -543,6 +566,17 @@ HRESULT utf8(const char *value, wchar_t *buffer, int capacity) {
     return S_OK;
 }
 
+// MS AppUserModelIDs: at most 128 UTF-16 units, no spaces (appids doc).
+bool validAumid(const wchar_t *id) {
+    const size_t length = wcslen(id);
+    if (!length || length > 128)
+        return false;
+    for (size_t i = 0; i < length; ++i)
+        if (id[i] == L' ')
+            return false;
+    return true;
+}
+
 DWORD WINAPI powerRun(void *) noexcept {
     for (;;) {
         WaitForSingleObject(powerRequest, INFINITE);
@@ -642,6 +676,84 @@ extern "C" ND_API void nd_session_close(void) {
         CloseHandle(worker);
         worker = nullptr;
     }
+}
+extern "C" ND_API int nd_win_process_set_aumid(const char *aumid_utf8) {
+    wchar_t id[AUMID_CAPACITY];
+    HRESULT result = utf8(aumid_utf8, id, AUMID_CAPACITY);
+    if (FAILED(result))
+        return static_cast<int>(result);
+    if (!validAumid(id))
+        return ND_E_ARG;
+    result = SetCurrentProcessExplicitAppUserModelID(id);
+    if (FAILED(result))
+        return static_cast<int>(result);
+    AcquireSRWLockExclusive(&identityLock);
+    memcpy(processAumid, id, (wcslen(id) + 1) * sizeof(wchar_t));
+    ReleaseSRWLockExclusive(&identityLock);
+    return 0;
+}
+extern "C" ND_API int nd_win_shortcut_set_aumid(const char *lnk_utf8, const char *aumid_utf8) {
+    wchar_t lnk[TEXT_CAPACITY], id[AUMID_CAPACITY];
+    HRESULT result = utf8(lnk_utf8, lnk, TEXT_CAPACITY);
+    if (SUCCEEDED(result))
+        result = utf8(aumid_utf8, id, AUMID_CAPACITY);
+    if (FAILED(result))
+        return static_cast<int>(result);
+    if (!validAumid(id))
+        return ND_E_ARG;
+    // Only an absolute path to an existing .lnk is ever written; the caller
+    // vets the folder. Data only — the path never reaches a command line.
+    const size_t length = wcslen(lnk);
+    const bool absolute = (length > 2 && iswalpha(lnk[0]) && lnk[1] == L':' && lnk[2] == L'\\') ||
+                          (length > 2 && lnk[0] == L'\\' && lnk[1] == L'\\');
+    if (!absolute || length < 5 || _wcsicmp(lnk + length - 4, L".lnk") != 0)
+        return ND_E_ARG;
+    if (GetFileAttributesW(lnk) == INVALID_FILE_ATTRIBUTES)
+        return static_cast<int>(HRESULT_FROM_WIN32(GetLastError()));
+    HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(com) && com != RPC_E_CHANGED_MODE)
+        return static_cast<int>(com);
+    IShellLinkW *link = nullptr;
+    IPersistFile *file = nullptr;
+    IPropertyStore *store = nullptr;
+    result = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&link));
+    if (SUCCEEDED(result))
+        result = link->QueryInterface(IID_PPV_ARGS(&file));
+    if (SUCCEEDED(result))
+        result = file->Load(lnk, STGM_READ);
+    if (SUCCEEDED(result))
+        result = link->QueryInterface(IID_PPV_ARGS(&store));
+    bool dirty = true;
+    if (SUCCEEDED(result)) {
+        PROPVARIANT current;
+        PropVariantInit(&current);
+        // A shortcut already carrying the ID is left untouched: the MSI's file
+        // keeps its timestamp and no write races an installer repair check.
+        if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &current)) && current.vt == VT_LPWSTR &&
+            current.pwszVal && wcscmp(current.pwszVal, id) == 0) {
+            dirty = false;
+        }
+        PropVariantClear(&current);
+    }
+    if (SUCCEEDED(result) && dirty) {
+        PROPVARIANT value;
+        result = InitPropVariantFromString(id, &value);
+        if (SUCCEEDED(result)) {
+            result = store->SetValue(PKEY_AppUserModel_ID, value);
+            PropVariantClear(&value);
+        }
+        if (SUCCEEDED(result))
+            result = store->Commit();
+        // pszFileName NULL saves back to the file IPersistFile::Load opened.
+        if (SUCCEEDED(result))
+            result = file->Save(nullptr, TRUE);
+    }
+    release(store);
+    release(file);
+    release(link);
+    if (SUCCEEDED(com))
+        CoUninitialize();
+    return static_cast<int>(result);
 }
 extern "C" ND_API int nd_power_keep_awake(int on) {
     if (on != 0 && on != 1)

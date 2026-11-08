@@ -34,6 +34,17 @@ ND_API int nd_power_keep_awake(int on);
    1 enabled, 2 requires approval, 3 not found); register and unregister
    return 0 or a negative ND_E_* code. */
 ND_API int nd_mac_login_item(int op);
+/* Windows only (11 Start-up step 4): SetCurrentProcessExplicitAppUserModelID
+   for the whole process, remembered so a later media-session start re-asserts
+   it instead of resetting a packaged build's release ID. `aumid_utf8` is a
+   borrowed UTF-8 string — at most 128 UTF-16 units, no spaces. The symbol is
+   absent on other platforms; a missing export means unsupported. */
+ND_API int nd_win_process_set_aumid(const char *aumid_utf8);
+/* Windows only (11 Windows MSI and ZIP): stamp System.AppUserModel.ID on a
+   shortcut through IShellLinkW + IPropertyStore + IPersistFile::Save.
+   `lnk_utf8` must name an absolute, existing .lnk path; a shortcut already
+   carrying `aumid_utf8` is left untouched. Same missing-export contract. */
+ND_API int nd_win_shortcut_set_aumid(const char *lnk_utf8, const char *aumid_utf8);
 #ifdef __cplusplus
 }
 #endif
