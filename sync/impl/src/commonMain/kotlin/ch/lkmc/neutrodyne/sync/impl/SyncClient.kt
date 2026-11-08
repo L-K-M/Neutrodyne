@@ -186,7 +186,7 @@ class KtorSyncClient(
         userCode: String,
         approve: Boolean,
     ) {
-        postJson<LinkConfirmRequest, Unit>(
+        postNoContent(
             baseUrl,
             "/api/v1/auth/link/confirm",
             LinkConfirmRequest(userCode, approve),
@@ -195,7 +195,7 @@ class KtorSyncClient(
     }
 
     override suspend fun logout() {
-        postNoContent(baseUrlProvider(), "/api/v1/auth/logout")
+        postNoContent(baseUrlProvider(), "/api/v1/auth/logout", Unit)
     }
 
     override suspend fun devices(): List<DeviceDto> = getJson(baseUrlProvider().trimEnd('/') + "/api/v1/devices")
@@ -236,12 +236,16 @@ class KtorSyncClient(
             tokenProvider(),
         )
 
-    private suspend fun postNoContent(
+    // Endpoints answering a bare 204 must not decode a body; `auth` is explicit because a call
+    // without an override token still authenticates through `tokenProvider` (logout does).
+    private suspend inline fun <reified B : Any> postNoContent(
         baseUrl: String,
         path: String,
+        body: B,
         token: String? = null,
+        auth: Boolean = true,
     ) {
-        val response = request(baseUrl, path, Unit, token != null, token)
+        val response = request(baseUrl, path, body, auth, token)
         if (!response.status.isSuccess()) throw problem(response)
     }
 

@@ -9,10 +9,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 /**
- * The [SyncActivity] flag's implementation: a count of in-flight rounds, so overlapping
- * rounds (the periodic lane and a manual "Sync now") keep it active until the last one
- * ends. [SyncEngine.round] brackets its body with [begin]/[end], which also clears the
- * flag when a round fails or is cancelled.
+ * The [SyncActivity] flag's implementation: a count of in-flight rounds and first-link
+ * merges, so overlapping work (the periodic lane, a manual "Sync now", a link merge)
+ * keeps it active until the last one ends. [SyncEngine.round] and [FirstLinkMerger.merge]
+ * bracket their bodies with [begin]/[end], which also clears the flag when one fails or is
+ * cancelled.
  */
 class SyncActivityState : SyncActivity {
     private val activeCount = MutableStateFlow(0)

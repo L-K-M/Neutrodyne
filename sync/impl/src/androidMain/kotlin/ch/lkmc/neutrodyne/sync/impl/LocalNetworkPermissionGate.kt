@@ -24,6 +24,10 @@ sealed interface LocalNetworkClassification {
  * permission that request would time out), and sets [LocalNetworkAccess.syncAllowed] only while
  * the permission is granted. Every other client keeps the guard, so LAN feeds still show
  * `LocalNetworkUnsupported`.
+ *
+ * The gate is the one writer for the bypass and reads the live OS state on every verdict, so a
+ * permission granted before the process started — or later in system settings — enables the SYNC
+ * client without the prompt, and a revocation clears it again.
  */
 class LocalNetworkPermissionGate(
     private val context: Context,
@@ -33,11 +37,18 @@ class LocalNetworkPermissionGate(
     private val connectivity =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
-    /** Whether the runtime permission is granted (below API 37 it is always true). */
+    /**
+     * Whether the runtime permission is granted (below API 37 it is always true). Keeps
+     * [LocalNetworkAccess.syncAllowed] in step with the real OS state, so no prompt is needed for
+     * an already-granted permission and a revocation is picked up at the next verdict.
+     */
     fun hasPermission(): Boolean {
         val sdkInt = platform.androidSdkInt
-        if (sdkInt == null || sdkInt < 37) return true
-        return context.checkSelfPermission(PERMISSION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val granted =
+            sdkInt == null || sdkInt < 37 ||
+                context.checkSelfPermission(PERMISSION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        access.setSyncAllowed(granted)
+        return granted
     }
 
     /** Re-classifies after the permission result; grants the SYNC bypass while granted. */
