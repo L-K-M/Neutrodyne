@@ -67,7 +67,13 @@ elif args[:3] == ["-s", scenario["serial"], "shell"] and args[3:6] == ["ls", "-1
 elif args[:3] == ["-s", scenario["serial"], "shell"] and args[3:5] == ["stat", "-c"]:
     name = args[6].rsplit("/", 1)[1]
     growth = scenario.get("grow", {}).get(name)
-    if growth:
+    versions = scenario.get("versions", {}).get(name)
+    if versions:
+        # The library rewrites the cumulative JSON whole after every test; the
+        # fixture advances one version per pull of the name.
+        pulled = state.get("pulls", {}).get(name, 0)
+        print(str(len(versions[min(pulled, len(versions) - 1)])))
+    elif growth:
         seen = state["stats"].get(name, 0)
         state["stats"][name] = seen + 1
         print(str(growth[min(seen, len(growth) - 1)]))
@@ -78,9 +84,16 @@ elif args[:3] == ["-s", scenario["serial"], "shell"] and args[3:5] == ["stat", "
 elif args[:3] == ["-s", scenario["serial"], "pull"]:
     name = args[3].rsplit("/", 1)[1]
     target = Path(args[4])
+    versions = scenario.get("versions", {}).get(name)
     if scenario.get("pull_error"):
         print(f"adb: error: failed to pull {name}", file=sys.stderr)
         code = 1
+    elif versions:
+        pulls = state.get("pulls", {})
+        pulled = pulls.get(name, 0)
+        pulls[name] = pulled + 1
+        state["pulls"] = pulls
+        target.write_bytes(versions[min(pulled, len(versions) - 1)].encode("utf-8"))
     elif name in scenario["contents"]:
         payload = scenario["contents"][name]
         growth = scenario.get("grow", {}).get(name)
@@ -116,11 +129,27 @@ sys.exit(int(os.environ.get("CAPTURE_CHILD_EXIT", "0")))
 
 
 TRACE = "ColdStartBenchmark_coldStartToFeeds_iter005_2026-11-08-21-38-12.perfetto-trace"
-SUMMARY = "ColdStartBenchmark_coldStartToFeeds.json"
+# The pinned androidx.benchmark 1.5.0 ResultWriter overwrites ONE cumulative
+# file per run - <target package>-benchmarkData.json, a Moshi-serialized
+# BenchmarkData object {"context": ..., "benchmarks": [TestResult...]} - after
+# EVERY test method. There are no per-test JSONs (R5 finding I1).
+REPORT = "ch.lkmc.neutrodyne.benchmark-benchmarkData.json"
 TRACE_TEXT = "perfetto trace fixture, bytes matter, not a real trace"
-SUMMARY_TEXT = '{"context": {}, "benchmarks": []}'
+REPORT_COLD = '{"context": {"coreCount": 4}, "benchmarks": [{"name": "coldStartToFeeds"}]}'
+REPORT_FULL = (
+    '{"context": {"coreCount": 4}, "benchmarks": '
+    '[{"name": "coldStartToFeeds"}, {"name": "coverGridFling"}]}'
+)
+# A same-length rewrite: only a content comparison can see it changed.
+REPORT_FULL_SAME_SIZE = (
+    '{"context": {"coreCount": 5}, "benchmarks": '
+    '[{"name": "coldStartToFeeds"}, {"name": "coverGridFling"}]}'
+)
+assert len(REPORT_FULL) == len(REPORT_FULL_SAME_SIZE)
+# A rewrite caught mid-write (unterminated JSON).
+REPORT_TRUNCATED = REPORT_FULL[: len(REPORT_FULL) // 2]
 TRACE_BODY = TRACE_TEXT.encode()
-SUMMARY_BODY = SUMMARY_TEXT.encode()
+REPORT_COLD_BODY = REPORT_COLD.encode()
 
 
 class BenchmarkLiveCaptureTest(unittest.TestCase):
@@ -145,8 +174,8 @@ class BenchmarkLiveCaptureTest(unittest.TestCase):
             "serial": "emulator-5554",
             "online_after": 3,
             "list_after": 6,
-            "names": [TRACE, SUMMARY],
-            "contents": {TRACE: TRACE_TEXT, SUMMARY: SUMMARY_TEXT},
+            "names": [TRACE, REPORT],
+            "contents": {TRACE: TRACE_TEXT, REPORT: REPORT_COLD},
             "late_names_marker": None,
         }
         scenario.update(overrides)
@@ -186,11 +215,11 @@ class BenchmarkLiveCaptureTest(unittest.TestCase):
 
     def test_delayed_device_and_directory_then_collected(self):
         self._scenario(online_after=3, list_after=8)
-        self.state_path.write_text(json.dumps({"calls": [], "stats": {}}))
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
         result, calls = self._run_wrapper(child_env={"CAPTURE_CHILD_SLEEP": "1"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(
-            {TRACE: TRACE_BODY, SUMMARY: SUMMARY_BODY},
+            {TRACE: TRACE_BODY, REPORT: REPORT_COLD_BODY},
             self._collected(),
             "files that appeared late were never pulled",
         )
@@ -244,6 +273,102 @@ class BenchmarkLiveCaptureTest(unittest.TestCase):
         result, _ = self._run_wrapper(child_env={"CAPTURE_CHILD_EXIT": "37"})
         self.assertEqual(37, result.returncode, "the child's failure code was masked")
         self.assertIn(TRACE, self._collected())
+
+    def test_cumulative_json_rewrite_supersedes_the_cold_start_snapshot(self):
+        # Macrobenchmark 1.5.0 overwrites <pkg>-benchmarkData.json after every
+        # test: the cold-start snapshot first, then the rewrite that adds
+        # cover-grid results under the SAME name. Skipping collected names
+        # keeps the stale first snapshot forever (R5 I1).
+        self._scenario(
+            online_after=0,
+            list_after=0,
+            names=[REPORT],
+            versions={REPORT: [REPORT_COLD, REPORT_FULL]},
+        )
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
+        result, _ = self._run_wrapper(child_env={"CAPTURE_CHILD_SLEEP": "0.6"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            {REPORT: REPORT_FULL.encode()},
+            self._collected(),
+            "the retained JSON is the stale cold-start snapshot, not the rewrite "
+            "that carries the cover-grid results",
+        )
+
+    def test_same_size_cumulative_rewrite_is_detected_by_content(self):
+        rewrite = REPORT_FULL_SAME_SIZE
+        self._scenario(
+            online_after=0,
+            list_after=0,
+            names=[REPORT],
+            versions={REPORT: [REPORT_FULL, rewrite]},
+        )
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
+        result, _ = self._run_wrapper(child_env={"CAPTURE_CHILD_SLEEP": "0.6"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(
+            {REPORT: rewrite.encode()},
+            self._collected(),
+            "a same-size rewrite slipped past a size-only snapshot cache",
+        )
+
+    def test_malformed_rewrite_keeps_prior_json_and_retries_until_valid(self):
+        valid_full = REPORT_FULL
+        self._scenario(
+            online_after=0,
+            list_after=0,
+            names=[REPORT],
+            versions={REPORT: [REPORT_COLD, REPORT_TRUNCATED, valid_full]},
+        )
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
+        result, calls = self._run_wrapper(child_env={"CAPTURE_CHILD_SLEEP": "0.6"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        # The mid-write snapshot never replaces the prior complete JSON; the
+        # next valid rewrite does.
+        self.assertEqual({REPORT: valid_full.encode()}, self._collected())
+        report_pulls = [call for call in calls if "pull" in call and call[3].endswith(REPORT)]
+        self.assertGreaterEqual(len(report_pulls), 3, calls)
+        self.assertNotIn("was never captured", result.stderr)
+
+    def test_uncapturable_final_rewrite_keeps_snapshot_and_warns(self):
+        self._scenario(
+            online_after=0,
+            list_after=0,
+            names=[REPORT],
+            versions={REPORT: [REPORT_COLD, REPORT_TRUNCATED]},
+        )
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
+        result, _ = self._run_wrapper(child_env={"CAPTURE_CHILD_SLEEP": "0.6"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        # The last complete JSON stays; the un-captured final rewrite is an
+        # explicit diagnostic gap, not a silent success.
+        self.assertEqual({REPORT: REPORT_COLD_BODY}, self._collected())
+        self.assertIn("::warning::", result.stderr)
+        self.assertIn("was never captured", result.stderr)
+
+    def test_replacement_is_not_a_new_file_or_consumed_budget(self):
+        other = "CoverGridBenchmark_coverGridFling_iter000_2026-11-08-21-40-00.perfetto-trace"
+        self._scenario(
+            online_after=0,
+            list_after=0,
+            names=[other, REPORT],
+            contents={other: "second trace"},
+            versions={REPORT: [REPORT_COLD, REPORT_FULL]},
+        )
+        self.state_path.write_text(json.dumps({"calls": [], "stats": {}, "pulls": {}}))
+        result, _ = self._run_wrapper(
+            "--max-files", "1", child_env={"CAPTURE_CHILD_SLEEP": "0.6"}
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        # The file cap admits the JSON once; its rewrite is a replacement of
+        # stored bytes, not another file, so it must still be published while
+        # the cap keeps gating genuinely new names.
+        self.assertEqual(
+            {REPORT: REPORT_FULL.encode()},
+            self._collected(),
+            "the rewrite was refused as if it were a new file",
+        )
+        self.assertIn("size cap", result.stderr)
 
     def test_pull_failures_leave_a_diagnostic_gap_and_preserve_status(self):
         self._scenario(online_after=0, list_after=0, pull_error=True)

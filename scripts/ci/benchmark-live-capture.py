@@ -4,7 +4,7 @@
 additional-test-output files to the host while the emulator is still alive.
 
 AGP 9.4.1's managed-device runner (android-test-engine 1.0.1) writes the
-Macrobenchmark Perfetto traces and summary JSONs to
+Macrobenchmark Perfetto traces and the benchmark JSON to
 /sdcard/Android/media/<benchmark package>/additional_test_output/ on the
 device, and its host-side collector runs in the test runner's finally - yet
 hosted runs reached the CI host with zero of those files (09-quality-and-release.md,
@@ -20,14 +20,24 @@ hold them):
   shell convention 128+signal); wrapper problems never mask it.
 - Every adb call is a bounded subprocess; the child is reaped on normal exit
   and on SIGINT/SIGTERM, which are forwarded to it first.
-- Only flat files matching the benchmark output name pattern are pulled, into
-  <output>/<serial>/ via .partial + rename, once per name; the destination is
-  cleared at startup so no stale or half-written files survive a rerun.
+- Traces are unique per iteration and immutable once moved: they are pulled
+  once per name into <output>/<serial>/ via .partial + rename and never
+  re-pulled.
+- The pinned library's ONE cumulative benchmarkData JSON (rewritten whole
+  after every test method, ResultWriter.appendTestResult) is re-examined on
+  every sweep and republished - by content, so a same-size rewrite counts -
+  only when the rewrite is complete and parseable; a truncated or in-flight
+  rewrite keeps the prior complete snapshot and is retried. Replacements
+  adjust the stored byte total instead of consuming it twice and never count
+  as a new file.
+- The destination is cleared at startup so no stale or half-written files
+  survive a rerun.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
@@ -45,6 +55,12 @@ DEFAULT_OUTPUT = Path("benchmark/build/outputs/host-collected")
 # Perfetto traces and the per-run summary JSONs. No directories, no traversal.
 EXPECTED_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.(perfetto-trace|json)$")
 SAFE_SERIAL = re.compile(r"^[A-Za-z0-9._-]+$")
+
+# The pinned androidx.benchmark 1.5.0 ResultWriter overwrites this one file
+# (<instrumentation target package>-benchmarkData.json, self-instrumenting)
+# with the cumulative report after EVERY test method; it is not immutable, so
+# it is refreshed instead of collected once.
+CUMULATIVE_JSON_NAME = "ch.lkmc.neutrodyne.benchmark-benchmarkData.json"
 
 DEVICE_QUERY_TIMEOUT_SECONDS = 10
 PULL_TIMEOUT_SECONDS = 60
@@ -81,6 +97,21 @@ def _run_adb(adb: str, argv: list[str]) -> subprocess.CompletedProcess[str] | No
         return None
 
 
+def _valid_report(data: bytes) -> dict | None:
+    """The pinned library's file is one BenchmarkData JSON object with a
+    'benchmarks' list (androidx.benchmark.json.BenchmarkData, Moshi-serialized);
+    a truncated or in-flight rewrite fails this."""
+    try:
+        parsed = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+
+    if isinstance(parsed, dict) and isinstance(parsed.get("benchmarks"), list):
+        return parsed
+
+    return None
+
+
 class CaptureState:
     """Counts that turn a zero-file run into an explained diagnostic gap."""
 
@@ -92,6 +123,7 @@ class CaptureState:
         self.listing_failures = 0
         self.listing_successes = 0
         self.pull_failures = 0
+        self.invalid_rewrites = 0
         self.unstable_left: set[str] = set()
         self.capped_out = False
 
@@ -111,6 +143,8 @@ class CaptureState:
             reasons.append(f"{self.pull_failures} pulls failed")
         if self.unstable_left:
             reasons.append(f"{len(self.unstable_left)} files never stabilized")
+        if self.invalid_rewrites:
+            reasons.append(f"{self.invalid_rewrites} cumulative-JSON rewrites failed validation")
         if self.capped_out:
             reasons.append("capture cap reached")
         if not reasons:
@@ -130,6 +164,8 @@ class LiveCollector:
         self.total_bytes = 0
         self.state = CaptureState()
         self.collector_failure = ""
+        self.report_bytes: bytes | None = None
+        self.report_device_size: int | None = None
 
     def resolve_serial(self) -> str | None:
         result = _run_adb(self.adb, ["devices"])
@@ -236,13 +272,91 @@ class LiveCollector:
         )
         return True
 
+    def refresh_cumulative(self, serial: str) -> None:
+        """Re-pull the single cumulative benchmarkData JSON the pinned library
+        rewrites whole after every test; publish the latest complete rewrite
+        through .partial + atomic replace. A truncated or in-flight rewrite
+        keeps the prior complete snapshot and is retried next sweep."""
+        size = self.remote_size(serial, CUMULATIVE_JSON_NAME)
+        if size is None:
+            self.state.unstable_left.add(CUMULATIVE_JSON_NAME)
+            return
+
+        self.report_device_size = size
+        target_dir = self.output / serial
+        target_dir.mkdir(parents=True, exist_ok=True)
+        partial = target_dir / f"{CUMULATIVE_JSON_NAME}.partial"
+        try:
+            try:
+                result = subprocess.run(
+                    [self.adb, "-s", serial, "pull", f"{self.remote_dir}/{CUMULATIVE_JSON_NAME}", str(partial)],
+                    capture_output=True,
+                    text=True,
+                    timeout=PULL_TIMEOUT_SECONDS,
+                    check=False,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                self.state.pull_failures += 1
+                return
+
+            if result.returncode != 0:
+                self.state.pull_failures += 1
+                return
+
+            if not partial.is_file() or partial.stat().st_size != size:
+                self.state.unstable_left.add(CUMULATIVE_JSON_NAME)
+                return
+
+            data = partial.read_bytes()
+            report = _valid_report(data)
+            if report is None:
+                self.state.invalid_rewrites += 1
+                print(
+                    f"benchmark-live-capture: keeping prior {CUMULATIVE_JSON_NAME}; "
+                    "the device rewrite failed validation",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+
+            if data == self.report_bytes:
+                return
+
+            partial.replace(target_dir / CUMULATIVE_JSON_NAME)
+        finally:
+            if partial.exists():
+                partial.unlink()
+
+        # A replacement swaps stored bytes; it is not another file and does not
+        # consume the byte budget twice.
+        previous = len(self.report_bytes) if self.report_bytes is not None else 0
+        first = CUMULATIVE_JSON_NAME not in self.collected
+        self.report_bytes = data
+        self.collected.add(CUMULATIVE_JSON_NAME)
+        self.total_bytes += size - previous
+        kind = "collected" if first else "refreshed"
+        print(
+            f"benchmark-live-capture: {kind} {serial}:{CUMULATIVE_JSON_NAME} "
+            f"({size} bytes, {len(report['benchmarks'])} tests)",
+            file=sys.stderr,
+            flush=True,
+        )
+
     def sweep(self, serial: str) -> None:
         names = self.list_names(serial)
         if names is None:
             return
 
         self.state.unstable_left.clear()
+        # The cumulative JSON is refreshed even at the file cap and even when
+        # already collected: its later rewrites carry the later tests' results.
+        if CUMULATIVE_JSON_NAME in names:
+            self.refresh_cumulative(serial)
+
         for name in names:
+            if name == CUMULATIVE_JSON_NAME:
+                continue
+
             if name in self.collected:
                 continue
 
@@ -289,6 +403,18 @@ class LiveCollector:
             print(
                 "::warning::benchmark-live-capture: capture stopped at the size cap with "
                 f"{len(self.collected)} files; later device files were not collected",
+                file=sys.stderr,
+                flush=True,
+            )
+        if self.report_bytes is not None and self.report_device_size not in (
+            None,
+            len(self.report_bytes),
+        ):
+            print(
+                f"::warning::benchmark-live-capture: the last on-device rewrite of "
+                f"{CUMULATIVE_JSON_NAME} ({self.report_device_size} bytes) was never "
+                f"captured; the retained snapshot ({len(self.report_bytes)} bytes) is "
+                "from an earlier test",
                 file=sys.stderr,
                 flush=True,
             )
