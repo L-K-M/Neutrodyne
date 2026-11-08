@@ -1700,6 +1700,13 @@ variant) and miniaudio's MIT-0 text.
 
 ### Image scan rules
 
+**Implementation note (2026-11-08):** the image checker and Windows installer
+exit-code helper are implemented with boundary fixtures. The checker validates
+the actual MSI directory chain, binds image JARs and extracted Skiko natives to
+the generated classpath manifests, and permits only the inert replay arming
+interface among test-named contracts. The release workflow wiring follows in a
+separate slice; real Windows installer execution is still pending.
+
 `scripts/ci/check-desktop-image.sh` runs on every image (PR builds on Linux x64, every target nightly and at release) and fails when an image:
 
 - contains a path matching `_dbm*`, `libdb*`, `_gdbm*`, `libreadline*`, `readline*` (other than libedit), `_tkinter*`, `libtcl*`, `libtk*`, `tcl9*`, `tk9*`, `site-packages/pip`, `ensurepip`, `mutagen`, `bgutil`, `qjs`, `qjs.exe`, `deno`, `node`, `bun`, `AppRun`, `libfuse*`, `proguard*`, `jextract*`, `javafx*`, `vlcj*`, `gstreamer*`, `libavfilter*`, `libswscale*`, `libpostproc*` or `libmpv*` (the last only while the fallback is not chosen);
