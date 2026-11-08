@@ -6,9 +6,11 @@ import android.os.Build
 import android.os.LocaleList
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -20,6 +22,7 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.After
 import org.junit.Assert.assertThrows
 import org.junit.Assume.assumeTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,6 +41,12 @@ import java.util.Locale
 class PerAppLanguageTest {
     @get:Rule
     val compose = createAndroidComposeRule<MainActivity>()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Before
+    fun enableFrameworkAccessibilityChecks() {
+        if (Build.VERSION.SDK_INT >= 34) compose.enableAccessibilityChecks()
+    }
 
     @After
     fun restoreLocales() {

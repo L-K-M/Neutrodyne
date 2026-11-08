@@ -113,7 +113,7 @@ trap request_cancel INT TERM
 # Snapshot the .cfg read-only and compute the child's JAVA_TOOL_OPTIONS. The
 # .cfg's java-options are command-line options and override JAVA_TOOL_OPTIONS;
 # `_JAVA_OPTIONS` overrides both. A conflicting value fails before launch.
-JAVA_TOOL_OPTIONS="$(python3 - "$CFG" "$SNAPSHOT" "${JAVA_TOOL_OPTIONS-}" "${_JAVA_OPTIONS-}" <<'PY'
+python3 - "$CFG" "$SNAPSHOT" "${JAVA_TOOL_OPTIONS-}" "${_JAVA_OPTIONS-}" >"$RUN_DIR/java-tool-options" <<'PY' || exit 1
 import hashlib
 import os
 import stat
@@ -229,7 +229,9 @@ if underscore_value is not None and underscore_value != "true":
 # false there; unrelated options are preserved.
 print(f"{jto} {SMOKE_OPT}".strip() if jto.strip() else SMOKE_OPT)
 PY
-)" || exit 1
+# A heredoc inside $(...) is misparsed by macOS's system Bash 3.2. Keep the
+# Python input outside command substitution, then read its successful result.
+JAVA_TOOL_OPTIONS="$(cat "$RUN_DIR/java-tool-options")"
 export JAVA_TOOL_OPTIONS
 
 # The watchdog runs the launcher in its own session/process group so a timeout or

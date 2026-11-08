@@ -445,7 +445,7 @@ class FeedsScreenTest {
             onNodeWithText("Ep 1").assertIsDisplayed()
 
             // Scrolling to a row only on page two drives the append load.
-            onNodeWithTag("feed-list").performScrollToNode(hasText("Ep 25"))
+            onNodeWithTag("feed_list").performScrollToNode(hasText("Ep 25"))
             waitForIdle()
             onNodeWithText("Ep 25").assertIsDisplayed()
 
@@ -477,7 +477,7 @@ class FeedsScreenTest {
 
             // Accessing the placeholder edge of the loaded page triggers the failing append.
             source.failNextAppend = true
-            onNodeWithTag("feed-list").performScrollToIndex(90)
+            onNodeWithTag("feed_list").performScrollToIndex(90)
             waitUntil(timeoutMillis = 5_000) { items.loadState.append is LoadState.Error }
 
             // Mid-list — hundreds of placeholders short of the old footer spot — the pinned
@@ -865,7 +865,7 @@ class FeedsScreenTest {
 
     private fun ComposeUiTest.pageList(ref: FeedSourceRef) =
         onNode(
-            hasTestTag("feed-list") and hasAnyAncestor(hasTestTag("feed-page:${ref.encode()}")),
+            hasTestTag("feed_list") and hasAnyAncestor(hasTestTag("feed-page:${ref.encode()}")),
             useUnmergedTree = true,
         )
 
@@ -1133,7 +1133,7 @@ private class PagerFixture {
         test.waitForIdle()
         test
             .onNode(
-                hasTestTag("feed-list") and hasAnyAncestor(hasTestTag("feed-page:${ref(id).encode()}")),
+                hasTestTag("feed_list") and hasAnyAncestor(hasTestTag("feed-page:${ref(id).encode()}")),
                 useUnmergedTree = true,
             ).assertIsDisplayed()
     }
