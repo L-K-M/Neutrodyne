@@ -340,6 +340,7 @@ internal object DesktopShell {
                 playbackState = graph.playbackStateSource,
                 busySignal = busySignal,
                 clock = DesktopClock,
+                syncFocusPoke = graph.syncFocusPoke::poke,
                 updateChecker = graph.appUpdateChecker,
                 crashOffer =
                     DesktopCrashOffer(

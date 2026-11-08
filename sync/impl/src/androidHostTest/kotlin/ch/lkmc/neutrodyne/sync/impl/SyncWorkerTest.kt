@@ -12,12 +12,15 @@ import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
+import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -107,6 +110,28 @@ class SyncWorkerTest {
                         activity = SyncActivityState(),
                         gate = FakeLocalNetworkGate(),
                     )
+                val schedulerCalls = mutableListOf<String>()
+                val scheduler =
+                    SyncScheduler(
+                        db = db,
+                        round = {},
+                        playback = NoPlaybackSync,
+                        network = FakeNetworkMonitor(),
+                        clock = clock,
+                        scope = CoroutineScope(currentCoroutineContext()),
+                        hooks =
+                            object : SyncScheduleHooks {
+                                override fun interactive(): Boolean = false
+
+                                override fun schedulePush(reason: ch.lkmc.neutrodyne.sync.api.SyncRoundReason) = Unit
+
+                                override suspend fun onLinked() = Unit
+
+                                override suspend fun onUnlinked() {
+                                    schedulerCalls += "unlinked"
+                                }
+                            },
+                    )
                 val worker =
                     TestListenableWorkerBuilder<SyncWorker>(app)
                         .setWorkerFactory(
@@ -115,15 +140,17 @@ class SyncWorkerTest {
                                     appContext: Context,
                                     workerClassName: String,
                                     workerParameters: WorkerParameters,
-                                ): ListenableWorker = SyncWorker(appContext, workerParameters, engine)
+                                ): ListenableWorker = SyncWorker(appContext, workerParameters, engine, scheduler)
                             },
                         ).build()
                 // A rejected token is not transient: the worker must not re-enqueue dead
-                // credentials, and the engine records the revocation for the status.
+                // credentials, the engine records the revocation for the status, and the
+                // scheduler drops every sync work name.
                 assertEquals(ListenableWorker.Result.failure(), worker.doWork())
                 val state = db.syncStateDao().get()
                 assertEquals("Revoked", state?.lastError)
                 assertEquals(false, state?.enabled)
+                assertEquals(listOf("unlinked"), schedulerCalls)
             } finally {
                 db.close()
             }
@@ -171,6 +198,25 @@ class SyncWorkerTest {
                     activity = SyncActivityState(),
                     gate = FakeLocalNetworkGate(),
                 )
+            val scheduler =
+                SyncScheduler(
+                    db = db,
+                    round = {},
+                    playback = NoPlaybackSync,
+                    network = FakeNetworkMonitor(),
+                    clock = clock,
+                    scope = CoroutineScope(currentCoroutineContext()),
+                    hooks =
+                        object : SyncScheduleHooks {
+                            override fun interactive(): Boolean = false
+
+                            override fun schedulePush(reason: ch.lkmc.neutrodyne.sync.api.SyncRoundReason) = Unit
+
+                            override suspend fun onLinked() = Unit
+
+                            override suspend fun onUnlinked() = Unit
+                        },
+                )
             val worker =
                 TestListenableWorkerBuilder<SyncWorker>(app)
                     .setWorkerFactory(
@@ -179,7 +225,7 @@ class SyncWorkerTest {
                                 appContext: Context,
                                 workerClassName: String,
                                 workerParameters: WorkerParameters,
-                            ): ListenableWorker = SyncWorker(appContext, workerParameters, engine)
+                            ): ListenableWorker = SyncWorker(appContext, workerParameters, engine, scheduler)
                         },
                     ).build()
             block(worker)

@@ -103,6 +103,7 @@ class SyncControllerImpl(
     private val merger: FirstLinkMerger,
     private val gate: LocalNetworkGate,
     private val errors: NetErrorClassifier,
+    private val scheduler: SyncScheduler,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
     @ch.lkmc.neutrodyne.core.common.ApplicationScope private val scope: CoroutineScope,
 ) : SyncController {
@@ -416,6 +417,8 @@ class SyncControllerImpl(
         address.serverUrl()?.let { url -> runCatching { client.logout() } }
         db.syncStateDao().unlink()
         address.serverUrl()?.let { tokenStore.clear(hostOf(it)) }
+        // 10 Scheduling: unlinking cancels every sync work name before the state refresh.
+        scheduler.onUnlinked()
         lastRoundProblem.value = null
         refreshStatus()
         return Outcome.Success(Unit)
@@ -429,6 +432,7 @@ class SyncControllerImpl(
             client.reset(DELETE_CONFIRMATION, RESET_MODE_PURGE, null)
             db.syncStateDao().unlink()
             tokenStore.clear(hostOf(url))
+            scheduler.onUnlinked()
             lastRoundProblem.value = null
             refreshStatus()
             Outcome.Success(Unit)
@@ -698,6 +702,7 @@ class SyncControllerImpl(
     private suspend fun completeEmptyLink() {
         db.syncStateDao().enableLinked(clock.now())
         linkFlow.linked(accountName.orEmpty(), deviceName())
+        scheduler.onLinked()
         refreshStatus()
     }
 
@@ -711,6 +716,7 @@ class SyncControllerImpl(
             ) {
                 is FirstLinkResult.Completed -> {
                     linkFlow.linked(accountName.orEmpty(), deviceName())
+                    scheduler.onLinked()
                     refreshStatus()
                 }
 
@@ -830,6 +836,8 @@ class SyncControllerImpl(
 
     private suspend fun markRevoked() {
         db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
+        // 10 Scheduling: a revoked token cancels every sync work name, as an unlink does.
+        scheduler.onUnlinked()
         refreshStatus()
     }
 
