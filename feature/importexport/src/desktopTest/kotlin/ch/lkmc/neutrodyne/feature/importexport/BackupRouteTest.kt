@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeBackupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakeLinkedRestoreCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -284,6 +285,7 @@ class BackupRouteTest {
                 backups,
                 delayed,
                 FakePlaybackController(),
+                FakeLinkedRestoreCoordinator(),
                 appScope,
                 ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
                     ch.lkmc.neutrodyne.core.testing
