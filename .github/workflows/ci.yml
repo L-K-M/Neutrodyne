@@ -515,7 +515,7 @@ jobs:
           name: desktop-smoke-linux-x64
           path: |
             smoke.txt
-            **/hs_err_pid*.log
+            hs_err_pid*.log
             desktopApp/build/desktop-packaging/runtime-classpath*.txt
             desktopApp/build/smoke-crash-evidence/
             playback/native/build/ffmpeg-cache/build-linux-x64/*.log
