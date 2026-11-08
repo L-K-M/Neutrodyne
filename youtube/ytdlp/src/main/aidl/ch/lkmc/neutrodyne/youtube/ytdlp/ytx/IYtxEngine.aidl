@@ -9,9 +9,9 @@ import ch.lkmc.neutrodyne.youtube.ytdlp.ytx.IYtxCallback;
  */
 interface IYtxEngine {
     // Queues `method` (04's shared method table) and returns at once; the answer arrives on `cb`.
-    void call(long callId, String method, String payloadJson, long deadlineAtMs, IYtxCallback cb);
+    oneway void call(long callId, String method, String payloadJson, long deadlineAtMs, IYtxCallback cb);
     // Cooperative cancel of a queued or running call.
-    void cancel(long callId);
+    oneway void cancel(long callId);
     // JSON: pid, engineVersion, ejsVersion, shimApi, python, jsChallenges, running, queued.
     String status();
 }

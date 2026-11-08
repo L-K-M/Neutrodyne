@@ -19,3 +19,7 @@
 
 # 04's test hook: inert unless an instrumented test arms it; 09 owns arming on release builds.
 -keep class ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks { *; }
+-keep class ch.lkmc.neutrodyne.youtube.ytdlp.YtxTestHooks$* { *; }
+
+# Python reads the reply fields directly, including in strict R8 full mode.
+-keep class ch.lkmc.neutrodyne.youtube.ytdlp.ytx.PyHttpReply { public *; }
