@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.common.Origin
+import ch.lkmc.neutrodyne.youtube.api.YouTubeResolveException
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.tls.HandshakeCertificates
