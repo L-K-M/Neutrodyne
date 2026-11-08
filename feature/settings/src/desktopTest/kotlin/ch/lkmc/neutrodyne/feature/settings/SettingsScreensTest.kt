@@ -629,6 +629,10 @@ class SettingsScreensTest {
                                 Provider { FakePodcastRepository() },
                                 ch.lkmc.neutrodyne.core.testing
                                     .FakeYouTubeCapabilitiesSource(),
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeEngine(),
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeHealth(),
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )
