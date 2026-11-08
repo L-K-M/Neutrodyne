@@ -1734,6 +1734,12 @@ separate slice; real Windows installer execution is still pending.
 - on Windows, is an MSI whose `INSTALLDIR` does not resolve under `LocalAppDataFolder\Neutrodyne-App` ([Windows MSI and ZIP](#windows-msi-and-zip)), or whose `Binary` table holds an entry not listed in `desktopApp/wix.lock` (2026-10-05: only `wixhelper.dll`, WiX Util's custom action and the WixUI resources of the pinned WiX version, [Lockfiles](#lockfiles));
 - on Linux, is a DEB whose members are not xz-compressed or whose `Depends` differs from our `control`, or an RPM without our `Requires` ([Linux DEB, RPM and tar.gz](#linux-deb-rpm-and-targz)).
 
+The production `EngineSelfTestRunner` validates the embedded engine before an
+update activates. Its class and its current companion and coroutine state classes
+are exact exceptions to the test-name scan, alongside the replay injection
+contract. Test classes with similar names remain rejected; the exception grants
+no package or class-prefix exemption.
+
 **Implementation note (2026-11-08):** `writeDesktopRuntimeClasspath` now records
 canonical JAR content hashes. Each hash binds the sorted entry names and their
 uncompressed content; ZIP recompression does not change the identity. Only
