@@ -59,4 +59,11 @@
     <string name="drop_to_import">Zum Importieren ablegen</string>
     <string name="drop_to_add">Zum Hinzufügen eines Podcasts ablegen</string>
     <string name="desktop_cannot_open_file">Neutrodyne kann diese Datei nicht öffnen</string>
+    <string name="crash_dialog_title">Neutrodyne wurde zuletzt unerwartet beendet</string>
+    <string name="crash_dialog_message">Neutrodyne wurde zuletzt unerwartet beendet. Bericht per E-Mail senden?</string>
+    <string name="crash_dialog_show_report">Bericht anzeigen</string>
+    <string name="crash_dialog_send_email">Per E-Mail senden</string>
+    <string name="crash_dialog_dont_send">Nicht senden</string>
+    <string name="crash_dialog_subject">Neutrodyne-Absturz %1$s</string>
+    <string name="crash_dialog_truncated">[auf %1$d Zeichen gekürzt — vollständige Datei %2$s anhängen]</string>
 </resources>
