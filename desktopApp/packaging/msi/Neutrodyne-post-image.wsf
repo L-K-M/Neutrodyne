@@ -46,17 +46,19 @@ try {
         throw new Error("JpAppImageDir is not a staging directory: " + dir);
     }
 
-    // JDK 25's Windows pipeline names JpAppImageDir the app image itself:
-    // WinPackagingPipeline stages Package::appImageLayout with the launcher
-    // at the image root and app/ and runtime/ directly below it (the
-    // copyAppImage step is noaction for --app-image); the --install-dir value
-    // ("Neutrodyne-App") names the installed tree under INSTALLDIR, not the
-    // staging layout. Require the trained layout — launcher, .cfg with the
-    // -XX:AOTCache read flag, archive and classpath JARs — or refuse: a
-    // pass-through would ship a strict-mode failure.
-    var app = dir;
+    // On Windows the standard pipeline keeps JpAppImageDir at the staging
+    // root; the install tree sits below the --install-dir value
+    // (installationPath = "Neutrodyne-App", 11 Windows MSI and ZIP). Require
+    // the trained layout — the launcher, its .cfg with the -XX:AOTCache read
+    // flag, the trained archive and the classpath JARs whose timestamps the
+    // archive recorded. Packaging without them would ship a strict-mode
+    // failure, so the hook refuses instead of silently passing through.
+    var app = dir + "\\Neutrodyne-App";
     var cfg = app + "\\app\\Neutrodyne.cfg";
     var aot = app + "\\app\\neutrodyne.aot";
+    if (!fso.FolderExists(app)) {
+        throw new Error("no staged install tree at " + app);
+    }
     if (!fso.FileExists(app + "\\Neutrodyne.exe")) {
         throw new Error("no staged launcher at " + app + "\\Neutrodyne.exe");
     }
