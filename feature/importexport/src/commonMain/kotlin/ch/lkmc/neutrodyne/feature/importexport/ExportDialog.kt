@@ -31,12 +31,15 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbar
 import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
+import ch.lkmc.neutrodyne.core.model.ExportFormat
 import ch.lkmc.neutrodyne.core.model.ExportLayout
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_continue
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
+import ch.lkmc.neutrodyne.core.ui.resources.export_format_newpipe
+import ch.lkmc.neutrodyne.core.ui.resources.export_format_opml
 import ch.lkmc.neutrodyne.core.ui.resources.export_group_title_export
 import ch.lkmc.neutrodyne.core.ui.resources.export_group_title_share
 import ch.lkmc.neutrodyne.core.ui.resources.export_include_passwords
@@ -69,6 +72,7 @@ internal fun ExportDialogContent(
     onSave: () -> Unit,
     onConfirmWarning: () -> Unit,
     onCancelWarning: () -> Unit,
+    onFormat: (ExportFormat) -> Unit = {},
 ) {
     Surface(
         shape = AlertDialogDefaults.shape,
@@ -97,7 +101,7 @@ internal fun ExportDialogContent(
             if (warning != null) {
                 PrivateLinksWarning(warning.privateLinks, warning.passwords)
             } else {
-                OptionsBody(state, onLayout, onYouTube, onPasswords)
+                OptionsBody(state, onLayout, onYouTube, onPasswords, onFormat)
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = ACTIONS_GAP),
@@ -179,9 +183,26 @@ private fun OptionsBody(
     onLayout: (ExportLayout) -> Unit,
     onYouTube: (Boolean) -> Unit,
     onPasswords: (Boolean) -> Unit,
+    onFormat: (ExportFormat) -> Unit,
 ) {
     val enabled = state.ready && !state.busy
     Column {
+        if (state.fullExport) {
+            RadioRow(stringResource(Res.string.export_format_opml), state.format == ExportFormat.OPML, enabled, {
+                onFormat(ExportFormat.OPML)
+            })
+            RadioRow(
+                stringResource(
+                    Res.string.export_format_newpipe,
+                ),
+                state.format == ExportFormat.NEWPIPE_JSON,
+                enabled,
+                {
+                    onFormat(ExportFormat.NEWPIPE_JSON)
+                },
+            )
+        }
+        if (state.format == ExportFormat.NEWPIPE_JSON) return@Column
         RadioRow(
             label = stringResource(Res.string.export_layout_grouped),
             selected = state.layout == ExportLayout.GROUPED,

@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ExportFormat
 import ch.lkmc.neutrodyne.core.model.ExportLayout
 import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.model.PreparedExport
@@ -53,6 +54,8 @@ internal data class ExportUiState(
     val ready: Boolean = false,
     /** A prepare or delivery is in flight — options and actions are frozen meanwhile. */
     val busy: Boolean = false,
+    val format: ExportFormat = ExportFormat.OPML,
+    val fullExport: Boolean = true,
     val layout: ExportLayout = ExportLayout.GROUPED,
     val includeYouTube: Boolean = true,
     /** Off on every open (05): password inclusion is never a remembered default. */
@@ -122,7 +125,7 @@ internal class ExportViewModel
         private val groups: GroupRepository,
         @ApplicationScope private val appScope: CoroutineScope,
     ) : ViewModel() {
-        private val state = MutableStateFlow(ExportUiState())
+        private val state = MutableStateFlow(ExportUiState(fullExport = groupId == null))
         val uiState = state.asStateFlow()
         private val userMessages = UserMessages()
         val messages = userMessages.flow
@@ -144,6 +147,11 @@ internal class ExportViewModel
                     }
                 }
             }
+        }
+
+        fun setFormat(format: ExportFormat) {
+            if (state.value.busy || (format == ExportFormat.NEWPIPE_JSON && groupId != null)) return
+            state.update { it.copy(format = format) }
         }
 
         fun setLayout(layout: ExportLayout) {
@@ -187,6 +195,7 @@ internal class ExportViewModel
                         val request =
                             ExportRequest(
                                 groupId = groupId,
+                                format = options.format,
                                 layout = options.layout,
                                 includeYouTube = options.includeYouTube,
                                 includePasswords = options.includePasswords,
