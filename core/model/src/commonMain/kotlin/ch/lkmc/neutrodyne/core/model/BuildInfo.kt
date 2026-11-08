@@ -19,7 +19,7 @@ data class BuildInfo(
     /** Always the GitHub repo URL; the only update, install and support endpoint. */
     val repoUrl: String,
     val updateManifestUrl: String,
-    /** Approved yt-dlp "engine manifest" URL on GitHub Pages (D76). */
+    /** Approved yt-dlp "engine-approvals" index release URL on GitHub (D76). */
     val engineManifestUrl: String,
     /** Whether the approved yt-dlp runtime ships in this binary (01; false = emergency build, L1). */
     val youTubeEngineBundled: Boolean,

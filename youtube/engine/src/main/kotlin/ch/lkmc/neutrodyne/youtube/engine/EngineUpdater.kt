@@ -43,13 +43,20 @@ class EngineUpdater(
     private val health: YouTubeHealth,
     private val monitor: EngineRollbackMonitor,
     private val clock: Clock,
-    private val manifestUrl: String,
+    private val indexUrl: String,
     private val control: () -> YtxControlRequest,
     // The fixture server's base in tests; production always uses GitHub Releases.
     private val releaseBaseUrl: String = RELEASES,
+    private val approvalBaseUrl: String = APPROVALS,
 ) : EngineUpdateHooks {
     private val mutex = Mutex()
-    private val heartbeatUrl = manifestUrl.substringBeforeLast('/') + "/ytdlp-heartbeat.json"
+
+    /** `<api>/repos/<owner>/<repo>/releases/` prefix of the configured index URL, or empty. */
+    private val indexRepoPrefix =
+        indexUrl
+            .substringBeforeLast("/tags/${EngineApprovalIndex.INDEX_TAG}", "")
+            .let { if ("/repos/" in it && it.endsWith("/releases")) "$it/" else "" }
+
     private val runner = EngineSelfTestRunner(store, transport, compiler, clock, control)
 
     override suspend fun runUpdate(trigger: EngineUpdateTrigger): EngineUpdateOutcome =
@@ -95,17 +102,32 @@ class EngineUpdater(
         }
     }
 
+    /**
+     * One bounded fetch of the stable index release names this round's immutable snapshot; all
+     * four documents then come from that tag's fixed asset names. Network failures propagate to
+     * `runUpdate`'s structured `Failed(NETWORK)`; any metadata defect fails closed as `ORIGIN`.
+     */
+    private suspend fun approvalIndex(): String? =
+        EngineApprovalIndex.resolve(
+            http.get(indexUrl, MAX_INDEX_BYTES),
+            indexRepoPrefix,
+            approvalBaseUrl,
+        )
+
     private suspend fun approvedRun(): EngineUpdateOutcome {
-        val manifestBytes = http.get(manifestUrl, MAX_MANIFEST_BYTES)
+        val snapshot =
+            approvalIndex()
+                ?: return finish(EngineUpdateOutcome.Rejected(null, EngineRejectReason.ORIGIN))
+        val manifestBytes = http.get("$snapshot/ytdlp-approved.json", MAX_MANIFEST_BYTES)
         val signature =
             try {
-                http.get("$manifestUrl.sig", MAX_SIGNATURE_BYTES).decodeToString()
+                http.get("$snapshot/ytdlp-approved.json.sig", MAX_SIGNATURE_BYTES).decodeToString()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (missing: Exception) {
                 return finish(EngineUpdateOutcome.Rejected(null, EngineRejectReason.MANIFEST_SIGNATURE))
             }
-        recordHeartbeat()
+        recordHeartbeat("$snapshot/ytdlp-heartbeat.json")
         val manifest =
             EngineManifestVerifier.verify(manifestBytes, signature, keys, verifier)
                 ?: return finish(EngineUpdateOutcome.Rejected(null, EngineRejectReason.MANIFEST_SIGNATURE))
@@ -271,7 +293,7 @@ class EngineUpdater(
             true
         } ?: false
 
-    private suspend fun recordHeartbeat() {
+    private suspend fun recordHeartbeat(heartbeatUrl: String) {
         try {
             val document = http.get(heartbeatUrl, MAX_HEARTBEAT_BYTES)
             val signature = http.get("$heartbeatUrl.sig", MAX_SIGNATURE_BYTES).decodeToString()
@@ -295,6 +317,8 @@ class EngineUpdater(
         private const val RELEASE_REPO = "yt-dlp/yt-dlp"
         private const val RELEASE_ASSET = "yt-dlp"
         private const val RELEASES = "https://github.com/yt-dlp/yt-dlp/releases"
+        private const val APPROVALS = "https://github.com/L-K-M/Neutrodyne/releases"
+        private const val MAX_INDEX_BYTES = 64L * 1024
         private const val MAX_MANIFEST_BYTES = 64L * 1024
         private const val MAX_SIGNATURE_BYTES = 4L * 1024
         private const val MAX_SUMS_BYTES = 64L * 1024
@@ -411,7 +435,9 @@ class EngineRollbackMonitor(
                 if (count >= DISTINCT_FAILURES) rollbackNow(EngineRejectReason.ROLLED_BACK)
             }
 
-            else -> Unit
+            else -> {
+                Unit
+            }
         }
     }
 

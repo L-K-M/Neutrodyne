@@ -59,6 +59,11 @@ val bundledAssets =
             include("yt-dlp", "bundled.json")
             into("ytdlp")
         }
+        // 04: the pinned manifest Ed25519 key and upstream release key ship as assets.
+        from(layout.projectDirectory.dir("keys")) {
+            include("engine-manifest-ed25519.pub", "yt-dlp-release-key.asc")
+            into("ytdlp/keys")
+        }
         into(bundledAssetsDirectory)
     }
 // Chaquopy exposes legacy Kotlin DSL accessors; select AGP's actual source-set type explicitly.

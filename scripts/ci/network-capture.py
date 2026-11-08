@@ -41,13 +41,14 @@ FIXED_HOST_PATTERNS = (
         "github.com",
         ("youtube-engine", "app-updates", "links", "issue-tracker", "server-updates"),
     ),
+    # The engine resolves its immutable approval snapshot through the release-by-tag
+    # index once per update round; app and server update checks never use the REST API.
+    ("api.github.com", ("youtube-engine",)),
     ("release-assets.githubusercontent.com", ("youtube-engine", "app-updates", "server-updates")),
 )
 
-# The inventory's "never" row: no build may contact the rate-limited REST API.
-FORBIDDEN_HOSTS = {
-    "api.github.com": "the inventory forbids api.github.com; the update check uses the release asset",
-}
+# The inventory's "never" row: hosts no build may ever contact.
+FORBIDDEN_HOSTS: dict[str, str] = {}
 
 INVENTORY_ROW = re.compile(r"^\| `([a-z-]+)` \|", re.MULTILINE)
 
@@ -74,8 +75,8 @@ def default_engine_host() -> str:
     if properties.is_file():
         match = re.search(r"^neutrodyne\.engineManifestUrl=(\S+)", properties.read_text(encoding="utf-8"), re.MULTILINE)
         if match:
-            return urlsplit(match.group(1)).hostname or "l-k-m.github.io"
-    return "l-k-m.github.io"
+            return urlsplit(match.group(1)).hostname or "api.github.com"
+    return "api.github.com"
 
 
 def fixed_ids(host: str, engine_host: str) -> set[str]:

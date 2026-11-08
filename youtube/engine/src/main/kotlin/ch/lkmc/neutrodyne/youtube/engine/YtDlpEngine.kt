@@ -17,13 +17,13 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -55,6 +55,7 @@ class YtDlpEngine(
     private var hostUnusable = transport.status.value.state == HostState.UNUSABLE
     private var failureRevision = 0L
     private val writes = Channel<Pair<Long, Int>>(Channel.UNLIMITED)
+    private val healthLoaded = CompletableDeferred<Unit>()
     private val mutableStatus = MutableStateFlow(EngineStatus(EngineAvailability.STOPPED, identity.engineVersion))
     override val status = mutableStatus.asStateFlow()
 
@@ -116,24 +117,34 @@ class YtDlpEngine(
             // Health-boundary steps keep their original post-restore ordering: reporting the
             // engine version before the restore CAS would drop persisted breaker state, and the
             // failure identity reset belongs to the same ordering. M9b reports the served
-            // version from `store.active`, not the compile identity.
+            // version from `store.active`, not the compile identity. The barrier is awaited
+            // once; the breaker watcher waits on the shared gate.
             health.awaitLoaded()
-            synchronized(lock) {
-                health.reportEngineVersion(store.active.value.current.ifEmpty { null })
-                if (settings.state.value.failureIdentity != identity) recordFailures()
-            }
+            healthLoaded.complete(Unit)
+            var reported =
+                synchronized(lock) {
+                    val served =
+                        store.active.value.current
+                            .ifEmpty { null }
+                    health.reportEngineVersion(served)
+                    if (settings.state.value.failureIdentity != identity) recordFailures()
+                    served
+                }
             // Activations, rollbacks and resets after the barrier change the served version
             // without touching settings or host state, so they report through `store.active`.
             store.active
                 .map { it.current.ifEmpty { null } }
                 .distinctUntilChanged()
-                .drop(1)
                 .collect { version ->
-                    synchronized(lock) { health.reportEngineVersion(version) }
+                    if (version == reported) return@collect
+                    synchronized(lock) {
+                        reported = version
+                        health.reportEngineVersion(version)
+                    }
                 }
         }
         scope.launch {
-            health.awaitLoaded()
+            healthLoaded.await()
             var opened = health.state.value.breaker != BreakerState.CLOSED
             health.state
                 .map { it.breaker }

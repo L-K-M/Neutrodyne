@@ -8,15 +8,16 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BuildInfoTest {
+    private val repoUrl = "https://github.com/L-K-M/Neutrodyne"
     private val info =
         BuildInfo(
             versionName = "0.1.0",
             versionCode = 10095,
             debug = true,
             platform = BuildInfo.Platform.DESKTOP,
-            repoUrl = "https://github.com/L-K-M/Neutrodyne",
-            updateManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/latest/download/update.json",
-            engineManifestUrl = "https://l-k-m.github.io/Neutrodyne/engine/ytdlp-approved.json",
+            repoUrl = repoUrl,
+            updateManifestUrl = "$repoUrl/releases/latest/download/update.json",
+            engineManifestUrl = engineIndexUrl(repoUrl),
             youTubeEngineBundled = true,
             desktop =
                 BuildInfo.Desktop(
@@ -51,4 +52,9 @@ class BuildInfoTest {
         assertTrue(text.contains("LINUX"))
         assertTrue(text.contains("arm64").not())
     }
+
+    /** The engine-approvals index is the repo's API mirror plus the stable release-by-tag path (D76). */
+    private fun engineIndexUrl(repoUrl: String) =
+        repoUrl.replace("://", "://api.").replace("github.com/", "github.com/repos/") +
+            "/releases/tags/engine-approvals"
 }
