@@ -5,6 +5,7 @@ import androidx.media3.common.C
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo
+import ch.lkmc.neutrodyne.youtube.api.YouTubeResolveException
 import dev.zacsweers.metro.Inject
 import java.net.HttpURLConnection
 

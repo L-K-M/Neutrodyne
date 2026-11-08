@@ -22,12 +22,16 @@ import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.kotlin.dsl.register
 import org.gradle.process.CommandLineArgumentProvider
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.util.Locale
 import javax.inject.Inject
 
 /** The four desktop packaging targets of 11's platform matrix (D88, D89). */
@@ -325,11 +329,349 @@ internal fun imageJarName(file: File): String {
 }
 
 /**
- * Writes the Licensee-checked runtime classpath as `sha256  name` lines (09 Build-output
- * checks): `check-desktop-image.sh` asserts every JAR of an image is one of these files.
- * Same-named JARs — `api-desktop.jar` comes from four modules, and androidx artefacts appear
- * twice via the `org.jetbrains.androidx` republish — are no collision here: the recorded name
- * is the mangled image name, which differs by content.
+ * The canonical JAR identity of 11 (Image scan rules): SHA-256 over each entry's name and
+ * uncompressed content SHA-256, sorted by entry name. Packaging recompresses image JARs and
+ * re-signs their Mach-O natives, so a raw file hash would report every JAR as differing;
+ * `canonical-jar-hash.py` is the checker's identical implementation. Mach-O entries are
+ * normalized (LC_CODE_SIGNATURE zeroed, blobs cut, __LINKEDIT bound to the non-signature
+ * extent); every other byte — code, data, unknown commands, zero FAT alignment padding and
+ * trailing bytes — is bound. A non-ZIP file falls back to its raw byte hash. Malformed or
+ * ambiguous ZIP names and duplicate entries fail closed.
+ */
+internal object CanonicalJarHash {
+    private val MACHO_EXTS = setOf("dylib", "jnilib", "so")
+
+    fun of(file: File): String {
+        val raw = file.readBytes()
+        val zip =
+            try {
+                java.util.zip.ZipFile(file)
+            } catch (_: java.util.zip.ZipException) {
+                return sha256Hex(raw)
+            }
+        return zip.use { z -> compute(z) }
+    }
+
+    private fun compute(zip: java.util.zip.ZipFile): String {
+        val entries = zip.entries().toList()
+        val seen = HashSet<String>()
+        for (entry in entries) {
+            validateName(entry.name)
+            if (!seen.add(entry.name.lowercase(Locale.ROOT))) {
+                throw IllegalArgumentException("duplicate ZIP entry name: ${entry.name}")
+            }
+        }
+        val outer = MessageDigest.getInstance("SHA-256")
+        for (entry in entries.sortedBy { it.name }) {
+            val inner = MessageDigest.getInstance("SHA-256")
+            if (!entry.isDirectory) {
+                val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                inner.update(normalizedEntryBytes(entry.name, bytes))
+            }
+            outer.update(entry.name.toByteArray(Charsets.UTF_8))
+            outer.update(0)
+            outer.update(hexToBytes(inner.digest()))
+            outer.update('\n'.code.toByte())
+        }
+        return hexToString(outer.digest())
+    }
+
+    private fun hexToString(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
+
+    private fun hexToBytes(bytes: ByteArray): ByteArray = hexToString(bytes).toByteArray(Charsets.US_ASCII)
+
+    private fun validateName(name: String) {
+        require(name.isNotEmpty()) { "empty ZIP entry name" }
+        require(!name.startsWith("/")) { "absolute ZIP entry name: $name" }
+        require(!name.contains('\\')) { "backslash in ZIP entry name: $name" }
+        require(!name.contains('\u0000')) { "NUL in ZIP entry name" }
+        require(name.split('/').none { it == ".." }) { "parent-directory ZIP entry name: $name" }
+        require(name.all { it.code < 128 }) { "non-ASCII ZIP entry name: $name" }
+    }
+
+    private fun normalizedEntryBytes(
+        name: String,
+        data: ByteArray,
+    ): ByteArray = if (name.substringAfterLast('.') in MACHO_EXTS) normalizeMacho(data) else data
+
+    private fun normalizeMacho(b: ByteArray): ByteArray =
+        if (b.size >= 8 && u32(b, 0, be = true) == FAT_MAGIC) {
+            normalizeFatMacho(b)
+        } else {
+            normalizeThinMacho(b).emit
+        }
+
+    private fun normalizeFatMacho(b: ByteArray): ByteArray {
+        val nfat = u32(b, 4, be = true).toInt()
+        if (nfat < 1 || nfat > 64 || 8 + 20L * nfat > b.size) return b
+        val out = ByteArrayOutputStream(b.size)
+        out.write(b, 0, 8)
+        var prevEnd = 8 + 20L * nfat
+        for (i in 0 until nfat) {
+            val ro = 8 + 20 * i
+            val off = u32(b, ro + 8, be = true)
+            val size = u32(b, ro + 12, be = true)
+            val align = u32(b, ro + 16, be = true)
+            if (align > 30) return b
+            val bound = 1L shl align.toInt()
+            val expected = (prevEnd + bound - 1) / bound * bound
+            if (off != expected) return b
+            if (off + size > b.size) return b
+            // Alignment padding is metadata-derived: require it zero and bind nothing.
+            if (!isZero(b, prevEnd.toInt(), (off - prevEnd).toInt())) return b
+            val thin = normalizeThinMacho(b.copyOfRange(off.toInt(), (off + size).toInt()))
+            if (thin.sigSize > size) return b
+            out.write(b, ro, 8)
+            out.write(ZERO4, 0, 4) // the slice offset is metadata-derived (validated above)
+            out.write(u32Bytes(size - thin.sigSize, be = true), 0, 4)
+            out.write(b, ro + 16, 4)
+            out.write(thin.emit)
+            prevEnd = off + size
+        }
+        // Trailing bytes are not metadata-derived: bind them.
+        if (prevEnd < b.size) out.write(b, prevEnd.toInt(), (b.size - prevEnd).toInt())
+        return out.toByteArray()
+    }
+
+    private class ThinResult(
+        val emit: ByteArray,
+        val sigSize: Long,
+    )
+
+    private fun normalizeThinMacho(b: ByteArray): ThinResult {
+        if (b.size < 28) return ThinResult(b, 0)
+        val is64: Boolean
+        val be: Boolean
+        when (u32(b, 0, be = false)) {
+            MH_MAGIC_64 -> {
+                is64 = true
+                be = false
+            }
+
+            MH_MAGIC -> {
+                is64 = false
+                be = false
+            }
+
+            MH_CIGAM_64 -> {
+                is64 = true
+                be = true
+            }
+
+            MH_CIGAM -> {
+                is64 = false
+                be = true
+            }
+
+            else -> {
+                return ThinResult(b, 0)
+            }
+        }
+        val hdr = if (is64) 32 else 28
+        if (b.size < hdr) return ThinResult(b, 0)
+        val ncmds = u32(b, 16, be)
+        val sizeofcmds = u32(b, 20, be)
+        if (ncmds > 4096 || hdr + sizeofcmds > b.size) return ThinResult(b, 0)
+        val cmds = mutableListOf<LongArray>()
+        val blobs = mutableListOf<LongArray>()
+        var off = hdr
+        for (i in 0 until ncmds.toInt()) {
+            if (off + 8 > b.size) return ThinResult(b, 0)
+            val cmd = u32(b, off, be)
+            val csz = u32(b, off + 4, be)
+            if (csz < 8 || off + csz > b.size) return ThinResult(b, 0)
+            cmds += longArrayOf(cmd, csz, off.toLong())
+            if (cmd == LC_CODE_SIGNATURE) {
+                if (csz != 16L) return ThinResult(b, 0)
+                val dataoff = u32(b, off + 8, be)
+                val datasize = u32(b, off + 12, be)
+                if (dataoff + datasize > b.size) return ThinResult(b, 0)
+                blobs += longArrayOf(dataoff, datasize)
+            }
+            off += csz.toInt()
+        }
+        // The commands must exactly cover the declared command region.
+        if (off.toLong() != hdr + sizeofcmds) return ThinResult(b, 0)
+        if (blobs.size > 1) return ThinResult(b, 0)
+        val cszSum = cmds.filter { it[0] == LC_CODE_SIGNATURE }.sumOf { it[1] }
+        if (cszSum > sizeofcmds) return ThinResult(b, 0)
+        // arm64/arm64_32 pages are 16K, other slices 4K — codesign rounds the
+        // linkedit VM reservation to the target's page.
+        val page =
+            if (u32(b, 4, be) == CPU_TYPE_ARM64 || u32(b, 4, be) == CPU_TYPE_ARM64_32) {
+                0x4000L
+            } else {
+                0x1000L
+            }
+        val segments = cmds.filter { it[0] == LC_SEGMENT || it[0] == LC_SEGMENT_64 }
+        val segmentKind = if (is64) LC_SEGMENT_64 else LC_SEGMENT
+        val segmentHeaderSize = if (is64) 72L else 56L
+        if (segments.any { it[0] != segmentKind || it[1] < segmentHeaderSize }) return ThinResult(b, 0)
+        val linkedits = segments.map { it[2].toInt() }.filter { isLinkeditName(b, it) }
+        if (linkedits.size != 1) return ThinResult(b, 0)
+        val linkOff = linkedits[0]
+        val linkSize = cmds.first { it[2] == linkOff.toLong() }[1].toInt()
+        if (linkSize.toLong() != segmentHeaderSize) return ThinResult(b, 0)
+        if (u32(b, linkOff + if (is64) 64 else 48, be) != 0L) return ThinResult(b, 0)
+        val linkBytes = b.copyOfRange(linkOff, linkOff + linkSize)
+        val vmsize: Long
+        val foff: Long
+        val fsize: Long
+        if (is64) {
+            vmsize = u64(linkBytes, 32, be)
+            foff = u64(linkBytes, 40, be)
+            fsize = u64(linkBytes, 48, be)
+        } else {
+            vmsize = u32(linkBytes, 28, be)
+            foff = u32(linkBytes, 32, be)
+            fsize = u32(linkBytes, 36, be)
+        }
+        // Only a final, disjoint linkedit range may contain masked signature bytes.
+        // Check subtraction bounds before addition: u64 values may decode as signed longs.
+        if (foff < off || foff > b.size || fsize < 0 || fsize > b.size - foff) return ThinResult(b, 0)
+        if (foff + fsize != b.size.toLong()) return ThinResult(b, 0)
+        for (segment in segments) {
+            if (segment[2] == linkOff.toLong()) continue
+            val co = segment[2].toInt()
+            val otherOff = if (is64) u64(b, co + 40, be) else u32(b, co + 32, be)
+            val otherSize = if (is64) u64(b, co + 48, be) else u32(b, co + 36, be)
+            if (otherOff < 0 || otherOff > b.size || otherSize < 0 || otherSize > b.size - otherOff) {
+                return ThinResult(b, 0)
+            }
+            if (otherSize > 0 && otherOff < foff + fsize && foff < otherOff + otherSize) return ThinResult(b, 0)
+        }
+        // A single terminal blob keeps all preceding linkedit data bound.
+        for (blob in blobs) {
+            if (blob[0] < foff || blob[0] + blob[1] != foff + fsize) return ThinResult(b, 0)
+        }
+        val inside = blobs.sumOf { it[1] }
+        if (inside > fsize) return ThinResult(b, 0)
+        val rounded = (fsize + page - 1) / page * page
+        if (vmsize != fsize && vmsize != rounded) return ThinResult(b, 0)
+        val out = ByteArrayOutputStream(b.size)
+        out.write(b, 0, 16)
+        out.write(u32Bytes(ncmds - blobs.size, be), 0, 4)
+        out.write(u32Bytes(sizeofcmds - cszSum, be), 0, 4)
+        out.write(b, 24, hdr - 24)
+        for (c in cmds) {
+            val cmd = c[0]
+            val csz = c[1].toInt()
+            val co = c[2].toInt()
+            if (cmd == LC_CODE_SIGNATURE) {
+                out.write(ByteArray(csz))
+                continue
+            }
+            val cb = b.copyOfRange(co, co + csz)
+            if ((cmd == LC_SEGMENT || cmd == LC_SEGMENT_64) && isLinkeditName(b, co)) {
+                val adjusted = cb.copyOf()
+                val order = if (be) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
+                val buf = ByteBuffer.wrap(adjusted).order(order)
+                val nonSig = fsize - inside
+                val nonSigRounded = (nonSig + page - 1) / page * page
+                if (is64) {
+                    buf.putLong(32, nonSigRounded)
+                    buf.putLong(48, nonSig)
+                } else {
+                    buf.putInt(28, nonSigRounded.toInt())
+                    buf.putInt(36, nonSig.toInt())
+                }
+                out.write(adjusted)
+            } else {
+                out.write(cb)
+            }
+        }
+        var emit = out.toByteArray() + b.copyOfRange(off, b.size)
+        var shift = 0L
+        for (blob in blobs.sortedBy { it[0] }) {
+            val start = blob[0] + (out.size() - off) - shift
+            if (0 <= start && start < emit.size) {
+                val end = minOf(emit.size.toLong(), start + blob[1]).toInt()
+                emit = emit.copyOfRange(0, start.toInt()) + emit.copyOfRange(end, emit.size)
+            }
+            shift += blob[1]
+        }
+        return ThinResult(emit, inside)
+    }
+
+    private fun isLinkeditName(
+        b: ByteArray,
+        cmdOff: Int,
+    ): Boolean = b.copyOfRange(cmdOff + 8, cmdOff + 24).contentEquals(LINKEDIT_SEGMENT_NAME)
+
+    private fun isZero(
+        b: ByteArray,
+        start: Int,
+        length: Int,
+    ): Boolean {
+        if (start < 0 || length < 0 || start + length > b.size) return false
+        for (i in start until start + length) {
+            if (b[i] != 0.toByte()) return false
+        }
+        return true
+    }
+
+    private fun u32(
+        b: ByteArray,
+        o: Int,
+        be: Boolean,
+    ): Long =
+        if (o < 0 || o + 4 > b.size) {
+            0
+        } else {
+            ByteBuffer
+                .wrap(b)
+                .order(if (be) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN)
+                .getInt(o)
+                .toLong() and 0xFFFFFFFFL
+        }
+
+    private fun u64(
+        b: ByteArray,
+        o: Int,
+        be: Boolean,
+    ): Long =
+        if (o < 0 || o + 8 > b.size) {
+            0
+        } else {
+            ByteBuffer
+                .wrap(b)
+                .order(if (be) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN)
+                .getLong(o)
+        }
+
+    private fun u32Bytes(
+        v: Long,
+        be: Boolean,
+    ): ByteArray =
+        ByteBuffer
+            .allocate(4)
+            .order(if (be) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN)
+            .putInt(v.toInt())
+            .array()
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private const val FAT_MAGIC = 0xCAFEBABEL
+    private const val MH_MAGIC_64 = 0xFEEDFACFL
+    private const val MH_MAGIC = 0xFEEDFACEL
+    private const val MH_CIGAM_64 = 0xCFFAEDFEL
+    private const val MH_CIGAM = 0xCEFAEDFEL
+    private const val LC_SEGMENT = 0x1L
+    private const val LC_SEGMENT_64 = 0x19L
+    private const val LC_CODE_SIGNATURE = 0x1DL
+    private const val CPU_TYPE_ARM64 = 0x0100000CL
+    private const val CPU_TYPE_ARM64_32 = 0x0200000CL
+    private val ZERO4 = ByteArray(4)
+    private val LINKEDIT_SEGMENT_NAME = "__LINKEDIT".toByteArray(Charsets.US_ASCII).copyOf(16)
+}
+
+/**
+ * Writes the Licensee-checked runtime classpath as `<canonical sha256>  name` lines
+ * (09 Build-output checks): `check-desktop-image.sh` asserts every JAR of an image is
+ * one of these files. Same-named JARs — `api-desktop.jar` comes from four modules, and
+ * androidx artefacts appear twice via the `org.jetbrains.androidx` republish — are no
+ * collision here: the recorded name is the mangled image name, which differs by content.
  */
 abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:InputFiles
@@ -344,27 +686,10 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         val lines =
             runtimeClasspath.files
                 .filter { it.isFile }
-                .map { "${sha256Of(it)}  ${imageJarName(it)}" }
+                .map { "${CanonicalJarHash.of(it)}  ${imageJarName(it)}" }
                 .toSortedSet()
                 .joinToString("\n", postfix = "\n")
         manifest.get().asFile.writeText(lines)
-    }
-
-    private fun sha256Of(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(BUFFER_BYTES)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private companion object {
-        private const val BUFFER_BYTES = 1 shl 16
     }
 }
 

@@ -877,16 +877,112 @@ class SyncControllerImplTest {
             val h = harness(this)
             try {
                 h.seedLinked()
-                h.client.devicesList =
+                h.client.devicesHandler = {
                     listOf(
                         DeviceDto(DEVICE_ID, "This", "android", "1.0.0", null, current = true, stale = false),
                         DeviceDto("dev-2", "Other", "linux", "1.0.0", null, current = false, stale = true),
                     )
+                }
                 val result = h.controller.devices()
                 val devices = (result as Outcome.Success).value
                 assertTrue(devices[0].current)
                 assertFalse(devices[1].current)
                 assertTrue(devices[1].stale)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun aFreshLinkedControlRequestAppliesTheGateVerdictBeforeTheClient() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                h.gate.setPermissionGranted(true)
+                // A fresh process with an already-granted permission must not need a prior
+                // preflight/round: the control request applies the gate's live verdict first.
+                h.client.rename = { id, name ->
+                    check(h.gate.results == listOf(true)) { "the gate verdict was not applied before the client" }
+                    DeviceDto(id, name, "android", "1.0.0", null, false, false)
+                }
+                val result = h.controller.renameDevice("dev-2", "Office")
+                assertTrue(result is Outcome.Success)
+                assertEquals(listOf("dev-2" to "Office"), h.client.renames)
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun everyDirectControlRequestAppliesTheGateVerdictBeforeTheClient() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                h.gate.setPermissionGranted(true)
+                var controlCalls = 0
+
+                fun expectGateApplied() {
+                    controlCalls++
+                    check(h.gate.results.isNotEmpty()) { "the gate verdict was not applied before the client" }
+                }
+                h.client.approve = {
+                    expectGateApplied()
+                    LinkApproveResponse("Pixel 8", "android", "1.0.0", "2026-11-04T10:00:00Z", "device", true)
+                }
+                h.client.confirm = { _, _ -> expectGateApplied() }
+                h.client.devicesHandler = {
+                    expectGateApplied()
+                    emptyList()
+                }
+                h.client.rename = { id, name ->
+                    expectGateApplied()
+                    DeviceDto(id, name, "android", "1.0.0", null, false, false)
+                }
+                h.client.revoke = { expectGateApplied() }
+                h.client.resetHandler = { _, _, _ ->
+                    expectGateApplied()
+                    AccountSummary("alice", LibraryCountsDto(0, 0, 0, 0, 0), 1, 0, 0)
+                }
+
+                assertTrue(h.controller.approveLink("WDJB-MJHT") is Outcome.Success)
+                assertTrue(h.controller.confirmLink("WDJB-MJHT", approve = true) is Outcome.Success)
+                assertTrue(h.controller.devices() is Outcome.Success)
+                assertTrue(h.controller.renameDevice("dev-2", "Office") is Outcome.Success)
+                assertTrue(h.controller.revokeDevice("dev-2") is Outcome.Success)
+                // deleteServerData unlinks locally, so it runs last.
+                assertTrue(h.controller.deleteServerData("DELETE") is Outcome.Success)
+                assertEquals(6, controlCalls)
+                assertTrue(h.client.calls.contains("approve:" + normaliseUserCode("WDJB-MJHT")))
+                assertTrue(h.client.calls.contains("confirm:" + normaliseUserCode("WDJB-MJHT") + ":true"))
+                assertTrue(h.client.calls.contains("devices"))
+                assertTrue(h.client.calls.contains("reset:purge"))
+            } finally {
+                h.close()
+            }
+        }
+
+    @Test
+    fun controlRequestsFollowTheLivePermissionRevokeAndRegrant() =
+        runTest {
+            val h = harness(this)
+            try {
+                h.seedLinked()
+                h.gate.setLocation(LocalNetworkLocation.LOCAL)
+                h.gate.setPermissionGranted(true)
+                assertTrue(h.controller.renameDevice("dev-2", "One") is Outcome.Success)
+                assertEquals(listOf(true), h.gate.results)
+                // A revocation in system settings is picked up at the next control request ...
+                h.gate.setPermissionGranted(false)
+                assertTrue(h.controller.renameDevice("dev-2", "Two") is Outcome.Success)
+                assertEquals(listOf(true, false), h.gate.results)
+                // ... and a regrant re-enables it without a prior round.
+                h.gate.setPermissionGranted(true)
+                assertTrue(h.controller.renameDevice("dev-2", "Three") is Outcome.Success)
+                assertEquals(listOf(true, false, true), h.gate.results)
             } finally {
                 h.close()
             }
@@ -1173,7 +1269,7 @@ private class ScriptedSyncClient : SyncClient {
         LinkApproveResponse("Pixel 8", "android", "1.0.0", REQUESTED_AT, "device", true)
     }
     var confirm: suspend (String, Boolean) -> Unit = { _, _ -> }
-    var devicesList: List<DeviceDto> = emptyList()
+    var devicesHandler: suspend () -> List<DeviceDto> = { emptyList() }
     var rename: suspend (String, String) -> DeviceDto = { id, name ->
         DeviceDto(id, name, "android", "1.0.0", null, false, false)
     }
@@ -1252,7 +1348,7 @@ private class ScriptedSyncClient : SyncClient {
 
     override suspend fun devices(): List<DeviceDto> {
         calls += "devices"
-        return devicesList
+        return devicesHandler()
     }
 
     override suspend fun renameDevice(

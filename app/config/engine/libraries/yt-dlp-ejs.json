@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:yt-dlp-ejs",
+  "name": "yt-dlp-ejs",
+  "description": "Bundled Python package and JS solver data; no runtime registered in M9a.",
+  "website": "https://github.com/yt-dlp/ejs",
+  "developers": [],
+  "licenses": [
+    "Unlicense"
+  ],
+  "artifactVersion": "0.8.0",
+  "tag": "bundled"
+}
