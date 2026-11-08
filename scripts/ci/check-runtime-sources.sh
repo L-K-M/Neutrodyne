@@ -208,7 +208,8 @@ image_compare_file() {
         # jpackage seals the bundle with an ad-hoc signature over Adoptium's, so the
         # comparison runs on copies of both files with signatures removed.
         if command -v codesign >/dev/null 2>&1; then
-            cp "$ref_file" "$work/ref" "$img_file" "$work/img"
+            cp "$ref_file" "$work/ref"
+            cp "$img_file" "$work/img"
             codesign --remove-signature "$work/ref" 2>/dev/null || true
             codesign --remove-signature "$work/img" 2>/dev/null || true
             if cmp -s "$work/ref" "$work/img"; then
