@@ -539,6 +539,25 @@ esac
                 result = self.fx.image_check(img)
                 self.assertEqual(result.returncode == 0, accepted, result.stdout + result.stderr)
 
+    def test_production_engine_selftest_classes_pass_but_test_neighbors_fail(self):
+        prefix = "ch/lkmc/neutrodyne/youtube/engine/"
+        for index, (name, accepted) in enumerate((
+            ("EngineSelfTestRunner.class", True),
+            ("EngineSelfTestRunner$Companion.class", True),
+            ("EngineSelfTestRunner$run$1.class", True),
+            ("EngineSelfTestRunnerTest.class", False),
+            ("EngineSelfTestRunner$Test.class", False),
+            ("FakeEngineSelfTestRunner.class", False),
+            ("EngineSelfTestRunner$run$1Test.class", False),
+        )):
+            with self.subTest(name=name):
+                img = self.flat_image(name=f"selfcheck-{index}")
+                data = zip_bytes([(prefix + name, b"PRODUCTION-SELFCHECK-FIXTURE")])
+                self.fx.write(f"{img}/lib/app/{self.fx.manifest('engine', data)}", data)
+                self.fx.write_manifest()
+                result = self.fx.image_check(img)
+                self.assertEqual(result.returncode == 0, accepted, result.stdout + result.stderr)
+
     def test_jar_content_mismatch_fails(self):
         """The name is on the manifest but the bytes are not the row's sha256."""
         img = self.flat_image()

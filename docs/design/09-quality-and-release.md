@@ -665,6 +665,9 @@ provenance, and retains package logs and checksum-verified corresponding sources
 The checked-out version selects the supported macOS format (0.x ZIP, 1.x DMG).
 These are CI artifacts; release publication remains in `release.yml`. Windows
 gets 210 minutes for the native build plus packaging; the other targets get 90.
+The opt-in `desktop-windows` scope selects only the Windows package leg.
+Both scopes retain jpackage error logs and argument files even when packaging
+fails, alongside the existing package and runtime diagnostics.
 Each format is checked before the next install-kind build changes the app JAR
 and generated classpath manifest. Runtime provenance is checked on each
 installed or extracted payload as well as the final build image. macOS ZIP
