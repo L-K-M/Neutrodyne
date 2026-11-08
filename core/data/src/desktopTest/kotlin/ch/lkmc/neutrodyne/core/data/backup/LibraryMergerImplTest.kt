@@ -10,7 +10,13 @@ import ch.lkmc.neutrodyne.core.data.newDb
 import ch.lkmc.neutrodyne.core.data.newUnsubscribe
 import ch.lkmc.neutrodyne.core.data.repo.GroupMerger
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
+import ch.lkmc.neutrodyne.core.database.PlaySessionEntity
+import ch.lkmc.neutrodyne.core.database.SyncClockEntity
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.domain.BackupError
+import ch.lkmc.neutrodyne.core.model.ContextType
+import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.MergeSummary
 import ch.lkmc.neutrodyne.core.model.MergeValueOrigin
@@ -27,9 +33,13 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import ch.lkmc.neutrodyne.feeds.backup.EpisodeLineV1
+import ch.lkmc.neutrodyne.feeds.backup.EpisodeRefV1
+import ch.lkmc.neutrodyne.feeds.backup.GroupV1
 import ch.lkmc.neutrodyne.feeds.backup.LibraryV1
+import ch.lkmc.neutrodyne.feeds.backup.MemberV1
 import ch.lkmc.neutrodyne.feeds.backup.PodcastV1
 import ch.lkmc.neutrodyne.feeds.backup.QueueV1
+import ch.lkmc.neutrodyne.feeds.backup.SessionV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingValueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import ch.lkmc.neutrodyne.feeds.backup.UpNextRefV1
@@ -48,6 +58,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import java.nio.file.Path as NioPath
 
@@ -106,6 +117,7 @@ class LibraryMergerImplTest {
     private val playedAt = 1_790_000_000_000L
     private val june = 1_780_000_000_000L
     private val syncId = "00000000-0000-4000-8000-00000000000f"
+    private var stagingCounter = 0
 
     @AfterTest
     fun tearDown() {
@@ -157,6 +169,805 @@ class LibraryMergerImplTest {
             assertEquals(1, db.queueDao().entries().size)
         }
 
+    /**
+     * MS2 acceptance 3 through the real port: a local podcast stays and a newer remote
+     * "unplayed" clears an older local played mark. This is the database behaviour the old
+     * engine-merge shortcut owned; the first-link orchestration around it is pinned by
+     * `:sync:impl`'s `FirstLinkMergerTest`.
+     */
+    @Test
+    fun mergeKeepsLocalPodcastsAndANewerRemoteUnplayedWins() =
+        runTest {
+            val localPodcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val localEpisode =
+                db.episodeDao().insertStub(episodeEntity(podcastId = localPodcast, identityKey = "g:e"))
+            db.episodeStateDao().upsert(
+                EpisodeStateEntity(episodeId = localEpisode, playedAt = june, updatedAt = june),
+            )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines =
+                        listOf(
+                            EpisodeLineV1(
+                                p = "https://s/feed",
+                                k = "g:e",
+                                u = "https://s/e.mp3",
+                                pl = null,
+                                ts = playedAt,
+                                fc = mapOf("played" to playedAt),
+                            ),
+                        ),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNotNull(db.podcastDao().bySyncId(syncId))
+            val state = db.episodeStateDao().byEpisode(localEpisode)
+            assertNull(state?.playedAt)
+            assertEquals(playedAt, state?.updatedAt)
+        }
+
+    /**
+     * 10 Merge step 2 / 05 First-link column: a server tombstone is a removal, not a live item.
+     * The mapper filters it out of a LINK_REPLACE staging directory, so the Replace pre-step's
+     * local-only cleanup unsubscribes the local row (D92: deletions must not resurrect).
+     */
+    @Test
+    fun linkReplaceRemovesALocalPodcastTheServerTombstoned() =
+        runTest {
+            db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val dir =
+                writeStagingDir(
+                    // The server's library carries only the surviving podcast; the tombstoned
+                    // one is absent, exactly as the mapper stages it.
+                    podcasts = listOf(podcastV1("https://s/other", "00000000-0000-4000-8000-00000000000c")),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_REPLACE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNull(db.podcastDao().bySyncId(syncId))
+            assertNotNull(db.podcastDao().bySyncId("00000000-0000-4000-8000-00000000000c"))
+        }
+
+    /**
+     * 10 Merge step 2 through the real port: a server-won podcast tombstone unsubscribes the
+     * local row. The mapper stages the tombstone clock; the merger compares it with the local
+     * row's own stamp.
+     */
+    @Test
+    fun linkMergeAppliesAServerWonPodcastTombstone() =
+        runTest {
+            val local =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/feed", syncId = syncId, subscribedAt = june),
+                )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId).copy(removedAt = playedAt)),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNull(db.podcastDao().byId(local), "a newer server tombstone removes the local row")
+        }
+
+    /**
+     * A server-won tombstone whose local row carries a different `syncId`: the seed moves to the
+     * record's rid, so the field merge overwrites it with the tombstone instead of the capture
+     * pass pushing the local seed under a stray rid.
+     */
+    @Test
+    fun linkMergeMovesAServerWonTombstoneSeedToTheRecordRid() =
+        runTest {
+            val localSyncId = "99999999-9999-4999-8999-999999999999"
+            val local =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/feed", syncId = localSyncId, subscribedAt = june),
+                )
+            db.syncClockDao().upsert(SyncClockEntity("podcast", localSyncId, "{}"))
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId).copy(removedAt = playedAt)),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNull(db.podcastDao().byId(local))
+            assertNull(db.syncClockDao().get("podcast", localSyncId), "the seed moved to the record's rid")
+            assertNotNull(db.syncClockDao().get("podcast", syncId))
+        }
+
+    /**
+     * 10 Merge step 3: a server-won podcast tombstone's removal pass re-keys every affected
+     * clock/outbox row — the episode, Up next and member records under the local rid — to the
+     * record's canonical rid before the unsubscribe cascade. The cascade's clock sweep would
+     * otherwise leave the pending outbox rows under a stray rid the server does not know, and
+     * the server's GC never purges a played/favourite orphan whose parent rid is unknown.
+     */
+    @Test
+    fun linkMergeRekeysTheRemovedPodcastsPendingRowsToTheRecordRid() =
+        runTest {
+            val localSyncId = "99999999-9999-4999-8999-999999999999"
+            val groupUuid = "11111111-1111-4111-8111-111111111111"
+            val local =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/feed", syncId = localSyncId, subscribedAt = june),
+                )
+            val episode = db.episodeDao().insertStub(episodeEntity(podcastId = local, identityKey = "g:e"))
+            db.queueDao().insert(
+                ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity(
+                    episodeId = episode,
+                    orderKey = "0.5",
+                    addedAt = june,
+                ),
+            )
+            val group =
+                db.groupDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database.groupEntity(
+                        uuid = groupUuid,
+                        name = "Group",
+                        orderKey = "0.5",
+                    ),
+                )
+            db.groupDao().insertMember(
+                ch.lkmc.neutrodyne.core.testing.database.memberEntity(
+                    groupId = group,
+                    podcastId = local,
+                    orderKey = "0.5",
+                    addedAt = june,
+                ),
+            )
+            // The pending local intents under the local rid: a played episode, a queued
+            // episode and a membership, each with its clock and outbox rows.
+            val localEpisodeRid = localSyncId + "g:e"
+            val localMemberRid = groupUuid + localSyncId
+            db.syncClockDao().upsert(SyncClockEntity("episode", localEpisodeRid, "{}"))
+            db.syncClockDao().upsert(SyncClockEntity("upnext", localEpisodeRid, "{}"))
+            db.syncClockDao().upsert(SyncClockEntity("member", localMemberRid, "{}"))
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity(
+                    coll = "episode",
+                    rid = localEpisodeRid,
+                    field = "played",
+                    hlc = playedAt shl 16,
+                    nodeId = "0000000000000001",
+                    value = """{"played":true,"playedAt":$playedAt}""",
+                ),
+            )
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity(
+                    coll = "upnext",
+                    rid = localEpisodeRid,
+                    field = "in",
+                    hlc = playedAt shl 16,
+                    nodeId = "0000000000000001",
+                    value = "true",
+                ),
+            )
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity(
+                    coll = "member",
+                    rid = localMemberRid,
+                    field = "in",
+                    hlc = playedAt shl 16,
+                    nodeId = "0000000000000001",
+                    value = "true",
+                ),
+            )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId).copy(removedAt = playedAt)),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNull(db.podcastDao().byId(local))
+            val canonicalEpisodeRid = syncId + "g:e"
+            val canonicalMemberRid = groupUuid + syncId
+            // No stale row survives under the local rid.
+            assertNull(db.syncClockDao().get("episode", localEpisodeRid))
+            assertNull(db.syncClockDao().get("upnext", localEpisodeRid))
+            assertNull(db.syncClockDao().get("member", localMemberRid))
+            assertTrue(db.syncOutboxDao().rowsFor("episode", listOf(localEpisodeRid)).isEmpty())
+            assertTrue(db.syncOutboxDao().rowsFor("upnext", listOf(localEpisodeRid)).isEmpty())
+            assertTrue(db.syncOutboxDao().rowsFor("member", listOf(localMemberRid)).isEmpty())
+            // The intended newest intents ride the canonical rid with their payloads.
+            assertNotNull(db.syncClockDao().get("episode", canonicalEpisodeRid))
+            assertNotNull(db.syncClockDao().get("upnext", canonicalEpisodeRid))
+            assertNotNull(db.syncClockDao().get("member", canonicalMemberRid))
+            assertEquals(
+                """{"played":true,"playedAt":$playedAt}""",
+                db
+                    .syncOutboxDao()
+                    .rowsFor("episode", listOf(canonicalEpisodeRid))
+                    .single()
+                    .value,
+            )
+            assertTrue(db.syncOutboxDao().rowsFor("upnext", listOf(canonicalEpisodeRid)).isNotEmpty())
+            assertTrue(db.syncOutboxDao().rowsFor("member", listOf(canonicalMemberRid)).isNotEmpty())
+        }
+
+    /** The local re-subscribe is newer than the server tombstone: the local row survives. */
+    @Test
+    fun linkMergeKeepsALocalPodcastWhoseResubscribeIsNewer() =
+        runTest {
+            val local =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/feed", syncId = syncId, subscribedAt = playedAt),
+                )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId).copy(removedAt = june)),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNotNull(db.podcastDao().byId(local), "a newer local intent survives the tombstone")
+        }
+
+    /** A server-won group tombstone deletes the local group; a newer local update survives. */
+    @Test
+    fun linkMergeAppliesAServerWonGroupTombstone() =
+        runTest {
+            val local =
+                db.groupDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database.groupEntity(
+                        uuid = "11111111-1111-4111-8111-111111111111",
+                        name = "Group",
+                        orderKey = "0.5",
+                        updatedAt = june,
+                    ),
+                )
+            val dir =
+                writeStagingDir(
+                    podcasts = emptyList(),
+                    groups =
+                        listOf(
+                            GroupV1(
+                                uuid = "11111111-1111-4111-8111-111111111111",
+                                name = "Group",
+                                sortOrder = 0,
+                                orderKey = "0.5",
+                                removedAt = playedAt,
+                            ),
+                        ),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNull(db.groupDao().groupById(local), "a newer server tombstone deletes the local group")
+        }
+
+    @Test
+    fun linkMergeKeepsALocalGroupWhoseUpdateIsNewer() =
+        runTest {
+            val local =
+                db.groupDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database.groupEntity(
+                        uuid = "11111111-1111-4111-8111-111111111111",
+                        name = "Group",
+                        orderKey = "0.5",
+                        updatedAt = playedAt,
+                    ),
+                )
+            val dir =
+                writeStagingDir(
+                    podcasts = emptyList(),
+                    groups =
+                        listOf(
+                            GroupV1(
+                                uuid = "11111111-1111-4111-8111-111111111111",
+                                name = "Group",
+                                sortOrder = 0,
+                                orderKey = "0.5",
+                                removedAt = june,
+                            ),
+                        ),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNotNull(db.groupDao().groupById(local), "a newer local update survives the tombstone")
+        }
+
+    /** A server-won membership tombstone removes the local membership; a newer local add survives. */
+    @Test
+    fun linkMergeAppliesAServerWonMemberTombstone() =
+        runTest {
+            val podcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val group =
+                db.groupDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database.groupEntity(
+                        uuid = "11111111-1111-4111-8111-111111111111",
+                        name = "Group",
+                        orderKey = "0.5",
+                    ),
+                )
+            db.groupDao().insertMember(
+                ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity(
+                    groupId = group,
+                    podcastId = podcast,
+                    orderKey = "0.5",
+                    addedAt = june,
+                ),
+            )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    groups =
+                        listOf(
+                            GroupV1(
+                                uuid = "11111111-1111-4111-8111-111111111111",
+                                name = "Group",
+                                sortOrder = 0,
+                                orderKey = "0.5",
+                                members =
+                                    listOf(
+                                        MemberV1(
+                                            podcastKey = "https://s/feed",
+                                            addedAt = june,
+                                            orderKey = "0.5",
+                                            removedAt = playedAt,
+                                        ),
+                                    ),
+                            ),
+                        ),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNull(
+                db.groupDao().member(group, podcast),
+                "a newer server tombstone removes the local membership",
+            )
+        }
+
+    @Test
+    fun linkMergeKeepsALocalMemberWhoseAddIsNewer() =
+        runTest {
+            val podcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val group =
+                db.groupDao().insert(
+                    ch.lkmc.neutrodyne.core.testing.database.groupEntity(
+                        uuid = "11111111-1111-4111-8111-111111111111",
+                        name = "Group",
+                        orderKey = "0.5",
+                    ),
+                )
+            db.groupDao().insertMember(
+                ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity(
+                    groupId = group,
+                    podcastId = podcast,
+                    orderKey = "0.5",
+                    addedAt = playedAt,
+                ),
+            )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    groups =
+                        listOf(
+                            GroupV1(
+                                uuid = "11111111-1111-4111-8111-111111111111",
+                                name = "Group",
+                                sortOrder = 0,
+                                orderKey = "0.5",
+                                members =
+                                    listOf(
+                                        MemberV1(
+                                            podcastKey = "https://s/feed",
+                                            addedAt = playedAt,
+                                            orderKey = "0.5",
+                                            removedAt = june,
+                                        ),
+                                    ),
+                            ),
+                        ),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNotNull(db.groupDao().member(group, podcast), "a newer local add survives the tombstone")
+        }
+
+    /** A server-won Up-next tombstone removes the local queue entry; a newer local add survives. */
+    @Test
+    fun linkMergeAppliesAServerWonUpNextTombstone() =
+        runTest {
+            val podcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val episode = db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:e"))
+            db.queueDao().insert(
+                ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity(
+                    episodeId = episode,
+                    orderKey = "0.5",
+                    addedAt = june,
+                ),
+            )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines = emptyList(),
+                    queue =
+                        QueueV1(
+                            upNext =
+                                listOf(
+                                    UpNextRefV1(
+                                        p = "https://s/feed",
+                                        k = "g:e",
+                                        ok = "0.5",
+                                        removedAt = playedAt,
+                                    ),
+                                ),
+                        ),
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNull(db.queueDao().entryByEpisode(episode), "a newer server tombstone removes the queue entry")
+        }
+
+    @Test
+    fun linkMergeKeepsALocalUpNextWhoseAddIsNewer() =
+        runTest {
+            val podcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val episode = db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:e"))
+            db.queueDao().insert(
+                ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity(
+                    episodeId = episode,
+                    orderKey = "0.5",
+                    addedAt = playedAt,
+                ),
+            )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines = emptyList(),
+                    queue =
+                        QueueV1(
+                            upNext =
+                                listOf(
+                                    UpNextRefV1(
+                                        p = "https://s/feed",
+                                        k = "g:e",
+                                        ok = "0.5",
+                                        removedAt = june,
+                                    ),
+                                ),
+                        ),
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertNotNull(db.queueDao().entryByEpisode(episode), "a newer local add survives the tombstone")
+        }
+
+    /**
+     * 10 Merge step 2 through the real port: the merger's Replace replay preserves the staged
+     * group and member `ok` order. The mapper's sorting is pinned by `:sync:impl`'s
+     * `mergeStagesGroupsAndMembersInTheServerOkOrder`; this proves the database outcome.
+     */
+    @Test
+    fun linkReplacePreservesTheStagedGroupAndMemberOkOrder() =
+        runTest {
+            val secondSyncId = "00000000-0000-4000-8000-00000000000b"
+            val dir =
+                writeStagingDir(
+                    podcasts =
+                        listOf(
+                            podcastV1("https://s/feed", syncId),
+                            podcastV1("https://s/lone", secondSyncId),
+                        ),
+                    // Already in the server's `ok` order, as the mapper stages it.
+                    groups =
+                        listOf(
+                            GroupV1(
+                                uuid = "22222222-2222-4222-8222-222222222222",
+                                name = "Group B",
+                                sortOrder = 0,
+                                orderKey = "0.1",
+                                members =
+                                    listOf(
+                                        MemberV1("https://s/lone", addedAt = 1L, orderKey = "0.1"),
+                                        MemberV1("https://s/feed", addedAt = 1L, orderKey = "0.2"),
+                                    ),
+                            ),
+                            GroupV1(
+                                uuid = "11111111-1111-4111-8111-111111111111",
+                                name = "Group A",
+                                sortOrder = 0,
+                                orderKey = "0.5",
+                                members = listOf(MemberV1("https://s/feed", addedAt = 1L, orderKey = "0.5")),
+                            ),
+                        ),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_REPLACE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            val groups = db.groupDao().groupsInOrder()
+            assertEquals(listOf("Group B", "Group A"), groups.map { it.name })
+            val groupB = groups.first { it.name == "Group B" }
+            assertEquals(
+                listOf("https://s/lone", "https://s/feed"),
+                db.groupDao().membersOf(groupB.id).map { db.podcastDao().byId(it.podcastId)?.feedKey },
+            )
+        }
+
+    /**
+     * The `ts` reduction excludes only the `pos` field: a server-only episode whose played, fav
+     * and pos clocks coincide still imports its played/favourite state (10 Merge step 2). The
+     * mapper's `ts` is pinned by `:sync:impl`'s `mergeMapsEqualStateClocksIntoTs`; this proves
+     * the database outcome of that staged line.
+     */
+    @Test
+    fun linkMergeWritesStateWhenPlayedFavAndPosShareOneClock() =
+        runTest {
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines =
+                        listOf(
+                            EpisodeLineV1(
+                                p = "https://s/feed",
+                                k = "g:e",
+                                u = "https://s/e.mp3",
+                                pl = playedAt,
+                                fav = true,
+                                pos = 5_000,
+                                ts = playedAt,
+                                fc =
+                                    mapOf(
+                                        "played" to playedAt,
+                                        "fav" to playedAt,
+                                        "pos" to playedAt,
+                                    ),
+                            ),
+                        ),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            val podcastId = db.podcastDao().bySyncId(syncId)!!.id
+            val episode = db.episodeDao().byIdentityKey(podcastId, "g:e")
+            assertNotNull(episode)
+            val state = db.episodeStateDao().byEpisode(episode.id)
+            assertNotNull(state, "a non-zero ts writes the played state")
+            assertEquals(playedAt, state.playedAt)
+            assertTrue(state.isFavorite)
+        }
+
+    /**
+     * 10 Use the server's library through the real port: the server's Up-next refs replace
+     * the local list in the server's order, a ref whose key differs from the local episode's
+     * key is kept through the mapper's match-hint rewrite (the `g:alias` row), and local-only
+     * podcasts and queue entries are pruned. The mapping itself is pinned by `:sync:impl`'s
+     * `useServerMapsTheServerUpNextWithOrderKeysAndMatchHints`.
+     */
+    @Test
+    fun useServerAppliesTheServerUpNextAndPrunesLocalOnlyEntries() =
+        runTest {
+            val shared =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val localOnlySyncId = "00000000-0000-4000-8000-00000000000b"
+            val localOnly =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/lone", syncId = localOnlySyncId),
+                )
+            db.episodeDao().insertStub(episodeEntity(podcastId = shared, identityKey = "g:srv1"))
+            db.episodeDao().insertStub(episodeEntity(podcastId = shared, identityKey = "g:srv2"))
+            db.episodeDao().insertStub(episodeEntity(podcastId = shared, identityKey = "g:local"))
+            db.episodeDao().insertStub(
+                episodeEntity(podcastId = shared, identityKey = "g:alias") {
+                    copy(enclosureUrl = "https://cdn.example.com/alias.mp3")
+                },
+            )
+            db.episodeDao().insertStub(episodeEntity(podcastId = localOnly, identityKey = "g:lone"))
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines = emptyList(),
+                    queue =
+                        QueueV1(
+                            upNext =
+                                listOf(
+                                    UpNextRefV1(p = "https://s/feed", k = "g:srv1", ok = "0.2"),
+                                    UpNextRefV1(p = "https://s/feed", k = "g:srv2", ok = "0.4"),
+                                    UpNextRefV1(p = "https://s/feed", k = "g:alias", ok = "0.6"),
+                                ),
+                        ),
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_REPLACE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertEquals(
+                listOf("g:srv1", "g:srv2", "g:alias"),
+                db.queueDao().entries().mapNotNull { db.episodeDao().byId(it.episodeId)?.identityKey },
+            )
+            assertEquals(
+                "0.6",
+                db
+                    .queueDao()
+                    .entryByEpisode(
+                        db
+                            .episodeDao()
+                            .all()
+                            .first { it.identityKey == "g:alias" }
+                            .id,
+                    )?.orderKey,
+            )
+            assertNull(db.podcastDao().bySyncId(localOnlySyncId))
+            assertNotNull(db.podcastDao().bySyncId(syncId))
+        }
+
+    /**
+     * 10 Merge step 2: the server's `youtubeVariants` survives the staging directory into the
+     * real row. The mapper's default-1 insert path otherwise drops the user's Shorts/Live
+     * choice permanently (the pull applier had no branch either).
+     */
+    @Test
+    fun linkReplacePersistsTheStagedYoutubeVariants() =
+        runTest {
+            val local =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://s/feed", syncId = syncId) {
+                        copy(youtubeVariants = 1)
+                    },
+                )
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId).copy(youtubeVariants = 3)),
+                    episodeLines = emptyList(),
+                    queue = null,
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_REPLACE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            assertEquals(3, db.podcastDao().byId(local)!!.youtubeVariants)
+        }
+
+    /**
+     * 05 transaction C / 10 First-link column: LINK_REPLACE owns the play-session row, so
+     * the server's `current`, context, order, filters, min-sort date and anchor land instead
+     * of the old mapper's always-empty session clearing the local current episode.
+     */
+    @Test
+    fun linkReplaceAdoptsTheServerSessionInsteadOfClearing() =
+        runTest {
+            val podcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            val current = db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:e"))
+            val localCurrent =
+                db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:local"))
+            db.playSessionDao().write(PlaySessionEntity(currentEpisodeId = localCurrent, updatedAt = june))
+            val groupUuid = "11111111-1111-4111-8111-111111111111"
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines = emptyList(),
+                    queue =
+                        QueueV1(
+                            upNext = emptyList(),
+                            session =
+                                SessionV1(
+                                    current = EpisodeRefV1("https://s/feed", "g:e"),
+                                    contextType = "GROUP",
+                                    contextGroupUuid = groupUuid,
+                                    order = "OLDEST_FIRST",
+                                    filterFlags = 3,
+                                    mediaFilter = "AUDIO",
+                                    minSortDate = 5,
+                                    anchor = EpisodeRefV1("https://s/feed", "g:e"),
+                                ),
+                        ),
+                    groups =
+                        listOf(
+                            GroupV1(
+                                uuid = groupUuid,
+                                name = "Group",
+                                sortOrder = 0,
+                                orderKey = "0.5",
+                            ),
+                        ),
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_REPLACE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            val session = assertNotNull(db.playSessionDao().get())
+            assertEquals(current, session.currentEpisodeId)
+            assertEquals(ContextType.GROUP, session.contextType)
+            assertEquals(db.groupDao().groupByUuid(groupUuid)?.id, session.contextId)
+            assertEquals(FeedOrder.OLDEST_FIRST, session.contextOrder)
+            assertEquals(3, session.contextFilterFlags)
+            assertEquals(MediaFilter.AUDIO, session.contextMediaFilter)
+            assertEquals(5L, session.contextMinSortDate)
+            assertEquals(current, session.contextAnchorEpisodeId)
+        }
+
+    /**
+     * 05 transaction C / R7.5: LINK_MERGE lands the session only while the local row is idle,
+     * so an active local current episode survives the server's session.
+     */
+    @Test
+    fun linkMergeKeepsTheLocalCurrentEpisodeWhilePlaying() =
+        runTest {
+            val podcast =
+                db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://s/feed", syncId = syncId))
+            db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:e"))
+            val localCurrent =
+                db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:local"))
+            db.playSessionDao().write(PlaySessionEntity(currentEpisodeId = localCurrent, updatedAt = june))
+            val dir =
+                writeStagingDir(
+                    podcasts = listOf(podcastV1("https://s/feed", syncId)),
+                    episodeLines = emptyList(),
+                    queue =
+                        QueueV1(
+                            upNext = emptyList(),
+                            session =
+                                SessionV1(
+                                    current = EpisodeRefV1("https://s/feed", "g:e"),
+                                    contextType = "PODCAST",
+                                    contextPodcastKey = "https://s/feed",
+                                ),
+                        ),
+                )
+
+            val outcome = impl.mergeStaged(dir.toString(), MergePolicy.LINK_MERGE, { _, _ -> }, { _, _ -> })
+
+            assertIs<Outcome.Success<MergeSummary>>(outcome)
+            val session = assertNotNull(db.playSessionDao().get())
+            assertEquals(
+                localCurrent,
+                session.currentEpisodeId,
+                "MERGE never overwrites an active local current episode",
+            )
+            assertNull(session.contextType)
+        }
+
     @Test
     fun mergeStagedRefusesADirectoryWithoutMetadata() =
         runTest {
@@ -179,74 +990,81 @@ class LibraryMergerImplTest {
         }
 
     /** Writes one full staging directory through the STAGING codec (10 Merge step 2). */
-    private fun stagingDir(): Path {
-        val dir = root.resolve("staging").toString().toPath()
+    private fun stagingDir(): Path =
+        writeStagingDir(
+            podcasts =
+                listOf(
+                    PodcastV1(
+                        key = "https://s/feed",
+                        feedUrl = "https://s/feed",
+                        title = "Server title",
+                        subscribedAt = pullAt,
+                        syncId = syncId,
+                    ),
+                ),
+            episodeLines =
+                listOf(
+                    EpisodeLineV1(
+                        p = "https://s/feed",
+                        k = "g:e",
+                        u = "https://s/e.mp3",
+                        pl = playedAt,
+                        ts = playedAt,
+                        fc = mapOf("played" to playedAt),
+                    ),
+                    EpisodeLineV1(
+                        p = "https://s/feed",
+                        k = "g:plain",
+                        u = "https://s/p.mp3",
+                        pl = 1L,
+                        ts = 1L,
+                        fc = mapOf("played" to 1L),
+                    ),
+                    EpisodeLineV1(p = "https://s/feed", k = "g:q", u = "https://s/q.mp3", ts = 0L),
+                ),
+            queue = QueueV1(upNext = listOf(UpNextRefV1("https://s/feed", "g:q"))),
+            settings =
+                listOf(
+                    SettingValueV1(GroupsSettingKeys.SHOW_UNGROUPED_TAB.name, "Bool", JsonPrimitive(true)),
+                ),
+        )
+
+    /** Writes a staging directory with the given entries through the STAGING codec. */
+    private fun writeStagingDir(
+        podcasts: List<PodcastV1>,
+        episodeLines: List<EpisodeLineV1>,
+        queue: QueueV1?,
+        settings: List<SettingValueV1> = emptyList(),
+        groups: List<GroupV1> = emptyList(),
+    ): Path {
+        val dir = root.resolve("staging-${stagingCounter++}").toString().toPath()
         fileSystem.createDirectories(dir)
         val codec = BackupCodec(BackupCodec.Mode.STAGING)
         fileSystem.write(dir / BackupCodec.ENTRY_LIBRARY) {
-            writeUtf8(
-                codec.encodeLibrary(
-                    LibraryV1(
-                        podcasts =
-                            listOf(
-                                PodcastV1(
-                                    key = "https://s/feed",
-                                    feedUrl = "https://s/feed",
-                                    title = "Server title",
-                                    subscribedAt = pullAt,
-                                    syncId = syncId,
-                                ),
-                            ),
-                        groups = emptyList(),
-                    ),
-                ),
-            )
+            writeUtf8(codec.encodeLibrary(LibraryV1(podcasts = podcasts, groups = groups)))
         }
         fileSystem.write(dir / BackupCodec.ENTRY_EPISODES) {
-            codec.writeEpisodeLine(
-                this,
-                EpisodeLineV1(
-                    p = "https://s/feed",
-                    k = "g:e",
-                    u = "https://s/e.mp3",
-                    pl = playedAt,
-                    ts = playedAt,
-                    fc = mapOf("played" to playedAt),
-                ),
-            )
-            codec.writeEpisodeLine(
-                this,
-                EpisodeLineV1(
-                    p = "https://s/feed",
-                    k = "g:plain",
-                    u = "https://s/p.mp3",
-                    pl = 1L,
-                    ts = 1L,
-                    fc =
-                        mapOf("played" to 1L),
-                ),
-            )
-            codec.writeEpisodeLine(
-                this,
-                EpisodeLineV1(p = "https://s/feed", k = "g:q", u = "https://s/q.mp3", ts = 0L),
-            )
+            for (line in episodeLines) codec.writeEpisodeLine(this, line)
         }
-        fileSystem.write(dir / BackupCodec.ENTRY_QUEUE) {
-            writeUtf8(codec.encodeQueue(QueueV1(upNext = listOf(UpNextRefV1("https://s/feed", "g:q")))))
+        if (queue != null) {
+            fileSystem.write(dir / BackupCodec.ENTRY_QUEUE) { writeUtf8(codec.encodeQueue(queue)) }
         }
         fileSystem.write(dir / BackupCodec.ENTRY_SETTINGS) {
-            writeUtf8(
-                codec.encodeSettings(
-                    SettingsV1(
-                        values =
-                            listOf(
-                                SettingValueV1(GroupsSettingKeys.SHOW_UNGROUPED_TAB.name, "Bool", JsonPrimitive(true)),
-                            ),
-                    ),
-                ),
-            )
+            writeUtf8(codec.encodeSettings(SettingsV1(values = settings)))
         }
         fileSystem.write(dir / STAGING_META_ENTRY) { writeUtf8("""{"createdAt":$pullAt}""") }
         return dir
     }
+
+    private fun podcastV1(
+        key: String,
+        syncId: String,
+    ): PodcastV1 =
+        PodcastV1(
+            key = key,
+            feedUrl = key,
+            title = "Server title",
+            subscribedAt = pullAt,
+            syncId = syncId,
+        )
 }
