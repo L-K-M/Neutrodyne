@@ -335,6 +335,49 @@ class BundledEngineStoreTest {
             assertEquals(active, store.hostPrepared())
         }
 
+    @Test fun latestStageSurvivesPreparationAfterAnAbandonedHigherVersion() =
+        runTest {
+            val store = store()
+            store.prepareBundled()
+            for ((sequence, version) in listOf("2026.09.01", "2026.09.15").withIndex()) {
+                val candidate =
+                    store.stageVersion(
+                        version,
+                        fixtureZip(version = version),
+                        "0.8.0",
+                        sequence.toLong() + 1,
+                    )
+                store.beginTrial(version)
+                compileFixture(candidate)
+                store.commitTrial(clock.now(), null, false)
+            }
+            val abandoned = store.stageVersion("2026.11.15", fixtureZip(version = "2026.11.15"), "0.8.0", 3)
+            store.beginTrial("2026.11.15")
+            store.clearTrial()
+            // A later approved manifest may target an older candidate which is still
+            // newer than current. The newest staging operation owns the pending tree.
+            val replacement = store.stageVersion("2026.11.01", fixtureZip(version = "2026.11.01"), "0.8.0", 4)
+            assertEquals("2026.11.01", store.active.value.staged)
+            store.prepareBundled()
+            assertTrue(File(replacement.libDir.toFile(), "yt_dlp/version.py").isFile)
+            assertFalse(abandoned.libDir.toFile().exists())
+            assertEquals("2026.09.15", store.active.value.current)
+            assertEquals("2026.09.01", store.active.value.previous)
+            assertTrue(
+                store.active.value.rejected
+                    .isEmpty(),
+            )
+            store.beginTrial("2026.11.01")
+            compileFixture(replacement)
+            store.commitTrial(clock.now(), null, false)
+            assertEquals("2026.11.01", store.active.value.current)
+            assertEquals("2026.09.15", store.active.value.previous)
+            assertEquals(
+                setOf("2026.08.19", "2026.09.15", "2026.11.01"),
+                File(paths.root.toFile(), "versions").list()!!.toSet(),
+            )
+        }
+
     @Test fun genuinePinnedZipExtractsWithShebangAndExpectedInventory() {
         val archive = File("../ytdlp/engine/yt-dlp")
         val target = File(temporary.root, "real-lib")

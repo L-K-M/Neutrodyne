@@ -251,8 +251,14 @@ class BundledEngineStore(
                     BundledZip.extract(archiveFile, File(staging, "lib"), version, ejsVersion)
                     Files.move(staging.toPath(), versionDir.toPath(), ATOMIC_MOVE)
                 }
-                updateRecord { it.copy(lastManifestSequence = maxOf(it.lastManifestSequence, sequence)) }
-                publishActive(readRecord<ActiveRecord>(File(root, "active.json"))!!)
+                val record = updateRecord { it.copy(lastManifestSequence = maxOf(it.lastManifestSequence, sequence)) }
+                // This staging operation supersedes abandoned candidates, even if a later
+                // approved manifest selects a lower version. Keep active/rollback/trial trees.
+                pruneVersions(
+                    setOf(record.bundled, record.current, version) +
+                        listOfNotNull(record.previous, trial?.marker?.engineVersion),
+                )
+                publishActive(record)
                 candidate
             }
         }
