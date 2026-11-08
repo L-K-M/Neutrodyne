@@ -5,11 +5,29 @@ import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFalse
 
 class BundledZipTest {
     @get:Rule val temporary = TemporaryFolder()
+
+    @Test fun zipappExtractionKeepsTheSignedArchiveAndCleansTemporaryCopies() {
+        for (version in listOf("2026.08.19", "2026.09.01")) {
+            val root = temporary.newFolder()
+            val bytes = "#!/usr/bin/env python3\n".toByteArray() + fixtureZip(version = version)
+            val archive = File(root, "yt-dlp").apply { writeBytes(bytes) }
+            val output = File(root, "lib")
+            if (version == "2026.08.19") {
+                BundledZip.extract(archive, output, "2026.08.19", "0.8.0")
+            } else {
+                assertFails { BundledZip.extract(archive, output, "2026.08.19", "0.8.0") }
+            }
+            assertContentEquals(bytes, archive.readBytes())
+            assertEquals(setOf("yt-dlp", "lib"), root.list()?.toSet())
+        }
+    }
 
     @Test fun rejectsSlipAbsoluteBackslashAndUnapprovedRoots() {
         for (name in listOf(
