@@ -158,6 +158,43 @@ class GmdDeviceBudgetTest(unittest.TestCase):
                 "Dry-run mode only affects MacrobenchmarkRule; unrelated system tests require a different app build",
             )
 
+    def test_m10_failure_preserves_class_evidence_and_full_log(self):
+        classname = "NavigationStateRestorationTest"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = root / "runner"
+            runner.mkdir()
+            # A prior class has already stopped its own collector.
+            (runner / "gmd-crash-preserver.stop").touch()
+            helper = root / "scripts/ci/preserve-emulator-crashes.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text("import sys\nfrom pathlib import Path\n"
+                              "assert not Path(sys.argv[3]).exists(), 'stale stop file'\n")
+            gradle = root / "gradlew"
+            gradle.write_text(
+                f"#!{sys.executable}\n"
+                "import sys\nfrom pathlib import Path\n"
+                "p=Path('app/build/outputs/androidTest-results/managedDevice/debug/api36')\n"
+                "p.mkdir(parents=True)\n"
+                "(p/'TEST-failed.xml').write_text('<testsuite failures=\"1\"/>')\n"
+                "print('device stdout evidence')\n"
+                "print('device stderr evidence', file=sys.stderr)\n"
+                "sys.exit(37)\n"
+            )
+            gradle.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", _run_block(f"M10 journeys on the api36 GMD - {classname}")],
+                cwd=root, env={**os.environ, "RUNNER_TEMP": str(runner)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 37, result.stderr)
+            evidence = root / f"app/build/outputs/androidTest-results/m10-a11y/{classname}/api36"
+            self.assertTrue((evidence / "TEST-failed.xml").is_file(), "Failed Gradle must still snapshot XML")
+            log = (evidence / "gradle.log").read_text()
+            self.assertIn("device stdout evidence", log)
+            self.assertIn("device stderr evidence", log)
+            self.assertNotIn("stale stop file", result.stderr)
+
     def test_gradle_worker_limit_does_not_replace_device_limit(self):
         with self.assertRaises(AssertionError):
             self._assert_device_budget(["--max-workers=1"])

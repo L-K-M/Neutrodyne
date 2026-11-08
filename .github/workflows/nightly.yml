@@ -1268,21 +1268,26 @@ jobs:
           # One worker avoids queuing a device lease behind the 30-minute case.
           readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
           # A later emulator launch deletes unconsented Crashpad reports.
-          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/m10-a11y-M10AccessibilityTest-crash-preserver.stop"
           python3 scripts/ci/preserve-emulator-crashes.py \
             "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
           readonly CRASH_PRESERVER_PID=$!
           trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
           # A cached or stale XML must never supply the device lane's evidence.
           rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          readonly EVIDENCE="app/build/outputs/androidTest-results/m10-a11y/M10AccessibilityTest/api36"
+          mkdir -p "$EVIDENCE"
+          gradle_status=0
           # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
           ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
             -Pneutrodyne.testScope=nightly \
             -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.M10AccessibilityTest \
-            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-M10AccessibilityTest.log"
-          # Copy evidence to distinct root with api36 path component.
-          mkdir -p app/build/outputs/androidTest-results/m10-a11y/M10AccessibilityTest/api36
-          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/M10AccessibilityTest/api36/ 2>/dev/null || true
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$EVIDENCE/gradle.log" || gradle_status=$?
+          # Preserve diagnostics before returning the original Gradle failure.
+          if [ -d app/build/outputs/androidTest-results/managedDevice/debug/api36 ]; then
+            cp -R app/build/outputs/androidTest-results/managedDevice/debug/api36/. "$EVIDENCE/"
+          fi
+          exit "$gradle_status"
       - name: Require M10AccessibilityTest executed unskipped
         run: |
           python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/M10AccessibilityTest --device api36 \
@@ -1294,21 +1299,26 @@ jobs:
           # One worker avoids queuing a device lease behind the 30-minute case.
           readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
           # A later emulator launch deletes unconsented Crashpad reports.
-          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/m10-a11y-NavigationStateRestorationTest-crash-preserver.stop"
           python3 scripts/ci/preserve-emulator-crashes.py \
             "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
           readonly CRASH_PRESERVER_PID=$!
           trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
           # Clear only owned managedDevice/debug/api36 results for this class.
           rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          readonly EVIDENCE="app/build/outputs/androidTest-results/m10-a11y/NavigationStateRestorationTest/api36"
+          mkdir -p "$EVIDENCE"
+          gradle_status=0
           # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
           ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
             -Pneutrodyne.testScope=nightly \
             -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.NavigationStateRestorationTest \
-            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-NavigationStateRestorationTest.log"
-          # Copy evidence to distinct root with api36 path component.
-          mkdir -p app/build/outputs/androidTest-results/m10-a11y/NavigationStateRestorationTest/api36
-          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/NavigationStateRestorationTest/api36/ 2>/dev/null || true
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$EVIDENCE/gradle.log" || gradle_status=$?
+          # Preserve diagnostics before returning the original Gradle failure.
+          if [ -d app/build/outputs/androidTest-results/managedDevice/debug/api36 ]; then
+            cp -R app/build/outputs/androidTest-results/managedDevice/debug/api36/. "$EVIDENCE/"
+          fi
+          exit "$gradle_status"
       - name: Require NavigationStateRestorationTest executed unskipped
         run: |
           python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/NavigationStateRestorationTest --device api36 \
@@ -1320,21 +1330,26 @@ jobs:
           # One worker avoids queuing a device lease behind the 30-minute case.
           readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
           # A later emulator launch deletes unconsented Crashpad reports.
-          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/m10-a11y-PerAppLanguageTest-crash-preserver.stop"
           python3 scripts/ci/preserve-emulator-crashes.py \
             "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
           readonly CRASH_PRESERVER_PID=$!
           trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
           # Clear only owned managedDevice/debug/api36 results for this class.
           rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          readonly EVIDENCE="app/build/outputs/androidTest-results/m10-a11y/PerAppLanguageTest/api36"
+          mkdir -p "$EVIDENCE"
+          gradle_status=0
           # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
           ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
             -Pneutrodyne.testScope=nightly \
             -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.PerAppLanguageTest \
-            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-PerAppLanguageTest.log"
-          # Copy evidence to distinct root with api36 path component.
-          mkdir -p app/build/outputs/androidTest-results/m10-a11y/PerAppLanguageTest/api36
-          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/PerAppLanguageTest/api36/ 2>/dev/null || true
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$EVIDENCE/gradle.log" || gradle_status=$?
+          # Preserve diagnostics before returning the original Gradle failure.
+          if [ -d app/build/outputs/androidTest-results/managedDevice/debug/api36 ]; then
+            cp -R app/build/outputs/androidTest-results/managedDevice/debug/api36/. "$EVIDENCE/"
+          fi
+          exit "$gradle_status"
       - name: Require PerAppLanguageTest executed unskipped
         run: |
           python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/PerAppLanguageTest --device api36 \
@@ -1346,21 +1361,26 @@ jobs:
           # One worker avoids queuing a device lease behind the 30-minute case.
           readonly -a GMD_LIMITS=(--max-workers=1 -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1)
           # A later emulator launch deletes unconsented Crashpad reports.
-          readonly CRASH_STOP_FILE="$RUNNER_TEMP/gmd-crash-preserver.stop"
+          readonly CRASH_STOP_FILE="$RUNNER_TEMP/m10-a11y-SubscribeJourneyTest-crash-preserver.stop"
           python3 scripts/ci/preserve-emulator-crashes.py \
             "/tmp/android-$USER" build/outputs/androidTest-results/emulator-crashes "$CRASH_STOP_FILE" &
           readonly CRASH_PRESERVER_PID=$!
           trap 'status=$?; touch "$CRASH_STOP_FILE"; if ! wait "$CRASH_PRESERVER_PID" && [ "$status" -eq 0 ]; then status=1; fi; exit "$status"' EXIT
           # Clear only owned managedDevice/debug/api36 results for this class.
           rm -rf app/build/outputs/androidTest-results/managedDevice/debug/api36
+          readonly EVIDENCE="app/build/outputs/androidTest-results/m10-a11y/SubscribeJourneyTest/api36"
+          mkdir -p "$EVIDENCE"
+          gradle_status=0
           # Use Lavapipe/ANGLE after the captured legacy-renderer crash.
           ./gradlew --info "${GMD_LIMITS[@]}" :app:api36DebugAndroidTest \
             -Pneutrodyne.testScope=nightly \
             -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.SubscribeJourneyTest \
-            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$RUNNER_TEMP/m10-a11y-SubscribeJourneyTest.log"
-          # Copy evidence to distinct root with api36 path component.
-          mkdir -p app/build/outputs/androidTest-results/m10-a11y/SubscribeJourneyTest/api36
-          cp -r app/build/outputs/androidTest-results/managedDevice/debug/api36/* app/build/outputs/androidTest-results/m10-a11y/SubscribeJourneyTest/api36/ 2>/dev/null || true
+            -Pandroid.testoptions.manageddevices.emulator.gpu=lavapipe 2>&1 | tee "$EVIDENCE/gradle.log" || gradle_status=$?
+          # Preserve diagnostics before returning the original Gradle failure.
+          if [ -d app/build/outputs/androidTest-results/managedDevice/debug/api36 ]; then
+            cp -R app/build/outputs/androidTest-results/managedDevice/debug/api36/. "$EVIDENCE/"
+          fi
+          exit "$gradle_status"
       - name: Require SubscribeJourneyTest executed unskipped
         run: |
           python3 scripts/ci/assert-selected-tests.py app/build/outputs/androidTest-results/m10-a11y/SubscribeJourneyTest --device api36 \
