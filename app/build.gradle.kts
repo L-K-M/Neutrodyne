@@ -41,6 +41,7 @@ val shippedLocales =
 
 android {
     sourceSets["main"].kotlin.srcDir(if (youtubeEngine) "src/youtubeEngine/kotlin" else "src/noYouTubeEngine/kotlin")
+    if (youtubeEngine) sourceSets["test"].kotlin.srcDir("src/youtubeEngineTest/kotlin")
     defaultConfig {
         fun prop(name: String) = providers.gradleProperty(name).orElse("").get()
         buildConfigField("String", "REPO_URL", "\"${prop("neutrodyne.repoUrl")}\"")
