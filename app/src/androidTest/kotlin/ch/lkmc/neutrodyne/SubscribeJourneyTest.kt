@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -12,11 +13,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -64,6 +67,7 @@ import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.jetbrains.compose.resources.getString
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -76,6 +80,12 @@ import kotlin.test.assertTrue
 @RunWith(AndroidJUnit4::class)
 class SubscribeJourneyTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Before
+    fun enableFrameworkAccessibilityChecks() {
+        if (Build.VERSION.SDK_INT >= 34) compose.enableAccessibilityChecks()
+    }
 
     @Test
     fun sharedAppleLinkResolvesWithoutWritingUntilConfirmation() = journey(Entry.APPLE)

@@ -52,8 +52,17 @@ import coil3.PlatformContext
 import coil3.map.Mapper
 import coil3.request.Options
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Test
 
@@ -70,11 +79,54 @@ class DesktopAppGraphTest {
     private val reporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
     private val graph = createDesktopGraph(dirs, buildInfo, reporter)
 
-    /** JUnit builds a fresh instance per test, so every test's scope is cancelled here. */
+    /** Finish each graph's collectors before closing the Room pool they still own. */
     @After
-    fun tearDown() {
-        graph.appScope.cancel()
+    fun tearDown() = runBlocking { closeGraph() }
+
+    private suspend fun closeGraph() {
+        graph.appScope.coroutineContext[Job]?.cancelAndJoin()
+        if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
+            graph.databaseOpener.requireDatabase().close()
+        }
     }
+
+    @Test
+    fun graphCleanupKeepsRoomOpenUntilItsCollectorsFinish() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            val db = graph.databaseOpener.requireDatabase()
+            val cancelled = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val readFailure = CompletableDeferred<Throwable?>()
+            graph.appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) {
+                        cancelled.complete(Unit)
+                        release.await()
+                        // Record the real Room failure without letting the debug fatal handler
+                        // halt this regression test's JVM before JUnit can report it.
+                        readFailure.complete(runCatching { db.queueDao().entries() }.exceptionOrNull())
+                    }
+                }
+            }
+            // Undispatched startup makes the old synchronous cleanup complete before this
+            // returns; joining the held collector instead suspends here without a timing poll.
+            val closing = async(start = CoroutineStart.UNDISPATCHED) { closeGraph() }
+            try {
+                cancelled.await()
+                val returnedBeforeCollector = closing.isCompleted
+                release.complete(Unit)
+                val failure = readFailure.await()
+                closing.await()
+                assertThat(failure).isNull()
+                assertThat(returnedBeforeCollector).isFalse()
+            } finally {
+                release.complete(Unit)
+                closing.await()
+            }
+        }
 
     @Test
     fun updateLaneResolvesWithTheExistingBannerBackendAfterDatabaseGate() =
@@ -89,7 +141,7 @@ class DesktopAppGraphTest {
                 assertThat(graph.jobRunner.status.value).containsKey("app-update-check")
                 assertThat(graph.bannerNotifier).isSameInstanceAs(graph.bannerNotifier)
             } finally {
-                graph.databaseOpener.requireDatabase().close()
+                closeGraph()
             }
         }
 
@@ -194,7 +246,7 @@ class DesktopAppGraphTest {
                 assertThat(graph.positionStore()).isSameInstanceAs(graph.positionStore())
                 assertThat(graph.playbackMediaLookup()).isSameInstanceAs(graph.playbackMediaLookup())
             } finally {
-                graph.databaseOpener.requireDatabase().close()
+                closeGraph()
             }
         }
 
@@ -256,7 +308,7 @@ class DesktopAppGraphTest {
                     ),
                 )
             } finally {
-                db.close()
+                closeGraph()
             }
         }
 
