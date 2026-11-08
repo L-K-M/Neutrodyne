@@ -198,11 +198,11 @@ class Fixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
 
-    def run(self, *args, env_extra=None) -> subprocess.CompletedProcess:
+    def run(self, *args, env_extra=None, executable_shell="bash") -> subprocess.CompletedProcess:
         env = dict(self.env)
         env.update(env_extra or {})
         return subprocess.run(
-            ["bash", *map(str, args)],
+            [executable_shell, *map(str, args)],
             cwd=self.root, env=env, capture_output=True, text=True, timeout=120,
         )
 
@@ -1074,6 +1074,54 @@ for image; do :; done
         self.fx.write_manifest()
         r = self.fx.image_check(self.tarball(img))
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+
+    @unittest.skipUnless(sys.platform == "darwin", "needs the macOS system Bash")
+    def test_macos_system_bash_runs_the_image_and_epoch_gates(self):
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        result = self.fx.run(
+            self.root / "scripts/ci/check-desktop-image.sh", self.tarball(img),
+            executable_shell="/bin/bash",
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("check-desktop-image: OK", result.stdout)
+        self.assertIn("size: package", result.stdout)
+        syntax = subprocess.run(
+            ["/bin/bash", "-n", str(self.root / "scripts/ci/check-desktop-image.sh")],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
+
+    @unittest.skipUnless(sys.platform == "darwin", "needs the macOS system Bash")
+    def test_macos_system_bash_rejects_a_drifted_classpath(self):
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        result = self.fx.run(
+            self.root / "scripts/ci/check-desktop-image.sh",
+            self.tarball(img, jar_epoch=self.AOT_EPOCH_S + 1),
+            executable_shell="/bin/bash",
+        )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("off the trained epoch", result.stderr)
+        self.assertNotIn("check-desktop-image: OK", result.stdout)
+
+    @unittest.skipUnless(sys.platform == "darwin", "needs the macOS system Bash")
+    def test_macos_system_bash_rejects_an_epoch_probe_failure(self):
+        img = self.flat_image()
+        self.fx.skiko_stub(img)
+        self.aot_cfg(img)
+        self.fx.write_manifest()
+        self.fake("python3", "if [ -n \"${APPDIR:-}\" ]; then exit 37; fi\nexec \"" + sys.executable + "\" \"$@\"\n")
+        result = self.fx.run(
+            self.root / "scripts/ci/check-desktop-image.sh", self.tarball(img),
+            executable_shell="/bin/bash",
+        )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("cannot inspect the packaged AOT classpath epoch", result.stderr)
 
     def test_targz_payload_drifted_jar_fails(self):
         """A one-second drift on a classpath JAR — what jpackage's

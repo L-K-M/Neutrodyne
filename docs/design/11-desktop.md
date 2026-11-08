@@ -1512,6 +1512,13 @@ Each target builds only on its own runner ([Supported targets](#supported-target
 
 *Recorded 2026-11-08 (implementation):* `packageMsi` and `packageDmg` also consume the trained image through Compose's own `appImage` property, not a freshly generated one. Compose 1.12.1 wires that property itself only for macOS package tasks (`configurePackageTask` passes the `createDistributable` provider on macOS, `null` elsewhere), and its non-macOS package tasks default to fresh-image mode: `--input <task>/libs` + `--main-jar`, which jpackage turns into a newly built image carrying no trained `neutrodyne.aot` — the state the MSI post-image WSF correctly failed closed on (Windows run 42509091764, job 128818030637: cscript exit 1, `IOException Command [cscript …] … exited with 1`, empty `jpackage-…-out.txt` because the invocation was not `--verbose`). The convention plugin therefore sets each task's `appImage` (the image directory for `packageMsi`; the destination directory for `packageDmg`, whose `makeArgs` appends `<name>.app` on a macOS host) and pairs it with the `dependsOn(createDistributable)` Compose itself adds when it wires the property: `makeArgs` then emits `--app-image` and drops `--input`/`--main-jar`/`--runtime-image`, so the MSI/DMG stage the trained bytes, classpath, natives, cache and `.cfg` the training launch verified. The regression tests drive the production wiring against a capturing fake `jpackage` (`*DesktopPackagingTest*`, CI's static job). For a post-image-hook failure on a real runner, `-Pcompose.desktop.verbose=true` adds jpackage's public `--verbose`, whose output carries the hook's stdout.
 
+*Recorded 2026-11-08 (validation):* the image checker's AOT epoch probe writes
+its Python report to a private temporary file, then reads and removes it. This
+keeps the heredoc compatible with macOS's system Bash 3.2 and counts a failed
+probe as a violation. The macOS desktop matrix and package jobs run explicit
+system-Bash fixtures for a complete successful scan, timestamp drift and a
+failed epoch probe before building the app.
+
 *Recorded 2026-10-08 (implementation):* the packaging host is matched against the official JVM `os.name` families (`Windows …`, `Mac OS X`, `Linux`), and `setupBundledRuntime` chooses the unpacker by magic bytes (`PK` ZIP vs `1f 8b` gzip'd tar) because the verified archive is staged without an extension; a Windows tree is recognised by `bin/java.exe`.
 
 ### nativeDistributions configuration

@@ -991,6 +991,13 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - name: Check image scans with the macOS system Bash
+        if: runner.os == 'macOS'
+        run: >-
+          python3 scripts/ci/tests/check-desktop-image.test.py
+          DesktopImageGatesTest.test_macos_system_bash_runs_the_image_and_epoch_gates
+          DesktopImageGatesTest.test_macos_system_bash_rejects_a_drifted_classpath
+          DesktopImageGatesTest.test_macos_system_bash_rejects_an_epoch_probe_failure
       - name: Android SDK
         shell: bash
         run: |

@@ -820,7 +820,11 @@ check_aot_epoch() {
     fi
     [ -f "$appdir/neutrodyne.aot" ] \
         || fail "the .cfg reads -XX:AOTCache but $appdir/neutrodyne.aot is missing"
-    bad="$(IMG="$img" APPDIR="$appdir" python3 - "$cfg" <<'PY'
+    # Bash 3.2 cannot parse this Python heredoc inside command substitution.
+    # Keep its output private and treat a failed probe as a counted violation.
+    local epoch_report
+    epoch_report="$(mktemp)"
+    if ! IMG="$img" APPDIR="$appdir" python3 - "$cfg" > "$epoch_report" <<'PY'
 import os, sys
 img = os.path.realpath(os.environ["IMG"])
 appdir = os.path.realpath(os.environ["APPDIR"])
@@ -870,7 +874,13 @@ for name in sorted(os.listdir(appdir)):
             problems.append("JAR not on the .cfg classpath: " + name)
 print("\n".join(problems[:3]))
 PY
-)"
+    then
+        rm -f "$epoch_report"
+        fail "cannot inspect the packaged AOT classpath epoch"
+        return
+    fi
+    bad="$(cat "$epoch_report")"
+    rm -f "$epoch_report"
     [ -z "$bad" ] || fail "the packaged AOT classpath is not at the trained epoch: $(echo "$bad" | tr '\n' ' ')"
 }
 
