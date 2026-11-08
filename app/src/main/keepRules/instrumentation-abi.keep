@@ -2739,8 +2739,6 @@
 }
 -keep enum ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality {
 }
--keep enum ch.lkmc.neutrodyne.core.model.settings.YouTubeEngineUpdatePolicy {
-}
 -keep class ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys {
   public ch.lkmc.neutrodyne.core.model.settings.SettingKey$Bool getENGINE_ENABLED();
   ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys INSTANCE;
@@ -4603,7 +4601,7 @@
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineControlMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$EngineMetroFactory$Companion Companion;
@@ -4657,7 +4655,7 @@
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$SearchMetroFactory$Companion Companion;
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StoreMetroFactory$Companion {
-  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StoreMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StoreMetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StoreMetroFactory {
   ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule$StoreMetroFactory$Companion Companion;
@@ -4692,8 +4690,6 @@
 }
 -keep class ch.lkmc.neutrodyne.youtube.api.EngineStatus {
   public ch.lkmc.neutrodyne.youtube.api.EngineAvailability getAvailability();
-}
--keep interface ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome {
 }
 -keep class ch.lkmc.neutrodyne.youtube.api.ExtractionAdmission$Admitted {
   public <init>(ch.lkmc.neutrodyne.youtube.api.ExtractionReservation);
@@ -4736,7 +4732,6 @@
   public java.lang.Object awaitLoaded(kotlin.coroutines.Continuation);
   public void completeExtraction(ch.lkmc.neutrodyne.youtube.api.ExtractionReservation, ch.lkmc.neutrodyne.youtube.api.ExtractionOutcome);
   public ch.lkmc.neutrodyne.youtube.api.ExtractionGate extractionGate(long);
-  public kotlinx.coroutines.flow.SharedFlow getOutcomes();
   public kotlinx.coroutines.flow.StateFlow getState();
   public void reportEngineVersion(java.lang.String);
   public void reportExtraction(ch.lkmc.neutrodyne.youtube.api.ExtractionOutcome);
@@ -4775,13 +4770,11 @@
 -keep interface ch.lkmc.neutrodyne.youtube.engine.EngineSettings {
   public java.lang.Object awaitLoaded(kotlin.coroutines.Continuation);
   public kotlinx.coroutines.flow.StateFlow getState();
-  public java.lang.Object recordCheck(long, ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome, kotlin.coroutines.Continuation);
-  public java.lang.Object recordHeartbeat(long, kotlin.coroutines.Continuation);
   public java.lang.Object recordStartFailures(ch.lkmc.neutrodyne.youtube.engine.CompileMarker, int, kotlin.coroutines.Continuation);
 }
 -keep class ch.lkmc.neutrodyne.youtube.engine.EngineSettingsSnapshot {
-  public <init>(boolean, int, ch.lkmc.neutrodyne.youtube.engine.CompileMarker, ch.lkmc.neutrodyne.core.model.settings.YouTubeEngineUpdatePolicy, java.lang.Long, ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome, java.lang.Long, int, kotlin.jvm.internal.DefaultConstructorMarker);
-  public static ch.lkmc.neutrodyne.youtube.engine.EngineSettingsSnapshot copy$default(ch.lkmc.neutrodyne.youtube.engine.EngineSettingsSnapshot, boolean, int, ch.lkmc.neutrodyne.youtube.engine.CompileMarker, ch.lkmc.neutrodyne.core.model.settings.YouTubeEngineUpdatePolicy, java.lang.Long, ch.lkmc.neutrodyne.youtube.api.EngineUpdateOutcome, java.lang.Long, int, java.lang.Object);
+  public <init>(boolean, int, ch.lkmc.neutrodyne.youtube.engine.CompileMarker, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public static ch.lkmc.neutrodyne.youtube.engine.EngineSettingsSnapshot copy$default(ch.lkmc.neutrodyne.youtube.engine.EngineSettingsSnapshot, boolean, int, ch.lkmc.neutrodyne.youtube.engine.CompileMarker, int, java.lang.Object);
 }
 -keep interface ch.lkmc.neutrodyne.youtube.engine.EngineStore {
 }
@@ -5797,7 +5790,6 @@
   public java.lang.Object emit(java.lang.Object, kotlin.coroutines.Continuation);
 }
 -keep class kotlinx.coroutines.flow.FlowKt {
-  public static kotlinx.coroutines.flow.SharedFlow asSharedFlow(kotlinx.coroutines.flow.MutableSharedFlow);
   public static kotlinx.coroutines.flow.StateFlow asStateFlow(kotlinx.coroutines.flow.MutableStateFlow);
   public static kotlinx.coroutines.flow.Flow distinctUntilChanged(kotlinx.coroutines.flow.Flow);
   public static kotlinx.coroutines.flow.Flow emptyFlow();
@@ -5807,7 +5799,6 @@
 }
 -keep interface kotlinx.coroutines.flow.MutableSharedFlow {
   public java.lang.Object emit(java.lang.Object, kotlin.coroutines.Continuation);
-  public boolean tryEmit(java.lang.Object);
 }
 -keep interface kotlinx.coroutines.flow.MutableStateFlow {
   public boolean compareAndSet(java.lang.Object, java.lang.Object);
