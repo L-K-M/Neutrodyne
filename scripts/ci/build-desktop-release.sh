@@ -37,9 +37,16 @@ mkdir -p "$DIST" "$SMOKE_IMG"
 
 smoke() { # <image dir> — append the SMOKE line for check-runtime-sources
     scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt
+    scripts/ci/check-runtime-sources.sh --image "$1" --smoke smoke.txt
 }
 xsmoke() { # smoke() under xvfb + a private session bus (Linux)
     xvfb-run -a dbus-run-session scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt
+    scripts/ci/check-runtime-sources.sh --image "$1" --smoke smoke.txt
+}
+check_package() {
+    # installKind changes the app JAR and its generated manifest. Check this
+    # variant before the next Gradle invocation replaces those source identities.
+    scripts/ci/check-desktop-image.sh "$IMG" "$1"
 }
 
 case "$TARGET" in
@@ -50,42 +57,41 @@ case "$TARGET" in
             ./gradlew createDistributable -Pneutrodyne.installKind=mac-zip
             scripts/desktop/mac-zip.sh --app "$IMG" --version "$V" \
                 --out "$DIST/neutrodyne-$V-macos-arm64.zip"
+            MAC_PACKAGE="$DIST/neutrodyne-$V-macos-arm64.zip"
             ditto -x -k "$DIST/neutrodyne-$V-macos-arm64.zip" "$SMOKE_IMG"
         else
             ./gradlew createDistributable packageDmg -Pneutrodyne.installKind=dmg
             cp desktopApp/build/compose/binaries/main/dmg/*.dmg "$DIST/neutrodyne-$V-macos-arm64.dmg"
+            MAC_PACKAGE="$DIST/neutrodyne-$V-macos-arm64.dmg"
             mkdir -p /tmp/neutrodyne-dmg-mnt
             hdiutil attach -nobrowse -mountpoint /tmp/neutrodyne-dmg-mnt \
                 "$DIST/neutrodyne-$V-macos-arm64.dmg"
             cp -R /tmp/neutrodyne-dmg-mnt/Neutrodyne.app "$SMOKE_IMG/"
             hdiutil detach /tmp/neutrodyne-dmg-mnt
         fi
-        smoke "$SMOKE_IMG/Neutrodyne.app" ;;
+        smoke "$SMOKE_IMG/Neutrodyne.app"
+        check_package "$MAC_PACKAGE" ;;
     linux-*)
         arch="${TARGET#linux-}"
         ./gradlew createDistributable packageDeb -Pneutrodyne.installKind=deb
-        ./gradlew createDistributable packageRpm -Pneutrodyne.installKind=rpm
-        ./gradlew createDistributable packageTarGz -Pneutrodyne.installKind=tar.gz
         cp desktopApp/build/desktop-packaging/deb/*.deb "$DIST/neutrodyne-$V-linux-$arch.deb"
-        cp desktopApp/build/desktop-packaging/rpm/*.rpm "$DIST/neutrodyne-$V-linux-$arch.rpm"
-        cp "desktopApp/build/desktop-packaging/tar-gz/neutrodyne-$V-linux-$arch.tar.gz" "$DIST/"
         sudo dpkg -i "$DIST/neutrodyne-$V-linux-$arch.deb"
         xsmoke /opt/neutrodyne
+        check_package "$DIST/neutrodyne-$V-linux-$arch.deb"
+        ./gradlew createDistributable packageRpm -Pneutrodyne.installKind=rpm
+        cp desktopApp/build/desktop-packaging/rpm/*.rpm "$DIST/neutrodyne-$V-linux-$arch.rpm"
         rpm2cpio "$DIST/neutrodyne-$V-linux-$arch.rpm" | (cd "$SMOKE_IMG" && cpio -idm --quiet)
         xsmoke "$SMOKE_IMG/opt/neutrodyne"
+        check_package "$DIST/neutrodyne-$V-linux-$arch.rpm"
+        ./gradlew createDistributable packageTarGz -Pneutrodyne.installKind=tar.gz
+        cp "desktopApp/build/desktop-packaging/tar-gz/neutrodyne-$V-linux-$arch.tar.gz" "$DIST/"
         tar -xzf "$DIST/neutrodyne-$V-linux-$arch.tar.gz" -C "$SMOKE_IMG"
-        xsmoke "$SMOKE_IMG/Neutrodyne" ;;
+        xsmoke "$SMOKE_IMG/Neutrodyne"
+        check_package "$DIST/neutrodyne-$V-linux-$arch.tar.gz" ;;
     *) echo "unknown target: $TARGET" >&2; exit 2 ;;
 esac
 
-# The image scan plus the runtime exception's image checks (11 Image scan rules,
-# Runtime exception obligations and checks).
-inputs=("$IMG")
-while IFS= read -r f; do
-    inputs+=("$f")
-done < <(find "$DIST" -maxdepth 1 -type f \
-    \( -name '*.msi' -o -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' -o -name '*.zip' -o -name '*.dmg' \))
-scripts/ci/check-desktop-image.sh "${inputs[@]}"
+# Package image scans ran with each variant's matching classpath manifest.
 scripts/ci/check-runtime-sources.sh --image "$IMG" --smoke smoke.txt
 if [ "$TARGET" = "macos-arm64" ]; then
     codesign --verify --deep --strict "$IMG"
