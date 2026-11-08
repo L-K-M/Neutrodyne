@@ -665,6 +665,12 @@ provenance, and retains package logs and checksum-verified corresponding sources
 The checked-out version selects the supported macOS format (0.x ZIP, 1.x DMG).
 These are CI artifacts; release publication remains in `release.yml`. Windows
 gets 210 minutes for the native build plus packaging; the other targets get 90.
+Each format is checked before the next install-kind build changes the app JAR
+and generated classpath manifest. Runtime provenance is checked on each
+installed or extracted payload as well as the final build image. macOS ZIP
+scans use `ditto` to preserve the sealed bundle's executable modes, symlinks
+and resource metadata. The MSI lock names the nine Binary IDs observed in the
+first real Windows package probe and traced to the pinned tool sources.
 
 ### Runners
 

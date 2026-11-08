@@ -688,6 +688,26 @@ esac
         r = self.fx.image_check(app)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
 
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("ditto"), "needs macOS ditto")
+    def test_mac_zip_preserves_launcher_mode_and_runtime_links(self):
+        app = self.mac_app()
+        image = self.root / app
+        (image / "Contents/MacOS/Neutrodyne").chmod(0o755)
+        (image / "Contents/runtime/Contents/Home/legal/LICENSE.link").symlink_to("LICENSE")
+        self.fx.write_manifest()
+        # These are sealed-bundle properties, checked after the shipped extractor runs.
+        self.fake("codesign", '''
+for image; do :; done
+[ -x "$image/Contents/MacOS/Neutrodyne" ] &&
+    [ -L "$image/Contents/runtime/Contents/Home/legal/LICENSE.link" ]
+''')
+        direct = self.fx.image_check(app)
+        self.assertEqual(0, direct.returncode, direct.stdout + direct.stderr)
+        archive = self.root / "app.zip"
+        subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(image), str(archive)], check=True)
+        extracted = self.fx.image_check(archive)
+        self.assertEqual(0, extracted.returncode, extracted.stdout + extracted.stderr)
+
     def test_make_runtime_sources_md_reads_the_nested_home(self):
         self.mac_app()
         r = self.fx.run(
@@ -901,7 +921,11 @@ esac
         "LocalAppDataFolder|TARGETDIR|.\n"
         "INSTALLDIR|LocalAppDataFolder|NEUTRO~1|Neutrodyne-App\n"
     )
-    MSI_BIN_OK = "wixhelper.dll\nWixHelperCA\nbannrbmp\ndlgbmp\n"
+    # Real pinned-tool MSI, Windows package run 42457761741 (2026-11-08).
+    MSI_BIN_OK = (
+        "JpCaDll\nWixCA\nWixUIWixca\nWixUI_Bmp_Banner\nWixUI_Bmp_Dialog\n"
+        "WixUI_Ico_Exclam\nWixUI_Ico_Info\nWixUI_Bmp_New\nWixUI_Bmp_Up\n"
+    )
 
     def msi_check(self, dir_rows=MSI_DIR_OK, bin_rows=MSI_BIN_OK,
                   msi="dist/x.msi", **fails):

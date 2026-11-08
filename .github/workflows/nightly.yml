@@ -1080,8 +1080,12 @@ jobs:
           download(wix['source.url'], wix['source.sha256'], f'wix-{wix["version"]}-src.tar.gz')
           python_lock = Path('youtube/ytdlp-desktop/python-components.lock')
           if python_lock.is_file():
-              pbs = tomllib.loads(python_lock.read_text())['pbsSource']
-              download(pbs['url'], pbs['sha256'], f'python-build-standalone-{pbs["tag"]}-src.tar.gz')
+              components = tomllib.loads(python_lock.read_text())
+              pbs = components.get('pbsSource')
+              if pbs is not None:
+                  download(pbs['url'], pbs['sha256'], f'python-build-standalone-{pbs["tag"]}-src.tar.gz')
+              elif components.get('component'):
+                  raise SystemExit('Python components require their pinned pbsSource record')
           PY
           cp playback/native/build/ffmpeg-source/ffmpeg-*-neutrodyne-src.tar.xz dist/
           image=desktopApp/build/compose/binaries/main/app/Neutrodyne
