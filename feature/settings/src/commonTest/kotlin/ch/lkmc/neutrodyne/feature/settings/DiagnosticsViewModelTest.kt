@@ -98,6 +98,36 @@ class DiagnosticsViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun issueUrlOmitsTheDesktopLogDirectoryButKeepsSafeDesktopRows() =
+        runTest {
+            val diagnostics =
+                FakeDiagnosticsRepository(
+                    reportOf(
+                        DiagnosticsSection(
+                            DiagnosticsSectionId.DESKTOP,
+                            listOf(
+                                DiagnosticsLine("logDir", "/Users/alice/.local/state/neutrodyne/logs"),
+                                DiagnosticsLine("lastWakeAt", "1234"),
+                                DiagnosticsLine("engineChild", "not running"),
+                            ),
+                        ),
+                    ),
+                )
+            val vm = viewModel(diagnostics)
+            awaitReport(vm)
+
+            val url = vm.issueReportUrl()!!
+            // The absolute home path and the OS username never reach the public issue URL.
+            assertFalse("alice" in url)
+            assertFalse("%2FUsers%2Falice" in url)
+            // The safe desktop rows stay in the pre-fill.
+            assertTrue("lastWakeAt" in url)
+            assertTrue("engineChild" in url)
+            // The local report keeps the log directory for the user's own diagnostics.
+            assertTrue("/Users/alice/.local/state/neutrodyne/logs" in vm.plainTextReport())
+        }
+
+    @Test
     fun issueUrlTruncatesToTheGitHubBudget() =
         runTest {
             val huge = "x".repeat(60_000)

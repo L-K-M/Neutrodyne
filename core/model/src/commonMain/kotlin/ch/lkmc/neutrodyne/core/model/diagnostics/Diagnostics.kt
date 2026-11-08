@@ -47,3 +47,9 @@ enum class DiagnosticsSeverity {
     WARNING,
     PROBLEM,
 }
+
+/**
+ * The DESKTOP log-directory row's key. Its value is an absolute path under the user's home,
+ * so the issue pre-fill omits the row (09's redaction surface) while the local report keeps it.
+ */
+const val DESKTOP_LOG_DIR_KEY = "logDir"

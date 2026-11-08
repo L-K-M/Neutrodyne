@@ -13,7 +13,9 @@ import ch.lkmc.neutrodyne.core.domain.DiagnosticsError
 import ch.lkmc.neutrodyne.core.domain.DiagnosticsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.diagnostics.DESKTOP_LOG_DIR_KEY
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsReport
+import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSection
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.model.settings.DiagnosticsSettingKeys
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -140,9 +142,9 @@ internal class DiagnosticsViewModel(
     /**
      * 09's "Report a problem": the screen copies the full `toPlainText` to the clipboard
      * itself (the caller does that), then opens the issue URL whose `diagnostics` field
-     * carries the summary — the report without `LOG` and `PARSE_WARNINGS`, cut from the
-     * end until the percent-encoded URL fits GitHub's unpublished limit. `null` without a
-     * report.
+     * carries the summary — the report without `LOG` and `PARSE_WARNINGS` and without the
+     * DESKTOP log-directory row (an absolute home path), cut from the end until the
+     * percent-encoded URL fits GitHub's unpublished limit. `null` without a report.
      */
     fun issueReportUrl(): String? {
         val report = mutableState.value.report ?: return null
@@ -150,9 +152,10 @@ internal class DiagnosticsViewModel(
             diagnostics.toPlainText(
                 report.copy(
                     sections =
-                        report.sections.filter {
-                            it.id != DiagnosticsSectionId.LOG && it.id != DiagnosticsSectionId.PARSE_WARNINGS
-                        },
+                        report.sections
+                            .filter {
+                                it.id != DiagnosticsSectionId.LOG && it.id != DiagnosticsSectionId.PARSE_WARNINGS
+                            }.map(::withoutPrivateDesktopRows),
                 ),
             )
         val base = "${buildInfo.repoUrl}$ISSUE_URL_BASE"
@@ -164,6 +167,17 @@ internal class DiagnosticsViewModel(
         }
         return base + encoded
     }
+
+    /**
+     * The issue pre-fill is a public surface: the DESKTOP log-directory row carries an absolute
+     * path under the user's home, so it is dropped here while the local report keeps it.
+     */
+    private fun withoutPrivateDesktopRows(section: DiagnosticsSection): DiagnosticsSection =
+        if (section.id != DiagnosticsSectionId.DESKTOP) {
+            section
+        } else {
+            section.copy(lines = section.lines.filterNot { it.key == DESKTOP_LOG_DIR_KEY })
+        }
 
     fun copied() {
         // 08's clipboard rule: Android 13+ shows its own copy confirmation; the desktop

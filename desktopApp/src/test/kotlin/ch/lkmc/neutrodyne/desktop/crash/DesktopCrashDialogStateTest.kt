@@ -87,12 +87,46 @@ class DesktopCrashDialogStateTest {
                 true
             })
         val pending = state.pendingCrashes()
-        state.sendByEmail(pending[0])
+        assertThat(state.sendByEmail(pending[0])).isTrue()
         assertThat(opened).isNotNull()
         assertThat(opened).startsWith("mailto:")
         assertThat(opened).contains("Neutrodyne")
         assertThat(opened).contains("truncated")
         assertThat(Files.exists(dirs.state.resolve("crash-20260101-010101.sent"))).isTrue()
+    }
+
+    @Test
+    fun `sendByEmail keeps the offer when the sent rename fails`() {
+        val dirs = tempAppDirs("nd-crash-dialog-rename").also { Files.createDirectories(it.state) }
+        val clock = TestClock()
+        val f = dirs.state.resolve("crash-20260101-010101.txt")
+        Files.writeString(f, "x")
+        // A directory at the target name makes Files.move fail without deleting the source.
+        Files.createDirectories(dirs.state.resolve("crash-20260101-010101.sent"))
+        var opened = 0
+        val state =
+            DesktopCrashDialogState(dirs, crashDialogBuildInfo(), clock, FakeCrashReporter(true), openMailto = {
+                opened++
+                true
+            })
+        val pending = state.pendingCrashes()
+        assertThat(pending).hasSize(1)
+
+        assertThat(state.sendByEmail(pending[0])).isFalse()
+        assertThat(opened).isEqualTo(1)
+        assertThat(Files.exists(f)).isTrue()
+        // The file is still pending, so the dialog does not advance past it.
+        assertThat(state.pendingCrashes().map { it.fileName }).containsExactly(f.fileName.toString())
+    }
+
+    @Test
+    fun `an unreadable state directory does not crash the scan`() {
+        val dirs = tempAppDirs("nd-crash-dialog-unreadable")
+        // A regular file at the state path makes Files.list throw NotDirectoryException.
+        Files.writeString(dirs.state, "not a directory")
+        val state = DesktopCrashDialogState(dirs, crashDialogBuildInfo(), TestClock(), FakeCrashReporter(true))
+
+        assertThat(state.pendingCrashes()).isEmpty()
     }
 }
 

@@ -4,9 +4,11 @@ package ch.lkmc.neutrodyne.desktop.crash
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CrashReporter
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import java.awt.Desktop
 import java.io.File
+import java.io.IOException
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -38,16 +40,22 @@ class DesktopCrashDialogState(
 
         val cutoff = clock.now() - maxAgeMs
         val files =
-            Files.list(stateDir).use { stream ->
-                stream
-                    .filter { Files.isRegularFile(it) }
-                    .filter { it.fileName.toString().endsWith(".txt") }
-                    .filter { it.fileName.toString().startsWith("crash-") }
-                    .filter { !it.fileName.toString().endsWith(".sent") }
-                    .filter { !it.fileName.toString().endsWith(".dismissed") }
-                    .filter { fileTime(it) >= cutoff }
-                    .sorted(compareByDescending<Path> { fileTime(it) }.thenBy { it.fileName.toString() })
-                    .toList()
+            try {
+                Files.list(stateDir).use { stream ->
+                    stream
+                        .filter { Files.isRegularFile(it) }
+                        .filter { it.fileName.toString().endsWith(".txt") }
+                        .filter { it.fileName.toString().startsWith("crash-") }
+                        .filter { !it.fileName.toString().endsWith(".sent") }
+                        .filter { !it.fileName.toString().endsWith(".dismissed") }
+                        .filter { fileTime(it) >= cutoff }
+                        .sorted(compareByDescending<Path> { fileTime(it) }.thenBy { it.fileName.toString() })
+                        .toList()
+                }
+            } catch (e: IOException) {
+                // An unreadable state directory must not take the start-up scan (and the EDT) down.
+                Log.w(TAG) { "crash scan failed: ${e.javaClass.simpleName}" }
+                return emptyList()
             }
 
         val pruned = files.drop(maxFiles)
@@ -65,13 +73,13 @@ class DesktopCrashDialogState(
 
     fun showReport(pending: PendingCrash): Boolean = showInFolder(pending.path)
 
+    /**
+     * Opens the bounded `mailto:` and marks the file `.sent`. True only when the rename
+     * succeeded, so the caller advances the offer only for a file no longer pending.
+     */
     fun sendByEmail(pending: PendingCrash): Boolean {
-        val mailto = buildMailto(pending)
-        val result = openMailto(mailto)
-        if (result) {
-            markSent(pending.path)
-        }
-        return result
+        if (!openMailto(buildMailto(pending))) return false
+        return markSent(pending.path)
     }
 
     fun dismiss(pending: PendingCrash): Boolean = markDismissed(pending.path)
@@ -125,6 +133,8 @@ class DesktopCrashDialogState(
         }
 
     companion object {
+        private const val TAG = "Crash"
+
         fun defaultShowInFolder(path: Path): Boolean =
             try {
                 val file = path.toFile()

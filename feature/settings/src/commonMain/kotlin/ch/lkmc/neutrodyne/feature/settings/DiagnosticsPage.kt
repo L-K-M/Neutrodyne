@@ -49,6 +49,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.model.diagnostics.DESKTOP_LOG_DIR_KEY
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSection
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSectionId
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSeverity
@@ -357,7 +358,7 @@ private fun DiagnosticsSectionCard(
                     }
                 }
                 if (section.id == DiagnosticsSectionId.DESKTOP && onOpenLogFolder != null) {
-                    val logDir = section.lines.firstOrNull { it.key == "logDir" }?.value
+                    val logDir = section.lines.firstOrNull { it.key == DESKTOP_LOG_DIR_KEY }?.value
                     if (logDir != null) {
                         TextButton(onClick = { onOpenLogFolder(logDir) }) {
                             Text(stringResource(Res.string.diagnostics_open_log_folder))
