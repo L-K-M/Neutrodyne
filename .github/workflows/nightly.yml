@@ -1216,7 +1216,11 @@ jobs:
         if: always()
         with:
           name: benchmark-dryrun
-          path: benchmark/build/outputs/
+          path: |
+            benchmark/build/outputs/
+            benchmark/build/reports/androidTests/
+            app/build/intermediates/merged_manifest/benchmarkRelease/processBenchmarkReleaseMainManifest/AndroidManifest.xml
+            app/build/outputs/logs/manifest-merger-benchmarkRelease-report.txt
           retention-days: 14
 
   bmgr-download-exclusion:

@@ -97,6 +97,15 @@ configurations.matching { it.name == "benchmarkReleaseImplementation" }.configur
     dependencies.add(project.dependencies.project(mapOf("path" to ":core:testing")))
 }
 
+// The profile plugin copies release's manifest over its generated build type.
+// Restore the shell-only fixture manifest after that plugin finalizes the DSL.
+androidComponents.finalizeDsl { dsl ->
+    dsl.sourceSets
+        .getByName("benchmarkRelease")
+        .manifest
+        .srcFile("src/benchmarkRelease/AndroidManifest.xml")
+}
+
 // Opt-in fixtures enter the single-variant KMP download library, so disable every
 // app variant except the disposable target. A release task with the flag must fail.
 if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
