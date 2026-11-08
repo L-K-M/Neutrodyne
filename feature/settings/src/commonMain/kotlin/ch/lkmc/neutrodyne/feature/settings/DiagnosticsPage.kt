@@ -3,8 +3,10 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,19 +14,29 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
+import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.diagnostics.DiagnosticsSection
@@ -131,7 +143,7 @@ internal fun DiagnosticsPage(vm: DiagnosticsViewModel = metroViewModel()) {
     // 09's pre-export statement, both platforms: only an explicit Export runs the
     // share sheet, the save dialog or the repository call.
     if (confirmExport) {
-        NdDialog(
+        DiagnosticsExportDialog(
             onDismissRequest = { confirmExport = false },
             icon = NdIcons.Download,
             title = stringResource(Res.string.diagnostics_export_db),
@@ -152,8 +164,12 @@ internal fun DiagnosticsPage(vm: DiagnosticsViewModel = metroViewModel()) {
                         scope.launch {
                             try {
                                 val uri = actions.saver.create(EXPORT_SUGGESTED_NAME, EXPORT_MIME)
-                                vm.exportDatabaseCopy(uri) { saved ->
-                                    actions.reveal?.reveal(saved)
+                                if (uri.isNullOrBlank()) {
+                                    vm.exportCancelled()
+                                } else {
+                                    vm.exportDatabaseCopy(uri) { saved ->
+                                        actions.reveal?.reveal(saved)
+                                    }
                                 }
                             } finally {
                                 saverInFlight = false
@@ -166,6 +182,47 @@ internal fun DiagnosticsPage(vm: DiagnosticsViewModel = metroViewModel()) {
                     confirmExport = false
                 },
         )
+    }
+}
+
+/** The explanation and actions can scroll; the first keyboard action stays Cancel. */
+@Composable
+private fun DiagnosticsExportDialog(
+    onDismissRequest: () -> Unit,
+    icon: ImageVector,
+    title: String,
+    text: String,
+    confirm: NdDialogAction,
+    dismiss: NdDialogAction,
+) {
+    NdDialog(onDismissRequest = onDismissRequest, icon = icon) {
+        val cancelFocus = remember { FocusRequester() }
+        val windowFocused = LocalWindowInfo.current.isWindowFocused
+        LaunchedEffect(windowFocused) {
+            if (windowFocused) {
+                withFrameNanos { }
+                cancelFocus.requestFocus()
+            }
+        }
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(text, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(24.dp))
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                NdTextButton(
+                    dismiss.label,
+                    dismiss.onClick,
+                    modifier = Modifier.focusRequester(cancelFocus),
+                )
+                NdTextButton(confirm.label, confirm.onClick)
+            }
+        }
     }
 }
 

@@ -118,6 +118,11 @@ internal class DiagnosticsViewModel(
         }
     }
 
+    /** The desktop save dialog can cancel before any database copy exists. */
+    fun exportCancelled() {
+        viewModelScope.launch { userMessages.post(UiText.Res(Res.string.diagnostics_export_cancelled)) }
+    }
+
     fun copied() {
         viewModelScope.launch { userMessages.post(UiText.Res(Res.string.diagnostics_copy_done)) }
     }

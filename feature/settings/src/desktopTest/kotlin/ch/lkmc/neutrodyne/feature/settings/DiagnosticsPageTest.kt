@@ -232,10 +232,9 @@ class DiagnosticsPageTest {
             onNodeWithText("Export database copy").performClick()
             onNodeWithText("Export").performClick()
 
-            waitUntil("the cancelled export resolves", TIMEOUT_MS) {
-                diagnostics.exportCalls.size == 1
-            }
-            assertEquals(listOf<String?>(null), diagnostics.exportCalls)
+            waitUntil("the save dialog was cancelled", TIMEOUT_MS) { actions.saverCalls.size == 1 }
+            waitForIdle()
+            assertTrue(diagnostics.exportCalls.isEmpty(), "a cancelled save must not produce a copy")
             assertTrue(actions.revealCalls.isEmpty() && actions.shareFileCalls.isEmpty())
             onNodeWithText("Export cancelled").assertIsDisplayed()
             onNodeWithText("Database copy exported").assertDoesNotExist()
@@ -303,15 +302,15 @@ class DiagnosticsPageTest {
     /** 08's dialog contract: both actions stay reachable at 200 % text in a small window. */
     @Test
     fun confirmationStaysReachableAtLargeTextInASmallWindow() =
-        runDesktopComposeUiTest(width = 640, height = 480) {
+        runDesktopComposeUiTest(width = 320, height = 280) {
             val diagnostics = FakeDiagnosticsRepository()
             val actions = RecordingActions(androidShare = false)
             setDiagnosticsPage(diagnostics, actions, density = Density(1f, 2f))
 
             onNodeWithText("Export database copy").performScrollTo().performClick()
 
-            onNodeWithText("Cancel").assertIsDisplayed()
-            onNodeWithText("Export").assertIsDisplayed().performClick()
+            onNodeWithText("Cancel").performScrollTo().assertIsDisplayed()
+            onNodeWithText("Export").performScrollTo().assertIsDisplayed().performClick()
             waitUntil("the save dialog ran", TIMEOUT_MS) { actions.saverCalls.size == 1 }
         }
 
