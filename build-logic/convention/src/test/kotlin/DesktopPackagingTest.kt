@@ -3,6 +3,8 @@ import org.gradle.api.GradleException
 import org.gradle.testfixtures.ProjectBuilder
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
@@ -206,6 +208,365 @@ class DesktopPackagingTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `the classpath manifest survives jar repacking`() {
+        val root = Files.createTempDirectory("classpath-repacking").toFile()
+        try {
+            val entries = listOf("A.class" to "CODE-A".toByteArray())
+            val original = writeJar(root, "runtime.jar", zipBytes(entries))
+            val repacked = writeJar(root, "repacked.jar", zipBytes(entries, byteArrayOf(0x34, 0x12, 0, 0)))
+            val task = classpathManifestTask(root, original)
+
+            task.write()
+
+            assertTrue(!original.readBytes().contentEquals(repacked.readBytes()))
+            assertEquals(
+                "${CanonicalJarHash.of(repacked)}  ${imageJarName(original)}\n",
+                File(root, "manifest.txt").readText(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `signature metadata cannot hide linkedit data`() = assertSignatureMutationBound(SignatureMutation.NON_TERMINAL)
+
+    @Test
+    fun `signature commands cannot hide header padding`() =
+        assertSignatureMutationBound(SignatureMutation.EXTENDED_COMMAND)
+
+    @Test
+    fun `overlapping signature commands cannot splice data`() =
+        assertSignatureMutationBound(SignatureMutation.OVERLAPPING)
+
+    @Test
+    fun overlappingTextSegmentBytesStayBound() = assertUnsupportedLayoutRaw("overlap_code_a")
+
+    @Test
+    fun changedBytesInAnOverlappingTextSegmentStayBound() = assertUnsupportedLayoutRaw("overlap_code_b")
+
+    @Test
+    fun embeddedNulSegmentNamesStayBound() = assertUnsupportedLayoutRaw("embedded_nul")
+
+    @Test
+    fun shortSegmentCommandsStayBoundWithoutThrowing() = assertUnsupportedLayoutRaw("short_segment")
+
+    @Test
+    fun unsignedSegmentOffsetsCannotWrapIntoTheFile() = assertUnsupportedLayoutRaw("unsigned_offset")
+
+    private fun assertUnsupportedLayoutRaw(label: String) {
+        val vectors = File(repoRoot(), "scripts/ci/tests/fixtures/malformed-macho-vectors.txt")
+        val hex = vectors.readLines().single { it.startsWith("$label=") }.substringAfter('=')
+        val data = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val root = Files.createTempDirectory("unsupported-macho").toFile()
+        try {
+            val file = writeJar(root, "input.jar", zipBytes(listOf("lib.dylib" to data)))
+            val rawFingerprint = sha256Hex("lib.dylib\u0000${sha256Hex(data)}\n".toByteArray())
+            assertEquals(rawFingerprint, CanonicalJarHash.of(file), label)
+            val process =
+                ProcessBuilder(
+                    "python3",
+                    File(repoRoot(), "scripts/ci/canonical-jar-hash.py").absolutePath,
+                    file.absolutePath,
+                ).redirectErrorStream(true)
+                    .start()
+            val output =
+                process.inputStream
+                    .bufferedReader()
+                    .use { it.readText() }
+                    .trim()
+            assertEquals(0, process.waitFor(), output)
+            assertEquals(rawFingerprint, output, "Kotlin/Python raw fallback: $label")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    private enum class SignatureMutation { NON_TERMINAL, EXTENDED_COMMAND, OVERLAPPING }
+
+    private fun assertSignatureMutationBound(mutation: SignatureMutation) {
+        val root = Files.createTempDirectory("signature-boundary").toFile()
+        try {
+            val original =
+                thinMacho(
+                    code = ByteArray(16),
+                    sig = ByteArray(128) { 0x53 },
+                    linkeditExtra = ByteArray(64) { 0x41 },
+                    dataoff = 0x1040,
+                )
+            val changed = original.copyOf()
+            val header = ByteBuffer.wrap(changed).order(ByteOrder.LITTLE_ENDIAN)
+            when (mutation) {
+                SignatureMutation.NON_TERMINAL -> {
+                    header.putInt(112, 0x1000)
+                    changed.fill(0x45, 0x1000, 0x1040)
+                    original.copyInto(changed, changed.size - 64, 0x1000, 0x1040)
+                }
+
+                SignatureMutation.EXTENDED_COMMAND -> {
+                    header.putInt(108, 32).putInt(20, 104)
+                    changed.fill(0x45, 120, 136)
+                }
+
+                SignatureMutation.OVERLAPPING -> {
+                    header.putInt(16, 3).putInt(20, 104).putInt(116, 64)
+                    header.position(120)
+                    header
+                        .putInt(0x1D)
+                        .putInt(16)
+                        .putInt(0x1040)
+                        .putInt(64)
+                    changed.fill(0x45, 0x1000, 0x1040)
+                    original.copyInto(changed, changed.size - 64, 0x1000, 0x1040)
+                }
+            }
+            val approved = writeJar(root, "approved.jar", zipBytes(listOf("lib.dylib" to original)))
+            val malformed = writeJar(root, "malformed.jar", zipBytes(listOf("lib.dylib" to changed)))
+            val hash = CanonicalJarHash.of(malformed)
+            assertTrue(CanonicalJarHash.of(approved) != hash, "non-signature data must stay bound: $mutation")
+            val script = File(repoRoot(), "scripts/ci/canonical-jar-hash.py")
+            val process =
+                ProcessBuilder("python3", script.absolutePath, malformed.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+            val output =
+                process.inputStream
+                    .bufferedReader()
+                    .use { it.readText() }
+                    .trim()
+            assertEquals(0, process.waitFor(), output)
+            assertEquals(hash, output, "Kotlin/Python malformed-signature parity: $mutation")
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    // ----- canonical JAR identity (11 Image scan rules) ------------------------
+
+    @Test
+    fun `canonical jar hash binds content not container bytes`() {
+        val root = Files.createTempDirectory("canonical-identity").toFile()
+        try {
+            val entries =
+                listOf(
+                    "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0\n".toByteArray(),
+                    "A.class" to "CODE-A".toByteArray(),
+                )
+            val deflated = writeJar(root, "deflated.jar", zipBytes(entries))
+            val recompressed =
+                writeJar(root, "recompressed.jar", zipBytes(entries.reversed(), extra = "PAD".toByteArray()))
+            val nonZip = writeJar(root, "plain.jar", byteArrayOf(1, 2, 3, 4))
+            // A non-zip falls back to its raw bytes; recompression, reordering and
+            // an extra field are packaging metadata and do not change identity.
+            assertEquals(sha256Hex(nonZip.readBytes()), CanonicalJarHash.of(nonZip))
+            assertEquals(CanonicalJarHash.of(deflated), CanonicalJarHash.of(recompressed))
+            // Content and entry-set mutations change identity.
+            val mutated = writeJar(root, "mutated.jar", zipBytes(listOf("A.class" to "CODE-B".toByteArray())))
+            val added = writeJar(root, "added.jar", zipBytes(entries + ("B.class" to "CODE-B".toByteArray())))
+            listOf(mutated, added).forEach {
+                assertTrue(CanonicalJarHash.of(deflated) != CanonicalJarHash.of(it))
+            }
+            // Java's ZipOutputStream refuses duplicate names; the fixture is a
+            // precomputed two-entry central directory with the same name.
+            val duplicate =
+                java.util.Base64.getDecoder().decode(
+                    "UEsDBBQAAAAAAC+/Z11RvXuhBgAAAAYAAAAHAAAAQS5jbGFzc0NPREUtQVBLAwQUAAAAAAAvv2dd6+xyOAYAAAAGAAAABwAAAEEuY2xhc3NDT0RFLUJQSwECFAMUAAAAAAAvv2ddUb17oQYAAAAGAAAABwAAAAAAAAAAAAAAgAEAAAAAQS5jbGFzc1BLAQIUAxQAAAAAAC+/Z13r7HI4BgAAAAYAAAAHAAAAAAAAAAAAAACAASsAAABBLmNsYXNzUEsFBgAAAAACAAIAagAAAFYAAAAAAA==",
+                )
+            assertThrows<IllegalArgumentException> { CanonicalJarHash.of(writeJar(root, "dup.jar", duplicate)) }
+            assertThrows<IllegalArgumentException> {
+                CanonicalJarHash.of(
+                    writeJar(root, "bad.jar", zipBytes(listOf("../evil.class" to "CODE".toByteArray()))),
+                )
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `canonical jar hash normalizes re-signed macho and fat natives`() {
+        val root = Files.createTempDirectory("canonical-macho").toFile()
+        try {
+            val original = writeJar(root, "a.jar", zipBytes(listOf("lib.dylib" to thinMacho())))
+            val resigned =
+                writeJar(root, "b.jar", zipBytes(listOf("lib.dylib" to thinMacho(sig = "OTHER".toByteArray()))))
+            val codeMutation =
+                writeJar(root, "c.jar", zipBytes(listOf("lib.dylib" to thinMacho(code = "CODE-B".toByteArray()))))
+            val linkeditMutation =
+                writeJar(root, "d.jar", zipBytes(listOf("lib.dylib" to thinMacho(linkeditExtra = ByteArray(8) { 1 }))))
+            val outside = thinMacho(sig = "A".repeat(16).toByteArray(), dataoff = 0x400, total = 0x2000)
+            val outsideLinkedit = writeJar(root, "e.jar", zipBytes(listOf("lib.dylib" to outside)))
+            assertEquals(CanonicalJarHash.of(original), CanonicalJarHash.of(resigned))
+            listOf(codeMutation, linkeditMutation, outsideLinkedit).forEach {
+                assertTrue(CanonicalJarHash.of(original) != CanonicalJarHash.of(it))
+            }
+
+            val slices = listOf(thinMacho(), thinMacho())
+
+            fun fatJar(
+                name: String,
+                s: List<ByteArray>,
+                t: Int,
+            ) = writeJar(root, name, zipBytes(listOf("lib.dylib" to fatMacho(s, ByteArray(t), 12))))
+            val fat = fatJar("f.jar", slices, 8)
+            val resignedSlices = listOf(thinMacho(sig = "X".toByteArray()), thinMacho())
+            val fatResigned = fatJar("g.jar", resignedSlices, 8)
+            val paddingMutation = fatMacho(slices, ByteArray(8), 12)
+            val off1 = ByteBuffer.wrap(paddingMutation).order(ByteOrder.BIG_ENDIAN).getInt(16)
+            paddingMutation[off1 - 1] = 0xFF.toByte()
+            val padding = writeJar(root, "h.jar", zipBytes(listOf("lib.dylib" to paddingMutation)))
+            val trailing = fatJar("i.jar", slices, 7)
+            assertEquals(CanonicalJarHash.of(fat), CanonicalJarHash.of(fatResigned))
+            listOf(padding, trailing).forEach { assertTrue(CanonicalJarHash.of(fat) != CanonicalJarHash.of(it)) }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `canonical jar hash matches the python checker`() {
+        val root = Files.createTempDirectory("canonical-parity").toFile()
+        try {
+            val script = File(repoRoot(), "scripts/ci/canonical-jar-hash.py")
+            assertTrue(script.isFile, "canonical-jar-hash.py not found")
+            val vectors =
+                listOf(
+                    "plain.jar" to byteArrayOf(1, 2, 3, 4),
+                    "zip.jar" to zipBytes(listOf("A.class" to "CODE-A".toByteArray())),
+                    "macho.jar" to zipBytes(listOf("lib.dylib" to thinMacho())),
+                    "fat.jar" to zipBytes(listOf("lib.dylib" to fatMacho(listOf(thinMacho(), thinMacho())))),
+                )
+            vectors.forEach { (name, bytes) ->
+                val file = writeJar(root, name, bytes)
+                val kotlin = CanonicalJarHash.of(file)
+                val process =
+                    ProcessBuilder("python3", script.absolutePath, file.absolutePath)
+                        .redirectErrorStream(true)
+                        .start()
+                val out = process.inputStream.use { it.readBytes().decodeToString().trim() }
+                assertEquals(0, process.waitFor(), out)
+                assertEquals(kotlin, out, name)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    private fun writeJar(
+        dir: File,
+        name: String,
+        bytes: ByteArray,
+    ): File = File(dir, name).apply { writeBytes(bytes) }
+
+    private fun zipBytes(
+        entries: List<Pair<String, ByteArray>>,
+        extra: ByteArray = ByteArray(0),
+    ): ByteArray {
+        val out = ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { zip ->
+            entries.forEach { (name, bytes) ->
+                val entry = ZipEntry(name)
+                entry.extra = extra
+                zip.putNextEntry(entry)
+                zip.write(bytes)
+                zip.closeEntry()
+            }
+        }
+        return out.toByteArray()
+    }
+
+    private fun thinMacho(
+        code: ByteArray = "CODE".toByteArray(),
+        sig: ByteArray = "SIGNATURE".toByteArray(),
+        page: Int = 0x1000,
+        linkeditExtra: ByteArray = ByteArray(0),
+        dataoff: Int = 0x1800,
+        total: Int? = null,
+    ): ByteArray {
+        val seg = 72
+        val sigCmd = 16
+        val linkeditOff = page
+        // Re-signing keeps the blob's offset and extends it to the end of the file.
+        val actualTotal = total ?: (dataoff + sig.size)
+        val fsize = actualTotal - linkeditOff
+        val vmsize = (fsize + page - 1) / page * page
+        val b = ByteBuffer.allocate(actualTotal).order(ByteOrder.LITTLE_ENDIAN)
+        b
+            .putInt(0xFEEDFACF.toInt())
+            .putInt(0x01000007)
+            .putInt(3)
+            .putInt(2)
+            .putInt(2)
+            .putInt(seg + sigCmd)
+        b.putInt(0).putInt(0) // flags, reserved
+        b.putInt(0x19).putInt(seg) // LC_SEGMENT_64
+        b.put("__LINKEDIT".toByteArray(Charsets.US_ASCII))
+        b.position(56)
+        b
+            .putLong(0)
+            .putLong(vmsize.toLong())
+            .putLong(linkeditOff.toLong())
+            .putLong(fsize.toLong())
+        b.putInt(5).putInt(1)
+        b.position(104)
+        b
+            .putInt(0x1D)
+            .putInt(sigCmd)
+            .putInt(dataoff)
+            .putInt(sig.size)
+        b.position(120)
+        b.put(code)
+        b.position(linkeditOff)
+        b.put(linkeditExtra)
+        b.position(dataoff)
+        b.put(sig)
+        return b.array()
+    }
+
+    private fun fatMacho(
+        slices: List<ByteArray>,
+        trailing: ByteArray = ByteArray(0),
+        align: Int = 2,
+    ): ByteArray {
+        val header = 8 + 20 * slices.size
+        val offsets = mutableListOf<Int>()
+        var prev = header
+        slices.forEach { s ->
+            val bound = 1 shl align
+            val off = (prev + bound - 1) / bound * bound
+            offsets += off
+            prev = off + s.size
+        }
+        val b = ByteBuffer.allocate(prev + trailing.size).order(ByteOrder.BIG_ENDIAN)
+        b.put(byteArrayOf(0xCA.toByte(), 0xFE.toByte(), 0xBA.toByte(), 0xBE.toByte()))
+        b.putInt(slices.size)
+        slices.forEachIndexed { i, s ->
+            b
+                .putInt(0x01000007)
+                .putInt(3)
+                .putInt(offsets[i])
+                .putInt(s.size)
+                .putInt(align)
+        }
+        slices.forEachIndexed { i, s ->
+            b.position(offsets[i])
+            b.put(s)
+        }
+        b.position(prev)
+        b.put(trailing)
+        return b.array()
+    }
+
+    private fun repoRoot(): File {
+        var dir: File? = File(System.getProperty("user.dir")).absoluteFile
+        while (dir != null) {
+            if (File(dir, "scripts/ci/canonical-jar-hash.py").isFile) return dir
+            dir = dir.parentFile
+        }
+        throw AssertionError("repository root not found from ${System.getProperty("user.dir")}")
     }
 
     private fun jar(
