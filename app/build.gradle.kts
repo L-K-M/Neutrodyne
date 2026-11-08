@@ -41,7 +41,10 @@ val shippedLocales =
 
 android {
     sourceSets["main"].kotlin.srcDir(if (youtubeEngine) "src/youtubeEngine/kotlin" else "src/noYouTubeEngine/kotlin")
-    if (youtubeEngine) sourceSets["test"].kotlin.srcDir("src/youtubeEngineTest/kotlin")
+    if (youtubeEngine) {
+        sourceSets["test"].kotlin.srcDir("src/youtubeEngineTest/kotlin")
+        sourceSets["androidTest"].kotlin.srcDir("src/youtubeEngineAndroidTest/kotlin")
+    }
     defaultConfig {
         fun prop(name: String) = providers.gradleProperty(name).orElse("").get()
         buildConfigField("String", "REPO_URL", "\"${prop("neutrodyne.repoUrl")}\"")
@@ -220,6 +223,9 @@ dependencies {
     // needs the serialization runtime on this classpath directly.
     androidTestImplementation(project(":feeds:jvm"))
     androidTestImplementation(libs.kotlinx.serialization.json)
+    // External-mode journeys use the JVM engine fakes in both test APKs. The Android host
+    // and its Python payload stay conditional; their device tests use a separate source dir.
+    androidTestImplementation(project(":youtube:engine"))
 
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)
