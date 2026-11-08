@@ -30,6 +30,21 @@ import java.io.File
 internal class SourceHarness(
     directory: File,
     prefs: kotlinx.coroutines.flow.StateFlow<PlaybackPrefsSnapshot>? = null,
+    val streams: ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeStreamResolver(),
+    val caps: ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeCapabilitiesSource(),
+    val health: ch.lkmc.neutrodyne.youtube.api.YouTubeHealth =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeHealth(),
+    val clock: ch.lkmc.neutrodyne.core.common.Clock =
+        ch.lkmc.neutrodyne.core.testing
+            .TestClock(),
+    var pref: ch.lkmc.neutrodyne.youtube.api.AudioPref =
+        ch.lkmc.neutrodyne.youtube.api
+            .AudioPref(),
 ) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
     val owner =
@@ -42,7 +57,13 @@ internal class SourceHarness(
         )
     val local = FakeLocalMediaIndex()
     val index = EpisodeSourceIndex { error("Unexpected database miss for $it") }
-    val resolver = EpisodeResolver(index, local, owner)
+
+    fun resolverFor(
+        sourceIndex: EpisodeSourceIndex = index,
+        localIndex: ch.lkmc.neutrodyne.download.api.LocalMediaIndex = local,
+    ) = EpisodeResolver(sourceIndex, localIndex, owner, streams, caps, { health }, clock) { pref }
+
+    val resolver = resolverFor()
 
     fun resolve(
         id: Long = 1,

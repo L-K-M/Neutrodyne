@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.playback.core.SmartResumePolicy
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
@@ -32,9 +34,15 @@ internal data class PlaybackPrefsSnapshot(
     val streamCacheMb: Int,
     val hardwareButtons: HardwareButtons = PlaybackSettingKeys.HARDWARE_BUTTONS.default,
     val smartResume: Boolean = PlaybackSettingKeys.SMART_RESUME.default,
+    val youtubeQuality: YouTubeAudioQuality = YouTubeSettingKeys.AUDIO_QUALITY.default,
+    val youtubeLevelling: Boolean = YouTubeSettingKeys.VOLUME_LEVELLING.default,
 ) {
     val resumePolicy: SmartResumePolicy
         get() = if (smartResume) SmartResumePolicy.ENABLED else SmartResumePolicy.DISABLED
+
+    fun audioPref(language: String) =
+        ch.lkmc.neutrodyne.youtube.api
+            .AudioPref(youtubeQuality, youtubeLevelling, preferredLanguage = language)
 
     companion object {
         val DEFAULT: PlaybackPrefsSnapshot =
@@ -85,6 +93,14 @@ internal class PlaybackPrefs
                             repo.observe(PlaybackSettingKeys.SMART_RESUME),
                         ) { prefs, hardware, smart ->
                             prefs.copy(hardwareButtons = hardware, smartResume = smart)
+                        }
+                    }.let { base ->
+                        combine(
+                            base,
+                            repo.observe(YouTubeSettingKeys.AUDIO_QUALITY),
+                            repo.observe(YouTubeSettingKeys.VOLUME_LEVELLING),
+                        ) { prefs, quality, levelling ->
+                            prefs.copy(youtubeQuality = quality, youtubeLevelling = levelling)
                         }
                     }.distinctUntilChanged()
                         .collect {

@@ -30,7 +30,9 @@ import ch.lkmc.neutrodyne.playback.core.WindowEntry
 import ch.lkmc.neutrodyne.playback.core.WindowOp
 import ch.lkmc.neutrodyne.playback.core.WindowPlayback
 import ch.lkmc.neutrodyne.playback.core.refusal
+import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +63,7 @@ internal class QueueProjector(
     private val lookup: PlaybackMediaLookup,
     private val positions: PositionStore,
     private val capabilities: YouTubeCapabilitiesSource,
+    private val engine: YouTubeEngine,
     private val index: EpisodeSourceIndex,
     private val resolver: EpisodeResolver,
     private val items: MediaItemFactory,
@@ -86,6 +89,8 @@ internal class QueueProjector(
     private var eventEpoch = 0L
     private var committedRevision = SessionRevision(null, 0)
     private var entries = emptyList<WindowEntry>()
+    private var remoteOccurrences = emptyMap<Long, PreResolveTarget>()
+    private var warmedNext: PreResolveTarget? = null
     private var applying = false
     private var revision = 0L
     private var skipExit: PlaybackExit? = null
@@ -292,8 +297,7 @@ internal class QueueProjector(
                         .firstOrNull()
                         ?.item
                         ?.episodeId
-            releaseDeparted(entries, pending.entries)
-            entries = pending.entries
+            commitWindow(pending.entries)
             if (currentChanged) {
                 pending.entries.firstOrNull()?.let {
                     tracker.load(
@@ -422,8 +426,7 @@ internal class QueueProjector(
             } finally {
                 applying = false
             }
-            releaseDeparted(entries, plan.entries)
-            entries = plan.entries
+            commitWindow(plan.entries)
             knownGeneration = maxOf(knownGeneration, plan.generation)
             if (plan.operations.none { it is WindowOp.SetAll }) applier.refreshFor(live.episodeIdOrNull())
             when (plan.currentAction) {
@@ -461,8 +464,7 @@ internal class QueueProjector(
                 applier.applyFor(it.item.episodeId)
             }
             if (playback != WindowPlayback.LOAD_PAUSED) live.prepare()
-            releaseDeparted(entries, window)
-            entries = window
+            commitWindow(window)
         } finally {
             applying = wasApplying
         }
@@ -481,6 +483,54 @@ internal class QueueProjector(
             live.isPlaying,
             playWhenReady = live.playWhenReady,
         )
+    }
+
+    /** Called only after the window is installed, including own and external commits. */
+    private fun commitWindow(window: List<WindowEntry>) {
+        releaseDeparted(entries, window)
+        entries = window
+        val previous = remoteOccurrences
+        remoteOccurrences =
+            window
+                .mapNotNull { entry ->
+                    val id = entry.item.episodeId
+                    val video = resolver.remoteYouTubeVideoId(id) ?: return@mapNotNull null
+                    id to (previous[id]?.takeIf { it.videoId == video } ?: PreResolveTarget(id, video))
+                }.toMap()
+        val next =
+            window
+                .getOrNull(1)
+                ?.item
+                ?.episodeId
+                ?.let(remoteOccurrences::get)
+        if (remoteOccurrences.any { (id, target) -> previous[id] !== target } ||
+            (next != null && next !== warmedNext)
+        ) {
+            engine.prewarm(PrewarmReason.PROJECTION)
+        }
+        warmedNext = next
+    }
+
+    /** Immutable snapshot from the actual installed timeline; no IO and no pin acquisition. */
+    fun preResolveWindow(currentId: Long): PreResolveWindow? {
+        val live = player ?: return null
+        if (applying || external != null || live.episodeIdOrNull() != currentId) return null
+        val nextIndex = live.currentMediaItemIndex + 1
+        val nextId =
+            if (nextIndex < live.mediaItemCount) {
+                live
+                    .getMediaItemAt(nextIndex)
+                    .mediaId
+                    .removePrefix("episode:")
+                    .toLongOrNull()
+            } else {
+                null
+            }
+        val next =
+            nextId?.let(remoteOccurrences::get)?.takeIf {
+                resolver.remoteYouTubeVideoId(it.episodeId) == it.videoId
+            }
+        return PreResolveWindow(next, remoteOccurrences.values.toSet())
     }
 
     override fun onPositionDiscontinuity(
@@ -664,6 +714,29 @@ internal class QueueProjector(
             observedRevision == pending.sessionRevision &&
             live.hasNextMediaItem() && isCurrentArrival(live, pending.departureId, pending.pinStartedAt, pending.epoch)
 
+    /** Breaker skips leave durable Up next rows intact; arrival still follows the normal writer. */
+    fun advancePastRemoteYouTube(allowSkip: (Long) -> Boolean) {
+        val live = player ?: return
+        var next = live.currentMediaItemIndex + 1
+        while (next < live.mediaItemCount) {
+            val id =
+                live
+                    .getMediaItemAt(next)
+                    .mediaId
+                    .removePrefix("episode:")
+                    .toLongOrNull() ?: break
+            if (!resolver.needsYouTube(id)) break
+            if (!allowSkip(id)) return
+            next++
+        }
+        if (next >= live.mediaItemCount) {
+            live.stop()
+            return
+        }
+        skipExit = PlaybackExit.ERROR_SKIP
+        live.seekTo(next, androidx.media3.common.C.TIME_UNSET)
+    }
+
     override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState != Player.STATE_ENDED || applying || external != null) return
         val id = player?.episodeIdOrNull()
@@ -844,6 +917,8 @@ internal class QueueProjector(
         writes.clear()
         entries.forEach { index.remove(it.item.episodeId) }
         entries = emptyList()
+        remoteOccurrences = emptyMap()
+        warmedNext = null
         resolver.clearPins()
     }
 

@@ -51,6 +51,7 @@ import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
@@ -85,6 +86,12 @@ interface DesktopAppGraph {
     /** The link state machine; `null` while no link runs. */
     val linkFlow: ch.lkmc.neutrodyne.sync.impl.LinkFlowImpl
 
+    /**
+     * 10 Scheduling on the desktop's window-refocus trigger: the window's focus listener calls
+     * it; the binding resolves the lane lazily so an early focus never blocks on the open.
+     */
+    val syncFocusPoke: ch.lkmc.neutrodyne.sync.impl.SyncFocusPoke
+
     val dirs: AppDirs
 
     val buildInfo: BuildInfo
@@ -106,8 +113,12 @@ interface DesktopAppGraph {
     val cleanupPlanner: Provider<CleanupPlanner>
     val downloadMover: Provider<DownloadMover>
     val downloadProgress: Provider<DownloadProgressSource>
+    val youtubeEngine: ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
+
+    /** Database-backed; resolve only after the database open gate (M9a health binding). */
+    val youTubeHealth: YouTubeHealth
 
     /** Download-time container chapters (06 Chapters): the desktop `EmbeddedChapterReader`. */
     val embeddedChapterReader: Provider<EmbeddedChapterReader?>

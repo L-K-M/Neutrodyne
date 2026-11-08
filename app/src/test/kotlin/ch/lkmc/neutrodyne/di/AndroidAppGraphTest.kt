@@ -192,6 +192,14 @@ class AndroidAppGraphTest {
             graph.playbackController.pause()
             // Dismiss is a durable command; it is deliberately not invoked by a graph-construction test.
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+            assertThat(graph.youtubeEngine).isSameInstanceAs(graph.youtubeEngine)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.PROJECTION)
+            graph.youtubeEngine.prewarm(ch.lkmc.neutrodyne.youtube.api.PrewarmReason.SCREEN)
+            graph.youtubeEngine.retryStart()
+            assertThat(graph.youtubeEngine.status.value.availability).isEqualTo(
+                ch.lkmc.neutrodyne.youtube.api.EngineAvailability.NOT_YET_AVAILABLE,
+            )
+            assertThat(graph.youtubeEngine.status.value.version).isNull()
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
             assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
             assertThat(
@@ -444,6 +452,10 @@ class AndroidAppGraphTest {
                 "CredentialLoadInitializer" to 120..199,
                 "PeriodicRefreshInitializer" to 200..299,
                 "RefreshForegroundObserverInitializer" to 200..299,
+                // 10 Scheduling on Android: `sync-periodic` arm at 200, the foreground observer
+                // at 220 beside the refresh observer.
+                "SyncSchedulingInitializer" to 200..299,
+                "SyncForegroundObserverInitializer" to 200..299,
                 // 05's work table: periodic arm, watcher and durable-work reconciliation.
                 "AutoBackupInitializer" to 200..299,
                 // M11b's maintenance arm belongs to the periodic scheduling band.

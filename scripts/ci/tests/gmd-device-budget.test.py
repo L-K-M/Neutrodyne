@@ -19,9 +19,10 @@ DEVICE_ARGUMENT = f"-P{DEVICE_PROPERTY}=1"
 GPU_PROPERTY = "android.testoptions.manageddevices.emulator.gpu"
 
 
-def _nightly_script():
+def _run_block(step_name):
+    """The dedented `run: |` body of the uniquely named workflow step."""
     source = WORKFLOW.read_text()
-    marker = "      - name: GMD nightly group (debug)\n"
+    marker = f"      - name: {step_name}\n"
     assert source.count(marker) == 1
     body = source.split(marker, 1)[1].split("        run: |\n", 1)[1]
     lines = []
@@ -33,7 +34,7 @@ def _nightly_script():
 
 
 class GmdDeviceBudgetTest(unittest.TestCase):
-    def _run_scope(self, scope):
+    def _run_script(self, script):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory(prefix="android-") as crashes:
             root = Path(directory)
             runner = root / "runner"
@@ -51,7 +52,7 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             )
             gradle.chmod(0o755)
             result = subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", _nightly_script().replace("${{ inputs.scope }}", scope)],
+                ["bash", "-euo", "pipefail", "-c", script],
                 cwd=root,
                 env={
                     **os.environ,
@@ -65,6 +66,10 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             return json.loads(record.read_text())
+
+    def _run_scope(self, scope):
+        script = _run_block("GMD nightly group (debug)").replace("${{ inputs.scope }}", scope)
+        return self._run_script(script)
 
     def _assert_device_budget(self, arguments):
         limits = [arg for arg in arguments if arg.startswith(f"-P{DEVICE_PROPERTY}=")]
@@ -93,6 +98,102 @@ class GmdDeviceBudgetTest(unittest.TestCase):
             "ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest",
             arguments,
         )
+
+    def test_m10_a11y_runs_four_serial_invocations_one_per_class(self):
+        classes = [
+            "M10AccessibilityTest",
+            "NavigationStateRestorationTest",
+            "PerAppLanguageTest",
+            "SubscribeJourneyTest",
+        ]
+        for classname in classes:
+            step_name = f"M10 journeys on the api36 GMD - {classname}"
+            arguments = self._run_script(_run_block(step_name))
+            self._assert_device_budget(arguments)
+            self.assertIn(":app:api36DebugAndroidTest", arguments)
+            self.assertIn("-Pneutrodyne.testScope=nightly", arguments)
+            self.assertEqual(
+                [arg for arg in arguments if arg.startswith("-Pandroid.testInstrumentationRunnerArguments.class=")],
+                [
+                    f"-Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.{classname}"
+                ],
+                f"The M10 lane runs {classname} in its own isolated invocation",
+            )
+            renderers = [arg for arg in arguments if arg.startswith(f"-P{GPU_PROPERTY}=")]
+            self.assertEqual(renderers, [f"-P{GPU_PROPERTY}=lavapipe"], "Do not restore the crashing legacy renderer")
+
+    def test_benchmark_dryrun_selects_only_macrobenchmark_journeys(self):
+        source = WORKFLOW.read_text().split("  benchmark-dryrun:\n", 1)[1].split("\n  bmgr-download-exclusion:", 1)[0]
+        body = source.split("      - name: Exercise all Macrobenchmark journeys\n", 1)[1]
+        lines = body.split("        run: >-\n", 1)[1].splitlines()
+        command = []
+        for line in lines:
+            if line.strip() and not line.startswith("          "):
+                break
+            command.append(line.strip())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = root / "arguments.json"
+            gradle = root / "gradlew"
+            gradle.write_text(
+                f"#!{sys.executable}\n"
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['GMD_ARGUMENTS']).write_text(json.dumps(sys.argv[1:]))\n"
+            )
+            gradle.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", " ".join(command)],
+                cwd=root, env={**os.environ, "GMD_ARGUMENTS": str(record)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = json.loads(record.read_text())
+            self._assert_device_budget(arguments)
+            self.assertIn(":benchmark:bench34BenchmarkReleaseAndroidTest", arguments)
+            selections = [arg for arg in arguments if arg.startswith("-Pandroid.testInstrumentationRunnerArguments.class=")]
+            self.assertEqual(
+                selections,
+                ["-Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.benchmark.Journeys"],
+                "Dry-run mode only affects MacrobenchmarkRule; unrelated system tests require a different app build",
+            )
+
+    def test_m10_failure_preserves_class_evidence_and_full_log(self):
+        classname = "NavigationStateRestorationTest"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = root / "runner"
+            runner.mkdir()
+            # A prior class has already stopped its own collector.
+            (runner / "gmd-crash-preserver.stop").touch()
+            helper = root / "scripts/ci/preserve-emulator-crashes.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text("import sys\nfrom pathlib import Path\n"
+                              "assert not Path(sys.argv[3]).exists(), 'stale stop file'\n")
+            gradle = root / "gradlew"
+            gradle.write_text(
+                f"#!{sys.executable}\n"
+                "import sys\nfrom pathlib import Path\n"
+                "p=Path('app/build/outputs/androidTest-results/managedDevice/debug/api36')\n"
+                "p.mkdir(parents=True)\n"
+                "(p/'TEST-failed.xml').write_text('<testsuite failures=\"1\"/>')\n"
+                "print('device stdout evidence')\n"
+                "print('device stderr evidence', file=sys.stderr)\n"
+                "sys.exit(37)\n"
+            )
+            gradle.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", _run_block(f"M10 journeys on the api36 GMD - {classname}")],
+                cwd=root, env={**os.environ, "RUNNER_TEMP": str(runner)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(result.returncode, 37, result.stderr)
+            evidence = root / f"app/build/outputs/androidTest-results/m10-a11y/{classname}/api36"
+            self.assertTrue((evidence / "TEST-failed.xml").is_file(), "Failed Gradle must still snapshot XML")
+            log = (evidence / "gradle.log").read_text()
+            self.assertIn("device stdout evidence", log)
+            self.assertIn("device stderr evidence", log)
+            self.assertNotIn("stale stop file", result.stderr)
 
     def test_gradle_worker_limit_does_not_replace_device_limit(self):
         with self.assertRaises(AssertionError):
