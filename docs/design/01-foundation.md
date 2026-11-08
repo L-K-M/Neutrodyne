@@ -1783,21 +1783,21 @@ the benchmark-only `BenchmarkSeedReceiver` from `app/src/benchmarkRelease/` (sou
 `:core:testing` dependency), so the generator can seed the journeys; the published `release`
 build type never includes either ([09 Macrobenchmark and profiles](09-quality-and-release.md#macrobenchmark-and-profiles)).
 
-**Implementation note (2026-11-08, M11b).** The committed captures replay
-generation run 42495419362 on 6270fc1 — the first successful generator run.
-Its merged `baseline-prof.txt` (6,467,795 bytes, 56,735 rules, SHA-256
-`a2950beb…b6fb`) and `startup-prof.txt` (5,314,591 bytes, 47,558 rules, SHA-256
-`7df0f389…56fd`) were re-compressed losslessly with deterministic gzip into
-`app/profiles/` (477,779 and 389,916 bytes); `capture-receipt.properties` also
-records the gzip digests (`315b9843…342c`, `daed81cf…96cc`), so the inflate
-task rejects any drift between the committed blobs and the receipt before it
-writes a byte. That run kept only the merged pair (`baseline-profile`
-artifact): the `baseline-profile-reports` upload was failure-only, so its
-four-journey XML/PB evidence was not retained — the upload now runs on every
-run ([09 CI pipelines](09-quality-and-release.md#ci-pipelines)). GMD and PB1
-timings and the physical-device PB3 measurement stay unverified until a fresh
-generator run with retained reports ([09 Macrobenchmark and
-profiles](09-quality-and-release.md#macrobenchmark-and-profiles)).
+**Implementation note (2026-11-08, M11b).** The committed captures come from
+successful generation run 42504550653 on `dc1ed51`. Its retained XML reports all
+four journeys executed with zero failures, errors or skips: `coldStart`,
+`coverGrid`, `podcastDetail` and `playerExpansion`. The retained `test-result.pb`
+names distinct generated profile outputs for those journeys. The merged
+`baseline-prof.txt` (6,610,939 bytes, 57,864 rules) and
+`startup-prof.txt` (5,405,447 bytes, 48,243 rules) are compressed
+losslessly into `app/profiles/` (487,272 and 395,751 bytes).
+The receipt pins the source, run and full raw/gzip hashes; no rules are filtered.
+The first successful run, 42495419362, lost its XML/PB evidence because reports
+uploaded only on failure. Reports now upload on every run. The new capture
+therefore has both the merged files and per-journey test evidence ([09 CI
+pipelines](09-quality-and-release.md#ci-pipelines)). Emulator timings remain
+diagnostic; PB1/PB3 measurements on the physical reference device stay manual
+([09 Macrobenchmark and profiles](09-quality-and-release.md#macrobenchmark-and-profiles)).
 
 **Release-only checks.** 09's `check-apk.sh --published` asserts on every published APK: no `application-debuggable`, no `testOnly`, no LeakCanary (`leakcanary`, `shark`), no `ui-tooling` `PreviewActivity`, no ui-test-manifest activity, no class from `app/src/debug/` or `app/src/benchmarkRelease/`, and the committed keystore's certificate ([09 CI pipelines](09-quality-and-release.md#ci-pipelines)); `verifyManifestPermissions` checks the merged `release` manifest; the nightly `release-build-smoke` installs the release APK on the API 36 GMD.
 
