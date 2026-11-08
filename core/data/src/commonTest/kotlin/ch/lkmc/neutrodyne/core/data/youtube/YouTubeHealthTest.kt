@@ -35,7 +35,8 @@ class YouTubeHealthTest {
                 assertEquals(minOf(index + 1, 4), f.health.state.value.feedOutageLevel)
                 assertEquals(f.clock.now() + hours * HOUR, f.health.state.value.feedOutageUntil)
             }
-            val restarted = DefaultYouTubeHealth(f.settings, f.clock, backgroundScope) {}
+            val restarted =
+                DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 0, invalidateUrls = {}) {}
             restarted.awaitLoaded()
             assertEquals(f.health.state.value, restarted.state.value)
             restarted.reportFeedRecovered()
@@ -54,7 +55,8 @@ class YouTubeHealthTest {
                 f.health.awaitLoaded()
                 assertEquals(f.clock.now() + minutes * 60_000L, f.health.state.value.feedRateLimitedUntil)
             }
-            val restarted = DefaultYouTubeHealth(f.settings, f.clock, backgroundScope) {}
+            val restarted =
+                DefaultYouTubeHealth(f.settings, f.clock, backgroundScope, appVersionCode = 0, invalidateUrls = {}) {}
             restarted.awaitLoaded()
             restarted.reportFeedRateLimited(f.clock.now(), 8 * HOUR)
             restarted.awaitLoaded()
@@ -275,7 +277,14 @@ class YouTubeHealthTest {
         val settings = FakeSettingsRepository()
         var retries = 0
         var controls = 0
-        val health = DefaultYouTubeHealth(settings, clock, scope.backgroundScope) { retries++ }
+        val health =
+            DefaultYouTubeHealth(
+                settings,
+                clock,
+                scope.backgroundScope,
+                appVersionCode = 0,
+                invalidateUrls = {},
+            ) { retries++ }
         val monitor =
             YouTubeOutageMonitor(health, clock, { total }) {
                 controls++

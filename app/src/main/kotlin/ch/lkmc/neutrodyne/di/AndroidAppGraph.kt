@@ -42,6 +42,7 @@ import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.work.MetroWorkerFactory
 import ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
@@ -80,6 +81,9 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     val networkMonitor: NetworkMonitor
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
+
+    /** Database-backed; resolve only after the database open gate (M9a health binding). */
+    val youTubeHealth: YouTubeHealth
 
     /** Resolve database-backed playback ports only after the database open gate. */
     val queueRepository: Provider<QueueRepository>
