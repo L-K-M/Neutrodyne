@@ -19,6 +19,8 @@ import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.database.SyncClockEntity
+import ch.lkmc.neutrodyne.core.database.SyncOutboxEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
@@ -147,6 +149,102 @@ class RestoreMergerTest {
 
             assertEquals(1, summary.podcastsMatched)
             assertEquals(recordSyncId, db.podcastDao().byId(local)!!.syncId)
+        }
+
+    /**
+     * First-link ID adoption moves the seed and pending captures to the adopted rid: the field
+     * merge and the capture pass must see the local winners under the record's identity, not a
+     * stray rid the server does not know (10 Merge steps 3–5).
+     */
+    @Test
+    fun linkMergeMovesTheSeededClockRowsWhenThePodcastAdoptsTheServerSyncId() =
+        runTest {
+            val localSyncId = "99999999-9999-4999-8999-999999999999"
+            val local =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://a/feed", syncId = localSyncId),
+                )
+            db.syncClockDao().upsert(SyncClockEntity("podcast", localSyncId, "{}"))
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity("podcast", localSyncId, "title", 1L shl 16, "0000000000000001"),
+            )
+            val recordSyncId = "00000000-0000-4000-8000-0000000000cc"
+            val staged =
+                stagedOf(podcasts = listOf(podcastV1("https://a/feed").copy(syncId = recordSyncId)))
+
+            merger.mergeLibrary(staged, MergePolicy.LINK_MERGE, ALL_CATEGORIES)
+
+            assertEquals(recordSyncId, db.podcastDao().byId(local)!!.syncId)
+            assertNull(db.syncClockDao().get("podcast", localSyncId))
+            assertNotNull(db.syncClockDao().get("podcast", recordSyncId))
+            assertTrue(db.syncOutboxDao().rowsFor("podcast", listOf(localSyncId)).isEmpty())
+            assertTrue(db.syncOutboxDao().rowsFor("podcast", listOf(recordSyncId)).isNotEmpty())
+        }
+
+    /** The episode seed rides the adopted podcast rid, not the local row's previous one. */
+    @Test
+    fun linkMergeRekeysTheEpisodeSeedToTheAdoptedSyncId() =
+        runTest {
+            val localSyncId = "99999999-9999-4999-8999-999999999999"
+            val podcast =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(feedKey = "https://a/feed", syncId = localSyncId),
+                )
+            db.episodeDao().insertStub(episodeEntity(podcastId = podcast, identityKey = "g:e"))
+            db.syncClockDao().upsert(SyncClockEntity("episode", localSyncId + "g:e", "{}"))
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity("episode", localSyncId + "g:e", "played", 1L shl 16, "0000000000000001"),
+            )
+            val recordSyncId = "00000000-0000-4000-8000-0000000000cc"
+            val staged =
+                stagedOf(podcasts = listOf(podcastV1("https://a/feed").copy(syncId = recordSyncId)))
+
+            merger.mergeLibrary(staged, MergePolicy.LINK_MERGE, ALL_CATEGORIES)
+
+            assertNull(db.syncClockDao().get("episode", localSyncId + "g:e"))
+            assertNotNull(db.syncClockDao().get("episode", recordSyncId + "g:e"))
+            assertTrue(db.syncOutboxDao().rowsFor("episode", listOf(localSyncId + "g:e")).isEmpty())
+            assertTrue(db.syncOutboxDao().rowsFor("episode", listOf(recordSyncId + "g:e")).isNotEmpty())
+        }
+
+    /** The member seed rides the adopted group uuid and podcast syncId. */
+    @Test
+    fun linkMergeRekeysTheMemberSeedToTheAdoptedIds() =
+        runTest {
+            val localSyncId = "99999999-9999-4999-8999-999999999999"
+            val localGroupUuid = "88888888-8888-4888-8888-888888888888"
+            val recordGroupUuid = "11111111-1111-4111-8111-111111111111"
+            val recordSyncId = "00000000-0000-4000-8000-0000000000cc"
+            db.podcastDao().insertPodcast(
+                podcastEntity(feedKey = "https://a/feed", syncId = localSyncId),
+            )
+            val group =
+                db.groupDao().insert(
+                    groupEntity(uuid = localGroupUuid, name = "Group", orderKey = "0.5"),
+                )
+            val podcastId = db.podcastDao().byFeedKey("https://a/feed")!!.id
+            db.groupDao().insertMember(memberEntity(group, podcastId, "0.5"))
+            val oldRid = localGroupUuid + localSyncId
+            db.syncClockDao().upsert(SyncClockEntity("member", oldRid, "{}"))
+            db.syncOutboxDao().upsert(
+                SyncOutboxEntity("member", oldRid, "in", 1L shl 16, "0000000000000001"),
+            )
+            val staged =
+                stagedOf(
+                    podcasts = listOf(podcastV1("https://a/feed").copy(syncId = recordSyncId)),
+                    groups =
+                        listOf(
+                            groupV1(uuid = recordGroupUuid, name = "Group", members = listOf("https://a/feed")),
+                        ),
+                )
+
+            merger.mergeLibrary(staged, MergePolicy.LINK_MERGE, ALL_CATEGORIES)
+
+            val newRid = recordGroupUuid + recordSyncId
+            assertNull(db.syncClockDao().get("member", oldRid))
+            assertNotNull(db.syncClockDao().get("member", newRid))
+            assertTrue(db.syncOutboxDao().rowsFor("member", listOf(oldRid)).isEmpty())
+            assertTrue(db.syncOutboxDao().rowsFor("member", listOf(newRid)).isNotEmpty())
         }
 
     /**

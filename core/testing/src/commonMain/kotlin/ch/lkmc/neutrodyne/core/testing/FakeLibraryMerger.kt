@@ -11,9 +11,8 @@ import ch.lkmc.neutrodyne.core.model.MergedRecord
 
 /**
  * Records [LibraryMerger] calls and feeds the configured fixtures to the callbacks before
- * returning [result]. Used by restore-runner tests now and by `FirstLinkMerger` tests in
- * MS2 — the `LINK_*` policies are representable but have no production implementation
- * until then (05 RestoreMerger).
+ * returning [result] — the fixture behind `FirstLinkMerger`'s orchestration tests (the
+ * `LINK_*` rules themselves are `:core:data`'s, pinned by its merger tests).
  */
 class FakeLibraryMerger : LibraryMerger {
     data class Call(
@@ -34,6 +33,9 @@ class FakeLibraryMerger : LibraryMerger {
     /** Fed to `onApplied` when the caller passes one. */
     var appliedRecords: List<MergedRecord> = emptyList()
 
+    /** Thrown from `mergeStaged` before any callback, for cancellation/failure paths. */
+    var failure: (() -> Throwable)? = null
+
     override suspend fun mergeStaged(
         stagingDir: String,
         policy: MergePolicy,
@@ -42,6 +44,7 @@ class FakeLibraryMerger : LibraryMerger {
         onApplied: (suspend (MergedRecord) -> Unit)?,
     ): Outcome<MergeSummary, BackupError> {
         calls += Call(stagingDir, policy)
+        failure?.let { throw it() }
         for ((podcastSyncId, identityKey) in unmatched) onUnmatched(podcastSyncId, identityKey)
         if (progressTotal > 0) progress(progressTotal, progressTotal)
         for (record in appliedRecords) onApplied?.invoke(record)

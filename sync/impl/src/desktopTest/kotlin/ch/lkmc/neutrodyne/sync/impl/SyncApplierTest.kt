@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.sync.impl
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
@@ -353,6 +354,61 @@ class SyncApplierTest {
             }
         }
 
+    @Test
+    fun aRemotePodcastInsertCarriesYoutubeVariants() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                val applier = applier(db)
+                val result =
+                    applier.applyPage(
+                        listOf(
+                            podcastRecord(
+                                podcastSyncId,
+                                "feedUrl" to text("https://example.com/feed"),
+                                "title" to text("Example"),
+                                "sourceType" to text("YOUTUBE_CHANNEL"),
+                                "youtubeVariants" to variants(3, counter = 10),
+                            ),
+                        ),
+                        roundId = now,
+                    )
+                assertEquals(1, result.applied)
+                assertEquals(3, db.podcastDao().bySyncId(podcastSyncId)!!.youtubeVariants)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun aWinningRemoteYoutubeVariantsOverwritesTheLocalDefaultAndAStaleOneDoesNot() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                link(db)
+                seedPodcast(db, podcastSyncId) {
+                    copy(sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL)
+                }
+                val applier = applier(db)
+                applier.applyPage(
+                    listOf(podcastRecord(podcastSyncId, "youtubeVariants" to variants(3, counter = 20))),
+                    roundId = now,
+                )
+                assertEquals(3, db.podcastDao().bySyncId(podcastSyncId)!!.youtubeVariants)
+
+                val stale =
+                    applier.applyPage(
+                        listOf(podcastRecord(podcastSyncId, "youtubeVariants" to variants(2, counter = 5))),
+                        roundId = now + 1,
+                    )
+                assertEquals(1, stale.applied)
+                assertEquals(3, db.podcastDao().bySyncId(podcastSyncId)!!.youtubeVariants)
+            } finally {
+                db.close()
+            }
+        }
+
     private fun applier(db: NeutrodyneDatabase): SyncApplier {
         val settings = FakeSettingsSyncPort()
         return SyncApplier(
@@ -388,6 +444,7 @@ class SyncApplierTest {
     private suspend fun seedPodcast(
         db: NeutrodyneDatabase,
         syncId: String,
+        block: PodcastEntity.() -> PodcastEntity = { this },
     ): Long =
         db
             .podcastDao()
@@ -396,6 +453,7 @@ class SyncApplierTest {
                     syncId = syncId,
                     feedUrl = "https://example.com/$syncId",
                     feedKey = "https://example.com/$syncId",
+                    block = block,
                 ),
             )
 
@@ -439,6 +497,11 @@ class SyncApplierTest {
     private fun text(value: String): FieldValue = FieldValue(JsonPrimitive(value), clock(10).toString())
 
     private fun int(value: Long): FieldValue = FieldValue(JsonPrimitive(value), clock(10).toString())
+
+    private fun variants(
+        value: Int,
+        counter: Long,
+    ): FieldValue = FieldValue(JsonPrimitive(value.toLong()), clock(counter).toString())
 
     private fun pos(
         ms: Long,
