@@ -118,6 +118,9 @@ internal class AdapterFixture(
         }
     val db = TestDb.inMemory(app, clock = clock)
     val caps = FakeYouTubeCapabilitiesSource()
+    val engine =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeEngine()
     val local = FakeLocalMediaIndex()
     val sessions = sessionStore(PlaybackTestStores.sessions(db, ProtocolOrderKeys, caps))
     val positions = PlaybackTestStores.positions(db)
@@ -134,9 +137,26 @@ internal class AdapterFixture(
             Dispatchers.Unconfined,
             scope.backgroundScope,
         )
-    val resolver = EpisodeResolver(index, local, cache)
+    private val youtubeHealth =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeHealth()
+    val resolver =
+        EpisodeResolver(
+            index,
+            local,
+            cache,
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeStreamResolver(),
+            caps,
+            { youtubeHealth },
+            clock,
+        ) {
+            ch.lkmc.neutrodyne.youtube.api
+                .AudioPref()
+        }
     val failures = mutableListOf<Exception>()
     val events = mutableListOf<PlaybackEvent>()
+    val ticks = mutableListOf<PlaybackTick>()
     val tracker =
         PositionTracker(
             PositionSaver(positions, clock, PlayedRule()),
@@ -153,6 +173,7 @@ internal class AdapterFixture(
                 }
             },
             failures::add,
+            onTick = ticks::add,
         )
     val settingsResolver = FakeEffectiveSettingsResolver()
     val settings = EffectivePlaybackSettings(settingsResolver, FakeScopeSettingsRepository(), FakeSettingsRepository())
@@ -169,6 +190,7 @@ internal class AdapterFixture(
             lookup,
             positions,
             caps,
+            engine,
             index,
             resolver,
             factory,
@@ -191,12 +213,31 @@ internal class AdapterFixture(
         applier.attach(exo)
     }
 
-    suspend fun seed(count: Int): List<Long> {
-        val podcast = db.podcastDao().insertPodcast(podcastEntity(subscribedAt = 0))
+    suspend fun seed(
+        count: Int,
+        youtube: Boolean = false,
+    ): List<Long> {
+        val podcast =
+            db.podcastDao().insertPodcast(
+                podcastEntity(subscribedAt = 0) {
+                    if (youtube) {
+                        copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            youtubeChannelId = "UC" + "0".repeat(21) + "A",
+                        )
+                    } else {
+                        this
+                    }
+                },
+            )
         return (1..count).map { n ->
             db.episodeDao().insertStub(
                 episodeEntity(podcastId = podcast, sortDate = n.toLong()) {
-                    copy(enclosureUrl = "https://example.com/$n.mp3", durationMs = DURATION_MS)
+                    copy(
+                        enclosureUrl = if (youtube) null else "https://example.com/$n.mp3",
+                        durationMs = DURATION_MS,
+                        externalMediaId = if (youtube) "abcdefghij$n" else null,
+                    )
                 },
             )
         }

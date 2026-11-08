@@ -10,8 +10,14 @@
 #
 # binaryTable lists the MSI Binary-table entries a Neutrodyne MSI may carry (11 Image
 # scan rules): jpackage's wixhelper.dll, WiX Util's custom action behind RemoveFolderEx
-# and the WixUI resources of the licence dialog. Exact ids are confirmed by the first
-# Windows build (S13); patterns match by fnmatch.
+# and the WixUI resources of the licence dialog. The exact IDs below were confirmed
+# by Windows package run 42457761741 (2026-11-08), not inferred from DLL filenames.
+# JpCaDll is OpenJDK jpackage's wixhelper.dll resource:
+# https://github.com/openjdk/jdk25u/blob/master/src/jdk.jpackage/windows/classes/jdk/jpackage/internal/resources/main.wxs
+# The remaining IDs come from the pinned WiX sources:
+# https://github.com/wixtoolset/wix3/blob/wix3112rtm/src/ext/UIExtension/wixlib/Common.wxs
+# https://github.com/wixtoolset/wix3/blob/wix3112rtm/src/ext/UIExtension/wixlib/Common_Platform.wxi
+# https://github.com/wixtoolset/wix3/blob/wix3112rtm/src/ext/UtilExtension/wixlib/UtilExtension.wxs
 version=3.11.2
 tag=wix3112rtm
 
@@ -22,7 +28,12 @@ source.name=wix-3.11.2-src.tar.gz
 source.url=https://codeload.github.com/wixtoolset/wix3/tar.gz/refs/tags/wix3112rtm
 source.sha256=cfc434f1ecd65d7274da35593aab792117821a22037af2a8ef42ba24673297aa
 
-binaryTable=wixhelper.dll
-binaryTable=WixHelper*
-binaryTable=bannrbmp
-binaryTable=dlgbmp
+binaryTable=JpCaDll
+binaryTable=WixCA
+binaryTable=WixUIWixca
+binaryTable=WixUI_Bmp_Banner
+binaryTable=WixUI_Bmp_Dialog
+binaryTable=WixUI_Ico_Exclam
+binaryTable=WixUI_Ico_Info
+binaryTable=WixUI_Bmp_New
+binaryTable=WixUI_Bmp_Up

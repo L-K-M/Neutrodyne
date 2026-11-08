@@ -237,6 +237,7 @@ class YtDlpEngine(
                 !loaded -> ExternalReason.NOT_YET_AVAILABLE
                 availability == EngineAvailability.DISABLED -> ExternalReason.DISABLED_BY_USER
                 availability == EngineAvailability.FAILED -> ExternalReason.ENGINE_FAILED
+                availability == EngineAvailability.NOT_YET_AVAILABLE -> ExternalReason.NOT_YET_AVAILABLE
                 else -> null
             }
         mutableStatus.value =

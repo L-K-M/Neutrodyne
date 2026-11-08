@@ -138,6 +138,8 @@ jobs:
           scripts/ci/tests/native-ffmpeg-build.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
           scripts/ci/tests/desktop-packaging.test.sh
+          scripts/ci/tests/build-desktop-release-windows.test.sh
+          python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
           python3 scripts/ci/tests/bmgr-api29-probe.test.py
@@ -146,6 +148,7 @@ jobs:
           python3 scripts/ci/test-server-image.py
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-discovery-tests.test.py
+          python3 scripts/ci/tests/assert-selected-tests.test.py
           python3 scripts/ci/tests/youtube-feed-canary.test.py
           python3 scripts/ci/tests/release-nightly-gate.test.py
           python3 scripts/ci/tests/trace-instrumentation-abi.test.py
