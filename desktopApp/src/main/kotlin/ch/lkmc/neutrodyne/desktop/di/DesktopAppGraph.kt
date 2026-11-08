@@ -10,6 +10,8 @@ import ch.lkmc.neutrodyne.core.common.CrashContext
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.DesktopNotifier
+import ch.lkmc.neutrodyne.core.common.LevelMutableLogSink
+import ch.lkmc.neutrodyne.core.common.LogLevel
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
@@ -52,6 +54,7 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
+import dev.zacsweers.metro.IntoSet
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
@@ -272,12 +275,23 @@ interface DesktopAppGraph {
     @Provides
     fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
 
+    /** "Detailed log for 24 hours" (09) lowers the ring and the file sink alike. */
+    @Provides
+    @IntoSet
+    fun provideRingLevelMutable(sink: ch.lkmc.neutrodyne.core.common.RingBufferLogSink): LevelMutableLogSink = sink
+
+    /** The shell's pre-graph [RollingFileSink], contributed into the same set by its interface. */
+    @Provides
+    @IntoSet
+    fun provideFileLevelMutable(fileSink: LevelMutableLogSink): LevelMutableLogSink = fileSink
+
     @DependencyGraph.Factory
     fun interface Factory {
         fun create(
             @Provides dirs: AppDirs,
             @Provides buildInfo: BuildInfo,
             @Provides crashReporter: DesktopCrashReporter,
+            @Provides fileSink: LevelMutableLogSink,
         ): DesktopAppGraph
     }
 }
@@ -287,9 +301,28 @@ internal fun createDesktopGraph(
     dirs: AppDirs,
     buildInfo: BuildInfo,
     crashReporter: DesktopCrashReporter,
+    fileSink: LevelMutableLogSink,
 ): DesktopAppGraph =
     createGraphFactory<DesktopAppGraph.Factory>().create(
         dirs = dirs,
         buildInfo = buildInfo,
         crashReporter = crashReporter,
+        fileSink = fileSink,
     )
+
+/** Tests and smoke runs have no pre-graph file sink; the verbose toggle simply has one member less. */
+internal fun createDesktopGraph(
+    dirs: AppDirs,
+    buildInfo: BuildInfo,
+    crashReporter: DesktopCrashReporter,
+): DesktopAppGraph = createDesktopGraph(dirs, buildInfo, crashReporter, NoopLevelMutableLogSink)
+
+private object NoopLevelMutableLogSink : LevelMutableLogSink {
+    override var minLevel: LogLevel = LogLevel.INFO
+
+    override fun log(
+        level: LogLevel,
+        tag: String,
+        message: String,
+    ) = Unit
+}

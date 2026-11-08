@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.log
 
+import ch.lkmc.neutrodyne.core.common.LevelMutableLogSink
 import ch.lkmc.neutrodyne.core.common.LogLevel
-import ch.lkmc.neutrodyne.core.common.LogSink
 import java.io.BufferedWriter
 import java.io.IOException
 import java.nio.charset.StandardCharsets
@@ -24,13 +24,17 @@ import java.time.Instant
  */
 internal class RollingFileSink(
     private val logsDir: Path,
-    private val minLevel: LogLevel,
+    minLevel: LogLevel,
     private val maxFileBytes: Long = MAX_FILE_BYTES,
     private val timeSource: () -> Instant = Instant::now,
-) : LogSink,
+) : LevelMutableLogSink,
     AutoCloseable {
     private val currentFile = logsDir.resolve(CURRENT_NAME)
     private val lock = Any()
+
+    /** "Detailed log for 24 hours" (09) lowers it to DEBUG like the ring's. */
+    @Volatile
+    override var minLevel: LogLevel = minLevel
 
     private var writer: BufferedWriter?
     private var closed = false
