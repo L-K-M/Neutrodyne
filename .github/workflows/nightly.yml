@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | desktop-windows (desktop-packages' windows-x64 leg alone) | windows-identity (the windows-x64 ndmedia native boundary: process AUMID, the SMTC worker's release-ID re-assert and the .lnk stamp) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36) | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36)| playback-class (diagnostic: only the classes input's instrumented selection on the api36 debug GMD)"
+        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | desktop-windows (desktop-packages' windows-x64 leg alone) | windows-identity (the windows-x64 ndmedia native boundary: process AUMID, the SMTC worker's release-ID re-assert and the .lnk stamp) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36) | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36) | api37-subscribe (API 37 ATF diagnostic on the api37-16k job: SubscribeJourneyTest only) | playback-class (diagnostic: only the classes input's instrumented selection on the api36 debug GMD)"
         default: full
       classes:
         description: "instrumentation class filter for scope=playback-class; Class#method narrows to one test"
@@ -241,7 +241,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'reboot'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'reboot' || inputs.scope == 'api37-subscribe'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -334,11 +334,15 @@ jobs:
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
             test -r "$RUNNER_TEMP/logcat-api37-debug.txt" && test -s "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
-            ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
-            ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
-            python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected
-            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --external-youtube --device connected
+            # scope api37-subscribe narrows the app suite to SubscribeJourneyTest and pulls
+            # its captured ATF evidence; the other suites' class filter would deselect every
+            # module (their class does not exist there), so they stay out of this scope.
+            if [ "${{ inputs.scope }}" = api37-subscribe ]; then scripts/ci/api37-subscribe-device.sh debug; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --external-youtube --device connected; fi
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -381,10 +385,12 @@ jobs:
             test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             # AGP uninstalls both APKs after a connected run; the reboot driver below needs them.
-            ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true :app:connectedReleaseAndroidTest
-            python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
-            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected
-            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --external-youtube --variant release --device connected
+            # scope api37-subscribe narrows this leg to SubscribeJourneyTest the same way.
+            if [ "${{ inputs.scope }}" = api37-subscribe ]; then scripts/ci/api37-subscribe-device.sh release; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true :app:connectedReleaseAndroidTest; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected; fi
+            if [ "${{ inputs.scope }}" != api37-subscribe ]; then python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --external-youtube --variant release --device connected; fi
             # M5 W9: host-driven reboot evidence on the installed release app; the
             # instrumentation process exits before the host reboots the guest. Dispatch-only
             # (scope reboot) while this image's System UI builds no card after reboot (09).
@@ -412,6 +418,7 @@ jobs:
             benchmark/build/reports/androidTests/
             benchmark/build/reports/system-tests/
             ${{ runner.temp }}/logcat-api37-*.txt
+            ${{ runner.temp }}/api37-subscribe-*
             ${{ env.RELEASE_ABI_TARGET_SHA }}
           if-no-files-found: error
       - name: Build the release APKs for the alignment check
