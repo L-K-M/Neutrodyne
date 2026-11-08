@@ -262,6 +262,21 @@ class FeedsScreenTest {
             assertEquals(FeedFilters(), filters)
         }
 
+    @Test fun emptyGroupOffersMembershipEditorAndNotCaughtUp() =
+        runComposeUiTest {
+            var edited = false
+            setFeeds(
+                FeedsUiState(hasSubscriptions = true),
+                source = PagedListSource(listOf(emptyList())),
+                emptyGroupName = "tech",
+                onEditEmptyGroup = { edited = true },
+            )
+            onNodeWithText("No podcasts in 'tech' yet").assertIsDisplayed()
+            onNodeWithText("You're all caught up").assertDoesNotExist()
+            onNodeWithText("Add podcasts").performClick()
+            assertTrue(edited)
+        }
+
     @Test
     fun refreshErrorShowsRetry() =
         runComposeUiTest {
@@ -625,7 +640,7 @@ class FeedsScreenTest {
             fixture.select(2)
             fixture.awaitSelected(this, 2)
             onNodeWithContentDescription("Not shown as tab", useUnmergedTree = true).assertExists()
-            onNodeWithTag("feeds-pager").performCustomAccessibilityActionWithLabel("Previous group")
+            onNodeWithTag("feeds_pager").performCustomAccessibilityActionWithLabel("Previous group")
             waitUntil(timeoutMillis = 5_000) { fixture.model.uiState.value.selected != fixture.ref(2) }
             waitForIdle()
             onNodeWithText("Group 2").assertDoesNotExist()
@@ -639,10 +654,10 @@ class FeedsScreenTest {
             runBlocking { fixture.settings.set(AppearanceSettingKeys.FEEDS_ROW_SWIPE, true) }
             setContent { fixture.Content() }
             fixture.awaitSelected(this, 0)
-            onNodeWithTag("feeds-pager").performTouchInput { swipeLeft() }
+            onNodeWithTag("feeds_pager").performTouchInput { swipeLeft() }
             waitForIdle()
             assertEquals(FeedSourceRef.All, fixture.model.uiState.value.selected)
-            onNodeWithTag("feeds-pager").performCustomAccessibilityActionWithLabel("Next group")
+            onNodeWithTag("feeds_pager").performCustomAccessibilityActionWithLabel("Next group")
             fixture.awaitSelected(this, 1)
             onNodeWithTag("feed-tab:${fixture.ref(1).encode()}").assertIsSelected()
             fixture.close()
@@ -654,7 +669,7 @@ class FeedsScreenTest {
             val fixture = PagerFixture()
             setContent { fixture.Content() }
             fixture.awaitSelected(this, 0)
-            onNodeWithTag("feeds-pager").performTouchInput { swipeLeft() }
+            onNodeWithTag("feeds_pager").performTouchInput { swipeLeft() }
             fixture.awaitSelected(this, 1)
             fixture.close()
         }
@@ -736,7 +751,7 @@ class FeedsScreenTest {
             setContent { fixture.Content() }
             fixture.awaitSelected(this, 2)
             runOnIdle { fixture.clock.advanceBy(1.seconds) }
-            onNodeWithTag("feeds-pager").performCustomAccessibilityActionWithLabel("Next group")
+            onNodeWithTag("feeds_pager").performCustomAccessibilityActionWithLabel("Next group")
             fixture.awaitSelected(this, 3)
             waitUntil(timeoutMillis = 5_000) {
                 fixture.feeds.prefs.value[FeedSource.Group(2)]
@@ -759,13 +774,13 @@ class FeedsScreenTest {
             val fixture = PagerFixture()
             setContent { fixture.Content() }
             fixture.awaitSelected(this, 0)
-            onNodeWithTag("feeds-pager").performKeyInput {
+            onNodeWithTag("feeds_pager").performKeyInput {
                 keyDown(Key.CtrlLeft)
                 pressKey(Key.Tab)
                 keyUp(Key.CtrlLeft)
             }
             fixture.awaitSelected(this, 1)
-            onNodeWithTag("feeds-pager").performKeyInput { pressKey(Key.F5) }
+            onNodeWithTag("feeds_pager").performKeyInput { pressKey(Key.F5) }
             assertEquals(listOf("refreshFeed(Group(groupId=1))"), fixture.refresh.calls)
             fixture.close()
         }
@@ -871,6 +886,8 @@ class FeedsScreenTest {
         onMarkAllPlayed: () -> Unit = {},
         onAddPodcast: () -> Unit = {},
         onSearch: () -> Unit = {},
+        emptyGroupName: String? = null,
+        onEditEmptyGroup: () -> Unit = {},
         wrapScreen: @Composable (@Composable () -> Unit) -> Unit = { it() },
     ): LazyPagingItems<FeedItem> {
         lateinit var pagingItems: androidx.paging.compose.LazyPagingItems<FeedItem>
@@ -900,7 +917,30 @@ class FeedsScreenTest {
                     cachedFeed.collectAsLazyPagingItems().also { pagingItems = it }
                     wrapScreen {
                         FeedsScreen(
-                            state = state.copy(tabs = persistentListOf(allTab())),
+                            state =
+                                if (emptyGroupName ==
+                                    null
+                                ) {
+                                    state.copy(tabs = persistentListOf(allTab()))
+                                } else {
+                                    state.copy(
+                                        tabs =
+                                            persistentListOf(
+                                                FeedTabUi(
+                                                    FeedTab(
+                                                        FeedSource.Group(999),
+                                                        emptyGroupName,
+                                                        null,
+                                                        null,
+                                                        "00000000-0000-4000-8000-000000000999",
+                                                    ),
+                                                    FeedSourceRef.Group("00000000-0000-4000-8000-000000000999"),
+                                                ),
+                                            ),
+                                        selected = FeedSourceRef.Group("00000000-0000-4000-8000-000000000999"),
+                                        emptyGroupIds = kotlinx.collections.immutable.persistentSetOf(999L),
+                                    )
+                                },
                             selection = selection,
                             live = live,
                             onVisibleIds = { _, ids -> onVisibleIds(ids) },
@@ -912,6 +952,7 @@ class FeedsScreenTest {
                             onMarkAllPlayedClick = { onMarkAllPlayed() },
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,
+                            onEditGroup = { onEditEmptyGroup() },
                         )
                     }
                 }

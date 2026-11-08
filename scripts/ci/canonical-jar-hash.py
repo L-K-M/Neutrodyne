@@ -12,6 +12,7 @@ implementations must stay byte-for-byte identical.
 """
 
 import hashlib
+import os
 import struct
 import sys
 import zipfile
@@ -201,6 +202,16 @@ def normalized(data, name):
     return normalize_macho(data)
 
 
+def content_sha256(path):
+    """SHA-256 over a standalone file's normalized content: the same Mach-O
+    normalization `canonical_sha256` applies to a JAR entry's bytes. Used to bind
+    the native libraries Compose extracts from a skiko runtime jar, which the
+    packager re-signs (so their raw bytes differ from the source artifact)."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+    return sha256_hex(normalized(data, os.path.basename(path)))
+
+
 def validate_name(name):
     if not name:
         fail("empty ZIP entry name")
@@ -249,8 +260,11 @@ def canonical_sha256(path):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--content":
+        print(content_sha256(sys.argv[2]))
+        return 0
     if len(sys.argv) != 2:
-        print("usage: canonical-jar-hash.py <file>", file=sys.stderr)
+        print("usage: canonical-jar-hash.py <file> | canonical-jar-hash.py --content <file>", file=sys.stderr)
         return 2
     print(canonical_sha256(sys.argv[1]))
     return 0

@@ -6,6 +6,7 @@
          without this entry ActivityScenario.launch cannot start it. -->
     <activity
       android:name="androidx.activity.ComponentActivity"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar"
       android:exported="false" />
   </application>
 </manifest>
