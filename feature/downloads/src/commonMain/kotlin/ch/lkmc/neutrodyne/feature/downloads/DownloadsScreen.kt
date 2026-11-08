@@ -145,6 +145,7 @@ internal fun DownloadsScreen(
     onReload: () -> Unit,
     onNotice: (DownloadNotice) -> Unit,
     onReveal: ((Long) -> Unit)? = null,
+    engineNotice: @Composable () -> Unit = {},
 ) {
     val list = rememberLazyListState()
     val rows = state.overview
@@ -164,6 +165,7 @@ internal fun DownloadsScreen(
         // 08 Scrollbars: the desktop draws an overlay thumb at the list's end edge.
         val scrollbars = LocalScrollbars.current
         val scrollbarColor = ndScrollbarColor(scrollbars)
+        engineNotice()
         LazyColumn(
             state = list,
             modifier = Modifier.weight(1f).ndScrollbar(list, scrollbars, scrollbarColor),
@@ -376,6 +378,7 @@ private fun DownloadEntryRow(
     onShare: ((Long, String) -> Unit)?,
     onSelect: (Long) -> Unit,
     onReveal: ((Long) -> Unit)? = null,
+    engineNotice: @Composable () -> Unit = {},
     selectionMode: DownloadSelectionMode = DownloadSelectionMode.BROWSE,
 ) {
     val status =

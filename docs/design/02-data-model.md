@@ -674,6 +674,15 @@ object EpisodeDescriptionCodec {             // the only way to read or write `h
 
 The column holds raw HTML from the feed (or plain text for YouTube and Atom); sanitising happens at display time ([D27](../PLAN.md#3-key-decisions), [03 Show notes](03-feeds-and-discovery.md#show-notes)). Compression shrinks the largest table to roughly a third (see [Expected size](#expected-size)). Encoding runs in the ingest's prepare step — off the write transaction for a refresh ingest, inside it for subscribe's single-transaction path, where an encode rejection aborts the whole subscribe: no podcast, alias, membership or episode row survives it (03 Subscribe transaction; covered by `SubscribeFlowTest`'s over-bound rollback and exact-bound commit cases).
 
+**Implementation note (2026-11-04, M9a current-code port).** Description blobs
+can carry producer completeness as a codec-owned trailer after the compressed
+stream. Existing unmarked blobs decode as `UNKNOWN` and keep their text and
+format. New complete or truncated descriptions use the compatible compressed
+representation. The trailer belongs to the codec, so publisher text cannot
+claim completeness. Current-item YouTube chapter loading uses only immutable
+complete snapshots and preserves higher-priority chapter sources. The shared
+codec vectors run on desktop and Android host tests.
+
 ### episode_transcript
 
 ```kotlin
