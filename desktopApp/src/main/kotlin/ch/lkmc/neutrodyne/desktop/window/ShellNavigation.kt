@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import java.awt.Frame
 import java.awt.Window
 import javax.swing.SwingUtilities
@@ -136,6 +137,17 @@ internal class DesktopMenuActions {
     fun pushKey(key: NavKey): Boolean {
         val navigate = push ?: return false
         SwingUtilities.invokeLater { navigate(key) }
+        return true
+    }
+
+    /**
+     * Selects [key]'s tab on the AWT event thread — `AppNavigator` state lives there. Returns
+     * false while the root has not composed; the AOT training journey polls this until the
+     * navigator is attached, then walks the five destinations (11 AOT cache).
+     */
+    fun selectTab(key: TopLevelKey): Boolean {
+        val current = navigator ?: return false
+        SwingUtilities.invokeLater { current.selectTab(key) }
         return true
     }
 

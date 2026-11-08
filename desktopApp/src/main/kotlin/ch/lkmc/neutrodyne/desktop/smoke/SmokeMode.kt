@@ -6,40 +6,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
-import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
-import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
-import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.DesktopAppGraph
-import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
-import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
-import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.window_title
-import ch.lkmc.neutrodyne.desktop.shell.appDirsUnder
 import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
 import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindowContent
 import ch.lkmc.neutrodyne.desktop.window.WindowIcons
 import ch.lkmc.neutrodyne.desktop.window.rememberNeutrodyneWindowState
 import ch.lkmc.neutrodyne.desktop.window.toGateState
-import coil3.SingletonImageLoader
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.jetbrains.compose.resources.stringResource
 import java.awt.GraphicsEnvironment
+import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 /**
@@ -50,123 +37,67 @@ import kotlin.time.TimeSource
  * 60 s. Under `java.awt.headless=true` the window step is skipped and the JSON says so.
  *
  * Still pending from 11's step list (the milestone rows): the five destinations through
- * `AppNavigator`, FFmpeg, `ndmedia`, the engine child, the D-Bus step, the AOT-cache flag and
- * the RSS line — the JSON lists them as pending.
+ * `AppNavigator`, FFmpeg, `ndmedia`, the engine child, the D-Bus step and the RSS line —
+ * the JSON lists them as pending.
  */
 internal class SmokeMode(
     private val output: (String) -> Unit = ::println,
     /** Shows the real window, returns the first-frame delay in ms (null = skipped headless). */
     private val windowStep: (DesktopAppGraph) -> Long? = Companion::openWindowAndAwaitFirstFrame,
 ) {
-    private val timings = LinkedHashMap<String, Long>()
-
     fun run(): Int {
-        val watchdog = armWatchdog()
-        var root: Path? = null
-        var startedGraph: DesktopAppGraph? = null
-
+        val journey =
+            try {
+                ShellJourney(SMOKE_TEMP_PREFIX)
+            } catch (t: Throwable) {
+                Log.e(TAG, t) { "smoke run failed" }
+                output(
+                    "SMOKE ${smokeJson(
+                        null,
+                        emptyMap(),
+                        windowOpened = null,
+                        failure = t.message ?: t.javaClass.simpleName,
+                    )}",
+                )
+                return EXIT_FAILED_STEP
+            }
+        var buildInfo: BuildInfo? = null
         return try {
-            val tempRoot = Files.createTempDirectory("neutrodyne-smoke")
-            root = tempRoot
-            val dirs = step("appDirs") { appDirsUnder(tempRoot).also { it.ensureCreated() } }
-            val buildInfo = step("buildInfo") { BuildInfoLoader.load() }
-            val graph =
-                step("graph") {
-                    val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
-                    createDesktopGraph(dirs, buildInfo, crashReporter).also { startedGraph = it }
-                }
-            // The database open gets its own step ahead of the bands, so the timing is real;
-            // band 100's `DatabaseOpenInitializer` then returns at once (11 Smoke mode, M1a).
-            step("database") { runBlocking { graph.databaseOpener.awaitOpen() } }
-            step("initializers") { runBlocking { runInitializers(graph.initializers) } }
-            // The real host installs the artwork-aware Coil singleton at start-up (08); smoke
-            // composes the same window, so it provisions the same loader before the first frame.
-            step("imageLoader") { SingletonImageLoader.setSafe(graph.imageLoaderFactory) }
+            buildInfo = journey.runPrologue()
 
             // 11 step 2's window half: show it, wait for the first frame, close it again.
-            val firstFrameMs = step("window") { windowStep(graph) }
+            val firstFrameMs = journey.step("window") { windowStep(journey.graph!!) }
             val windowOpened = firstFrameMs != null
-            if (windowOpened) timings[FIRST_FRAME_STEP] = firstFrameMs
+            if (windowOpened) journey.timings[FIRST_FRAME_STEP] = firstFrameMs
 
-            cleanUp(tempRoot, startedGraph)
-            output("SMOKE ${smokeJson(buildInfo, timings, windowOpened, failure = null)}")
+            journey.cleanUp()
+            output("SMOKE ${smokeJson(buildInfo, journey.timings, windowOpened, failure = null)}")
             EXIT_OK
         } catch (t: Throwable) {
             Log.e(TAG, t) { "smoke run failed" }
-            val buildInfo = runCatching { BuildInfoLoader.load() }.getOrNull()
+            val info = buildInfo ?: runCatching { BuildInfoLoader.load() }.getOrNull()
             output(
                 "SMOKE ${smokeJson(
-                    buildInfo,
-                    timings,
+                    info,
+                    journey.timings,
                     windowOpened = null,
                     failure =
                         t.message ?: t.javaClass.simpleName,
                 )}",
             )
-            runCatching { root?.let { cleanUp(it, startedGraph) } }
+            runCatching { journey.cleanUp() }
                 .onFailure { Log.e(TAG, it) { "smoke shutdown failed" } }
             EXIT_FAILED_STEP
         } finally {
-            watchdog.interrupt()
-            watchdog.join()
-        }
-    }
-
-    /** A daemon thread that ends a hanging run (11: the watchdog exits 1 after 60 s). */
-    private fun armWatchdog(): Thread {
-        val watchdog =
-            Thread({
-                try {
-                    Thread.sleep(WATCHDOG_TIMEOUT.inWholeMilliseconds)
-                } catch (_: InterruptedException) {
-                    return@Thread
-                }
-                System.err.println("smoke run exceeded $WATCHDOG_TIMEOUT; exiting")
-                Runtime.getRuntime().halt(EXIT_FAILED_STEP)
-            }, THREAD_NAME)
-        watchdog.isDaemon = true
-        watchdog.start()
-        return watchdog
-    }
-
-    /** Runs [block], recording its wall time under [name] — also when it fails. */
-    private fun <T> step(
-        name: String,
-        block: () -> T,
-    ): T {
-        val mark = TimeSource.Monotonic.markNow()
-        return try {
-            block()
-        } finally {
-            timings[name] = mark.elapsedNow().inWholeMilliseconds
-        }
-    }
-
-    private fun cleanUp(
-        root: Path,
-        graph: DesktopAppGraph?,
-    ) {
-        if (graph != null) {
-            runBlocking {
-                // Collectors and lanes must finish before Room closes or its files disappear.
-                val opened = graph.databaseOpener.openState.value is DatabaseOpenState.Opened
-                if (opened) graph.jobRunner.stop(RUNNER_GRACE)
-                graph.appScope.coroutineContext[Job]?.cancelAndJoin()
-                if (opened) graph.databaseOpener.requireDatabase().close()
-            }
-        }
-        Files.walk(root).use { paths ->
-            paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+            journey.disarmWatchdog()
         }
     }
 
     companion object {
         private const val TAG = "Smoke"
-        private const val THREAD_NAME = "smoke-watchdog"
+        private const val SMOKE_TEMP_PREFIX = "neutrodyne-smoke"
         private const val EXIT_OK = 0
         private const val EXIT_FAILED_STEP = 1
-        private val WATCHDOG_TIMEOUT = 60.seconds
-        private val RUNNER_GRACE = 3.seconds
 
         /** [openWindowAndAwaitFirstFrame]'s "no frame yet" marker. */
         private const val FRAME_NOT_RENDERED = -1L
@@ -181,6 +112,16 @@ internal class SmokeMode(
         internal const val WINDOW_OPENED = "opened"
         internal const val WINDOW_SKIPPED_HEADLESS = "skipped-headless"
 
+        /** The AOT cache's option prefix and the strict mode that proves its use. */
+        internal const val AOT_CACHE_OPTION_PREFIX = "-XX:AOTCache="
+        internal const val AOT_MODE_STRICT_OPTION = "-XX:AOTMode=on"
+
+        /** The `aotCache` JSON field's values. */
+        internal const val AOT_CACHE_IN_USE = "in-use"
+        internal const val AOT_CACHE_MISSING = "missing"
+        internal const val AOT_CACHE_NOT_CONFIGURED = "not-configured"
+        internal const val AOT_CACHE_UNVERIFIED = "unverified"
+
         /** Steps 11 defines that this milestone cannot run yet (11 Smoke mode). */
         internal val PENDING_STEPS =
             listOf(
@@ -189,31 +130,38 @@ internal class SmokeMode(
                 "ndmedia",
                 "engine",
                 "dbus",
-                "aotCache",
                 "rss",
             )
 
         /** `-Dneutrodyne.smoke` is read exactly like this (11 Start-up sequence step 1). */
         fun isEnabled(property: String?): Boolean = property == "true"
 
+        /** The smoke journey: open the window, take the first-frame figure, close it again. */
+        private fun openWindowAndAwaitFirstFrame(graph: DesktopAppGraph): Long? = openWindow(graph) { }
+
         /**
-         * Opens the real window and returns the ms from the window step's start to the first
-         * rendered frame (11 step 8's first-frame figure), then closes it. A headless AWT skips
-         * the window and reports `null` — CI's `desktop-smoke` job runs the same code under
-         * Xvfb, where the real branch executes.
+         * Opens the real window, waits for the first frame, runs [journey] inside the window's
+         * composition — the AOT training run walks the five destinations there — then closes
+         * it and returns the ms from the window step's start to that first frame (11 step 8's
+         * first-frame figure). A headless AWT skips the window and returns `null` — CI's
+         * `desktop-smoke` job runs the same code under Xvfb, where the real branch executes.
          *
          * `application` must return here, so `exitProcessOnExit = false`: its default
          * `exitProcess(0)` fires the moment the smoke window closes and kills the JVM before
          * [run] can print the `SMOKE` line — the failure the real-window CI run hit. A window
          * that closes without a first frame is a failed window step, not `skipped-headless`.
          */
-        private fun openWindowAndAwaitFirstFrame(graph: DesktopAppGraph): Long? {
+        internal fun openWindow(
+            graph: DesktopAppGraph,
+            journey: suspend (DesktopMenuActions) -> Unit = {},
+        ): Long? {
             if (GraphicsEnvironment.isHeadless()) {
                 Log.i(TAG) { "java.awt.headless: skipping the window step" }
                 return null
             }
 
             val firstFrameMs = AtomicLong(FRAME_NOT_RENDERED)
+            var journeyFailure: Throwable? = null
             application(exitProcessOnExit = false) {
                 val menuActions = remember { DesktopMenuActions() }
                 Window(
@@ -241,12 +189,18 @@ internal class SmokeMode(
                     LaunchedEffect(Unit) {
                         withFrameNanos { } // returns after the first frame was presented
                         firstFrameMs.set(openedAt.elapsedNow().inWholeMilliseconds)
+                        try {
+                            journey(menuActions)
+                        } catch (t: Throwable) {
+                            journeyFailure = t
+                        }
                         exitApplication()
                     }
                 }
             }
             val elapsed = firstFrameMs.get()
             if (elapsed == FRAME_NOT_RENDERED) error("window closed before its first frame")
+            journeyFailure?.let { throw it }
             return elapsed
         }
 
@@ -277,10 +231,44 @@ internal class SmokeMode(
                             JsonPrimitive(if (windowOpened) WINDOW_OPENED else WINDOW_SKIPPED_HEADLESS),
                         )
                     }
+                    put("aotCache", JsonPrimitive(aotCacheState()))
                     put("pending", JsonPrimitive(PENDING_STEPS.joinToString(",")))
                     if (failure != null) put("failed", JsonPrimitive(failure))
                 }
             return JsonObject(json).toString()
+        }
+
+        /**
+         * The PO-42 AOT cache's runtime state (11 step 8's "whether the AOT cache was used"):
+         * `not-configured` without a `-XX:AOTCache` flag, `missing` when the flag names a
+         * file that is not there. When the file exists the state depends on the JVM's mode.
+         * A strict launch (`-XX:AOTMode=on`) fails before main when the archive cannot be
+         * mapped (JDK 25), so reaching this report under strict mode proves the cache was
+         * used — `in-use`. An auto launch silently falls back to the non-AOT path (JDK 25),
+         * so the file's existence alone proves nothing: `unverified`. The packaged acceptance
+         * launches the image under strict mode; a normal product start stays on auto and is
+         * reported honestly rather than claimed as proven.
+         */
+        internal fun aotCacheState(): String =
+            aotCacheStateOf(ManagementFactory.getRuntimeMXBean().inputArguments) { path ->
+                Files.isRegularFile(Path.of(path))
+            }
+
+        internal fun aotCacheStateOf(
+            inputArguments: List<String>,
+            exists: (String) -> Boolean,
+        ): String {
+            val path =
+                inputArguments
+                    .firstOrNull { it.startsWith(AOT_CACHE_OPTION_PREFIX) }
+                    ?.substringAfter('=')
+                    ?: return AOT_CACHE_NOT_CONFIGURED
+            if (!exists(path)) return AOT_CACHE_MISSING
+            return if (inputArguments.any { it == AOT_MODE_STRICT_OPTION }) {
+                AOT_CACHE_IN_USE
+            } else {
+                AOT_CACHE_UNVERIFIED
+            }
         }
     }
 }
