@@ -12,6 +12,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.resolve
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Drains a screen state's pending [UserMessage]s into the root snackbar, acknowledging each one
@@ -49,14 +50,19 @@ public fun ShowUserMessages(
  * dismisses it. `Indefinite` stays reserved for the `GroupError.NameTaken` case.
  */
 internal suspend fun SnackbarHostState.showUserMessage(message: UserMessage): SnackbarResult =
-    showSnackbar(
-        message = message.text.resolve(),
-        actionLabel = message.action?.resolve(),
-        withDismissAction = message.action != null,
-        duration =
-            if (message.action != null) {
-                SnackbarDuration.Long
-            } else {
-                SnackbarDuration.Short
-            },
-    )
+    if (message.durationMs != null) {
+        withTimeoutOrNull(message.durationMs) { showUserMessage(message.copy(durationMs = null)) }
+            ?: SnackbarResult.Dismissed
+    } else {
+        showSnackbar(
+            message = message.text.resolve(),
+            actionLabel = message.action?.resolve(),
+            withDismissAction = message.action != null,
+            duration =
+                if (message.action != null) {
+                    SnackbarDuration.Long
+                } else {
+                    SnackbarDuration.Short
+                },
+        )
+    }

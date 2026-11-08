@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.testing.testFeedHealth
 import ch.lkmc.neutrodyne.core.testing.testMonogramArtwork
 import java.util.Locale
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -93,8 +94,11 @@ class CustomActionsChecklistTest {
                         ) in actions,
                         state.name,
                     )
-                    assertTrue("Play next" in actions, state.name)
-                    assertTrue("Play last" in actions, state.name)
+                    // External rows keep episodes out of the queue (M8): no Play next/last.
+                    val queuesEpisode =
+                        state.row.sourceType == SourceType.RSS || state.caps.inAppPlayback
+                    assertEquals(queuesEpisode, "Play next" in actions, state.name)
+                    assertEquals(queuesEpisode, "Play last" in actions, state.name)
                     assertTrue("Go to podcast" in actions, state.name)
                     val download =
                         when (state.live?.downloadState ?: state.row.downloadState) {

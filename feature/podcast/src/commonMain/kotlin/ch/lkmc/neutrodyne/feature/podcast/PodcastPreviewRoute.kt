@@ -91,6 +91,10 @@ internal fun PodcastPreviewRoute(key: PodcastPreviewKey) {
         }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
+    LaunchedEffect(state.youTubeInput) {
+        val input = viewModel.consumeYouTubeInput() ?: return@LaunchedEffect
+        if (navigator.pop(key)) navigator.push(AddPodcastKey(input))
+    }
     LaunchedEffect(state.doneId) {
         val id = viewModel.consumeDone() ?: return@LaunchedEffect
         if (navigator.pop(key)) navigator.pushDetail(PodcastKey(id))

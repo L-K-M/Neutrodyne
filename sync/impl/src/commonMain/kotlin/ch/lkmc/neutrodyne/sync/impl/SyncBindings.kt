@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
@@ -90,6 +91,7 @@ object SyncBindings {
         address: SyncServerAddress,
         tokens: SyncTokenStore,
         activity: SyncActivityState,
+        gate: LocalNetworkGate,
     ): SyncEngine =
         SyncEngine(
             db = db,
@@ -101,6 +103,7 @@ object SyncBindings {
             address = address,
             tokens = tokens,
             activity = activity,
+            gate = gate,
         )
 
     /** The first-link merge; the controller drives it from the link state machine. */

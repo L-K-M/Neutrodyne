@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.playback.core.PlayerWindow
 import ch.lkmc.neutrodyne.playback.core.StartOutcome
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
@@ -793,11 +794,12 @@ class QueueProjectorTest {
         runTest {
             lateinit var lookupGate: GatedLookup
             lateinit var sessionGate: GatedSessions
+            val holderJob = CoroutineName("mutex holder")
             val f =
                 AdapterFixture(
                     this,
                     sessionStore = { real -> GatedSessions(real).also { sessionGate = it } },
-                    mediaLookup = { real -> GatedLookup(real).also { lookupGate = it } },
+                    mediaLookup = { real -> GatedLookup(real, holderJob).also { lookupGate = it } },
                 )
             try {
                 val ids = f.seed(3)
@@ -811,7 +813,12 @@ class QueueProjectorTest {
                     holderAtGate.complete(Unit)
                     holderRelease.await()
                 }
-                val holder = async { f.projector.prepareExternalEdit(f.sessions.virtualQueue(20)) }
+                // The owner-scoped barrier guarantees the holder itself is parked on the
+                // gate while holding the plan mutex. Its external apply deliberately
+                // stays pending: the player can never re-match its full pre-remove
+                // window, and bracketing the edit would stash the refresh's plan
+                // instead of exposing it to the revision fence under test.
+                val holder = async(holderJob) { f.projector.prepareExternalEdit(f.sessions.virtualQueue(20)) }
                 awaitAdapter("mutex holder never reached the lookup gate") { holderAtGate.isCompleted }
                 val readAtGate = CompletableDeferred<Unit>()
                 val readRelease = CompletableDeferred<Unit>()
@@ -841,6 +848,7 @@ class QueueProjectorTest {
                     "a read that waited on the plan mutex across a bracket was applied",
                     add != -1 && (remove == -1 || add < remove),
                 )
+                assertTrue(f.failures.toString(), f.failures.isEmpty())
             } finally {
                 f.close()
             }

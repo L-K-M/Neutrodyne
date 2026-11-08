@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.LocalNetworkGate
 import ch.lkmc.neutrodyne.core.domain.PlaybackSyncPort
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsSyncPort
@@ -76,12 +77,17 @@ class SyncEngine(
     private val address: ch.lkmc.neutrodyne.core.domain.SyncServerAddress,
     private val tokens: SyncTokenStore,
     private val activity: SyncActivityState,
+    private val gate: LocalNetworkGate,
 ) {
     private val reader = OutboxReader(db, clock)
     private val builder = ChangeBuilder(db, secrets, sharePasswords)
 
     /** Marks the shared [SyncActivity] flag for the round's whole duration, including failures. */
     suspend fun round(reason: SyncRoundReason): SyncReport {
+        // The gate owns the SYNC bypass: apply its live verdict before the round's first request,
+        // so a permission granted before the process started works after a restart and a
+        // revocation blocks the round (10 Local-network gate 3-4). No prompt is shown here.
+        gate.onPermissionResult(gate.hasPermission())
         activity.begin()
         try {
             return roundInternal(reason)
@@ -154,7 +160,7 @@ class SyncEngine(
             // Below the thresholds the guard deleted its provisional row; the removals were staged
             // in `sync_held` only when held, so nothing else to apply here.
         }
-        db.syncStateDao().get()?.let { db.syncStateDao().upsert(it.copy(lastSyncAt = clock.now())) }
+        db.syncStateDao().recordSyncAt(clock.now())
         return SyncReport(pushed, applied, stale, rejected, pulled, held, clock.now() - started)
     }
 
@@ -196,8 +202,7 @@ class SyncEngine(
     }
 
     private suspend fun storeCursor(cursor: String) {
-        val state = db.syncStateDao().get() ?: return
-        db.syncStateDao().upsert(state.copy(cursor = cursor))
+        db.syncStateDao().storeCursor(cursor)
     }
 
     private suspend fun localPodcastCount(): Int = db.podcastDao().allForExport().size
@@ -215,8 +220,7 @@ class SyncEngine(
         }
 
     private suspend fun markRevoked() {
-        val state = db.syncStateDao().get() ?: return
-        db.syncStateDao().upsert(state.copy(enabled = false, lastError = SYNC_ERROR_REVOKED))
+        db.syncStateDao().markRevoked(SYNC_ERROR_REVOKED)
     }
 
     private companion object {

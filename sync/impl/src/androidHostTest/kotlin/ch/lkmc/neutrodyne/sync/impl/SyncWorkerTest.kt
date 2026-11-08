@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.domain.NoPlaybackSync
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.SyncServerAddress
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeLocalNetworkGate
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSyncServerAddress
@@ -104,6 +105,7 @@ class SyncWorkerTest {
                         address = FakeSyncServerAddress(serverUrl = "https://sync.example"),
                         tokens = SyncTokenStore(secrets),
                         activity = SyncActivityState(),
+                        gate = FakeLocalNetworkGate(),
                     )
                 val worker =
                     TestListenableWorkerBuilder<SyncWorker>(app)
@@ -167,6 +169,7 @@ class SyncWorkerTest {
                     address = address,
                     tokens = SyncTokenStore(secrets),
                     activity = SyncActivityState(),
+                    gate = FakeLocalNetworkGate(),
                 )
             val worker =
                 TestListenableWorkerBuilder<SyncWorker>(app)
