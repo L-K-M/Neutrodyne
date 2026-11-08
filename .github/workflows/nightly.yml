@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | aot-wsf (the MSI post-image hook's native cscript fixture on windows-2025, no build) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36) | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36)"
+        description: "full | system-tests (M6b out-of-process gate: E10 on bench34 plus the api36 smoke leg) | reboot (the API 37 release leg with the host-driven boot resumption driver) | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | desktop-packages (installed and extracted packages on all four desktop targets) | desktop-windows (installed and extracted Windows packages only) | aot-wsf (the MSI post-image hook's native cscript fixture on windows-2025, no build) | benchmark-dryrun (M10 journeys; timings are diagnostic) | screenshots-full (M10 full Android and desktop matrix) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr (published-release local backup/restore on API31 + API36) | bgstart (M4 P6b external background-start impossibility gate on API31 + API36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance) | bmgr-legacy-negative (stock API28/29 refusal evidence, not app acceptance) | m10-a11y (M10 acceptance: the four ATF/journey classes on api36) | youtube-recorded (M9a recorded acceptance: the three app classes and the :ytx selftest on api34 + api36)"
         default: full
 
 permissions:
@@ -969,20 +969,12 @@ jobs:
           retention-days: 14
 
   desktop-packages:
-    if: inputs.scope == 'desktop-packages'
+    if: inputs.scope == 'desktop-packages' || inputs.scope == 'desktop-windows'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: windows-x64
-            runs-on: windows-2025
-            timeout-minutes: 210
-          - target: macos-arm64
-            runs-on: macos-15
-          - target: linux-x64
-            runs-on: ubuntu-24.04
-          - target: linux-arm64
-            runs-on: ubuntu-24.04-arm
+        # Include-only matrices add entries after exclude, so select the final list.
+        include: ${{ inputs.scope == 'desktop-windows' && fromJSON('[{"target":"windows-x64","runs-on":"windows-2025","timeout-minutes":210}]') || fromJSON('[{"target":"windows-x64","runs-on":"windows-2025","timeout-minutes":210},{"target":"macos-arm64","runs-on":"macos-15"},{"target":"linux-x64","runs-on":"ubuntu-24.04"},{"target":"linux-arm64","runs-on":"ubuntu-24.04-arm"}]') }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: ${{ matrix.timeout-minutes || 90 }}
     steps:
@@ -1108,6 +1100,12 @@ jobs:
             packaging.log
             smoke.txt
             desktopApp/build/desktop-packaging/runtime-classpath*.txt
+            # jpackage's own out/err logs and the @args.txt files it ran — a
+            # failed package surfaces only "External tool execution failed"
+            # in packaging.log; the reason lives under compose/logs and the
+            # invocation under compose/tmp.
+            desktopApp/build/compose/logs/**
+            desktopApp/build/compose/tmp/*.args.txt
             playback/native/build/ffmpeg-cache/build-${{ matrix.target }}/*.log
             playback/native/build/ndmedia/${{ matrix.target }}/ndmedia-build.txt
           retention-days: 5
