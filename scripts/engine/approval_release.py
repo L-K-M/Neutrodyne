@@ -28,12 +28,14 @@ release may stay body-only discovery with ``immutable: false``.
 
 Draft discovery and tag provenance: the by-tag endpoint returns published
 releases only, so a leftover draft with the snapshot tag is recovered
-through the bounded authenticated release listing before any create.  A
-fresh snapshot tag owns no git ref until publication: a pre-existing ref
-is resolved and held to the workflow commit before any mutation, the
-missing ref is normal during the draft phase, and the ref is verified
-strictly after publish.  The echoed ``target_commitish`` is never
-trusted as provenance.
+through the exact GraphQL ``repository.release(tagName:)`` lookup
+followed by a REST by-id identity check — the official GitHub CLI
+contract — never by enumerating release history.  A fresh snapshot tag
+owns no git ref until publication: a pre-existing ref is resolved and
+held to the workflow commit before any mutation, the missing ref is
+normal during the draft phase, and the ref is verified strictly after
+publish.  The echoed ``target_commitish`` is never trusted as
+provenance.
 
 Concurrency precondition (not a linearizable CAS): GitHub's release-body
 PATCH has no compare-and-swap.  ``expected_index_tag`` is checked before the
@@ -92,9 +94,23 @@ MAX_SIGNATURE_BYTES = 4 * 1024
 MAX_HEARTBEAT_BYTES = 4 * 1024
 MAX_GIT_REF_JSON_BYTES = 8 * 1024
 MAX_TAG_OBJECT_JSON_BYTES = 8 * 1024
-DRAFT_DISCOVERY_PER_PAGE = 50
-MAX_DRAFT_DISCOVERY_PAGES = 4
-MAX_RELEASE_LIST_PAGE_BYTES = 256 * 1024
+GRAPHQL_URL = "https://api.github.com/graphql"
+MAX_GRAPHQL_JSON_BYTES = 16 * 1024
+# The official GitHub CLI pending-tag lookup (cli/cli
+# pkg/cmd/release/shared/fetch.go, fetchDraftRelease): one exact GraphQL
+# query returns the release's databaseId and isDraft, then a REST by-id
+# fetch verifies identity.  Release history is never enumerated.
+RELEASE_BY_TAG_QUERY = (
+    "query RepositoryReleaseByTag("
+    "$owner: String!, $name: String!, $tagName: String!) {\n"
+    "  repository(owner: $owner, name: $name) {\n"
+    "    release(tagName: $tagName) {\n"
+    "      databaseId\n"
+    "      isDraft\n"
+    "    }\n"
+    "  }\n"
+    "}"
+)
 DEFAULT_TIMEOUT_SECONDS = 15.0
 MAX_REDIRECTS = 3
 MAX_TAG_PEElS = 4
@@ -962,8 +978,9 @@ class SnapshotPublisher:
         release = self._get_release_by_tag(tag)
         if release is None:
             # The by-tag endpoint returns published releases only, so a
-            # leftover draft is recovered through the bounded listing.
-            release = self._discover_snapshot_release(tag)
+            # leftover draft is recovered through the exact pending-tag
+            # lookup and a REST by-id identity check.
+            release = self._discover_draft_release(tag)
         created = False
         published = False
         reused = False
@@ -1007,8 +1024,8 @@ class SnapshotPublisher:
         """Look up a release by tag; this endpoint returns published only.
 
         A draft is invisible here, so None also covers "a draft carries the
-        tag"; callers must use the bounded listing to tell that apart from
-        "no release carries the tag".
+        tag"; callers must use the exact pending-tag lookup to tell that
+        apart from "no release carries the tag".
         """
         response = self._request(
             "GET",
@@ -1053,66 +1070,91 @@ class SnapshotPublisher:
             )
         return release
 
-    def _discover_snapshot_release(self, tag: str) -> Release | None:
-        """Find the unique same-tag release the by-tag endpoint cannot return.
+    def _discover_draft_release(self, tag: str) -> Release | None:
+        """Resolve the pending-tag draft the by-tag endpoint cannot return.
 
-        The authenticated ``GET /releases`` list includes drafts for a caller
-        with push access.  Pages come only from the fixed repository URL with
-        self-constructed ``per_page``/``page`` parameters; a Link URL is
-        never followed.  All reads stay inside a declared page/item/byte
-        budget.  A non-200, a malformed page or item, a second same-tag
-        release or a continuation past the budget fails closed without
-        mutating: a draft is created only when absence is proven.
+        This is the official GitHub CLI contract (cli/cli
+        ``pkg/cmd/release/shared/fetch.go``): one exact GraphQL
+        ``repository.release(tagName:)`` query resolves the pending
+        release's ``databaseId`` and ``isDraft``, then the REST by-id
+        fetch verifies the same id, tag and draft state before any asset
+        work.  Release history is never enumerated, so discovery stays
+        bounded no matter how many immutable snapshots accumulate; the
+        canonical tag lookup is trusted for uniqueness exactly as the
+        CLI trusts it.
+
+        A null release is normal absence only when the repository node
+        resolved without errors.  An error payload, a null or malformed
+        repository, an ambiguously typed release node, an invalid
+        ``databaseId``, a missing or untrue ``isDraft`` and an identity
+        mismatch on the by-id fetch all fail closed before any mutation.
         """
-        match: Release | None = None
-        for page in range(1, MAX_DRAFT_DISCOVERY_PAGES + 1):
-            query = urllib.parse.urlencode(
-                {"per_page": DRAFT_DISCOVERY_PER_PAGE, "page": page}
-            )
-            response = self._request(
-                "GET",
-                f"{REPO_API_PREFIX}/releases?{query}",
-                max_response_bytes=MAX_RELEASE_LIST_PAGE_BYTES,
-            )
-            if response.status != 200:
-                raise SnapshotStateError(
-                    f"release listing failed with HTTP {response.status}"
-                )
-            try:
-                document = json.loads(response.body.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as invalid:
-                raise SnapshotStateError(
-                    "release listing is not UTF-8 JSON"
-                ) from invalid
-            if not isinstance(document, list):
-                raise SnapshotStateError("release listing is not a JSON array")
-            if len(document) > DRAFT_DISCOVERY_PER_PAGE:
-                raise SnapshotStateError(
-                    "release listing returned more items than requested"
-                )
-            for item in document:
-                try:
-                    release = parse_release(item)
-                except ValidationError as invalid:
-                    raise SnapshotStateError(
-                        "release listing contains a malformed release"
-                    ) from invalid
-                if release.tag_name != tag:
-                    continue
-                if match is not None:
-                    raise SnapshotStateError(
-                        f"multiple releases named {tag!r}; refusing to choose"
-                    )
-                match = release
-            if (
-                len(document) < DRAFT_DISCOVERY_PER_PAGE
-                or 'rel="next"' not in (response.header("link") or "")
-            ):
-                return match
-        raise SnapshotStateError(
-            f"release listing exceeded {MAX_DRAFT_DISCOVERY_PAGES} pages; "
-            f"cannot prove no release named {tag!r} exists"
+        payload = {
+            "query": RELEASE_BY_TAG_QUERY,
+            "variables": {
+                "owner": REPO_OWNER,
+                "name": REPO_NAME,
+                "tagName": tag,
+            },
+        }
+        response = self._request(
+            "POST",
+            GRAPHQL_URL,
+            headers={"Content-Type": "application/json"},
+            body=_json_bytes(payload),
+            max_response_bytes=MAX_GRAPHQL_JSON_BYTES,
         )
+        if response.status != 200:
+            raise SnapshotStateError(
+                f"draft release lookup failed with HTTP {response.status}"
+            )
+        try:
+            document = json.loads(response.body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as invalid:
+            raise SnapshotStateError(
+                "draft lookup response is not UTF-8 JSON"
+            ) from invalid
+        if not isinstance(document, dict):
+            raise SnapshotStateError("draft lookup response is not a JSON object")
+        if document.get("errors"):
+            raise SnapshotStateError("draft lookup returned GraphQL errors")
+        data = document.get("data")
+        if not isinstance(data, dict):
+            raise SnapshotStateError("draft lookup data is not a JSON object")
+        repository = data.get("repository")
+        if not isinstance(repository, dict):
+            raise SnapshotStateError("draft lookup repository did not resolve")
+        node = repository.get("release")
+        if node is None:
+            # The repository resolved and no release carries the tag.
+            return None
+        if not isinstance(node, dict):
+            raise SnapshotStateError("draft lookup release is not a JSON object")
+        database_id = node.get("databaseId")
+        if (
+            isinstance(database_id, bool)
+            or not isinstance(database_id, int)
+            or database_id <= 0
+        ):
+            raise SnapshotStateError(
+                "draft lookup databaseId is not a positive integer"
+            )
+        if node.get("isDraft") is not True:
+            # A published release under this tag is exactly what the
+            # by-tag lookup just missed; the contradictory state cannot
+            # be trusted to name this tag.
+            raise SnapshotStateError(
+                f"release {database_id} named {tag!r} is not a draft"
+            )
+        release = self._get_release_by_id(database_id)
+        if release.tag_name != tag:
+            raise SnapshotStateError(
+                f"release {database_id} reports tag {release.tag_name!r}, "
+                f"expected {tag!r}"
+            )
+        if not release.draft:
+            raise SnapshotStateError(f"release {database_id} is no longer a draft")
+        return release
 
     def _verify_snapshot_tag_commit(
         self, tag: str, commit_sha: str, *, missing_ok: bool = False

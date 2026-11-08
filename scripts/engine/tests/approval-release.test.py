@@ -103,7 +103,11 @@ class FakeGitHub:
         self.document_failures = {}
         self.create_target_overrides = {}
         self.release_list_overrides = {}
-        self.list_hides_drafts = False
+        self.release_get_overrides = {}
+        self.hides_drafts = False
+        self.repository_missing = False
+        self.graphql_override = None
+        self.graphql_payloads = []
         self._next_release_id = 100
         self._next_asset_id = 500
         if index_snapshot_tag is not None:
@@ -243,9 +247,12 @@ class FakeGitHub:
         parts = urllib.parse.urlsplit(url)
         host = parts.hostname
         if host == "api.github.com":
-            status, response_headers, payload = self._api(
-                method, parts.path, urllib.parse.parse_qs(parts.query), body, headers or {}
-            )
+            if parts.path == "/graphql":
+                status, response_headers, payload = self._graphql(method, body)
+            else:
+                status, response_headers, payload = self._api(
+                    method, parts.path, urllib.parse.parse_qs(parts.query), body, headers or {}
+                )
         elif host == "uploads.github.com":
             status, response_headers, payload = self._uploads(
                 method, parts.path, urllib.parse.parse_qs(parts.query), body, headers or {}
@@ -341,6 +348,8 @@ class FakeGitHub:
         if method in ("GET", "PATCH") and path.startswith(RELEASES_PATH + "/"):
             release_id = int(path[len(RELEASES_PATH + "/") :])
             if method == "GET":
+                if release_id in self.release_get_overrides:
+                    return self.release_get_overrides[release_id]
                 return self._release_response(self.releases.get(release_id))
             return self._patch_release(release_id, body)
         if method == "GET" and path == REPO_PATH:
@@ -419,7 +428,7 @@ class FakeGitHub:
         releases = [
             release
             for release in reversed(list(self.releases.values()))
-            if not (release["draft"] and self.list_hides_drafts)
+            if not (release["draft"] and self.hides_drafts)
         ]
         start = (page - 1) * per_page
         items = releases[start : start + per_page]
@@ -429,6 +438,43 @@ class FakeGitHub:
                 f'<{REPO_API}/releases?per_page={per_page}&page={page + 1}>; rel="next"'
             )
         return self._json(200, items, headers)
+
+    def _graphql(self, method, body):
+        # GraphQL only accepts POST.  The single modeled query resolves
+        # repository.release(tagName:) -> {databaseId, isDraft}, the same
+        # exact pending-tag lookup the official GitHub CLI performs: it
+        # returns drafts by their pending tag to a push-access caller and
+        # never enumerates release history.  hides_drafts models a token
+        # without that access; repository_missing models an unresolvable
+        # repository node.
+        if method != "POST":
+            return 404, {}, b""
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+            return 400, {}, b""
+        self.graphql_payloads.append(payload)
+        override = self.graphql_override
+        if callable(override):
+            override = override(payload)
+        if override is not None:
+            status, response_headers, response_body = override
+            return status, response_headers, response_body
+        variables = payload.get("variables") if isinstance(payload, dict) else None
+        tag_name = variables.get("tagName") if isinstance(variables, dict) else None
+        if not isinstance(tag_name, str):
+            return self._json(
+                200, {"errors": [{"message": "Variable $tagName is required"}]}
+            )
+        if self.repository_missing:
+            return self._json(200, {"data": {"repository": None}})
+        release = self.find_by_tag(tag_name)
+        if release is not None and release["draft"] and self.hides_drafts:
+            release = None
+        node = None
+        if release is not None:
+            node = {"databaseId": release["id"], "isDraft": release["draft"]}
+        return self._json(200, {"data": {"repository": {"release": node}}})
 
     def _create_release(self, body):
         payload = json.loads(body.decode("utf-8"))
@@ -878,6 +924,62 @@ class FakeGitHubGuardTests(unittest.TestCase):
         tags = [item["tag_name"] for item in json.loads(response.body)]
         self.assertIn("engine-approvals-4242-3", tags)
 
+    def graphql_lookup(self, tag_name):
+        return self.fake.request(
+            "POST",
+            ar.GRAPHQL_URL,
+            max_response_bytes=65536,
+            body=json.dumps(
+                {
+                    "query": ar.RELEASE_BY_TAG_QUERY,
+                    "variables": {
+                        "owner": "L-K-M",
+                        "name": "Neutrodyne",
+                        "tagName": tag_name,
+                    },
+                }
+            ).encode(),
+        )
+
+    def test_graphql_resolves_a_pending_tag_draft(self):
+        response = self.graphql_lookup("engine-approvals-4242-3")
+        self.assertEqual(200, response.status)
+        document = json.loads(response.body)
+        self.assertEqual(
+            {"databaseId": self.release_id, "isDraft": True},
+            document["data"]["repository"]["release"],
+        )
+
+    def test_graphql_returns_null_for_an_absent_tag(self):
+        response = self.graphql_lookup("engine-approvals-9-9")
+        self.assertEqual(200, response.status)
+        document = json.loads(response.body)
+        self.assertIsNone(document["data"]["repository"]["release"])
+
+    def test_graphql_reports_a_published_release_as_not_a_draft(self):
+        published_id = self.fake.add_release(
+            "engine-approvals-7-7", target_commitish=SHA, draft=False
+        )
+        response = self.graphql_lookup("engine-approvals-7-7")
+        document = json.loads(response.body)
+        self.assertEqual(
+            {"databaseId": published_id, "isDraft": False},
+            document["data"]["repository"]["release"],
+        )
+
+    def test_graphql_hides_drafts_without_push_access(self):
+        self.fake.hides_drafts = True
+        response = self.graphql_lookup("engine-approvals-4242-3")
+        document = json.loads(response.body)
+        self.assertIsNone(document["data"]["repository"]["release"])
+
+    def test_graphql_null_release_is_normal_absence(self):
+        self.assertIsNone(
+            ar.SnapshotPublisher(self.fake)._discover_draft_release(
+                "engine-approvals-9-9"
+            )
+        )
+
 
 class PublisherTests(unittest.TestCase):
     def setUp(self):
@@ -1091,8 +1193,7 @@ class PublisherTests(unittest.TestCase):
         return [
             request
             for request in self.fake.requests
-            if request["method"] == "GET"
-            and request["url"].startswith(f"{RELEASES}?")
+            if request["method"] == "POST" and request["url"] == ar.GRAPHQL_URL
         ]
 
     def test_partial_draft_uploads_only_missing_assets(self):
@@ -1111,8 +1212,15 @@ class PublisherTests(unittest.TestCase):
             [urllib.parse.parse_qs(urllib.parse.urlsplit(u["url"]).query)["name"][0] for u in uploads],
         )
         # The draft is invisible to the by-tag endpoint; it was recovered
-        # through the release listing, never recreated.
+        # through the exact pending-tag lookup, never recreated and never
+        # by enumerating release history.
         self.assertTrue(self._draft_discovery_requests())
+        self.assertFalse(
+            any(
+                request["url"].startswith(f"{RELEASES}?")
+                for request in self.fake.requests
+            )
+        )
         self.assertFalse(
             any(
                 request["method"] == "POST" and request["url"] == RELEASES
@@ -1393,7 +1501,13 @@ class PublisherTests(unittest.TestCase):
 
 
 class DraftDiscoveryTests(unittest.TestCase):
-    """Drafts are invisible to by-tag; recovery lists releases, bounded."""
+    """Drafts are invisible to by-tag; recovery is one exact bounded query.
+
+    The official GitHub CLI contract resolves a pending-tag draft through
+    ``repository.release(tagName:)`` (databaseId + isDraft) and a REST
+    by-id fetch; release history is never enumerated, so discovery does
+    not depend on how many immutable snapshots have accumulated.
+    """
 
     def setUp(self):
         self.files = make_files()
@@ -1403,9 +1517,11 @@ class DraftDiscoveryTests(unittest.TestCase):
     def publish(self, **kwargs):
         return self.publisher.publish(self.files, 4242, 3, SHA, **kwargs)
 
-    def mutations(self):
+    def graphql_requests(self):
         return [
-            request for request in self.fake.requests if request["method"] != "GET"
+            request
+            for request in self.fake.requests
+            if request["url"] == ar.GRAPHQL_URL
         ]
 
     def list_requests(self):
@@ -1415,134 +1531,13 @@ class DraftDiscoveryTests(unittest.TestCase):
             if request["url"].startswith(f"{RELEASES}?")
         ]
 
-    def fill_releases(self, count):
-        for index in range(count):
-            self.fake.add_release(
-                f"engine-approvals-9{index:04d}-1",
-                target_commitish=SHA,
-                draft=False,
-                immutable=True,
-            )
-
-    def test_draft_on_a_later_page_is_recovered(self):
-        # The leftover draft is older than 55 fillers, so it sits past the
-        # first page; discovery must keep paging within its budget.
-        self.fake.add_release(
-            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
-        )
-        self.fill_releases(55)
-        result = self.publish()
-        self.assertTrue(result.published)
-        self.assertFalse(result.created)
-        pages = [
-            urllib.parse.parse_qs(urllib.parse.urlsplit(r["url"]).query)["page"][0]
-            for r in self.list_requests()
+    def mutations(self):
+        # The GraphQL POST is a read-only query, never a mutation.
+        return [
+            request
+            for request in self.fake.requests
+            if request["method"] != "GET" and request["url"] != ar.GRAPHQL_URL
         ]
-        self.assertIn("2", pages)
-        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
-
-    def test_draft_beyond_the_page_budget_fails_closed_without_mutation(self):
-        self.fake.add_release(
-            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
-        )
-        self.fill_releases(205)
-        with self.assertRaises(ar.SnapshotStateError) as context:
-            self.publish()
-        self.assertIn("engine-approvals-4242-3", str(context.exception))
-        self.assertEqual([], self.mutations())
-        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
-        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
-
-    def test_release_list_error_fails_closed_without_mutation(self):
-        self.fake.release_list_overrides[1] = (500, {}, b"")
-        with self.assertRaises(ar.SnapshotStateError):
-            self.publish()
-        self.assertEqual([], self.mutations())
-        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
-
-    def test_release_list_malformed_json_fails_closed(self):
-        self.fake.release_list_overrides[1] = (200, {}, b"garbage")
-        with self.assertRaises(ar.SnapshotStateError):
-            self.publish()
-        self.assertEqual([], self.mutations())
-
-    def test_release_list_non_array_fails_closed(self):
-        self.fake.release_list_overrides[1] = (200, {}, b'{"total":1}')
-        with self.assertRaises(ar.SnapshotStateError):
-            self.publish()
-        self.assertEqual([], self.mutations())
-
-    def test_release_list_oversize_page_fails_closed(self):
-        self.fake.release_list_overrides[1] = (
-            200,
-            {},
-            b"x" * (ar.MAX_RELEASE_LIST_PAGE_BYTES + 1),
-        )
-        with self.assertRaises(ar.ResponseTooLargeError):
-            self.publish()
-        self.assertEqual([], self.mutations())
-
-    def test_release_list_more_items_than_requested_fails_closed(self):
-        items = [
-            index_document() for _ in range(51)
-        ]
-        self.fake.release_list_overrides[1] = (
-            200,
-            {},
-            json.dumps(items).encode(),
-        )
-        with self.assertRaises(ar.SnapshotStateError):
-            self.publish()
-        self.assertEqual([], self.mutations())
-
-    def test_release_list_malformed_item_fails_closed(self):
-        self.fake.release_list_overrides[1] = (
-            200,
-            {},
-            json.dumps([{"tag_name": "engine-approvals-4242-3"}]).encode(),
-        )
-        with self.assertRaises(ar.SnapshotStateError):
-            self.publish()
-        self.assertEqual([], self.mutations())
-
-    def test_duplicate_same_tag_drafts_fail_closed(self):
-        self.fake.add_release(
-            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
-        )
-        self.fake.add_release(
-            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
-        )
-        with self.assertRaises(ar.SnapshotStateError):
-            self.publish()
-        self.assertEqual([], self.mutations())
-        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
-
-    def test_draft_hidden_from_the_listing_fails_closed_via_422(self):
-        # A token without push access gets no draft listings: discovery
-        # proves nothing, so the create attempt 422s instead of clobbering.
-        self.fake.add_release(
-            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
-        )
-        self.fake.list_hides_drafts = True
-        with self.assertRaises(ar.ApprovalReleaseError):
-            self.publish()
-        self.assertTrue(self.list_requests())
-        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
-        self.assertEqual([], self.index_patch())
-        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
-
-    def test_discovered_draft_targeting_another_commit_fails_before_uploads(self):
-        self.fake.add_release(
-            "engine-approvals-4242-3",
-            target_commitish="b" * 40,
-            draft=True,
-            immutable=True,
-        )
-        with self.assertRaises(ar.SnapshotStateError):
-            self.publish()
-        self.assertEqual([], self.uploads())
-        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
-        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
 
     def uploads(self):
         return [
@@ -1559,6 +1554,314 @@ class DraftDiscoveryTests(unittest.TestCase):
             and f"/releases/{self.fake.index_id}" in request["url"]
         ]
 
+    def fill_releases(self, count):
+        for index in range(count):
+            self.fake.add_release(
+                f"engine-approvals-9{index:04d}-1",
+                target_commitish=SHA,
+                draft=False,
+                immutable=True,
+            )
+
+    def pending_draft(self, target_commitish=SHA):
+        return self.fake.add_release(
+            "engine-approvals-4242-3",
+            target_commitish=target_commitish,
+            draft=True,
+            immutable=True,
+        )
+
+    def assert_exact_discovery_only(self, graphql_count=1):
+        self.assertEqual(graphql_count, len(self.graphql_requests()))
+        self.assertEqual([], self.list_requests())
+
+    def test_fresh_tag_publishes_past_200_releases(self):
+        # Immutable snapshots accumulate forever; a fresh publish must not
+        # depend on release-history depth.
+        self.fill_releases(250)
+        result = self.publish()
+        self.assertTrue(result.created)
+        self.assertTrue(result.published)
+        self.assert_exact_discovery_only()
+        self.assertEqual([], self.fake.violations)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+        self.assertEqual(
+            {"type": "commit", "sha": SHA},
+            self.fake.tag_refs["engine-approvals-4242-3"],
+        )
+
+    def test_fresh_tag_publishes_even_with_the_release_list_broken(self):
+        # The legacy list endpoint failing cannot affect discovery.
+        self.fake.release_list_overrides[1] = (500, {}, b"")
+        self.fill_releases(250)
+        result = self.publish()
+        self.assertTrue(result.created)
+        self.assert_exact_discovery_only()
+
+    def test_partial_draft_past_200_releases_resumes_without_enumeration(self):
+        release_id = self.pending_draft()
+        present = ("ytdlp-approved.json", "ytdlp-heartbeat.json")
+        for name in present:
+            self.fake.add_asset(release_id, name, self.files.by_name()[name])
+        self.fill_releases(250)
+        result = self.publish()
+        self.assertFalse(result.created)
+        self.assertTrue(result.published)
+        self.assert_exact_discovery_only()
+        # Matching assets already on the draft are reused byte-exact, not
+        # re-uploaded; only the missing pair is uploaded before publish.
+        self.assertEqual(
+            ["ytdlp-approved.json.sig", "ytdlp-heartbeat.json.sig"],
+            [
+                urllib.parse.parse_qs(urllib.parse.urlsplit(u["url"]).query)[
+                    "name"
+                ][0]
+                for u in self.uploads()
+            ],
+        )
+        self.assertFalse(
+            any(
+                request["method"] == "POST" and request["url"] == RELEASES
+                for request in self.fake.requests
+            )
+        )
+        by_id_gets = [
+            request
+            for request in self.fake.requests
+            if request["method"] == "GET"
+            and request["url"] == f"{RELEASES}/{release_id}"
+        ]
+        self.assertTrue(by_id_gets)
+        self.assertEqual([], self.fake.violations)
+        self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
+
+    def test_graphql_request_is_the_fixed_bounded_query(self):
+        self.publish()
+        requests = self.graphql_requests()
+        self.assertEqual(1, len(requests))
+        request = requests[0]
+        self.assertEqual("POST", request["method"])
+        self.assertEqual("https://api.github.com/graphql", request["url"])
+        self.assertEqual(
+            "application/json", request["headers"].get("Content-Type")
+        )
+        payload = json.loads(request["body"])
+        self.assertEqual(ar.RELEASE_BY_TAG_QUERY, payload["query"])
+        self.assertIn("RepositoryReleaseByTag", payload["query"])
+        self.assertIn("repository(owner: $owner, name: $name)", payload["query"])
+        self.assertIn("release(tagName: $tagName)", payload["query"])
+        self.assertIn("databaseId", payload["query"])
+        self.assertIn("isDraft", payload["query"])
+        self.assertEqual(
+            {
+                "owner": "L-K-M",
+                "name": "Neutrodyne",
+                "tagName": "engine-approvals-4242-3",
+            },
+            payload["variables"],
+        )
+        self.assert_exact_discovery_only()
+
+    def test_published_reuse_never_queries_graphql_or_lists(self):
+        release_id = self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=False, immutable=True
+        )
+        for name, content in self.files.by_name().items():
+            self.fake.add_asset(release_id, name, content)
+        result = self.publish()
+        self.assertTrue(result.reused)
+        self.assertEqual([], self.graphql_requests())
+        self.assertEqual([], self.list_requests())
+
+    def test_graphql_failure_responses_fail_closed_without_mutation(self):
+        cases = (
+            ("http-500", (500, {}, b"")),
+            ("malformed-json", (200, {}, b"garbage")),
+            ("top-level-array", (200, {}, b"[]")),
+            ("graphql-errors", (200, {}, b'{"errors":[{"message":"boom"}]}')),
+            (
+                "errors-with-data",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":null}},'
+                    b'"errors":[{"message":"partial"}]}',
+                ),
+            ),
+            ("errors-not-a-list", (200, {}, b'{"errors":"boom"}')),
+            ("no-data-no-errors", (200, {}, b"{}")),
+            ("data-not-an-object", (200, {}, b'{"data":[]}')),
+            ("repository-null", (200, {}, b'{"data":{"repository":null}}')),
+            ("repository-missing", (200, {}, b'{"data":{}}')),
+            ("repository-array", (200, {}, b'{"data":{"repository":[]}}')),
+            (
+                "release-array",
+                (200, {}, b'{"data":{"repository":{"release":[]}}}'),
+            ),
+            (
+                "release-scalar",
+                (200, {}, b'{"data":{"repository":{"release":42}}}'),
+            ),
+            (
+                "databaseId-string",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":'
+                    b'{"databaseId":"7","isDraft":true}}}}',
+                ),
+            ),
+            (
+                "databaseId-bool",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":'
+                    b'{"databaseId":true,"isDraft":true}}}}',
+                ),
+            ),
+            (
+                "databaseId-zero",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":'
+                    b'{"databaseId":0,"isDraft":true}}}}',
+                ),
+            ),
+            (
+                "databaseId-missing",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":{"isDraft":true}}}}',
+                ),
+            ),
+            (
+                "isDraft-missing",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":{"databaseId":7}}}}',
+                ),
+            ),
+            (
+                "isDraft-false",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":'
+                    b'{"databaseId":7,"isDraft":false}}}}',
+                ),
+            ),
+            (
+                "isDraft-string",
+                (
+                    200,
+                    {},
+                    b'{"data":{"repository":{"release":'
+                    b'{"databaseId":7,"isDraft":"true"}}}}',
+                ),
+            ),
+        )
+        for name, override in cases:
+            with self.subTest(name=name):
+                fake = FakeGitHub(index_snapshot_tag="engine-approvals-1-1")
+                fake.graphql_override = override
+                publisher = ar.SnapshotPublisher(fake)
+                with self.assertRaises(ar.SnapshotStateError):
+                    publisher.publish(self.files, 4242, 3, SHA)
+                self.assertIsNone(fake.find_by_tag("engine-approvals-4242-3"))
+                self.assertFalse(
+                    any(
+                        request["method"] != "GET"
+                        and request["url"] != ar.GRAPHQL_URL
+                        for request in fake.requests
+                    )
+                )
+                self.assertEqual("engine-approvals-1-1", fake.index_body_tag())
+
+    def test_graphql_oversize_response_fails_closed(self):
+        self.fake.graphql_override = (
+            200,
+            {},
+            b"x" * (ar.MAX_GRAPHQL_JSON_BYTES + 1),
+        )
+        with self.assertRaises(ar.ResponseTooLargeError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+
+    def test_discovery_rest_lookup_errors_fail_closed(self):
+        for status in (404, 500):
+            with self.subTest(status=status):
+                fake = FakeGitHub(index_snapshot_tag="engine-approvals-1-1")
+                release_id = fake.add_release(
+                    "engine-approvals-4242-3",
+                    target_commitish=SHA,
+                    draft=True,
+                    immutable=True,
+                )
+                fake.release_get_overrides[release_id] = (status, {}, b"")
+                with self.assertRaises(ar.ApprovalReleaseError) as context:
+                    ar.SnapshotPublisher(fake).publish(self.files, 4242, 3, SHA)
+                self.assertIn(str(status), str(context.exception))
+                self.assertTrue(fake.find_by_tag("engine-approvals-4242-3")["draft"])
+                self.assertEqual("engine-approvals-1-1", fake.index_body_tag())
+
+    def test_discovery_rest_malformed_release_fails_closed(self):
+        release_id = self.pending_draft()
+        self.fake.release_get_overrides[release_id] = (200, {}, b"garbage")
+        with self.assertRaises(ar.ApprovalReleaseError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_discovery_rest_id_mismatch_fails_closed(self):
+        self.pending_draft()
+        self.fake.override_release = {"id": 999999}
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_discovery_rest_tag_mismatch_fails_closed(self):
+        self.pending_draft()
+        self.fake.override_release = {"tag_name": "engine-approvals-9-9"}
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_discovery_rest_release_not_a_draft_fails_closed(self):
+        self.pending_draft()
+        self.fake.override_release = {"draft": False}
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.mutations())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_draft_hidden_from_exact_lookup_fails_closed_via_422(self):
+        # A token without push access gets no pending-tag node either:
+        # absence cannot be proven, so the create attempt 422s instead of
+        # clobbering.
+        self.pending_draft()
+        self.fake.hides_drafts = True
+        with self.assertRaises(ar.ApprovalReleaseError):
+            self.publish()
+        self.assertTrue(self.graphql_requests())
+        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
+        self.assertEqual([], self.index_patch())
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
+    def test_discovered_draft_targeting_another_commit_fails_before_uploads(self):
+        self.pending_draft(target_commitish="b" * 40)
+        with self.assertRaises(ar.SnapshotStateError):
+            self.publish()
+        self.assertEqual([], self.uploads())
+        self.assertTrue(self.fake.find_by_tag("engine-approvals-4242-3")["draft"])
+        self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
+
     def test_publish_response_that_stays_a_draft_fails_closed(self):
         self.fake.override_release = {"draft": True}
         with self.assertRaises(ar.SnapshotStateError):
@@ -1571,9 +1874,7 @@ class DraftDiscoveryTests(unittest.TestCase):
         self.assertEqual("engine-approvals-1-1", self.fake.index_body_tag())
 
     def test_publish_response_with_wrong_tag_identity_fails_closed(self):
-        release_id = self.fake.add_release(
-            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
-        )
+        release_id = self.pending_draft()
 
         def lie_about_tag(method, url, body):
             if method == "PATCH" and url == f"{RELEASES}/{release_id}":
@@ -1597,12 +1898,11 @@ class DraftDiscoveryTests(unittest.TestCase):
         self.assertEqual("engine-approvals-4242-3", self.fake.index_body_tag())
 
     def test_resolve_and_dry_run_never_enumerate_releases(self):
-        self.fake.add_release(
-            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
-        )
+        self.pending_draft()
         index = ar.resolve_index(self.fake)
         self.assertIsNotNone(index)
         self.assertEqual([], self.list_requests())
+        self.assertEqual([], self.graphql_requests())
         plan = ar.SnapshotPublisher(None).plan(self.files, 4242, 3, SHA)
         self.assertIn("engine-approvals-4242-3", plan.snapshot_tag)
 
@@ -2393,6 +2693,79 @@ class CliTests(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertIn("published", self.stdout.getvalue())
         self.assertIn("engine-approvals-4242-3", self.stdout.getvalue())
+        self.assertEqual([], self.fake.violations)
+
+    def test_publish_via_main_with_deep_release_history(self):
+        # A real repository accumulates immutable snapshots forever; the
+        # CLI publish must not depend on release-history depth.
+        for index in range(250):
+            self.fake.add_release(
+                f"engine-approvals-8{index:04d}-1",
+                target_commitish=SHA,
+                draft=False,
+                immutable=True,
+            )
+        self.env["GITHUB_TOKEN"] = "token"
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+        )
+        self.assertEqual(0, code)
+        self.assertIn("published", self.stdout.getvalue())
+        self.assertEqual([], self.fake.violations)
+        self.assertFalse(
+            any(
+                request["url"].startswith(f"{RELEASES}?")
+                for request in self.fake.requests
+            )
+        )
+
+    def test_publish_via_main_resumes_a_partial_draft_with_matching_assets(self):
+        release_id = self.fake.add_release(
+            "engine-approvals-4242-3", target_commitish=SHA, draft=True, immutable=True
+        )
+        for name in ("ytdlp-approved.json", "ytdlp-heartbeat.json"):
+            self.fake.add_asset(release_id, name, self.files.by_name()[name])
+        for index in range(210):
+            self.fake.add_release(
+                f"engine-approvals-8{index:04d}-1",
+                target_commitish=SHA,
+                draft=False,
+                immutable=True,
+            )
+        self.env["GITHUB_TOKEN"] = "token"
+        code = self.run_cli(
+            "publish",
+            "--run-id",
+            "4242",
+            "--run-attempt",
+            "3",
+            "--commit-sha",
+            SHA,
+            "--snapshot-dir",
+            str(self.directory),
+        )
+        self.assertEqual(0, code)
+        self.assertIn("published", self.stdout.getvalue())
+        uploads = [
+            request
+            for request in self.fake.requests
+            if "uploads.github.com" in request["url"]
+        ]
+        self.assertEqual(2, len(uploads))
+        self.assertFalse(
+            any(
+                request["url"].startswith(f"{RELEASES}?")
+                for request in self.fake.requests
+            )
+        )
         self.assertEqual([], self.fake.violations)
 
     def test_invalid_token_makes_no_requests_and_is_never_printed(self):
