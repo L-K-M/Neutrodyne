@@ -255,8 +255,9 @@ private fun configureNativeDistributions(
         // configuration records why, 2026-10-06). ZIP, mac-zip and tar.gz are archive tasks.
         targetFormats(TargetFormat.Msi, TargetFormat.Dmg)
         modules(*JLINK_MODULES.toTypedArray())
-        // common/, <os>/ and <os>-<arch>/ merge into the image (11 Resources layout); M0b ships
-        // only the DEB's desktop-integration payload; engine/, native/ and licenses/ follow.
+        // common/, <os>/ and <os>-<arch>/ merge into the image (11 Resources layout);
+        // syncDesktopIntegrationResources fills native/, licenses/, the icons and the DEB's
+        // desktop-integration payload; engine/ follows with the YouTube engine host.
         appResourcesRootDir.set(project.layout.buildDirectory.dir("desktop-resources"))
 
         windows {

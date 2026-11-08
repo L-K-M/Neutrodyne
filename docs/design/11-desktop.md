@@ -1537,7 +1537,10 @@ compose.desktop.application {
         macOS {
             bundleID = "ch.lkmc.neutrodyne"; dockName = "Neutrodyne"; minimumSystemVersion = "13.0"
             appCategory = "public.app-category.music"; iconFile.set(file("icons/neutrodyne.icns"))
-            fileAssociation("text/x-opml", "opml", "OPML subscription list", file("icons/neutrodyne.icns"))
+            // no iconFile here (nightly 37831500506): Compose copies an FA icon into
+            // Contents/Resources while jpackage writes <app>.icns -- they collide on a
+            // case-insensitive volume; a null FA icon falls back to the app icon
+            fileAssociation("text/x-opml", "opml", "OPML subscription list")
             infoPlist { extraKeysRawXml = MAC_URL_TYPES + MAC_LOCAL_NETWORK_USAGE }
             // no signing block: jpackage signs ad hoc
         }
@@ -1613,12 +1616,19 @@ desktop-resources/
     engine/shim/neutrodyne_ytx/…           (compiled shim incl. host_stdio.py, bootstrap.py)
     engine/cacert.pem                       (certifi, MPL-2.0 data, unmodified)
     licenses/THIRD_PARTY_NOTICES.md, COPYING.LGPLv2.1, miniaudio.txt, python/…
-  windows-x64/  native/ndmedia.dll, avcodec-63.dll, avformat-63.dll, avutil-61.dll, swresample-7.dll,
-                ffmpeg-layout.json, ffmpeg-license.txt;  engine/python/…
-  macos-arm64/  native/libndmedia.dylib, libavcodec.63.dylib, …;  engine/python/…
-  linux-x64/    native/libndmedia.so, libavcodec.so.63, …;  engine/python/…
+  windows-x64/
+    native/ffmpeg/bin/avcodec-63.dll, avformat-63.dll, avutil-61.dll, swresample-7.dll
+    native/ndmedia/ndmedia.dll;  engine/python/…
+  macos-arm64/
+    native/ffmpeg/lib/libavcodec.63.dylib, libavformat.63.dylib, libavutil.61.dylib, libswresample.7.dylib
+    native/ndmedia/libndmedia.dylib;  engine/python/…
+  linux-x64/
+    native/ffmpeg/lib/libavcodec.so.63, libavformat.so.63, libavutil.so.61, libswresample.so.7
+    native/ndmedia/libndmedia.so;  engine/python/…
   linux-arm64/  (as linux-x64)
 ```
+
+Each target also stages `ffmpeg-layout.json` and `ffmpeg-license.txt` directly under `native/ffmpeg/`. The loader reads that layout and resolves the shared libraries from its `bin/` or `lib/` subdirectory.
 
 The packaging pipeline adds `install-kind` (one line: `msi`, `zip`, `dmg`, `mac-zip`, `deb`, `rpm` or `tar.gz`) to the merged directory of each image copy; `BuildInfo.installKind` reads it, and its absence means `DEV`. The `-Pneutrodyne.youtubeEngine=false` build omits `engine/` entirely.
 
@@ -1700,12 +1710,19 @@ variant) and miniaudio's MIT-0 text.
 
 ### Image scan rules
 
+**Implementation note (2026-11-08):** the image checker and Windows installer
+exit-code helper are implemented with boundary fixtures. The checker validates
+the actual MSI directory chain, binds image JARs and extracted Skiko natives to
+the generated classpath manifests, and permits only the inert replay arming
+interface among test-named contracts. The release workflow wiring follows in a
+separate slice; real Windows installer execution is still pending.
+
 `scripts/ci/check-desktop-image.sh` runs on every image (PR builds on Linux x64, every target nightly and at release) and fails when an image:
 
 - contains a path matching `_dbm*`, `libdb*`, `_gdbm*`, `libreadline*`, `readline*` (other than libedit), `_tkinter*`, `libtcl*`, `libtk*`, `tcl9*`, `tk9*`, `site-packages/pip`, `ensurepip`, `mutagen`, `bgutil`, `qjs`, `qjs.exe`, `deno`, `node`, `bun`, `AppRun`, `libfuse*`, `proguard*`, `jextract*`, `javafx*`, `vlcj*`, `gstreamer*`, `libavfilter*`, `libswscale*`, `libpostproc*` or `libmpv*` (the last only while the fallback is not chosen);
 - lacks `runtime/legal/` or has a `runtime/release` whose `JAVA_VERSION` disagrees with `runtime.lock` (the full runtime check is `check-runtime-sources.sh`);
 - has FFmpeg libraries under other names, or an `ffmpeg-license.txt` (written by `buildFfmpeg` from `avcodec_license()` of the built library) other than "LGPL version 2.1 or later";
-- contains a JAR under `lib/app/` that is not on `:desktopApp`'s Licensee-checked runtime classpath — recorded 2026-10-08 as `sha256  <image name>` lines written by `writeDesktopRuntimeClasspath` (`build/desktop-packaging/runtime-classpath.txt`), where the image name is Compose's mangled one (`<base>-<md5>.jar`; several KMP modules ship a same-named `api-desktop.jar`, and `androidx`/`org.jetbrains.androidx` republishes double entries). Two image JARs are outside that manifest by construction: `lib/runtime/lib/jrt-fs.jar` belongs to the jlink runtime (`check-runtime-sources.sh`), and `skiko-awt-runtime-<os>-<arch>-<md5>.jar` is a stub Compose writes in place of the classpath JAR — the native `libskiko-*.so` is extracted beside it with a `.sha256` sidecar, so the stub's name (its own content hash) can never equal the classpath entry's; the check accepts the stub when the classpath manifest carries a `skiko-awt-runtime-<os>-<arch>-*.jar` entry;
+- contains a JAR under `lib/app/` that is not on `:desktopApp`'s Licensee-checked runtime classpath — recorded as `<canonical sha256>  <image name>` lines by `writeDesktopRuntimeClasspath` (`build/desktop-packaging/runtime-classpath.txt`): the name is Compose's mangled `<base>-<md5>.jar`, the hash canonical jar content (entry name + content SHA-256, sorted), because packaging recompresses and re-signs image JARs; membership is the jar's basename, not a recomputed md5. Two image JARs are outside it: `lib/runtime/lib/jrt-fs.jar` and the skiko stub. The stub is Compose's repacked derivative of the source runtime jar (the target's native library is extracted), so its image name is unpredictable; it is bound by `runtime-classpath-stubs.txt`, whose expected stub hash and extracted natives `writeDesktopRuntimeClasspath` derives from the Licensee-checked source artifact and the target extraction rule — never from the image;
 - has a Python tree whose component list differs from `python-components.lock`;
 - on Linux, contains an ELF file that needs a `GLIBC_` symbol version above 2.31;
 - contains test classes, fixture directories or entry points other than smoke mode;

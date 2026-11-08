@@ -22,6 +22,14 @@ bundles third-party components, which keep their own licences:
   Windows, Contents/runtime/Contents/Home/legal on macOS). Its exact
   source is attached to the release as
   openjdk-<version>-temurin-sources.tar.gz.
+- FFmpeg, built from source and shipped as separate dynamically linked
+  shared libraries under resources/native/ffmpeg in the installation:
+  LGPL-2.1-or-later. Its licence text and its exact source archive ride
+  with the release (licenses/COPYING.LGPLv2.1 inside the package and
+  ffmpeg-<version>-neutrodyne-src.tar.xz attached to the release); the
+  libraries can be replaced in place.
+- miniaudio inside the ndmedia audio shim: MIT-0 (attribution not
+  required; its text still ships under licenses/miniaudio.txt).
 
 Every bundled component is listed with its full licence text under
 Settings > Licences in the app. Source code:
