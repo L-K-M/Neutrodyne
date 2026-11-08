@@ -5,6 +5,10 @@ import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.opml.FolderRef
 import ch.lkmc.neutrodyne.feeds.opml.OpmlDocument
 import ch.lkmc.neutrodyne.feeds.opml.ParseMode
+import ch.lkmc.neutrodyne.feeds.youtube.LibreTubeBackupParser
+import ch.lkmc.neutrodyne.feeds.youtube.NewPipeSubscriptions
+import ch.lkmc.neutrodyne.feeds.youtube.TakeoutSubscriptionsParser
+import ch.lkmc.neutrodyne.feeds.youtube.UrlListParser
 import kotlinx.serialization.Serializable
 
 /**
@@ -23,6 +27,7 @@ public data class ImportEntry(
     val groupNames: List<String> = emptyList(),
     val preselect: Boolean = true,
     val youtubeVariantsHint: Int? = null,
+    val errorDetail: String? = null,
 )
 
 /**
@@ -76,6 +81,22 @@ public data class ImportDocumentWarning(
 
 /** The OPML adapter (05 Adapters): applies the Group-mapping folder rules to an [OpmlDocument]. */
 public object ImportDocuments {
+    public fun fromNewPipe(source: okio.Source): ImportDocument =
+        NewPipeSubscriptions
+            .parse(source)
+
+    public fun fromLibreTube(source: okio.Source): ImportDocument =
+        LibreTubeBackupParser
+            .parse(source)
+
+    public fun fromTakeout(source: okio.Source): ImportDocument =
+        TakeoutSubscriptionsParser
+            .parse(source)
+
+    public fun fromUrlList(source: okio.Source): ImportDocument =
+        UrlListParser
+            .parse(source)
+
     public const val FORMAT_OPML: String = "OPML"
 
     /**
@@ -242,7 +263,7 @@ public object ImportDocuments {
 
     private fun nameKey(name: String): String? = (GroupNames.validate(name) as? GroupNames.Validation.Valid)?.nameKey
 
-    /** `nd:ytVariants` tokens (UULF = 1, UUSH = 2, UULV = 4, UU = all) OR'd; unknown ignored. */
+    /** `nd:ytVariants` tokens (UULF = 1, UUSH = 2, UULV = 4) OR'd; unknown ignored. */
     private fun ytVariantsHint(raw: String?): Int? {
         if (raw.isNullOrBlank()) return null
         var bits = 0
@@ -250,7 +271,6 @@ public object ImportDocuments {
             bits =
                 bits or
                 when (token.trim().uppercase()) {
-                    "UU" -> 7
                     "UULF" -> 1
                     "UUSH" -> 2
                     "UULV" -> 4

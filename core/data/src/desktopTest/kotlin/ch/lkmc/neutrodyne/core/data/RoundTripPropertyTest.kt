@@ -310,6 +310,12 @@ class RoundTripPropertyTest {
                 channels = FakeGroupChannelSync(),
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
+                channelWriter =
+                    ch.lkmc.neutrodyne.core.data.youtube.YouTubeSubscriptionWriterImpl(
+                        db,
+                        clock,
+                        ProtocolOrderKeys,
+                    ),
                 newSyncId = { Uuid.random().toString() },
             )
         return Target(db, payloads, sessions, committer)
