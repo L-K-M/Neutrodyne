@@ -8,6 +8,6 @@ import okio.Path
  * recorded exchanges instead of reaching YouTube (11 "Stdio protocol", W9 AC1). Production
  * graphs never provide this; tests inject it through the transport's internal constructor.
  */
-fun interface StdioYtxTestArming {
+fun interface StdioReplayArming {
     fun replayDir(): Path?
 }

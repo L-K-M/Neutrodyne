@@ -133,7 +133,7 @@ internal class StdioFixture(
         spawner,
         store,
         settings,
-        arming = replay?.let { dir -> StdioYtxTestArming { dir.canonicalPath.toPath() } },
+        arming = replay?.let { dir -> StdioReplayArming { dir.canonicalPath.toPath() } },
         debugHooks = true,
         clock = clock,
         scope = scope,

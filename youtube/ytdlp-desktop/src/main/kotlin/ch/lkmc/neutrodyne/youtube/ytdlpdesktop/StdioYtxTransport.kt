@@ -60,7 +60,7 @@ class StdioYtxTransport(
     private val spawner: YtxSpawner,
     private val store: EngineStore,
     private val settings: EngineSettings,
-    private val arming: StdioYtxTestArming?,
+    private val arming: StdioReplayArming?,
     private val debugHooks: Boolean,
     private val clock: Clock,
     private val scope: CoroutineScope,
