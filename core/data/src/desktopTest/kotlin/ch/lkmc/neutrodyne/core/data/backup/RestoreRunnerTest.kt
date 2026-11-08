@@ -9,6 +9,7 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.CommitCancellingDriver
 import ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPort
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
@@ -191,7 +192,8 @@ class RestoreRunnerTest {
             stager = stager,
             merger = merger,
             episodes = episodeMerger,
-            settingsMerge = RestoreSettingsMerge(settings, db, settingsSyncPort),
+            settingsMerge =
+                RestoreSettingsMerge(settings, db, settingsSyncPort, DataStoreSettingsWriteCoordinator()),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,
@@ -709,6 +711,10 @@ class RestoreRunnerTest {
             val retry = assertIs<RestoreRunResult.Retry>(result)
             assertEquals(BackupError.Storage, retry.error)
             assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId)?.state)
+
+            dataStore.failWrites = false
+            assertIs<RestoreRunResult.Completed>(realRunner.run(sessionId))
+            assertEquals(1.5f, store.get(PlaybackSettingKeys.SPEED))
         }
 
     /** `captureAt` never lowers a newer pending clock (10 Capture rules). */

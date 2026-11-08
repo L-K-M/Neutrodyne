@@ -1016,6 +1016,13 @@
 }
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsSyncPortContributions {
 }
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope$ProvidesDataStoreSettingsWriteCoordinatorMetroFactory {
+  public static ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope$ProvidesDataStoreSettingsWriteCoordinatorMetroFactory create();
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions$ToAppScope {
+}
+-keep class ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinatorContributions {
+}
 -keep class ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions$ToAppScope$ProvidesDataStoreSyncServerAddressMetroFactory$Companion {
   public ch.lkmc.neutrodyne.core.data.DataStoreSyncServerAddressContributions$ToAppScope$ProvidesDataStoreSyncServerAddressMetroFactory create(dev.zacsweers.metro.Provider);
 }
@@ -1185,7 +1192,7 @@
 -keep class ch.lkmc.neutrodyne.core.data.backup.RestoreRunner {
 }
 -keep class ch.lkmc.neutrodyne.core.data.backup.RestoreSettingsMerge$MetroFactory$Companion {
-  public ch.lkmc.neutrodyne.core.data.backup.RestoreSettingsMerge$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
+  public ch.lkmc.neutrodyne.core.data.backup.RestoreSettingsMerge$MetroFactory create(dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider, dev.zacsweers.metro.Provider);
 }
 -keep class ch.lkmc.neutrodyne.core.data.backup.RestoreSettingsMerge$MetroFactory {
   ch.lkmc.neutrodyne.core.data.backup.RestoreSettingsMerge$MetroFactory$Companion Companion;

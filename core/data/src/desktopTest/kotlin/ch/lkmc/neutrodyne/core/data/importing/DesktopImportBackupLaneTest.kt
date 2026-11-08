@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.importing
 import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.CommitCancellingDriver
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.StubSourceAdapter
@@ -174,7 +175,13 @@ class DesktopImportBackupLaneTest {
             stager = stager,
             merger = merger,
             episodes = episodeMerger,
-            settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort()),
+            settingsMerge =
+                RestoreSettingsMerge(
+                    settings,
+                    TestDb.inMemory(),
+                    FakeSettingsSyncPort(),
+                    DataStoreSettingsWriteCoordinator(),
+                ),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,

@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.core.data.backup
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.newDb
 import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -21,7 +22,7 @@ import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys as Keys
 
 class M6RestoreSettingsTest {
     private fun merger(settings: FakeSettingsRepository) =
-        RestoreSettingsMerge(settings, newDb(TestClock()), FakeSettingsSyncPort())
+        RestoreSettingsMerge(settings, newDb(TestClock()), FakeSettingsSyncPort(), DataStoreSettingsWriteCoordinator())
 
     @Test fun restoreValidatesPolicyAndRejectsDeviceKeys() =
         runTest {

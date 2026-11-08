@@ -8,6 +8,7 @@ import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.NoPayloadSource
@@ -413,7 +414,13 @@ class FirstLaunchRestoreInitializerTest {
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
             ),
-        settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(app), FakeSettingsSyncPort()),
+        settingsMerge =
+            RestoreSettingsMerge(
+                settings,
+                TestDb.inMemory(app),
+                FakeSettingsSyncPort(),
+                DataStoreSettingsWriteCoordinator(),
+            ),
         payloads = payloads,
         storagePaths = storagePaths,
         fileSystem = fileSystem,

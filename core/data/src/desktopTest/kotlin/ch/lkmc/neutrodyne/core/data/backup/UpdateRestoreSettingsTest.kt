@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.backup
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -31,6 +32,7 @@ class UpdateRestoreSettingsTest {
                         settings,
                         TestDb.inMemory(),
                         FakeSettingsSyncPort(),
+                        DataStoreSettingsWriteCoordinator(),
                     ).apply(SettingsV1(entries)),
                 ).value
             assertEquals(1, counts.applied)

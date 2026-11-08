@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.backup
 
 import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
@@ -176,7 +177,13 @@ class BackupCrossPlatformTest {
                         orderKeys = ProtocolOrderKeys,
                         clock = clock,
                     ),
-                settingsMerge = RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort()),
+                settingsMerge =
+                    RestoreSettingsMerge(
+                        settings,
+                        TestDb.inMemory(),
+                        FakeSettingsSyncPort(),
+                        DataStoreSettingsWriteCoordinator(),
+                    ),
                 payloads =
                     PayloadStore(
                         storagePaths = storagePaths,

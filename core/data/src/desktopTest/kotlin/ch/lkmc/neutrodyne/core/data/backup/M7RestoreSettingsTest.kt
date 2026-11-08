@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.backup
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -35,7 +36,8 @@ class M7RestoreSettingsTest {
                 )
             val counts =
                 assertIs<Outcome.Success<SettingsMergeCounts>>(
-                    RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort()).apply(SettingsV1(values)),
+                    RestoreSettingsMerge(settings, TestDb.inMemory(), FakeSettingsSyncPort(), DataStoreSettingsWriteCoordinator())
+                        .apply(SettingsV1(values)),
                 ).value
             assertEquals(4, counts.applied)
             assertEquals(7, counts.skipped)

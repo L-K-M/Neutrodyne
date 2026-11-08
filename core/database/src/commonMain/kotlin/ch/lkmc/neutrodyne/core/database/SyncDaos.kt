@@ -239,9 +239,10 @@ abstract class SyncOutboxDao(
      * as "insert, or raise only if older", so an older restored stamp never replaces a newer pending
      * change. [literal] freezes the value for played, position, session and setting fields.
      *
-     * Returns true when the archive's intent won — the row was written or raised, or sync is disabled
-     * so no intent exists — and false when a newer or equal pending row was kept. A linked settings
-     * restore uses the answer to keep the local DataStore value (05 step 7).
+     * Returns true when the archive's intent won or is already pending with the same clock and
+     * payload, or sync is disabled. A newer pending intent returns false. An identical intent must
+     * still reach DataStore when replaying a failed write; a linked settings restore uses this
+     * answer to preserve a newer local value (05 step 7).
      */
     suspend fun captureAt(
         coll: String,
@@ -369,17 +370,18 @@ abstract class SyncOutboxDao(
         }
     }
 
-    /** True when [row] was written or raised; false when an equal-or-newer row was kept. */
+    /** True when [row] wins or is already pending verbatim; false when a newer row was kept. */
     private suspend fun putIfNewer(row: SyncOutboxEntity): Boolean {
         val old = get(row.coll, row.rid, row.field)
         if (old == null || compareClock(row, old) > 0) {
             upsert(row)
             return true
         }
-        require(compareClock(row, old) != 0 || row.value == old.value) {
+        val comparison = compareClock(row, old)
+        require(comparison != 0 || row.value == old.value) {
             "Conflicting payloads at the same complete clock"
         }
-        return false
+        return comparison == 0
     }
 }
 
