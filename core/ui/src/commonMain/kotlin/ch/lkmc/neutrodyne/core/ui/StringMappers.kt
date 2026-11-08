@@ -49,6 +49,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_storage
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_storage_android
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_storage_desktop
 import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_wifi
+import ch.lkmc.neutrodyne.core.ui.resources.dl_wait_youtube_engine
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_folder_missing
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_too_large
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
@@ -183,6 +184,10 @@ public object DownloadStatusText {
                 when (waitReason) {
                     null, WaitReason.NONE, WaitReason.SLOT -> {
                         UiText.Res(Res.string.dl_queued)
+                    }
+
+                    WaitReason.YOUTUBE_ENGINE_OFF -> {
+                        UiText.Res(Res.string.dl_wait_youtube_engine)
                     }
 
                     WaitReason.NETWORK -> {

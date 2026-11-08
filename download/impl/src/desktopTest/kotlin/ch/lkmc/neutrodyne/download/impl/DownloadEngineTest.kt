@@ -2,7 +2,6 @@
 package ch.lkmc.neutrodyne.download.impl
 
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
-import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.download.api.DeleteReason
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -113,10 +112,7 @@ class DownloadEngineTest {
 
     @Test fun autoCapReservesManualSlotAndYoutubeIsLimitedToOne() =
         engineTest {
-            val autos =
-                seed(
-                    4,
-                ) { it.copy(lane = Lane.AUTO, sourceKind = SourceKind.YOUTUBE, priority = 0) }
+            val autos = seedYouTube(4) { it.copy(lane = Lane.AUTO, priority = 0) }
             val rss = seed(2) { it.copy(lane = Lane.AUTO, priority = 0) }
             val manual = seed().single()
             source.action = { _, _, _ -> awaitCancellation() }
