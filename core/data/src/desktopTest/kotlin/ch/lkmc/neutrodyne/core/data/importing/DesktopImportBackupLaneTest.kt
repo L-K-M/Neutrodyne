@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.importing
 import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.CommitCancellingDriver
+import ch.lkmc.neutrodyne.core.data.DataStoreSettingsWriteCoordinator
 import ch.lkmc.neutrodyne.core.data.FakePayloadSource
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.StubSourceAdapter
@@ -58,6 +59,7 @@ import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsSyncPort
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelResolver
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -173,7 +175,13 @@ class DesktopImportBackupLaneTest {
             stager = stager,
             merger = merger,
             episodes = episodeMerger,
-            settingsMerge = RestoreSettingsMerge(settings),
+            settingsMerge =
+                RestoreSettingsMerge(
+                    settings,
+                    TestDb.inMemory(),
+                    FakeSettingsSyncPort(),
+                    DataStoreSettingsWriteCoordinator(),
+                ),
             payloads = payloads,
             storagePaths = storagePaths,
             fileSystem = fileSystem,
@@ -181,6 +189,7 @@ class DesktopImportBackupLaneTest {
             refresh = refresh,
             channels = channels,
             snapshots = snapshots,
+            linkedSync = ch.lkmc.neutrodyne.core.domain.NoLinkedRestoreCoordinator,
             clock = clock,
             io = Dispatchers.IO,
         )

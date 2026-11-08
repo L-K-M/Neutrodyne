@@ -48,14 +48,11 @@ internal class DataStoreSettingsSyncPort(
         json: String,
     ): Boolean {
         if (!key.synced) return false
-        val element = runCatching { Json.parseToJsonElement(json) }.getOrNull() ?: return false
-        // A remote reset lands as JsonNull; decode() alone cannot tell it from an invalid value.
-        if (element is JsonNull) {
-            return suspendRunCatching { settingsStore.reset(key) }.isSuccess
+        return when (val decoded = decodeSyncedValue(key, json)) {
+            null -> false
+            SyncedSettingValue.Reset -> suspendRunCatching { settingsStore.reset(key) }.isSuccess
+            is SyncedSettingValue.Set -> suspendRunCatching { write(key, decoded.value) }.isSuccess
         }
-        val value = decode(key, element) ?: return false
-        if (!AllSettingKeys.acceptsValue(key, value)) return false
-        return suspendRunCatching { write(key, value) }.isSuccess
     }
 
     override fun registerRecorder(recorder: (suspend (key: SettingKey<*>, json: String) -> Unit)?) {
@@ -100,45 +97,6 @@ internal class DataStoreSettingsSyncPort(
         local.tryEmit(LocalSyncedSetting(key, json, atMs))
     }
 
-    /** Decodes [element] into [key]'s type; `null` when it is not a valid value for it. */
-    private fun decode(
-        key: SettingKey<*>,
-        element: kotlinx.serialization.json.JsonElement,
-    ): Any? =
-        when (key) {
-            is SettingKey.Bool -> {
-                (element as? JsonPrimitive)?.booleanOrNull
-            }
-
-            is SettingKey.Int32 -> {
-                (element as? JsonPrimitive)?.intOrNull
-            }
-
-            is SettingKey.Int64 -> {
-                (element as? JsonPrimitive)?.longOrNull
-            }
-
-            is SettingKey.Float32 -> {
-                (element as? JsonPrimitive)?.floatOrNull
-            }
-
-            is SettingKey.Text -> {
-                (element as? JsonPrimitive)?.takeIf { it.isString }?.content
-            }
-
-            is SettingKey.TextSet -> {
-                (element as? JsonArray)
-                    ?.takeIf { entries -> entries.all { it is JsonPrimitive && it.isString } }
-                    ?.map { (it as JsonPrimitive).content }
-                    ?.toSet()
-            }
-
-            is SettingKey.Choice<*> -> {
-                val name = (element as? JsonPrimitive)?.takeIf { it.isString }?.content
-                name?.let(key::fromStored)
-            }
-        }
-
     @Suppress("UNCHECKED_CAST")
     private suspend fun write(
         key: SettingKey<*>,
@@ -147,3 +105,73 @@ internal class DataStoreSettingsSyncPort(
         settingsStore.set(key as SettingKey<Any>, value)
     }
 }
+
+/**
+ * A decoded synced setting value (05 Rules 4): a reset (`"null"`) or a validated value.
+ * [decodeSyncedValue] returns null for malformed JSON, a wrong shape or a value the key
+ * rejects.
+ */
+internal sealed interface SyncedSettingValue {
+    data object Reset : SyncedSettingValue
+
+    data class Set(
+        val value: Any,
+    ) : SyncedSettingValue
+}
+
+/**
+ * Decodes [json] into [key]'s type and validates it (05 Rules 4): the stored type must match
+ * the key's subclass and [AllSettingKeys.acceptsValue] must accept it. Returns null when the
+ * value is invalid. This is the shared precondition of [DataStoreSettingsSyncPort.applyRemote]
+ * and a linked Merge restore's settings step, so both skip exactly the same values instead of
+ * a restore treating the port's rejection as a storage failure.
+ */
+internal fun decodeSyncedValue(
+    key: SettingKey<*>,
+    json: String,
+): SyncedSettingValue? {
+    val element = runCatching { Json.parseToJsonElement(json) }.getOrNull() ?: return null
+    // A remote reset lands as JsonNull; the value decode alone cannot tell it from an invalid value.
+    if (element is JsonNull) return SyncedSettingValue.Reset
+    val value = decodeSettingValue(key, element) ?: return null
+    return if (AllSettingKeys.acceptsValue(key, value)) SyncedSettingValue.Set(value) else null
+}
+
+/** Decodes [element] into [key]'s type; null when it is not a valid value for it. */
+private fun decodeSettingValue(
+    key: SettingKey<*>,
+    element: kotlinx.serialization.json.JsonElement,
+): Any? =
+    when (key) {
+        is SettingKey.Bool -> {
+            (element as? JsonPrimitive)?.booleanOrNull
+        }
+
+        is SettingKey.Int32 -> {
+            (element as? JsonPrimitive)?.intOrNull
+        }
+
+        is SettingKey.Int64 -> {
+            (element as? JsonPrimitive)?.longOrNull
+        }
+
+        is SettingKey.Float32 -> {
+            (element as? JsonPrimitive)?.floatOrNull
+        }
+
+        is SettingKey.Text -> {
+            (element as? JsonPrimitive)?.takeIf { it.isString }?.content
+        }
+
+        is SettingKey.TextSet -> {
+            (element as? JsonArray)
+                ?.takeIf { entries -> entries.all { it is JsonPrimitive && it.isString } }
+                ?.map { (it as JsonPrimitive).content }
+                ?.toSet()
+        }
+
+        is SettingKey.Choice<*> -> {
+            val name = (element as? JsonPrimitive)?.takeIf { it.isString }?.content
+            name?.let(key::fromStored)
+        }
+    }

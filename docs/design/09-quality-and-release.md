@@ -657,6 +657,21 @@ Instrumented tests run inside the app's process, so killing the process (`am kil
 
 Serves N8, N11, N12. Delivered in M0a (`ci.yml`, `release.yml` with the `verify-tag`, `android` and `publish` jobs, skeleton `nightly.yml`), M0b (`desktop-smoke`, `desktop-matrix`, the `desktop` and `sources` release jobs, the `server` PR job), MD0 (native builds in the matrix), MD1b (FFmpeg sources), MS0 (`sync-convergence`), MS1 (`server-jar`, the image jobs, `server-image-smoke`), M9a (engine jobs), M9b (`engine-canary.yml`), MD3 (the stdio host in the canary), extended per milestone. Honours [D60](../PLAN.md#3-key-decisions), [D76](../PLAN.md#3-key-decisions), [D79](../PLAN.md#3-key-decisions), [D89](../PLAN.md#3-key-decisions), [D95](../PLAN.md#3-key-decisions), [PO-18](../PLAN.md#48-further-product-owner-decisions) (public GitHub repository: free standard runners on Linux x64 and arm64, Windows and macOS).
 
+Implementation note (2026-11-08): the opt-in `nightly.yml` scope
+`desktop-packages` runs the release build helper on Windows x64, macOS arm64,
+Linux x64 and Linux arm64 before a tag exists. It builds the native libraries,
+checks installed/extracted package smoke starts, image contents and runtime
+provenance, and retains package logs and checksum-verified corresponding sources.
+The checked-out version selects the supported macOS format (0.x ZIP, 1.x DMG).
+These are CI artifacts; release publication remains in `release.yml`. Windows
+gets 210 minutes for the native build plus packaging; the other targets get 90.
+Each format is checked before the next install-kind build changes the app JAR
+and generated classpath manifest. Runtime provenance is checked on each
+installed or extracted payload as well as the final build image. macOS ZIP
+scans use `ditto` to preserve the sealed bundle's executable modes, symlinks
+and resource metadata. The MSI lock names the nine Binary IDs observed in the
+first real Windows package probe and traced to the pinned tool sources.
+
 ### Runners
 
 jpackage cannot cross-package and the native libraries are built per target, so every desktop target has its own runner ([D89](../PLAN.md#3-key-decisions), [native distributions](https://kotlinlang.org/docs/multiplatform/compose-native-distribution.html)). Standard GitHub-hosted runners for public repositories ([GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners), read 2026-10-05):
