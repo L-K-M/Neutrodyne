@@ -1495,8 +1495,14 @@ Interactions: downloads wait (`BACKOFF` until the gate reopens); auto-download p
 ## Engine updates
 
 **Implementation boundary (2026-11-08).** The protocol below describes the
-M9b updater and canary slices. The app continues to use its bundled engine
-until their production wiring lands.
+M9b updater and canary slices; their Android production wiring landed the
+same day (M9b Android host adapter): `AndroidEngineStorePaths`,
+`DataStoreEngineSettings`, the `WorkManagerEngineUpdateScheduler`
+(`engine-update`, `engine-update-now`), the order-200
+`EngineUpdateInitializer`, `EngineUpdateWorker` and the Tink Ed25519
+verifier below API 33, assembled in `YouTubeBindingsModule`. The engine
+itself updates only once a canary publishes an approved manifest; the
+desktop wiring remains a separate slice.
 
 Serves R3.9, R8.6, N11, N12; mitigates risks M1r, M7r, P3, P14. Delivered in M9b on Android (`EngineStore` and the bundled-version handling in M9a) and MD3 on the desktop. Honours [D76](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions), [PO-32](../PLAN.md#48-further-product-owner-decisions) (resolved 2026-10-05: Neutrodyne-approved, automatic). yt-dlp, with the yt-dlp-ejs it bundles, is replaced at runtime by a newer official release without an app release, on both hosts with the same keys, manifest, checks, policies, rollback and reset: everything below is shared code in `:youtube:engine` ([Shared engine module](#shared-engine-module)); only the runner, the store paths, the compile step and the Ed25519 implementation differ per host. Every app update is a manual install: the update check only announces a release and links to it on GitHub ([PO-31](../PLAN.md#48-further-product-owner-decisions), [D78](../PLAN.md#3-key-decisions)); from Google's 2027 verification rollout every APK update of the unregistered app also needs the advanced flow on certified devices ([PO-5](../PLAN.md#po-5-google-developer-verification)), and every desktop update means re-running the installer and, on macOS, "Open Anyway" again ([D80](../PLAN.md#3-key-decisions)). An engine update is data the app downloads, not an install, so it also reaches users who have not installed the latest release or whose updates are blocked, and it never triggers Gatekeeper, SmartScreen or Smart App Control, because no native code is ever downloaded.
 

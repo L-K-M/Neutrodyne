@@ -553,6 +553,7 @@ class AndroidAppGraphTest {
                 "EngineStatusInitializer" to 150..150,
                 "YouTubeNetworkInitializer" to 150..150,
                 "EnginePreparationObserver" to 210..210,
+                "EngineUpdateInitializer" to 200..200,
                 "YouTubeBreakerNotifier" to 200..200,
                 "EngineFilesCleanup" to 300..300,
             )

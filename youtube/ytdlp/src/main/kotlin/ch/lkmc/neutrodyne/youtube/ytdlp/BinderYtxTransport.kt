@@ -11,7 +11,6 @@ import android.os.IBinder
 import android.os.Process
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.youtube.api.PrewarmReason
-import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
 import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import ch.lkmc.neutrodyne.youtube.engine.EngineStore
@@ -62,12 +61,11 @@ class BinderYtxTransport internal constructor(
     constructor(
         context: Context,
         store: EngineStore,
-        identity: CompileMarker,
         clock: Clock,
         scope: CoroutineScope,
         ping: YtxControlRequest,
         settings: EngineSettings,
-    ) : this(AndroidYtxConnection(context.applicationContext, store, identity), store, clock, scope, ping, settings)
+    ) : this(AndroidYtxConnection(context.applicationContext, store), store, clock, scope, ping, settings)
 
     private class Pending(
         val result: CompletableDeferred<String> = CompletableDeferred(),
@@ -182,7 +180,7 @@ class BinderYtxTransport internal constructor(
                     if (!settings.state.value.enabled) fail("ENGINE_UNAVAILABLE")
                     Result.success(
                         withTimeout(if (compiling) YtxLimits.COMPILE_MS else YtxLimits.START_MS) {
-                            if (store.hostLibDir() == null) fail("ENGINE_UNAVAILABLE")
+                            if (store.hostPrepared() == null) fail("ENGINE_UNAVAILABLE")
                             val endpoint =
                                 connection.bind { synchronized(lock) { if (epoch == generation) stop(HostExit.CRASH) } }
                             synchronized(lock) {
@@ -349,7 +347,6 @@ internal interface YtxConnection {
 private class AndroidYtxConnection(
     private val context: Context,
     private val store: EngineStore,
-    private val identity: CompileMarker,
 ) : YtxConnection {
     private var binding: ServiceConnection? = null
 
@@ -385,12 +382,15 @@ private class AndroidYtxConnection(
                 }
             }
         binding = connection
+        // The prepared record hands the bound :ytx host its lib directory and the marker of the
+        // engine it serves — the active one or, during a trial, the staged candidate (04).
+        val prepared = store.hostPrepared() ?: throw YtxCallException("ENGINE_UNAVAILABLE")
         val intent =
             Intent(context, YtxService::class.java)
                 .setAction(YtxService.ENGINE_BIND)
-                .putExtra(YtxService.LIB_DIR, store.hostLibDir().toString())
-                .putExtra(YtxService.APP_VERSION, identity.appVersionCode)
-                .putExtra(YtxService.ENGINE_VERSION, identity.engineVersion)
+                .putExtra(YtxService.LIB_DIR, prepared.libDir.toString())
+                .putExtra(YtxService.APP_VERSION, prepared.marker.appVersionCode)
+                .putExtra(YtxService.ENGINE_VERSION, prepared.marker.engineVersion)
         YtxTestHooks.attach(intent)
         if (!context.bindService(
                 intent,
