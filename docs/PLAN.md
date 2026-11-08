@@ -1413,27 +1413,21 @@ provider's switch stays off; the in-app "What Neutrodyne connects to" list is `P
 
 #### M9: YouTube playback and downloads via the embedded yt-dlp engine
 
-Implementation note (2026-10-19, M9a): D72's verified bundled store,
-D76's build-time signature/hash gate and the shared Python shim are integrated
-locally. The official 2026.08.19 pin is unchanged. Portable implementation and
-deterministic testing may precede the reference-device spike; host selection
-and production activation still require owner approval, **spike pending**.
-W6's portable lifecycle and synchronous extraction reservations now use the
-frozen host/settings/cache ports; Android adapters, consumer wiring and device
-proof remain pending. M8 feed health stays independent.
-Both shells remain external with `NOT_YET_AVAILABLE`. Status/preparation hooks
-and worker creators stay unbound; ordinary startup never compiles or imports
-Python. No runtime updater, JS provider or engine-backed playback is activated.
-Host CPython 3.11.2 is a disclosed test fallback, not CPython 3.14 acceptance;
-replay fixtures are synthetic and successful residential captures remain open.
-W5 now supplies portable client admission, strict DTO/audio/error mapping, the
-pure selector and memory-only resolver single flight/cache. Its network-identity
-adapter is unbound. Portable W5/W6 health/cache boundaries are tested together
-against real shared implementations. W4 host enforcement, W9 facts/ingest, W11
-bindings and reference-device evidence remain separate gates; these local
-tests do not accept the milestone.
-See [04 Host and packaging](design/04-youtube.md#host-and-packaging) and
-[09 Recorded responses](design/09-quality-and-release.md#recorded-responses).
+Implementation note (2026-11-04, M9a current-code port). The current candidate
+uses the verified bundled 2026.08.19 engine through the Android Chaquopy host.
+The portable client, resolver, enrichment, search, back catalogue, breaker,
+Media3 sources and chunked download integration were re-applied from the old
+candidates onto the current M8 code. Android bindings select the engine on
+supported 64-bit installations. The emergency build selects external mode.
+The desktop retains its pre-MD3 external bindings.
+
+Preparation runs in `engine-prepare`, including after enabling a previously
+disabled installation. Settings reads and ordinary startup retain their
+process boundaries. Runtime engine updates belong to M9b. The reference-device
+spike, residential response captures and manual playback/download checklist
+remain open. The host Mac lacks Python 3.14, so target-minor bytecode and device
+validation depend on CI. Implementation details and deviations are recorded in
+[04 YouTube engine](design/04-youtube.md#youtube-engine).
 
 - **Goal:** on the 64-bit APKs, YouTube episodes play and download as audio exactly like podcasts, through yt-dlp embedded in CPython in the `:ytx` process (layer B, [D72](#3-key-decisions)–[D75](#3-key-decisions)) (M9a); YouTube fixes then reach users as verified engine updates within hours, without an app update ([D76](#3-key-decisions)) (M9b).
 - **Increments** ([7.1](#71-milestone-overview)): **M9a** = every deliverable and criterion below not tagged M9b; **M9b** = the tagged ones. M9a starts with a one-week spike whose results decide the go/fallback before the rest of M9a is built.

@@ -1,0 +1,7 @@
+<resources>
+    <string name="youtube_breaker_banner">YouTube playback is temporarily broken. Neutrodyne retries automatically.</string>
+    <string name="youtube_try_now">Try now</string>
+    <string name="youtube_alert_channel">App alerts</string>
+    <string name="youtube_alert_title">YouTube playback is temporarily broken</string>
+    <string name="youtube_alert_text">Neutrodyne can’t read YouTube streams right now. It retries automatically at %1$s.</string>
+</resources>

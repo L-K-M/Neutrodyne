@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.feature.player
 
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,10 +13,12 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.EnterPasswordDialog
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
+import ch.lkmc.neutrodyne.core.ui.YouTubeHealthBanner
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
@@ -27,6 +31,7 @@ import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_read_failed
 import ch.lkmc.neutrodyne.feature.player.resources.player_write_failed
+import ch.lkmc.neutrodyne.youtube.api.BreakerState
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -51,6 +56,9 @@ private fun PlayerRouteContent(
     episodeVm: PlayerEpisodeViewModel = metroViewModel(),
     upNext: @Composable () -> Unit,
 ) {
+    val engineHealth by
+        (vm.youtubeHealth?.state ?: androidx.compose.runtime.remember { kotlinx.coroutines.flow.flowOf(null) })
+            .collectAsStateWithLifecycle(null)
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val position by vm.position.collectAsStateWithLifecycle()
     val failed by episodeVm.writeFailed.collectAsStateWithLifecycle()
@@ -86,8 +94,8 @@ private fun PlayerRouteContent(
                     noHandler,
                     copyLink,
                     withDismissAction = true,
-                    duration = androidx.compose.material3.SnackbarDuration.Long,
-                ) == androidx.compose.material3.SnackbarResult.ActionPerformed
+                    duration = SnackbarDuration.Long,
+                ) == SnackbarResult.ActionPerformed
             ) {
                 clipboard.setText(AnnotatedString(url))
             }
@@ -133,6 +141,14 @@ private fun PlayerRouteContent(
     val link = currentDetail?.let { it.link ?: it.externalMediaId?.let(YouTubeLinks::watch) }
     val seekEpisodeId = ui.now?.episodeId
     PlayerSheet(
+        engineNotice = {
+            if (ui.now?.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                YouTubeHealthBanner(
+                    engineHealth?.breaker == BreakerState.OPEN,
+                    retry = { vm.youtubeHealth?.retryNow() },
+                )
+            }
+        },
         ui = ui,
         setPanelHidden = vm::setPanelHidden,
         position = position,
