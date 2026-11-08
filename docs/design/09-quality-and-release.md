@@ -2206,6 +2206,21 @@ Budget changes are PO decisions (N5) and are recorded in this table. PB12 and PB
   release's optimization block) and carries the benchmark-only seed receiver so the
   generator can seed the journeys; neither enters the published `release` APK
   ([01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)).
+
+  **Trace retention (2026-11-08).** The benchmark library writes each iteration's
+  Perfetto trace and the summary JSONs to the emulator's public additional-test-output
+  directory (`/sdcard/Android/media/ch.lkmc.neutrodyne.benchmark/additional_test_output/`),
+  and AGP 9.4.1's managed-device runner collects them only after instrumentation ends -
+  yet the hosted `benchmark` runs reached the CI host with zero of those files (the
+  complete `benchmark-results` artifacts of runs 42515546426 and 42522440261 contain
+  none), losing the ephemeral emulator's traces with the runner. The job therefore runs
+  the Gradle command through `scripts/ci/benchmark-live-capture.py`, which polls that
+  exact directory through adb while the emulator is alive and pulls every stable new
+  trace and JSON into `benchmark/build/outputs/host-collected/` (inside the uploaded
+  `build/outputs/` tree) before teardown. It changes no Gradle or instrumentation
+  arguments, returns the child's exit status exactly, and logs a diagnostic-gap warning
+  instead of claiming success when nothing could be captured; its lifecycle is covered
+  by `scripts/ci/tests/benchmark-live-capture.test.py` (fake adb and child, no device).
 - **Full display:** 08's Feeds route calls `ReportDrawnWhen { first page loaded }` ([08 Performance journeys](08-ui-ux.md#performance-journeys)), so `StartupTimingMetric` also reports time to full display; not budgeted in v1.
 - Results (`*-benchmarkData.json`) from the reference device are attached to the release checklist issue; a regression > 10 % against the previous minor release on PB1–PB4 blocks the release until explained.
 - **R8** (`release` and `benchmarkRelease`): full mode via `optimization { enable = true }` and `-dontobfuscate` (01); keep rules reviewed with R8's `-printconfiguration` and `-printusage` (S19). Size tips when PB12 or PB13 is at risk: legacy native packaging (compressed `.so` files, ≈ 6 MB less per 64-bit APK, decided by S7, [01 Build variants and ABIs](01-foundation.md#build-variants-and-abis)); Chaquopy's foreign-ABI assets left in each split (S7 measures them; > 5 MB per APK triggers [D2](../PLAN.md#3-key-decisions)'s ABI-flavor fallback) and its ABI-independent Python assets in the `armeabi-v7a` APK (01 open question 13); `packaging` excludes such as `/DebugProbesKt.bin`.

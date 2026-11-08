@@ -1455,7 +1455,14 @@ jobs:
         run: |
           sudo chmod a+rw /dev/kvm
       - name: Run the cold-start and cover-grid Macrobenchmarks
+        # benchmark-live-capture.py pulls the Perfetto traces and benchmark
+        # JSONs from the emulator's public additional-test-output directory
+        # while it is alive; AGP 9.4.1's own collector has delivered zero of
+        # them on hosted runs (09 Macrobenchmark and profiles).
         run: >-
+          python3 scripts/ci/benchmark-live-capture.py
+          --output benchmark/build/outputs/host-collected
+          --
           ./gradlew :benchmark:bench34BenchmarkReleaseAndroidTest
           --max-workers=1
           -Pandroid.experimental.testOptions.managedDevices.maxConcurrentDevices=1
