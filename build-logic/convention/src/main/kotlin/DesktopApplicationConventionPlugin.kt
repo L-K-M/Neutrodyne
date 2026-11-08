@@ -286,11 +286,11 @@ private fun configureNativeDistributions(
             minimumSystemVersion = "13.0"
             appCategory = "public.app-category.music"
             iconFile.set(project.file("icons/neutrodyne.icns"))
+            // no iconFile here (nightly 37831500506): Compose's FA icon collides with the app icon
             fileAssociation(
                 mimeType = OPML_MIME_TYPE,
                 extension = OPML_EXTENSION,
                 description = OPML_DESCRIPTION,
-                iconFile = project.file("icons/neutrodyne.icns"),
             )
             infoPlist { extraKeysRawXml = MAC_URL_TYPES + MAC_LOCAL_NETWORK_USAGE }
             // jpackage refuses a macOS version whose first number is 0 (11 macOS DMG, ad-hoc signing
