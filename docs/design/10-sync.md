@@ -1209,9 +1209,18 @@ account never uploads silently. Deviations forced by the current code:
   cursor. Step 2's ID adoption and episode-history merge through
   `LibraryMerger` are not implemented, so server episode records are not
   merged into local history during that choice.
-- The second confirmation naming the effect on the other devices is not
-  shown; the choice screen offers the three options directly (the effect
-  counts need the staged pull, which the merger runs only after the choice).
+- The choice screen now asks before both replacing choices. "Use the
+  server's library on this device" shows 08's confirmation with Save a
+  backup first / Replace / Cancel: the backup runs 05's manual flow
+  (`prepareBackup`, the R1.9 warning, `savePreparedBackup` through
+  `PlatformActions.saver`) and stops there, so a cancelled or failed backup
+  never merges and only the explicit Replace calls
+  `chooseFirstLink(USE_SERVER)`. "Use this device's library everywhere"
+  shows a local warning confirmation (Replace everywhere / Cancel) because
+  this branch's link service cannot stage the pull and compute the effect
+  counts; the exact two-stage gate arrives with the service's
+  `LinkState.ConfirmReplaceEverywhere` precursor, which this local gate
+  leaves room for.
 - A plain `http://` address to a public host is refused before the discovery
   request rather than after it, so no cleartext request leaves the device;
   loopback and local addresses still ask once.
@@ -1224,7 +1233,7 @@ account never uploads silently. Deviations forced by the current code:
 
 ### Use the server's library on this device
 
-05's **Replace** with the server's records as the backup: local podcasts the server lacks are unsubscribed (D24), local-only groups deleted, state replaced, Up next and session replaced, settings replaced. The dialog first offers "Save a backup first" (05's backup flow). All local writes run with `applying = 1`; each applied record seeds its exact received raw fields, clocks and session `by` in `sync_clock` with the projection transaction. `hlc` is raised past every clock seen, then `enabled = 1` and `linkedAt` with the pulled cursor. Nothing is pushed except later local changes, which therefore order after the adopted state.
+05's **Replace** with the server's records as the backup: local podcasts the server lacks are unsubscribed (D24), local-only groups deleted, state replaced, Up next and session replaced, settings replaced. The dialog first offers "Save a backup first" (05's backup flow). The setup screen implements this at the current UI boundary: the backup is prepared and saved through `BackupRepository` and `PlatformActions.saver` (with 05's R1.9 warning when the prepared artifact carries private links or passwords) and the flow stops there; only the explicit Replace then calls `chooseFirstLink(USE_SERVER)`. A cancelled or failed backup leaves the choice unconfirmed. All local writes run with `applying = 1`; each applied record seeds its exact received raw fields, clocks and session `by` in `sync_clock` with the projection transaction. `hlc` is raised past every clock seen, then `enabled = 1` and `linkedAt` with the pulled cursor. Nothing is pushed except later local changes, which therefore order after the adopted state.
 
 ### Use this device's library everywhere
 

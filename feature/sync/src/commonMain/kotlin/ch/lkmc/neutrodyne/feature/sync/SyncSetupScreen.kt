@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -25,6 +26,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,7 +36,31 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
+import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
+import ch.lkmc.neutrodyne.core.designsystem.components.NdOutlinedButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdProgress
+import ch.lkmc.neutrodyne.core.domain.BackupError
+import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.model.PreparedBackup
+import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
+import ch.lkmc.neutrodyne.core.ui.resources.action_continue
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_corrupt
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_expired
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_io
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_large
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_newer
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_not_backup
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_running
+import ch.lkmc.neutrodyne.core.ui.resources.backup_err_unsupported
+import ch.lkmc.neutrodyne.core.ui.resources.backup_title
+import ch.lkmc.neutrodyne.core.ui.resources.export_err_destination
+import ch.lkmc.neutrodyne.core.ui.resources.export_err_storage
+import ch.lkmc.neutrodyne.core.ui.resources.export_passwords
+import ch.lkmc.neutrodyne.core.ui.resources.export_private_links
 import ch.lkmc.neutrodyne.feature.sync.resources.Res
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_continue
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_error_app_too_old
@@ -56,6 +82,8 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_error_server_too_old
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_error_unreachable
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_error_wrong_password
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_address_hint
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_backup_saved
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_backup_working
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_cancel
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_checking
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_choice_device
@@ -87,6 +115,13 @@ import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_method_password
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_not_encrypted
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_password_label
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_private_feeds
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_device_body
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_device_confirm
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_device_title
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_server_backup
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_server_body
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_server_confirm
+import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_replace_server_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_title
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_try_again
 import ch.lkmc.neutrodyne.feature.sync.resources.sync_setup_upload_body
@@ -101,7 +136,12 @@ import ch.lkmc.neutrodyne.sync.api.LinkState
 import ch.lkmc.neutrodyne.sync.api.SyncController
 import ch.lkmc.neutrodyne.sync.api.SyncDisclosure
 import ch.lkmc.neutrodyne.sync.api.SyncProblem
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
+import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 
 /**
  * Linking a device (08 Linking a device): one screen whose body follows [LinkFlow.state]; the flow
@@ -112,6 +152,7 @@ import org.jetbrains.compose.resources.stringResource
 internal fun SyncSetupScreen(
     controller: SyncController,
     serverUrl: String,
+    backup: BackupRepository,
 ) {
     val link = controller.link ?: return
     val state by link.state.collectAsStateWithLifecycle()
@@ -124,8 +165,85 @@ internal fun SyncSetupScreen(
     val awaiting = state as? LinkState.AwaitingInput
     val host = hostOf(awaiting?.server?.serverUrl ?: address)
 
+    // The destructive choices wait for their confirmation; only the explicit final action calls
+    // `chooseFirstLink`. `USE_DEVICE` still lacks the service's staged effect counts, so its
+    // dialog warns without numbers (the exact two-stage gate arrives with the service).
+    var pendingChoice by remember { mutableStateOf<FirstLinkChoice?>(null) }
+    var backupPhase by remember { mutableStateOf<BackupPhase>(BackupPhase.Idle) }
+    var backupError by remember { mutableStateOf<BackupError?>(null) }
+    var backupJob by remember { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
+    val actions = LocalPlatformActions.current
+
+    fun dismissConfirmation() {
+        backupJob?.cancel()
+        backupJob = null
+        pendingChoice = null
+        backupPhase = BackupPhase.Idle
+        backupError = null
+    }
+
+    fun confirmChoice(confirmed: FirstLinkChoice) {
+        pendingChoice = null
+        backupPhase = BackupPhase.Idle
+        backupError = null
+        controller.chooseFirstLink(confirmed)
+    }
+
+    fun startBackup(prepared: PreparedBackup? = null) {
+        backupJob?.cancel()
+        backupPhase = BackupPhase.Working
+        backupError = null
+        backupJob =
+            scope.launch {
+                try {
+                    val receipt =
+                        prepared
+                            ?: when (val outcome = backup.prepareBackup(includePasswords = false)) {
+                                is Outcome.Failure -> {
+                                    backupError = outcome.error
+                                    backupPhase = BackupPhase.Idle
+                                    return@launch
+                                }
+
+                                is Outcome.Success -> {
+                                    outcome.value
+                                }
+                            }
+                    if (prepared == null &&
+                        (receipt.privacy.privateLinks > 0 || receipt.privacy.passwords > 0)
+                    ) {
+                        backupPhase = BackupPhase.Warning(receipt)
+                        return@launch
+                    }
+                    val uri = actions.saver.create(receipt.fileName, BACKUP_MIME)
+                    if (uri == null) {
+                        // A cancelled save leaves the prepared artifact to the cleaner; nothing merges.
+                        backupPhase = BackupPhase.Idle
+                        return@launch
+                    }
+                    when (val outcome = backup.savePreparedBackup(receipt, uri)) {
+                        is Outcome.Failure -> {
+                            backupError = outcome.error
+                            backupPhase = BackupPhase.Idle
+                        }
+
+                        is Outcome.Success -> {
+                            backupPhase = BackupPhase.Saved
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    backupError = BackupError.Io
+                    backupPhase = BackupPhase.Idle
+                }
+            }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            backupJob?.cancel()
             if (link.state.value !is LinkState.Merging && link.state.value !is LinkState.Authorising) {
                 link.cancel()
             }
@@ -233,7 +351,13 @@ internal fun SyncSetupScreen(
                     host = host,
                     choice = choice,
                     onChoice = { choice = it },
-                    onContinue = { controller.chooseFirstLink(choice) },
+                    onContinue = {
+                        when (choice) {
+                            FirstLinkChoice.MERGE -> controller.chooseFirstLink(FirstLinkChoice.MERGE)
+                            FirstLinkChoice.USE_SERVER -> pendingChoice = FirstLinkChoice.USE_SERVER
+                            FirstLinkChoice.USE_DEVICE -> pendingChoice = FirstLinkChoice.USE_DEVICE
+                        }
+                    },
                 )
             }
 
@@ -254,6 +378,36 @@ internal fun SyncSetupScreen(
                     host = host,
                     onTryAgain = { controller.discover(address) },
                 )
+            }
+        }
+    }
+
+    pendingChoice?.let { pending ->
+        when (pending) {
+            FirstLinkChoice.USE_SERVER -> {
+                ReplaceServerDialog(
+                    phase = backupPhase,
+                    error = backupError,
+                    onBackup = { startBackup() },
+                    onWarningConfirm = { startBackup(it) },
+                    onWarningDismiss = {
+                        backupPhase = BackupPhase.Idle
+                        backupError = null
+                    },
+                    onReplace = { confirmChoice(FirstLinkChoice.USE_SERVER) },
+                    onCancel = ::dismissConfirmation,
+                )
+            }
+
+            FirstLinkChoice.USE_DEVICE -> {
+                ReplaceEverywhereDialog(
+                    onReplace = { confirmChoice(FirstLinkChoice.USE_DEVICE) },
+                    onCancel = ::dismissConfirmation,
+                )
+            }
+
+            FirstLinkChoice.MERGE -> {
+                Unit
             }
         }
     }
@@ -558,6 +712,167 @@ private fun ChooseFirstLinkStep(
         Button(onClick = onContinue) { Text(stringResource(Res.string.sync_continue)) }
     }
 }
+
+/** The local state of the USE_SERVER confirmation's backup step. */
+private sealed interface BackupPhase {
+    data object Idle : BackupPhase
+
+    data object Working : BackupPhase
+
+    /** The prepared artifact carries private links or passwords: 05's R1.9 warning comes first. */
+    data class Warning(
+        val prepared: PreparedBackup,
+    ) : BackupPhase
+
+    /** The backup is saved; the user still confirms Replace explicitly. */
+    data object Saved : BackupPhase
+}
+
+private const val BACKUP_MIME = "application/zip"
+
+/**
+ * 08 Linking a device, "Use the server's library on this device": the confirmation before the
+ * replace. "Save a backup first" runs 05's manual backup flow (prepare, R1.9 warning, save) and
+ * stops there — only "Replace" calls the destructive choice. Cancel just closes the dialog.
+ */
+@Composable
+private fun ReplaceServerDialog(
+    phase: BackupPhase,
+    error: BackupError?,
+    onBackup: () -> Unit,
+    onWarningConfirm: (PreparedBackup) -> Unit,
+    onWarningDismiss: () -> Unit,
+    onReplace: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    NdDialog(
+        onDismissRequest = onCancel,
+        title = stringResource(Res.string.sync_setup_replace_server_title),
+        confirm =
+            if (phase == BackupPhase.Working) {
+                null
+            } else {
+                NdDialogAction(
+                    stringResource(Res.string.sync_setup_replace_server_confirm),
+                    NdActionRole.DESTRUCTIVE,
+                    onClick = onReplace,
+                )
+            },
+        dismiss = NdDialogAction(stringResource(Res.string.sync_setup_cancel), onClick = onCancel),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                stringResource(Res.string.sync_setup_replace_server_body),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (phase == BackupPhase.Working) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    stringResource(Res.string.sync_setup_backup_working),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (phase == BackupPhase.Saved) {
+                Text(
+                    stringResource(Res.string.sync_setup_backup_saved),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            error?.let {
+                Text(
+                    backupErrorText(it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (phase != BackupPhase.Working) {
+                NdOutlinedButton(
+                    label = stringResource(Res.string.sync_setup_replace_server_backup),
+                    onClick = onBackup,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+
+    if (phase is BackupPhase.Warning) {
+        NdDialog(
+            onDismissRequest = onWarningDismiss,
+            title = stringResource(UiRes.string.backup_title),
+            confirm =
+                NdDialogAction(stringResource(UiRes.string.action_continue)) {
+                    onWarningConfirm(phase.prepared)
+                },
+            dismiss =
+                NdDialogAction(stringResource(UiRes.string.action_cancel), onClick = onWarningDismiss),
+        ) {
+            PrivateLinksWarning(phase.prepared.privacy.privateLinks, phase.prepared.privacy.passwords)
+        }
+    }
+}
+
+/**
+ * 08 Linking a device, "Use this device's library everywhere": the confirmation before the
+ * replace. The exact effect counts need the service's staged pull, which this branch's link
+ * service does not expose yet, so the warning names the effect without numbers; the service's
+ * later `ConfirmReplaceEverywhere` step can replace this local gate.
+ */
+@Composable
+private fun ReplaceEverywhereDialog(
+    onReplace: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    NdDialog(
+        onDismissRequest = onCancel,
+        title = stringResource(Res.string.sync_setup_replace_device_title),
+        text = stringResource(Res.string.sync_setup_replace_device_body),
+        confirm =
+            NdDialogAction(
+                stringResource(Res.string.sync_setup_replace_device_confirm),
+                NdActionRole.DESTRUCTIVE,
+                onClick = onReplace,
+            ),
+        dismiss = NdDialogAction(stringResource(Res.string.sync_setup_cancel), onClick = onCancel),
+    )
+}
+
+@Composable
+private fun PrivateLinksWarning(
+    privateLinks: Int,
+    passwords: Int,
+) {
+    Column {
+        if (privateLinks > 0) {
+            Text(
+                pluralStringResource(UiRes.plurals.export_private_links, privateLinks, privateLinks),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+        if (passwords > 0) {
+            Text(
+                pluralStringResource(UiRes.plurals.export_passwords, passwords, passwords),
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
+
+/** `BackupError` → core/ui's existing backup wording (05 Error handling and failure modes). */
+@Composable
+private fun backupErrorText(error: BackupError): String =
+    when (error) {
+        BackupError.NotABackup -> stringResource(UiRes.string.backup_err_not_backup)
+        is BackupError.NewerFormat -> stringResource(UiRes.string.backup_err_newer)
+        is BackupError.Corrupt -> stringResource(UiRes.string.backup_err_corrupt, error.entry)
+        BackupError.TooLarge -> stringResource(UiRes.string.backup_err_large)
+        BackupError.Io -> stringResource(UiRes.string.backup_err_io)
+        BackupError.Storage -> stringResource(UiRes.string.export_err_storage)
+        BackupError.RestoreRunning -> stringResource(UiRes.string.backup_err_running)
+        BackupError.DestinationUnavailable -> stringResource(UiRes.string.export_err_destination)
+        BackupError.PreparedExpired -> stringResource(UiRes.string.backup_err_expired)
+        BackupError.Unsupported -> stringResource(UiRes.string.backup_err_unsupported)
+    }
 
 @Composable
 private fun ChoiceCard(

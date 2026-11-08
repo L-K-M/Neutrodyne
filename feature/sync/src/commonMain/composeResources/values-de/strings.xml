@@ -41,6 +41,15 @@
   <string name="sync_setup_choice_server_body">Ersetzt die Podcasts, Gruppen, den Wiedergabeverlauf und die Warteschlange dieses Geräts durch die des Servers.</string>
   <string name="sync_setup_choice_device">Bibliothek dieses Geräts überall verwenden</string>
   <string name="sync_setup_choice_device_body">Ersetzt die Bibliothek auf dem Server und auf deinen anderen Geräten durch die dieses Geräts.</string>
+  <string name="sync_setup_replace_server_title">Bibliothek dieses Geräts ersetzen?</string>
+  <string name="sync_setup_replace_server_body">Podcasts und Gruppen, die auf dem Server nicht sind, werden hier entfernt; Wiedergabeverlauf und Warteschlange werden ersetzt.</string>
+  <string name="sync_setup_replace_server_backup">Zuerst eine Sicherung speichern</string>
+  <string name="sync_setup_replace_server_confirm">Ersetzen</string>
+  <string name="sync_setup_replace_device_title">Bibliothek dieses Geräts überall verwenden?</string>
+  <string name="sync_setup_replace_device_body">Andere Geräte entfernen bei ihrem nächsten Synchronisieren Podcasts und Gruppen, die dieses Gerät nicht hat; Geräte fragen zuerst, wenn das ihre Grenzwerte überschreitet.</string>
+  <string name="sync_setup_replace_device_confirm">Überall ersetzen</string>
+  <string name="sync_setup_backup_working">Sicherung wird gespeichert…</string>
+  <string name="sync_setup_backup_saved">Sicherung gespeichert.</string>
   <string name="sync_setup_merging_uploading">Wird hochgeladen…</string>
   <string name="sync_setup_merging_downloading">Wird heruntergeladen…</string>
   <string name="sync_setup_merging">Bibliotheken werden kombiniert… %1$d von %2$d</string>

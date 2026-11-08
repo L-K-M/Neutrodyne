@@ -14,8 +14,15 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.testing.FakeBackupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeLinkFlow
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
+import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
+import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
+import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
+import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
+import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -51,13 +58,34 @@ class SyncSetupLocalNetworkDesktopTest {
                 FakeSyncController(
                     link = FakeLinkFlow(LinkState.NeedsLocalNetworkPermission("192.168.7.4")),
                 )
+            val actions =
+                object : PlatformActions {
+                    override val urls = ExternalUrlOpener { OpenResult.OPENED }
+                    override val share = null
+                    override val files =
+                        object : FilePicker {
+                            override suspend fun pickFile(
+                                mimeTypes: List<String>,
+                                extensions: List<String>,
+                            ): String? = null
+
+                            override suspend fun pickFolder(title: String): String? = null
+                        }
+
+                    override val saver = FileSaver { _, _ -> null }
+                    override val reveal = null
+                    override val notifications = null
+                }
             var prompt: LocalNetworkPermissionPrompt? = LocalNetworkPermissionPrompt {}
             setContent {
                 // collectAsStateWithLifecycle needs a started owner the bare scene lacks.
-                CompositionLocalProvider(LocalLifecycleOwner provides ResumedLifecycleOwner()) {
+                CompositionLocalProvider(
+                    LocalLifecycleOwner provides ResumedLifecycleOwner(),
+                    LocalPlatformActions provides actions,
+                ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                         prompt = rememberLocalNetworkPermissionPrompt()
-                        SyncSetupScreen(controller, "http://192.168.7.4")
+                        SyncSetupScreen(controller, "http://192.168.7.4", FakeBackupRepository())
                     }
                 }
             }

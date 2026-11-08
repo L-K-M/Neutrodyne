@@ -18,8 +18,15 @@ import androidx.core.app.ActivityOptionsCompat
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.testing.FakeBackupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeLinkFlow
 import ch.lkmc.neutrodyne.core.testing.FakeSyncController
+import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
+import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
+import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
+import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
+import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.sync.api.LinkState
 import org.junit.After
 import org.junit.Before
@@ -52,6 +59,24 @@ class SyncSetupLocalNetworkPermissionTest {
         FakeSyncController(
             link = FakeLinkFlow(LinkState.NeedsLocalNetworkPermission("192.168.7.4")),
         )
+    private val actions =
+        object : PlatformActions {
+            override val urls = ExternalUrlOpener { OpenResult.OPENED }
+            override val share = null
+            override val files =
+                object : FilePicker {
+                    override suspend fun pickFile(
+                        mimeTypes: List<String>,
+                        extensions: List<String>,
+                    ): String? = null
+
+                    override suspend fun pickFolder(title: String): String? = null
+                }
+
+            override val saver = FileSaver { _, _ -> null }
+            override val reveal = null
+            override val notifications = null
+        }
 
     @Before
     fun pinAndroid17() {
@@ -70,9 +95,10 @@ class SyncSetupLocalNetworkPermissionTest {
                     object : ActivityResultRegistryOwner {
                         override val activityResultRegistry = registry
                     },
+                LocalPlatformActions provides actions,
             ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                    SyncSetupScreen(controller, "http://192.168.7.4")
+                    SyncSetupScreen(controller, "http://192.168.7.4", FakeBackupRepository())
                 }
             }
         }
