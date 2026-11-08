@@ -107,7 +107,7 @@ jobs:
           --continue
       - name: Verify desktop JAR content identity
         run: |
-          ./gradlew -p build-logic :convention:test --tests '*DesktopPackagingTest*'
+          ./gradlew -p build-logic :convention:test --tests '*DesktopPackagingTest*' --tests '*DesktopAotTrainingTest*'
           python3 scripts/ci/tests/canonical-jar-hash.test.py
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
@@ -140,6 +140,7 @@ jobs:
           scripts/ci/tests/desktop-packaging.test.sh
           scripts/ci/tests/build-desktop-release-windows.test.sh
           python3 scripts/ci/tests/desktop-package-variants.test.py
+          python3 scripts/ci/tests/desktop-package-diagnostics.test.py
           python3 scripts/ci/tests/desktop-smoke-pipeline.test.py
           python3 scripts/ci/tests/check-desktop-image.test.py
           python3 scripts/ci/tests/report-nightly.test.py
