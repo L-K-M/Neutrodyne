@@ -151,6 +151,7 @@ jobs:
           python3 scripts/ci/tests/assert-discovery-tests.test.py
           python3 scripts/ci/tests/assert-selected-tests.test.py
           python3 scripts/ci/tests/youtube-feed-canary.test.py
+          python3 scripts/engine/tests/approval-release.test.py
           python3 scripts/ci/tests/release-nightly-gate.test.py
           python3 scripts/ci/tests/trace-instrumentation-abi.test.py
           python3 scripts/ci/tests/emulator-acceleration.test.py
